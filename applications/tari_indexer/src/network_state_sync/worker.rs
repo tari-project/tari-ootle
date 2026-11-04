@@ -2958,8 +2958,8 @@ fn promote_staged(
 /// Every substate is committed at the snapshot's version, in one commit per creation epoch, which the indexed UTXOs
 /// record. The snapshot is read [`MAX_PROMOTED_SNAPSHOT_SUBSTATES`] at a time, so it is never held in memory whole.
 /// The receipts and events it indexes are history rather than news, so they are counted but not announced: a
-/// subscriber reads them from the store. The snapshot holds no tombstone of a UTXO spent at or below its version, so
-/// the shard's UTXO tombstone horizon is raised to that version.
+/// subscriber reads them from the store. The snapshot holds no tombstone of a UTXO spent without burning at or below
+/// its version, so the shard's UTXO tombstone horizon is raised to that version.
 fn promote_snapshot(
     tx: &mut SqliteStoreWriteTransaction<'_>,
     shard: Shard,
@@ -3027,10 +3027,9 @@ impl VersionBuf {
         Ok(buf)
     }
 
-    /// Marks each spend of a UTXO version whose next version this version brings up with no output as a burn. A burn
-    /// takes a version down and brings the next one up in the same transaction, and a UTXO's versions share its shard,
-    /// so both are in this version. In a snapshot there is no accompanying destroy transition, so any burnt version
-    /// without a matching spend is appended directly as a burn.
+    /// A burn brings up the next version of a UTXO with no output. When this version also takes the burnt version
+    /// down, that spend is marked burnt; a snapshot holds only the version brought up, and its burnt version is
+    /// recorded as a burn at this state version.
     fn mark_burns(&mut self, shard: Shard, state_version: StateVersion) {
         if self.burnt_utxos.is_empty() {
             return;
@@ -3961,13 +3960,35 @@ mod tests {
 
         #[tokio::test]
         async fn a_promoted_snapshot_is_indexed_and_verified_at_its_version() {
+            use tari_engine_types::Utxo;
+            use tari_indexer_client::types::{UtxoBurnt, WalletUtxoUpdate};
+
             let (_dir, store) = store().await;
             let num_substates = MAX_PROMOTED_SNAPSHOT_SUBSTATES as u64 + 5;
+            let UtxoUpdateRecord::Unspent(burnt_template) = crate::storage_sqlite::unspent_at(1, 1) else {
+                unreachable!()
+            };
+            let burnt_address = burnt_template.address;
+            let burnt_snapshot = SnapshotSubstate {
+                epoch: Epoch(2),
+                leaf_key: tari_state_tree::LeafKey::new(tari_state_tree::TreeHash::new([0xff; 32])),
+                substate: rpc::SubstateData::from(SubstateData {
+                    substate_id: SubstateId::Utxo(burnt_address.clone()),
+                    version: tari_engine_types::SubstateVersion::new(1),
+                    value: SubstateValueOrHash::Value(Box::new(SubstateValue::Utxo(Utxo {
+                        output: None,
+                        is_frozen: false,
+                    }))),
+                    template_metadata: None,
+                })
+                .encode_to_vec(),
+            };
             store
                 .with_write_tx(move |tx| {
-                    let substates = (1..=num_substates)
+                    let mut substates = (1..=num_substates)
                         .map(|n| snapshot_receipt(n, n % 3 + 1))
                         .collect::<Vec<_>>();
+                    substates.push(burnt_snapshot);
                     tx.snapshot_substates_insert(SHARD, &substates)?;
                     tx.checkpoint_shard_leaves_insert(&[checkpoint_leaf(40), checkpoint_leaf(60)])?;
                     // Another shard's snapshot is left alone
@@ -3996,6 +4017,23 @@ mod tests {
                     .await
                     .unwrap();
             }
+            let resource = *burnt_address.resource_address();
+            let burnt_id = *burnt_address.id();
+            let utxo_updates = store
+                .with_read_tx(move |tx| tx.utxos_get_updates(resource, Epoch(2), SHARD, v(0), false, 10))
+                .await
+                .unwrap();
+            assert_eq!(utxo_updates.max_epoch, Epoch(2));
+            assert_eq!(utxo_updates.max_state_version, v(50));
+            assert_eq!(utxo_updates.updates, [WalletUtxoUpdate::Burnt(UtxoBurnt {
+                id: burnt_id,
+                version: 0,
+            })]);
+            let after_epoch = store
+                .with_read_tx(move |tx| tx.utxos_get_updates(resource, Epoch(3), SHARD, v(0), false, 10))
+                .await
+                .unwrap();
+            assert!(after_epoch.updates.is_empty());
             let stored = stored_progress(&store).await;
             assert_eq!(stored.verified.get(&SHARD), Some(&verified));
             assert_eq!(stored.last_state_version(SHARD), Some(v(50)));

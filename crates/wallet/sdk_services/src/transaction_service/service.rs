@@ -329,13 +329,8 @@ where
             .unwrap_or_default();
         // The poll submits a stored transaction, so the locks are linked in the same write that stores it: an error
         // returned here means the wallet holds no transaction for the caller's inputs and the locks are still free.
-        let transaction_id = transaction_api.insert_new_transaction(
-            transaction,
-            new_account_info,
-            linked_accounts,
-            false,
-            &lock_ids,
-        )?;
+        let transaction_id =
+            transaction_api.insert_new_transaction(transaction, new_account_info, linked_accounts, false, &lock_ids)?;
 
         // A poll can submit the transaction while this call waits on the validator set, so the context is in place
         // before the submission starts.

@@ -654,5 +654,7 @@ async fn a_lock_stays_free_when_its_transaction_cannot_be_stored() {
         .submit_transaction_with_opts(retry, None, vec![lock_id])
         .await
         .unwrap();
-    assert_eq!(sdk.locks_api().get_locks_by_transaction_id(retry_id).unwrap(), [lock_id]);
+    assert_eq!(sdk.locks_api().get_locks_by_transaction_id(retry_id).unwrap(), [
+        lock_id
+    ]);
 }

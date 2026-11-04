@@ -782,9 +782,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             };
 
             // The fee the transfer statement itself reveals. Non-zero only while the merge holds: on
-            // fallback the fee reverts to a statement of its own and this drops back to zero, so the
-            // transfer statement reveals only what the recipients are owed and the surplus locked against
-            // the fee becomes change.
+            // fallback the fee reverts to a statement of its own and this drops back to zero, and the
+            // transfer inputs are re-selected for the recipients' amount alone.
             let mut merged_fee_amount = if merge_candidate {
                 Amount::from(params.max_fee)
             } else {
@@ -822,7 +821,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                         inputs_to_spend.inputs.len(),
                         num_outputs,
                     );
-                    drop(lock);
+                    let old_lock_id = lock.keep_locked();
+                    self.locks_api.release_lock(old_lock_id)?;
                     lock = self.locks_api.create_lock_with_timeout(Duration::from_secs(5 * 60))?;
                     merged_fee_amount = Amount::zero();
                     fee_half = Some(self.build_fee_statement(
@@ -891,38 +891,42 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 substate_inputs.push(InputDeclaration::write(*owner_account.component_address()));
             }
 
-            if inputs_to_spend.revealed.is_positive() ||
-                fee_inputs_to_spend.revealed.is_positive() ||
-                params.fee_params.pay_fee_with_swap.is_some()
-            {
-                // Add the vaults for XTR (fees) and the spending/fee resources if different
-                if let Some(vault) = self
+            // Declare each vault that the built instructions touch:
+            // - `pay_fee_with_swap` deposits the swapped XTR output into the TARI_TOKEN vault;
+            // - revealed transfer inputs withdraw from the `params.resource_address` vault;
+            // - revealed fee inputs withdraw from the `fee_resource` vault.
+            let touches_tari_vault = params.fee_params.pay_fee_with_swap.is_some() ||
+                (inputs_to_spend.revealed.is_positive() && params.resource_address == TARI_TOKEN) ||
+                (fee_inputs_to_spend.revealed.is_positive() && fee_resource == TARI_TOKEN);
+            if touches_tari_vault &&
+                let Some(vault) = self
                     .accounts_api
                     .get_vault_by_resource(owner_account.component_address(), &TARI_TOKEN)
                     .optional()?
-                {
-                    substate_inputs.push(InputDeclaration::write(vault.id));
-                    substate_inputs.push(InputDeclaration::read(vault.resource_address));
-                }
-                if params.resource_address != TARI_TOKEN &&
-                    let Some(vault) = self
-                        .accounts_api
-                        .get_vault_by_resource(owner_account.component_address(), &params.resource_address)
-                        .optional()?
-                {
-                    substate_inputs.push(InputDeclaration::write(vault.id));
-                    substate_inputs.push(InputDeclaration::read(vault.resource_address));
-                }
-                if fee_resource != TARI_TOKEN &&
-                    fee_resource != params.resource_address &&
-                    let Some(vault) = self
-                        .accounts_api
-                        .get_vault_by_resource(owner_account.component_address(), &fee_resource)
-                        .optional()?
-                {
-                    substate_inputs.push(InputDeclaration::write(vault.id));
-                    substate_inputs.push(InputDeclaration::read(vault.resource_address));
-                }
+            {
+                substate_inputs.push(InputDeclaration::write(vault.id));
+                substate_inputs.push(InputDeclaration::read(vault.resource_address));
+            }
+            if inputs_to_spend.revealed.is_positive() &&
+                params.resource_address != TARI_TOKEN &&
+                let Some(vault) = self
+                    .accounts_api
+                    .get_vault_by_resource(owner_account.component_address(), &params.resource_address)
+                    .optional()?
+            {
+                substate_inputs.push(InputDeclaration::write(vault.id));
+                substate_inputs.push(InputDeclaration::read(vault.resource_address));
+            }
+            if fee_inputs_to_spend.revealed.is_positive() &&
+                fee_resource != TARI_TOKEN &&
+                !(inputs_to_spend.revealed.is_positive() && fee_resource == params.resource_address) &&
+                let Some(vault) = self
+                    .accounts_api
+                    .get_vault_by_resource(owner_account.component_address(), &fee_resource)
+                    .optional()?
+            {
+                substate_inputs.push(InputDeclaration::write(vault.id));
+                substate_inputs.push(InputDeclaration::read(vault.resource_address));
             }
 
             // Any change outputs? When merged, the fee is revealed by this statement too, so it comes out

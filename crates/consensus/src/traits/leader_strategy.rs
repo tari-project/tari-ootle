@@ -26,6 +26,21 @@ use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 pub trait LeaderStrategy<TAddr: PartialEq> {
     fn calculate_leader(&self, committee: &Committee<TAddr>, height: NodeHeight) -> u32;
 
+    /// The leaders of `height` and of every height after it, as committee indices. Past the top of the
+    /// height range the heights wrap to zero.
+    fn leaders_from<'a>(
+        &'a self,
+        committee: &'a Committee<TAddr>,
+        height: NodeHeight,
+    ) -> impl Iterator<Item = u32> + 'a {
+        let mut next = height;
+        std::iter::from_fn(move || {
+            let leader = self.calculate_leader(committee, next);
+            next = next.wrapping_add(NodeHeight(1));
+            Some(leader)
+        })
+    }
+
     fn is_leader(&self, validator_addr: &TAddr, committee: &Committee<TAddr>, height: NodeHeight) -> bool {
         let position = self.calculate_leader(committee, height);
         if let Some(m) = committee.get(position as usize) {

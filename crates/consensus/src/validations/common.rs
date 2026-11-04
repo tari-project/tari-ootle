@@ -243,8 +243,8 @@ pub(super) fn check_height(block: &Block) -> Result<(), ProposalValidationError>
     Ok(())
 }
 
-/// A block may only come from the effective leader of the view below it: the round-robin leader of
-/// that view, or - when that validator is suspended - the first validator after it that is not.
+/// A block may only come from the effective leader of the view below it: the leader strategy's leader
+/// of that view, or - when that validator is suspended - the first leader of a later view that is not.
 ///
 /// `skip_set` must be the one anchored on the block's justify, which is the state every node that
 /// can act on this block has committed.

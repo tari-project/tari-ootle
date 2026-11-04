@@ -169,7 +169,7 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
         has_processed_first_block: bool,
     ) -> IncomingMessageResult<TConsensusSpec::Addr> {
         let current_epoch = epoch_state.epoch();
-        let next_view = View::new(current_epoch, current_height + NodeHeight(1));
+        let next_view = active_buffer_view(current_epoch, current_height, has_processed_first_block);
         // Clear buffer with lower (epoch, heights)
         let num_discarded = self.buffer.discard_before(next_view);
 
@@ -182,11 +182,9 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
             num_discarded,
             self.buffer.len()
         );
-        if has_processed_first_block {
-            // Drain all buffered messages for the current view
-            if let Some((_, (from, message))) = self.buffer.pop_front(&next_view) {
-                return Ok(Some(InboundMessage::Ready { from, message }));
-            }
+        // Drain all buffered messages for the current view
+        if let Some((_, (from, message))) = self.buffer.pop_front(&next_view) {
+            return Ok(Some(InboundMessage::Ready { from, message }));
         }
 
         while let Some(result) = self.inbound_messaging.next_message().await {
@@ -554,6 +552,15 @@ fn extract_embedded_qc(msg: &HotstuffMessage) -> Option<&ProposalCertificate> {
     }
 }
 
+fn active_buffer_view(current_epoch: Epoch, current_height: NodeHeight, has_processed_first_block: bool) -> View {
+    let next_height = if has_processed_first_block {
+        current_height + NodeHeight(1)
+    } else {
+        current_height
+    };
+    View::new(current_epoch, next_height)
+}
+
 enum MessageRelativeView {
     /// The message is for the current view, or is applicable to the current view
     Current,
@@ -681,7 +688,7 @@ fn msg_relative_view(
         HotstuffMessage::ForeignProposalNotification(_) => MessageRelativeView::Current,
         HotstuffMessage::ForeignProposalRequest(_) => MessageRelativeView::Current,
         HotstuffMessage::MissingTransactionsRequest(msg) => {
-            if msg.epoch < current_epoch {
+            if current_epoch.checked_sub(Epoch(1)).is_some_and(|min| msg.epoch < min) {
                 return MessageRelativeView::Past {
                     epoch: msg.epoch,
                     height: NodeHeight::zero(),
@@ -696,7 +703,7 @@ fn msg_relative_view(
             MessageRelativeView::Current
         },
         HotstuffMessage::MissingTransactionsResponse(msg) => {
-            if msg.epoch < current_epoch {
+            if current_epoch.checked_sub(Epoch(1)).is_some_and(|min| msg.epoch < min) {
                 return MessageRelativeView::Past {
                     epoch: msg.epoch,
                     height: NodeHeight::zero(),
@@ -874,6 +881,119 @@ mod tests {
             let release_height = height - NodeHeight(1);
             assert!(matches!(
                 msg_relative_view(&msg, EPOCH, release_height, true),
+                MessageRelativeView::Current
+            ));
+        }
+
+        fn proposal_at(epoch: Epoch, justify_height: NodeHeight, block_height: NodeHeight) -> HotstuffMessage {
+            let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+            let justify = ProposalCertificate::new(
+                FixedHash::zero(),
+                BlockId::zero(),
+                justify_height,
+                epoch,
+                shard_group,
+                ProposalCertificate::genesis_signatures(),
+                QuorumDecision::Accept,
+            );
+            let header = BlockHeader::create_unsigned(
+                NETWORK,
+                ProtocolVersion::at(NETWORK, epoch),
+                BlockId::zero(),
+                justify.calculate_id(),
+                None,
+                block_height,
+                epoch,
+                shard_group,
+                RistrettoPublicKeyBytes::default(),
+                FixedHash::zero(),
+                &BlockCommands::empty(),
+                0,
+                0,
+                FixedHash::zero(),
+                ShardGroupAccumulatedData::default(),
+                ExtraData::new(),
+            )
+            .unwrap();
+            HotstuffMessage::new_proposal(ProposalMessage {
+                block: Block::new(header, justify, BlockCommands::empty(), None),
+                foreign_proposals: vec![],
+            })
+        }
+
+        #[test]
+        fn next_epoch_proposals_are_buffered_at_the_active_buffer_view_when_the_epoch_opens() {
+            let next_epoch = EPOCH + Epoch(1);
+            let first = proposal_at(next_epoch, NodeHeight::zero(), NodeHeight(1));
+            let second = proposal_at(next_epoch, NodeHeight(1), NodeHeight(2));
+
+            let MessageRelativeView::Future {
+                epoch: first_epoch,
+                height: first_height,
+            } = msg_relative_view(&first, EPOCH, NodeHeight(10), true)
+            else {
+                panic!("expected first next-epoch proposal to be buffered");
+            };
+            assert_eq!(
+                View::new(first_epoch, first_height),
+                active_buffer_view(next_epoch, NodeHeight::zero(), false)
+            );
+            assert!(matches!(
+                msg_relative_view(&first, next_epoch, NodeHeight::zero(), false),
+                MessageRelativeView::Current
+            ));
+
+            let MessageRelativeView::Future {
+                epoch: second_epoch,
+                height: second_height,
+            } = msg_relative_view(&second, EPOCH, NodeHeight(10), true)
+            else {
+                panic!("expected second next-epoch proposal to be buffered");
+            };
+            assert_eq!(
+                View::new(second_epoch, second_height),
+                active_buffer_view(next_epoch, NodeHeight::zero(), true)
+            );
+            assert!(matches!(
+                msg_relative_view(&second, next_epoch, NodeHeight::zero(), false),
+                MessageRelativeView::Future {
+                    epoch,
+                    height: NodeHeight(1)
+                } if epoch == next_epoch
+            ));
+            assert!(matches!(
+                msg_relative_view(&second, next_epoch, NodeHeight::zero(), true),
+                MessageRelativeView::Current
+            ));
+        }
+
+        #[test]
+        fn missing_transactions_messages_from_the_previous_epoch_are_current() {
+            use std::collections::HashSet;
+
+            use crate::messages::{MissingTransactionsRequest, MissingTransactionsResponse};
+
+            let current_epoch = Epoch(5);
+            let prev_epoch = Epoch(4);
+            let req = HotstuffMessage::MissingTransactionsRequest(MissingTransactionsRequest {
+                request_id: 1,
+                epoch: prev_epoch,
+                block_id: BlockId::zero(),
+                transactions: HashSet::new(),
+            });
+            let resp = HotstuffMessage::MissingTransactionsResponse(MissingTransactionsResponse {
+                request_id: 1,
+                epoch: prev_epoch,
+                block_id: BlockId::zero(),
+                transactions: vec![],
+            });
+
+            assert!(matches!(
+                msg_relative_view(&req, current_epoch, NodeHeight(1), true),
+                MessageRelativeView::Current
+            ));
+            assert!(matches!(
+                msg_relative_view(&resp, current_epoch, NodeHeight(1), true),
                 MessageRelativeView::Current
             ));
         }

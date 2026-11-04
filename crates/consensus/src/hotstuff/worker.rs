@@ -471,6 +471,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
             // Need to update epoch state if the epoch has changed
             if epoch_state.epoch != current_epoch {
+                self.worker_state.has_processed_first_block = false;
                 let exhaust_burn_rate = self.epoch_exhaust_burn_rate(current_epoch)?;
                 epoch_state
                     .update_from_epoch_manager(&self.epoch_manager, current_epoch, exhaust_burn_rate)
@@ -710,7 +711,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let made_progress = !transactions.is_empty();
         self.on_receive_new_transaction
             .process_requested(
-                epoch_state.epoch(),
+                epoch,
                 from.clone(),
                 block_id,
                 transactions,

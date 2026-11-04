@@ -737,6 +737,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     genesis.as_last_executed().set(tx)?;
                     genesis.as_last_voted().set(tx)?;
                     genesis.justify().as_high_pc().set(tx)?;
+                    genesis.commit_block_without_state_changes(tx, &genesis.justify().calculate_id())?;
                 }
 
                 Ok::<_, HotStuffError>(())

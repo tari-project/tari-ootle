@@ -742,6 +742,49 @@ mod transaction_execution_operations {
 
         tx.rollback().unwrap();
     }
+
+    /// Epoch GC deletes the previous epoch's blocks while a transaction executed in one of them may still be pending,
+    /// so that execution stays reusable.
+    #[test]
+    fn an_execution_in_a_pruned_previous_epoch_block_is_reused() {
+        use tari_ootle_storage::EpochCleanupStep;
+
+        use crate::helpers::{create_block_with_qc, create_first_block_of_next_epoch};
+
+        let (db, _tmp) = create_rocksdb();
+        let mut tx = db.create_write_tx().unwrap();
+
+        // Epoch 0 blocks are never pruned, so the execution sits in epoch 1 and the leaf in epoch 2.
+        let mut chain = chain_across_an_epoch_change(3, 4);
+        let mut parent = create_first_block_of_next_epoch(&chain.last().unwrap().as_leaf());
+        for _ in 0..4 {
+            let block = create_block_with_qc(&parent.as_leaf());
+            chain.push(std::mem::replace(&mut parent, block));
+        }
+        chain.push(parent);
+        commit_chain(&mut tx, &chain);
+
+        let transaction_id = transaction_id_from_seed(1);
+        let executed_in = chain[6].clone();
+        let leaf = chain.last().unwrap().as_leaf();
+        assert_eq!(executed_in.epoch(), Epoch(1));
+        assert_eq!(leaf.epoch(), Epoch(2));
+        assert!(
+            tx.block_transaction_executions_insert_or_ignore(&accepted_execution(&executed_in, &transaction_id))
+                .unwrap()
+        );
+
+        tx.epoch_cleanup_step(leaf.epoch(), EpochCleanupStep::Blocks, usize::MAX)
+            .unwrap();
+        assert!(!tx.blocks_exists(executed_in.id()).unwrap());
+
+        let execution = tx
+            .block_transaction_executions_get_pending_for_block(&transaction_id, &leaf)
+            .unwrap();
+        assert_eq!(execution.block_id(), executed_in.id());
+
+        tx.rollback().unwrap();
+    }
 }
 
 mod finalized_transaction_gc {

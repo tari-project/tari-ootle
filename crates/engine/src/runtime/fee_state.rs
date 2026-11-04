@@ -139,6 +139,22 @@ impl FeeState {
         self.fee_charges().get_total()
     }
 
+    /// Every charge except the execution sources ([`FeeSource::WasmExecution`] and
+    /// [`FeeSource::NativeExecution`]), at the fee scale. Those are priced from the accumulated
+    /// points, so a bound on further compute that counts the points consumed must leave them out.
+    pub fn total_charges_excluding_execution(&self) -> u64 {
+        let sum = |charges: &FeeBreakdown| {
+            charges
+                .iter()
+                .filter(|(source, _)| !matches!(source, FeeSource::WasmExecution | FeeSource::NativeExecution))
+                .fold(0u64, |acc, (_, amount)| acc.saturating_add(*amount))
+        };
+        if self.fee_scale.is_one() {
+            return sum(&self.fee_charges);
+        }
+        sum(&self.fee_charges())
+    }
+
     pub fn total_payments(&self) -> u64 {
         self.running_payments_total
     }

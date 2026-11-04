@@ -1699,6 +1699,100 @@ async fn multishard_publish_template() {
     test.assert_clean_shutdown().await;
 }
 
+/// A transaction declaring a published template as an input is global: every committee holds the template, so every
+/// committee sequences, prepares and commits it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn multishard_global_input() {
+    setup_logger();
+    let mut test = Test::builder()
+        .add_committee(0, vec!["1", "2"])
+        .add_committee(1, vec!["3", "4"])
+        .add_committee(2, vec!["5", "6"])
+        .add_committee(3, vec!["7", "8"])
+        .start()
+        .await;
+    let (sk, pk) = create_key_pair();
+    let wasm = load_binary_fixture("state.wasm");
+    let template_id =
+        PublishedTemplateAddress::from_author_and_binary_hash(&pk.to_byte_type(), &hash_template_code(&wasm));
+    let publish_input = test
+        .create_substates_on_vns(TestVnDestination::Committee(0), 1)
+        .remove(0);
+    let publish = Transaction::builder_localnet(Epoch(1))
+        .publish_template(wasm)
+        .with_inputs([publish_input.clone().into()])
+        .build_and_seal(&sk);
+    let publish = TransactionRecord::new(publish);
+    test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
+        transaction: publish.transaction().clone(),
+        decision: Decision::Commit,
+        fee: 1,
+        input_locks: vec![(publish_input.into_substate_id(), SubstateLockType::Write)],
+        new_outputs: vec![SubstateId::Template(template_id)],
+        validator_fee_withdrawals: vec![],
+        calls_template: None,
+        fee_intent_fallback_fee: None,
+    });
+    test.send_transaction_to_destination(TestVnDestination::All, publish.clone())
+        .await;
+
+    test.start_epoch(Epoch(1)).await;
+    loop {
+        test.on_block_committed().await;
+        if test.is_transaction_finalized_at_destination(TestVnDestination::All, publish.id()) {
+            break;
+        }
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        if leaf.height >= NodeHeight(30) {
+            panic!("Template not published after {} blocks", leaf.height);
+        }
+    }
+    test.assert_all_validators_have_decision(publish.id(), Decision::Commit)
+        .await;
+
+    // The only non-global input is in committee 0, so the template input alone involves the other committees.
+    let local_input = test
+        .create_substates_on_vns(TestVnDestination::Committee(0), 1)
+        .remove(0);
+    let template_input = VersionedSubstateId::new(SubstateId::Template(template_id), SubstateVersion::ZERO);
+    let tx = Transaction::builder_localnet(Epoch(1))
+        .with_inputs([local_input.clone().into(), template_input.clone().into()])
+        .build_and_seal(&create_key_pair().0);
+    let tx = TransactionRecord::new(tx);
+    assert!(tx.transaction().is_global());
+    test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
+        transaction: tx.transaction().clone(),
+        decision: Decision::Commit,
+        fee: 1,
+        input_locks: vec![
+            (local_input.into_substate_id(), SubstateLockType::Write),
+            (template_input.into_substate_id(), SubstateLockType::Read),
+        ],
+        new_outputs: vec![],
+        validator_fee_withdrawals: vec![],
+        calls_template: None,
+        fee_intent_fallback_fee: None,
+    });
+    test.send_transaction_to_destination(TestVnDestination::All, tx.clone())
+        .await;
+
+    loop {
+        test.on_block_committed().await;
+        if test.is_transaction_finalized_at_destination(TestVnDestination::All, tx.id()) {
+            break;
+        }
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        if leaf.height >= NodeHeight(60) {
+            panic!("Global transaction not committed after {} blocks", leaf.height);
+        }
+    }
+
+    test.stop();
+    test.assert_all_validators_have_decision(tx.id(), Decision::Commit)
+        .await;
+    test.assert_clean_shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn multishard_validator_fee_claim() {
     setup_logger();

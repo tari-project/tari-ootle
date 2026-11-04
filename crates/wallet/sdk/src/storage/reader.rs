@@ -234,10 +234,11 @@ pub trait WalletStoreReader {
     fn stealth_outputs_get_unproven_held(&mut self) -> Result<Vec<StealthOutputModel>, WalletStorageError>;
 
     // Output Locks
+    /// Every lock linked to `transaction_id`, in creation order. Empty when none is.
     fn locks_get_by_transaction_id(
         &mut self,
         transaction_id: TransactionId,
-    ) -> Result<WalletLockId, WalletStorageError>;
+    ) -> Result<Vec<WalletLockId>, WalletStorageError>;
 
     /// Returns `NotFound` when no lock has this id.
     fn locks_get(&mut self, lock_id: WalletLockId) -> Result<WalletLock, WalletStorageError>;

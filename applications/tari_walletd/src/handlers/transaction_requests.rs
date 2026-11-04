@@ -58,6 +58,7 @@ use tari_template_lib_types::{ResourceAddress, crypto::PedersenCommitmentBytes, 
 
 use super::context::HandlerContext;
 use crate::handlers::{
+    component_upgrades::component_upgrades,
     helpers::{ensure_transaction_signers, invalid_params, invalid_request},
     transaction::submit_inner_for_request,
 };
@@ -383,6 +384,32 @@ pub(crate) fn ensure_free_locks_of<R: WalletStoreReader>(
     Ok(())
 }
 
+/// Refuses `lock_ids` unless `caller` created each lock. Unlike
+/// [`ensure_free_locks_of`], a lock already linked to a transaction or held by
+/// a request is accepted, for paths that read the locks without claiming them.
+///
+/// Every refusal is the same error on `field`, so the call does not reveal
+/// which lock ids exist.
+pub(crate) fn ensure_locks_owned_by<R: WalletStoreReader>(
+    reader: &mut R,
+    caller: LockOwner,
+    lock_ids: &[WalletLockId],
+    field: &'static str,
+) -> Result<(), anyhow::Error> {
+    for lock_id in lock_ids {
+        let lock = reader.locks_get(*lock_id).optional()?;
+        if !lock.is_some_and(|l| l.owner == caller) {
+            return Err(invalid_params(
+                field,
+                Some(format!(
+                    "lock {lock_id} does not exist or was created by another caller"
+                )),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Guarded transition to `to`, refusing an already-expired request.
 fn transition(
     context: &HandlerContext,
@@ -416,6 +443,10 @@ fn to_info(context: &HandlerContext, model: TransactionRequestModel) -> Result<T
 
     let main_signer = resolve_main_signer(context, &model.unsigned_transaction, &model.other_signers)?;
     let external_signers = model.signatures.iter().map(|sig| *sig.public_key()).collect();
+    let component_upgrades = component_upgrades(
+        model.unsigned_transaction.fee_instructions(),
+        model.unsigned_transaction.instructions(),
+    );
 
     Ok(TransactionRequestInfo {
         request_id: model.id,
@@ -426,6 +457,7 @@ fn to_info(context: &HandlerContext, model: TransactionRequestModel) -> Result<T
         status,
         transaction_id: model.transaction_id,
         value_summaries,
+        component_upgrades,
         main_signer,
         external_signers,
         expires_at: model.expires_at.assume_utc().unix_timestamp(),

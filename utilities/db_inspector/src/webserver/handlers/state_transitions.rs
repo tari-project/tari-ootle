@@ -11,7 +11,7 @@ use axum::{
 use serde_json::json;
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_storage::Ordering;
-use tari_state_store_rocksdb::column_families;
+use tari_state_store_rocksdb::{column_families, error::RocksDbStorageError, traits::Cf};
 
 use crate::webserver::{
     context::HandlerContext,
@@ -44,13 +44,15 @@ pub async fn list(
     } else {
         Ordering::Ascending
     };
-    let iter = if let Some(prefix_hex) = req.query.as_ref() {
-        let key_prefix = decode_hex_prefix::<column_families::state_transition::StateTransitionCf>(prefix_hex)?;
-        cf.range_iterator(ordering, key_prefix.as_slice()..)
-    } else {
-        let empty = Vec::<u8>::new();
-        cf.range_iterator(ordering, empty.as_slice()..)
-    };
+    type Key = <column_families::state_transition::StateTransitionCf as Cf>::Key;
+    type Value = <column_families::state_transition::StateTransitionCf as Cf>::Value;
+    let iter: Box<dyn Iterator<Item = Result<(Key, Value), RocksDbStorageError>>> =
+        if let Some(prefix_hex) = req.query.as_ref().filter(|q| !q.is_empty()) {
+            let key_prefix = decode_hex_prefix::<column_families::state_transition::StateTransitionCf>(prefix_hex)?;
+            Box::new(cf.prefix_range_iterator_raw_key(ordering, key_prefix))
+        } else {
+            Box::new(cf.iterator(ordering, OPERATION))
+        };
 
     let row_limit = req.limit.unwrap_or(1_000);
     let row_skip = req.page.unwrap_or(0).saturating_mul(row_limit);
@@ -62,6 +64,7 @@ pub async fn list(
         let encoded_key = cf.encode_key(&(shard, state_version));
         let key_hex = hex::encode(&encoded_key);
         for (i, transition) in data.transitions.into_iter().enumerate() {
+            count += 1;
             if skipped < row_skip {
                 skipped += 1;
                 continue;
@@ -79,8 +82,6 @@ pub async fn list(
                 }));
                 emitted += 1;
             }
-
-            count += 1;
         }
     }
     table.set_total_entries(count);

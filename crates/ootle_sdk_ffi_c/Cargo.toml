@@ -21,6 +21,10 @@ hex = { workspace = true }
 
 [dev-dependencies]
 tari_engine_types = { workspace = true }
+tari_template_lib_types = { workspace = true, features = ["std"] }
+ootle-network = { workspace = true }
+ootle-wasm-core = { workspace = true }
+tari_bor = { workspace = true }
 
 [build-dependencies]
 # cbindgen generates `include/ootle_sdk.h` from the `extern "C"` surface at build time. New to the

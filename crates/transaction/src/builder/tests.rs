@@ -328,3 +328,27 @@ fn auto_filled_inputs_and_referenced_substates_skip_undeclarable_ids() {
         vec![SubstateId::from(component)]
     );
 }
+
+#[test]
+fn auto_filled_inputs_include_migrate_args() {
+    use tari_engine_types::substate::SubstateId;
+    use tari_template_lib_types::ObjectKey;
+
+    let target = ComponentAddress::new(ObjectKey::from_array([10; 32]));
+    let migrate_arg = ComponentAddress::new(ObjectKey::from_array([12; 32]));
+    let new_template = TemplateAddress::from_array([0x42; 32]);
+
+    let transaction = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .update_component_template_address_with_migrate(target, new_template, "migrate", args![migrate_arg])
+        .build_unsigned();
+
+    let inputs = transaction
+        .inputs()
+        .iter()
+        .map(|input| input.substate_id().clone())
+        .collect::<std::collections::HashSet<_>>();
+    let expected = std::collections::HashSet::from([SubstateId::from(target), SubstateId::from(migrate_arg)]);
+    assert_eq!(inputs, expected);
+    assert_eq!(transaction.to_referenced_substates().unwrap(), expected);
+}

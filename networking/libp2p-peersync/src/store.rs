@@ -31,6 +31,18 @@ pub trait PeerStore: Clone + Send + Sync + 'static {
         }
         self.put(peer).await
     }
+    /// Stores `peer` unless the stored record has a later `updated_at`, returning whether it was stored. A record
+    /// with the same `updated_at` replaces the stored one, because the wire format carries `updated_at` in whole
+    /// seconds and a peer can re-sign its record more than once within a second.
+    async fn put_unless_older(&self, peer: SignedPeerRecord) -> Result<bool, Self::Error> {
+        if let Some(existing) = self.get(&peer.to_peer_id()).await? &&
+            existing.updated_at > peer.updated_at
+        {
+            return Ok(false);
+        }
+        self.put(peer).await?;
+        Ok(true)
+    }
     async fn put_address(&self, peer_id: &PeerId, address: Multiaddr) -> Result<bool, Self::Error>;
     async fn remove(&self, peer_id: &PeerId) -> Result<Option<SignedPeerRecord>, Self::Error>;
 

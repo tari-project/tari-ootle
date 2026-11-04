@@ -107,9 +107,8 @@ mod template {
             }
         }
 
-        /// Does nothing. Its one argument is the component address the engine passes a method, so it
-        /// can be called as a method on any of this template's components without reading the state.
-        pub fn touch(_component: ComponentAddress) {}
+        /// Does nothing with the state, which the dispatcher reads for the receiver all the same.
+        pub fn touch(&self) {}
 
         /// Calls `touch` as a method on `target` `calls` times.
         pub fn touch_component(target: ComponentAddress, calls: u32) {

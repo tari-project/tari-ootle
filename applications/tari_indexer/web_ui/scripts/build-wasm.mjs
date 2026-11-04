@@ -5,7 +5,8 @@
 //
 // The indexer's build.rs runs this UI's build while cargo holds the lock on the workspace target directory, so the
 // wasm build gets a target directory of its own. Cargo hands build scripts the host's rustflags, which would reach
-// the wasm32 link, so they are dropped.
+// the wasm32 link, so they are dropped. `CARGO` is dropped as well: wasm-pack runs it as a single program, and a
+// release build sets it to a cargo command with arguments (`cargo auditable`).
 
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
@@ -17,6 +18,7 @@ const repo = resolve(webUi, "../../..");
 const env = { ...process.env, CARGO_TARGET_DIR: join(repo, "target", "indexer-web-ui-wasm") };
 delete env.CARGO_ENCODED_RUSTFLAGS;
 delete env.RUSTFLAGS;
+delete env.CARGO;
 
 const result = spawnSync(
   "wasm-pack",

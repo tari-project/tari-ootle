@@ -2,6 +2,7 @@
 import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 import type { TransactionSignature } from "../TransactionSignature";
 import type { UnsignedTransaction } from "../UnsignedTransaction";
+import type { ComponentUpgrade } from "./ComponentUpgrade";
 import type { KeyId } from "./KeyId";
 import type { SigningRequestEffectiveStatus } from "./SigningRequestEffectiveStatus";
 import type { SigningRequester } from "./SigningRequester";
@@ -12,6 +13,11 @@ export type SigningRequestInfo = {
    * The transaction body the signature commits to.
    */
   transaction: UnsignedTransaction;
+  /**
+   * Every `UpdateComponentTemplate` instruction in `transaction`, fee instructions first. See
+   * [`ComponentUpgrade`].
+   */
+  component_upgrades: Array<ComponentUpgrade>;
   seal_public_key: RistrettoPublicKeyBytes;
   key_id: KeyId;
   /**

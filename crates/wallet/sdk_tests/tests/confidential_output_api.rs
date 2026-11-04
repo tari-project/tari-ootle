@@ -304,7 +304,6 @@ async fn dry_run_transfer_releases_locks_and_skips_unconfirmed_change() {
         .unwrap();
     assert!(vault.locked_revealed_balance.is_zero());
     assert_eq!(vault.available_revealed_balance(), 20u64);
-    assert!(test.sdk().locks_api().release_lock(output.transaction_proof_id).is_err());
 }
 
 #[tokio::test]

@@ -328,11 +328,15 @@ impl<TStore: StateReader> RuleEvaluator<'_, TStore> {
             },
             // `ScopedToComponent` / `ScopedToTemplate` mean "execution is within this component/template":
             // they always describe the current (top) frame, which is the actor on resource/ownership checks
-            // and the callee on method checks.
-            RuleRequirement::ScopedToComponent(address) => {
-                Ok(state.current_component().ok().flatten() == Some(*address))
+            // and the callee on method checks. Outside any frame (a top-level instruction) no component or template
+            // is executing, so both are false.
+            RuleRequirement::ScopedToComponent(_) | RuleRequirement::ScopedToTemplate(_)
+                if state.call_frame_depth() == 0 =>
+            {
+                Ok(false)
             },
-            RuleRequirement::ScopedToTemplate(address) => Ok(state.current_template().ok() == Some(address)),
+            RuleRequirement::ScopedToComponent(address) => Ok(state.current_component()? == Some(*address)),
+            RuleRequirement::ScopedToTemplate(address) => Ok(state.current_template()? == address),
             // Sugar for the caller badges the engine stamps into a frame's scope at push. Both badge resources are
             // empty by invariant, so the scope's badges are the only thing that can satisfy these.
             RuleRequirement::CallerComponent(address) => {
@@ -355,7 +359,15 @@ mod tests {
         indexed_value::IndexedWellKnownTypes,
         virtual_substate::VirtualSubstates,
     };
-    use tari_template_lib::types::{ComponentAddress, EntityId, Hash32, ObjectKey, ResourceAddress, TemplateAddress};
+    use tari_template_lib::types::{
+        ComponentAddress,
+        EntityId,
+        Hash32,
+        ObjectKey,
+        ResourceAddress,
+        TemplateAddress,
+        access_rules::UpdateRule,
+    };
 
     use super::*;
     use crate::{
@@ -407,7 +419,7 @@ mod tests {
         assert!(!auth.check_access_rule(&any_of_rule).unwrap());
 
         let owner_rule = SubstateOwnerRule::ByAccessRule(comp_rule);
-        let access_rules = ResourceAccessRules::new().withdrawable(AccessRule::AllowAll);
+        let access_rules = ResourceAccessRules::new().withdrawable(AccessRule::AllowAll, UpdateRule::Locked);
         auth.check_resource_access_rules(
             ResourceAuthAction::Withdraw,
             Ownership {

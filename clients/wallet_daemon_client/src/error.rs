@@ -10,12 +10,9 @@ const UNAUTHORIZED_ERROR_CODE: i64 = 401;
 
 /// reqwest hides the actual transport failure (timeout, connection refused, DNS error, ...) in its
 /// error source chain — its own `Display` only says "error sending request for url (...)". This walks
-/// the chain so the real cause, and any HTTP status, ends up in the message.
+/// the chain so the real cause ends up in the message.
 fn describe_request_error(err: &reqwest::Error) -> String {
     let mut msg = err.to_string();
-    if let Some(status) = err.status() {
-        msg = format!("{msg} (HTTP {})", status.as_u16());
-    }
     let mut source = err.source();
     while let Some(cause) = source {
         msg = format!("{msg}: {cause}");
@@ -30,7 +27,7 @@ pub enum WalletDaemonClientError {
     DeserializeResponse { source: serde_json::Error, method: String },
     #[error("Failed to serialize request for method {method}: {source}")]
     SerializeRequest { method: String, source: serde_json::Error },
-    #[error("Failed to send request: {}", describe_request_error(.source))]
+    #[error("Request failed: {}", describe_request_error(.source))]
     RequestFailed {
         #[from]
         source: reqwest::Error,

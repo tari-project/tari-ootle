@@ -1291,7 +1291,8 @@ mod tests {
             ),
             "unexpected error: {err}"
         );
-        assert!(err.to_string().contains("(HTTP 502)"), "unexpected error: {err}");
+        assert!(err.to_string().contains("502 Bad Gateway"), "unexpected error: {err}");
+        assert!(!err.to_string().contains("(HTTP 502)"), "unexpected error: {err}");
     }
 
     #[tokio::test]

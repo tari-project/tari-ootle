@@ -945,29 +945,24 @@ pub struct BalanceEntry {
 
 impl BalanceEntry {
     pub fn to_balance_string(&self) -> String {
-        let symbol = self.token_symbol.as_deref().map(str::trim).filter(|s| !s.is_empty());
-        match (self.resource_type, symbol) {
-            (ResourceType::Fungible, Some(symbol)) => format!("{} {symbol}", self.balance),
-            (ResourceType::Fungible, None) => self.balance.to_string(),
-            (ResourceType::NonFungible, Some(symbol)) => format!("{} {symbol} tokens", self.balance),
-            (ResourceType::NonFungible, None) => format!("{} tokens", self.balance),
-            (ResourceType::Confidential, Some(symbol)) => format!(
-                "{} revealed + {} blinded = {} {symbol}",
+        let suffix = self
+            .token_symbol
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| format!(" {s}"))
+            .unwrap_or_default();
+        match self.resource_type {
+            ResourceType::Fungible => format!("{}{suffix}", self.balance),
+            ResourceType::NonFungible => format!("{}{suffix} tokens", self.balance),
+            ResourceType::Confidential => format!(
+                "{} revealed + {} blinded = {}{suffix}",
                 self.balance,
                 self.confidential_balance,
                 self.balance + self.confidential_balance,
             ),
-            (ResourceType::Confidential, None) => format!(
-                "{} revealed + {} blinded = {}",
-                self.balance,
-                self.confidential_balance,
-                self.balance + self.confidential_balance,
-            ),
-            (ResourceType::Stealth, Some(symbol)) => {
-                format!("{} {symbol} (stealth)", self.balance + self.confidential_balance)
-            },
-            (ResourceType::Stealth, None) => {
-                format!("{} (stealth)", self.balance + self.confidential_balance)
+            ResourceType::Stealth => {
+                format!("{}{suffix} (stealth)", self.balance + self.confidential_balance)
             },
         }
     }

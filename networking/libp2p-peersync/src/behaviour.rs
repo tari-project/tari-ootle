@@ -176,8 +176,19 @@ where TPeerStore: PeerStore
         &self.peer_store
     }
 
-    fn on_connection_closed(&mut self, ConnectionClosed { peer_id, .. }: ConnectionClosed) {
-        self.active_outbound_connections.remove(&peer_id);
+    fn on_connection_closed(
+        &mut self,
+        ConnectionClosed {
+            peer_id, connection_id, ..
+        }: ConnectionClosed,
+    ) {
+        if self
+            .active_outbound_connections
+            .get(&peer_id)
+            .is_some_and(|id| *id == connection_id)
+        {
+            self.active_outbound_connections.remove(&peer_id);
+        }
         if let Some(pos) = self.pending_syncs.iter().position(|p| *p == peer_id) {
             self.pending_syncs.remove(pos);
             self.pending_events
@@ -369,5 +380,53 @@ where TPeerStore: PeerStore
 fn shrink_hash_set_if_required<T: Eq + std::hash::Hash>(set: &mut HashSet<T>) {
     if set.capacity() > EMPTY_QUEUE_SHRINK_THRESHOLD {
         set.shrink_to_fit();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use libp2p::core::ConnectedPoint;
+
+    use super::*;
+    use crate::store::MemoryPeerStore;
+
+    fn close_connection(behaviour: &mut Behaviour<MemoryPeerStore>, peer_id: PeerId, connection_id: ConnectionId) {
+        let endpoint = ConnectedPoint::Listener {
+            local_addr: "/ip4/127.0.0.1/tcp/9300".parse().unwrap(),
+            send_back_addr: "/ip4/127.0.0.1/tcp/9301".parse().unwrap(),
+        };
+        behaviour.on_swarm_event(FromSwarm::ConnectionClosed(ConnectionClosed {
+            peer_id,
+            connection_id,
+            endpoint: &endpoint,
+            cause: None,
+            remaining_established: 1,
+        }));
+    }
+
+    #[test]
+    fn closing_other_connection_keeps_tracked_outbound_connection() {
+        let mut behaviour = Behaviour::new(Keypair::generate_ed25519(), MemoryPeerStore::new(), Config::default());
+        let peer_id = PeerId::random();
+        let outbound_conn = ConnectionId::new_unchecked(1);
+        let other_conn = ConnectionId::new_unchecked(2);
+        behaviour
+            .handle_established_outbound_connection(
+                outbound_conn,
+                peer_id,
+                &"/ip4/127.0.0.1/tcp/9302".parse().unwrap(),
+                Endpoint::Dialer,
+                PortUse::New,
+            )
+            .unwrap();
+
+        close_connection(&mut behaviour, peer_id, other_conn);
+        assert_eq!(
+            behaviour.active_outbound_connections.get(&peer_id),
+            Some(&outbound_conn)
+        );
+
+        close_connection(&mut behaviour, peer_id, outbound_conn);
+        assert!(!behaviour.active_outbound_connections.contains_key(&peer_id));
     }
 }

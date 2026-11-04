@@ -85,15 +85,21 @@ where
     ///
     /// `linked_accounts` are the wallet account(s) this transaction involves; they are persisted so the
     /// transaction list can be filtered per account. Accounts not known to this wallet are ignored.
+    ///
+    /// `lock_ids` are linked in the same write that stores the transaction, so a failed store leaves them unlinked.
     pub fn insert_new_transaction(
         &self,
         transaction: Transaction,
         new_account_info: Option<NewAccountData>,
         linked_accounts: &[ComponentAddress],
         is_dry_run: bool,
+        lock_ids: &[WalletLockId],
     ) -> Result<TransactionId, TransactionApiError> {
         let tx_id = transaction.calculate_id();
         self.store.with_write_tx(|tx| {
+            for lock_id in lock_ids {
+                tx.locks_link_transaction(*lock_id, tx_id)?;
+            }
             tx.transactions_insert(&transaction, new_account_info.as_ref(), linked_accounts, is_dry_run)
         })?;
 
@@ -374,7 +380,7 @@ where
                             .filter(|_| final_decision.is_commit());
                         match maybe_diff {
                             Some(diff) => {
-                                if let Some(lock_id) = tx.locks_get_by_transaction_id(transaction_id).optional()? {
+                                for lock_id in tx.locks_get_by_transaction_id(transaction_id)? {
                                     info!(target: LOG_TARGET, "Finalizing locked outputs for transaction {}: {}", transaction_id, lock_id);
                                     tx.locks_unlock_finalized(lock_id, diff)?;
                                 }
@@ -518,6 +524,20 @@ where
             .with_write_tx(|tx| self.release_all_locks_for_transaction_internal(tx, transaction_id))
     }
 
+    /// Releases every lock linked to `transaction_id` unless the wallet stored the transaction. Only a stored
+    /// transaction resolves its locks, and the stale sweep skips linked locks.
+    pub fn release_locks_of_unstored_transaction(
+        &self,
+        transaction_id: TransactionId,
+    ) -> Result<(), TransactionApiError> {
+        self.store.with_write_tx(|tx| {
+            if tx.transactions_get(transaction_id).optional()?.is_some() {
+                return Ok(());
+            }
+            self.release_all_locks_for_transaction_internal(tx, transaction_id)
+        })
+    }
+
     pub fn locks_set_transaction_id(
         &self,
         lock_id: WalletLockId,
@@ -533,7 +553,7 @@ where
         tx: &mut <TStore as WriteableWalletStore>::WriteTransaction<'_>,
         transaction_id: TransactionId,
     ) -> Result<(), TransactionApiError> {
-        if let Some(lock_id) = tx.locks_get_by_transaction_id(transaction_id).optional()? {
+        for lock_id in tx.locks_get_by_transaction_id(transaction_id)? {
             debug!(target: LOG_TARGET, "Releasing lock {} (and associated outputs) for transaction {} that was not committed", lock_id, transaction_id);
             tx.locks_release(lock_id)?;
         }

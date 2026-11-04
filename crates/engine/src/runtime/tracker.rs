@@ -63,7 +63,7 @@ use crate::{
         error::ArgumentValidationError,
         fee_state::FeeState,
         locking::LockedSubstate,
-        scope::{CallScope, FrameWriteMode, PushCallFrame},
+        scope::{CallScope, FrameWriteMode, PushCallFrame, RestrictedFrame},
         working_state::{ChargeableState, WorkingState},
         workspace::Workspace,
     },
@@ -232,6 +232,10 @@ impl<TStore: StateReader> StateTracker<TStore> {
     /// costs, and that share of the payment is already spoken for; funding compute out of the full
     /// payment would run work nothing is left to pay for.
     ///
+    /// The execution charges are left out of what the payment has spent: the allowance is in
+    /// points, and its users subtract every point the transaction has consumed — the fee intent's
+    /// included — so deducting the fee intent's priced execution here as well would count it twice.
+    ///
     /// That payment-funded figure is measured against the charges *standing when it is asked*.
     /// Anything charged after the last call — instructions that follow the final invocation — is
     /// outside it, so the total can end a little past the payment. The fallback commit is decided
@@ -258,7 +262,9 @@ impl<TStore: StateReader> StateTracker<TStore> {
             if fee_state.is_dry_run() {
                 return None;
             }
-            let unspent = fee_state.total_payments().saturating_sub(fee_state.total_charges());
+            let unspent = fee_state
+                .total_payments()
+                .saturating_sub(fee_state.total_charges_excluding_execution());
             Some(ComputeAllowance {
                 // `prices_execution` above is the only case that yields no figure, so nothing here
                 // may widen the allowance by failing to produce one. The rate is the fee table's, so
@@ -333,6 +339,15 @@ impl<TStore: StateReader> StateTracker<TStore> {
             let component_address = match address_allocation {
                 Some(address_allocation) => {
                     let alloc = state.use_allocated_address(address_allocation.id())?;
+                    if let Some(allocated_template) = alloc.template_address() &&
+                        *allocated_template != template_address
+                    {
+                        return Err(RuntimeError::AddressAllocationTemplateMismatch {
+                            id: address_allocation.id(),
+                            allocated_by: *allocated_template,
+                            used_by: template_address,
+                        });
+                    }
                     alloc.substate_id().as_component_address().ok_or_else(|| {
                         RuntimeError::AddressAllocationTypeMismatch {
                             id: alloc.substate_id().clone(),
@@ -390,7 +405,11 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.write_with(|state| state.unlock_substate(locked))
     }
 
-    pub fn push_call_frame(&self, push_frame: PushCallFrame) -> Result<(), RuntimeError> {
+    pub fn push_call_frame(
+        &self,
+        push_frame: PushCallFrame,
+        restrict_to: Option<FrameWriteMode>,
+    ) -> Result<(), RuntimeError> {
         self.write_with(|state| {
             // If substates used in args are in scope for the current frame, we can bring then into scope for the new
             // frame
@@ -401,7 +420,12 @@ impl<TStore: StateReader> StateTracker<TStore> {
             );
             state.check_all_substates_in_scope(push_frame.arg_scope())?;
 
-            let new_frame = push_frame.into_new_call_frame();
+            let mut new_frame = push_frame.into_new_call_frame();
+            // Restricted before the push, so the push installs neither signer badges nor a loan into a confined
+            // frame.
+            if let Some(mode) = restrict_to {
+                new_frame.restrict(mode);
+            }
             trace!(target: LOG_TARGET, "NEW CALL FRAME:\n{}", new_frame.scope());
 
             state.push_frame(new_frame, limits::ENGINE_LIMITS.max_call_depth)
@@ -500,6 +524,26 @@ impl<TStore: StateReader> StateTracker<TStore> {
             },
             None => cap_remaining,
         }
+    }
+
+    /// Runs `f` on the working state with access-rule evaluation metered, then charges what the evaluation used as
+    /// native execution. Every access rule is evaluated inside `f`, while the working state is borrowed and no charge
+    /// can be made, so the meter is opened with [`Self::native_execution_headroom`] read beforehand and evaluation
+    /// stops once it has used that. A transaction that cannot pay for the evaluation then fails out of compute here,
+    /// whatever `f` returned.
+    pub(super) fn write_with_authorization<R, E, F>(&self, f: F) -> Result<R, E>
+    where
+        F: FnOnce(&mut WorkingState<TStore>) -> Result<R, E>,
+        E: From<RuntimeError>,
+    {
+        let budget = self.native_execution_headroom();
+        let (result, used) = self.write_with(|state| {
+            state.authorization_meter().open(budget);
+            let result = f(state);
+            (result, state.authorization_meter().close())
+        });
+        self.charge_native_execution(used)?;
+        result
     }
 
     /// Chooses the state that finalization will persist.
@@ -605,6 +649,11 @@ impl<TStore: StateReader> StateTracker<TStore> {
         // persists real state — substates, and a receipt carrying every event the intent emitted —
         // and there is no shallower checkpoint left to fall back to. Letting it through is what
         // would make an underfunded fee intent a way to write state for free.
+        //
+        // The fee checkpoint already rejects a payment short of this figure before the main intent
+        // may run, since the fee module prices the checkpoint exactly as it prices the fallback
+        // here. This check is the backstop for a module whose persist-time charges exceed what it
+        // charged at the checkpoint.
         //
         // The compute allowance holds the main intent's charges inside the payment only up to the
         // last allowance it sized, so charges accrued past that can leave the total a little over
@@ -727,6 +776,10 @@ impl<TStore: StateReader> StateTracker<TStore> {
 
     pub fn is_fee_state_dry_run(&self) -> bool {
         self.read_with(|state| state.fee_state().is_dry_run())
+    }
+
+    pub fn current_restricted_frame(&self) -> RestrictedFrame {
+        self.read_with(|state| state.current_restricted_frame())
     }
 
     /// The write mode of the current call frame. Used by the engine's core sandbox enforcement to deny the few

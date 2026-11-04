@@ -1,11 +1,19 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, fmt::Display, num::NonZeroU64, time::Instant};
+use std::{collections::HashMap, fmt::Display, num::NonZeroU64, ops::Deref, time::Instant};
 
 use log::*;
 use ootle_byte_type::ToByteType;
-use tari_consensus_types::{BlockId, HighPc, HighestSeenBlock, LeafBlock, ProposalCertificate, TimeoutCertificate};
+use tari_consensus_types::{
+    BlockId,
+    HighPc,
+    HighestSeenBlock,
+    LastProposed,
+    LeafBlock,
+    ProposalCertificate,
+    TimeoutCertificate,
+};
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_engine_types::{commit_result::RejectReason, fees::FeeScaleSchedule};
 use tari_epoch_manager::EpochManagerReader;
@@ -23,6 +31,8 @@ use tari_ootle_common_types::{
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
+    StateStoreWriteTransaction,
+    StorageError,
     consensus_models::{
         Block,
         BlockCommands,
@@ -59,7 +69,12 @@ use crate::{
         apply_leader_fee_to_substate_store,
         block_change_set::ProposedBlockChangeSet,
         calculate_state_merkle_root,
-        command_derivation::{DerivedCommand, derive_local_only_command, derive_new_multishard_command},
+        command_derivation::{
+            DerivedCommand,
+            derive_local_only_command,
+            derive_new_multishard_command,
+            pin_new_transaction,
+        },
         epoch_state::EpochState,
         error::HotStuffError,
         exceeds_block_foreign_proposal_bytes,
@@ -225,6 +240,8 @@ where TConsensusSpec: ConsensusSpec
                     );
                     ForeignProposalRecord::set_status_by_id(tx, &block_id, ForeignProposalStatus::Invalid, None)?;
                 }
+
+                drop_executions_of_uninserted_proposal(tx, epoch)?;
 
                 // Add executions for this block
                 if !executed_transactions.is_empty() {
@@ -831,7 +848,7 @@ where TConsensusSpec: ConsensusSpec
         let max_block_weight = self.config.consensus_constants.max_block_weight;
         let max_commands = self.config.consensus_constants.max_commands_in_block;
 
-        let mut foreign_proposals =
+        let foreign_proposals =
             ForeignProposalRecord::get_all_new(tx, state_anchor_leaf.block_id(), MAX_FOREIGN_PROPOSALS_PER_BLOCK)?;
 
         if !foreign_proposals.is_empty() {
@@ -842,31 +859,10 @@ where TConsensusSpec: ConsensusSpec
             );
         }
 
-        // The block travels with every foreign proposal it includes, so they are taken in order for as long as they
-        // fit the byte budget. The rest stay new for a later block.
-        let max_foreign_proposal_bytes = self.config.consensus_constants.max_block_foreign_proposal_bytes;
-        let mut foreign_proposal_bytes = 0usize;
-        let num_fitting = foreign_proposals
-            .iter()
-            .enumerate()
-            .take_while(|(idx, fp)| {
-                let total_bytes = foreign_proposal_bytes.saturating_add(tari_bor::encoded_len(fp.proposal()));
-                if exceeds_block_foreign_proposal_bytes(total_bytes, idx + 1, max_foreign_proposal_bytes) {
-                    return false;
-                }
-                foreign_proposal_bytes = total_bytes;
-                true
-            })
-            .count();
-        if num_fitting < foreign_proposals.len() {
-            info!(
-                target: LOG_TARGET,
-                "📦 PROPOSE: foreign proposal budget ({max_foreign_proposal_bytes} bytes) reached after {num_fitting} \
-                 of {} foreign proposal(s); deferring the rest to a later block",
-                foreign_proposals.len(),
-            );
-            foreign_proposals.truncate(num_fitting);
-        }
+        let foreign_proposals = select_foreign_proposals(
+            foreign_proposals,
+            self.config.consensus_constants.max_block_foreign_proposal_bytes,
+        );
 
         let foreign_proposal_weight: u64 = foreign_proposals
             .iter()
@@ -954,8 +950,17 @@ where TConsensusSpec: ConsensusSpec
             pool_tx.id(),
         );
 
-        // Update locked epoch if needed
-        pool_tx.update_locked_epoch(locked_epoch.clone());
+        if let Err(pinned_after) = pin_new_transaction(&mut pool_tx, locked_epoch, local_committee_info.shard_group()) {
+            info!(
+                target: LOG_TARGET,
+                "📌 PROPOSE: transaction {} is pinned to {}, after this block's {}. Deferring it until this shard \
+                 group reaches that epoch",
+                pool_tx.id(),
+                pinned_after.locked_epoch,
+                pinned_after.block_epoch,
+            );
+            return Ok(None);
+        }
 
         let prepared = self
             .transaction_manager
@@ -1068,7 +1073,7 @@ where TConsensusSpec: ConsensusSpec
     ) -> Result<Option<Command>, HotStuffError> {
         // Only set to abort if either the local or one or more foreign shards decided to ABORT
         if tx_rec.current_decision().is_abort() {
-            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom())));
+            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom()?)));
         }
 
         let locked_epoch = tx_rec.locked_epoch().ok_or_else(|| {
@@ -1089,22 +1094,7 @@ where TConsensusSpec: ConsensusSpec
             locked_epoch.clone(),
         )?;
 
-        if execution.decision().is_commit() {
-            // Preparing the transaction bounded what its inputs alone may pledge, so only the block budget applies
-            let pledge = substate_store.pledge_inputs(
-                local_pledged_inputs(&tx_rec, local_committee_info.shard_group()),
-                usize::MAX,
-            )?;
-            if let InputPledge::BlockBudgetReached { total_bytes, max_bytes } = pledge {
-                info!(
-                    target: LOG_TARGET,
-                    "📦 PROPOSE: LocalAccept of transaction {} would take the block's pledge to {total_bytes} bytes, \
-                     past the {max_bytes} budget. Deferring it to a later block",
-                    tx_rec.id(),
-                );
-                return Ok(None);
-            }
-        }
+        let is_commit = execution.decision().is_commit();
 
         // Try to lock all local outputs
         let locked = lock_multishard_execution(
@@ -1133,7 +1123,25 @@ where TConsensusSpec: ConsensusSpec
             );
 
             executed_transactions.insert(*tx_rec.id(), execution);
-            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom())));
+            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom()?)));
+        }
+
+        if is_commit {
+            // Preparing the transaction bounded what its inputs alone may pledge, so only the block budget applies
+            let pledge = substate_store.pledge_inputs(
+                local_pledged_inputs(&tx_rec, local_committee_info.shard_group()),
+                usize::MAX,
+            )?;
+            if let InputPledge::BlockBudgetReached { total_bytes, max_bytes } = pledge {
+                info!(
+                    target: LOG_TARGET,
+                    "📦 PROPOSE: LocalAccept of transaction {} would take the block's pledge to {total_bytes} bytes, \
+                     past the {max_bytes} budget. Deferring it to a later block",
+                    tx_rec.id(),
+                );
+                substate_store.release_new_locks(tx_rec.id());
+                return Ok(None);
+            }
         }
 
         tx_rec.update_from_execution(
@@ -1160,7 +1168,7 @@ where TConsensusSpec: ConsensusSpec
         executed_transactions: &HashMap<TransactionId, TransactionExecution>,
     ) -> Result<Option<Command>, HotStuffError> {
         if tx_rec.current_decision().is_abort() {
-            return Ok(Some(Command::SomeAccept(tx_rec.get_current_multi_shard_atom())));
+            return Ok(Some(Command::SomeAccept(tx_rec.get_current_multi_shard_atom()?)));
         }
 
         // A foreign proposal in this block may have replaced the stored execution with its fee-intent commit
@@ -1219,7 +1227,7 @@ where TConsensusSpec: ConsensusSpec
         &self,
         tx_rec: &TransactionPoolRecord,
     ) -> Result<MultiShardAtom, HotStuffError> {
-        let mut atom = tx_rec.get_current_multi_shard_atom();
+        let mut atom = tx_rec.get_current_multi_shard_atom()?;
         if tx_rec.current_decision().is_commit() {
             let num_involved_shard_groups = tx_rec.evidence().num_shard_groups();
             let involved = NonZeroU64::new(num_involved_shard_groups as u64).ok_or_else(|| {
@@ -1299,6 +1307,46 @@ impl Display for ProposalBatch {
     }
 }
 
+/// Selects the foreign proposals for the next block from `foreign_proposals`, which are in the order they are stored,
+/// and returns them in the order a replica applies them.
+///
+/// The block travels with every foreign proposal it includes, so they are taken in stored order for as long as they
+/// fit `max_bytes`. The rest stay new for a later block.
+///
+/// Applying foreign proposals is order-dependent (e.g. the first abort recorded for a transaction is the one it keeps),
+/// and the proposer derives the block's transaction commands from the state they leave behind. Replicas apply them in
+/// block command order, so the proposer must too, or it commits to atoms no replica reproduces.
+fn select_foreign_proposals(
+    mut foreign_proposals: Vec<ForeignProposalRecord>,
+    max_bytes: usize,
+) -> Vec<ForeignProposalRecord> {
+    let mut foreign_proposal_bytes = 0usize;
+    let num_fitting = foreign_proposals
+        .iter()
+        .enumerate()
+        .take_while(|(idx, fp)| {
+            let total_bytes = foreign_proposal_bytes.saturating_add(tari_bor::encoded_len(fp.proposal()));
+            if exceeds_block_foreign_proposal_bytes(total_bytes, idx + 1, max_bytes) {
+                return false;
+            }
+            foreign_proposal_bytes = total_bytes;
+            true
+        })
+        .count();
+    if num_fitting < foreign_proposals.len() {
+        info!(
+            target: LOG_TARGET,
+            "📦 PROPOSE: foreign proposal budget ({max_bytes} bytes) reached after {num_fitting} of {} foreign \
+             proposal(s); deferring the rest to a later block",
+            foreign_proposals.len(),
+        );
+        foreign_proposals.truncate(num_fitting);
+    }
+
+    foreign_proposals.sort_by(|a, b| a.to_atom().block_order_key().cmp(&b.to_atom().block_order_key()));
+    foreign_proposals
+}
+
 /// Subtract `by` from the remaining block weight budget, returning `None` once the budget is
 /// exhausted (i.e. drops to zero or would underflow). Mirrors the previous count-based helper but
 /// operates on the weight budget.
@@ -1306,9 +1354,121 @@ fn subtract_weight_checked(remaining_weight: Option<u64>, by: u64) -> Option<u64
     remaining_weight.and_then(|w| w.checked_sub(by)).filter(|w| *w > 0)
 }
 
+/// Drops the executions of this node's last proposal in `epoch` if that proposal was never inserted.
+///
+/// `OnPropose` records a proposal's executions before its block is inserted, so a proposal that is never inserted
+/// leaves executions with no block. Execution reuse rejects them within the epoch because the block is absent, but not
+/// in a later epoch, where epoch GC has pruned committed blocks too. This runs before each proposal and in the
+/// transaction that ends the epoch, which precedes any pruning of the epoch's blocks, so they do not outlive it.
+pub(crate) fn drop_executions_of_uninserted_proposal<TTx>(tx: &mut TTx, epoch: Epoch) -> Result<(), StorageError>
+where
+    TTx: StateStoreWriteTransaction + Deref,
+    TTx::Target: StateStoreReadTransaction,
+{
+    if let Some(previous) = LastProposed::get(&**tx, epoch).optional()? &&
+        !Block::record_exists(&**tx, &previous.block_id)?
+    {
+        tx.block_transaction_executions_remove_any_by_block_id(&previous.block_id)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod select_foreign_proposals {
+        use tari_ootle_common_types::{ExtraData, ShardGroup};
+        use tari_ootle_storage::consensus_models::{
+            BlockCommands,
+            BlockHeaderMetadata,
+            BlockPledge,
+            CommandsCommitProof,
+            ForeignProposalAtom,
+        };
+        use tari_ootle_transaction::Network;
+        use tari_sidechain::{SidechainBlockCommitProof, SidechainBlockHeader};
+
+        use super::*;
+
+        /// A stored `New` foreign proposal from `shard_group`'s block `block_id` in epoch 1.
+        fn stored_proposal(shard_group: ShardGroup, block_id: BlockId) -> ForeignProposalRecord {
+            let metadata = BlockHeaderMetadata {
+                total_leader_fee: 0,
+                timestamp: 0,
+                extra_data: ExtraData::new(),
+                timeout_certificate_id: None,
+                is_dummy: false,
+            };
+            let header = SidechainBlockHeader {
+                network: Network::MainNet.as_byte(),
+                protocol_version: 0,
+                parent_id: Default::default(),
+                justify_id: Default::default(),
+                height: 1,
+                epoch: 1,
+                epoch_hash: Default::default(),
+                shard_group: tari_sidechain::ShardGroup {
+                    start: shard_group.start().as_u32(),
+                    end_inclusive: shard_group.end().as_u32(),
+                },
+                proposed_by: Default::default(),
+                state_merkle_root: Default::default(),
+                command_merkle_root: Default::default(),
+                transaction_merkle_root: Default::default(),
+                signature: Default::default(),
+                accumulated_data: Default::default(),
+                metadata_hash: metadata.calculate_hash(),
+            };
+            let commit_proof = CommandsCommitProof::new_latest(vec![], SidechainBlockCommitProof {
+                header,
+                proof_elements: vec![],
+            });
+            ForeignProposalRecord::load(
+                block_id,
+                ForeignProposal::new(commit_proof, BlockPledge::default(), metadata),
+                None,
+                ForeignProposalStatus::New,
+            )
+        }
+
+        fn atoms(proposals: &[ForeignProposalRecord]) -> Vec<ForeignProposalAtom> {
+            proposals.iter().map(|fp| fp.to_atom()).collect()
+        }
+
+        /// Two same-epoch proposals whose stored order (block id) is the reverse of their shard group order.
+        fn stored_out_of_block_order() -> Vec<ForeignProposalRecord> {
+            vec![
+                stored_proposal(ShardGroup::new(32u32, 63u32), BlockId::from([0xaa; 32])),
+                stored_proposal(ShardGroup::new(0u32, 31u32), BlockId::from([0xbb; 32])),
+            ]
+        }
+
+        #[test]
+        fn it_returns_the_selection_in_the_order_replicas_apply_it() {
+            let stored = stored_out_of_block_order();
+            let selected = select_foreign_proposals(stored.clone(), usize::MAX);
+
+            let block_order = BlockCommands::init(selected.iter().map(|fp| Command::ForeignProposal(fp.to_atom())))
+                .unwrap()
+                .iter()
+                .filter_map(|cmd| cmd.foreign_proposal().cloned())
+                .collect::<Vec<_>>();
+
+            assert_ne!(atoms(&stored), block_order, "fixture must be stored out of block order");
+            assert_eq!(atoms(&selected), block_order);
+        }
+
+        #[test]
+        fn it_selects_in_stored_order_within_the_byte_budget() {
+            let stored = stored_out_of_block_order();
+            let max_bytes = tari_bor::encoded_len(stored[0].proposal());
+
+            let selected = select_foreign_proposals(stored.clone(), max_bytes);
+
+            assert_eq!(atoms(&selected), atoms(&stored[..1]));
+        }
+    }
 
     mod subtract_weight_checked {
         use super::*;

@@ -317,7 +317,10 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         match self.tracker.current_frame_write_mode() {
             FrameWriteMode::Full => Ok(()),
             FrameWriteMode::OwnComponent if FORBIDDEN_IN_OWN_COMPONENT.contains(&function) => {
-                Err(RuntimeError::ForbiddenInAuthHookContext { operation: function })
+                Err(RuntimeError::ForbiddenInRestrictedFrame {
+                    operation: function,
+                    frame: self.tracker.current_restricted_frame(),
+                })
             },
             FrameWriteMode::ReadOnly if FORBIDDEN_IN_READ_ONLY.contains(&function) => {
                 Err(RuntimeError::ForbiddenInReadOnlyContext { operation: function })
@@ -430,11 +433,9 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             }
 
             // `get_bucket` scope-checks; `get_proof` does not, so the frame's own scope is checked here to keep a
-            // returned proof to the same rule as a returned bucket.
+            // returned proof to the same rule as a returned bucket: only a held proof crosses to the caller.
             for proof_id in value.proof_ids() {
-                if !state.current_call_scope()?.is_proof_in_scope(proof_id) {
-                    return Err(RuntimeError::ProofNotInScope { proof_id: *proof_id });
-                }
+                state.current_call_scope()?.require_held_proof(proof_id)?;
                 let _ignore = state.get_proof(*proof_id)?;
             }
 
@@ -531,10 +532,10 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             }
             // The hook component may still be an unused address allocation when the resource is acted upon in the
             // same call that creates it. For example, commonly a user creates a resource with initial supply and
-            // deposits it into a vault before creating the component. In this case, we "skip" the hook.
-            if state
-                .get_allocated_address_by_address(auth_hook.component_address)
-                .is_some()
+            // deposits it into a vault before creating the component. In this case, we "skip" the hook. Only the
+            // frame holding the allocation, running the template that made it, may skip.
+            if let Some(alloc) = state.get_allocated_address_in_current_scope(auth_hook.component_address)? &&
+                alloc.template_address() == state.current_template().ok()
             {
                 return Ok(true);
             }
@@ -627,7 +628,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     where
         F: FnOnce(&Resource) -> Result<(), RuntimeError>,
     {
-        let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+        let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
             let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
             let resource = state_mut.get_resource(&resource_lock)?;
             validate(resource)?;
@@ -822,6 +823,13 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
 
+        if !func.has_receiver() {
+            return Err(RuntimeError::InvalidArgument {
+                argument,
+                reason: format!("Authorize hook '{}' must be a method taking &self or &mut self", hook),
+            });
+        }
+
         if !matches!(
             func.arguments.get(1).expect("length checked").arg_type.other(),
             Some("ResourceAuthAction")
@@ -854,6 +862,15 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             return Err(RuntimeError::InvalidArgument {
                 argument: "TemplateFunction",
                 reason: format!("spend script function '{}' must not be mutable", func.name),
+            });
+        }
+        if func.has_receiver() {
+            return Err(RuntimeError::InvalidArgument {
+                argument: "TemplateFunction",
+                reason: format!(
+                    "spend script function '{}' must be a template function, not a method taking &self",
+                    func.name
+                ),
             });
         }
         if !matches!(func.output, Type::Unit) {
@@ -1115,7 +1132,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             AtomicCondition::AccessRule(access_rule) => {
                 let allowed = self
                     .tracker
-                    .read_with(|state| state.authorization().check_access_rule(access_rule))?;
+                    .write_with_authorization(|state| state.authorization().check_access_rule(access_rule))?;
                 if !allowed {
                     return Err(RuntimeError::AccessDenied {
                         action_ident: ActionIdent::Native(NativeAction::StealthUtxoSpend),
@@ -1632,7 +1649,7 @@ where
                 }
                 reject_invalid_m_of_n("access_rules", access_rules.find_invalid_m_of_n())?;
 
-                self.tracker.write_with(|state| {
+                self.tracker.write_with_authorization(|state| {
                     let component_lock = state
                         .current_call_scope()?
                         .get_current_component_lock()
@@ -1688,7 +1705,7 @@ where
                     reject_invalid_m_of_n("owner_rule", rule.find_invalid_m_of_n())?;
                 }
 
-                self.tracker.write_with(|state| {
+                self.tracker.write_with_authorization(|state| {
                     let component_lock = state
                         .current_call_scope()?
                         .get_current_component_lock()
@@ -1944,7 +1961,7 @@ where
                 let mint_resource: MintResourceArg = args.assert_one_arg()?;
 
                 let (maybe_auth_hook, auth_caller, has_view_key, tracks_supply) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                         let resource = state_mut.get_resource(&resource_lock)?;
@@ -2003,7 +2020,7 @@ where
                         })?;
                 let arg: RecallResourceArg = args.assert_one_arg()?;
 
-                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2100,7 +2117,7 @@ where
                 let arg: ResourceUpdateNonFungibleDataArg = args.assert_one_arg()?;
                 reject_transient_values_in("Non-fungible mutable data", &arg.data)?;
 
-                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2165,7 +2182,7 @@ where
                 let UpdateAccessRuleArg { action, new_rule } = args.assert_one_arg()?;
                 reject_invalid_m_of_n("new_rule", new_rule.find_invalid_m_of_n())?;
 
-                let resource_lock = self.tracker.write_with(|state_mut| {
+                let resource_lock = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2208,7 +2225,7 @@ where
                         })?;
                 let UpdateAuthHookArg { auth_hook } = args.assert_one_arg()?;
 
-                let resource_lock = self.tracker.write_with(|state_mut| {
+                let resource_lock = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2265,7 +2282,7 @@ where
                 Self::check_metadata_values("metadata", &new_metadata)?;
                 Self::check_token_symbol(&new_metadata)?;
 
-                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2331,7 +2348,7 @@ where
                     });
                 }
 
-                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2628,7 +2645,7 @@ where
                     })?;
                 args.assert_no_args("CreateVault")?;
 
-                self.tracker.write_with(|state| {
+                self.tracker.write_with_authorization(|state| {
                     let resource_substate_id = SubstateId::Resource(*resource_address);
                     let resource_lock = state.read_lock_substate(resource_substate_id.clone())?;
                     let resource = state.get_resource(&resource_lock)?;
@@ -2682,7 +2699,7 @@ where
                 let bucket_id: BucketId = args.assert_one_arg()?;
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
@@ -2743,7 +2760,7 @@ where
                 let arg: VaultWithdrawArg = args.assert_one_arg()?;
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller, has_view_key) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
@@ -2957,7 +2974,7 @@ where
                     self.verify_input_authorizations(TARI_TOKEN.into(), statement)?;
                 }
 
-                self.tracker.write_with(|state_mut| {
+                self.tracker.write_with_authorization(|state_mut| {
                     let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                     let vault = state_mut.get_vault(&vault_lock)?;
@@ -3030,7 +3047,7 @@ where
                 args.assert_no_args("CreateProofByResource")?;
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
@@ -3084,7 +3101,7 @@ where
                 let arg: VaultCreateProofByFungibleAmountArg = args.assert_one_arg()?;
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
@@ -3138,7 +3155,7 @@ where
                 let arg: VaultCreateProofByNonFungiblesArg = args.assert_one_arg()?;
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
@@ -3381,7 +3398,7 @@ where
                 let arg: BurnBucketArg = args.assert_one_arg()?;
 
                 let (resource_address, maybe_auth_hook, auth_caller, tracks_supply) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let bucket = state_mut.get_bucket(bucket_id)?;
                         // Reject a burn that cannot succeed before the auth hook runs or anything is charged for it.
                         // This is re-checked after the hook, which may lock funds itself.
@@ -3457,7 +3474,7 @@ where
 
                 args.assert_no_args("Bucket::CreateProof")?;
 
-                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
                     let bucket = state_mut.get_bucket(bucket_id)?;
 
                     let resource_lock =
@@ -3635,12 +3652,17 @@ where
 
                 self.tracker.write_with(|state| {
                     // A proof id is a sequential counter shared by the whole transaction, so authority has to come
-                    // from the frame's own scope: a proof it created, was passed as an argument, or a callee handed
-                    // back. Every other live proof in the transaction belongs to someone else.
-                    if !state.proof_exists(proof_id) || !state.current_call_scope()?.is_proof_in_scope(&proof_id) {
+                    // from a proof the frame holds: one it created or a callee handed back. A proof shown as an
+                    // argument is the caller's to authorize, and every other live proof belongs to someone else.
+                    // The answer is the same for all of them, so it reveals nothing about ids the frame cannot see.
+                    // A window that is already open is refused too: the auth scope holds one entry per proof, so a
+                    // second window would alias the first and close it when either guard drops.
+                    let is_live = state.proof_exists(proof_id);
+                    let scope = state.current_call_scope_mut()?;
+                    if !is_live || !scope.is_proof_in_scope(&proof_id) || scope.auth_scope().contains_proof(&proof_id) {
                         return Ok(InvokeResult::encode(&Err::<(), _>(NotAuthorized))?);
                     }
-                    state.current_call_scope_mut()?.auth_scope_mut().add_proof(proof_id);
+                    scope.auth_scope_mut().add_proof(proof_id);
                     Ok(InvokeResult::encode(&Ok::<_, NotAuthorized>(()))?)
                 })
             },
@@ -3754,10 +3776,12 @@ where
                 let key: WorkspaceOffsetId = args.assert_one_arg()?;
                 self.tracker.write_with(|state| {
                     let proof_id = state.workspace_proof(key)?;
-                    if !state.current_call_scope()?.is_proof_in_scope(&proof_id) {
-                        return Err(RuntimeError::ProofNotInScope { proof_id });
+                    let scope = state.current_call_scope_mut()?;
+                    scope.require_held_proof(&proof_id)?;
+                    if scope.auth_scope().contains_proof(&proof_id) {
+                        return Err(RuntimeError::ProofAlreadyAuthorized { proof_id });
                     }
-                    state.current_call_scope_mut()?.auth_scope_mut().add_proof(proof_id);
+                    scope.auth_scope_mut().add_proof(proof_id);
                     Ok(InvokeResult::unit())
                 })
             },
@@ -3946,7 +3970,7 @@ where
         pool_address: ValidatorFeePoolAddress,
         max_amount: Option<Amount>,
     ) -> Result<BucketId, RuntimeError> {
-        self.tracker.write_with(|state| {
+        self.tracker.write_with_authorization(|state| {
             let resource = match max_amount {
                 Some(max_amount) => state.withdraw_fees_from_pool_up_to(pool_address, max_amount)?,
                 None => state.withdraw_all_fees_from_pool(pool_address)?,
@@ -4036,7 +4060,7 @@ where
                 let rule = AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::Require(
                     RuleRequirement::NonFungibleAddress(badge.clone()),
                 )));
-                self.tracker.read_with(|state| {
+                self.tracker.write_with_authorization(|state| {
                     if !state.authorization().check_access_rule(&rule)? {
                         return Err(RuntimeError::BadgeNotInScope { badge });
                     }
@@ -4155,7 +4179,7 @@ where
 
     fn check_component_access_rules(&self, method: &str) -> Result<(), RuntimeError> {
         self.tracker
-            .read_with(|state| state.authorization().check_current_component_access_rules(method))
+            .write_with_authorization(|state| state.authorization().check_current_component_access_rules(method))
     }
 
     fn check_signer_badge_in_scope(&self, public_key: RistrettoPublicKeyBytes) -> Result<(), RuntimeError> {
@@ -4168,28 +4192,16 @@ where
         })
     }
 
-    fn revoke_boundary_proofs(&self) -> Result<(), RuntimeError> {
-        self.tracker.write_with(|state| state.revoke_boundary_proofs())
-    }
-
-    fn check_component_upgrade_rule(&self) -> Result<(), RuntimeError> {
-        self.tracker.read_with(|state| {
-            let locked = state
-                .current_call_scope()?
-                .get_current_component_lock()
-                .ok_or_else(|| RuntimeError::InvariantError {
-                    function: "check_component_upgrade_rule",
-                    details: "No current component lock in call scope".to_string(),
-                })?;
-
-            let component = state.get_component(locked)?;
+    fn check_component_upgrade_rule(&self, component_lock: &LockedSubstate) -> Result<(), RuntimeError> {
+        self.tracker.write_with_authorization(|state| {
+            let component = state.get_component(component_lock)?;
             let action = NativeAction::UpdateComponentTemplate;
             match component.upgrade_rule() {
                 UpdateRule::Locked => Err(RuntimeError::ComponentUpgradesLocked {
-                    component: locked.substate_id().as_component_address().ok_or_else(|| {
+                    component: component_lock.substate_id().as_component_address().ok_or_else(|| {
                         RuntimeError::InvariantError {
                             function: "check_component_upgrade_rule",
-                            details: "Current component lock is not a component".to_string(),
+                            details: "Locked substate is not a component".to_string(),
                         }
                     })?,
                 }),
@@ -4241,12 +4253,7 @@ where
     }
 
     fn push_call_frame(&self, frame: PushCallFrame, restrict_to: Option<FrameWriteMode>) -> Result<(), RuntimeError> {
-        self.tracker.push_call_frame(frame)?;
-        // The WASM only runs after this returns, so the restriction is in place before any host op can be issued.
-        if let Some(mode) = restrict_to {
-            self.tracker.write_with(|state| state.restrict_current_frame(mode))?;
-        }
-        Ok(())
+        self.tracker.push_call_frame(frame, restrict_to)
     }
 
     fn pop_call_frame(&self, returned: &IndexedWellKnownTypes) -> Result<(), RuntimeError> {
@@ -4432,7 +4439,7 @@ where
         // wraparound forgery in the covenant check.
         self.verify_input_authorizations(resource_address.clone(), &statement)?;
 
-        self.tracker.write_with(|state_mut| {
+        self.tracker.write_with_authorization(|state_mut| {
             let Some(container) =
                 state_mut.execute_stealth_transfer(resource_address, statement, revealed_funds_bucket_id)?
             else {
@@ -4594,7 +4601,9 @@ where
                 InstructionArg::Literal(v) => Ok(decode_exact(v)?),
                 // A blob arg's value is the raw bytes of the referenced blob, decoded as CBOR
                 // by the same path as `Literal`. Lookup is against the surrounding transaction's
-                // `Blobs`, set on the runtime at construction time.
+                // `Blobs`, set on the runtime at construction time. Each reference is charged via
+                // `charge_engine_arg` before decoding so repeating a single blob across many
+                // instructions cannot amplify host CBOR decoding without paying per reference.
                 InstructionArg::Blob(idx) => {
                     let blob = self
                         .blobs
@@ -4603,6 +4612,10 @@ where
                             index: *idx,
                             count: self.blobs.len(),
                         })?;
+                    self.charge_engine_arg(blob.as_bytes()).map_err(|e| match e {
+                        EngineArgChargeError::Unreadable(e) => RuntimeError::from(e),
+                        EngineArgChargeError::Runtime(e) => e,
+                    })?;
                     Ok(decode_exact(blob.as_bytes())?)
                 },
             })
@@ -4659,4 +4672,139 @@ fn validate_component_access_rule_methods(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use ootle_network::Network;
+    use tari_engine_types::{
+        confidential::MinotariBurnClaimProof,
+        fees::{ExhaustBurnRate, FeeScale},
+        limits::engine_arg_points,
+        virtual_substate::VirtualSubstates,
+    };
+    use tari_ootle_common_types::Epoch;
+    use tari_ootle_transaction::{Blob, Blobs, TransactionWeight};
+
+    use super::*;
+    use crate::{
+        fees::{FeeTable, WasmMeteringRate},
+        runtime::{DeclaredInputLoad, scope::CallScope},
+        state_store::memory::MemoryStateStore,
+        traits::VerifiedClaim,
+    };
+
+    #[derive(Default, Clone)]
+    struct DummyTemplateProvider;
+
+    impl TemplateProvider for DummyTemplateProvider {
+        type Error = std::convert::Infallible;
+        type Template = LoadedTemplate;
+
+        fn get_template(&self, _id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
+            Ok(None)
+        }
+    }
+
+    struct DummyClaimVerifier;
+
+    impl ClaimProofVerifier for DummyClaimVerifier {
+        fn verify_claim_proof(
+            &self,
+            _epoch: Epoch,
+            _claim: &MinotariBurnClaimProof,
+        ) -> Result<VerifiedClaim, ClaimProofError> {
+            unimplemented!("not used in blob metering tests")
+        }
+    }
+
+    fn runtime_with_blobs(blobs: Blobs) -> RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider> {
+        let mut fee_table = FeeTable::zero_rated();
+        fee_table.per_wasm_point_cost = 1;
+        let tracker = StateTracker::new(
+            MemoryStateStore::new(),
+            VirtualSubstates::empty(),
+            CallScope::new(),
+            HashSet::new(),
+            Hash32::zero(),
+            Hash32::zero(),
+            TransactionWeight::new(0),
+            DeclaredInputLoad::default(),
+            WasmMeteringRate::from_fee_table(&fee_table),
+            ExhaustBurnRate::default(),
+            FeeScale::default(),
+            Network::LocalNet,
+            false,
+        );
+        RuntimeInterfaceImpl::initialize(
+            tracker,
+            Arc::new(DummyTemplateProvider),
+            None,
+            EntityIdProvider::new(Hash32::zero(), 64),
+            Arc::from(Vec::new()),
+            Arc::new(DummyClaimVerifier),
+            Rc::new(blobs),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn resolving_a_blob_arg_charges_native_points_per_reference() {
+        let payload: Vec<u64> = (0..128).collect();
+        let encoded = tari_bor::encode(&payload).unwrap();
+        let items = tari_bor::count_data_items_bounded(&encoded, limits::MAX_CBOR_NESTING_DEPTH, u64::MAX)
+            .unwrap()
+            .unwrap();
+        let expected_per_ref = engine_arg_points(encoded.len() as u64, items);
+        assert!(expected_per_ref > 0);
+
+        let blobs = Blobs::from_vec(vec![Blob::from(encoded)]);
+        let runtime = runtime_with_blobs(blobs);
+
+        assert_eq!(runtime.native_points_consumed(), 0);
+
+        // First reference to blob 0 charges `expected_per_ref`.
+        let resolved = runtime.resolve_args(None, &[InstructionArg::Blob(0)]).unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(runtime.native_points_consumed(), expected_per_ref);
+
+        // Referencing the same blob three more times charges in direct proportion to the number of references.
+        let resolved_multi = runtime
+            .resolve_args(None, &[
+                InstructionArg::Blob(0),
+                InstructionArg::Blob(0),
+                InstructionArg::Blob(0),
+            ])
+            .unwrap();
+        assert_eq!(resolved_multi.len(), 3);
+        assert_eq!(runtime.native_points_consumed(), expected_per_ref * 4);
+    }
+
+    #[test]
+    fn repeating_a_large_blob_arg_across_instructions_exhausts_compute_allowance() {
+        // Build a CBOR blob with 2,000 items so each reference costs a substantial chunk of compute points,
+        // and repeating it across many instructions exceeds `FREE_COMPUTE_GRACE_POINTS`.
+        let payload: Vec<u64> = (0..2_000).collect();
+        let encoded = tari_bor::encode(&payload).unwrap();
+        let blobs = Blobs::from_vec(vec![Blob::from(encoded)]);
+        let runtime = runtime_with_blobs(blobs);
+
+        let mut exhausted = false;
+        for _ in 0..500 {
+            match runtime.resolve_args(None, &[InstructionArg::Blob(0)]) {
+                Ok(_) => {},
+                Err(RuntimeError::FeeIntentComputeExceeded { .. }) => {
+                    exhausted = true;
+                    break;
+                },
+                Err(other) => panic!("expected FeeIntentComputeExceeded, got {other:?}"),
+            }
+        }
+        assert!(
+            exhausted,
+            "repeatedly referencing a large blob must exhaust the compute allowance"
+        );
+    }
 }

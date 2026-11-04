@@ -53,6 +53,7 @@ use crate::{
         epoch_state::EpochState,
         error::HotStuffError,
         generate_epoch_checkpoint,
+        on_propose::drop_executions_of_uninserted_proposal,
         on_ready_to_vote_on_local_block::{LocalNextEpochView, OnReadyToVoteOnLocalBlock},
         on_receive_foreign_proposal::OnReceiveForeignProposalHandler,
         pacemaker_handle::PaceMakerHandle,
@@ -699,6 +700,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     )));
                 }
                 checkpoint.save(tx)?;
+                drop_executions_of_uninserted_proposal(tx, prev_epoch)?;
 
                 if let Some(next_shard_group) = next_shard_group.filter(|_| !shard_group_changed) {
                     let next_protocol_version = ProtocolVersion::at(network, next_epoch);

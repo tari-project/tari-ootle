@@ -6,7 +6,7 @@
 //! checkable wherever any other badge is (so a *resource* rule can gate on the caller), and it names only the
 //! immediate caller (so it cannot be forwarded down a call chain).
 
-use tari_engine::runtime::RuntimeError;
+use tari_engine::runtime::{RuntimeError, scope::RestrictedFrame};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_transaction::args;
 use tari_template_lib::types::{
@@ -204,6 +204,7 @@ fn auth_hook_cannot_spend_the_depositors_caller_badge() {
     );
     assert_reject_reason(&reason, RuntimeError::WriteOutsideOwnComponent {
         id: SubstateId::Resource(gated),
+        frame: RestrictedFrame::AuthHook,
     });
 }
 

@@ -279,6 +279,11 @@ fn fee_payment_native_charge(test: &mut TemplateTest, account: ComponentAddress,
     native_charge(&result)
 }
 
+/// Native points a stealth transfer of a resource with default access rules spends authorizing its withdraw: the owner
+/// rule, which the sender does not satisfy, then the `AllowAll` withdraw rule, once for the resource action and once
+/// by the transfer itself.
+const STEALTH_TRANSFER_AUTHORIZATION_POINTS: u64 = 2 * 2 * NativeExecutionPoints::PER_ACCESS_RULE_NODE;
+
 fn native_charge(result: &tari_engine_types::commit_result::ExecuteResult) -> u64 {
     result
         .finalize
@@ -326,7 +331,10 @@ fn paid_native_verification_is_charged() {
         vec![owner, mask_badge],
     );
 
-    assert_eq!(native_charge(&result) - baseline, expected_points);
+    assert_eq!(
+        native_charge(&result) - baseline,
+        expected_points + STEALTH_TRANSFER_AUTHORIZATION_POINTS
+    );
 }
 
 /// A resource with a view key verifies an ElGamal viewable-balance proof per output, so its
@@ -376,5 +384,8 @@ fn view_key_surcharge_is_charged_per_output() {
         vec![owner, mask_badge],
     );
 
-    assert_eq!(native_charge(&result) - baseline, expected_points);
+    assert_eq!(
+        native_charge(&result) - baseline,
+        expected_points + STEALTH_TRANSFER_AUTHORIZATION_POINTS
+    );
 }

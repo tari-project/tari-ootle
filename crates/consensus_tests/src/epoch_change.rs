@@ -508,6 +508,73 @@ async fn epoch_change_unknown_validator_set_is_not_voted() {
     test.assert_clean_shutdown().await;
 }
 
+/// A proposal this node never inserted keeps its executions until its epoch ends. The end-of-epoch transaction drops
+/// them before epoch GC can prune the epoch's blocks, after which execution reuse could not tell them from a committed
+/// block's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn epoch_change_drops_the_executions_of_an_uninserted_last_proposal() {
+    use tari_consensus_types::{BlockId, LastProposed};
+    use tari_engine_types::commit_result::RejectReason;
+    use tari_ootle_storage::{StorageError, consensus_models::TransactionExecution};
+    use tari_ootle_transaction::TransactionId;
+
+    setup_logger();
+    let mut test = Test::builder()
+        .modify_config(|cfg| {
+            cfg.epoch_end_grace_period = Duration::from_millis(10);
+        })
+        .with_test_timeout(Duration::from_secs(120))
+        .add_committee(0, vec!["1", "2", "3", "4"])
+        .start()
+        .await;
+
+    // Validator 1's last proposal of epoch 1 is a block it never inserted. Its height is above any epoch 1 reaches, so
+    // validator 1 proposes nothing else in the epoch and only the end of the epoch can drop the execution.
+    let addr = TestAddress::new("1");
+    let validator = test.get_validator(&addr);
+    let uninserted = LeafBlock {
+        block_id: BlockId::from([0x77; 32]),
+        height: NodeHeight(1_000_000),
+        epoch: Epoch(1),
+        shard_group: validator.shard_group,
+    };
+    let transaction_id = TransactionId::new([0x78; 32]);
+    validator
+        .state_store
+        .with_write_tx(|tx| {
+            LastProposed {
+                height: uninserted.height,
+                block_id: uninserted.block_id,
+                epoch: uninserted.epoch,
+                shard_group: uninserted.shard_group,
+            }
+            .set(tx)?;
+            TransactionExecution::abort(
+                &transaction_id,
+                RejectReason::execution_failure_unclassified("never proposed"),
+            )
+            .for_block(uninserted, transaction_id)
+            .insert_if_required(tx)?;
+            Ok::<_, StorageError>(())
+        })
+        .unwrap();
+
+    test.start_epoch(Epoch(1)).await;
+    drain_blocks(&mut test, Duration::from_secs(2)).await;
+    test.start_epoch(Epoch(2)).await;
+    wait_for_all_validators_at_epoch(&mut test, Epoch(2), Duration::from_secs(60)).await;
+
+    let remaining = test
+        .get_validator(&addr)
+        .state_store
+        .with_read_tx(|tx| tx.block_transaction_executions_get_all_for_block(&uninserted.block_id))
+        .unwrap();
+    assert!(remaining.is_empty(), "{remaining:?}");
+
+    test.stop();
+    test.assert_clean_shutdown().await;
+}
+
 async fn drain_blocks(test: &mut Test, duration: Duration) {
     let drain_until = Instant::now() + duration;
     while Instant::now() < drain_until {

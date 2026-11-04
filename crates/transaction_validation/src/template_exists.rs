@@ -39,3 +39,74 @@ impl<TProvider: TemplateProvider> Validator<Transaction> for TemplateExistsValid
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashSet, convert::Infallible};
+
+    use indexmap::IndexSet;
+    use tari_ootle_transaction::{
+        ComponentReference,
+        Instruction,
+        Network,
+        Sr25519SignatureBytes,
+        TransactionSealSignature,
+        UnsealedTransactionV1,
+        UnsignedTransactionV1,
+    };
+    use tari_template_lib::types::{ComponentAddress, ObjectKey, TemplateAddress, crypto::RistrettoPublicKeyBytes};
+
+    use super::*;
+
+    #[derive(Clone)]
+    struct KnownTemplates(HashSet<TemplateAddress>);
+
+    impl TemplateProvider for KnownTemplates {
+        type Error = Infallible;
+        type Template = ();
+
+        fn get_template(&self, address: &TemplateAddress) -> Result<Option<()>, Infallible> {
+            Ok(self.0.contains(address).then_some(()))
+        }
+    }
+
+    fn update_component_template(new_template: TemplateAddress) -> Transaction {
+        let instruction = Instruction::UpdateComponentTemplate {
+            component: ComponentReference::Address(ComponentAddress::new(ObjectKey::from_array([1; 32]))),
+            migrate: None,
+            new_template,
+        };
+        Transaction::new(
+            UnsealedTransactionV1::new(
+                UnsignedTransactionV1::new(
+                    Network::LocalNet.as_byte(),
+                    vec![],
+                    vec![instruction],
+                    IndexSet::new(),
+                    None,
+                    tari_ootle_common_types::Epoch(10),
+                    false,
+                ),
+                vec![],
+            )
+            .into(),
+            TransactionSealSignature::new(RistrettoPublicKeyBytes::zero(), Sr25519SignatureBytes::zero()),
+        )
+    }
+
+    #[test]
+    fn a_component_template_update_to_an_unknown_template_is_rejected() {
+        let known = TemplateAddress::from_array([1; 32]);
+        let unknown = TemplateAddress::from_array([2; 32]);
+        let validator = TemplateExistsValidator::new(KnownTemplates(HashSet::from([known])));
+
+        validator.validate(&(), &update_component_template(known)).unwrap();
+        let err = validator
+            .validate(&(), &update_component_template(unknown))
+            .unwrap_err();
+        assert!(
+            matches!(err, TransactionValidationError::TemplateNotFound { address } if address == unknown),
+            "unexpected error: {err}"
+        );
+    }
+}

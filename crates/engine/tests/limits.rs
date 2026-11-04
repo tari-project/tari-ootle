@@ -679,7 +679,7 @@ fn open_component_with_items(test: &mut TemplateTest, items: u32) -> ComponentAd
 }
 
 /// Native points `calls` more method calls on `component` are charged than a single call, each made
-/// from a template and to a method that leaves the state unread.
+/// from a template and to a method that does nothing with the state its dispatcher reads.
 fn native_points_for_extra_method_calls(test: &mut TemplateTest, component: ComponentAddress, calls: u32) -> u64 {
     let template = test.get_template_address(TEMPLATE_NAME);
     let mut native_points = |calls: u32| {
@@ -708,11 +708,16 @@ fn a_method_call_is_charged_per_item_its_component_state_holds() {
     let small_points = native_points_for_extra_method_calls(&mut test, small, calls);
     let large_points = native_points_for_extra_method_calls(&mut test, large, calls);
 
+    // Each call also reads the state for the method's receiver.
+    let extra_bytes = encoded_len(&vec![0u32; large_items as usize]) - encoded_len(&Vec::<u32>::new());
+    let extra_items = u64::from(large_items);
     assert_eq!(
         large_points - small_points,
-        u64::from(calls) * limits::component_load_points(u64::from(large_items), 0),
+        u64::from(calls) *
+            (limits::component_load_points(extra_items, 0) +
+                limits::engine_response_points(extra_bytes as u64, extra_items)),
         "{calls} calls on a component holding {large_items} more items must cost exactly the difference in component \
-         load charges"
+         load and state read charges"
     );
 }
 
@@ -734,46 +739,52 @@ fn a_method_call_is_charged_per_reference_its_component_state_holds() {
             )
         })
         .collect();
-    seed_extra(&mut test, large, tari_bor::Value::Array(addresses));
+    let extra = tari_bor::Value::Array(addresses);
+    let extra_bytes = encoded_len(&extra) - encoded_len(&tari_bor::Value::Null);
+    seed_extra(&mut test, large, extra);
     let calls = 10;
 
     let small_points = native_points_for_extra_method_calls(&mut test, small, calls);
     let large_points = native_points_for_extra_method_calls(&mut test, large, calls);
 
-    // The array replaces a null, and each address is a tag and a byte string.
+    // The array replaces a null, and each address is a tag and a byte string. Each call also reads the state for
+    // the method's receiver.
     let extra_items = 2 * references;
     assert_eq!(
         large_points - small_points,
-        u64::from(calls) * limits::component_load_points(extra_items, references),
+        u64::from(calls) *
+            (limits::component_load_points(extra_items, references) +
+                limits::engine_response_points(extra_bytes as u64, extra_items)),
         "{calls} calls on a component holding {references} more addresses must cost exactly the difference in \
-         component load charges"
+         component load and state read charges"
     );
 }
 
 /// Component loads are charged against the transaction's compute allowance, so a template that
-/// calls a method on a large component over and over fails out of compute. Run in the fee intent,
-/// whose flat credit is the allowance, with too few calls for their other charges alone to exhaust
-/// it.
+/// calls a method on a large enough component fails out of compute. Run in the fee intent, whose
+/// flat credit is the allowance, on a component whose load alone costs more than the credit, so
+/// the call fails while loading the component, before its state is read.
 #[test]
 fn component_loads_are_charged_against_the_fee_intent_credit() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let template = test.get_template_address(TEMPLATE_NAME);
-    let items = 30_000u32;
-    let component = open_component_with_items(&mut test, items);
+    let component = open_component_with_items(&mut test, 0);
+    let items = limits::FREE_COMPUTE_GRACE_POINTS / limits::component_load_points(1, 0) + 1;
+    seed_extra(
+        &mut test,
+        component,
+        tari_bor::Value::Array(vec![tari_bor::Value::Null; usize::try_from(items).unwrap()]),
+    );
     let mut fee_table = FeeTable::zero_rated();
     fee_table.per_wasm_point_cost = 1;
     fee_table.wasm_points_cost_divisor = 1;
     test.set_fee_table(fee_table);
     test.enable_fees();
 
-    let calls = limits::FREE_COMPUTE_GRACE_POINTS / limits::component_load_points(u64::from(items), 0) + 1;
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet(Epoch(1))
             .with_fee_instructions_builder(|builder| {
-                builder.call_function(template, "touch_component", args![
-                    component,
-                    u32::try_from(calls).unwrap()
-                ])
+                builder.call_function(template, "touch_component", args![component, 1u32])
             })
             .build_and_seal(test.secret_key()),
         vec![],

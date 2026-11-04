@@ -22,18 +22,17 @@ pub struct CallScope {
     /// from that component.
     component_owned: IndexSet<SubstateId>,
     referenced: IndexSet<SubstateId>,
-    /// The proofs this frame holds. `auth_scope.proofs()` is the subset that is currently authorizing an action: a
-    /// `ProofAccess` guard leaves that subset when it is dropped while the proof itself is still held, so holding is
-    /// tracked separately from authorizing.
+    /// The proofs this frame holds: those it created and those a callee returned to it. Holding authorizes nothing
+    /// by itself — `auth_scope.proofs()` is the subset the frame has opened a window over — but only a held proof
+    /// can be authorized, passed on, returned or dropped.
     proof_scope: IndexSet<ProofId>,
-    /// Buckets and proofs the caller passed in as arguments. They remain the caller's: this frame may leave them
-    /// unconsumed, and the caller keeps them once the frame is popped.
+    /// Buckets the caller passed in as arguments. They remain the caller's: this frame may leave them unconsumed,
+    /// and the caller keeps them once the frame is popped.
     inherited_buckets: IndexSet<BucketId>,
-    inherited_proofs: IndexSet<ProofId>,
-    /// Proofs seeded from the transaction's base scope so that the callee's access rule can be evaluated against
-    /// the caller at the call boundary. [`Self::revoke_boundary_proofs`] takes them away again once that check has
-    /// run, leaving the frame to act with its own badges and the proofs it was handed as arguments.
-    boundary_proofs: IndexSet<ProofId>,
+    /// Proofs the caller passed in as arguments. A shown proof proves that the immediate caller holds it and is
+    /// read-only here: the frame may inspect its resource, amount and ids, but cannot authorize, pass on, return,
+    /// store or drop it.
+    shown_proofs: IndexSet<ProofId>,
     component_lock: Option<LockedSubstate>,
     lock_scope: IndexSet<LockId>,
     bucket_scope: IndexSet<BucketId>,
@@ -51,8 +50,7 @@ impl CallScope {
             referenced: IndexSet::new(),
             proof_scope: IndexSet::new(),
             inherited_buckets: IndexSet::new(),
-            inherited_proofs: IndexSet::new(),
-            boundary_proofs: IndexSet::new(),
+            shown_proofs: IndexSet::new(),
             component_lock: None,
             lock_scope: IndexSet::new(),
             bucket_scope: IndexSet::new(),
@@ -61,49 +59,48 @@ impl CallScope {
         }
     }
 
+    /// The transaction's base scope, whose badges are the signers' public-key badges.
+    pub fn with_auth_scope(auth_scope: AuthorizationScope) -> Self {
+        let mut this = Self::new();
+        this.auth_scope = auth_scope;
+        this
+    }
+
     pub fn for_component(component_lock: LockedSubstate) -> Self {
         let mut this = Self::new();
         this.component_lock = Some(component_lock);
         this
     }
 
-    /// Installs the auth scope this frame starts with. Its proofs came from the frame's caller (the transaction's
-    /// base scope for a top-level instruction), so the caller accounts for them. They last until the boundary
-    /// check has run — see [`Self::revoke_boundary_proofs`]. Proofs already in scope arrived as call arguments and
-    /// authorize for the whole frame, so they are carried into `scope`.
-    pub(crate) fn set_auth_scope(&mut self, mut scope: AuthorizationScope) {
-        let argument_proofs = self.auth_scope.proofs().clone();
-        self.boundary_proofs = scope
-            .proofs()
-            .iter()
-            .filter(|id| !argument_proofs.contains(*id))
-            .copied()
-            .collect();
-        for proof_id in &argument_proofs {
-            scope.add_proof(*proof_id);
-        }
-        self.inherited_proofs.extend(scope.proofs().iter().copied());
-        self.proof_scope.extend(scope.proofs().iter().copied());
-        self.auth_scope = scope;
-    }
-
-    /// Drops the proofs that were in scope only for the call boundary check. The frame keeps its badges and its
-    /// `Proof` arguments, so a component reached by a top-level instruction can act on a guarded resource only with
-    /// a proof its caller handed it.
-    pub(crate) fn revoke_boundary_proofs(&mut self) {
-        for proof_id in std::mem::take(&mut self.boundary_proofs) {
-            self.proof_scope.swap_remove(&proof_id);
-            self.inherited_proofs.swap_remove(&proof_id);
-            self.auth_scope.remove_proof(&proof_id);
-        }
-    }
-
     pub fn lock_scope(&self) -> &IndexSet<LockId> {
         &self.lock_scope
     }
 
+    /// Whether this frame holds `proof_id`.
     pub fn is_proof_in_scope(&self, proof_id: &ProofId) -> bool {
         self.proof_scope.contains(proof_id)
+    }
+
+    pub fn is_proof_shown(&self, proof_id: &ProofId) -> bool {
+        self.shown_proofs.contains(proof_id)
+    }
+
+    /// Whether this frame may read `proof_id`: it holds it, or it was shown it.
+    pub fn can_read_proof(&self, proof_id: &ProofId) -> bool {
+        self.is_proof_in_scope(proof_id) || self.is_proof_shown(proof_id)
+    }
+
+    /// Requires that this frame holds `proof_id`, for an action only the holder may take: authorizing, passing on,
+    /// returning, storing or dropping it. A shown proof is named separately from one the frame cannot see at all,
+    /// since the caller of a shown proof is the one who could act on it.
+    pub fn require_held_proof(&self, proof_id: &ProofId) -> Result<(), RuntimeError> {
+        if self.is_proof_in_scope(proof_id) {
+            return Ok(());
+        }
+        if self.is_proof_shown(proof_id) {
+            return Err(RuntimeError::ProofNotHeld { proof_id: *proof_id });
+        }
+        Err(RuntimeError::ProofNotInScope { proof_id: *proof_id })
     }
 
     pub fn is_bucket_in_scope(&self, bucket_id: BucketId) -> bool {
@@ -152,12 +149,10 @@ impl CallScope {
         self.address_allocation_scope.swap_remove(&id)
     }
 
-    /// Brings a proof into this frame and authorizes it. A proof reaching a frame — created here, passed in as an
-    /// argument, or handed back by a callee — authorizes for the rest of the frame unless the frame drops the
-    /// authorization.
+    /// Brings a proof into this frame as held: created here or handed back by a callee. Holding authorizes nothing;
+    /// the frame opens a window over the proof with an explicit authorize.
     pub fn add_proof_to_scope(&mut self, proof_id: ProofId) {
         self.proof_scope.insert(proof_id);
-        self.auth_scope_mut().add_proof(proof_id);
     }
 
     pub fn remove_proof_from_scope(&mut self, proof_id: &ProofId) {
@@ -295,13 +290,10 @@ impl CallScope {
             .filter(|id| !self.inherited_buckets.contains(*id))
     }
 
-    /// The proofs this frame must account for before it is popped: those it holds and its caller did not lend it.
-    /// Read from `proof_scope` rather than the auth scope, so a proof whose `ProofAccess` has been dropped is still
-    /// owed.
+    /// The proofs this frame must account for before it is popped: every proof it holds. A shown proof is the
+    /// caller's and is not owed.
     pub fn proofs_owed(&self) -> impl Iterator<Item = &ProofId> {
-        self.proof_scope
-            .iter()
-            .filter(|id| !self.inherited_proofs.contains(*id))
+        self.proof_scope.iter()
     }
 
     pub fn include_owned_in_scope(&mut self, values: &IndexedWellKnownTypes) {
@@ -314,10 +306,9 @@ impl CallScope {
         }
     }
 
-    /// Brings what a caller passed in as arguments into this frame. Buckets and proofs stay the caller's — they are
-    /// recorded as inherited, so this frame need not account for them — but a proof among them also *authorizes*
-    /// here from the moment it arrives, without the frame calling `authorize()` on it. Passing a proof is therefore
-    /// the act of lending the authority it carries.
+    /// Brings what a caller passed in as arguments into this frame. Buckets and proofs stay the caller's, so this
+    /// frame need not account for them. A proof among them is shown, not held: the frame can read it and nothing
+    /// more. Authority is lent through the caller's authorization window, never through an argument.
     pub fn include_refs_in_scope(&mut self, values: &IndexedWellKnownTypes) {
         for addr in values.referenced_substates() {
             // Never able to bring these into scope
@@ -332,8 +323,7 @@ impl CallScope {
             self.inherited_buckets.insert(*bucket_id);
         }
         for proof_id in values.proof_ids() {
-            self.add_proof_to_scope(*proof_id);
-            self.inherited_proofs.insert(*proof_id);
+            self.shown_proofs.insert(*proof_id);
         }
         for allocation in values.component_address_allocations() {
             self.add_address_allocation_to_scope(allocation.id());
@@ -390,6 +380,12 @@ impl Display for CallScope {
                 writeln!(f, "  {}", proof)?;
             }
         }
+        if !self.shown_proofs.is_empty() {
+            writeln!(f, "Shown proofs:")?;
+            for proof in &self.shown_proofs {
+                writeln!(f, "  {}", proof)?;
+            }
+        }
 
         if !self.bucket_scope.is_empty() {
             writeln!(f, "Buckets:")?;
@@ -404,6 +400,25 @@ impl Display for CallScope {
             }
         }
         Ok(())
+    }
+}
+
+/// Why a frame runs in [`FrameWriteMode::OwnComponent`]. Named in the errors a confined frame produces, so a refusal
+/// says which kind of code was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestrictedFrame {
+    /// A resource auth hook: code the acting frame did not choose.
+    AuthHook,
+    /// A component migration: reformats the component's own state and nothing else.
+    Migration,
+}
+
+impl Display for RestrictedFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AuthHook => write!(f, "a resource auth hook"),
+            Self::Migration => write!(f, "a component migration"),
+        }
     }
 }
 
@@ -464,6 +479,8 @@ impl CallFrame {
         }
     }
 
+    /// A migration frame reformats its component's own state and nothing else, so it is confined like a resource
+    /// auth hook: it may write only the component it was pushed for and cannot call out.
     pub fn migration_context(
         current_template: TemplateAddress,
         current_module: String,
@@ -477,7 +494,7 @@ impl CallFrame {
             entity_id,
             allow_cross_template_calls: false,
             allow_migration_calls: true,
-            write_mode: FrameWriteMode::Full,
+            write_mode: FrameWriteMode::OwnComponent,
         }
     }
 
@@ -521,10 +538,27 @@ impl CallFrame {
         self.write_mode
     }
 
-    /// Restricts this frame to `mode` (never loosening an existing restriction) and disables cross-template
-    /// calls. The two restrictions are load-bearing in tandem: the write mode blocks state writes at the lock
-    /// layer, while disabling cross-template calls prevents the frame from re-entering other templates, which
-    /// would otherwise run with the identity of this frame as their caller.
+    /// Whether this frame runs with less than a full frame's write authority. A restricted frame is pushed without a
+    /// loan of its caller's authorized proofs; one that is also confined to its own component
+    /// ([`Self::restricted_frame`]) is pushed without signer badges as well.
+    pub fn is_restricted(&self) -> bool {
+        self.write_mode != FrameWriteMode::Full
+    }
+
+    /// Which kind of confined frame this is, when it runs in `OwnComponent` mode.
+    pub fn restricted_frame(&self) -> Option<RestrictedFrame> {
+        match self.write_mode {
+            FrameWriteMode::OwnComponent if self.allow_migration_calls => Some(RestrictedFrame::Migration),
+            FrameWriteMode::OwnComponent => Some(RestrictedFrame::AuthHook),
+            FrameWriteMode::Full | FrameWriteMode::ReadOnly => None,
+        }
+    }
+
+    /// Restricts this frame to `mode` (never loosening an existing restriction) and disables cross-template calls.
+    /// Applied before the frame is pushed, so the push installs the authority a confined frame gets. The two
+    /// restrictions are load-bearing in tandem: the write mode blocks state writes at the lock layer, while disabling
+    /// cross-template calls prevents the frame from re-entering other templates, which would otherwise run with the
+    /// identity of this frame as their caller.
     pub fn restrict(&mut self, mode: FrameWriteMode) {
         self.write_mode = self.write_mode.max(mode);
         self.allow_cross_template_calls = false;

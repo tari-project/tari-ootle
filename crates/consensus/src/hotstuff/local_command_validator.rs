@@ -7,7 +7,7 @@ use log::*;
 use tari_consensus_types::{Decision, LeafBlock};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::commit_result::RejectReason;
-use tari_ootle_common_types::{committee::CommitteeInfo, optional::Optional};
+use tari_ootle_common_types::{VersionedSubstateId, committee::CommitteeInfo, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
@@ -505,16 +505,10 @@ where
             };
             let execution = execution.into_transaction_execution();
 
-            if execution.decision().is_commit() {
-                // Counted for the block pledge check once every command is evaluated. Preparing the transaction
-                // bounded what its inputs alone may pledge.
-                substate_store.pledge_inputs(
-                    local_pledged_inputs(&tx_rec, local_committee_info.shard_group()),
-                    usize::MAX,
-                )?;
-            }
-
             let execution = if execution.decision().is_commit() {
+                let pledged_inputs = local_pledged_inputs(&tx_rec, local_committee_info.shard_group())
+                    .map(|id| id.to_owned())
+                    .collect::<Vec<_>>();
                 // Lock all local outputs
                 let locked = lock_multishard_execution(
                     substate_store,
@@ -545,6 +539,12 @@ where
                     );
                     execution
                 } else {
+                    // Counted for the block pledge check once every command is evaluated. Preparing the transaction
+                    // bounded what its inputs alone may pledge.
+                    substate_store.pledge_inputs(
+                        pledged_inputs.iter().map(VersionedSubstateId::as_versioned_ref),
+                        usize::MAX,
+                    )?;
                     // TODO: can we modify input locks at this point? For multi-shard input transactions, we locked all
                     // inputs as Write due to lack of information. We now know what locks are necessary, and this
                     // block has the correct evidence so this should be fine.

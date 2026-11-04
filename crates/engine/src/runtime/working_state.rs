@@ -1309,11 +1309,28 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(id)
     }
 
+    /// Finds a pending allocation for `address` in any call frame. Naming a pending address grants nothing, so value
+    /// checks and hook template lookups may use this.
     pub fn get_allocated_address_by_address<T: Into<SubstateId>>(&self, address: T) -> Option<&AllocatedAddress> {
         let substate_id = address.into();
         self.address_allocations
             .values()
             .find(|alloc| *alloc.substate_id() == substate_id)
+    }
+
+    /// Finds a pending allocation for `address` that the current call frame holds. Use this wherever holding the
+    /// allocation confers authority, such as skipping a resource auth hook.
+    pub fn get_allocated_address_in_current_scope<T: Into<SubstateId>>(
+        &self,
+        address: T,
+    ) -> Result<Option<&AllocatedAddress>, RuntimeError> {
+        let scope = self.current_call_scope()?;
+        let substate_id = address.into();
+        Ok(self
+            .address_allocations
+            .iter()
+            .find(|(id, alloc)| scope.is_address_allocation_in_scope(**id) && *alloc.substate_id() == substate_id)
+            .map(|(_, alloc)| alloc))
     }
 
     pub fn get_template_for_component(

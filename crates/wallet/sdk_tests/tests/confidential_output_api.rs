@@ -8,16 +8,27 @@ use tari_crypto::commitment::HomomorphicCommitmentFactory;
 use tari_engine_types::{
     confidential_output::ConfidentialOutput,
     crypto::{OutputBody, get_commitment_factory},
+    resource::Resource,
     substate::{Substate, SubstateDiff, SubstateId},
 };
-use tari_ootle_common_types::SubstateVersion;
+use tari_ootle_common_types::{Epoch, SubstateVersion, VersionedSubstateIdRef};
 use tari_ootle_wallet_sdk::{
+    apis::confidential_transfer::{ConfidentialTransferApiError, ConfidentialTransferParams, UtxoInputSelection},
     models::{BalanceChangeSource, ConfidentialOutputModel, KeyBranch, KeyId, OutputStatus},
     storage::{ReadableWalletStore, WalletStoreReader},
 };
-use tari_template_lib::types::{ConfidentialOutputAddress, EncryptedData, constants::STEALTH_TARI_RESOURCE_ADDRESS};
+use tari_template_lib::types::{
+    ConfidentialOutputAddress,
+    EncryptedData,
+    Metadata,
+    ResourceType,
+    SubstateOwnerRule,
+    VaultId,
+    access_rules::ResourceAccessRules,
+    constants::STEALTH_TARI_RESOURCE_ADDRESS,
+};
 
-use crate::support::Test;
+use crate::support::{Test, resource_address_from_seed};
 
 #[test]
 fn outputs_locked_and_released() {
@@ -268,4 +279,88 @@ async fn confidential_transfer_releases_lock_on_dry_run_and_keeps_timed_unlinked
         .unwrap();
     assert!(held.timeout_at.is_some(), "expected a timed lock");
     assert_eq!(held.transaction_id, None, "lock must not be linked before submission");
+}
+
+#[tokio::test]
+async fn prefer_confidential_respects_locked_revealed_balance() {
+    let test = Test::new();
+    let sdk = test.sdk();
+    let dest = sdk.key_manager_api().derive_account_address(1).unwrap();
+    let dest_account = sdk.accounts_api().create_account(Some("dest"), false, dest).unwrap();
+
+    let resource_address = resource_address_from_seed(7);
+    let vault_id: VaultId = "vault_0dc41b5cc74b36d696c7b140323a40a2f98b71df5d60e5a6bf4c1a07fffffffe"
+        .parse()
+        .unwrap();
+    sdk.resources_api()
+        .upsert_resource(
+            &resource_address,
+            &Resource::new(
+                ResourceType::Confidential,
+                SubstateOwnerRule::None,
+                ResourceAccessRules::new(),
+                Metadata::new(),
+                None,
+                None,
+                6,
+                false,
+            ),
+        )
+        .unwrap();
+    sdk.accounts_api()
+        .add_vault(
+            Test::test_account_address(),
+            vault_id,
+            SubstateVersion::ZERO,
+            resource_address,
+            ResourceType::Confidential,
+            Some("CONF".to_string()),
+            6,
+        )
+        .unwrap();
+    sdk.accounts_api()
+        .update_vault_balance_and_record_change(
+            vault_id,
+            SubstateVersion::ZERO,
+            100u64.into(),
+            0u64.into(),
+            BalanceChangeSource::Scan,
+        )
+        .unwrap();
+    sdk.substate_api()
+        .save_root(
+            VersionedSubstateIdRef::new(&Test::test_account_address().into(), SubstateVersion::ZERO),
+            [],
+        )
+        .unwrap();
+    sdk.substate_api()
+        .save_root(VersionedSubstateIdRef::new(&vault_id.into(), SubstateVersion::ZERO), [])
+        .unwrap();
+
+    let other_lock = test.new_lock();
+    sdk.locks_api()
+        .lock_funds_in_vault(other_lock.id(), &vault_id, 80u64.into())
+        .unwrap();
+
+    let err = sdk
+        .confidential_transfer_api()
+        .transfer(ConfidentialTransferParams {
+            from_account: Test::test_account_address(),
+            input_selection: UtxoInputSelection::PreferConfidential,
+            amount: 50u64.into(),
+            destination_address: dest_account.address,
+            resource_address,
+            max_fee: 10,
+            output_to_revealed: true,
+            proof_from_resource: None,
+            memo: None,
+            max_epoch: Epoch(10),
+            is_dry_run: true,
+        })
+        .await
+        .expect_err("locked revealed funds should not be spent");
+    assert!(
+        matches!(err, ConfidentialTransferApiError::InsufficientFunds),
+        "expected InsufficientFunds, got: {err}"
+    );
 }

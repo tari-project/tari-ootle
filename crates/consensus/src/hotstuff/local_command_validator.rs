@@ -473,7 +473,12 @@ where
             }
 
             let transaction = tx_rec.get_transaction(tx)?;
-            if !transaction.has_all_required_input_pledges(tx, &block.as_leaf(), local_committee_info)? {
+            if !transaction.has_all_required_input_pledges(
+                tx,
+                &block.as_leaf(),
+                local_committee_info,
+                proposed_block_change_set.get_foreign_pledges(tx_rec.id()),
+            )? {
                 warn!(
                     target: LOG_TARGET,
                     "❌ NO VOTE AllPrepare: transaction {} in block {} has not received all foreign input pledges",
@@ -808,7 +813,11 @@ where
             return Ok(Some(reason));
         }
 
-        if !tx_rec.has_all_required_foreign_pledges(tx, local_committee_info)? {
+        if !tx_rec.has_all_required_foreign_pledges(
+            tx,
+            local_committee_info,
+            proposed_block_change_set.get_foreign_pledges(tx_rec.id()),
+        )? {
             warn!(
                 target: LOG_TARGET,
                 "❌ NO VOTE: AllAccept disagreement for transaction {} in block {}. Leader proposed that all foreign pledges have been received but locally this is not the case",

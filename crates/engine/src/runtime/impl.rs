@@ -2440,14 +2440,7 @@ where
                         let id = SubstateId::Utxo(UtxoAddress::new(resource_address, utxo));
                         let locked = state_mut.write_lock_substate(id.clone())?;
 
-                        let utxo_mut = state_mut
-                            .get_locked_substate_mut(&locked)?
-                            .as_utxo_mut()
-                            .ok_or_else(|| RuntimeError::LockSubstateMismatch {
-                                lock_id: locked.lock_id(),
-                                expected_type: "Utxo",
-                                id,
-                            })?;
+                        let utxo_mut = state_mut.get_utxo_mut(&locked)?;
 
                         // Freeze is idempotent.
                         if arg.freeze {
@@ -2498,14 +2491,7 @@ where
                         ));
                         let locked = state_mut.write_lock_substate(id.clone())?;
 
-                        let output_mut = state_mut
-                            .get_locked_substate_mut(&locked)?
-                            .as_confidential_output_mut()
-                            .ok_or_else(|| RuntimeError::LockSubstateMismatch {
-                                lock_id: locked.lock_id(),
-                                expected_type: "ConfidentialOutput",
-                                id,
-                            })?;
+                        let output_mut = state_mut.get_confidential_output_mut(&locked)?;
 
                         // Freeze is idempotent.
                         if arg.freeze {
@@ -2564,14 +2550,7 @@ where
                     let id = SubstateId::Utxo(UtxoAddress::new(resource_address, arg.utxo_id));
                     let utxo_lock = state_mut.write_lock_substate(id.clone())?;
 
-                    let utxo_mut = state_mut
-                        .get_locked_substate_mut(&utxo_lock)?
-                        .as_utxo_mut()
-                        .ok_or_else(|| RuntimeError::LockSubstateMismatch {
-                            lock_id: utxo_lock.lock_id(),
-                            expected_type: "Utxo",
-                            id,
-                        })?;
+                    let utxo_mut = state_mut.get_utxo_mut(&utxo_lock)?;
 
                     if utxo_mut.is_burnt() {
                         return Err(RuntimeError::ResourceError(ResourceError::UtxoBurnFailed {
@@ -4232,9 +4211,7 @@ where
                     details: "No current component lock in call scope".to_string(),
                 })?;
 
-            let component_mut = state_mut.get_component_mut(&locked)?;
-            let prev_template = *component_mut.template_address();
-            component_mut.set_template_address(new_template);
+            let prev_template = state_mut.set_component_template_address(&locked, new_template)?;
 
             state_mut.push_event(Event::std(
                 Some(locked.substate_id().clone()),

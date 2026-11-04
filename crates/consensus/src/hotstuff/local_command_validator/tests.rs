@@ -2473,7 +2473,7 @@ impl LockFailure {
 
     fn evaluate(&self, atom: MultiShardAtom) -> Evaluation {
         self.replica
-            .evaluate_with_outputs_locked(&[Command::LocalAccept(atom)], &[self.locked_output.clone()])
+            .evaluate_with_outputs_locked(&[Command::LocalAccept(atom)], std::slice::from_ref(&self.locked_output))
     }
 }
 

@@ -103,7 +103,8 @@ fn instantiate_ms(segment_len: usize) -> (f64, usize) {
 }
 
 /// A module whose tables are filled by active element segments, which `Instance::new` writes out on
-/// every instantiation just as it copies the data segments. `tables` x `entries` funcref writes.
+/// every instantiation just as it copies the data segments. One segment per table, so `tables` x
+/// `entries` funcref writes.
 fn module_with_element_segments(tables: usize, entries: usize) -> Vec<u8> {
     let funcrefs = vec!["0"; entries].join(" ");
     let table_decls = (0..tables)
@@ -555,13 +556,14 @@ fn main() {
     // Element segments are the other thing copied per instantiation.
     let tables = limits::WASM_LIMITS.max_tables;
     let entries = limits::WASM_LIMITS.max_table_elements as usize;
+    let segments = limits::WASM_LIMITS.max_element_segments;
     let none = instantiate_code_ms(&module_with_element_segments(0, 0));
-    let full = instantiate_code_ms(&module_with_element_segments(tables, entries));
+    let full = instantiate_code_ms(&module_with_element_segments(segments, entries));
     println!();
     println!(
-        "element segments: none {none:.4} ms, {tables}x{entries} {full:.4} ms -> {} points for {} writes",
+        "element segments: none {none:.4} ms, {segments}x{entries} {full:.4} ms -> {} points for {} writes",
         ((full - none) * rate).ceil() as i64,
-        tables * entries,
+        segments * entries,
     );
 
     // Declared table capacity, with nothing written into it.

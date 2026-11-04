@@ -645,35 +645,78 @@ fn passive_segments_are_refused() {
     }
 }
 
-/// Nothing caps how many element segments a module declares, and several may target one table at
-/// overlapping offsets — each is written out in turn at instantiation. The entry count a charge is
-/// taken on is therefore bounded by the binary, not by the table limits.
+/// Instantiation re-syncs a fixed-size table in full after each active element segment it writes,
+/// empty ones included, so the work grows with segments times table slots while a segment costs a
+/// few bytes. One active segment is what a linker emits for a template's function table.
 #[test]
-fn overlapping_element_segments_each_count() {
-    const SEGMENTS: u64 = 8;
-    const ENTRIES: u64 = 512;
+fn a_second_active_element_segment_is_refused() {
+    let max = limits::WASM_LIMITS.max_element_segments;
+    for (table, segment) in [
+        ("(table 16384 16384 funcref)", "(elem (i32.const 0) func)"),
+        ("(table 1 1 funcref)", "(elem (i32.const 0) func 0)"),
+        ("(table 1 funcref)", "(elem (i32.const 0) func 0)"),
+    ] {
+        let segments = vec![segment; max + 1].join("\n");
+        let code = template_module(&format!(
+            r#"
+            {table}
+            {ABI_EXPORTS}
+            {segments}
+            "#
+        ));
 
-    let funcrefs = vec!["0"; ENTRIES as usize].join(" ");
-    let segments = (0..SEGMENTS)
-        .map(|_| format!("(elem (i32.const 0) func {funcrefs})"))
-        .collect::<Vec<_>>()
-        .join("\n");
+        let err = WasmModule::load_template_from_code(&code).expect_err("a second active element segment was accepted");
+        assert!(
+            matches!(
+                err,
+                tari_engine::template::TemplateLoaderError::WasmModuleError(WasmExecutionError::WasmValidationError(
+                    WasmValidationError::TooManyElementSegments { .. }
+                ))
+            ),
+            "unexpected error for {table}: {err}"
+        );
+    }
+}
+
+/// Declarative segments, which `rustc` emits for functions referenced by `ref.func`, stay out of
+/// every table, so only the active segment counts toward the limit.
+#[test]
+fn declarative_element_segments_load_alongside_the_active_one() {
+    let declarative = vec!["(elem declare func 0)"; 64].join("\n");
     let code = template_module(&format!(
         r#"
-        (table {ENTRIES} {ENTRIES} funcref)
-        (func (export "tari_alloc") (param i32) (result i32) (i32.const 1024))
-        (func (export "tari_free") (param i32))
-        (func (export "Buggy_main") (param i32 i32) (result i32) (i32.const 20))
-        {segments}
+        (table 4 4 funcref)
+        {ABI_EXPORTS}
+        (elem (i32.const 0) func 0 1)
+        {declarative}
         "#
     ));
 
     let shape = match WasmModule::load_template_from_code(&code).expect("module was rejected") {
         tari_engine::template::LoadedTemplate::Wasm(loaded) => loaded.shape(),
     };
+    assert_eq!(shape.element_segment_entries, 2);
+}
 
-    // Every segment is counted, even though the table only ever holds `ENTRIES` of them at once.
-    assert_eq!(shape.element_segment_entries, SEGMENTS * ENTRIES);
+/// Every element segment is active or declarative, and both are dropped at instantiation, so a
+/// `table.init` has nothing to copy: it can only trap or do nothing. Running one still re-syncs the
+/// whole table, so it is refused when the module is loaded.
+#[test]
+fn table_init_is_refused() {
+    let code = template_module(
+        r#"
+        (table 4 4 funcref)
+        (func (export "tari_alloc") (param i32) (result i32) (i32.const 1024))
+        (func (export "tari_free") (param i32))
+        (func (export "Buggy_main") (param i32 i32) (result i32)
+          (table.init 0 0 (i32.const 0) (i32.const 0) (i32.const 0))
+          (i32.const 20))
+        (elem (i32.const 0) func 0)
+        "#,
+    );
+
+    let err = WasmModule::load_template_from_code(&code).expect_err("table.init was accepted");
+    assert!(err.to_string().contains("TableInit"), "unexpected error: {err}");
 }
 
 /// A zero-length active data segment contributes no bytes but is still walked, offset-evaluated and

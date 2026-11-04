@@ -76,7 +76,6 @@ use crate::{
             OrJrpcNotFound,
             ensure_signing_key,
             ensure_transaction_signers,
-            extract_stealth_statements,
             get_account,
             get_account_or_default,
             invalid_params,
@@ -173,56 +172,10 @@ pub(crate) async fn submit_inner_for_request(
     context: &HandlerContext,
     req: TransactionSubmitRequest,
 ) -> Result<TransactionSubmitResponse, anyhow::Error> {
-    context
-        .wallet_sdk()
-        .store()
-        .with_read_tx(|tx| ensure_locked_stealth_inputs_are_spent(tx, &req.transaction, &req.lock_ids))?;
     let linked_accounts = get_account_for_key(context.wallet_sdk(), req.seal_signer)
         .map(|address| vec![address])
         .unwrap_or_default();
     submit_inner(context, req, linked_accounts, None).await
-}
-
-/// Refuses a transaction request whose `lock_ids` hold a `LockedForSpend` stealth UTXO that no
-/// directly executed statement (`Instruction::StealthTransfer` or `Account::pay_fee_stealth`) in
-/// `transaction` spends, so `value_summaries` and the stealth spend keys walletd attaches agree.
-///
-/// Runs when a request is created, so the approver never sees a request that cannot be submitted, and again when it is
-/// submitted, which is the check that gates signing.
-pub(crate) fn ensure_locked_stealth_inputs_are_spent<R: WalletStoreReader>(
-    reader: &mut R,
-    transaction: &UnsignedTransaction,
-    lock_ids: &[WalletLockId],
-) -> Result<(), anyhow::Error> {
-    if lock_ids.is_empty() {
-        return Ok(());
-    }
-    let statements = extract_stealth_statements(transaction);
-    for lock_id in lock_ids {
-        let Some(outputs) = reader.stealth_outputs_get_locked_by_lock_id(*lock_id).optional()? else {
-            continue;
-        };
-        for output in outputs {
-            if !matches!(output.status, OutputStatus::LockedForSpend) {
-                continue;
-            }
-            let spent = statements.iter().any(|(res, stmt)| {
-                res.is_none_or(|r| r == output.resource_address) &&
-                    stmt.inputs_statement
-                        .inputs
-                        .iter()
-                        .any(|i| i.commitment == output.commitment)
-            });
-            if !spent {
-                return Err(invalid_request(format!(
-                    "Locked stealth input {} (lock {lock_id}) is not named by any stealth transfer statement in the \
-                     transaction",
-                    output.commitment
-                )));
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Signs, links `req.lock_ids` to the transaction and submits it.

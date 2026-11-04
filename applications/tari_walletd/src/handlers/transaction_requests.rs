@@ -66,7 +66,7 @@ use crate::handlers::{
         invalid_request,
         validate_transaction_for_approval,
     },
-    transaction::{ensure_locked_stealth_inputs_are_spent, submit_inner_for_request},
+    transaction::submit_inner_for_request,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::transaction_requests";
@@ -127,7 +127,6 @@ pub async fn handle_create(
         let mut tx = sdk.store().create_write_tx()?;
 
         ensure_free_locks_of(&mut *tx, auth.lock_owner(), &req.lock_ids, "lock_ids")?;
-        ensure_locked_stealth_inputs_are_spent(&mut *tx, &unsigned, &req.lock_ids)?;
 
         // Hold the inputs across the approval window. The transfer-selection
         // handlers lock for five minutes, which is a selection deadline, not a
@@ -496,8 +495,18 @@ fn resolve_main_signer(
 ///
 /// A stealth transfer's instructions are commitments and range proofs; the
 /// wallet owns the masks and is the only party that can say "10,000 µT leaves
-/// this account". The figures are derived from the statements in the
-/// transaction being approved, which are what the engine executes.
+/// this account".
+///
+/// Inputs are every `LockedForSpend` stealth output under the request's locks,
+/// which are the outputs submit signs a spend for, together with any wallet
+/// output an `Instruction::StealthTransfer` statement spends. A spend signature
+/// covers this transaction's body, so the locked outputs bound what the
+/// transaction can take with the wallet's stealth keys, however it routes them.
+///
+/// Change is credited only from `Instruction::StealthTransfer` statements,
+/// which the engine executes as written. Change routed any other way counts as
+/// leaving, so a statement walletd cannot read overstates what leaves and never
+/// hides a spend.
 fn value_summaries(
     context: &HandlerContext,
     transaction: &UnsignedTransaction,
@@ -509,18 +518,15 @@ fn value_summaries(
     let statements = extract_stealth_statements(transaction);
     let mut spent = Vec::new();
     let mut created = Vec::new();
-    for (resource, statement) in &statements {
+    for (resource, statement) in statements {
         spent.extend(
             statement
                 .inputs_statement
                 .inputs
                 .iter()
-                .map(|i| (*resource, i.commitment)),
+                .map(|i| (resource, i.commitment)),
         );
-        created.extend(statement.outputs_statement.outputs.iter().map(|o| (*resource, o)));
-    }
-    if spent.is_empty() {
-        return Ok(Vec::new());
+        created.extend(statement.outputs_statement.outputs.iter().map(|o| (resource, o)));
     }
 
     let commitments = spent
@@ -528,25 +534,42 @@ fn value_summaries(
         .map(|(_, c)| *c)
         .chain(created.iter().map(|(_, o)| *o.commitment()))
         .collect::<Vec<_>>();
-    let known = context
-        .wallet_sdk()
-        .store()
-        .with_read_tx(|tx| tx.stealth_outputs_get_by_commitments(&commitments))?;
+    let (known, locked_inputs) = context.wallet_sdk().store().with_read_tx(|tx| {
+        let known = if commitments.is_empty() {
+            Vec::new()
+        } else {
+            tx.stealth_outputs_get_by_commitments(&commitments)?
+        };
+        let mut locked_inputs = Vec::new();
+        for lock_id in lock_ids {
+            let outputs = tx.stealth_outputs_get_locked_by_lock_id(*lock_id).optional()?;
+            locked_inputs.extend(
+                outputs
+                    .into_iter()
+                    .flatten()
+                    .filter(|o| matches!(o.status, OutputStatus::LockedForSpend)),
+            );
+        }
+        Ok::<_, anyhow::Error>((known, locked_inputs))
+    })?;
     let wallet_outputs = |resource: Option<ResourceAddress>, commitment: PedersenCommitmentBytes| {
         known
             .iter()
             .filter(move |o| o.commitment == commitment && resource.is_none_or(|r| r == o.resource_address))
     };
 
-    // (inputs_total, change_total) per resource, in transaction order.
+    // (inputs_total, change_total) per resource, in transaction order, then
+    // lock order for locked inputs no statement names.
     let mut totals = IndexMap::<ResourceAddress, (u64, u64)>::new();
     let mut inputs = HashSet::new();
-    for (resource, commitment) in spent {
-        for output in wallet_outputs(resource, commitment) {
-            if inputs.insert(output.to_utxo_address()) {
-                let (inputs_total, _) = totals.entry(output.resource_address).or_default();
-                *inputs_total = inputs_total.saturating_add(output.value);
-            }
+    let spent_outputs = spent
+        .into_iter()
+        .flat_map(|(resource, commitment)| wallet_outputs(resource, commitment))
+        .chain(&locked_inputs);
+    for output in spent_outputs {
+        if inputs.insert(output.to_utxo_address()) {
+            let (inputs_total, _) = totals.entry(output.resource_address).or_default();
+            *inputs_total = inputs_total.saturating_add(output.value);
         }
     }
 
@@ -1288,22 +1311,6 @@ mod tests {
                 .request
             }
 
-            /// The value summaries of a pending request over `transaction` and `lock_ids`, computed without
-            /// creating the request, so a lock may hold an output the transaction does not spend.
-            fn summaries(
-                &self,
-                transaction: &UnsignedTransaction,
-                lock_ids: &[WalletLockId],
-            ) -> Vec<TransactionRequestValueSummary> {
-                value_summaries(
-                    &self.daemon.context,
-                    transaction,
-                    TransactionRequestStatus::Pending,
-                    lock_ids,
-                )
-                .unwrap()
-            }
-
             /// `(inputs_total, change_total, amount_leaving)` of a one-statement transaction.
             async fn totals(
                 &self,
@@ -1316,16 +1323,16 @@ mod tests {
                     inputs,
                     outputs,
                 )]);
-                let summaries = self.summaries(&tx, &lock_ids);
-                let [summary] = summaries.as_slice() else {
-                    panic!("expected one summary: {summaries:?}");
+                let info = self.info(tx, lock_ids).await;
+                let [summary] = info.value_summaries.as_slice() else {
+                    panic!("expected one summary: {:?}", info.value_summaries);
                 };
                 (summary.inputs_total, summary.change_total, summary.amount_leaving)
             }
         }
 
         #[tokio::test]
-        async fn it_counts_the_inputs_the_transaction_spends_not_the_requests_locks() {
+        async fn it_counts_the_inputs_the_transaction_spends_and_the_requests_locked_inputs() {
             let wallet = Wallet::start().await;
             let small = wallet_output(1, 1, OutputStatus::Unspent);
             let large = wallet_output(2, 1_000_000, OutputStatus::Unspent);
@@ -1338,29 +1345,37 @@ mod tests {
                 &[large.commitment],
                 vec![],
             )]);
-            let summaries = wallet.summaries(&tx, &[lock_id]);
+            let info = wallet.info(tx, vec![lock_id]).await;
 
-            let [summary] = summaries.as_slice() else {
-                panic!("expected one summary: {summaries:?}");
+            let [summary] = info.value_summaries.as_slice() else {
+                panic!("expected one summary: {:?}", info.value_summaries);
             };
             assert_eq!(summary.resource_address, resource());
-            assert_eq!(summary.inputs_total, 1_000_000);
+            assert_eq!(summary.inputs_total, 1_000_001);
             assert_eq!(summary.change_total, 0);
-            assert_eq!(summary.amount_leaving, 1_000_000);
+            assert_eq!(summary.amount_leaving, 1_000_001);
         }
 
         #[tokio::test]
-        async fn a_lock_the_transaction_does_not_spend_states_no_value() {
+        async fn a_locked_input_counts_as_leaving_when_no_statement_names_it() {
             let wallet = Wallet::start().await;
             let small = wallet_output(1, 1, OutputStatus::Unspent);
             wallet.add_output(&small);
             let lock_id = wallet.tool_lock_over(&small);
 
-            let summaries = wallet.summaries(&UnsignedTransaction::new(Network::LocalNet.as_byte(), Epoch(100)), &[
-                lock_id,
-            ]);
+            let info = wallet
+                .info(UnsignedTransaction::new(Network::LocalNet.as_byte(), Epoch(100)), vec![
+                    lock_id,
+                ])
+                .await;
 
-            assert!(summaries.is_empty(), "{summaries:?}");
+            let [summary] = info.value_summaries.as_slice() else {
+                panic!("expected one summary: {:?}", info.value_summaries);
+            };
+            assert_eq!(
+                (summary.inputs_total, summary.change_total, summary.amount_leaving),
+                (1, 0, 1)
+            );
         }
 
         #[tokio::test]
@@ -1452,11 +1467,17 @@ mod tests {
                 let mut existing = wallet_output(n, 1_000_000, status);
                 existing.lock_id = Some(lock_id);
                 wallet.add_output(&existing);
+                // A LockedForSpend output under the request's lock is an input submit signs for.
+                let inputs_total = if matches!(status, OutputStatus::LockedForSpend) {
+                    2_000_000
+                } else {
+                    1_000_000
+                };
                 assert_eq!(
                     wallet
                         .totals(spend, vec![as_statement_output(&existing)], vec![lock_id])
                         .await,
-                    (1_000_000, 0, 1_000_000),
+                    (inputs_total, 0, inputs_total),
                     "a {status:?} wallet output was replayed as change"
                 );
             }
@@ -1619,19 +1640,33 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn it_counts_stealth_inputs_spent_via_pay_fee_stealth() {
+        async fn a_locked_input_spent_through_a_template_call_counts_as_leaving_with_no_change() {
             let wallet = Wallet::start().await;
+            let lock_id = lock_for(&wallet.daemon, owner_of(&wallet.daemon, &wallet.tool));
             let mut tari_input = wallet_output(2, 500_000, OutputStatus::Unspent);
             tari_input.resource_address = TARI_TOKEN;
             wallet.add_output(&tari_input);
+            wallet
+                .daemon
+                .context
+                .wallet_sdk()
+                .stealth_outputs_api()
+                .lock_specific_outputs(&account(), &TARI_TOKEN, lock_id, &[tari_input.to_utxo_address()])
+                .unwrap();
+            let mut change = wallet_output(3, 400_000, OutputStatus::LockedUnconfirmed);
+            change.resource_address = TARI_TOKEN;
+            change.lock_id = Some(lock_id);
+            wallet.add_output(&change);
 
+            // A template method takes the statement as an argument. The method is free to drop the change output, so
+            // the wallet credits none.
             let statement = StealthTransferStatement {
                 inputs_statement: StealthInputsStatement {
                     inputs: vec![StealthInput::new(tari_input.commitment)],
                     revealed_amount: Amount::ZERO,
                 },
                 outputs_statement: StealthOutputsStatement {
-                    outputs: vec![],
+                    outputs: vec![as_statement_output(&change)],
                     revealed_output: None,
                     agg_range_proof: RangeProofBytes::empty(),
                 },
@@ -1645,13 +1680,15 @@ mod tests {
                 })
                 .build_unsigned();
 
-            let info = wallet.info(tx, vec![]).await;
+            let info = wallet.info(tx, vec![lock_id]).await;
             let [summary] = info.value_summaries.as_slice() else {
                 panic!("expected one summary: {:?}", info.value_summaries);
             };
             assert_eq!(summary.resource_address, TARI_TOKEN);
-            assert_eq!(summary.inputs_total, 500_000);
-            assert_eq!(summary.amount_leaving, 500_000);
+            assert_eq!(
+                (summary.inputs_total, summary.change_total, summary.amount_leaving),
+                (500_000, 0, 500_000)
+            );
         }
 
         #[tokio::test]
@@ -1673,106 +1710,6 @@ mod tests {
                 .await
                 .expect_err("dry-run transaction must be rejected");
             assert!(err.to_string().contains("transaction.dry_run"), "{err}");
-        }
-
-        #[tokio::test]
-        async fn requests_reject_unnamed_locked_stealth_inputs_on_create_and_submit() {
-            let wallet = Wallet::start().await;
-            let unnamed = wallet_output(1, 100, OutputStatus::Unspent);
-            let named = wallet_output(2, 200, OutputStatus::Unspent);
-            let mut fee_input = wallet_output(3, 300, OutputStatus::Unspent);
-            fee_input.resource_address = TARI_TOKEN;
-            wallet.add_output(&unnamed);
-            wallet.add_output(&named);
-            wallet.add_output(&fee_input);
-
-            let unnamed_lock = wallet.tool_lock_over(&unnamed);
-            let named_lock = wallet.tool_lock_over(&named);
-            let fee_lock = lock_for(&wallet.daemon, owner_of(&wallet.daemon, &wallet.tool));
-            wallet
-                .daemon
-                .context
-                .wallet_sdk()
-                .stealth_outputs_api()
-                .lock_specific_outputs(&account(), &TARI_TOKEN, fee_lock, &[fee_input.to_utxo_address()])
-                .unwrap();
-
-            let fee_statement = StealthTransferStatement {
-                inputs_statement: StealthInputsStatement {
-                    inputs: vec![StealthInput::new(fee_input.commitment)],
-                    revealed_amount: Amount::ZERO,
-                },
-                outputs_statement: StealthOutputsStatement {
-                    outputs: vec![],
-                    revealed_output: None,
-                    agg_range_proof: RangeProofBytes::empty(),
-                },
-                balance_proof: None,
-                covenant_claims: vec![],
-            };
-            let tx = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
-                .without_auto_fill_inputs()
-                .with_fee_instructions_builder(|b| {
-                    b.call_method(account(), "pay_fee_stealth", tari_ootle_transaction::args![
-                        fee_statement
-                    ])
-                })
-                .with_instructions(vec![stealth_transfer(
-                    ResourceAddressRef::Address(resource()),
-                    &[named.commitment],
-                    vec![],
-                )])
-                .build_unsigned();
-
-            // An unnamed locked input is refused before an approver sees the request, with an error naming both the
-            // lock and the commitment.
-            let mut req = create_request(vec![unnamed_lock, named_lock, fee_lock], 60 * 60);
-            req.transaction = tx.clone();
-            let err = handle_create(&wallet.daemon.context, Some(&wallet.tool), req)
-                .await
-                .expect_err("unnamed locked stealth input must be rejected on request create");
-            let msg = err.to_string();
-            assert!(msg.contains(&unnamed.commitment.to_string()), "{msg}");
-            assert!(msg.contains(&format!("lock {unnamed_lock}")), "{msg}");
-
-            // Named inputs in StealthTransfer and pay_fee_stealth pass the create check.
-            let mut req = create_request(vec![named_lock, fee_lock], 60 * 60);
-            req.transaction = tx;
-            let created = handle_create(&wallet.daemon.context, Some(&wallet.tool), req)
-                .await
-                .unwrap();
-
-            // An input locked under a request lock after creation is caught by the submit-time check.
-            let late = wallet_output(4, 400, OutputStatus::Unspent);
-            wallet.add_output(&late);
-            wallet
-                .daemon
-                .context
-                .wallet_sdk()
-                .stealth_outputs_api()
-                .lock_specific_outputs(&account(), &resource(), named_lock, &[late.to_utxo_address()])
-                .unwrap();
-            handle_approve(
-                &wallet.daemon.context,
-                Some(&wallet.daemon.session),
-                TransactionRequestDecisionRequest {
-                    request_id: created.request_id,
-                },
-            )
-            .await
-            .unwrap();
-            let err = handle_submit(
-                &wallet.daemon.context,
-                Some(&wallet.tool),
-                TransactionRequestSubmitRequest {
-                    request_id: created.request_id,
-                },
-            )
-            .await
-            .expect_err("unnamed locked stealth input must be rejected on request submit");
-            let msg = err.to_string();
-            assert!(msg.contains(&late.commitment.to_string()), "{msg}");
-            assert!(msg.contains(&format!("lock {named_lock}")), "{msg}");
         }
     }
 }

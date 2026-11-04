@@ -5,20 +5,14 @@ use std::{collections::HashSet, fmt::Display, path::Path, time::Duration};
 
 use anyhow::anyhow;
 use ootle_byte_type::ToByteType;
-use tari_engine_types::{component::derive_component_address_from_public_key, encoded::Encoded};
+use tari_engine_types::component::derive_component_address_from_public_key;
 use tari_ootle_address::Network;
 use tari_ootle_app_utilities::burn_claim_proof::claim_proof_from_l1;
 use tari_ootle_common_types::{
     SubstateRequirement,
     optional::{IsNotFoundError, Optional},
 };
-use tari_ootle_transaction::{
-    Instruction,
-    ResourceAddressRef,
-    TransactionId,
-    UnsignedTransaction,
-    args::InstructionArg,
-};
+use tari_ootle_transaction::{Instruction, ResourceAddressRef, TransactionId, UnsignedTransaction};
 use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkSpec,
@@ -28,13 +22,7 @@ use tari_ootle_wallet_sdk::{
 use tari_ootle_walletd_client::{ComponentAddressOrName, types::ClaimBurnProofContents};
 use tari_sidechain::CompleteClaimBurnProof;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib_types::{
-    ComponentAddress,
-    EncryptedData,
-    ResourceAddress,
-    constants::TARI_TOKEN,
-    stealth::StealthTransferStatement,
-};
+use tari_template_lib_types::{ComponentAddress, EncryptedData, ResourceAddress, stealth::StealthTransferStatement};
 use tokio::{sync::broadcast, time};
 
 use crate::server::ApplicationErrorCode;
@@ -267,36 +255,32 @@ pub(super) fn validate_transaction_for_approval(
     Ok(())
 }
 
-/// Extracts every stealth transfer statement the transaction executes directly (`Instruction::StealthTransfer`
-/// and `Account::pay_fee_stealth` method calls), paired with its explicit resource address when known.
+/// The statements of the transaction's `Instruction::StealthTransfer`s, each paired with its resource address when
+/// the instruction names one. The engine executes these statements as written, so the outputs they list are the
+/// outputs the transaction creates.
 pub(super) fn extract_stealth_statements(
     transaction: &UnsignedTransaction,
-) -> Vec<(Option<ResourceAddress>, StealthTransferStatement)> {
-    let mut statements = Vec::new();
-    for instruction in transaction.fee_instructions().iter().chain(transaction.instructions()) {
-        match instruction {
-            Instruction::StealthTransfer {
+) -> Vec<(Option<ResourceAddress>, &StealthTransferStatement)> {
+    transaction
+        .fee_instructions()
+        .iter()
+        .chain(transaction.instructions())
+        .filter_map(|instruction| {
+            let Instruction::StealthTransfer {
                 resource_address_ref,
                 statement,
                 ..
-            } => {
-                let resource = match resource_address_ref {
-                    ResourceAddressRef::Address(address) => Some(*address),
-                    ResourceAddressRef::Workspace(_) => None,
-                };
-                statements.push((resource, statement.clone()));
-            },
-            Instruction::CallMethod { method, args, .. } if &**method == "pay_fee_stealth" => {
-                if let Some(InstructionArg::Literal(bytes)) = args.first() &&
-                    let Ok(statement) = Encoded::<StealthTransferStatement>::from_bytes(bytes.to_vec()).decode()
-                {
-                    statements.push((Some(TARI_TOKEN), statement));
-                }
-            },
-            _ => {},
-        }
-    }
-    statements
+            } = instruction
+            else {
+                return None;
+            };
+            let resource = match resource_address_ref {
+                ResourceAddressRef::Address(address) => Some(*address),
+                ResourceAddressRef::Workspace(_) => None,
+            };
+            Some((resource, statement))
+        })
+        .collect()
 }
 
 /// [`ensure_signing_key`] for a transaction's `seal_signer` and each of its `other_signers`.

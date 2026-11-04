@@ -1783,8 +1783,8 @@ mod tests {
         assert!(matches_after);
     }
 
-    // Minimal mock for `EpochManagerReader`. `crates/consensus_tests` cannot be added as a dev-dependency
-    // due to circular dependency on `tari_rpc_state_sync`.
+    // Defined inline because `tari_consensus_tests` is a higher-level test crate that is not in
+    // `tari_rpc_state_sync`'s dev-dependencies.
     struct RegisteredFromEpoch {
         registered_from: Epoch,
         shard_group: ShardGroup,
@@ -1850,7 +1850,7 @@ mod tests {
                 1,
                 self.shard_group,
                 epoch,
-                tari_ootle_common_types::VotePower::from(1),
+                tari_ootle_common_types::VotePower::of(1),
             ))
         }
 
@@ -1946,10 +1946,8 @@ mod tests {
             RocksDbStateStore::open(tmp.path().join("rocksdb"), DatabaseOptions::default()).unwrap();
 
         let group_a = ShardGroup::new(Shard::from(1u32), Shard::from(2u32));
-        let group_b = ShardGroup::new(Shard::from(3u32), Shard::from(4u32));
         let merged_group = ShardGroup::new(Shard::from(1u32), Shard::from(4u32));
         let cp_a = make_checkpoint(group_a, vec![]);
-        let cp_b = make_checkpoint(group_b, vec![]);
         store.with_write_tx(|tx| cp_a.save(tx)).unwrap();
 
         let epoch_manager = RegisteredFromEpoch {
@@ -1970,7 +1968,9 @@ mod tests {
             .unwrap();
         assert!(!partial);
 
-        // When the checkpoint set fully covers the starting epoch's shard group, the check returns Ok(true).
+        // Once the remaining half (`cp_b`) is also persisted, full coverage of `merged_group` returns `Ok(true)`.
+        let group_b = ShardGroup::new(Shard::from(3u32), Shard::from(4u32));
+        let cp_b = make_checkpoint(group_b, vec![]);
         store.with_write_tx(|tx| cp_b.save(tx)).unwrap();
         let complete = local_state_matches_checkpoint_at(&epoch_manager, &store, Epoch(3), Epoch(4))
             .await

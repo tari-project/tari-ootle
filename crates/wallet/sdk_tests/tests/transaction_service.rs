@@ -606,7 +606,7 @@ async fn a_transaction_is_not_stored_when_its_lock_cannot_be_linked() {
 
     running
         .handle
-        .submit_transaction_with_opts(transaction, None, vec![lock_id])
+        .submit_transaction_with_opts(transaction, None, Some(lock_id))
         .await
         .unwrap_err();
 
@@ -643,7 +643,7 @@ async fn a_lock_stays_free_when_its_transaction_cannot_be_stored() {
 
     running
         .handle
-        .submit_transaction_with_opts(transaction, None, vec![lock_id])
+        .submit_transaction_with_opts(transaction, None, Some(lock_id))
         .await
         .unwrap_err();
 
@@ -651,7 +651,7 @@ async fn a_lock_stays_free_when_its_transaction_cannot_be_stored() {
     let retry = build_transaction_valid_to(Epoch(101));
     let retry_id = running
         .handle
-        .submit_transaction_with_opts(retry, None, vec![lock_id])
+        .submit_transaction_with_opts(retry, None, Some(lock_id))
         .await
         .unwrap();
     assert_eq!(sdk.locks_api().get_locks_by_transaction_id(retry_id).unwrap(), [

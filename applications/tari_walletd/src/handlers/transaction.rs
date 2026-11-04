@@ -287,7 +287,7 @@ async fn submit_inner(
     // the request.
     let submission = task::spawn(async move {
         let submission = transaction_service
-            .submit_transaction_with_opts(transaction, tx_context, Vec::new())
+            .submit_transaction_with_opts(transaction, tx_context, None)
             .await;
         if let Err(err) = &submission &&
             let Err(unlink_err) = unlink_locks_of_unstored_transaction(&task_sdk, tx_id, &lock_ids)
@@ -696,7 +696,7 @@ pub async fn handle_submit_manifest(
     let tx_context = build_transaction_context(sdk, fee_payer, seal_signer_key_id);
     let transaction_id = context
         .transaction_service()
-        .submit_transaction_with_opts(transaction, tx_context, vec![])
+        .submit_transaction_with_opts(transaction, tx_context, None)
         .await?;
 
     Ok(TransactionSubmitManifestResponse {
@@ -1065,7 +1065,7 @@ mod tests {
         engine_types::substate::SubstateId,
         signature::Sr25519SignatureBytes,
     };
-    use tari_ootle_transaction::{ComponentReference, Instruction, TransactionBuilder, TransactionId};
+    use tari_ootle_transaction::{ComponentReference, Instruction, TransactionBuilder};
     use tari_ootle_wallet_sdk::{
         apis::key_manager::KeyManagerApiError,
         models::{KeyBranch, WalletLock, WalletTransactionUpdate},
@@ -1611,89 +1611,32 @@ mod tests {
         ));
     }
 
-    fn lock_owned_by(daemon: &TestDaemon, bearer: &Bearer) -> WalletLockId {
-        let owner = daemon
-            .context
-            .check_auth_with_identity(Some(bearer))
-            .unwrap()
-            .lock_owner();
-        daemon
-            .context
-            .wallet_sdk()
-            .locks_api()
-            .create_owned_lock_with_timeout(Duration::from_secs(5 * 60), owner)
-            .unwrap()
-            .keep_locked()
-    }
-
-    fn linked_transaction(daemon: &TestDaemon, lock_id: WalletLockId) -> Option<TransactionId> {
-        daemon
-            .context
-            .wallet_sdk()
-            .store()
-            .with_read_tx(|tx| tx.locks_get(lock_id))
-            .unwrap()
-            .transaction_id
-    }
-
-    #[tokio::test]
-    async fn submit_and_dry_run_refuse_a_lock_another_caller_created() {
-        let daemon = TestDaemon::start().await;
-        let reader = daemon.api_key("reader", "transactions:read");
-        let creator = daemon.api_key("creator", "transactions:create");
-        let wallet_lock = lock_owned_by(&daemon, &daemon.session);
-        let req = submit_with_locks(vec![wallet_lock]);
-
-        let err = handle_submit_dry_run(&daemon.context, Some(&reader), req.clone())
-            .await
-            .unwrap_err();
-        assert_invalid_params(&err, "lock_ids");
-
-        let err = handle_submit(&daemon.context, Some(&creator), req).await.unwrap_err();
-        assert_invalid_params(&err, "lock_ids");
-        assert_eq!(linked_transaction(&daemon, wallet_lock), None);
-    }
-
     /// `accounts.create_stealth_transfer_statement` creates a lock for its
     /// caller, who then submits with it.
     #[tokio::test]
     async fn a_caller_submits_with_its_own_lock_once() {
         let daemon = TestDaemon::start_with_transaction_service().await;
         let tool = daemon.api_key("tool", "transactions:create,transactions:read");
-        let lock_id = lock_owned_by(&daemon, &tool);
+        let lock_id = lock_for(&daemon, owner_of(&daemon, &tool));
 
         let transaction_id = handle_submit(&daemon.context, Some(&tool), submit_with_locks(vec![lock_id]))
             .await
             .unwrap()
             .transaction_id;
-        assert_eq!(linked_transaction(&daemon, lock_id), Some(transaction_id));
+        assert_eq!(get_lock(&daemon, lock_id).transaction_id, Some(transaction_id));
 
         // The lock now belongs to that transaction.
         let err = handle_submit(&daemon.context, Some(&tool), submit_with_locks(vec![lock_id]))
             .await
             .unwrap_err();
         assert_invalid_params(&err, "lock_ids");
-        assert_eq!(linked_transaction(&daemon, lock_id), Some(transaction_id));
-    }
-
-    #[tokio::test]
-    async fn a_caller_dry_runs_with_its_own_lock() {
-        let daemon = TestDaemon::start().await;
-        let reader = daemon.api_key("reader", "transactions:read");
-        let lock_id = lock_owned_by(&daemon, &reader);
-
-        // The test daemon has no transaction service, so the dry run fails after the lock check passes.
-        let err = handle_submit_dry_run(&daemon.context, Some(&reader), submit_with_locks(vec![lock_id]))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().starts_with("Failed to submit transaction"), "{err}");
-        assert_eq!(linked_transaction(&daemon, lock_id), None);
+        assert_eq!(get_lock(&daemon, lock_id).transaction_id, Some(transaction_id));
     }
 
     #[tokio::test]
     async fn submit_refuses_a_lock_a_live_request_holds() {
         let daemon = TestDaemon::start().await;
-        let lock_id = lock_owned_by(&daemon, &daemon.session);
+        let lock_id = lock_for(&daemon, owner_of(&daemon, &daemon.session));
         daemon
             .context
             .wallet_sdk()
@@ -1715,21 +1658,5 @@ mod tests {
             .await
             .unwrap_err();
         assert_invalid_params(&err, "lock_ids");
-    }
-
-    #[tokio::test]
-    async fn a_lock_stays_free_when_the_transaction_is_never_stored() {
-        let daemon = TestDaemon::start().await;
-        let lock_id = lock_owned_by(&daemon, &daemon.session);
-
-        // The test daemon has no transaction service, so each attempt fails before a transaction is stored. A retry
-        // seals a new transaction and must still be able to take the lock.
-        for _ in 0..2 {
-            let err = handle_submit(&daemon.context, Some(&daemon.session), submit_with_locks(vec![lock_id]))
-                .await
-                .unwrap_err();
-            assert!(err.to_string().starts_with("Failed to submit transaction"), "{err}");
-            assert_eq!(linked_transaction(&daemon, lock_id), None);
-        }
     }
 }

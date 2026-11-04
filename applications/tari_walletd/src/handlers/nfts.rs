@@ -149,7 +149,7 @@ pub async fn handle_mint_faucet(
         .submit_transaction_with_opts(
             transaction,
             Some(TransactionContext::with_accounts([account.component_address])),
-            vec![],
+            None,
         )
         .await?;
 
@@ -411,7 +411,7 @@ pub async fn handle_transfer(
         .submit_transaction_with_opts(
             transaction,
             Some(TransactionContext::with_accounts(linked_accounts.clone())),
-            vec![],
+            None,
         )
         .await?;
 

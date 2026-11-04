@@ -692,7 +692,7 @@ pub(crate) async fn execute_claim_burn(
         tx_context = tx_context.with_kind(TransactionContextKind::ClaimBurn { file_name });
     }
     let tx_id = transaction_service
-        .submit_transaction_with_opts(transaction, Some(tx_context), vec![])
+        .submit_transaction_with_opts(transaction, Some(tx_context), None)
         .await?;
 
     Ok(ClaimBurnResponse {
@@ -1071,7 +1071,7 @@ pub async fn handle_create_free_test_coins(
     }
     let tx_id = context
         .transaction_service()
-        .submit_transaction_with_opts(transaction, Some(tx_context), vec![])
+        .submit_transaction_with_opts(transaction, Some(tx_context), None)
         .await?;
 
     // Wait for the monitor to pick up the new or updated account
@@ -1330,7 +1330,7 @@ pub async fn handle_transfer(
         .submit_transaction_with_opts(
             transaction,
             Some(TransactionContext::with_accounts(linked_accounts)),
-            vec![],
+            None,
         )
         .await?;
 
@@ -1441,7 +1441,7 @@ pub async fn handle_confidential_transfer(
             .submit_transaction_with_opts(
                 transfer.transaction,
                 Some(TransactionContext::with_accounts(linked_accounts)),
-                vec![],
+                None,
             )
             .await;
         if let Err(err) = &submission &&
@@ -1817,7 +1817,7 @@ pub async fn handle_stealth_transfer(
                 .submit_transaction_with_opts(
                     transaction,
                     Some(TransactionContext::with_accounts(linked_accounts)),
-                    vec![lock.id()],
+                    Some(lock.id()),
                 )
                 .await
                 .map_err(|e| anyhow!("Transaction failed to submit: {e}"))?;

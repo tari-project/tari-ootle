@@ -228,8 +228,6 @@ where TConsensusSpec: ConsensusSpec
                     invalid_foreign_proposals,
                 } = next_block;
 
-                lock_conflicts.save_for_block(tx, next_block.id())?;
-
                 // Invalid leaves the unconfirmed index, so a proposal rejected here is not selected into a
                 // later block. Selection is what makes such a failure repeat: the batch query returns every
                 // proposal still in that index, and a validation failure is deterministic across leaders.
@@ -242,6 +240,7 @@ where TConsensusSpec: ConsensusSpec
                 }
 
                 drop_executions_of_uninserted_proposal(tx, epoch)?;
+                lock_conflicts.save_for_block(tx, next_block.id())?;
 
                 // Add executions for this block
                 if !executed_transactions.is_empty() {
@@ -1369,6 +1368,7 @@ where
         !Block::record_exists(&**tx, &previous.block_id)?
     {
         tx.block_transaction_executions_remove_any_by_block_id(&previous.block_id)?;
+        tx.lock_conflicts_remove_by_block_id(&previous.block_id)?;
     }
     Ok(())
 }

@@ -224,7 +224,7 @@ fn fork_proposing_same_foreign_proposal_preserves_chain_and_confirmed_status() {
     let res = tx.foreign_proposals_get_all_new(fork_block.id(), 10).unwrap();
     assert!(res.is_empty());
 
-    tx.foreign_proposals_set_status(proposal1.block_id(), ForeignProposalStatus::Confirmed, None)
+    tx.foreign_proposals_set_status(proposal1.block_id(), ForeignProposalStatus::Confirmed, Some(block1.id()))
         .unwrap();
     tx.foreign_proposals_clear_proposed_in(fork_block.id()).unwrap();
 
@@ -232,6 +232,15 @@ fn fork_proposing_same_foreign_proposal_preserves_chain_and_confirmed_status() {
     assert_eq!(res[0].status(), ForeignProposalStatus::Confirmed);
     assert!(!tx.foreign_proposals_has_unconfirmed(EPOCH).unwrap());
 
-    tx.rollback().unwrap();
-}
+    tx.epoch_cleanup(Epoch(3)).unwrap();
+    assert!(!tx.foreign_proposals_exists(proposal1.block_id()).unwrap());
+    tx.commit().unwrap();
 
+    let fp_cf = db
+        .column_family_info()
+        .unwrap()
+        .into_iter()
+        .find(|info| info.name == "foreign_proposals")
+        .unwrap();
+    assert_eq!(fp_cf.num_entries, 0);
+}

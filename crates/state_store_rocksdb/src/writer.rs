@@ -2446,6 +2446,8 @@ mod cleanup {
         let committed_cf = db.cf(chain::CommittedParentChildChainIndex)?;
         let pending_chain_cf = db.cf(PendingChainIndex)?;
         let pending_parent_child_cf = db.cf(chain::PendingParentChildIndex)?;
+        let proposed_in_query = db.cf(foreign_proposal::ByProposedInBlockIndexQuery)?;
+        let proposed_in_cf = db.cf(foreign_proposal::ProposedInBlockIndex)?;
         let index_cf = db.cf(block::EpochHeightIndex)?;
 
         // Don't delete epoch 0 blocks (i.e the zero block)
@@ -2461,6 +2463,9 @@ mod cleanup {
                 } else {
                     pending_chain_cf.delete(&block_id, OPERATION)?;
                     pending_parent_child_cf.delete(&(*block.parent(), block_id), OPERATION)?;
+                    for key in proposed_in_query.query_prefix_range_keys(Ordering::default(), &block_id)? {
+                        proposed_in_cf.delete(&key, OPERATION)?;
+                    }
                 }
             }
             cf.delete(&block_id, OPERATION)?;

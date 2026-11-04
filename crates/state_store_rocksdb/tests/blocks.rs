@@ -479,4 +479,3 @@ fn epoch_cleanup_removes_committed_parent_child_index_and_keeps_next_epoch_child
 
     tx.rollback().unwrap();
 }
-

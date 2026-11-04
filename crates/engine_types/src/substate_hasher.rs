@@ -812,10 +812,6 @@ mod tests {
         );
     }
 
-    /// Pins the borsh tag of every cheaply constructed variant, which pins the rest transitively: a
-    /// variant inserted anywhere but after `Utxo` shifts one of these tags. `ConfidentialOutput` is
-    /// last, where an append is the only move and is safe. The two leading bytes are the
-    /// `SubstateHashMessage` version tag and the value tag.
     /// One value per type that the other version 1 pins leave out, so that a change to any type's encoding fails here.
     #[test]
     fn version_1_hash_of_every_other_type_is_pinned() {
@@ -866,6 +862,10 @@ mod tests {
         }
     }
 
+    /// Pins the borsh tag of every cheaply constructed variant, which pins the rest transitively: a
+    /// variant inserted anywhere but after `Utxo` shifts one of these tags. `ConfidentialOutput` is
+    /// last, where an append is the only move and is safe. The two leading bytes are the
+    /// `SubstateHashMessage` version tag and the value tag.
     #[test]
     fn value_tags_are_stable() {
         let values: Vec<(u8, SubstateValue)> = vec![

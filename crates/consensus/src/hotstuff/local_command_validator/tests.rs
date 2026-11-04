@@ -2409,7 +2409,8 @@ mod some_accept {
     fn a_some_accept_with_different_evidence_is_refused() {
         let (replica, rec) = aborted_after_local_accept();
         let mut evidence = rec.evidence().clone();
-        evidence.abort();
+        evidence.add_shard_group(ShardGroup::all_shards(NUM_PRESHARDS));
+        assert_ne!(evidence, *rec.evidence());
         let atom = MultiShardAtom {
             evidence,
             ..rec.get_current_multi_shard_atom()

@@ -277,7 +277,7 @@ mod tests {
     use tari_ootle_transaction::Network;
     use tari_sidechain::{FixedHash, QuorumDecision};
     use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
-    use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+    use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
     use super::*;
     use crate::traits::CertificateStore;
@@ -285,6 +285,8 @@ mod tests {
     const NETWORK: Network = Network::LocalNet;
     const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
 
+    /// A block extending `parent`. It carries a signature, since a catch-up response skips unsigned (dummy) blocks;
+    /// the store does not check it.
     fn child(parent: &Block) -> Block {
         let justify = ProposalCertificate::new(
             *parent.id().hash(),
@@ -296,7 +298,7 @@ mod tests {
             QuorumDecision::Accept,
         );
         let commands = BlockCommands::empty();
-        let header = BlockHeader::create_unsigned(
+        let mut header = BlockHeader::create_unsigned(
             NETWORK,
             ProtocolVersion::V0,
             *parent.id(),
@@ -315,6 +317,7 @@ mod tests {
             ExtraData::new(),
         )
         .unwrap();
+        header.set_signature(SchnorrSignatureBytes::zero());
         Block::new(header, justify, commands, None)
     }
 

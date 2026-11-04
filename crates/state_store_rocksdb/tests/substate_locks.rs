@@ -7,19 +7,20 @@ use std::collections::HashMap;
 
 use indexmap::IndexMap;
 use tari_consensus_types::{Decision, LeafBlock};
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::substate::{Substate, SubstateId};
 use tari_ootle_common_types::{Epoch, SubstateLockType, SubstateVersion, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
-    consensus_models::{Evidence, SubstateLock, TransactionPoolRecord},
+    consensus_models::{Evidence, SubstateChange, SubstateLock, TransactionPoolRecord},
 };
 use tari_ootle_transaction::TransactionId;
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 
 use crate::helpers::{
+    build_substate_value,
     chain_across_an_epoch_change,
     commit_chain,
     create_block_with_qc,
@@ -930,6 +931,67 @@ fn an_empty_lock_set_replaces_the_blocks_locks() {
         .optional()
         .unwrap();
     assert!(lock.is_none());
+}
+
+#[test]
+fn a_lock_on_a_pending_block_diff_substate_carries_its_value() {
+    let (db, _tmp) = create_rocksdb();
+    let mut tx = db.create_write_tx().unwrap();
+
+    let chain = create_chain(10);
+    commit_chain(&mut tx, &chain);
+    let b8 = chain[8].as_leaf();
+    let b9 = chain[9].as_leaf();
+
+    let fork = create_block_with_qc(&b8);
+    tx.proposal_certificates_save(fork.justify()).unwrap();
+    fork.insert(&mut tx).unwrap();
+
+    let tx_id = transaction_id_from_seed(1);
+    let substate_id = create_random_substate_id();
+    let fork_substate_id = create_random_substate_id();
+    let value = build_substate_value(None);
+    let fork_value = build_substate_value(None);
+
+    tx.block_diffs_insert(chain[8].id(), &[SubstateChange::Up {
+        id: substate_id.clone(),
+        shard: chain[8].shard_group().start(),
+        substate: Box::new(Substate::new(SubstateVersion::ZERO, value.clone())),
+    }])
+    .unwrap();
+    tx.block_diffs_insert(fork.id(), &[SubstateChange::Up {
+        id: fork_substate_id.clone(),
+        shard: fork.shard_group().start(),
+        substate: Box::new(Substate::new(SubstateVersion::ZERO, fork_value)),
+    }])
+    .unwrap();
+
+    let locks = IndexMap::from([
+        (substate_id.clone(), vec![SubstateLock::new(
+            tx_id,
+            SubstateVersion::ZERO,
+            SubstateLockType::Write,
+            false,
+        )]),
+        (fork_substate_id.clone(), vec![SubstateLock::new(
+            tx_id,
+            SubstateVersion::ZERO,
+            SubstateLockType::Write,
+            false,
+        )]),
+    ]);
+    tx.substate_locks_insert_all(&b9, &locks).unwrap();
+
+    let locked = tx
+        .substate_locks_get_locked_substates_for_transaction(&b9, &tx_id)
+        .unwrap();
+    assert_eq!(locked.len(), 2);
+    let on_chain = locked.iter().find(|l| l.substate_id == substate_id).unwrap();
+    assert_eq!(on_chain.value, Some(value));
+    let on_fork = locked.iter().find(|l| l.substate_id == fork_substate_id).unwrap();
+    assert!(on_fork.value.is_none());
+
+    tx.rollback().unwrap();
 }
 
 fn reopen(db: RocksDbStateStore<String>, tmp: &tempfile::TempDir) -> RocksDbStateStore<String> {

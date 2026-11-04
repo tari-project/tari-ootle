@@ -97,12 +97,18 @@ async fn wait_for_finalized(test: &mut Test, transactions: &[&TransactionRecord]
     wait_for_finalized_at(test, TestVnDestination::All, transactions).await;
 }
 
-/// The number of blocks validator 1 may commit while a wait for finalization is in progress.
+/// The number of blocks a validator at the wait's destination may commit while a wait for finalization is in progress.
 const MAX_BLOCKS_TO_FINALIZE: u64 = 40;
 
 /// Waits until every validator at `destination` has finalized every one of `transactions`.
 async fn wait_for_finalized_at(test: &mut Test, destination: TestVnDestination, transactions: &[&TransactionRecord]) {
-    let start_height = test.get_validator(&TestAddress::new("1")).get_leaf_block().height;
+    let sample = test
+        .validators_iter()
+        .find(|validator| destination.is_for_vn(validator))
+        .expect("the destination has a validator")
+        .address
+        .clone();
+    let start_height = test.get_validator(&sample).get_leaf_block().height;
     loop {
         test.on_block_committed().await;
         if transactions.iter().all(|transaction| {
@@ -112,11 +118,12 @@ async fn wait_for_finalized_at(test: &mut Test, destination: TestVnDestination, 
         }) {
             return;
         }
-        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        let leaf = test.get_validator(&sample).get_leaf_block();
         if leaf.height > start_height + NodeHeight(MAX_BLOCKS_TO_FINALIZE) {
             test.dump_pool_info();
             panic!(
-                "Not all transactions finalized within {MAX_BLOCKS_TO_FINALIZE} blocks of {start_height} (leaf: {})",
+                "Not all transactions finalized within {MAX_BLOCKS_TO_FINALIZE} blocks of {start_height} on {sample} \
+                 (leaf: {})",
                 leaf.height
             );
         }

@@ -424,6 +424,64 @@ impl<'a, TStore: StateStore, TValidator: CommitProofValidator> ShardSync<'a, TSt
         Ok(())
     }
 
+    /// Syncs the shard from one peer, opening each state stream with `open_stream` from the version it must start at.
+    /// Returns `None` if the shard already matched the checkpoint.
+    ///
+    /// A stream that ends with [`RpcStateSyncError::EarlierSyncMissingValue`] has already rewound the shard below the
+    /// substate an earlier attempt left without its value, and the peer is not at fault, so the same peer is asked
+    /// once more from the rewound version. The rewind clears that record, so a second attempt cannot fail the same
+    /// way.
+    pub async fn sync_from_peer<F, Fut, S, E>(
+        &self,
+        stats: &mut StateSyncStats,
+        mut open_stream: F,
+    ) -> Result<Option<Version>, RpcStateSyncError>
+    where
+        F: FnMut(Version) -> Fut,
+        Fut: Future<Output = Result<S, RpcStateSyncError>>,
+        S: Stream<Item = Result<SyncStateResponse, E>> + Unpin,
+        RpcStateSyncError: From<E>,
+    {
+        match self.sync_once_from_peer(stats, &mut open_stream).await {
+            Err(RpcStateSyncError::EarlierSyncMissingValue { address, created_at }) => {
+                warn!(
+                    target: LOG_TARGET,
+                    "🛜 An earlier sync left {address} (v{created_at}) in {} without its value; rewound and asking the same peer again",
+                    self.shard,
+                );
+                self.sync_once_from_peer(stats, &mut open_stream).await
+            },
+            result => result,
+        }
+    }
+
+    async fn sync_once_from_peer<F, Fut, S, E>(
+        &self,
+        stats: &mut StateSyncStats,
+        open_stream: &mut F,
+    ) -> Result<Option<Version>, RpcStateSyncError>
+    where
+        F: FnMut(Version) -> Fut,
+        Fut: Future<Output = Result<S, RpcStateSyncError>>,
+        S: Stream<Item = Result<SyncStateResponse, E>> + Unpin,
+        RpcStateSyncError: From<E>,
+    {
+        let verified_version = self.discard_unverified_state()?;
+
+        if self.local_state_matches_checkpoint(verified_version)? {
+            info!(target: LOG_TARGET, "Checkpoint state root indicates no further state changes. Nothing to sync for {}", self.shard);
+            self.align_to_checkpoint_version(verified_version)?;
+            return Ok(None);
+        }
+
+        let start_state_version = self.start_state_version(verified_version)?;
+        info!(target: LOG_TARGET, "🛜Syncing from v{start_state_version}");
+
+        stats.total_requests += 1;
+        let state_stream = open_stream(start_state_version).await?;
+        self.sync_from_stream(stats, verified_version, state_stream).await
+    }
+
     /// Syncs the shard from `state_stream` on top of `verified_version`, its latest verified version. Versions are
     /// committed as they arrive and discarded again unless the stream completes with the shard matching the
     /// checkpoint root, so only verified state outlives a sync.
@@ -1003,7 +1061,7 @@ impl VersionBuffer {
 
 #[cfg(test)]
 mod tests {
-    use futures::{FutureExt, stream};
+    use futures::{FutureExt, future, stream};
     use tari_engine_types::{
         ProtocolVersion,
         confidential::ClaimedOutputTombstone,
@@ -2685,6 +2743,99 @@ mod tests {
         assert!(!err.is_peer_fault());
         assert_eq!(local_version(&store), None);
         assert_eq!(missing_value(&store), None);
+    }
+
+    /// Syncs against `checkpoint` from one peer that answers a request from each start version with `respond`, and
+    /// returns the outcome with the start versions requested.
+    async fn sync_from_peer_with_proofs<TStore: StateStore>(
+        store: &TStore,
+        checkpoint: &Versions,
+        respond: impl Fn(Version) -> Vec<Result<SyncStateResponse, RpcStatus>>,
+    ) -> (Result<Option<Version>, RpcStateSyncError>, Vec<Version>) {
+        let validator = AcceptAll;
+        let sync = ShardSync::new(
+            NETWORK,
+            NUM_PRESHARDS,
+            store,
+            shard(),
+            root_after(checkpoint),
+            acc_after(checkpoint),
+            version_after(checkpoint),
+            EPOCH,
+            UP_VERSION_LOOKBACK,
+        )
+        .with_version_proofs(&validator);
+        let mut requested = Vec::new();
+        let result = sync
+            .sync_from_peer(&mut StateSyncStats::default(), |start_state_version| {
+                requested.push(start_state_version);
+                future::ready(Ok(stream::iter(respond(start_state_version))))
+            })
+            .await;
+        (result, requested)
+    }
+
+    /// The checkpoint [`stream_to_proof_point_without_first_value`] stops short of: one version past the proof point.
+    fn checkpoint_past_proof_point() -> Versions {
+        let mut checkpoint = versions_to_proof_point();
+        checkpoint.push((N + 1, vec![create(200)]));
+        checkpoint
+    }
+
+    /// An honest peer's stream of [`checkpoint_past_proof_point`] from `start_state_version`.
+    fn honest_stream_past_proof_point(start_state_version: Version) -> Vec<Result<SyncStateResponse, RpcStatus>> {
+        let proof_point = versions_to_proof_point();
+        let mut responses = Vec::new();
+        if start_state_version <= N {
+            responses = stream_of(&proof_point);
+            responses.push(version_proof(N, root_after(&proof_point), acc_after(&proof_point)));
+        }
+        responses.push(batch(N + 1, vec![create(200)]));
+        responses.push(complete(N + 1));
+        responses
+    }
+
+    #[tokio::test]
+    async fn the_peer_is_asked_again_from_below_a_value_an_earlier_attempt_left_missing() {
+        let (store, _tmp) = create_store();
+        let checkpoint = checkpoint_past_proof_point();
+        sync_with_proofs(&store, &checkpoint, stream_to_proof_point_without_first_value())
+            .await
+            .unwrap_err();
+        assert_eq!(missing_value(&store), Some((address(1), 1)));
+
+        let (result, requested) = sync_from_peer_with_proofs(&store, &checkpoint, honest_stream_past_proof_point).await;
+
+        assert_eq!(result.unwrap(), Some(N + 1));
+        assert_eq!(requested, vec![N + 1, 1]);
+        assert_eq!(missing_value(&store), None);
+        assert!(substate(&store, 1).is_some_and(|s| s.is_up() && s.substate_value().is_some()));
+    }
+
+    #[tokio::test]
+    async fn a_peer_s_own_fault_is_not_asked_again() {
+        let (store, _tmp) = create_store();
+        let checkpoint = checkpoint_past_proof_point();
+
+        let (result, requested) =
+            sync_from_peer_with_proofs(&store, &checkpoint, |_| stream_to_proof_point_without_first_value()).await;
+
+        assert!(result.unwrap_err().is_peer_fault());
+        assert_eq!(requested, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn a_shard_already_at_the_checkpoint_opens_no_stream() {
+        let (store, _tmp) = create_store();
+        let checkpoint = checkpoint_past_proof_point();
+        sync_with_proofs(&store, &checkpoint, honest_stream_past_proof_point(1))
+            .await
+            .unwrap();
+
+        let (result, requested) = sync_from_peer_with_proofs(&store, &checkpoint, honest_stream_past_proof_point).await;
+
+        assert_eq!(result.unwrap(), None);
+        assert!(requested.is_empty());
     }
 
     #[tokio::test]

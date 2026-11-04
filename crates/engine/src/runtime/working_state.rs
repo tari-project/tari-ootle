@@ -1466,6 +1466,18 @@ impl<TStore: StateReader> WorkingState<TStore> {
         let new_values = diff_values.as_ref().unwrap_or(next_state);
         self.check_all_substates_in_scope(new_values)?;
 
+        // A vault belongs to exactly one component. It starts as an orphan of the frame that created it, which must
+        // attach it before the frame is popped, and attaching it removes it from the orphans. So a newly referenced
+        // vault that is not an orphan here is already held by a component.
+        let scope = self.current_call_scope()?;
+        if let Some(vault_id) = new_values
+            .vault_ids()
+            .iter()
+            .find(|vault_id| !scope.orphans().contains(&SubstateId::from(**vault_id)))
+        {
+            return Err(RuntimeError::VaultAlreadyOwned { vault_id: *vault_id });
+        }
+
         let scope_mut = self.current_call_scope_mut()?;
         for address in next_state.referenced_substates() {
             // Anything the state references now belongs to the component, not to this frame

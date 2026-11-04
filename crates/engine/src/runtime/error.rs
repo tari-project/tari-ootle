@@ -404,6 +404,11 @@ pub enum RuntimeError {
     CallFrameRemainingOnStack { remaining: usize },
     #[error("Duplicate reference to substate {address}")]
     DuplicateReference { address: SubstateId },
+    #[error(
+        "Vault {vault_id} already belongs to a component and cannot be placed in another component's state: a vault \
+         may be added to component state only by the call that created it, and only once"
+    )]
+    VaultAlreadyOwned { vault_id: VaultId },
     #[error("Invalid argument: {0}")]
     ArgumentValidationError(#[from] ArgumentValidationError),
     #[error("Fee payment found in main intent, which is not allowed")]
@@ -569,6 +574,7 @@ impl RuntimeError {
             Self::NoFeesPaid { .. } |
             Self::InvalidOpLockedBucket { .. } |
             Self::DuplicateReference { .. } |
+            Self::VaultAlreadyOwned { .. } |
             Self::ArgumentValidationError(_) |
             Self::FeePaymentInMainIntent |
             Self::AddressAllocationNotFound { .. } |

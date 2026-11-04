@@ -10,7 +10,7 @@ use tari_engine_types::{
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::{
     args::VaultAction,
-    types::{Amount, ComponentAddress, ResourceType, constants::TARI_TOKEN},
+    types::{Amount, ComponentAddress, ObjectKey, ResourceType, VaultId, constants::TARI_TOKEN},
 };
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
@@ -160,6 +160,87 @@ fn it_rejects_double_ownership_of_vault() {
     );
 
     assert_reject_reason(reason, "Duplicate reference to substate");
+}
+
+/// Asserts that `reason` is [`RuntimeError::VaultAlreadyOwned`] for a vault the transaction created, whose id is
+/// unknown before it runs. The expected text is rendered from the variant around a placeholder id, so it follows
+/// the variant's message.
+#[track_caller]
+fn assert_new_vault_already_owned(reason: RejectReason) {
+    let placeholder = VaultId::new(ObjectKey::from_array([0u8; ObjectKey::LENGTH]));
+    let expected = RuntimeError::VaultAlreadyOwned { vault_id: placeholder }.to_string();
+    let (before_id, after_id) = expected.split_once(&placeholder.to_string()).unwrap();
+    let reason = reason.to_string();
+    let vault_id_start = reason
+        .find(before_id)
+        .unwrap_or_else(|| panic!("Expected reject reason \"{expected}\" but got \"{reason}\"")) +
+        before_id.len();
+    let rest = &reason[vault_id_start..];
+    let vault_id_end = rest
+        .find(after_id)
+        .unwrap_or_else(|| panic!("Expected reject reason \"{expected}\" but got \"{reason}\""));
+    rest[..vault_id_end]
+        .parse::<VaultId>()
+        .unwrap_or_else(|_| panic!("Expected a vault id in reject reason \"{reason}\""));
+}
+
+#[test]
+fn it_rejects_one_vault_in_two_new_components() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(template_addr, "with_vault_in_two_components", args![])
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()],
+    );
+
+    assert_new_vault_already_owned(reason);
+}
+
+fn create_component_with_vault(test: &mut TemplateTest) -> (ComponentAddress, VaultId) {
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(template_addr, "with_vault", args![])
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()],
+    );
+    let component_address = test.return_values()[0].decoded::<ComponentAddress>().unwrap();
+    let component = test.read_only_state_store().get_component(component_address).unwrap();
+    let indexed = IndexedWellKnownTypes::from_value(component.state()).unwrap();
+    (component_address, indexed.vault_ids()[0])
+}
+
+#[test]
+fn it_rejects_a_components_vault_in_a_new_component() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (component_address, vault_id) = create_component_with_vault(&mut test);
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(component_address, "share_vault_with_new_component", args![])
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()],
+    );
+
+    assert_reject_reason(reason, RuntimeError::VaultAlreadyOwned { vault_id });
+}
+
+#[test]
+fn it_rejects_another_components_vault_in_a_state_update() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (component_address, _) = create_component_with_vault(&mut test);
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(component_address, "share_new_component_vault_with_self", args![])
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()],
+    );
+
+    assert_new_vault_already_owned(reason);
 }
 
 #[test]

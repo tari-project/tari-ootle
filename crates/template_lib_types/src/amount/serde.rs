@@ -163,9 +163,9 @@ mod tests {
         tari_bor::serde_codec::from_slice::<Amount>(&encode(&[42u64, 1u64, 0u64]).unwrap()).unwrap_err();
         // Indefinite-length CBOR arrays through serde_codec: 1 element (short), 2 elements (valid), 3 elements (long)
         tari_bor::serde_codec::from_slice::<Amount>(&[0x9f, 0x01, 0xff]).unwrap_err();
-        let indef_ok: Amount = tari_bor::serde_codec::from_slice(&[0x9f, 0x2a, 0x01, 0xff]).unwrap();
+        let indef_ok: Amount = tari_bor::serde_codec::from_slice(&[0x9f, 0x18, 0x2a, 0x01, 0xff]).unwrap();
         assert_eq!(indef_ok, Amount::from_le_digits([42, 1]));
-        tari_bor::serde_codec::from_slice::<Amount>(&[0x9f, 0x2a, 0x01, 0x00, 0xff]).unwrap_err();
+        tari_bor::serde_codec::from_slice::<Amount>(&[0x9f, 0x18, 0x2a, 0x01, 0x00, 0xff]).unwrap_err();
     }
 
     #[test]

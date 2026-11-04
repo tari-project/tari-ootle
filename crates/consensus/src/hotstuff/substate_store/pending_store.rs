@@ -220,6 +220,8 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         Ok(true)
     }
 
+    /// Attempts to grant every lock in `id_locks` to `transaction_id`, or none of them: if any lock fails, all
+    /// locks granted to `transaction_id` in this block are released before returning.
     pub fn try_lock_all<I, L>(
         &mut self,
         transaction_id: TransactionId,

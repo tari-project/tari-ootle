@@ -79,11 +79,11 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         &self.uncommitted_templates
     }
 
-    /// Adds the transaction's local inputs to what the block pledges to foreign shard groups, before they are
-    /// locked. Returns what the transaction is prepared as instead if they cannot be pledged: an abort if they are
-    /// more than any block may pledge, or a deferral if they only do not fit in this block. Only the shard group
-    /// holding the inputs measures them, so it aborts unilaterally and the other shard groups adopt the abort from
-    /// its foreign proposal.
+    /// Adds the transaction's local inputs to what the block pledges to foreign shard groups, after they are
+    /// locked. If they cannot be pledged, releases the locks taken for `transaction_id` in this block and returns
+    /// what the transaction is prepared as instead: an abort if they are more than any block may pledge, or a
+    /// deferral if they only do not fit in this block. Only the shard group holding the inputs measures them, so
+    /// it aborts unilaterally and the other shard groups adopt the abort from its foreign proposal.
     fn pledge_local_inputs<'i, TTx: StateStoreReadTransaction, I>(
         &self,
         store: &mut PendingSubstateStore<TTx>,
@@ -770,7 +770,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             })
             .collect::<Result<Vec<_>, SubstateStoreError>>()?;
 
-        // Pledge the local inputs
+        // Lock the local inputs
         let lock_status = store.try_lock_all(transaction_id, &requested_locks, false)?;
         if let Some(err) = lock_status.hard_conflict() {
             warn!(target: LOG_TARGET, "⚠️ PREPARE: Hard conflict when locking inputs: {err}");
@@ -973,11 +973,7 @@ fn lock_all_or_none<TTx: StateStoreReadTransaction>(
     execution: &TransactionExecution,
 ) -> Result<LockStatus, BlockTransactionExecutorError> {
     let requested_locks = execution.resolved_inputs().iter().chain(execution.resulting_outputs());
-    let lock_status = store.try_lock_all(transaction_id, requested_locks, true)?;
-    if lock_status.is_any_failed() {
-        store.release_new_locks(&transaction_id);
-    }
-    Ok(lock_status)
+    Ok(store.try_lock_all(transaction_id, requested_locks, true)?)
 }
 
 /// Whether `err` means an output version cannot be created in this or any later block on this chain: the version
@@ -1084,7 +1080,6 @@ pub fn lock_multishard_execution<TTx: StateStoreReadTransaction>(
         "⚠️ Multishard transaction {transaction_id} creates an output that exists or is being created by another \
          transaction ({conflict}). Every shard group commits its fee intent only",
     );
-    store.release_new_locks(&transaction_id);
     let lock_status = store.try_lock_all(
         transaction_id,
         scope.locks(&fee_intent_commit, local_committee_info),

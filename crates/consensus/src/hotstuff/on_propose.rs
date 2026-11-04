@@ -499,7 +499,7 @@ where TConsensusSpec: ConsensusSpec
         let mut invalid_foreign_proposals = Vec::new();
         let mut dropped_foreign_proposals = false;
 
-        if !batch.transactions.is_empty() || !batch.foreign_proposals.is_empty() {
+        if !batch.transactions.is_empty() {
             // A replica evaluates this block as: the newly justified block, then the commands in block order
             // (foreign proposals sort before the transaction commands, see `BlockCommands`), all against
             // a single change set. The commands generated below must be derived from that same sequence, or
@@ -1052,94 +1052,19 @@ where TConsensusSpec: ConsensusSpec
         state_anchor: &LeafBlock,
         local_committee_info: &CommitteeInfo,
         change_set: &ProposedBlockChangeSet,
-        mut tx_rec: TransactionPoolRecord,
+        tx_rec: TransactionPoolRecord,
         substate_store: &mut PendingSubstateStore<TTx>,
         executed_transactions: &mut HashMap<TransactionId, TransactionExecution>,
     ) -> Result<Option<Command>, HotStuffError> {
-        // Only set to abort if either the local or one or more foreign shards decided to ABORT
-        if tx_rec.current_decision().is_abort() {
-            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom())));
-        }
-
-        let locked_epoch = tx_rec.locked_epoch().ok_or_else(|| {
-            HotStuffError::InvariantError(format!(
-                "PROPOSE: local_accept_transaction: Transaction {} is in LocalPrepared stage but has no locked epoch",
-                tx_rec.id(),
-            ))
-        })?;
-
-        let tx = substate_store.read_transaction();
-        let transaction = tx_rec.get_transaction(tx)?;
-        let execution = self.execute_transaction(
-            substate_store,
-            local_committee_info,
+        propose_local_accept_transaction(
+            &self.transaction_manager,
             state_anchor,
-            transaction,
-            change_set,
-            locked_epoch.clone(),
-        )?;
-
-        // Try to lock all local outputs
-        let locked = lock_multishard_execution(
-            substate_store,
             local_committee_info,
-            *tx_rec.id(),
-            execution,
-            MultishardLockScope::LocalOutputs,
-            tx_rec.is_fee_intent_only(),
+            change_set,
+            tx_rec,
+            substate_store,
+            executed_transactions,
         )
-        .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
-        if let Some(err) = locked.lock_status.failures().first() {
-            warn!(
-                target: LOG_TARGET,
-                "⚠️ Failed to lock outputs for transaction {}: {}",
-                tx_rec.id(),
-                err,
-            );
-            // If the transaction does not lock, we propose to abort it
-            let execution =
-                TransactionExecution::abort(tx_rec.id(), RejectReason::FailedToLockOutputs(err.to_string()));
-            tx_rec.update_from_execution(
-                local_committee_info.num_preshards(),
-                local_committee_info.num_committees(),
-                &execution,
-            );
-
-            executed_transactions.insert(*tx_rec.id(), execution);
-            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom())));
-        }
-
-        if locked.execution.decision().is_commit() {
-            // Preparing the transaction bounded what its inputs alone may pledge, so only the block budget applies
-            let pledge = substate_store.pledge_inputs(
-                local_pledged_inputs(&tx_rec, local_committee_info.shard_group()),
-                usize::MAX,
-            )?;
-            if let InputPledge::BlockBudgetReached { total_bytes, max_bytes } = pledge {
-                substate_store.release_new_locks(tx_rec.id());
-                info!(
-                    target: LOG_TARGET,
-                    "📦 PROPOSE: LocalAccept of transaction {} would take the block's pledge to {total_bytes} bytes, \
-                     past the {max_bytes} budget. Deferring it to a later block",
-                    tx_rec.id(),
-                );
-                return Ok(None);
-            }
-        }
-
-        tx_rec.update_from_execution(
-            local_committee_info.num_preshards(),
-            local_committee_info.num_committees(),
-            &locked.execution,
-        );
-        if locked.fee_intent_only {
-            tx_rec.set_fee_intent_only(true);
-        }
-        executed_transactions.insert(*tx_rec.id(), locked.execution);
-        // If we locally decided to ABORT, we are still saying that we think all prepared and, after execution decide to
-        // ABORT. When we enter the acceptance phase, we will propose SomeAccept for this case.
-        let atom = self.get_multi_shard_atom_with_leader_fee(&tx_rec)?;
-        Ok(Some(Command::LocalAccept(atom)))
     }
 
     fn accept_transaction<TTx: StateStoreReadTransaction>(
@@ -1202,73 +1127,175 @@ where TConsensusSpec: ConsensusSpec
             );
             return Ok(None);
         }
-        let atom = self.get_multi_shard_atom_with_leader_fee(tx_rec)?;
+        let atom = get_multi_shard_atom_with_leader_fee(tx_rec)?;
         Ok(Some(Command::AllAccept(atom)))
     }
+}
 
-    fn get_multi_shard_atom_with_leader_fee(
-        &self,
-        tx_rec: &TransactionPoolRecord,
-    ) -> Result<MultiShardAtom, HotStuffError> {
-        let mut atom = tx_rec.get_current_multi_shard_atom();
-        if tx_rec.current_decision().is_commit() {
-            let num_involved_shard_groups = tx_rec.evidence().num_shard_groups();
-            let involved = NonZeroU64::new(num_involved_shard_groups as u64).ok_or_else(|| {
-                HotStuffError::InvariantError(format!(
-                    "PROPOSE: Transaction {} involves zero shard groups",
-                    tx_rec.id(),
-                ))
-            })?;
-            let leader_fee = tx_rec.calculate_leader_fee(involved);
-            atom.leader_fee = Some(leader_fee);
-        }
-        Ok(atom)
+pub(super) fn propose_local_accept_transaction<TStateStore, TExecutor, TTx>(
+    transaction_manager: &ConsensusTransactionManager<TExecutor, TStateStore>,
+    state_anchor: &LeafBlock,
+    local_committee_info: &CommitteeInfo,
+    change_set: &ProposedBlockChangeSet,
+    mut tx_rec: TransactionPoolRecord,
+    substate_store: &mut PendingSubstateStore<TTx>,
+    executed_transactions: &mut HashMap<TransactionId, TransactionExecution>,
+) -> Result<Option<Command>, HotStuffError>
+where
+    TStateStore: StateStore,
+    TExecutor: crate::traits::BlockTransactionExecutor<TStateStore>,
+    TTx: StateStoreReadTransaction,
+{
+    // Only set to abort if either the local or one or more foreign shards decided to ABORT
+    if tx_rec.current_decision().is_abort() {
+        return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom())));
     }
 
-    fn execute_transaction<TTx: StateStoreReadTransaction>(
-        &self,
-        substate_store: &PendingSubstateStore<TTx>,
-        local_committee_info: &CommitteeInfo,
-        state_anchor: &LeafBlock,
-        transaction: TransactionRecord,
-        change_set: &ProposedBlockChangeSet,
-        locked_epoch: LockedEpoch,
-    ) -> Result<TransactionExecution, HotStuffError> {
-        let tx = substate_store.read_transaction();
-        // Should have been executed already if all inputs are local
-        if let Some(execution) =
-            BlockTransactionExecution::get_pending_for_block(tx, transaction.id(), state_anchor).optional()?
-        {
-            info!(
-                target: LOG_TARGET,
-                "👨‍🔧 PROPOSE: Using existing transaction execution {} ({})",
-                transaction.id(), execution.decision(),
-            );
-            return Ok(execution.into_transaction_execution());
-        }
+    let locked_epoch = tx_rec.locked_epoch().ok_or_else(|| {
+        HotStuffError::InvariantError(format!(
+            "PROPOSE: local_accept_transaction: Transaction {} is in LocalPrepared stage but has no locked epoch",
+            tx_rec.id(),
+        ))
+    })?;
 
-        let mut pledged = PledgedTransaction::load_pledges(tx, state_anchor, transaction)?;
-        let transaction_id = *pledged.id();
-        pledged
-            .foreign_pledges
-            .extend(change_set.get_foreign_pledges(&transaction_id).cloned());
+    let tx = substate_store.read_transaction();
+    let transaction = tx_rec.get_transaction(tx)?;
+    let execution = execute_transaction(
+        transaction_manager,
+        substate_store,
+        local_committee_info,
+        state_anchor,
+        transaction,
+        change_set,
+        locked_epoch.clone(),
+    )?;
 
-        info!(
+    // Try to lock all local outputs
+    let locked = lock_multishard_execution(
+        substate_store,
+        local_committee_info,
+        *tx_rec.id(),
+        execution,
+        MultishardLockScope::LocalOutputs,
+        tx_rec.is_fee_intent_only(),
+    )
+    .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
+    if let Some(err) = locked.lock_status.failures().first() {
+        warn!(
             target: LOG_TARGET,
-            "👨‍🔧 PROPOSE: Executing transaction {} (pledges: {} local, {} foreign)",
-            pledged.id(), pledged.local_pledges.len(), pledged.foreign_pledges.len(),
+            "⚠️ Failed to lock outputs for transaction {}: {}",
+            tx_rec.id(),
+            err,
+        );
+        // If the transaction does not lock, we propose to abort it
+        let execution = TransactionExecution::abort(tx_rec.id(), RejectReason::FailedToLockOutputs(err.to_string()));
+        tx_rec.update_from_execution(
+            local_committee_info.num_preshards(),
+            local_committee_info.num_committees(),
+            &execution,
         );
 
-        self.transaction_manager
-            .execute(
-                substate_store,
-                local_committee_info,
-                locked_epoch,
-                state_anchor.epoch,
-                pledged,
-            )
-            .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))
+        executed_transactions.insert(*tx_rec.id(), execution);
+        return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom())));
     }
+
+    if locked.execution.decision().is_commit() {
+        // Preparing the transaction bounded what its inputs alone may pledge, so only the block budget applies
+        let pledge = substate_store.pledge_inputs(
+            local_pledged_inputs(&tx_rec, local_committee_info.shard_group()),
+            usize::MAX,
+        )?;
+        if let InputPledge::BlockBudgetReached { total_bytes, max_bytes } = pledge {
+            substate_store.release_new_locks(tx_rec.id());
+            info!(
+                target: LOG_TARGET,
+                "📦 PROPOSE: LocalAccept of transaction {} would take the block's pledge to {total_bytes} bytes, \
+                 past the {max_bytes} budget. Deferring it to a later block",
+                tx_rec.id(),
+            );
+            return Ok(None);
+        }
+    }
+
+    tx_rec.update_from_execution(
+        local_committee_info.num_preshards(),
+        local_committee_info.num_committees(),
+        &locked.execution,
+    );
+    if locked.fee_intent_only {
+        tx_rec.set_fee_intent_only(true);
+    }
+    executed_transactions.insert(*tx_rec.id(), locked.execution);
+    // If we locally decided to ABORT, we are still saying that we think all prepared and, after execution decide to
+    // ABORT. When we enter the acceptance phase, we will propose SomeAccept for this case.
+    let atom = get_multi_shard_atom_with_leader_fee(&tx_rec)?;
+    Ok(Some(Command::LocalAccept(atom)))
+}
+
+fn get_multi_shard_atom_with_leader_fee(tx_rec: &TransactionPoolRecord) -> Result<MultiShardAtom, HotStuffError> {
+    let mut atom = tx_rec.get_current_multi_shard_atom();
+    if tx_rec.current_decision().is_commit() {
+        let num_involved_shard_groups = tx_rec.evidence().num_shard_groups();
+        let involved = NonZeroU64::new(num_involved_shard_groups as u64).ok_or_else(|| {
+            HotStuffError::InvariantError(format!(
+                "PROPOSE: Transaction {} involves zero shard groups",
+                tx_rec.id(),
+            ))
+        })?;
+        let leader_fee = tx_rec.calculate_leader_fee(involved);
+        atom.leader_fee = Some(leader_fee);
+    }
+    Ok(atom)
+}
+
+fn execute_transaction<TStateStore, TExecutor, TTx>(
+    transaction_manager: &ConsensusTransactionManager<TExecutor, TStateStore>,
+    substate_store: &PendingSubstateStore<TTx>,
+    local_committee_info: &CommitteeInfo,
+    state_anchor: &LeafBlock,
+    transaction: TransactionRecord,
+    change_set: &ProposedBlockChangeSet,
+    locked_epoch: LockedEpoch,
+) -> Result<TransactionExecution, HotStuffError>
+where
+    TStateStore: StateStore,
+    TExecutor: crate::traits::BlockTransactionExecutor<TStateStore>,
+    TTx: StateStoreReadTransaction,
+{
+    let tx = substate_store.read_transaction();
+    // Should have been executed already if all inputs are local
+    if let Some(execution) =
+        BlockTransactionExecution::get_pending_for_block(tx, transaction.id(), state_anchor).optional()?
+    {
+        info!(
+            target: LOG_TARGET,
+            "👨‍🔧 PROPOSE: Using existing transaction execution {} ({})",
+            transaction.id(), execution.decision(),
+        );
+        return Ok(execution.into_transaction_execution());
+    }
+
+    let mut pledged = PledgedTransaction::load_pledges(tx, state_anchor, transaction)?;
+    let transaction_id = *pledged.id();
+    pledged
+        .foreign_pledges
+        .extend(change_set.get_foreign_pledges(&transaction_id).cloned());
+
+    info!(
+        target: LOG_TARGET,
+        "👨‍🔧 PROPOSE: Executing transaction {} (pledges: {} local, {} foreign)",
+        pledged.id(), pledged.local_pledges.len(), pledged.foreign_pledges.len(),
+    );
+
+    transaction_manager
+        .execute(
+            substate_store,
+            local_committee_info,
+            locked_epoch,
+            state_anchor.epoch,
+            pledged,
+        )
+        .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))
 }
 
 #[derive(Default)]

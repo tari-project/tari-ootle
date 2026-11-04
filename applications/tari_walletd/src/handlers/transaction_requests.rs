@@ -19,13 +19,14 @@ use indexmap::IndexMap;
 use log::*;
 use ootle_byte_type::ToByteType;
 use tari_ootle_common_types::optional::Optional;
-use tari_ootle_transaction::{MainSigner, UnsignedTransaction};
+use tari_ootle_transaction::{MainSigner, TransactionId, UnsignedTransaction};
 use tari_ootle_wallet_sdk::{
     models::{
         EffectiveStatus,
         KeyId,
         LockOwner,
         OutputStatus,
+        StealthOutputModel,
         TransactionRequestCreatedEvent,
         TransactionRequestId,
         TransactionRequestModel,
@@ -443,7 +444,13 @@ fn transition(
 /// The wallet-computed view of a request, including what it moves.
 fn to_info(context: &HandlerContext, model: TransactionRequestModel) -> Result<TransactionRequestInfo, anyhow::Error> {
     let status = model.effective_status_now();
-    let value_summaries = value_summaries(context, &model.unsigned_transaction, model.status, &model.lock_ids)?;
+    let value_summaries = value_summaries(
+        context,
+        &model.unsigned_transaction,
+        model.status,
+        &model.lock_ids,
+        model.transaction_id,
+    )?;
 
     let main_signer = resolve_main_signer(context, &model.unsigned_transaction, &model.other_signers)?;
     let external_signers = model.signatures.iter().map(|sig| *sig.public_key()).collect();
@@ -490,6 +497,37 @@ fn resolve_main_signer(
     Ok(TransactionRequestMainSigner::External { public_key })
 }
 
+/// The wallet's stealth outputs that `transaction_id`'s finalized diff downs.
+/// Empty until the wallet stores a finalized result for the transaction.
+fn finalized_wallet_inputs<R: WalletStoreReader>(
+    reader: &mut R,
+    transaction_id: TransactionId,
+) -> Result<Vec<StealthOutputModel>, anyhow::Error> {
+    let Some(transaction) = reader.transactions_get(transaction_id).optional()? else {
+        return Ok(Vec::new());
+    };
+    let downed = transaction
+        .finalized_diff()
+        .map(|diff| {
+            diff.down_iter()
+                .filter_map(|(id, _)| id.as_utxo_address())
+                .collect::<HashSet<_>>()
+        })
+        .unwrap_or_default();
+    if downed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let commitments = downed
+        .iter()
+        .map(|address| address.id().into_commitment_bytes())
+        .collect::<Vec<_>>();
+    Ok(reader
+        .stealth_outputs_get_by_commitments(&commitments)?
+        .into_iter()
+        .filter(|o| downed.contains(&o.to_utxo_address()))
+        .collect())
+}
+
 /// What the transaction's stealth transfers move out of the wallet, one
 /// summary per resource.
 ///
@@ -503,6 +541,10 @@ fn resolve_main_signer(
 /// covers this transaction's body, so the locked outputs bound what the
 /// transaction can take with the wallet's stealth keys, however it routes them.
 ///
+/// Finalizing the transaction marks its spent inputs `Spent` and takes them out
+/// of the lock, so once `transaction_id` has a finalized diff, the wallet
+/// outputs that diff downs are inputs too.
+///
 /// Change is credited only from `Instruction::StealthTransfer` statements,
 /// which the engine executes as written. Change routed any other way counts as
 /// leaving, so a statement walletd cannot read overstates what leaves and never
@@ -512,6 +554,7 @@ fn value_summaries(
     transaction: &UnsignedTransaction,
     status: TransactionRequestStatus,
     lock_ids: &[WalletLockId],
+    transaction_id: Option<TransactionId>,
 ) -> Result<Vec<TransactionRequestValueSummary>, anyhow::Error> {
     // A workspace reference resolves only at execution, so its commitments
     // match a wallet output of any resource.
@@ -534,23 +577,27 @@ fn value_summaries(
         .map(|(_, c)| *c)
         .chain(created.iter().map(|(_, o)| *o.commitment()))
         .collect::<Vec<_>>();
-    let (known, locked_inputs) = context.wallet_sdk().store().with_read_tx(|tx| {
+    // `wallet_inputs` holds the inputs found through the request's locks and the finalized diff.
+    let (known, wallet_inputs) = context.wallet_sdk().store().with_read_tx(|tx| {
         let known = if commitments.is_empty() {
             Vec::new()
         } else {
             tx.stealth_outputs_get_by_commitments(&commitments)?
         };
-        let mut locked_inputs = Vec::new();
+        let mut wallet_inputs = Vec::new();
         for lock_id in lock_ids {
             let outputs = tx.stealth_outputs_get_locked_by_lock_id(*lock_id).optional()?;
-            locked_inputs.extend(
+            wallet_inputs.extend(
                 outputs
                     .into_iter()
                     .flatten()
                     .filter(|o| matches!(o.status, OutputStatus::LockedForSpend)),
             );
         }
-        Ok::<_, anyhow::Error>((known, locked_inputs))
+        if let Some(transaction_id) = transaction_id {
+            wallet_inputs.extend(finalized_wallet_inputs(tx, transaction_id)?);
+        }
+        Ok::<_, anyhow::Error>((known, wallet_inputs))
     })?;
     let wallet_outputs = |resource: Option<ResourceAddress>, commitment: PedersenCommitmentBytes| {
         known
@@ -559,13 +606,13 @@ fn value_summaries(
     };
 
     // (inputs_total, change_total) per resource, in transaction order, then
-    // lock order for locked inputs no statement names.
+    // the order the locks and the finalized diff yield the remaining inputs.
     let mut totals = IndexMap::<ResourceAddress, (u64, u64)>::new();
     let mut inputs = HashSet::new();
     let spent_outputs = spent
         .into_iter()
         .flat_map(|(resource, commitment)| wallet_outputs(resource, commitment))
-        .chain(&locked_inputs);
+        .chain(&wallet_inputs);
     for output in spent_outputs {
         if inputs.insert(output.to_utxo_address()) {
             let (inputs_total, _) = totals.entry(output.resource_address).or_default();
@@ -1136,8 +1183,22 @@ mod tests {
     }
 
     mod value_summaries {
-        use tari_ootle_transaction::{Instruction, ResourceAddressRef, TransactionBuilder, args::WorkspaceOffsetId};
-        use tari_ootle_wallet_sdk::models::StealthOutputModel;
+        use tari_crypto::ristretto::RistrettoSecretKey;
+        use tari_engine_types::{
+            commit_result::{FinalizeResult, TransactionResult},
+            fees::FeeReceipt,
+            substate::{SubstateDiff, SubstateId},
+        };
+        use tari_ootle_common_types::SubstateVersion;
+        use tari_ootle_transaction::{
+            Instruction,
+            ResourceAddressRef,
+            Transaction,
+            TransactionBuilder,
+            args,
+            args::WorkspaceOffsetId,
+        };
+        use tari_ootle_wallet_sdk::models::WalletTransactionUpdate;
         use tari_template_lib_types::{
             Amount,
             ComponentAddress,
@@ -1685,6 +1746,81 @@ mod tests {
                 panic!("expected one summary: {:?}", info.value_summaries);
             };
             assert_eq!(summary.resource_address, TARI_TOKEN);
+            assert_eq!(
+                (summary.inputs_total, summary.change_total, summary.amount_leaving),
+                (500_000, 0, 500_000)
+            );
+        }
+
+        #[tokio::test]
+        async fn a_submitted_request_keeps_its_locked_inputs_after_the_transaction_finalizes() {
+            let wallet = Wallet::start().await;
+            let sdk = wallet.daemon.context.wallet_sdk();
+            let input = wallet_output(2, 500_000, OutputStatus::Unspent);
+            let untouched = wallet_output(3, 7, OutputStatus::Unspent);
+            wallet.add_output(&input);
+            wallet.add_output(&untouched);
+            let lock_id = wallet.tool_lock_over(&input);
+
+            // No statement names the input, as when a template call spends it.
+            let mut req = create_request(vec![lock_id], 60 * 60);
+            req.transaction = UnsignedTransaction::new(Network::LocalNet.as_byte(), Epoch(100));
+            let created = handle_create(&wallet.daemon.context, Some(&wallet.tool), req)
+                .await
+                .unwrap();
+
+            let transaction = Transaction::builder_localnet(Epoch(100))
+                .call_method(account(), "anything", args![])
+                .build_and_seal(&RistrettoSecretKey::from(1u64));
+            let transaction_id = sdk
+                .transaction_api()
+                .insert_new_transaction(transaction, None, &[], false, &[lock_id])
+                .unwrap();
+            let mut diff = SubstateDiff::new();
+            diff.down(SubstateId::Utxo(input.to_utxo_address()), SubstateVersion::ZERO);
+            let finalize = FinalizeResult::new(
+                transaction_id.into_array().into(),
+                vec![],
+                vec![],
+                TransactionResult::Accept(diff.clone()),
+                FeeReceipt::default(),
+            );
+            sdk.store()
+                .with_write_tx(|tx| {
+                    tx.transactions_update(
+                        WalletTransactionUpdate::new(transaction_id)
+                            .with_result(Some(&finalize))
+                            .with_new_status(TransactionStatus::Accepted),
+                    )?;
+                    tx.transaction_request_transition(
+                        created.request_id,
+                        &[TransactionRequestStatus::Pending],
+                        TransactionRequestStatus::Submitting,
+                    )?;
+                    tx.transaction_request_mark_submitted(created.request_id, transaction_id)
+                })
+                .unwrap();
+            sdk.locks_api().finalize_lock(lock_id, &diff).unwrap();
+            assert!(
+                sdk.store()
+                    .with_read_tx(|tx| tx.stealth_outputs_get_locked_by_lock_id(lock_id))
+                    .is_err_and(|e| e.is_not_found_error()),
+                "finalizing the lock takes the spent input out of it"
+            );
+
+            let info = handle_get(
+                &wallet.daemon.context,
+                Some(&wallet.daemon.session),
+                TransactionRequestGetRequest {
+                    request_id: created.request_id,
+                },
+            )
+            .await
+            .unwrap()
+            .request;
+            let [summary] = info.value_summaries.as_slice() else {
+                panic!("expected one summary: {:?}", info.value_summaries);
+            };
             assert_eq!(
                 (summary.inputs_total, summary.change_total, summary.amount_leaving),
                 (500_000, 0, 500_000)

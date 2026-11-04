@@ -552,6 +552,7 @@ impl Replica {
                         .get_transaction_pool_record(tx, substate_store.parent_chain(), id)
                         .unwrap();
                     evaluation.stages.push(rec.current_stage());
+                    evaluation.decisions.push(rec.current_decision());
                     evaluation.executed.push(change_set.transaction_execution(id).is_some());
                 }
                 let (changes, _) = substate_store.into_parts();
@@ -769,6 +770,8 @@ struct Evaluation {
     total_exhaust_burn: u128,
     /// The pending stage of each transaction voted for.
     stages: Vec<TransactionPoolStage>,
+    /// The pending decision of each transaction voted for.
+    decisions: Vec<Decision>,
     /// Whether each transaction voted for has an execution in the block.
     executed: Vec<bool>,
     /// The substates the block puts up.
@@ -2575,8 +2578,11 @@ mod local_accept_before_a_layout_change {
         let (replica, id) = executing_cross_shard();
         let prepare = multishard_atom(&replica.honest_new_multishard_command(&id));
         replica.prepare_in_parent(&prepare);
+        let mut evidence = prepare.evidence.clone();
+        evidence.abort();
         let accept = MultiShardAtom {
             decision: Decision::Abort(AbortReason::EpochExpired),
+            evidence,
             transaction_fee: 0,
             leader_fee: None,
             ..prepare
@@ -2592,28 +2598,36 @@ mod local_accept_before_a_layout_change {
 
         assert!(evaluation.no_vote.is_none(), "{:?}", evaluation.no_vote);
         assert_eq!(evaluation.stages, [TransactionPoolStage::LocalAccepted]);
+        assert_eq!(evaluation.decisions, [Decision::Abort(AbortReason::EpochExpired)]);
     }
 
-    /// A proposer that has not yet seen the layout change aborts the transaction for its own reason with aborted
-    /// evidence, which the prepared evidence of the forced abort refuses whatever the reason.
+    /// A proposer whose oracle does not yet report the layout change aborts the transaction for its own reason. The
+    /// replica takes that reason, so the transaction's SomeAccept matches the proposer's.
     #[test]
-    fn an_abort_with_aborted_evidence_is_refused() {
+    fn an_abort_for_the_proposers_own_reason_is_voted_for_and_recorded() {
         let (replica, accept) = forced_epoch_end_abort();
-        let mut evidence = accept.evidence.clone();
-        evidence.abort();
-        let atom = MultiShardAtom { evidence, ..accept };
+        let atom = MultiShardAtom {
+            decision: Decision::Abort(AbortReason::LockOutputsFailed),
+            ..accept
+        };
 
         let evaluation = replica.evaluate_before_layout_change(&[Command::LocalAccept(atom)]);
 
-        assert!(
-            matches!(
-                evaluation.no_vote,
-                Some(NoVoteReason::InvalidEvidence {
-                    reason: InvalidEvidenceReason::MismatchedEvidence,
-                })
-            ),
-            "{:?}",
-            evaluation.no_vote
-        );
+        assert!(evaluation.no_vote.is_none(), "{:?}", evaluation.no_vote);
+        assert_eq!(evaluation.stages, [TransactionPoolStage::LocalAccepted]);
+        assert_eq!(evaluation.decisions, [Decision::Abort(AbortReason::LockOutputsFailed)]);
+    }
+
+    #[test]
+    fn a_commit_is_refused() {
+        let (replica, accept) = forced_epoch_end_abort();
+        let atom = MultiShardAtom {
+            decision: Decision::Commit,
+            ..accept
+        };
+
+        let evaluation = replica.evaluate_before_layout_change(&[Command::LocalAccept(atom)]);
+
+        assert!(evaluation.no_vote.is_some(), "a commit must not be voted for");
     }
 }

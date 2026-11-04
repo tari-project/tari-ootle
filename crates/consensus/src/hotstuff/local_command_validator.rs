@@ -425,6 +425,7 @@ where
                 .then(|| abort_local_prepared_for_epoch_end(&mut tx_rec))
                 .flatten()
         });
+        let is_forced_abort = forced_abort.is_some();
         if let Some(execution) = forced_abort {
             proposed_block_change_set.add_abort_execution(*tx_rec.id(), execution);
         }
@@ -599,9 +600,12 @@ where
             }
         }
 
-        // The abort reason must match as well as the outcome, as for every other command. A forced epoch-end abort
-        // keeps the prepared evidence, so a leader that aborts for a different reason also proposes aborted evidence
-        // and is refused by the pledge check below in any case.
+        // CONSENSUS RULE: a forced abort accepts any abort the leader proposes. A leader whose oracle does not yet
+        // report the layout change aborts for its own reason, such as a lock failure, and the record takes that
+        // reason so that its later SomeAccept matches.
+        if is_forced_abort && atom.decision.is_abort() {
+            tx_rec.set_local_decision(atom.decision);
+        }
         if tx_rec.current_decision() != atom.decision {
             warn!(
                 target: LOG_TARGET,

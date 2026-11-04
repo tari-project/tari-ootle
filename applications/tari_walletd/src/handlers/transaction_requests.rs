@@ -26,7 +26,6 @@ use tari_ootle_wallet_sdk::{
         KeyId,
         LockOwner,
         OutputStatus,
-        StealthOutputModel,
         TransactionRequestCreatedEvent,
         TransactionRequestId,
         TransactionRequestModel,
@@ -497,37 +496,6 @@ fn resolve_main_signer(
     Ok(TransactionRequestMainSigner::External { public_key })
 }
 
-/// The wallet's stealth outputs that `transaction_id`'s finalized diff downs.
-/// Empty until the wallet stores a finalized result for the transaction.
-fn finalized_wallet_inputs<R: WalletStoreReader>(
-    reader: &mut R,
-    transaction_id: TransactionId,
-) -> Result<Vec<StealthOutputModel>, anyhow::Error> {
-    let Some(transaction) = reader.transactions_get(transaction_id).optional()? else {
-        return Ok(Vec::new());
-    };
-    let downed = transaction
-        .finalized_diff()
-        .map(|diff| {
-            diff.down_iter()
-                .filter_map(|(id, _)| id.as_utxo_address())
-                .collect::<HashSet<_>>()
-        })
-        .unwrap_or_default();
-    if downed.is_empty() {
-        return Ok(Vec::new());
-    }
-    let commitments = downed
-        .iter()
-        .map(|address| address.id().into_commitment_bytes())
-        .collect::<Vec<_>>();
-    Ok(reader
-        .stealth_outputs_get_by_commitments(&commitments)?
-        .into_iter()
-        .filter(|o| downed.contains(&o.to_utxo_address()))
-        .collect())
-}
-
 /// What the transaction's stealth transfers move out of the wallet, one
 /// summary per resource.
 ///
@@ -535,15 +503,12 @@ fn finalized_wallet_inputs<R: WalletStoreReader>(
 /// wallet owns the masks and is the only party that can say "10,000 µT leaves
 /// this account".
 ///
-/// Inputs are every `LockedForSpend` stealth output under the request's locks,
-/// which are the outputs submit signs a spend for, together with any wallet
-/// output an `Instruction::StealthTransfer` statement spends. A spend signature
-/// covers this transaction's body, so the locked outputs bound what the
-/// transaction can take with the wallet's stealth keys, however it routes them.
-///
-/// Finalizing the transaction marks its spent inputs `Spent` and takes them out
-/// of the lock, so once `transaction_id` has a finalized diff, the wallet
-/// outputs that diff downs are inputs too.
+/// Inputs are the outputs `StealthOutputsApi::get_spent_under_locks` returns
+/// for the request's locks, which include every output submit signs a spend
+/// for, together with any wallet output an `Instruction::StealthTransfer`
+/// statement spends. A spend signature covers this transaction's body, so the
+/// locked outputs bound what the transaction can take with the wallet's stealth
+/// keys, however it routes them.
 ///
 /// Change is credited only from `Instruction::StealthTransfer` statements,
 /// which the engine executes as written. Change routed any other way counts as
@@ -577,28 +542,16 @@ fn value_summaries(
         .map(|(_, c)| *c)
         .chain(created.iter().map(|(_, o)| *o.commitment()))
         .collect::<Vec<_>>();
-    // `wallet_inputs` holds the inputs found through the request's locks and the finalized diff.
-    let (known, wallet_inputs) = context.wallet_sdk().store().with_read_tx(|tx| {
-        let known = if commitments.is_empty() {
-            Vec::new()
-        } else {
-            tx.stealth_outputs_get_by_commitments(&commitments)?
-        };
-        let mut wallet_inputs = Vec::new();
-        for lock_id in lock_ids {
-            let outputs = tx.stealth_outputs_get_locked_by_lock_id(*lock_id).optional()?;
-            wallet_inputs.extend(
-                outputs
-                    .into_iter()
-                    .flatten()
-                    .filter(|o| matches!(o.status, OutputStatus::LockedForSpend)),
-            );
-        }
-        if let Some(transaction_id) = transaction_id {
-            wallet_inputs.extend(finalized_wallet_inputs(tx, transaction_id)?);
-        }
-        Ok::<_, anyhow::Error>((known, wallet_inputs))
-    })?;
+    let sdk = context.wallet_sdk();
+    let known = if commitments.is_empty() {
+        Vec::new()
+    } else {
+        sdk.store()
+            .with_read_tx(|tx| tx.stealth_outputs_get_by_commitments(&commitments))?
+    };
+    let wallet_inputs = sdk
+        .stealth_outputs_api()
+        .get_spent_under_locks(lock_ids, transaction_id)?;
     let wallet_outputs = |resource: Option<ResourceAddress>, commitment: PedersenCommitmentBytes| {
         known
             .iter()
@@ -606,7 +559,7 @@ fn value_summaries(
     };
 
     // (inputs_total, change_total) per resource, in transaction order, then
-    // the order the locks and the finalized diff yield the remaining inputs.
+    // the order `get_spent_under_locks` yields the remaining inputs.
     let mut totals = IndexMap::<ResourceAddress, (u64, u64)>::new();
     let mut inputs = HashSet::new();
     let spent_outputs = spent
@@ -1198,7 +1151,7 @@ mod tests {
             args,
             args::WorkspaceOffsetId,
         };
-        use tari_ootle_wallet_sdk::models::WalletTransactionUpdate;
+        use tari_ootle_wallet_sdk::models::{StealthOutputModel, WalletTransactionUpdate};
         use tari_template_lib_types::{
             Amount,
             ComponentAddress,

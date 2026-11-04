@@ -339,6 +339,15 @@ impl<TStore: StateReader> StateTracker<TStore> {
             let component_address = match address_allocation {
                 Some(address_allocation) => {
                     let alloc = state.use_allocated_address(address_allocation.id())?;
+                    if let Some(allocated_template) = alloc.template_address() &&
+                        *allocated_template != template_address
+                    {
+                        return Err(RuntimeError::AddressAllocationTemplateMismatch {
+                            id: address_allocation.id(),
+                            allocated_by: *allocated_template,
+                            used_by: template_address,
+                        });
+                    }
                     alloc.substate_id().as_component_address().ok_or_else(|| {
                         RuntimeError::AddressAllocationTypeMismatch {
                             id: alloc.substate_id().clone(),

@@ -2,6 +2,7 @@
 import type { Decision } from "./Decision";
 import type { Evidence } from "./Evidence";
 import type { LeaderFee } from "./LeaderFee";
+import type { LockedEpoch } from "./LockedEpoch";
 
 export type MultiShardAtom = {
   id: string;
@@ -14,4 +15,9 @@ export type MultiShardAtom = {
    * outputs. That shard group sets it, and every other shard group adopts it.
    */
   fee_intent_only: boolean;
+  /**
+   * The epoch the transaction executes in. Every shard group involved must execute the transaction under this pin.
+   * A shard group that first learns of the transaction from this atom adopts it.
+   */
+  locked_epoch: LockedEpoch;
 };

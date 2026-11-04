@@ -5,7 +5,7 @@ use tari_bor::RawCbor;
 use tari_engine::runtime::RuntimeError;
 use tari_engine_types::hashing::hash_template_code;
 use tari_ootle_transaction::{Epoch, Transaction, args};
-use tari_template_abi::{EngineOp, FunctionDef, TemplateDef, TemplateDefV1, Type};
+use tari_template_abi::{EngineOp, FunctionDef, FunctionKind, TemplateDef, TemplateDefV2, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args::EmitEventArg,
@@ -69,15 +69,14 @@ fn wat_bytes(bytes: &[u8]) -> String {
 /// payload. The `#[template]` macro only produces Rust identifiers as template names, so any other
 /// name needs a module built by hand.
 fn event_emitting_template(template_name: &str, topic: &str) -> Vec<u8> {
-    let template_def = TemplateDef::V1(TemplateDefV1 {
+    let template_def = TemplateDef::V2(TemplateDefV2 {
         template_name: template_name.to_string(),
         abi_version: 0,
         functions: vec![FunctionDef {
             name: "main".to_string(),
+            kind: FunctionKind::Function,
             arguments: vec![],
             output: Type::Unit,
-            is_mut: false,
-            is_migration: false,
         }],
     })
     .encode_for_wasm_embedding()

@@ -1309,11 +1309,28 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(id)
     }
 
+    /// Finds a pending allocation for `address` in any call frame. Naming a pending address grants nothing, so value
+    /// checks and hook template lookups may use this.
     pub fn get_allocated_address_by_address<T: Into<SubstateId>>(&self, address: T) -> Option<&AllocatedAddress> {
         let substate_id = address.into();
         self.address_allocations
             .values()
             .find(|alloc| *alloc.substate_id() == substate_id)
+    }
+
+    /// Finds a pending allocation for `address` that the current call frame holds. Use this wherever holding the
+    /// allocation confers authority, such as skipping a resource auth hook.
+    pub fn get_allocated_address_in_current_scope<T: Into<SubstateId>>(
+        &self,
+        address: T,
+    ) -> Result<Option<&AllocatedAddress>, RuntimeError> {
+        let scope = self.current_call_scope()?;
+        let substate_id = address.into();
+        Ok(self
+            .address_allocations
+            .iter()
+            .find(|(id, alloc)| scope.is_address_allocation_in_scope(**id) && *alloc.substate_id() == substate_id)
+            .map(|(_, alloc)| alloc))
     }
 
     pub fn get_template_for_component(
@@ -1448,6 +1465,18 @@ impl<TStore: StateReader> WorkingState<TStore> {
         // single vault.
         let new_values = diff_values.as_ref().unwrap_or(next_state);
         self.check_all_substates_in_scope(new_values)?;
+
+        // A vault belongs to exactly one component. It starts as an orphan of the frame that created it, which must
+        // attach it before the frame is popped, and attaching it removes it from the orphans. So a newly referenced
+        // vault that is not an orphan here is already held by a component.
+        let scope = self.current_call_scope()?;
+        if let Some(vault_id) = new_values
+            .vault_ids()
+            .iter()
+            .find(|vault_id| !scope.orphans().contains(&SubstateId::from(**vault_id)))
+        {
+            return Err(RuntimeError::VaultAlreadyOwned { vault_id: *vault_id });
+        }
 
         let scope_mut = self.current_call_scope_mut()?;
         for address in next_state.referenced_substates() {

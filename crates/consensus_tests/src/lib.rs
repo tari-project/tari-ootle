@@ -29,6 +29,8 @@ mod foreign_proposal_size;
 #[cfg(test)]
 mod high_pc_block_binding;
 #[cfg(test)]
+mod justify_certificate;
+#[cfg(test)]
 mod last_voted_persistence;
 #[cfg(test)]
 mod leader_failure;

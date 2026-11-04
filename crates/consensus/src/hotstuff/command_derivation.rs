@@ -9,18 +9,20 @@ use std::{fmt, fmt::Display, num::NonZeroU64};
 
 use tari_consensus_types::Decision;
 use tari_engine_types::substate::SubstateDiff;
-use tari_ootle_common_types::{ShardGroup, committee::CommitteeInfo};
+use tari_ootle_common_types::{Epoch, ShardGroup, committee::CommitteeInfo};
 use tari_ootle_storage::consensus_models::{
     Command,
     InvalidEvidenceReason,
     LeaderFee,
     LocalOnlyAtom,
+    LockedEpoch,
     MultiShardAtom,
     NoVoteReason,
     TransactionExecution,
     TransactionPoolRecord,
     TransactionPoolStage,
 };
+use tari_ootle_transaction::TransactionId;
 
 use crate::hotstuff::{
     error::HotStuffError,
@@ -236,7 +238,7 @@ pub(super) fn derive_new_multishard_command(
     Ok(DerivedCommand {
         command: NewMultiShardCommand {
             kind,
-            atom: pool_record.get_current_multi_shard_atom(),
+            atom: pool_record.get_current_multi_shard_atom()?,
         },
         pool_record,
         execution,
@@ -298,7 +300,65 @@ pub(super) fn new_multishard_disagreement(
             reason: InvalidEvidenceReason::MismatchedEvidence,
         });
     }
-    None
+    locked_epoch_disagreement(Some(&derived.locked_epoch), proposed)
+}
+
+/// The reason a replica refuses `proposed` when the transaction is pinned to `local` here. Every shard group involved
+/// in the transaction adopts the pin the atom carries, so the atom must carry the pin the transaction executes under.
+pub(super) fn locked_epoch_disagreement(
+    local: Option<&LockedEpoch>,
+    proposed: &MultiShardAtom,
+) -> Option<NoVoteReason> {
+    (local != Some(&proposed.locked_epoch)).then(|| NoVoteReason::LockedEpochDisagreement {
+        transaction_id: proposed.id,
+        local: local.cloned(),
+        proposed: proposed.locked_epoch.clone(),
+    })
+}
+
+/// A transaction at the New stage that cannot be sequenced yet: it is pinned to a later epoch than the block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct PinnedAfterBlock {
+    pub locked_epoch: Epoch,
+    pub block_epoch: Epoch,
+}
+
+impl PinnedAfterBlock {
+    pub fn into_no_vote(self, transaction_id: TransactionId) -> NoVoteReason {
+        NoVoteReason::LockedEpochAfterBlock {
+            transaction_id,
+            locked_epoch: self.locked_epoch,
+            block_epoch: self.block_epoch,
+        }
+    }
+}
+
+/// Pins a transaction at the New stage for sequencing in a block pinned to `block_locked_epoch`.
+///
+/// A shard group holding inputs of the transaction pins it to the earliest pin of any block that prepares it, its own
+/// included, and every input shard group converges on that pin before sending its LocalAccept. A shard group holding
+/// none of its inputs learns that pin from the foreign LocalAccepts, which all carry it, and must execute under exactly
+/// it: its own block's pin may be earlier, or name a lower rate for the same epoch. Such a shard group waits until its
+/// own epoch reaches the pin, so no block carries a transaction pinned to a later epoch than the block.
+pub(super) fn pin_new_transaction(
+    pool_record: &mut TransactionPoolRecord,
+    block_locked_epoch: &LockedEpoch,
+    local_shard_group: ShardGroup,
+) -> Result<(), PinnedAfterBlock> {
+    match pool_record.locked_epoch() {
+        Some(pin) if !pool_record.evidence().has_inputs(local_shard_group) => {
+            if pin.epoch() > block_locked_epoch.epoch() {
+                return Err(PinnedAfterBlock {
+                    locked_epoch: pin.epoch(),
+                    block_epoch: block_locked_epoch.epoch(),
+                });
+            }
+        },
+        _ => {
+            pool_record.update_locked_epoch(block_locked_epoch.clone());
+        },
+    }
+    Ok(())
 }
 
 /// The reason a replica refuses `proposed` when it commits a different part of the transaction than the leader.

@@ -82,7 +82,7 @@ fn it_sets_migrate_to_true_in_the_function_def() {
     ]);
     let t2 = test.get_module("TemplateV2"); // Load v2 module
     let migrate_fn = t2.template_def().get_function("migrate_v1_to_v2").unwrap();
-    assert!(migrate_fn.is_migration);
+    assert!(migrate_fn.is_migration());
 }
 
 #[test]

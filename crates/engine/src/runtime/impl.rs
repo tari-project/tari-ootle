@@ -57,7 +57,7 @@ use tari_ootle_transaction::{
     ResourceAddressRef,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
 };
-use tari_template_abi::{FunctionDef, TemplateDef, Type};
+use tari_template_abi::{FunctionDef, FunctionKind, TemplateDef, Type};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, is_builtin_template_address};
 use tari_template_lib::{
     SpendContext,
@@ -812,17 +812,6 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
 
-        if func.arguments.len() != 3 {
-            return Err(RuntimeError::InvalidArgument {
-                argument,
-                reason: format!(
-                    "Authorize hook '{}' must take 3 arguments (incl &self), but found {}",
-                    hook,
-                    func.arguments.len()
-                ),
-            });
-        }
-
         if !func.has_receiver() {
             return Err(RuntimeError::InvalidArgument {
                 argument,
@@ -830,8 +819,19 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
 
+        if func.arguments.len() != 2 {
+            return Err(RuntimeError::InvalidArgument {
+                argument,
+                reason: format!(
+                    "Authorize hook '{}' must take 2 arguments after self, but found {}",
+                    hook,
+                    func.arguments.len()
+                ),
+            });
+        }
+
         if !matches!(
-            func.arguments.get(1).expect("length checked").arg_type.other(),
+            func.arguments.first().expect("length checked").arg_type.other(),
             Some("ResourceAuthAction")
         ) {
             return Err(RuntimeError::InvalidArgument {
@@ -841,7 +841,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         }
 
         if !matches!(
-            func.arguments.get(2).expect("length checked").arg_type.other(),
+            func.arguments.get(1).expect("length checked").arg_type.other(),
             Some("AuthHookCaller")
         ) {
             return Err(RuntimeError::InvalidArgument {
@@ -854,21 +854,14 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     }
 
     /// Validates the shape of a spend-script predicate `FunctionDef`, mirroring `check_resource_auth_hook`. A spend
-    /// script must be a non-mutable, unit-returning function whose last argument is a `SpendContext`. The mutability
-    /// rule is load-bearing: a mutable predicate could take a write lock and cause side effects, defeating the
-    /// read-only guarantee.
+    /// script must be a unit-returning static function whose last argument is a `SpendContext`. Taking no component
+    /// is load-bearing: a predicate that locked a component could write it, defeating the read-only guarantee.
     fn validate_spend_script_signature(func: &FunctionDef) -> Result<(), RuntimeError> {
-        if func.is_mut {
-            return Err(RuntimeError::InvalidArgument {
-                argument: "TemplateFunction",
-                reason: format!("spend script function '{}' must not be mutable", func.name),
-            });
-        }
-        if func.has_receiver() {
+        if func.kind != FunctionKind::Function {
             return Err(RuntimeError::InvalidArgument {
                 argument: "TemplateFunction",
                 reason: format!(
-                    "spend script function '{}' must be a template function, not a method taking &self",
+                    "spend script function '{}' must be a template function, not a method or a migration",
                     func.name
                 ),
             });

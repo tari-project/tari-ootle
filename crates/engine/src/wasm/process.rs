@@ -613,10 +613,10 @@ impl WasmProcess {
     ) -> Result<IndexedValue, WasmExecutionError> {
         let main_name = format!("{}_main", self.module.template_name());
         let func: MainFunction = self.instance.exports.get_typed_function(store, &main_name)?;
-        if func_def.arguments.len() != args.len() {
+        if func_def.num_call_args() != args.len() {
             return Err(WasmExecutionError::InvalidArgumentCount {
                 name: func_def.name.clone(),
-                expected: func_def.arguments.len(),
+                expected: func_def.num_call_args(),
                 actual: args.len(),
             });
         }

@@ -342,6 +342,7 @@ impl NetworkWideStateSync {
                                     },
                                 }
                             },
+                            Ok(EpochManagerEvent::PendingActivation { .. }) => Ok(()),
                             Err(broadcast::error::RecvError::Lagged(n)) => {
                                 warn!(target: LOG_TARGET, "⚠️ Missed {n} epoch event(s). Re-planning the state sync");
                                 Ok(())

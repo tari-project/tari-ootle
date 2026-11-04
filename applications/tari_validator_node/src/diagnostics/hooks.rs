@@ -243,6 +243,9 @@ fn classify(
         // only remaining way to leave it other than by finishing.
         (ConsensusCurrentState::Syncing, ConsensusCurrentState::Shutdown, _) => ("consensus.state_transition", Info),
         (ConsensusCurrentState::Syncing, _, _) => ("sync.completed", Info),
+        (_, ConsensusCurrentState::Presyncing, _) => ("presync.started", Info),
+        (ConsensusCurrentState::Presyncing, ConsensusCurrentState::Shutdown, _) => ("consensus.state_transition", Info),
+        (ConsensusCurrentState::Presyncing, _, _) => ("presync.completed", Info),
         _ => ("consensus.state_transition", Info),
     }
 }

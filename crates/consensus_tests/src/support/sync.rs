@@ -11,6 +11,7 @@ use tari_consensus::{
     traits::{SyncManager, SyncStatus},
 };
 use tari_engine_types::Epoch;
+use tari_ootle_common_types::ShardGroup;
 
 /// Reports the node as up to date, unless a test asks for the next check to report it behind.
 ///
@@ -45,6 +46,10 @@ impl SyncManager for TestSyncManager {
 
     async fn sync(&mut self, _target_epoch: Option<Epoch>) -> Result<(), Self::Error> {
         self.num_syncs.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn presync(&mut self, _shard_group: ShardGroup) -> Result<(), Self::Error> {
         Ok(())
     }
 }

@@ -1412,20 +1412,11 @@ pub async fn handle_confidential_transfer(
             })
             .await?;
 
-        // `transfer` links its lock to the transaction, and only a stored transaction resolves a linked lock. A dry
-        // run is never stored, and a failed submission may leave nothing stored.
         let transaction_id = transfer.transaction.calculate_id();
         if req.dry_run {
             let result = transaction_service
                 .submit_dry_run_transaction(transfer.transaction)
-                .await;
-            if let Err(release_err) = sdk.transaction_api().release_locks_of_unstored_transaction(transaction_id) {
-                warn!(
-                    target: LOG_TARGET,
-                    "Dry-run transfer {transaction_id} locked inputs could not be released: {release_err}"
-                );
-            }
-            let result = result?;
+                .await?;
             return Ok(ConfidentialTransferResponse {
                 transaction_id,
                 required_fees: Some(result.finalize.required_fees()),
@@ -1433,6 +1424,8 @@ pub async fn handle_confidential_transfer(
             });
         }
 
+        // `transfer` links its lock to a submitted transaction, and only a stored transaction resolves a linked lock;
+        // a failed submission may leave nothing stored.
         let mut linked_accounts = vec![source_account_address];
         linked_accounts.extend(owned_destination);
         let submission = transaction_service

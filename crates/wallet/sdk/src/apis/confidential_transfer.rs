@@ -87,7 +87,7 @@ where TSpec: WalletSdkSpec
     }
 
     #[allow(clippy::too_many_lines)]
-    pub fn resolved_inputs_for_transfer(
+    fn resolved_inputs_for_transfer(
         &self,
         lock_id: WalletLockId,
         from_account: ComponentAddress,
@@ -533,6 +533,8 @@ where TSpec: WalletSdkSpec
 
 pub struct TransferOutput {
     pub transaction: Transaction,
+    /// Lock ID holding the inputs and change output for this transfer. Meaningful only when `params.is_dry_run` is
+    /// `false`; on a dry run, the lock is released before `transfer` returns.
     pub transaction_proof_id: WalletLockId,
 }
 

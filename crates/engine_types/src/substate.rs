@@ -30,7 +30,7 @@ use std::{
 use borsh::{BorshDeserialize, BorshSerialize};
 use ootle_network::Network;
 use serde::{Deserialize, Serialize};
-use tari_bor::{BorError, decode_exact_with_max_depth, decode_with_max_depth, encode};
+use tari_bor::{BorError, decode_exact_with_max_depth, encode};
 use tari_template_lib::types::{
     ClaimedOutputTombstoneAddress,
     ComponentAddress,
@@ -110,7 +110,7 @@ impl Substate {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, BorError> {
-        decode_with_max_depth(bytes, limits::MAX_CBOR_NESTING_DEPTH)
+        decode_exact_with_max_depth(bytes, limits::MAX_CBOR_NESTING_DEPTH)
     }
 
     pub fn to_value_hash(&self, network: Network, epoch: Epoch) -> Hash32 {
@@ -1174,6 +1174,23 @@ mod tests {
                 hash_substate(NETWORK, &v, SubstateVersion::ZERO, Epoch::zero()),
                 hash_substate(NETWORK, &v, SubstateVersion::new(1), Epoch::zero())
             );
+        }
+    }
+
+    mod substate_from_bytes_exact {
+        use super::*;
+
+        fn sample_value() -> SubstateValue {
+            SubstateValue::ClaimedOutputTombstone(ClaimedOutputTombstone { value: 1 })
+        }
+
+        #[test]
+        fn rejects_substate_from_bytes_with_trailing_bytes() {
+            let substate = Substate::new(SubstateVersion::ZERO, sample_value());
+            let mut bytes = substate.to_bytes();
+            bytes.extend_from_slice(b"trailing_malicious_bytes");
+            let err = Substate::from_bytes(&bytes).unwrap_err();
+            assert!(err.to_string().contains("remaining on input"));
         }
     }
 }

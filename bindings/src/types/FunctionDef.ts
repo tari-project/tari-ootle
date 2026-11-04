@@ -7,8 +7,8 @@ export type FunctionDef = {
   name: string;
   kind: FunctionKind;
   /**
-   * The parameters the caller supplies, in declaration order. A method's receiver and a migration's previous state
-   * are in [`Self::kind`], not here.
+   * The parameters the caller supplies, in declaration order. [`Self::kind`] carries a method's receiver and a
+   * migration's previous state, which precede them in the Rust signature.
    */
   arguments: Array<ArgDef>;
   output: Type;

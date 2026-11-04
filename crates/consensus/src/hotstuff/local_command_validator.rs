@@ -259,6 +259,7 @@ where
     }
 
     /// Evaluates a `proposed_kind` command proposed for a transaction at the New stage.
+    #[allow(clippy::too_many_lines)]
     fn evaluate_new_multishard_command<TTx: StateStoreReadTransaction>(
         &self,
         mut tx_rec: TransactionPoolRecord,

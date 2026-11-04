@@ -1734,7 +1734,7 @@ mod tests {
                 transaction_fee: 100,
                 leader_fee: None,
                 fee_intent_only: false,
-                locked_epoch: LockedEpoch::zero(),
+                locked_epoch: fixture.genesis.to_locked_epoch(),
             };
             let block_1 = fixture.make_block(
                 &fixture.genesis,

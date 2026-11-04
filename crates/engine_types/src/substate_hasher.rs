@@ -23,8 +23,6 @@ use crate::{
     vault::Vault,
 };
 
-/// The substate hash preimage, tagged with the protocol version it was written under so that no two versions
-/// share a preimage.
 /// The substate value preimage, one variant per protocol version. The variant tag is part of the preimage, so a
 /// value hashes differently under each version.
 #[derive(Debug, Clone, Copy, borsh::BorshSerialize)]
@@ -257,9 +255,9 @@ pub enum SubstateValueCborHashMessage<'a> {
 impl<'a> From<&'a SubstateValue> for SubstateValueCborHashMessage<'a> {
     fn from(value: &'a SubstateValue) -> Self {
         match value {
-            SubstateValue::Component(component) => Self::Component {
-                header: Cbor(&component.header),
-                body: CborHash(&component.body),
+            SubstateValue::Component(Component { header, body }) => Self::Component {
+                header: Cbor(header),
+                body: CborHash(body),
             },
             SubstateValue::Resource(resource) => Self::Resource(Cbor(resource.as_ref())),
             SubstateValue::Vault(vault) => Self::Vault(Cbor(vault)),
@@ -441,6 +439,7 @@ mod tests {
     use ootle_network::Network;
     use tari_template_lib::types::{
         AccessRule,
+        EncryptedData,
         EntityId,
         Metadata,
         ObjectKey,
@@ -449,18 +448,21 @@ mod tests {
         SubstateOwnerRule,
         TemplateAddress,
         access_rules::{ComponentAccessRules, ResourceAccessRules, UpdateRule},
-        crypto::RistrettoPublicKeyBytes,
+        crypto::{RistrettoPublicKeyBytes, UtxoTag},
+        stealth::SpendAuthorization,
     };
 
     use super::*;
     use crate::{
         Epoch,
         SubstateVersion,
+        crypto::OutputBody,
         fees::{FeeBreakdown, FeeReceipt, FeeSource},
         published_template::{TemplateBlob, TemplateName},
         resource_container::ResourceContainer,
         substate::{hash_published_template_metadata, hash_substate},
         transaction_receipt::{DiffSummary, FinalizeOutcome},
+        utxo::UtxoOutput,
     };
 
     /// The non-fungible data rule is spelled out so that the pinned hash moves only with the preimage format.
@@ -814,6 +816,56 @@ mod tests {
     /// variant inserted anywhere but after `Utxo` shifts one of these tags. `ConfidentialOutput` is
     /// last, where an append is the only move and is safe. The two leading bytes are the
     /// `SubstateHashMessage` version tag and the value tag.
+    /// One value per type that the other version 1 pins leave out, so that a change to any type's encoding fails here.
+    #[test]
+    fn version_1_hash_of_every_other_type_is_pinned() {
+        let output = OutputBody {
+            public_nonce: RistrettoPublicKeyBytes::from_bytes(&[2u8; 32]).unwrap(),
+            encrypted_data: EncryptedData::empty(),
+            minimum_value_promise: 11,
+            viewable_balance: None,
+        };
+        let values = [
+            (
+                SubstateValue::Vault(Vault::new(ResourceContainer::non_fungible(
+                    ResourceAddress::new(ObjectKey::from_array([1u8; ObjectKey::LENGTH])),
+                    BTreeSet::new(),
+                ))),
+                "6c971b3745518e4f168b1713d13b543a518fea0dba826fb4986890ffbed3aa27",
+            ),
+            (
+                SubstateValue::NonFungible(NonFungibleContainer::new(
+                    tari_bor::Value::Integer(1.into()),
+                    tari_bor::Value::Null,
+                )),
+                "73d230102f65ad78d3c9ef94cda1ce74f1dfe1ff1d3f71e3ad4993daafc226ca",
+            ),
+            (
+                SubstateValue::ClaimedOutputTombstone(ClaimedOutputTombstone { value: 1 }),
+                "3f936da5906c8894dde118ba72ce1ce6fac41192a4f03f491aa6962e8bfcdd3d",
+            ),
+            (
+                SubstateValue::ValidatorFeePool(ValidatorFeePool::new(RistrettoPublicKeyBytes::default(), 5)),
+                "abf9f17fec650232238efef74b8a6c2416b62f1cd89999e32c658d9212d26701",
+            ),
+            (
+                SubstateValue::Utxo(Utxo::new(UtxoOutput {
+                    output: output.clone(),
+                    auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::from_bytes(&[3u8; 32]).unwrap()),
+                    tag: UtxoTag::new(4),
+                })),
+                "fbfd477a67bf6983ee391e98b7b15584b594090628ef34ebd79d18ebefc1aec0",
+            ),
+            (
+                SubstateValue::ConfidentialOutput(ConfidentialOutput::new(output)),
+                "21334cfbe386757cbd370e05b1431831e204dba322017a4fcc75e15aef245a06",
+            ),
+        ];
+        for (value, expected) in &values {
+            assert_eq!(hex(hash_at(ProtocolVersion::V1, value)), *expected, "{value:?}");
+        }
+    }
+
     #[test]
     fn value_tags_are_stable() {
         let values: Vec<(u8, SubstateValue)> = vec![

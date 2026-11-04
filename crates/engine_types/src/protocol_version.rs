@@ -57,9 +57,9 @@ impl ProtocolVersion {
     const fn activations(network: Network) -> &'static [(Epoch, Self)] {
         match network {
             Network::MainNet => &[(Epoch(0), Self::V1)],
-            Network::StageNet => &[(Epoch(0), Self::V0), (V1_ACTIVATION_UNSCHEDULED, Self::V1)],
-            Network::NextNet => &[(Epoch(0), Self::V0), (V1_ACTIVATION_UNSCHEDULED, Self::V1)],
-            Network::Igor => &[(Epoch(0), Self::V0), (V1_ACTIVATION_UNSCHEDULED, Self::V1)],
+            Network::StageNet => &[(Epoch(0), Self::V1)],
+            Network::NextNet => &[(Epoch(0), Self::V1)],
+            Network::Igor => &[(Epoch(0), Self::V1)],
             Network::Esmeralda => &[(Epoch(0), Self::V0), (V1_ACTIVATION_UNSCHEDULED, Self::V1)],
             Network::LocalNet => &[(Epoch(0), Self::V0), (LOCALNET_V1_ACTIVATION, Self::V1)],
         }
@@ -288,14 +288,13 @@ mod tests {
             .collect()
     }
 
-    /// MainNet has not launched, so it starts at the newest version. Every other network has history under V0.
+    /// Esmeralda and LocalNet have history under V0. Every other network has none, so it starts at the newest version.
     #[test]
-    fn mainnet_starts_at_v1_and_every_other_network_at_v0() {
+    fn networks_without_history_start_at_v1() {
         for network in all_networks() {
-            let expected = if network == Network::MainNet {
-                ProtocolVersion::V1
-            } else {
-                ProtocolVersion::V0
+            let expected = match network {
+                Network::Esmeralda | Network::LocalNet => ProtocolVersion::V0,
+                _ => ProtocolVersion::V1,
             };
             assert_eq!(ProtocolVersion::genesis(network), expected, "{network}");
         }
@@ -313,18 +312,14 @@ mod tests {
 
     #[test]
     fn an_unscheduled_activation_is_never_reached() {
-        for network in [Network::StageNet, Network::NextNet, Network::Igor, Network::Esmeralda] {
-            assert_eq!(
-                ProtocolVersion::newest_scheduled_activation(network),
-                Some((V1_ACTIVATION_UNSCHEDULED, ProtocolVersion::V1)),
-                "{network}"
-            );
-            assert_eq!(
-                ProtocolVersion::at(network, Epoch(u64::MAX - 1)),
-                ProtocolVersion::V0,
-                "{network}"
-            );
-        }
+        assert_eq!(
+            ProtocolVersion::newest_scheduled_activation(Network::Esmeralda),
+            Some((V1_ACTIVATION_UNSCHEDULED, ProtocolVersion::V1))
+        );
+        assert_eq!(
+            ProtocolVersion::at(Network::Esmeralda, Epoch(u64::MAX - 1)),
+            ProtocolVersion::V0
+        );
     }
 
     #[test]

@@ -1,11 +1,19 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, fmt::Display, num::NonZeroU64, time::Instant};
+use std::{collections::HashMap, fmt::Display, num::NonZeroU64, ops::Deref, time::Instant};
 
 use log::*;
 use ootle_byte_type::ToByteType;
-use tari_consensus_types::{BlockId, HighPc, HighestSeenBlock, LeafBlock, ProposalCertificate, TimeoutCertificate};
+use tari_consensus_types::{
+    BlockId,
+    HighPc,
+    HighestSeenBlock,
+    LastProposed,
+    LeafBlock,
+    ProposalCertificate,
+    TimeoutCertificate,
+};
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_engine_types::{commit_result::RejectReason, fees::FeeScaleSchedule};
 use tari_epoch_manager::EpochManagerReader;
@@ -23,6 +31,8 @@ use tari_ootle_common_types::{
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
+    StateStoreWriteTransaction,
+    StorageError,
     consensus_models::{
         Block,
         BlockCommands,
@@ -59,7 +69,12 @@ use crate::{
         apply_leader_fee_to_substate_store,
         block_change_set::ProposedBlockChangeSet,
         calculate_state_merkle_root,
-        command_derivation::{DerivedCommand, derive_local_only_command, derive_new_multishard_command},
+        command_derivation::{
+            DerivedCommand,
+            derive_local_only_command,
+            derive_new_multishard_command,
+            pin_new_transaction,
+        },
         epoch_state::EpochState,
         error::HotStuffError,
         exceeds_block_foreign_proposal_bytes,
@@ -225,6 +240,8 @@ where TConsensusSpec: ConsensusSpec
                     );
                     ForeignProposalRecord::set_status_by_id(tx, &block_id, ForeignProposalStatus::Invalid, None)?;
                 }
+
+                drop_executions_of_uninserted_proposal(tx, epoch)?;
 
                 // Add executions for this block
                 if !executed_transactions.is_empty() {
@@ -933,8 +950,17 @@ where TConsensusSpec: ConsensusSpec
             pool_tx.id(),
         );
 
-        // Update locked epoch if needed
-        pool_tx.update_locked_epoch(locked_epoch.clone());
+        if let Err(pinned_after) = pin_new_transaction(&mut pool_tx, locked_epoch, local_committee_info.shard_group()) {
+            info!(
+                target: LOG_TARGET,
+                "📌 PROPOSE: transaction {} is pinned to {}, after this block's {}. Deferring it until this shard \
+                 group reaches that epoch",
+                pool_tx.id(),
+                pinned_after.locked_epoch,
+                pinned_after.block_epoch,
+            );
+            return Ok(None);
+        }
 
         let prepared = self
             .transaction_manager
@@ -1047,7 +1073,7 @@ where TConsensusSpec: ConsensusSpec
     ) -> Result<Option<Command>, HotStuffError> {
         // Only set to abort if either the local or one or more foreign shards decided to ABORT
         if tx_rec.current_decision().is_abort() {
-            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom())));
+            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom()?)));
         }
 
         let locked_epoch = tx_rec.locked_epoch().ok_or_else(|| {
@@ -1112,7 +1138,7 @@ where TConsensusSpec: ConsensusSpec
             );
 
             executed_transactions.insert(*tx_rec.id(), execution);
-            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom())));
+            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom()?)));
         }
 
         tx_rec.update_from_execution(
@@ -1139,7 +1165,7 @@ where TConsensusSpec: ConsensusSpec
         executed_transactions: &HashMap<TransactionId, TransactionExecution>,
     ) -> Result<Option<Command>, HotStuffError> {
         if tx_rec.current_decision().is_abort() {
-            return Ok(Some(Command::SomeAccept(tx_rec.get_current_multi_shard_atom())));
+            return Ok(Some(Command::SomeAccept(tx_rec.get_current_multi_shard_atom()?)));
         }
 
         // A foreign proposal in this block may have replaced the stored execution with its fee-intent commit
@@ -1198,7 +1224,7 @@ where TConsensusSpec: ConsensusSpec
         &self,
         tx_rec: &TransactionPoolRecord,
     ) -> Result<MultiShardAtom, HotStuffError> {
-        let mut atom = tx_rec.get_current_multi_shard_atom();
+        let mut atom = tx_rec.get_current_multi_shard_atom()?;
         if tx_rec.current_decision().is_commit() {
             let num_involved_shard_groups = tx_rec.evidence().num_shard_groups();
             let involved = NonZeroU64::new(num_involved_shard_groups as u64).ok_or_else(|| {
@@ -1323,6 +1349,25 @@ fn select_foreign_proposals(
 /// operates on the weight budget.
 fn subtract_weight_checked(remaining_weight: Option<u64>, by: u64) -> Option<u64> {
     remaining_weight.and_then(|w| w.checked_sub(by)).filter(|w| *w > 0)
+}
+
+/// Drops the executions of this node's last proposal in `epoch` if that proposal was never inserted.
+///
+/// `OnPropose` records a proposal's executions before its block is inserted, so a proposal that is never inserted
+/// leaves executions with no block. Execution reuse rejects them within the epoch because the block is absent, but not
+/// in a later epoch, where epoch GC has pruned committed blocks too. This runs before each proposal and in the
+/// transaction that ends the epoch, which precedes any pruning of the epoch's blocks, so they do not outlive it.
+pub(crate) fn drop_executions_of_uninserted_proposal<TTx>(tx: &mut TTx, epoch: Epoch) -> Result<(), StorageError>
+where
+    TTx: StateStoreWriteTransaction + Deref,
+    TTx::Target: StateStoreReadTransaction,
+{
+    if let Some(previous) = LastProposed::get(&**tx, epoch).optional()? &&
+        !Block::record_exists(&**tx, &previous.block_id)?
+    {
+        tx.block_transaction_executions_remove_any_by_block_id(&previous.block_id)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

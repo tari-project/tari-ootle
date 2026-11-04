@@ -1309,11 +1309,28 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(id)
     }
 
+    /// Finds a pending allocation for `address` in any call frame. Naming a pending address grants nothing, so value
+    /// checks and hook template lookups may use this.
     pub fn get_allocated_address_by_address<T: Into<SubstateId>>(&self, address: T) -> Option<&AllocatedAddress> {
         let substate_id = address.into();
         self.address_allocations
             .values()
             .find(|alloc| *alloc.substate_id() == substate_id)
+    }
+
+    /// Finds a pending allocation for `address` that the current call frame holds. Use this wherever holding the
+    /// allocation confers authority, such as skipping a resource auth hook.
+    pub fn get_allocated_address_in_current_scope<T: Into<SubstateId>>(
+        &self,
+        address: T,
+    ) -> Result<Option<&AllocatedAddress>, RuntimeError> {
+        let scope = self.current_call_scope()?;
+        let substate_id = address.into();
+        Ok(self
+            .address_allocations
+            .iter()
+            .find(|(id, alloc)| scope.is_address_allocation_in_scope(**id) && *alloc.substate_id() == substate_id)
+            .map(|(_, alloc)| alloc))
     }
 
     pub fn get_template_for_component(
@@ -1973,28 +1990,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 return Err(RuntimeError::ReferencedSubstateNotFound { id: id.clone() });
             }
         }
-        for bucket_id in value.bucket_ids() {
-            if !self.buckets().contains_key(bucket_id) {
-                return Err(RuntimeError::BucketNotInScope { bucket_id: *bucket_id });
-            }
-        }
-        for proof_id in value.proof_ids() {
-            if !self.proofs().contains_key(proof_id) {
-                return Err(RuntimeError::ProofNotInScope { proof_id: *proof_id });
-            }
-        }
-        for allocation in value.component_address_allocations() {
-            if !self.address_allocations.contains_key(&allocation.id()) {
-                return Err(RuntimeError::AddressAllocationNotInScope { id: allocation.id() });
-            }
-        }
-        for allocation in value.resource_address_allocations() {
-            if !self.address_allocations.contains_key(&allocation.id()) {
-                return Err(RuntimeError::AddressAllocationNotInScope { id: allocation.id() });
-            }
-        }
-
-        Ok(())
+        self.check_capabilities_held(value)
     }
 
     pub fn check_all_substates_in_scope(&self, value: &IndexedWellKnownTypes) -> Result<(), RuntimeError> {
@@ -2021,34 +2017,39 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 // OK
             }
         }
+        self.check_capabilities_held(value)
+    }
+
+    /// Requires the current frame to hold every bucket, proof and address allocation `value` names. Naming one in an
+    /// argument or a return value passes it on, so a frame may name only what it holds: a proof it was shown is
+    /// already its caller's. A bucket or allocation this frame lent to a callee stays in its scope after the callee
+    /// consumes it, so membership is checked together with liveness.
+    fn check_capabilities_held(&self, value: &IndexedWellKnownTypes) -> Result<(), RuntimeError> {
+        let scope = self.current_call_scope()?;
         for bucket_id in value.bucket_ids() {
-            if !scope.is_bucket_in_scope(*bucket_id) {
+            if !scope.is_bucket_in_scope(*bucket_id) || !self.buckets.contains_key(bucket_id) {
                 return Err(RuntimeError::BucketNotInScope { bucket_id: *bucket_id });
             }
         }
         for proof_id in value.proof_ids() {
             scope.require_held_proof(proof_id)?;
         }
-        for allocation in value.component_address_allocations() {
-            if !scope.is_address_allocation_in_scope(allocation.id()) {
-                return Err(RuntimeError::AddressAllocationNotInScope { id: allocation.id() });
+        let allocation_ids = value
+            .component_address_allocations()
+            .iter()
+            .map(|allocation| allocation.id())
+            .chain(
+                value
+                    .resource_address_allocations()
+                    .iter()
+                    .map(|allocation| allocation.id()),
+            );
+        for id in allocation_ids {
+            if !scope.is_address_allocation_in_scope(id) || !self.address_allocations.contains_key(&id) {
+                return Err(RuntimeError::AddressAllocationNotInScope { id });
             }
         }
-        for allocation in value.resource_address_allocations() {
-            if !scope.is_address_allocation_in_scope(allocation.id()) {
-                return Err(RuntimeError::AddressAllocationNotInScope { id: allocation.id() });
-            }
-        }
-
         Ok(())
-    }
-
-    pub fn buckets(&self) -> &HashMap<BucketId, Bucket> {
-        &self.buckets
-    }
-
-    pub fn proofs(&self) -> &HashMap<ProofId, Proof> {
-        &self.proofs
     }
 
     pub fn push_log(&mut self, log: LogEntry) -> Result<&LogEntry, RuntimeError> {
@@ -2461,7 +2462,96 @@ fn exhaust_burn_share(paid: u64, rate: ExhaustBurnRate) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use tari_template_lib::{
+        models::{Bucket, ComponentAddressAllocation, Proof},
+        types::ObjectKey,
+    };
+
     use super::*;
+    use crate::{runtime::scope::PushCallFrame, state_store::memory::MemoryStateStore};
+
+    fn test_working_state() -> WorkingState<MemoryStateStore> {
+        WorkingState::new(
+            MemoryStateStore::new(),
+            VirtualSubstates::empty(),
+            CallScope::new(),
+            HashSet::new(),
+            Hash32::zero(),
+            Hash32::zero(),
+            ExhaustBurnRate::new(0),
+            FeeScale::default(),
+            Network::LocalNet,
+            false,
+        )
+    }
+
+    #[test]
+    fn check_all_substates_known_rejects_capabilities_outside_current_call_scope() {
+        let mut state = test_working_state();
+        let bucket_id = BucketId::from(0u32);
+        let proof_id = ProofId::from(0u32);
+        let comp_addr = ComponentAddress::from_array([1u8; ObjectKey::LENGTH]);
+        let resx_addr = ResourceAddress::new(ObjectKey::from_array([2u8; ObjectKey::LENGTH]));
+
+        state
+            .new_bucket(
+                bucket_id,
+                ResourceContainer::public_fungible(STEALTH_TARI_RESOURCE_ADDRESS, Amount::from(10u64)),
+            )
+            .unwrap();
+        state
+            .new_proof(
+                proof_id,
+                LockedResource::new(
+                    ContainerRef::Runtime,
+                    ResourceContainer::public_fungible(STEALTH_TARI_RESOURCE_ADDRESS, Amount::from(10u64)),
+                ),
+            )
+            .unwrap();
+        let comp_alloc_id = state.new_address_allocation(comp_addr).unwrap();
+        let resx_alloc_id = state.new_address_allocation(resx_addr).unwrap();
+
+        let child_frame = PushCallFrame::Static {
+            template_address: TemplateAddress::default(),
+            module_name: "Child".to_string(),
+            arg_scope: IndexedWellKnownTypes::new(),
+            entity_id: EntityId::default(),
+        }
+        .into_new_call_frame();
+        state.push_frame(child_frame, 10).unwrap();
+
+        let forged_bucket =
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&Bucket::from_id(bucket_id)).unwrap()).unwrap();
+        assert!(matches!(
+            state.check_all_substates_known(&forged_bucket),
+            Err(RuntimeError::BucketNotInScope { bucket_id: id }) if id == bucket_id
+        ));
+
+        let forged_proof =
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&Proof::from_id(proof_id)).unwrap()).unwrap();
+        assert!(matches!(
+            state.check_all_substates_known(&forged_proof),
+            Err(RuntimeError::ProofNotInScope { proof_id: id }) if id == proof_id
+        ));
+
+        let forged_comp_alloc = IndexedWellKnownTypes::from_value(
+            &tari_bor::to_value(&ComponentAddressAllocation::new(comp_alloc_id)).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            state.check_all_substates_known(&forged_comp_alloc),
+            Err(RuntimeError::AddressAllocationNotInScope { id }) if id == comp_alloc_id
+        ));
+
+        let forged_resx_alloc = IndexedWellKnownTypes::from_value(
+            &tari_bor::to_value(&ResourceAddressAllocation::new(resx_alloc_id)).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            state.check_all_substates_known(&forged_resx_alloc),
+            Err(RuntimeError::AddressAllocationNotInScope { id }) if id == resx_alloc_id
+        ));
+    }
 
     #[test]
     fn the_burn_is_a_floor_share_of_what_was_paid_and_the_leader_gets_the_rest() {

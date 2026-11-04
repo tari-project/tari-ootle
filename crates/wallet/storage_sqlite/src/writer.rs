@@ -2618,10 +2618,45 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         const OPERATION: &str = "locks_link_transaction";
         use crate::schema::locks;
 
-        diesel::update(locks::table.filter(locks::id.eq(lock_id)))
-            .set(locks::transaction_id.eq(serialize_hex(transaction_id)))
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        let transaction_id = serialize_hex(transaction_id);
+        let rows_affected = diesel::update(
+            locks::table.filter(locks::id.eq(lock_id)).filter(
+                locks::transaction_id
+                    .is_null()
+                    .or(locks::transaction_id.eq(&transaction_id)),
+            ),
+        )
+        .set(locks::transaction_id.eq(&transaction_id))
+        .execute(self.connection())
+        .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        if rows_affected == 0 {
+            return Err(WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "lock".to_string(),
+                key: lock_id.to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    fn locks_unlink_transaction(
+        &mut self,
+        lock_id: WalletLockId,
+        transaction_id: TransactionId,
+    ) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "locks_unlink_transaction";
+        use crate::schema::locks;
+
+        diesel::update(
+            locks::table
+                .filter(locks::id.eq(lock_id))
+                .filter(locks::transaction_id.eq(serialize_hex(transaction_id))),
+        )
+        .set(locks::transaction_id.eq::<Option<String>>(None))
+        .execute(self.connection())
+        .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         Ok(())
     }

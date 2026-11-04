@@ -532,10 +532,10 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             }
             // The hook component may still be an unused address allocation when the resource is acted upon in the
             // same call that creates it. For example, commonly a user creates a resource with initial supply and
-            // deposits it into a vault before creating the component. In this case, we "skip" the hook.
-            if state
-                .get_allocated_address_by_address(auth_hook.component_address)
-                .is_some()
+            // deposits it into a vault before creating the component. In this case, we "skip" the hook. Only the
+            // frame holding the allocation, running the template that made it, may skip.
+            if let Some(alloc) = state.get_allocated_address_in_current_scope(auth_hook.component_address)? &&
+                alloc.template_address() == state.current_template().ok()
             {
                 return Ok(true);
             }
@@ -823,6 +823,13 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
 
+        if !func.has_receiver() {
+            return Err(RuntimeError::InvalidArgument {
+                argument,
+                reason: format!("Authorize hook '{}' must be a method taking &self or &mut self", hook),
+            });
+        }
+
         if !matches!(
             func.arguments.get(1).expect("length checked").arg_type.other(),
             Some("ResourceAuthAction")
@@ -855,6 +862,15 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             return Err(RuntimeError::InvalidArgument {
                 argument: "TemplateFunction",
                 reason: format!("spend script function '{}' must not be mutable", func.name),
+            });
+        }
+        if func.has_receiver() {
+            return Err(RuntimeError::InvalidArgument {
+                argument: "TemplateFunction",
+                reason: format!(
+                    "spend script function '{}' must be a template function, not a method taking &self",
+                    func.name
+                ),
             });
         }
         if !matches!(func.output, Type::Unit) {
@@ -4232,15 +4248,8 @@ where
     }
 
     fn validate_return_value(&self, value: &IndexedValue) -> Result<(), RuntimeError> {
-        self.tracker.read_with(|state| {
-            state.check_all_substates_known(value.well_known_types())?;
-            // A proof crosses to the caller only from the frame that holds it: a shown proof is already the
-            // caller's, and returning it would let the callee hand it back as if it were its own.
-            for proof_id in value.proof_ids() {
-                state.current_call_scope()?.require_held_proof(proof_id)?;
-            }
-            Ok(())
-        })
+        self.tracker
+            .read_with(|state| state.check_all_substates_known(value.well_known_types()))
     }
 
     fn push_call_frame(&self, frame: PushCallFrame, restrict_to: Option<FrameWriteMode>) -> Result<(), RuntimeError> {
@@ -4687,11 +4696,11 @@ mod tests {
         traits::VerifiedClaim,
     };
 
-    #[derive(Default)]
+    #[derive(Default, Clone)]
     struct DummyTemplateProvider;
 
     impl TemplateProvider for DummyTemplateProvider {
-        type Error = String;
+        type Error = std::convert::Infallible;
         type Template = LoadedTemplate;
 
         fn get_template(&self, _id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {

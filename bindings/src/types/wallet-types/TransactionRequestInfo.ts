@@ -2,6 +2,7 @@
 import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 import type { TransactionId } from "../TransactionId";
 import type { UnsignedTransaction } from "../UnsignedTransaction";
+import type { ComponentUpgrade } from "./ComponentUpgrade";
 import type { EffectiveStatus } from "./EffectiveStatus";
 import type { KeyId } from "./KeyId";
 import type { TransactionRequestMainSigner } from "./TransactionRequestMainSigner";
@@ -29,6 +30,11 @@ export type TransactionRequestInfo = {
    * transaction spends; empty when it spends none.
    */
   value_summaries: Array<TransactionRequestValueSummary>;
+  /**
+   * Every `UpdateComponentTemplate` instruction in the transaction, fee instructions first. See
+   * [`ComponentUpgrade`].
+   */
+  component_upgrades: Array<ComponentUpgrade>;
   /**
    * Who the transaction acts as wherever the engine needs a single signer.
    */

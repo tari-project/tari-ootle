@@ -443,6 +443,12 @@ pub enum RuntimeError {
     AddressAllocationNotUsed { id: u32 },
     #[error("Address allocation type mismatch: got {id}, expected: {expected}")]
     AddressAllocationTypeMismatch { id: SubstateId, expected: &'static str },
+    #[error("Address allocation {id} was created by template {allocated_by} and cannot be used by template {used_by}")]
+    AddressAllocationTemplateMismatch {
+        id: AddressAllocationId,
+        allocated_by: TemplateAddress,
+        used_by: TemplateAddress,
+    },
     #[error("Allocated address does not have an associated template")]
     AddressAllocationNoTemplate,
 
@@ -573,6 +579,7 @@ impl RuntimeError {
             Self::FeePaymentInMainIntent |
             Self::AddressAllocationNotFound { .. } |
             Self::AddressAllocationTypeMismatch { .. } |
+            Self::AddressAllocationTemplateMismatch { .. } |
             Self::AddressAllocationNoTemplate |
             Self::NumericConversionError { .. } |
             Self::WriteToReadDeclaredInput { .. } |

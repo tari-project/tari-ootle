@@ -97,6 +97,16 @@ pub struct FunctionDef {
     pub is_migration: bool,
 }
 
+impl FunctionDef {
+    /// True for a component method: its first argument is the `&self` or `&mut self` receiver, which the caller
+    /// passes as the component's address. A function without a receiver is a static template function.
+    pub fn has_receiver(&self) -> bool {
+        self.arguments
+            .first()
+            .is_some_and(|arg| matches!(arg.arg_type.other(), Some("&self" | "&mut self")))
+    }
+}
+
 #[derive(Debug, Clone, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]

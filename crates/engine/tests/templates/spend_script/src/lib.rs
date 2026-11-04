@@ -135,6 +135,9 @@ mod spend_scripts {
             self.nonce += 1;
         }
 
+        /// Component method — rejected because its first argument is the `&self` receiver.
+        pub fn bad_receiver(&self, _ctx: SpendContext) {}
+
         /// Non-unit return — rejected at creation time.
         pub fn bad_returns_value(_ctx: SpendContext) -> u32 {
             0

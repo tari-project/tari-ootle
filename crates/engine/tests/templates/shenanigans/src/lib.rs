@@ -350,6 +350,17 @@ mod template {
             stolen.withdraw_all()
         }
 
+        /// Bucket ids are a transaction-wide counter, so a frame can name a bucket it was never handed. Takes the id
+        /// as a plain integer: a `BucketId` argument is how a bucket is handed over.
+        pub fn return_bucket_by_id(bucket_id: u32) -> Bucket {
+            Bucket::from_id(bucket_id.into())
+        }
+
+        /// Names an address allocation this frame was never handed and returns it as its own.
+        pub fn return_allocation_by_id(allocation_id: u32) -> ComponentAddressAllocation {
+            ComponentAddressAllocation::new(allocation_id)
+        }
+
         /// Allocates an address and hands it to nobody, so the allocation is left in this frame when it returns.
         pub fn allocate_and_abandon(&self) {
             let _allocation = CallerContext::allocate_component_address(None);

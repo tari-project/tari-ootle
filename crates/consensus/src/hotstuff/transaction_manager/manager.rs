@@ -789,6 +789,12 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
 
         // Pledge the local inputs
         let lock_status = store.try_lock_all(transaction_id, &requested_locks, false)?;
+        if let Some(err) = lock_status.hard_conflict() {
+            warn!(target: LOG_TARGET, "⚠️ PREPARE: Hard conflict when locking inputs: {err}");
+            let execution =
+                TransactionExecution::abort(&transaction_id, RejectReason::FailedToLockInputs(err.to_string()));
+            return Ok(PreparedTransaction::new_multishard_executed(execution, lock_status));
+        }
         info!(
             target: LOG_TARGET,
             "👨‍🔧 PREPARE: Multishard transaction {transaction_id} requires additional input pledges. Partial evidence: {evidence}",
@@ -1462,6 +1468,12 @@ mod tests {
     /// Prepares, pinned to epoch 1, a transaction with one input in this shard group and one in
     /// another. Returns the prepared decision and whether the local input was locked.
     fn prepare_cross_shard(max_epoch: Epoch) -> (Decision, bool) {
+        prepare_cross_shard_with(max_epoch, false)
+    }
+
+    /// Prepares a transaction like [`prepare_cross_shard`]. With `local_input_held`, the transaction requires
+    /// version zero of its local input, which another transaction has already write-locked.
+    fn prepare_cross_shard_with(max_epoch: Epoch, local_input_held: bool) -> (Decision, bool) {
         let local = component_id(1);
         let local_shard = shard_of(&local);
         let foreign = (2..=u8::MAX)
@@ -1476,9 +1488,14 @@ mod tests {
             Epoch(1),
             VotePower::of(1),
         );
+        let local_requirement = if local_input_held {
+            SubstateRequirement::versioned(local.clone(), SubstateVersion::ZERO)
+        } else {
+            SubstateRequirement::unversioned(local.clone())
+        };
         let transaction = TransactionRecord::new(
             Transaction::builder_localnet(max_epoch)
-                .add_input(SubstateRequirement::unversioned(local.clone()))
+                .add_input(local_requirement)
                 .add_input(SubstateRequirement::unversioned(foreign))
                 .build_and_seal(&PrivateKey::from(1u64)),
         );
@@ -1499,6 +1516,12 @@ mod tests {
                         substate: Box::new(Substate::new(SubstateVersion::ZERO, NonFungibleContainer::no_data())),
                     })?;
                 }
+            }
+            if local_input_held {
+                let holder = TransactionId::default();
+                assert_ne!(holder, *transaction.id());
+                let held = VersionedSubstateIdLockIntent::write(versioned(&local, 0), false);
+                assert!(!store.try_lock_all(holder, [held], false)?.is_any_failed());
             }
             let manager = manager();
             let ResolvedTransactionInputs::LocalAndForeignInputs {
@@ -1549,6 +1572,14 @@ mod tests {
         let (decision, is_locked) = prepare_cross_shard(Epoch(2));
         assert!(decision.is_commit());
         assert!(is_locked);
+    }
+
+    /// A shard group that cannot execute the transaction pledges its local inputs. A lock conflict on a version the
+    /// transaction requires is a hard conflict, so the transaction aborts.
+    #[test]
+    fn a_cross_shard_transaction_whose_required_local_input_is_held_aborts() {
+        let (decision, _) = prepare_cross_shard_with(Epoch(2), true);
+        assert_eq!(decision.abort_reason(), Some(AbortReason::LockInputsFailed));
     }
 
     /// Stands in for the engine: every transaction executes to the execution it holds.

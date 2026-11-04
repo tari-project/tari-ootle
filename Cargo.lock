@@ -12773,6 +12773,7 @@ dependencies = [
  "log",
  "log4rs",
  "mime_guess",
+ "mini-moka",
  "notify",
  "ootle_byte_type",
  "openssl",
@@ -13457,6 +13458,7 @@ dependencies = [
  "tari_template_abi",
  "tari_template_lib_types",
  "thiserror 2.0.18",
+ "tokio",
  "ts-rs",
 ]
 

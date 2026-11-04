@@ -44,7 +44,9 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_template_metadata::{MetadataHash, TemplateMetadata};
 use tari_ootle_transaction::{
+    ComponentReference,
     Instruction,
+    MigrateFunction,
     PrunedTransaction,
     TransactionId,
     TransactionSignature,
@@ -96,6 +98,7 @@ use tari_template_lib_types::{
     UtxoId,
     ValidatorFeePoolAddress,
     VaultId,
+    access_rules::UpdateRule,
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
     stealth::{SpendAuthorization, StealthTransferStatement},
@@ -272,6 +275,10 @@ pub struct TransactionRequestInfo {
     /// One entry per resource whose stealth outputs in this wallet the
     /// transaction spends; empty when it spends none.
     pub value_summaries: Vec<TransactionRequestValueSummary>,
+    /// Every `UpdateComponentTemplate` instruction in the transaction, fee instructions first. See
+    /// [`ComponentUpgrade`].
+    #[serde(default)]
+    pub component_upgrades: Vec<ComponentUpgrade>,
     /// Who the transaction acts as wherever the engine needs a single signer.
     pub main_signer: TransactionRequestMainSigner,
     /// Public keys of the signatures the request's creator supplied out of band. Each one authorizes the
@@ -382,6 +389,10 @@ pub struct SigningRequestInfo {
     pub request_id: SigningRequestId,
     /// The transaction body the signature commits to.
     pub transaction: UnsignedTransaction,
+    /// Every `UpdateComponentTemplate` instruction in `transaction`, fee instructions first. See
+    /// [`ComponentUpgrade`].
+    #[serde(default)]
+    pub component_upgrades: Vec<ComponentUpgrade>,
     pub seal_public_key: RistrettoPublicKeyBytes,
     pub key_id: KeyId,
     /// Public key of `key_id`.
@@ -491,6 +502,42 @@ pub struct TransactionSubmitDryRunResponse {
     /// subtracted since it won't recur with a tighter max_fee.
     pub required_fees: u64,
     pub result: ExecuteResult,
+    /// Components the transaction calls directly, plus components a nested call writes, whose template can still be
+    /// swapped after creation. Whoever satisfies `upgrade_rule` can change that template, so the code that runs on
+    /// submission may differ from the dry run. See [`UpgradableComponent`].
+    ///
+    /// The list leaves out components a nested call only reads, components the transaction creates, and components
+    /// whose upgrade rule is [`UpdateRule::Locked`] or `AccessRule::DenyAll`. An empty list does not mean every
+    /// component the transaction reaches is locked.
+    #[serde(default)]
+    pub upgradable_components: Vec<UpgradableComponent>,
+    /// Every `UpdateComponentTemplate` instruction in the transaction, fee instructions first. See
+    /// [`ComponentUpgrade`].
+    #[serde(default)]
+    pub component_upgrades: Vec<ComponentUpgrade>,
+}
+
+/// An `UpdateComponentTemplate` instruction: the transaction replaces the code of `component` with `new_template`
+/// and runs `migrate` from the new template, if given. Whoever signs the transaction lends their signer badge to the
+/// upgrade, so a signer who satisfies the component's upgrade rule hands its code, and every vault it holds, to the
+/// new template.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ComponentUpgrade {
+    /// A workspace reference names a component the transaction resolves during execution, such as one an earlier
+    /// instruction returns.
+    pub component: ComponentReference,
+    pub new_template: TemplateAddress,
+    pub migrate: Option<MigrateFunction>,
+}
+
+/// A component whose template can be swapped by whoever satisfies `upgrade_rule`, so the code that runs when the
+/// transaction is submitted may differ from the code that ran in the dry run.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct UpgradableComponent {
+    pub component_address: ComponentAddress,
+    pub upgrade_rule: UpdateRule,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -523,6 +570,19 @@ pub struct TransactionSubmitManifestResponse {
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub required_fees: Option<u64>,
     pub result: Option<ExecuteResult>,
+    /// Components the transaction calls directly, plus components a nested call writes, whose template can still be
+    /// swapped after creation. Whoever satisfies `upgrade_rule` can change that template, so the code that runs on
+    /// submission may differ from the dry run. Only populated for dry runs. See [`UpgradableComponent`].
+    ///
+    /// The list leaves out components a nested call only reads, components the transaction creates, and components
+    /// whose upgrade rule is [`UpdateRule::Locked`] or `AccessRule::DenyAll`. An empty list does not mean every
+    /// component the transaction reaches is locked.
+    #[serde(default)]
+    pub upgradable_components: Vec<UpgradableComponent>,
+    /// Every `UpdateComponentTemplate` instruction in the transaction, fee instructions first. Only populated for dry
+    /// runs. See [`ComponentUpgrade`].
+    #[serde(default)]
+    pub component_upgrades: Vec<ComponentUpgrade>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -653,9 +713,9 @@ pub struct TransactionClaimBurnResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct BurnProofsListRequest {
-    /// Optional filter by account public key. Only proofs whose file name starts with this key
-    /// will be returned. Proofs with file names that do not match the expected
-    /// `{public_key}_{commitment}.json` format are always included.
+    /// Optional filter by account public key, compared case-insensitively. A proof is excluded when its file name has
+    /// the `{public_key}-{commitment}.json` format with a different key, or when it parses and its `burn_public_key`
+    /// differs. A file that does not parse is listed unless its name gives a different key.
     pub filter_by_public_key: Option<String>,
 }
 

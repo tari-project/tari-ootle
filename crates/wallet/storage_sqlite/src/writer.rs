@@ -193,10 +193,9 @@ impl<'a> WriteTransaction<'a> {
                 stealth_outputs::owner_account_id,
                 stealth_outputs::resource_address,
                 stealth_outputs::commitment,
-                stealth_outputs::status,
             ))
             .filter(stealth_outputs::lock_id.eq(lock_id))
-            .load_iter::<(i32, i32, String, String, String), _>(self.connection())
+            .load_iter::<(i32, i32, String, String), _>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         let up_id_index = diff
@@ -219,7 +218,7 @@ impl<'a> WriteTransaction<'a> {
         let mut affected_balances = HashSet::new();
 
         for res in locked_outputs {
-            let (id, owner_account_id, resx, commitment, status) =
+            let (id, owner_account_id, resx, commitment) =
                 res.map_err(|e| WalletStorageError::general(OPERATION, e))?;
             let resource_address: ResourceAddress = resx.parse().map_err(|_| WalletStorageError::DecodingError {
                 operation: "try_to_substate_id",
@@ -237,15 +236,14 @@ impl<'a> WriteTransaction<'a> {
             let downed_version = down_id_index.get(&addr).copied();
             let is_upped = up_id_index.contains(&addr);
             let is_burnt = burnt_id_index.contains(&addr);
-            let is_locked_unconfirmed = status == OutputStatus::LockedUnconfirmed.as_key_str();
 
-            if is_burnt && (!is_locked_unconfirmed || downed_version.is_some()) {
+            if is_burnt {
                 if let Some(version) = downed_version {
                     spent_versions.push((addr.clone(), version));
                 }
                 to_burn.push(addr);
                 affected_balances.insert((owner_account_id, resource_address));
-            } else if is_locked_unconfirmed && is_upped {
+            } else if is_upped {
                 to_confirm.push(id);
                 affected_balances.insert((owner_account_id, resource_address));
             } else if let Some(version) = downed_version {

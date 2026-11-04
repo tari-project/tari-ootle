@@ -19,6 +19,8 @@ use tari_crypto::{
 };
 use tari_engine_types::{
     Utxo,
+    UtxoOutput,
+    crypto::OutputBody,
     resource::Resource,
     substate::{Substate, SubstateDiff, SubstateId},
 };
@@ -380,6 +382,69 @@ fn finalizing_a_lock_marks_burnt_stealth_outputs_as_burnt_and_records_balance_ch
     assert_eq!(page.changes[0].confidential_before, Amount::from(1_000_000u64));
     assert_eq!(page.changes[0].confidential_after, Amount::from(600_000u64));
     assert_eq!(page.changes[0].confidential_delta, "-400000");
+
+    tx.commit().unwrap();
+}
+
+#[test]
+fn finalizing_a_lock_over_a_re_versioned_unburnt_input_releases_it_to_unspent() {
+    let db = open_store();
+    let account =
+        ComponentAddress::from_str("component_91bef6af37bfb39b20260275c37a9e8acfc0517127284cd8f05944c8ffffffff")
+            .unwrap();
+    let stealth_resource: ResourceAddress = format!("resource_{:064x}", 3u8).parse().unwrap();
+    let owner_public_key = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(1000u64)).to_byte_type();
+
+    let mut tx = db.create_write_tx().unwrap();
+    tx.accounts_insert(
+        Some("test"),
+        &account,
+        KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+        Some(KeyId::derived(KeyBranch::Account, 0)),
+        &owner_public_key,
+        &HashSet::new(),
+        Epoch::zero(),
+        true,
+        true,
+    )
+    .unwrap();
+
+    let input = stealth_output(account, stealth_resource, 400_000, 7, OutputStatus::Unspent, None);
+    tx.stealth_outputs_insert(&input).unwrap();
+
+    let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.stealth_outputs_lock_many(&stealth_resource, &[&input.commitment], lock_id)
+        .unwrap();
+
+    let addr = input.to_utxo_address();
+    let mut diff = SubstateDiff::new();
+    diff.down(SubstateId::Utxo(addr.clone()), SubstateVersion::new(2));
+    diff.up(
+        SubstateId::Utxo(addr),
+        Substate::new(SubstateVersion::new(3), Utxo {
+            output: Some(UtxoOutput {
+                output: OutputBody {
+                    public_nonce: input.sender_public_nonce,
+                    encrypted_data: input.encrypted_data.clone(),
+                    minimum_value_promise: input.minimum_value_promise,
+                    viewable_balance: None,
+                },
+                auth: input.auth.clone(),
+                tag: input.tag_byte,
+            }),
+            is_frozen: true,
+        }),
+    );
+
+    tx.locks_unlock_finalized(lock_id, &diff).unwrap();
+
+    let stored = tx
+        .stealth_outputs_get_by_commitment(&stealth_resource, &input.commitment)
+        .unwrap();
+    assert_eq!(stored.status, OutputStatus::Unspent);
+    assert!(!stored.is_burnt);
+    assert_eq!(stored.lock_id, None);
+    assert_eq!(stored.spent_version, None);
 
     tx.commit().unwrap();
 }

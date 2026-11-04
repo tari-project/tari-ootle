@@ -434,24 +434,28 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             let mut foreign_unparked_blocks = Vec::new();
             for transaction_id in transaction_ids {
                 debug!(target: LOG_TARGET, "🔍 Checking if transaction {} unparks any blocks", transaction_id);
-                if let Some((unparked_block, foreign_proposals, origin)) =
-                    tx.parked_block_remove_missing_transaction(transaction_id)?
-                {
-                    info!(target: LOG_TARGET, "♻️ all transactions for local block {unparked_block} are ready for consensus");
-
-                    self.publish_event(HotstuffEvent::ParkedBlockReady {
-                        block: unparked_block.as_leaf(),
-                    });
-
-                    unparked_blocks.push((
-                        ProposalMessage {
-                            block: unparked_block,
-                            foreign_proposals,
-                        },
-                        origin,
-                    ));
-                } else {
+                let unparked = tx.parked_block_remove_missing_transaction(transaction_id)?;
+                if unparked.is_empty() {
                     debug!(target: LOG_TARGET, "🔍 Transaction {} did not unpark any blocks", transaction_id);
+                } else {
+                    for (unparked_block, foreign_proposals, origin) in unparked {
+                        info!(
+                            target: LOG_TARGET,
+                            "♻️ all transactions for local block {unparked_block} are ready for consensus"
+                        );
+
+                        self.publish_event(HotstuffEvent::ParkedBlockReady {
+                            block: unparked_block.as_leaf(),
+                        });
+
+                        unparked_blocks.push((
+                            ProposalMessage {
+                                block: unparked_block,
+                                foreign_proposals,
+                            },
+                            origin,
+                        ));
+                    }
                 }
 
                 let foreign_unparked = ForeignParkedProposal::remove_by_transaction_id(tx, transaction_id)?;
@@ -462,6 +466,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                     foreign_unparked_blocks.extend(foreign_unparked.into_iter().map(Into::into));
                 }
             }
+            unparked_blocks.sort_by_key(|(msg, _)| (msg.block.epoch(), msg.block.height()));
             Ok((unparked_blocks, foreign_unparked_blocks))
         })
     }

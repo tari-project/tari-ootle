@@ -1168,44 +1168,34 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     fn parked_block_remove_missing_transaction(
         &mut self,
         transaction_id: &TransactionId,
-    ) -> Result<Option<(Block, Vec<ForeignProposal>, ProposalOrigin)>, StorageError> {
-        const OPERATION: &str = "missing_transactions_insert";
+    ) -> Result<Vec<(Block, Vec<ForeignProposal>, ProposalOrigin)>, StorageError> {
+        const OPERATION: &str = "parked_block_remove_missing_transaction";
 
         let query_cf = self.db().cf(missing_transactions::ByTransactionIdQuery)?;
-
-        // Safe to iterate lazily: the iterator is dropped before anything is written
-        #[allow(clippy::disallowed_methods)]
-        let mut iter = query_cf.query_prefix_range_key_iterator(Ordering::Ascending, transaction_id);
-
-        let Some(key) = iter.next().transpose()? else {
-            return Ok(None);
-        };
-        drop(iter);
+        let keys = query_cf.query_prefix_range_keys(Ordering::Ascending, transaction_id)?;
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
 
         let cf = self.db().cf(MissingTransactionCf)?;
-        cf.delete(&key, OPERATION)?;
+        let index_cf = self.db().cf(missing_transactions::MissingTransactionBlockIdIndex)?;
+        let by_block_query = self.db().cf(missing_transactions::ByBlockIdQuery)?;
 
-        let (_, block_id) = key;
-
-        self.db()
-            .cf(missing_transactions::MissingTransactionBlockIdIndex)?
-            .delete_or_not_found(&(block_id, *transaction_id), OPERATION)?;
-
-        {
-            let query = self.db().cf(missing_transactions::ByBlockIdQuery)?;
-            // Safe to iterate lazily: this scope only reads
-            #[allow(clippy::disallowed_methods)]
-            let mut iter = query.query_prefix_range_key_iterator(Ordering::default(), &block_id);
-
-            // Are there more missing transactions for this block?
-            if iter.next().transpose()?.is_some() {
-                return Ok(None);
+        let mut unparked_block_ids = Vec::new();
+        for (tx_id, block_id) in keys {
+            cf.delete(&(tx_id, block_id), OPERATION)?;
+            index_cf.delete_or_not_found(&(block_id, tx_id), OPERATION)?;
+            if !by_block_query.exists_prefix(&block_id)? {
+                unparked_block_ids.push(block_id);
             }
         }
 
-        // None left, remove and return the block
-        let parked = self.parked_blocks_remove(&block_id)?;
-        Ok(Some(parked))
+        let mut unparked = Vec::with_capacity(unparked_block_ids.len());
+        for block_id in unparked_block_ids {
+            unparked.push(self.parked_blocks_remove(&block_id)?);
+        }
+
+        Ok(unparked)
     }
 
     fn parked_blocks_remove_up_to(&mut self, epoch: Epoch, height: NodeHeight) -> Result<usize, StorageError> {

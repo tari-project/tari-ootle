@@ -76,20 +76,26 @@ impl CertificateStore for ProposalCertificate {
                 Ok(high_pc)
             },
             Some(_) | None => {
-                // The certificate id and the block id omit the height and epoch, so the stored block is the authority
-                // for them.
+                // The certificate id and the block id omit the height, epoch and shard group, and the signed vote
+                // message omits the shard group, so the stored block is the authority for all three.
                 if !self.justifies_zero_block() {
                     let block = Block::get(&**tx, &self.calculate_block_id())?;
-                    if block.height() != self.height() || block.epoch() != self.epoch() {
+                    if block.height() != self.height() ||
+                        block.epoch() != self.epoch() ||
+                        block.shard_group() != self.shard_group()
+                    {
                         return Err(StorageError::DataInconsistency {
                             details: format!(
-                                "Certificate {} claims height {} in epoch {} for block {} at height {} in epoch {}",
+                                "Certificate {} claims height {} in epoch {} for shard group {}, but block {} is at \
+                                 height {} in epoch {} for shard group {}",
                                 self.calculate_id(),
                                 self.height(),
                                 self.epoch(),
+                                self.shard_group(),
                                 block.id(),
                                 block.height(),
                                 block.epoch(),
+                                block.shard_group(),
                             ),
                         });
                     }

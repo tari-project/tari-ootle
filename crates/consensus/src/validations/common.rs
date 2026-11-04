@@ -312,6 +312,20 @@ pub(super) fn check_proposal_certificate<TConsensusSpec: ConsensusSpec>(
     committee: &Committee<TConsensusSpec::Addr>,
     signing_service: &TConsensusSpec::SignerService,
 ) -> Result<(), ProposalValidationError> {
+    check_justify_precedes_block(candidate_block)?;
+    check_quorum_certificate_signatures::<TConsensusSpec>(
+        network,
+        candidate_block.justify().into(),
+        committee,
+        signing_service,
+    )?;
+
+    Ok(())
+}
+
+/// Checks that the justify of `candidate_block` accepts a lower block of the same shard group. The shard group lies
+/// outside both the certificate id and the signed vote message, so the candidate block is what binds it.
+pub fn check_justify_precedes_block(candidate_block: &Block) -> Result<(), ProposalValidationError> {
     let qc = candidate_block.justify();
     if candidate_block.height() <= qc.height() {
         return Err(ProposalValidationError::CandidateBlockNotHigherThanJustify {
@@ -319,8 +333,24 @@ pub(super) fn check_proposal_certificate<TConsensusSpec: ConsensusSpec>(
             candidate_block_height: candidate_block.height(),
         });
     }
-
-    check_quorum_certificate_signatures::<TConsensusSpec>(network, qc.into(), committee, signing_service)?;
+    if qc.shard_group() != candidate_block.shard_group() {
+        return Err(ProposalValidationError::InvalidShardGroup {
+            block_id: *candidate_block.id(),
+            shard_group: qc.shard_group(),
+            details: format!(
+                "Justify QC shard group {} does not match candidate block shard group {}",
+                qc.shard_group(),
+                candidate_block.shard_group()
+            ),
+        });
+    }
+    if !qc.decision().is_accept() {
+        return Err(ProposalValidationError::JustifyBlockInvalid {
+            proposed_by: candidate_block.proposed_by().to_string(),
+            block_id: *candidate_block.id(),
+            details: format!("Justify QC has decision {}, expected Accept", qc.decision()),
+        });
+    }
 
     Ok(())
 }

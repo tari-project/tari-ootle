@@ -194,7 +194,6 @@ where
     TStateStore: StateStore,
     TGossip: Gossip,
 {
-
     async fn handle_request(&mut self, request: MempoolRequest) {
         match request {
             MempoolRequest::SubmitTransaction { transaction, reply } => {
@@ -343,8 +342,9 @@ where
         }
 
         // While the consensus worker is not running, it either discards rx_new_transactions (in Idle)
-        // or leaves the 10-slot channel unread, which would block this service's select! loop once full.
-        // A local submission is propagated without admitting it locally or handing it to consensus.
+        // or leaves the bounded rx_new_transactions channel unread, which would block this service's
+        // select! loop once full. A local submission is propagated without admitting it locally or
+        // handing it to consensus.
         if !is_running {
             if is_local {
                 self.propagate(tx_id, transaction).await;
@@ -656,7 +656,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = RocksDbStateStore::<PeerAddress>::open(dir.path(), DatabaseOptions::default()).unwrap();
         let (_tx_req, rx_req) = mpsc::channel(1);
-        let (tx_epoch_request, mut rx_epoch_request) = mpsc::channel(1);
+        let (tx_epoch_request, rx_epoch_request) = mpsc::channel(1);
+        // Drop the epoch-manager request receiver so any regression that calls `get_local_committee_info`
+        // while consensus is not running fails immediately with `SendError` instead of hanging.
+        drop(rx_epoch_request);
         let (tx_epoch_events, _) = broadcast::channel(1);
         let epoch_manager = EpochManagerHandle::new(
             tx_epoch_request,
@@ -703,10 +706,6 @@ mod tests {
         assert!(
             !service.transactions.contains(&tx_id),
             "a non-running validator must not admit the transaction into SeenTransactions",
-        );
-        assert!(
-            rx_epoch_request.try_recv().is_err(),
-            "a non-running validator must return before querying local committee info",
         );
     }
 

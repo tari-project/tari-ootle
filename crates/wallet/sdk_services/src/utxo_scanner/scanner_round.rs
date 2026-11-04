@@ -589,12 +589,11 @@ where TSpec: WalletSdkSpec
                         read.substate.version()
                     );
                     if let Some(proven_up) = read.proven_up &&
-                        self.sdk.stealth_outputs_api().record_proven_up(&address, proven_up)? &&
                         let Some(utxo) = read.substate.substate_value().as_utxo()
                     {
                         self.sdk
                             .stealth_outputs_api()
-                            .set_utxo_frozen(&address, utxo.is_frozen())?;
+                            .record_proven_up_and_frozen(&address, proven_up, utxo.is_frozen())?;
                     }
                 },
                 Err(err) if is_refusal(&err) => {
@@ -719,16 +718,21 @@ where TSpec: WalletSdkSpec
                 Ok(read) => {
                     // An output a freeze or unfreeze took to a later version is live at it, and later checks prove
                     // that version gone.
-                    let updated = match read.proven_up {
-                        Some(proven_up) => self.sdk.stealth_outputs_api().record_proven_up(&address, proven_up)?,
-                        None => true,
-                    };
-                    if updated &&
-                        let Some(utxo) = read.substate.substate_value().as_utxo()
-                    {
-                        self.sdk
-                            .stealth_outputs_api()
-                            .set_utxo_frozen(&address, utxo.is_frozen())?;
+                    if let Some(utxo) = read.substate.substate_value().as_utxo() {
+                        match read.proven_up {
+                            Some(proven_up) => {
+                                self.sdk.stealth_outputs_api().record_proven_up_and_frozen(
+                                    &address,
+                                    proven_up,
+                                    utxo.is_frozen(),
+                                )?;
+                            },
+                            None => {
+                                self.sdk
+                                    .stealth_outputs_api()
+                                    .set_utxo_frozen(&address, utxo.is_frozen())?;
+                            },
+                        }
                     }
                     continue;
                 },
@@ -870,8 +874,6 @@ fn is_refusal(err: &SubstateApiError) -> bool {
         err,
         SubstateApiError::SubstateDoesNotExist { .. } |
             SubstateApiError::SubstateNotDown { .. } |
-            SubstateApiError::SubstateOfAnotherType(_) |
-            SubstateApiError::UndecodableSubstate { .. } |
             SubstateApiError::SubstateUnproven { .. } |
             SubstateApiError::SubstateUnverified { .. } |
             SubstateApiError::SubstateProvenBeforeAnchor { .. }

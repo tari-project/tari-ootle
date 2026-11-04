@@ -1043,10 +1043,8 @@ where TSpec: WalletSdkSpec
                     substate,
                     proven_up: Some(proven_up),
                 }) => {
-                    if stealth_outputs_api.record_proven_up(address, proven_up)? &&
-                        let Some(utxo) = substate.substate_value().as_utxo()
-                    {
-                        stealth_outputs_api.set_utxo_frozen(address, utxo.is_frozen())?;
+                    if let Some(utxo) = substate.substate_value().as_utxo() {
+                        stealth_outputs_api.record_proven_up_and_frozen(address, proven_up, utxo.is_frozen())?;
                     }
                     num_proven += 1;
                 },

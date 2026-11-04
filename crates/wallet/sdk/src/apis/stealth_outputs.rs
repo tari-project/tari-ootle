@@ -749,6 +749,25 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(recorded)
     }
 
+    /// Atomically records that a verified proof showed the output at `address` up and syncs its `is_frozen` flag in a
+    /// single write transaction, unless the wallet already holds a proof of the same or a later version. Returns
+    /// whether the proven version advanced.
+    pub fn record_proven_up_and_frozen(
+        &self,
+        address: &UtxoAddress,
+        proven_up: ProvenUp,
+        is_frozen: bool,
+    ) -> Result<bool, StealthOutputsApiError> {
+        let recorded = self.store.with_write_tx(|tx| {
+            let recorded = tx.stealth_outputs_record_proven_up(address, proven_up)?;
+            if recorded {
+                tx.stealth_outputs_update(address, None, None, Some(is_frozen))?;
+            }
+            Ok::<_, WalletStorageError>(recorded)
+        })?;
+        Ok(recorded)
+    }
+
     pub fn update_utxo_status(
         &self,
         address: &UtxoAddress,

@@ -342,3 +342,23 @@ async fn a_substate_served_of_the_wrong_type_is_refused() {
     assert!(matches!(err, SubstateApiError::SubstateOfAnotherType(_)), "{err}");
 }
 
+#[tokio::test]
+async fn an_unrequested_substate_in_a_batch_is_refused() {
+    let (sets, network, test) = walked_wallet(IndexerTrust::Verify).await;
+    let [(asked_id, asked_value), (extra_id, extra_value)] = high_substates(2).try_into().unwrap();
+    let asked_proof = substate_proof(&sets[4], &asked_id, VERSION, &asked_value);
+    let extra_proof = substate_proof(&sets[4], &extra_id, VERSION, &extra_value);
+    network.serve_substate(asked_id.clone(), VERSION, asked_value, Some(asked_proof));
+    network.serve_unrequested_substate(extra_id.clone(), VERSION, extra_value, Some(extra_proof));
+
+    let err = test
+        .sdk()
+        .substate_api()
+        .get_substates_from_network(std::slice::from_ref(&asked_id))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, SubstateApiError::UnrequestedSubstate { ref id } if *id == extra_id),
+        "{err}"
+    );
+}

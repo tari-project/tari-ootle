@@ -485,7 +485,12 @@ where
     ) -> Result<Option<FoundUtxo>, StealthScannerApiError> {
         match read {
             Ok(read) if read.is_burnt_utxo() => found.burnt_at = Some(read.substate.version()),
-            Ok(read) => found.proven_up = read.proven_up,
+            Ok(read) => {
+                if let Some(utxo) = read.substate.substate_value().as_utxo() {
+                    found.is_frozen = utxo.is_frozen();
+                }
+                found.proven_up = read.proven_up;
+            },
             Err(SubstateApiError::StoreError(err)) => return Err(err.into()),
             Err(err) => {
                 debug!(
@@ -514,8 +519,6 @@ where
             Ok(read) => read,
             Err(
                 err @ (SubstateApiError::SubstateDoesNotExist { .. } |
-                SubstateApiError::SubstateOfAnotherType(_) |
-                SubstateApiError::UndecodableSubstate { .. } |
                 SubstateApiError::SubstateUnproven { .. } |
                 SubstateApiError::SubstateUnverified { .. } |
                 SubstateApiError::SubstateProvenBeforeAnchor { .. } |
@@ -612,8 +615,6 @@ where
             },
             Err(
                 err @ (SubstateApiError::SubstateDoesNotExist { .. } |
-                SubstateApiError::SubstateOfAnotherType(_) |
-                SubstateApiError::UndecodableSubstate { .. } |
                 SubstateApiError::SubstateUnproven { .. } |
                 SubstateApiError::SubstateUnverified { .. } |
                 SubstateApiError::SubstateProvenBeforeAnchor { .. } |

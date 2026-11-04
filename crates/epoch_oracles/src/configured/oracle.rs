@@ -189,18 +189,34 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
     fn prepare_next_epoch(&mut self, epoch_ticker_data: EpochTickerData) -> anyhow::Result<()> {
         let next_epoch = epoch_ticker_data.epoch;
         let epoch_hash = epoch_ticker_data.epoch_hash;
+        let done_for_now = epoch_ticker_data.done_for_now;
         if next_epoch.is_zero() {
+            if let Some(vns) = self.queued_validators.get(&Epoch(1)) {
+                self.pending_events.extend(
+                    vns.iter()
+                        .filter(|vn| vn.kind == ActivationKind::Registration)
+                        .map(|vn| EpochEvent::NewValidatorRegistered {
+                            epoch: next_epoch,
+                            claim_public_key: vn.claim_key,
+                            validator_node_public_key: vn.public_key,
+                        }),
+                );
+            }
             // If at epoch 0, just emit the epoch changed and done for now events
             self.pending_events.push_back(EpochEvent::EpochChanged {
                 epoch: next_epoch,
                 epoch_hash,
             });
+            if done_for_now {
+                self.pending_events.push_back(EpochEvent::DoneForNow {
+                    epoch: next_epoch,
+                    epoch_hash,
+                });
+            }
 
             return Ok(());
         }
 
-        let done_for_now = epoch_ticker_data.done_for_now;
-        let current_epoch = next_epoch - Epoch(1);
         self.store
             .set(StoreKey::ConfiguredCurrentEpoch.as_key_bytes(), &next_epoch)?;
 
@@ -246,13 +262,13 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             }
             self.pending_events
                 .push_back(EpochEvent::ActiveValidatorNodeSetChanged {
-                    epoch: current_epoch,
+                    epoch: epoch.saturating_sub(Epoch(1)),
                     node_changes: vns
                         .into_iter()
                         .map(|vn| ValidatorNodeChange::Add {
                             claim_public_key: vn.claim_key,
                             validator_node_public_key: vn.public_key,
-                            activation_epoch: next_epoch,
+                            activation_epoch: epoch,
                             minimum_value_promise: 0,
                             shard_key: vn.shard_key,
                         })
@@ -738,6 +754,62 @@ mod tests {
         assert!(
             matches!(events.as_slice(), [EpochEvent::Error(_)]),
             "an invalid config must surface as an error, not a partial event stream; got {events:?}"
+        );
+    }
+
+    #[test]
+    fn epoch_zero_emits_done_for_now_and_announces_epoch_one_registrations() {
+        let validator = mk_validator(1, Epoch(0));
+        let config = mk_config(vec![validator.clone()]);
+        let ticker = ScriptedTicker::new(vec![EpochTickerData {
+            epoch: Epoch(0),
+            epoch_hash: FixedHash::zero(),
+            done_for_now: true,
+        }]);
+        let mut oracle = ConfiguredEpochOracle::with_custom_ticker(config, TestStore::default(), ticker);
+
+        let events = drive_events(&mut oracle);
+
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                EpochEvent::NewValidatorRegistered {
+                    epoch: Epoch(0),
+                    validator_node_public_key,
+                    ..
+                } if *validator_node_public_key == validator.public_key
+            )),
+            "expected NewValidatorRegistered at epoch 0; got {events:?}"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, EpochEvent::DoneForNow { epoch: Epoch(0), .. })),
+            "expected DoneForNow at epoch 0; got {events:?}"
+        );
+    }
+
+    #[test]
+    fn skipped_epochs_preserve_individual_activation_epochs() {
+        let validator = mk_validator_with_rotation(Epoch(1), Epoch(4));
+        let expected_shard_key = validator.calculate_shard_key();
+        let original_claim_key = validator.claim_key;
+        let config = mk_config(vec![validator]);
+        let ticker = ScriptedTicker::new(vec![EpochTickerData {
+            epoch: Epoch(5),
+            epoch_hash: FixedHash::zero(),
+            done_for_now: true,
+        }]);
+        let mut oracle = ConfiguredEpochOracle::with_custom_ticker(config, TestStore::default(), ticker);
+
+        let events = drive_events(&mut oracle);
+
+        assert_eq!(
+            added_validators(&events),
+            vec![
+                (Epoch(1), original_claim_key, Epoch(2), expected_shard_key),
+                (Epoch(3), mk_key(99), Epoch(4), expected_shard_key),
+            ]
         );
     }
 }

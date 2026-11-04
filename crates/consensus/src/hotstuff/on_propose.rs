@@ -1115,7 +1115,7 @@ where
 
     let locked_epoch = tx_rec.locked_epoch().ok_or_else(|| {
         HotStuffError::InvariantError(format!(
-            "PROPOSE: local_accept_transaction: Transaction {} is in LocalPrepared stage but has no locked epoch",
+            "PROPOSE: propose_local_accept_transaction: Transaction {} is in LocalPrepared stage but has no locked epoch",
             tx_rec.id(),
         ))
     })?;

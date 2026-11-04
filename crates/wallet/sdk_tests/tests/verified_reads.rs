@@ -358,7 +358,7 @@ async fn an_unrequested_substate_in_a_batch_is_refused() {
         .await
         .unwrap_err();
     assert!(
-        matches!(err, SubstateApiError::UnrequestedSubstate { ref id } if *id == extra_id),
+        matches!(&err, SubstateApiError::UnrequestedSubstate { substate_id } if *substate_id == extra_id),
         "{err}"
     );
 }

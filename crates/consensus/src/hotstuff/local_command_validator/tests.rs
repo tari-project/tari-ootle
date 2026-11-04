@@ -1851,7 +1851,7 @@ fn prepared_cross_shard_creating_an_existing_output() -> (Replica, TransactionPo
         replica.committee.num_committees(),
         &TransactionExecution::abort(&id, RejectReason::FailedToLockOutputs("exists".to_string())),
     );
-    let atom = honest_abort.get_current_multi_shard_atom();
+    let atom = honest_abort.get_current_multi_shard_atom().unwrap();
     assert_eq!(atom.decision, Decision::Abort(AbortReason::LockOutputsFailed));
     (replica, rec, atom)
 }

@@ -1322,11 +1322,19 @@ mod tests {
         store: CountingStore<RocksDbStateStore<String>>,
         start_state_version: Version,
     ) -> Vec<(Version, usize)> {
+        streamed_versions_with(store, SubstateValueFilterFlags::all(), start_state_version).await
+    }
+
+    async fn streamed_versions_with(
+        store: CountingStore<RocksDbStateStore<String>>,
+        value_filters: SubstateValueFilterFlags,
+        start_state_version: Version,
+    ) -> Vec<(Version, usize)> {
         let (sender, mut receiver) = mpsc::channel(100);
         let task = sync_task_from(
             store,
             sender,
-            SubstateValueFilterFlags::all(),
+            value_filters,
             Arc::new(Semaphore::new(1)),
             start_state_version,
         );
@@ -1360,27 +1368,10 @@ mod tests {
     #[tokio::test]
     async fn a_stream_from_v0_streams_an_empty_v0_when_genesis_updates_are_filtered_out() {
         let (store, _dir) = store_with_versions(0..=1);
-        let (sender, mut receiver) = mpsc::channel(100);
-        let task = sync_task_from(
-            store,
-            sender,
-            SubstateValueFilterFlags::COMPONENT,
-            Arc::new(Semaphore::new(1)),
-            0,
+        assert_eq!(
+            streamed_versions_with(store, SubstateValueFilterFlags::COMPONENT, 0).await,
+            [(0, 0)],
         );
-        let handle = tokio::spawn(task.run());
-        let mut versions = Vec::new();
-        while let Some(Ok(response)) = receiver.recv().await {
-            match response.response {
-                Some(rpc::sync_state_response::Response::Batch(batch)) => {
-                    versions.push((batch.state_version, batch.updates.len()));
-                },
-                _ => break,
-            }
-        }
-        drop(receiver);
-        handle.await.unwrap().ok();
-        assert_eq!(versions, [(0, 0)]);
     }
 
     #[tokio::test]

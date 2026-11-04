@@ -14,7 +14,7 @@ use tari_ootle_common_types::{
 use tari_ootle_transaction::TransactionId;
 use tari_sidechain::FixedHash;
 
-use super::{ForeignProposalAtom, LeaderFee, TransactionRecord};
+use super::{ForeignProposalAtom, LeaderFee, LockedEpoch, TransactionRecord};
 use crate::{StateStoreReadTransaction, StorageError, consensus_models::evidence::Evidence};
 
 #[derive(
@@ -46,6 +46,10 @@ pub struct MultiShardAtom {
     /// outputs. That shard group sets it, and every other shard group adopts it.
     #[n(5)]
     pub fee_intent_only: bool,
+    /// The epoch the transaction executes in. Every shard group involved must execute the transaction under this pin.
+    /// A shard group that first learns of the transaction from this atom adopts it.
+    #[n(6)]
+    pub locked_epoch: LockedEpoch,
 }
 
 impl MultiShardAtom {
@@ -62,10 +66,11 @@ impl Display for MultiShardAtom {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "MultiShardAtom({}, {}{}, {}, ",
+            "MultiShardAtom({}, {}{}, {}, {}, ",
             self.id,
             self.decision,
             if self.fee_intent_only { " (fee intent only)" } else { "" },
+            self.locked_epoch,
             self.transaction_fee,
         )?;
         match self.leader_fee {
@@ -554,6 +559,7 @@ mod tests {
                 transaction_fee: 0,
                 leader_fee: None,
                 fee_intent_only: false,
+                locked_epoch: LockedEpoch::zero(),
             }),
             Command::ForeignProposal(ForeignProposalAtom {
                 block_id: BlockId::zero(),
@@ -566,6 +572,7 @@ mod tests {
                 transaction_fee: 0,
                 leader_fee: None,
                 fee_intent_only: false,
+                locked_epoch: LockedEpoch::zero(),
             }),
         ];
         let expected = [cmds[2].clone(), cmds[3].clone(), cmds[1].clone(), cmds[0].clone()];
@@ -578,6 +585,36 @@ mod tests {
         }
     }
 
+    /// The pin is certified with the command, so a foreign shard group that adopts it adopts what the committee voted
+    /// on.
+    #[test]
+    fn a_multi_shard_command_hash_covers_its_locked_epoch() {
+        use tari_engine_types::fees::ExhaustBurnRate;
+        use tari_ootle_common_types::Epoch;
+        use tari_template_lib_types::Hash32;
+
+        let pinned_to = |epoch: u64, hash: u8, rate_bps: u16| {
+            Command::LocalAccept(MultiShardAtom {
+                id: TransactionId::default(),
+                decision: Decision::Commit,
+                evidence: Evidence::default(),
+                transaction_fee: 0,
+                leader_fee: None,
+                fee_intent_only: false,
+                locked_epoch: LockedEpoch::new(
+                    Epoch(epoch),
+                    Hash32::from_array([hash; 32]),
+                    ExhaustBurnRate::try_new(rate_bps).unwrap(),
+                ),
+            })
+            .hash(ProtocolVersion::V0)
+        };
+        let pinned = pinned_to(5, 1, 500);
+        assert_ne!(pinned, pinned_to(6, 1, 500));
+        assert_ne!(pinned, pinned_to(5, 2, 500));
+        assert_ne!(pinned, pinned_to(5, 1, 700));
+    }
+
     #[test]
     fn execution_weight_percent() {
         let atom = || MultiShardAtom {
@@ -587,6 +624,7 @@ mod tests {
             transaction_fee: 0,
             leader_fee: None,
             fee_intent_only: false,
+            locked_epoch: LockedEpoch::zero(),
         };
         let local_only_atom = LocalOnlyAtom {
             id: TransactionId::default(),
@@ -634,6 +672,7 @@ mod borsh_discriminant_tests {
             transaction_fee: 0,
             leader_fee: None,
             fee_intent_only: false,
+            locked_epoch: LockedEpoch::zero(),
         }
     }
 
@@ -741,6 +780,7 @@ mod pledged_value_hash_tests {
             transaction_fee: 0,
             leader_fee: None,
             fee_intent_only: false,
+            locked_epoch: LockedEpoch::zero(),
         })
     }
 

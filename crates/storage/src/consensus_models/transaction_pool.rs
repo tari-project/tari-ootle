@@ -851,15 +851,24 @@ impl TransactionPoolRecord {
         (*self.id()).into()
     }
 
-    pub fn get_current_multi_shard_atom(&self) -> MultiShardAtom {
-        MultiShardAtom {
+    /// The multi-shard atom for this transaction as it currently stands. It carries the transaction's pin, so a record
+    /// that is not pinned yet has no atom.
+    pub fn get_current_multi_shard_atom(&self) -> Result<MultiShardAtom, TransactionPoolError> {
+        let locked_epoch = self
+            .locked_epoch
+            .clone()
+            .ok_or(TransactionPoolError::MultiShardAtomWithoutLockedEpoch {
+                transaction_id: self.transaction_id,
+            })?;
+        Ok(MultiShardAtom {
             id: self.transaction_id,
             decision: self.current_decision(),
             evidence: self.evidence.clone(),
             transaction_fee: self.transaction_fee,
             leader_fee: self.leader_fee().cloned(),
             fee_intent_only: self.is_fee_intent_only(),
-        }
+            locked_epoch,
+        })
     }
 
     pub fn get_local_only_atom(&self) -> LocalOnlyAtom {
@@ -868,28 +877,6 @@ impl TransactionPoolRecord {
             decision: self.current_decision(),
             transaction_fee: self.transaction_fee,
             leader_fee: self.leader_fee().cloned(),
-        }
-    }
-
-    pub fn get_local_multi_shard_atom(&self) -> MultiShardAtom {
-        MultiShardAtom {
-            id: self.transaction_id,
-            decision: self.current_local_decision(),
-            evidence: self.evidence.clone(),
-            transaction_fee: self.transaction_fee,
-            leader_fee: self.leader_fee().cloned(),
-            fee_intent_only: self.is_fee_intent_only(),
-        }
-    }
-
-    pub fn into_current_multi_shard_atom(self) -> MultiShardAtom {
-        MultiShardAtom {
-            id: self.transaction_id,
-            decision: self.current_decision(),
-            leader_fee: self.leader_fee().cloned(),
-            fee_intent_only: self.is_fee_intent_only(),
-            evidence: self.evidence,
-            transaction_fee: self.transaction_fee,
         }
     }
 
@@ -1298,6 +1285,8 @@ pub enum TransactionPoolError {
         transaction_id: TransactionId,
         block_id: BlockId,
     },
+    #[error("Transaction {transaction_id} was sequenced as a multi-shard command before it was pinned to an epoch")]
+    MultiShardAtomWithoutLockedEpoch { transaction_id: TransactionId },
 }
 
 impl IsNotFoundError for TransactionPoolError {

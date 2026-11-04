@@ -38,7 +38,9 @@ use crate::{
             derive_new_multishard_command,
             fee_intent_only_disagreement,
             local_only_disagreement,
+            locked_epoch_disagreement,
             new_multishard_disagreement,
+            pin_new_transaction,
         },
         error::HotStuffError,
         filter_diff_for_committee,
@@ -260,8 +262,15 @@ where
             return Ok(Some(reason));
         }
 
-        // Prepare phase, ensure we set a locked_epoch if not already done
-        tx_rec.update_locked_epoch(block.to_locked_epoch());
+        if let Err(pinned_after) = pin_new_transaction(
+            &mut tx_rec,
+            &block.to_locked_epoch(),
+            local_committee_info.shard_group(),
+        ) {
+            let reason = pinned_after.into_no_vote(*atom.id());
+            warn!(target: LOG_TARGET, "❌ NO VOTE {proposed_kind} in block {block}: {reason}");
+            return Ok(Some(reason));
+        }
 
         // Foreign block could have already resulted in an ABORT execution
         let maybe_execution = proposed_block_change_set.take_transaction_execution(tx_rec.id());
@@ -432,7 +441,14 @@ where
                 substate_store,
                 proposed_block_change_set,
             );
-        } else if tx_rec.current_decision().is_commit() {
+        }
+
+        if let Some(reason) = locked_epoch_disagreement(tx_rec.locked_epoch(), atom) {
+            warn!(target: LOG_TARGET, "❌ NO VOTE LocalAccept in block {block}: {reason}");
+            return Ok(Some(reason));
+        }
+
+        if tx_rec.current_decision().is_commit() {
             // CASE: We are in the LocalPrepared stage, and want to proceed to LocalAccept
 
             if !tx_rec.current_stage().is_local_prepared() {
@@ -816,6 +832,11 @@ where
             }));
         }
 
+        if let Some(reason) = locked_epoch_disagreement(tx_rec.locked_epoch(), atom) {
+            warn!(target: LOG_TARGET, "❌ NO VOTE AllAccept in block {block}: {reason}");
+            return Ok(Some(reason));
+        }
+
         // A foreign proposal earlier in this block may have replaced the stored execution with its fee-intent commit
         let stored_execution;
         let execution = match proposed_block_change_set.transaction_execution(tx_rec.id()) {
@@ -979,6 +1000,11 @@ where
                 tx_rec.transaction_fee()
             );
             return Ok(Some(NoVoteReason::FeeDisagreement));
+        }
+
+        if let Some(reason) = locked_epoch_disagreement(tx_rec.locked_epoch(), atom) {
+            warn!(target: LOG_TARGET, "❌ NO VOTE SomeAccept in block {block}: {reason}");
+            return Ok(Some(reason));
         }
 
         tx_rec.set_next_stage_and_readiness(TransactionPoolStage::SomeAccepted, block.shard_group())?;

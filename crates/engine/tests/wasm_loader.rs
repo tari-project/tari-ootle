@@ -699,8 +699,8 @@ fn declarative_element_segments_load_alongside_the_active_one() {
 }
 
 /// Every element segment is active or declarative, and both are dropped at instantiation, so a
-/// `table.init` has nothing to copy: it can only trap or do nothing. Running one still re-syncs the
-/// whole table, so it is refused when the module is loaded.
+/// `table.init` has nothing to copy: it can only trap or do nothing. A zero-length one still
+/// re-syncs the whole table, so it is refused when the module is loaded.
 #[test]
 fn table_init_is_refused() {
     let code = template_module(

@@ -62,8 +62,9 @@ pub struct WasmLimits {
     /// Maximum number of active element segments a module may declare. Wasmer re-syncs a
     /// fixed-size funcref table in full after writing each active segment into it at
     /// instantiation, empty segments included, so the work is the segment count times the table
-    /// slots while an empty segment costs ~5 bytes of binary. A single sync pass is covered by
-    /// [`PER_TEMPLATE_TABLE_SLOT`]. `wasm-ld` emits one active segment for a module's
+    /// slots while an empty segment costs ~5 bytes of binary. [`PER_TEMPLATE_TABLE_SLOT`] covers the
+    /// sync wasmer runs on every fixed table once the instance is built plus the one a single active
+    /// segment adds. `wasm-ld` emits one active segment for a module's
     /// `__indirect_function_table`. Only active segments count: declarative and passive ones stay
     /// out of every table at instantiation.
     pub max_element_segments: usize,
@@ -346,9 +347,13 @@ pub const PER_TEMPLATE_DATA_SEGMENT: u64 = 700;
 /// Each slot a declared table claims, whether or not anything is written into it.
 ///
 /// Allocating and zeroing the tables is separate from filling them: four tables of
-/// `max_table_elements` with no element section at all measure at 0.114 ms against 192 bytes of
-/// binary. Measured at ~13 points per slot.
-pub const PER_TEMPLATE_TABLE_SLOT: u64 = 16;
+/// `max_table_elements` with no element section at all measure at ~0.083 ms against 192 bytes of
+/// binary, ~11 points per slot, which includes the pass wasmer makes over every fixed-size funcref
+/// table to sync it once the instance is built. The active element segment a module may declare
+/// makes wasmer sync its fixed-size table once more, another ~10 points per slot: one empty active
+/// segment on a fixed table of `max_table_elements` measures at ~411,000 points for the whole
+/// instantiation. The price covers both passes.
+pub const PER_TEMPLATE_TABLE_SLOT: u64 = 24;
 
 /// Each element-segment entry written into a table.
 ///
@@ -359,8 +364,9 @@ pub const PER_TEMPLATE_TABLE_SLOT: u64 = 16;
 /// instantiation refuses one whose entries run past the end of its table before writing any of
 /// them, so a module that loads writes at most `max_table_elements` entries.
 ///
-/// 65,536 entries measure at ~0.21 ms once the table allocation they used to be conflated with is
-/// priced separately by [`PER_TEMPLATE_TABLE_SLOT`], i.e. ~28 points each. Set above that.
+/// One segment filling a fixed table of `max_table_elements` measures at ~0.062 ms, ~511,000 points
+/// over a module with no table. Taking away the same table behind an empty segment, which
+/// [`PER_TEMPLATE_TABLE_SLOT`] prices, leaves ~10 points per entry written. Set well above that.
 pub const PER_TEMPLATE_ELEMENT_ENTRY: u64 = 32;
 
 /// What a module's binary says about the work instantiating it will cost.

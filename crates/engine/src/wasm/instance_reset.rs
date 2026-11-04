@@ -107,7 +107,7 @@ impl<'a> FunctionMiddleware<'a> for FunctionResettableState {
             Operator::TableFill { .. } |
             Operator::TableCopy { .. } => Err(refused(format!("operator {operator:?} modifies a table"))),
             // Every element segment is dropped at instantiation, so `table.init` can only trap or
-            // copy nothing, and wasmer re-syncs the whole table after either.
+            // copy nothing, and wasmer re-syncs the whole table after a zero-length copy.
             Operator::TableInit { .. } => Err(refused(format!(
                 "operator {operator:?} copies from an element segment, and none is kept after instantiation"
             ))),

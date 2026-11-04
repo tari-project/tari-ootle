@@ -102,16 +102,23 @@ fn instantiate_ms(segment_len: usize) -> (f64, usize) {
     (best, code_size)
 }
 
-/// A module whose tables are filled by active element segments, which `Instance::new` writes out on
-/// every instantiation just as it copies the data segments. One segment per table, so `tables` x
-/// `entries` funcref writes.
-fn module_with_element_segments(tables: usize, entries: usize) -> Vec<u8> {
+/// A module of `segments` active element segments, each filling a fixed table of its own with
+/// `entries` funcrefs, which `Instance::new` writes out on every instantiation just as it copies the
+/// data segments. `segments` x `entries` funcref writes.
+fn module_with_element_segments(segments: usize, entries: usize) -> Vec<u8> {
+    module_with_fixed_tables(segments, entries, entries)
+}
+
+/// A module of `segments` fixed tables of `slots` slots, each written by an active element segment
+/// of its own carrying `entries` funcrefs. With `entries` at 0 the segment writes nothing, and what
+/// it adds over [`module_with_tables_only`] is the table sync wasmer runs after every active segment.
+fn module_with_fixed_tables(segments: usize, slots: usize, entries: usize) -> Vec<u8> {
     let funcrefs = vec!["0"; entries].join(" ");
-    let table_decls = (0..tables)
-        .map(|_| format!("(table {entries} {entries} funcref)"))
+    let table_decls = (0..segments)
+        .map(|_| format!("(table {slots} {slots} funcref)"))
         .collect::<Vec<_>>()
         .join("\n");
-    let elem_decls = (0..tables)
+    let elem_decls = (0..segments)
         .map(|i| format!("(elem (table {i}) (i32.const 0) func {funcrefs})"))
         .collect::<Vec<_>>()
         .join("\n");
@@ -575,6 +582,23 @@ fn main() {
         ((tables_only_ms - none) * rate).ceil() as i64,
         charged_points(&tables_only),
     );
+
+    // The fullest table one empty active segment can make wasmer re-sync, against the same table
+    // with no segment at all. Both figures are whole instantiations, measured and charged.
+    for (empty_segments, code) in [
+        (0, module_with_tables_only(1, entries)),
+        (segments, module_with_fixed_tables(segments, entries, 0)),
+    ] {
+        let ms = instantiate_code_ms(&code);
+        let charged = charged_points(&code);
+        let measured = (ms * rate).ceil() as u64;
+        println!(
+            "{entries}-slot fixed table, {empty_segments} empty active segments ({} bytes): {ms:.4} ms -> {measured} \
+             points, charged {charged} ({:.2}x)",
+            code.len(),
+            charged as f64 / measured as f64,
+        );
+    }
 
     // Zero-length active data segments.
     // wasmparser refuses a data section above 100,000 segments, so this is the whole range.

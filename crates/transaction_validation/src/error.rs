@@ -112,6 +112,8 @@ pub enum TransactionValidationError {
     },
     #[error("Transaction {transaction_id} publishes a template in its fee instructions")]
     PublishTemplateInFeeInstructions { transaction_id: TransactionId },
+    #[error("Transaction {transaction_id} updates a component template in its fee instructions")]
+    UpdateComponentTemplateInFeeInstructions { transaction_id: TransactionId },
     #[error("Transaction {transaction_id} publishes a {actual} byte template binary, but the maximum allowed is {max}")]
     PublishTemplateBinaryTooLarge {
         transaction_id: TransactionId,
@@ -213,6 +215,7 @@ impl TransactionValidationError {
             Self::ExceedsStealthTransactionLimit { .. } |
             Self::TooManyPublishTemplateInstructions { .. } |
             Self::PublishTemplateInFeeInstructions { .. } |
+            Self::UpdateComponentTemplateInFeeInstructions { .. } |
             Self::PublishTemplateBinaryTooLarge { .. } |
             Self::TooManySignatures { .. } |
             Self::TooManyInputs { .. } |

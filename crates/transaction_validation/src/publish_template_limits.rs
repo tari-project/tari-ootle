@@ -10,12 +10,12 @@ use crate::{TransactionValidationError, Validator};
 const LOG_TARGET: &str = "tari::ootle::mempool::validators::publish_template_limits";
 
 /// Rejects transactions that break one of the engine's publish rules: more than
-/// [`MAX_PUBLISH_TEMPLATES_PER_TRANSACTION`] `PublishTemplate` instructions, a template published from the fee
-/// instructions, or a binary larger than `ENGINE_LIMITS.max_template_binary_size_bytes`.
+/// [`MAX_PUBLISH_TEMPLATES_PER_TRANSACTION`] `PublishTemplate` instructions, a template published or updated from the
+/// fee instructions, or a binary larger than `ENGINE_LIMITS.max_template_binary_size_bytes`.
 ///
 /// A publish compiles the binary, which costs two orders of magnitude more than the compute credit a fee intent runs
 /// on, and it is charged only once the fee intent has been paid for. Fee instructions exist to source the fee, and no
-/// way of sourcing a fee involves publishing a template.
+/// way of sourcing a fee involves publishing or updating a template.
 ///
 /// Each is a pure function of the transaction, so all three are decided here rather than during execution. This
 /// validator backs both mempool ingress and block validation, so every validator applies the rules to every
@@ -46,6 +46,19 @@ impl Validator<Transaction> for PublishTemplateLimitValidator {
                 "PublishTemplateLimitValidator - FAIL: {transaction_id} publishes a template in its fee instructions"
             );
             return Err(TransactionValidationError::PublishTemplateInFeeInstructions { transaction_id });
+        }
+
+        if transaction
+            .fee_instructions()
+            .iter()
+            .any(|instruction| matches!(instruction, Instruction::UpdateComponentTemplate { .. }))
+        {
+            let transaction_id = transaction.calculate_id();
+            warn!(
+                target: LOG_TARGET,
+                "PublishTemplateLimitValidator - FAIL: {transaction_id} updates a component template in its fee instructions"
+            );
+            return Err(TransactionValidationError::UpdateComponentTemplateInFeeInstructions { transaction_id });
         }
 
         // Count across both instruction lists, matching `Transaction::has_publish_template`.
@@ -104,6 +117,7 @@ mod tests {
     use indexmap::IndexSet;
     use tari_ootle_common_types::Epoch;
     use tari_ootle_transaction::{
+        ComponentReference,
         Network,
         Sr25519SignatureBytes,
         TransactionSealSignature,
@@ -111,7 +125,7 @@ mod tests {
         UnsealedTransactionV1,
         UnsignedTransactionV1,
     };
-    use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+    use tari_template_lib::types::{ComponentAddress, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
     use super::*;
 
@@ -197,6 +211,21 @@ mod tests {
         assert!(matches!(
             err,
             TransactionValidationError::PublishTemplateInFeeInstructions { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_an_update_template_in_the_fee_instructions() {
+        let update = Instruction::UpdateComponentTemplate {
+            component: ComponentReference::Address(ComponentAddress::from_array([1u8; 32])),
+            migrate: None,
+            new_template: TemplateAddress::from_array([2u8; 32]),
+        };
+        let tx = tx(vec![update], vec![]);
+        let err = PublishTemplateLimitValidator::new().validate(&(), &tx).unwrap_err();
+        assert!(matches!(
+            err,
+            TransactionValidationError::UpdateComponentTemplateInFeeInstructions { .. }
         ));
     }
 

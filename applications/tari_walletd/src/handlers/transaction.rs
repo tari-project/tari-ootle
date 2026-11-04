@@ -76,6 +76,7 @@ use crate::{
             OrJrpcNotFound,
             ensure_signing_key,
             ensure_transaction_signers,
+            extract_stealth_statements,
             get_account,
             get_account_or_default,
             invalid_params,
@@ -196,7 +197,7 @@ pub(crate) fn ensure_locked_stealth_inputs_are_spent<R: WalletStoreReader>(
     if lock_ids.is_empty() {
         return Ok(());
     }
-    let statements = crate::handlers::transaction_requests::extract_stealth_statements(transaction);
+    let statements = extract_stealth_statements(transaction);
     for lock_id in lock_ids {
         let Some(outputs) = reader.stealth_outputs_get_locked_by_lock_id(*lock_id).optional()? else {
             continue;

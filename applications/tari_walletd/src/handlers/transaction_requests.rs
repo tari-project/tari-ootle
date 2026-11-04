@@ -19,7 +19,7 @@ use indexmap::IndexMap;
 use log::*;
 use ootle_byte_type::ToByteType;
 use tari_ootle_common_types::optional::Optional;
-use tari_ootle_transaction::{Instruction, MainSigner, ResourceAddressRef, UnsignedTransaction, args::InstructionArg};
+use tari_ootle_transaction::{MainSigner, UnsignedTransaction};
 use tari_ootle_wallet_sdk::{
     models::{
         EffectiveStatus,
@@ -54,17 +54,18 @@ use tari_ootle_walletd_client::{
         TransactionSubmitRequest,
     },
 };
-use tari_template_lib_types::{
-    ResourceAddress,
-    constants::TARI_TOKEN,
-    crypto::PedersenCommitmentBytes,
-    stealth::{SpendAuthorization, StealthTransferStatement},
-};
+use tari_template_lib_types::{ResourceAddress, crypto::PedersenCommitmentBytes, stealth::SpendAuthorization};
 
 use super::context::HandlerContext;
 use crate::handlers::{
     component_upgrades::component_upgrades,
-    helpers::{ensure_transaction_signers, invalid_params, invalid_request, validate_transaction_for_approval},
+    helpers::{
+        ensure_transaction_signers,
+        extract_stealth_statements,
+        invalid_params,
+        invalid_request,
+        validate_transaction_for_approval,
+    },
     transaction::{ensure_locked_stealth_inputs_are_spent, submit_inner_for_request},
 };
 
@@ -488,40 +489,6 @@ fn resolve_main_signer(
         }
     }
     Ok(TransactionRequestMainSigner::External { public_key })
-}
-
-/// Extracts every stealth transfer statement the transaction executes directly (`Instruction::StealthTransfer`
-/// and `Account::pay_fee_stealth` method calls), paired with its explicit resource address when known.
-pub(crate) fn extract_stealth_statements(
-    transaction: &UnsignedTransaction,
-) -> Vec<(Option<ResourceAddress>, StealthTransferStatement)> {
-    let mut statements = Vec::new();
-    for instruction in transaction.fee_instructions().iter().chain(transaction.instructions()) {
-        match instruction {
-            Instruction::StealthTransfer {
-                resource_address_ref,
-                statement,
-                ..
-            } => {
-                let resource = match resource_address_ref {
-                    ResourceAddressRef::Address(address) => Some(*address),
-                    ResourceAddressRef::Workspace(_) => None,
-                };
-                statements.push((resource, statement.clone()));
-            },
-            Instruction::CallMethod { method, args, .. } if &**method == "pay_fee_stealth" => {
-                if let Some(InstructionArg::Literal(bytes)) = args.first() &&
-                    let Ok(statement) =
-                        tari_engine_types::encoded::Encoded::<StealthTransferStatement>::from_bytes(bytes.to_vec())
-                            .decode()
-                {
-                    statements.push((Some(TARI_TOKEN), statement));
-                }
-            },
-            _ => {},
-        }
-    }
-    statements
 }
 
 /// What the transaction's stealth transfers move out of the wallet, one
@@ -1146,13 +1113,14 @@ mod tests {
     }
 
     mod value_summaries {
-        use tari_ootle_transaction::{TransactionBuilder, args::WorkspaceOffsetId};
+        use tari_ootle_transaction::{Instruction, ResourceAddressRef, TransactionBuilder, args::WorkspaceOffsetId};
         use tari_ootle_wallet_sdk::models::StealthOutputModel;
         use tari_template_lib_types::{
             Amount,
             ComponentAddress,
             EncryptedData,
             Hash32,
+            constants::TARI_TOKEN,
             crypto::{RangeProofBytes, RistrettoPublicKeyBytes, UtxoTag},
             stealth::{
                 StealthInput,

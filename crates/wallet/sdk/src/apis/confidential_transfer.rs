@@ -533,7 +533,7 @@ where TSpec: WalletSdkSpec
 pub struct TransferOutput {
     pub transaction: Transaction,
     /// The lock holding this transfer's inputs. After a dry run the lock is already released and deleted, so this id
-    /// names no lock: passing it to `release_lock` or a submission returns not-found.
+    /// names no lock: a submission naming it fails with not-found, and releasing it does nothing.
     pub transaction_proof_id: WalletLockId,
 }
 

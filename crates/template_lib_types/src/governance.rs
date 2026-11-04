@@ -121,10 +121,8 @@ pub fn council_owner_rule(threshold: u16, council: &[RistrettoPublicKeyBytes]) -
         }) => panic!("a council of {num_requirements} cannot be seated at a threshold of {threshold}"),
         // The member goes unnamed: formatting a key would put hex encoding into every template that seats a council.
         Some(InvalidAccessRule::DuplicateRequirement { .. }) => panic!("a council lists a member more than once"),
-        Some(InvalidAccessRule::EmptyAnyOf | InvalidAccessRule::EmptyAllOf) => {
-            unreachable!("a council owner rule is a single m_of_n")
-        },
-        None => {},
+        // A council owner rule is a single m_of_n, which holds no any_of or all_of.
+        Some(InvalidAccessRule::EmptyAnyOf | InvalidAccessRule::EmptyAllOf) | None => {},
     }
 
     SubstateOwnerRule::ByAccessRule(rule)

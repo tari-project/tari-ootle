@@ -221,6 +221,7 @@ impl EpochCheckpoint {
     /// This includes basic sanity checks such as:
     /// - The shard group is valid (start < end + 1)
     /// - The number of shard state roots does not exceed the number of shards in the group
+    /// - Every shard in `shard_tree_summary` is either the global shard or within the header's shard group
     /// - The state root matches the provided header
     ///
     /// Use EpochCheckpoint::validate() to validate the entire proof (including well-formedness).
@@ -235,7 +236,7 @@ impl EpochCheckpoint {
             )));
         }
 
-        // 1 + for global shard
+        // Cheap early length bound before checking each key (`1 +` for the global shard).
         if self.shard_tree_summary.len() > num_shards + 1 {
             return Err(
                 EpochCheckpointValidationError::NumberOfShardStateRootsExceedsNumberOfShards {

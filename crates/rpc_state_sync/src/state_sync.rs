@@ -283,13 +283,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         checkpoint_epoch: Epoch,
         local_epoch: Epoch,
     ) -> Result<bool, RpcStateSyncError> {
-        let Some(local_info) = self.epoch_manager.get_local_committee_info(local_epoch).await.optional()? else {
-            return Ok(false);
-        };
-        self.state_store.with_read_tx(|tx| {
-            let checkpoints = EpochCheckpoint::get_all_for_epoch(tx, checkpoint_epoch)?;
-            local_state_matches_checkpoints(tx, local_info.shard_group(), &checkpoints)
-        })
+        local_state_matches_checkpoint_at(&self.epoch_manager, &self.state_store, checkpoint_epoch, local_epoch).await
     }
 
     async fn get_sync_sources(
@@ -1028,17 +1022,18 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
             // route it to `Syncing`, which fails because every committee member rolled back together holds the same
             // (absent) state, wedging consensus in `Sleeping`.
             //
-            // The state-root match is required, not merely the checkpoint's presence: state sync stores each shard
-            // group's checkpoint as soon as that group's shards match it, so a first-time sync interrupted before
-            // the remaining groups also leaves a leaf-less node holding a checkpoint — but with incomplete state.
-            // Its roots will not match, so it correctly falls through here and resumes the sync.
+            // Checkpoint coverage and state-root match are both required, not merely a checkpoint's presence: state
+            // sync stores each shard group's checkpoint as soon as that group's shards match it, so a first-time sync
+            // interrupted before the remaining groups finish also leaves a leaf-less node holding a checkpoint — but
+            // with incomplete state. Such a node holds no checkpoint covering the remaining groups' shards, so it falls
+            // through here and resumes the sync.
             let maybe_checkpoint = self
                 .state_store
                 .with_read_tx(|tx| EpochCheckpoint::get_last_checkpoint(tx))
                 .optional()?;
             if let Some(checkpoint) = maybe_checkpoint &&
                 checkpoint_admits_leafless_join(checkpoint.epoch(), oracle_epoch) &&
-                self.local_state_matches_checkpoint(checkpoint.epoch(), oracle_epoch)
+                self.local_state_matches_checkpoint(checkpoint.epoch(), checkpoint.epoch() + Epoch(1))
                     .await?
             {
                 return Ok(SyncStatus::UpToDate);
@@ -1238,6 +1233,37 @@ fn holds_missing_values<TTx: StateStoreReadTransaction>(
     Ok(false)
 }
 
+async fn local_state_matches_checkpoint_at<TEpochManager, TStateStore>(
+    epoch_manager: &TEpochManager,
+    state_store: &TStateStore,
+    checkpoint_epoch: Epoch,
+    local_epoch: Epoch,
+) -> Result<bool, RpcStateSyncError>
+where
+    TEpochManager: EpochManagerReader,
+    TStateStore: StateStore,
+{
+    let Some(local_info) = epoch_manager.get_local_committee_info(local_epoch).await.optional()? else {
+        return Ok(false);
+    };
+    state_store.with_read_tx(|tx| {
+        let checkpoints = EpochCheckpoint::get_all_for_epoch(tx, checkpoint_epoch)?;
+        local_state_matches_checkpoints(tx, local_info.shard_group(), &checkpoints)
+    })
+}
+
+fn summary_matches(
+    checkpoint: &EpochCheckpoint,
+    shard: Shard,
+    local_root: tari_state_tree::TreeHash,
+    local_version: Version,
+    local_acc: TransitionAccumulator,
+) -> bool {
+    local_root == checkpoint.get_shard_root(shard) &&
+        local_version == checkpoint.get_shard_state_version(shard) &&
+        local_acc == checkpoint.get_shard_transition_acc(shard)
+}
+
 /// True if every shard of `local_shard_group`, and the global shard, holds the committed state of the checkpoint in
 /// `checkpoints` that covers it, with the value of every up substate. The checkpoint epoch's groups may be split or
 /// merged into `local_shard_group`, so each shard is checked against the checkpoint of the group that held it then. A
@@ -1273,11 +1299,10 @@ fn local_state_matches_checkpoints<TTx: StateStoreReadTransaction>(
         };
 
         if shard.is_global() {
-            if checkpoints_with_groups.iter().any(|(_, checkpoint)| {
-                local_root != checkpoint.get_shard_root(shard) ||
-                    local_version != checkpoint.get_shard_state_version(shard) ||
-                    local_acc != checkpoint.get_shard_transition_acc(shard)
-            }) {
+            if checkpoints_with_groups
+                .iter()
+                .any(|(_, checkpoint)| !summary_matches(checkpoint, shard, local_root, local_version, local_acc))
+            {
                 return Ok(false);
             }
         } else {
@@ -1287,10 +1312,7 @@ fn local_state_matches_checkpoints<TTx: StateStoreReadTransaction>(
             else {
                 return Ok(false);
             };
-            if local_root != checkpoint.get_shard_root(shard) ||
-                local_version != checkpoint.get_shard_state_version(shard) ||
-                local_acc != checkpoint.get_shard_transition_acc(shard)
-            {
+            if !summary_matches(checkpoint, shard, local_root, local_version, local_acc) {
                 return Ok(false);
             }
         }
@@ -1759,5 +1781,200 @@ mod tests {
             .with_read_tx(|tx| local_state_matches_checkpoints(tx, group, std::slice::from_ref(&cp)))
             .unwrap();
         assert!(matches_after);
+    }
+
+    struct RegisteredFromEpoch {
+        registered_from: Epoch,
+        shard_group: ShardGroup,
+    }
+
+    impl EpochManagerReader for RegisteredFromEpoch {
+        type Addr = PeerAddress;
+
+        fn subscribe(&self) -> tokio::sync::broadcast::Receiver<tari_epoch_manager::EpochManagerEvent> {
+            unimplemented!()
+        }
+
+        async fn wait_for_initial_scanning_to_complete(&self) -> Result<(), tari_epoch_manager::EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_all_validator_nodes(
+            &self,
+            _epoch: Epoch,
+        ) -> Result<Vec<tari_ootle_storage::global::models::ValidatorNode<Self::Addr>>, tari_epoch_manager::EpochManagerError>
+        {
+            unimplemented!()
+        }
+
+        async fn get_committee_info_by_validator_address(
+            &self,
+            _epoch: Epoch,
+            _address: &Self::Addr,
+        ) -> Result<tari_ootle_common_types::committee::CommitteeInfo, tari_epoch_manager::EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_committee_for_substate(
+            &self,
+            _epoch: Epoch,
+            _substate_address: tari_ootle_common_types::SubstateAddress,
+        ) -> Result<std::sync::Arc<Committee<Self::Addr>>, tari_epoch_manager::EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_validator_node_by_public_key(
+            &self,
+            _epoch: Epoch,
+            _public_key: RistrettoPublicKeyBytes,
+        ) -> Result<tari_ootle_storage::global::models::ValidatorNode<Self::Addr>, tari_epoch_manager::EpochManagerError>
+        {
+            unimplemented!()
+        }
+
+        async fn get_our_validator_node(
+            &self,
+            _epoch: Epoch,
+        ) -> Result<tari_ootle_storage::global::models::ValidatorNode<Self::Addr>, tari_epoch_manager::EpochManagerError>
+        {
+            unimplemented!()
+        }
+
+        async fn get_local_committee_info(
+            &self,
+            epoch: Epoch,
+        ) -> Result<tari_ootle_common_types::committee::CommitteeInfo, tari_epoch_manager::EpochManagerError> {
+            if epoch < self.registered_from {
+                return Err(tari_epoch_manager::EpochManagerError::ValidatorNodeNotRegistered {
+                    address: RistrettoPublicKeyBytes::default().to_string(),
+                    epoch,
+                });
+            }
+            Ok(tari_ootle_common_types::committee::CommitteeInfo::new(
+                NumPreshards::P256,
+                1,
+                1,
+                self.shard_group,
+                epoch,
+            ))
+        }
+
+        async fn get_committee_info(
+            &self,
+            _epoch: Epoch,
+            _shard_group: ShardGroup,
+        ) -> Result<tari_ootle_common_types::committee::CommitteeInfo, tari_epoch_manager::EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_committee_info_for_substate(
+            &self,
+            _epoch: Epoch,
+            _shard: tari_ootle_common_types::SubstateAddress,
+        ) -> Result<tari_ootle_common_types::committee::CommitteeInfo, tari_epoch_manager::EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn current_epoch(&self) -> Result<Epoch, tari_epoch_manager::EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_current_epoch_hash(&self) -> Result<FixedHash, tari_epoch_manager::EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_epoch_hash(&self, _epoch: Epoch) -> Result<FixedHash, tari_epoch_manager::EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_validator_set_hash(
+            &self,
+            _epoch: Epoch,
+        ) -> Result<tari_ootle_common_types::ValidatorSetHash, tari_epoch_manager::EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_validator_set_committee_proof(
+            &self,
+            _epoch: Epoch,
+            _shard_group: ShardGroup,
+        ) -> Result<tari_state_tree::ValidatorSetCommitteeProof, tari_epoch_manager::EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_num_committees(&self, _epoch: Epoch) -> Result<u32, tari_epoch_manager::EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_committee_by_shard_group(
+            &self,
+            _epoch: Epoch,
+            _shards: ShardGroup,
+        ) -> Result<std::sync::Arc<Committee<Self::Addr>>, tari_epoch_manager::EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_committees_overlapping_shard_group(
+            &self,
+            _epoch: Epoch,
+            _shard_group: ShardGroup,
+        ) -> Result<HashMap<ShardGroup, Committee<Self::Addr>>, tari_epoch_manager::EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_random_committee_member(
+            &self,
+            _epoch: Epoch,
+            _shard_group: Option<ShardGroup>,
+            _excluding: HashSet<Self::Addr>,
+        ) -> Result<tari_ootle_storage::global::models::ValidatorNode<Self::Addr>, tari_epoch_manager::EpochManagerError>
+        {
+            unimplemented!()
+        }
+
+        async fn lock_epoch(&self, _epoch: Epoch) -> Result<(), tari_epoch_manager::EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_observed_epoch_hash(
+            &self,
+            _epoch: Epoch,
+        ) -> Result<Option<FixedHash>, tari_epoch_manager::EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_birthday_epoch(&self) -> Result<Option<Epoch>, tari_epoch_manager::EpochManagerError> {
+            unimplemented!()
+        }
+    }
+
+    #[tokio::test]
+    async fn local_state_matches_checkpoint_at_queries_starting_epoch_and_tolerates_unregistered_node() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store: RocksDbStateStore<PeerAddress> =
+            RocksDbStateStore::open(tmp.path().join("rocksdb"), DatabaseOptions::default()).unwrap();
+
+        let group_a = ShardGroup::new(Shard::from(1u32), Shard::from(2u32));
+        let merged_group = ShardGroup::new(Shard::from(1u32), Shard::from(4u32));
+        let cp_a = make_checkpoint(group_a, vec![]);
+        store.with_write_tx(|tx| cp_a.save(tx)).unwrap();
+
+        let epoch_manager = RegisteredFromEpoch {
+            registered_from: Epoch(4),
+            shard_group: merged_group,
+        };
+
+        // At an epoch before registration, `.optional()` turns `ValidatorNodeNotRegistered` into `Ok(false)`.
+        let unregistered = local_state_matches_checkpoint_at(&epoch_manager, &store, Epoch(3), Epoch(3))
+            .await
+            .unwrap();
+        assert!(!unregistered);
+
+        // At `checkpoint.epoch() + Epoch(1)`, the new validator is registered in `merged_group`, and partial
+        // checkpoint coverage (`cp_a` only) returns `Ok(false)` rather than `ValidatorNodeNotRegistered`.
+        let partial = local_state_matches_checkpoint_at(&epoch_manager, &store, Epoch(3), Epoch(4))
+            .await
+            .unwrap();
+        assert!(!partial);
     }
 }

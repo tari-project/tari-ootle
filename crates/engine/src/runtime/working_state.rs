@@ -96,8 +96,8 @@ const LOG_TARGET: &str = "tari::ootle::engine::runtime::working_state";
 
 /// The view of a transaction's state that a runtime module is given when charging for it.
 ///
-/// Exposes what a charge computed from the state needs to read ÔÇö what will be persisted, and the fee
-/// state to record against ÔÇö and nothing that would let a module alter the state it is pricing. It
+/// Exposes what a charge computed from the state needs to read — what will be persisted, and the fee
+/// state to record against — and nothing that would let a module alter the state it is pricing. It
 /// also keeps [`WorkingState`] itself, which is a large internal surface, out of the public module
 /// API that [`super::RuntimeModule`] defines.
 pub struct ChargeableState<'a, TStore> {
@@ -314,7 +314,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
     fn lock_substate(&mut self, addr: SubstateId, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
         let lock_id = self.try_lock(addr.clone(), lock_flag)?;
         // Every lock a frame takes must be released before that frame is popped, which `pop_frame` enforces. A lock
-        // taken before the first frame is pushed ÔÇö fee settlement, transaction setup ÔÇö belongs to no frame and is
+        // taken before the first frame is pushed — fee settlement, transaction setup — belongs to no frame and is
         // left untracked.
         if let Some(frame) = self.call_frames.last_mut() {
             frame.scope_mut().add_lock_to_scope(lock_id);
@@ -813,7 +813,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     /// Downs each commitment's [`ConfidentialOutput`] substate, verifying the caller's value proof for it and
-    /// returning the total value proven. Requiring a proof here ÔÇö where the commitments are enumerated ÔÇö is what
+    /// returning the total value proven. Requiring a proof here — where the commitments are enumerated — is what
     /// makes it impossible to destroy a commitment's value without accounting for it.
     pub fn spend_confidential_outputs_with_value_proofs<I: IntoIterator<Item = PedersenCommitmentBytes>>(
         &mut self,
@@ -904,7 +904,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
     /// bucket holds: a commitment's value is not visible to `unlocked_amount`, so without a proof the engine cannot
     /// know how much the burn destroys.
     ///
-    /// A holder who knows the masks can prove a commitment directly. A holder who does not ÔÇö a recaller, say ÔÇö can
+    /// A holder who knows the masks can prove a commitment directly. A holder who does not — a recaller, say — can
     /// only prove one through the resource's view key, so commitments recalled from a resource without a view key
     /// cannot be burnt at all. The supply figure stays correct either way: the value still exists, held by whoever
     /// holds the commitment.
@@ -1620,7 +1620,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
     /// The storage footprint of the transaction receipt this state will finalize into.
     ///
     /// The receipt is persisted like any other substate but is only built once fees are settled, so
-    /// it cannot be measured alongside the substates in [`Self::mutated_substates`] ÔÇö it is bounded
+    /// it cannot be measured alongside the substates in [`Self::mutated_substates`] — it is bounded
     /// here instead. See [`TransactionReceipt::encoded_size_upper_bound`] for what the bound covers.
     pub fn transaction_receipt_size(&mut self) -> Result<usize, RuntimeError> {
         let epoch = self.get_current_epoch()?;
@@ -1761,7 +1761,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             });
         }
 
-        // A restricted frame ÔÇö a resource auth hook, a spend-script predicate or a component migration ÔÇö is lent
+        // A restricted frame — a resource auth hook, a spend-script predicate or a component migration — is lent
         // nothing: whatever authorized the action that reached it (for a migration, the upgrade rule evaluated in
         // the pushing scope before this point) does not extend to the code that runs in it. A hook or migration
         // frame carries no signer badges either, since the signer chose neither the hook nor the migration code. A
@@ -2516,11 +2516,11 @@ pub fn reject_transient_values_in(location: &'static str, value: &tari_bor::Valu
     reject_transient_values(location, &IndexedWellKnownTypes::from_value(value)?)
 }
 
-/// The share of `paid` that is burned at `rate`: `Ôîèpaid ├ù rate / 10_000Ôîï`. Never exceeds `paid`
-/// because `ExhaustBurnRate` caps the rate at 10_000, so the leader share `paid ÔêÆ burn` cannot go
+/// The share of `paid` that is burned at `rate`: `⌊paid × rate / 10_000⌋`. Never exceeds `paid`
+/// because `ExhaustBurnRate` caps the rate at 10_000, so the leader share `paid − burn` cannot go
 /// negative and a full rate leaves leaders exactly nothing.
 fn exhaust_burn_share(paid: u64, rate: ExhaustBurnRate) -> u64 {
-    // At most `paid ├ù 10_000 / 10_000 = paid`, so the cast back is lossless.
+    // At most `paid × 10_000 / 10_000 = paid`, so the cast back is lossless.
     (u128::from(paid) * u128::from(rate.as_bps()) / 10_000) as u64
 }
 

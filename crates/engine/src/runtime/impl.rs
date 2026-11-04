@@ -208,8 +208,8 @@ pub struct RuntimeInterfaceImpl<TStore, TTemplateProvider> {
     /// `InstructionArg::Blob(idx)` references against the surrounding transaction's blobs.
     blobs: Rc<tari_ootle_transaction::Blobs>,
     /// The introspection context made available to a spend-script predicate for the duration of its evaluation. It is
-    /// set immediately before invoking the predicate and cleared immediately after, so `spend_context_invoke` ÔÇö which
-    /// the predicate reaches through its own nested interface ÔÇö can serve the `SpendContext` accessors.
+    /// set immediately before invoking the predicate and cleared immediately after, so `spend_context_invoke` — which
+    /// the predicate reaches through its own nested interface — can serve the `SpendContext` accessors.
     spend_exec_context: Rc<RefCell<Option<SpendScriptExecution>>>,
     /// The template instances this transaction has created, shared by every frame's interface.
     wasm_instances: Rc<RefCell<WasmInstanceCache>>,
@@ -293,7 +293,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     /// non-determinism.
     ///
     /// The lists contain only WASM host ops (each backed by an `EngineOp`), because a restricted frame only exists
-    /// while template WASM is executing ÔÇö instruction-level operations such as `pay_fee` and `publish_template` have
+    /// while template WASM is executing — instruction-level operations such as `pay_fee` and `publish_template` have
     /// no `EngineOp`, run only at the top level, and so can never execute in a restricted context. `call_invoke` is
     /// also blocked at the frame level (`allow_cross_template_calls == false`) and listed here for defence in depth.
     /// `allocate_address_invoke` is also refused by `WorkingState::new_address_allocation`; listing it here refuses
@@ -456,8 +456,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
 
     /// Metadata a template supplies is persisted and served as JSON by every node, wallet and indexer
     /// that reads it. A value's JSON form is that of the [`tari_bor::Value`] it decodes to, so a value
-    /// that does not decode to one ÔÇö a CBOR simple value, or nesting past
-    /// [`tari_bor::MAX_DECODE_DEPTH`] ÔÇö would commit and then fail every reader.
+    /// that does not decode to one — a CBOR simple value, or nesting past
+    /// [`tari_bor::MAX_DECODE_DEPTH`] — would commit and then fail every reader.
     fn check_metadata_values(argument: &'static str, metadata: &Metadata) -> Result<(), RuntimeError> {
         for (key, value) in metadata {
             if let Err(e) = tari_bor::check_value_form(value.as_bytes()) {
@@ -499,10 +499,10 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     /// `payload` entry is paid for by every caller of the instruction that emits it. A payload must
     /// therefore carry only what a reader cannot recover from the substates the same transaction
     /// ups: the amount moved, which rule changed, which vault was reached. Anything the reader can
-    /// read off `substate_id` or off a substate it names ÔÇö a resource's type, symbol or metadata ÔÇö
+    /// read off `substate_id` or off a substate it names — a resource's type, symbol or metadata —
     /// is charged for twice and must stay out. A consumer that needs a substate's contents to
-    /// interpret an event resolves it once and caches it ÔÇö a vault's resource, for instance, is
-    /// fixed for the vault's life ÔÇö rather than having every caller pay to carry it.
+    /// interpret an event resolves it once and caches it — a vault's resource, for instance, is
+    /// fixed for the vault's life — rather than having every caller pay to carry it.
     fn emit_std_event<T: Into<SubstateId>>(
         object_name: &str,
         action: &str,
@@ -720,8 +720,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         })
     }
 
-    /// A bucket with funds locked by a proof may only be held, never consumed. Every operation that empties one ÔÇö
-    /// deposit, burn, join, fee payment ÔÇö operates on the unlocked funds alone, so consuming a locked bucket would
+    /// A bucket with funds locked by a proof may only be held, never consumed. Every operation that empties one —
+    /// deposit, burn, join, fee payment — operates on the unlocked funds alone, so consuming a locked bucket would
     /// destroy the locked portion while the proof still points at it.
     fn check_bucket_is_unlocked(op: &'static str, bucket_id: BucketId, bucket: &Bucket) -> Result<(), RuntimeError> {
         if bucket.has_locked_funds() {
@@ -873,7 +873,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     /// referenced function exists, has the required signature, and `args` carries exactly one well-formed-CBOR element
     /// per leading (non-`SpendContext`) parameter. Because a condition tree commits only an opaque root, leaves are
     /// hidden at creation; this runs at spend time (T2) when the leaf is revealed. Templates are immutable substates,
-    /// so a referenced template must already resolve ÔÇö there is no "not yet published" skip case.
+    /// so a referenced template must already resolve — there is no "not yet published" skip case.
     fn validate_template_function(&self, tf: &TemplateFunction) -> Result<(), RuntimeError> {
         let template_def = self.get_template_def(&tf.template)?;
         let func = template_def
@@ -932,8 +932,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     ///
     /// Each input's committed [`SpendAuthorization`] is read once, then the per-input [`SpendWitness`] selects the
     /// path:
-    /// - **key path** ÔÇö the output's `spend_key` must be present and its signer badge in the transaction's auth scope;
-    /// - **script path** ÔÇö the revealed leaf must be included under the output's committed `condition_root` (the
+    /// - **key path** — the output's `spend_key` must be present and its signer badge in the transaction's auth scope;
+    /// - **script path** — the revealed leaf must be included under the output's committed `condition_root` (the
     ///   inclusion proof is verified exactly once, here), then the leaf is evaluated: an `AccessRule` leaf natively, a
     ///   `TemplateFunction` leaf as a read-only WASM predicate.
     fn verify_input_authorizations(
@@ -1142,7 +1142,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         Ok(())
     }
 
-    /// Evaluates a single native [`BuiltinPredicate`] ÔÇö a local spend predicate (timelock or hashlock) ÔÇö rejecting the
+    /// Evaluates a single native [`BuiltinPredicate`] — a local spend predicate (timelock or hashlock) — rejecting the
     /// spend with [`RuntimeError::SpendConditionNotMet`] if it does not hold. A data-consuming predicate (the hashlock)
     /// reads the entire witness `data` blob as raw bytes; `validate_condition_structure` guarantees it is the leaf's
     /// sole consumer, so the whole blob is unambiguously its input.
@@ -1190,8 +1190,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     }
 
     /// Invokes a single `TemplateFunction` spend-condition predicate inside a read-only restricted frame. Returning
-    /// normally authorises the spend; any panic ÔÇö a deliberate `assert!`, out-of-gas, or a blocked state mutation
-    /// (`WriteInReadOnlyContext`) ÔÇö aborts it as `SpendScriptRejected`.
+    /// normally authorises the spend; any panic — a deliberate `assert!`, out-of-gas, or a blocked state mutation
+    /// (`WriteInReadOnlyContext`) — aborts it as `SpendScriptRejected`.
     fn evaluate_spend_script(
         &self,
         tf: &TemplateFunction,
@@ -2952,7 +2952,7 @@ where
                         .charge_native_execution(stealth::transfer_native_points(statement, has_view_key))?;
                 }
 
-                // Authorise the spent inputs before the fee transfer executes ÔÇö the same mandatory pre-execute gate as
+                // Authorise the spent inputs before the fee transfer executes — the same mandatory pre-execute gate as
                 // `stealth_transfer`, so a rejection leaves the inputs unspent. Fees are always paid in TARI.
                 if let Some(ref statement) = arg.statement {
                     self.verify_input_authorizations(TARI_TOKEN.into(), statement)?;
@@ -3661,7 +3661,7 @@ where
                     // Giving up an authorization only shrinks this frame's own auth scope, so it succeeds for any
                     // id: an id the frame never authorized is already in the state being asked for. That makes it
                     // answerless by construction, which is what keeps it from reporting whether a proof is live at
-                    // an id the frame does not hold ÔÇö the ids are a dense counter, so an answer would enumerate
+                    // an id the frame does not hold — the ids are a dense counter, so an answer would enumerate
                     // every proof in the transaction. `ProofAccess::drop` is the only route here, and a `Drop` has
                     // nowhere to report a failure, so a rejection would abort the transaction from a drop point
                     // the template author never wrote.
@@ -3982,7 +3982,7 @@ where
     fn checkpoint_fee_intent(&self) -> Result<(), RuntimeError> {
         // Price the state the fee intent ended on before testing what was paid against it. This is
         // the state a transaction that cannot afford its main intent falls back to committing, so a
-        // payment that cannot cover it cannot commit anything at all ÔÇö better established here,
+        // payment that cannot cover it cannot commit anything at all — better established here,
         // before the main instructions run, than after they have consumed compute nobody pays for.
         self.invoke_modules_on_fee_checkpoint()?;
         if !self.tracker.is_fee_state_dry_run() && self.tracker.total_fee_payments() < self.tracker.total_fee_charges()
@@ -4381,7 +4381,7 @@ where
         revealed_funds_bucket_id: Option<BucketId>,
     ) -> Result<Option<BucketId>, RuntimeError> {
         // (T1) Creation time: a stealth output commits only an opaque `condition_root`, so its leaves are hidden and
-        // cannot be validated at creation ÔÇö that happens at spend time when a leaf is revealed (below / inline). The
+        // cannot be validated at creation — that happens at spend time when a leaf is revealed (below / inline). The
         // only creation-time invariant is that an output is spendable by at least one path (`spend_key` or
         // `condition_root` is `Some`), enforced by `validate_stealth_outputs_statement` during execution.
 
@@ -4416,7 +4416,7 @@ where
         //
         // Covenant soundness invariant: a covenant balance proof binds the partition's output commitments but trusts
         // their values to be in range; `execute_stealth_transfer` below range-proofs those same `statement` outputs.
-        // Both run pre-commit in this one atomic call, so the two MUST stay coupled ÔÇö decoupling them would reopen a
+        // Both run pre-commit in this one atomic call, so the two MUST stay coupled — decoupling them would reopen a
         // wraparound forgery in the covenant check.
         self.verify_input_authorizations(resource_address.clone(), &statement)?;
 
@@ -4822,7 +4822,6 @@ mod tests {
             .collect();
 
         let runtime = runtime_with_blobs(Blobs::default());
-
         assert!(matches!(
             runtime.stealth_transfer(TARI_TOKEN.into(), too_many_inputs.clone(), None),
             Err(RuntimeError::ArgumentValidationError(
@@ -4830,7 +4829,15 @@ mod tests {
             ))
         ));
 
+        let runtime = runtime_with_blobs(Blobs::default());
         let vault_id = tari_template_lib::types::VaultId::new([1u8; 32].into());
+        runtime.tracker.write_with(|state| {
+            state
+                .current_call_scope_mut()
+                .unwrap()
+                .add_substate_to_scope(vault_id.into())
+                .unwrap();
+        });
         let pay_fee_args = EngineArgs::try_from(vec![
             tari_bor::encode(&PayFeeArg {
                 amount: Amount::zero(),

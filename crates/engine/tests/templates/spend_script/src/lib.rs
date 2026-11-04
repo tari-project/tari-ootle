@@ -35,6 +35,9 @@ mod spend_scripts {
         /// Unconditionally authorises the spend.
         pub fn always_ok(_ctx: SpendContext) {}
 
+        /// Unconditionally authorises the spend, ignoring a bound byte-vector argument.
+        pub fn always_ok_with_bytes(_ignored: Vec<u8>, _ctx: SpendContext) {}
+
         /// Unconditionally rejects the spend.
         pub fn always_reject(_ctx: SpendContext) {
             panic!("spend always rejected");

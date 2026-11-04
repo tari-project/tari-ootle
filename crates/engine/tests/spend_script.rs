@@ -1078,14 +1078,9 @@ fn validating_a_spend_script_charges_native_points_for_bound_args() {
 
     let (resx_bound, mint_bound) = mint_utxo(
         &mut test,
-        script_condition(script_template, "require_witness_data", vec![encoded_arg.clone()]),
+        script_condition(script_template, "always_ok_with_bytes", vec![encoded_arg]),
     );
-    let transfer_bound = spend_leaf_with_data(
-        &mint_bound,
-        script_condition(script_template, "require_witness_data", vec![encoded_arg]),
-        Bytes::from_vec(payload),
-        key_path(test.to_public_key_bytes()),
-    );
+    let transfer_bound = spend_into(&mint_bound, key_path(test.to_public_key_bytes()));
     let result_bound = test.execute_expect_success(
         Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx_bound, transfer_bound.statement)
@@ -1096,14 +1091,13 @@ fn validating_a_spend_script_charges_native_points_for_bound_args() {
 
     let (resx_empty, mint_empty) = mint_utxo(
         &mut test,
-        script_condition(script_template, "require_witness_data", vec![encode_arg(&Vec::<u8>::new())]),
+        script_condition(
+            script_template,
+            "always_ok_with_bytes",
+            vec![encode_arg(&Vec::<u8>::new())],
+        ),
     );
-    let transfer_empty = spend_leaf_with_data(
-        &mint_empty,
-        script_condition(script_template, "require_witness_data", vec![encode_arg(&Vec::<u8>::new())]),
-        Bytes::default(),
-        key_path(test.to_public_key_bytes()),
-    );
+    let transfer_empty = spend_into(&mint_empty, key_path(test.to_public_key_bytes()));
     let result_empty = test.execute_expect_success(
         Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(resx_empty, transfer_empty.statement)

@@ -994,6 +994,32 @@ mod local_only {
     }
 
     #[test]
+    fn a_transaction_writing_what_an_earlier_one_in_the_block_read_locked_is_refused() {
+        let replica = Replica::new();
+        let shared = component_id(0x20);
+        let other = component_id(0x21);
+        replica.add_substate(&shared);
+        replica.add_substate(&other);
+        let first = replica.pool_transaction(1, &[&other], Script {
+            commit: true,
+            extra_reads: vec![shared.clone()],
+            ..Default::default()
+        });
+        let second = replica.pool_transaction(2, &[&shared], commits());
+
+        let evaluation = replica.evaluate_local_only(&[committing(first), committing(second)]);
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::ConflictingTransactionProposed { transaction_id, .. }) if transaction_id == second
+            ),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
+
+    #[test]
     fn a_transaction_with_a_foreign_output_is_refused() {
         let (local, foreign) = local_and_foreign_halves();
         let replica = Replica::in_committee(local, 2);
@@ -1373,6 +1399,30 @@ mod local_prepare {
                 Some(NoVoteReason::InvalidEvidence {
                     reason: InvalidEvidenceReason::MismatchedEvidence
                 })
+            ),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
+
+    #[test]
+    fn a_prepare_conflicting_with_an_earlier_prepare_in_the_block_is_refused() {
+        let (local, foreign) = local_and_foreign_halves();
+        let replica = Replica::in_committee(local, 2);
+        let local_input = component_id_in(local);
+        let foreign_input = component_id_in(foreign);
+        replica.add_substate(&local_input);
+        let first = replica.pool_transaction(1, &[&local_input, &foreign_input], commits());
+        let second = replica.pool_transaction(2, &[&local_input, &foreign_input], commits());
+        let first_cmd = replica.honest_new_multishard_command(&first);
+        let second_cmd = replica.honest_new_multishard_command(&second);
+
+        let evaluation = replica.evaluate(&[first_cmd, second_cmd]);
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::ConflictingTransactionProposed { transaction_id, .. }) if transaction_id == second
             ),
             "{:?}",
             evaluation.no_vote

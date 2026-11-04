@@ -90,7 +90,14 @@ use crate::{
     },
     messages::{HotstuffMessage, ProposalMessage},
     tracing::TraceTimer,
-    traits::{CertificateStore, ConsensusSpec, OutboundMessaging, ValidatorSignerService, WriteableSubstateStore},
+    traits::{
+        BlockTransactionExecutor,
+        CertificateStore,
+        ConsensusSpec,
+        OutboundMessaging,
+        ValidatorSignerService,
+        WriteableSubstateStore,
+    },
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_propose";
@@ -351,7 +358,8 @@ where TConsensusSpec: ConsensusSpec
             ),
             // Leader thinks all foreign PREPARE pledges have been received (condition for LocalPrepared stage to be
             // ready)
-            TransactionPoolStage::LocalPrepared => self.local_accept_transaction(
+            TransactionPoolStage::LocalPrepared => propose_local_accept_transaction(
+                &self.transaction_manager,
                 state_anchor,
                 local_committee_info,
                 change_set,
@@ -1047,26 +1055,6 @@ where TConsensusSpec: ConsensusSpec
         }
     }
 
-    fn local_accept_transaction<TTx: StateStoreReadTransaction>(
-        &self,
-        state_anchor: &LeafBlock,
-        local_committee_info: &CommitteeInfo,
-        change_set: &ProposedBlockChangeSet,
-        tx_rec: TransactionPoolRecord,
-        substate_store: &mut PendingSubstateStore<TTx>,
-        executed_transactions: &mut HashMap<TransactionId, TransactionExecution>,
-    ) -> Result<Option<Command>, HotStuffError> {
-        propose_local_accept_transaction(
-            &self.transaction_manager,
-            state_anchor,
-            local_committee_info,
-            change_set,
-            tx_rec,
-            substate_store,
-            executed_transactions,
-        )
-    }
-
     fn accept_transaction<TTx: StateStoreReadTransaction>(
         &self,
         state_anchor: &LeafBlock,
@@ -1132,6 +1120,9 @@ where TConsensusSpec: ConsensusSpec
     }
 }
 
+/// Proposes a `LocalAccept` command for a `LocalPrepared` transaction. Returns `Ok(None)` when the transaction's local
+/// input pledges would exceed the block's pledge budget (deferring it to a later block after releasing its output
+/// locks), or `Ok(Some(Command::LocalAccept(..)))` with an aborting atom if locking its local outputs fails.
 pub(super) fn propose_local_accept_transaction<TStateStore, TExecutor, TTx>(
     transaction_manager: &ConsensusTransactionManager<TExecutor, TStateStore>,
     state_anchor: &LeafBlock,
@@ -1143,7 +1134,7 @@ pub(super) fn propose_local_accept_transaction<TStateStore, TExecutor, TTx>(
 ) -> Result<Option<Command>, HotStuffError>
 where
     TStateStore: StateStore,
-    TExecutor: crate::traits::BlockTransactionExecutor<TStateStore>,
+    TExecutor: BlockTransactionExecutor<TStateStore>,
     TTx: StateStoreReadTransaction,
 {
     // Only set to abort if either the local or one or more foreign shards decided to ABORT
@@ -1259,7 +1250,7 @@ fn execute_transaction<TStateStore, TExecutor, TTx>(
 ) -> Result<TransactionExecution, HotStuffError>
 where
     TStateStore: StateStore,
-    TExecutor: crate::traits::BlockTransactionExecutor<TStateStore>,
+    TExecutor: BlockTransactionExecutor<TStateStore>,
     TTx: StateStoreReadTransaction,
 {
     let tx = substate_store.read_transaction();

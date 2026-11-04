@@ -1042,9 +1042,10 @@ fn check_no_deferrable_conflict(
     lock_status: &LockStatus,
     block: &Block,
 ) -> Option<NoVoteReason> {
-    let err = lock_status
-        .is_deferrable_conflict()
-        .then(|| lock_status.failures().first())??;
+    if !lock_status.is_deferrable_conflict() {
+        return None;
+    }
+    let err = lock_status.failures().first()?;
     warn!(
         target: LOG_TARGET,
         "❌ Transaction {transaction_id} in block {block} has a lock conflict that an honest proposer skips: \

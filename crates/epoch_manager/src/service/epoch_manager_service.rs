@@ -186,6 +186,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     self.inner.set_birthday_epoch_if_unset(activation_epoch)?;
                 }
 
+                let mut invalidate_committee_cache = false;
                 for node_change in node_changes {
                     match node_change {
                         ValidatorNodeChange::Add {
@@ -195,6 +196,15 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                             minimum_value_promise: _minimum_value_promise,
                             shard_key,
                         } => {
+                            if self.inner.is_epoch_locked(activation_epoch) {
+                                warn!(
+                                    target: LOG_TARGET,
+                                    "⛓️ Ignoring validator node {} activation for already-locked epoch {}",
+                                    validator_node_public_key,
+                                    activation_epoch,
+                                );
+                                continue;
+                            }
                             info!(
                                 target: LOG_TARGET,
                                 "⛓️ Validator node {} activated at {}",
@@ -211,8 +221,20 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                                 // All validators currently get a vote power of 1
                                 VotePower::of(1),
                             )?;
+                            if activation_epoch <= self.current_epoch() {
+                                invalidate_committee_cache = true;
+                            }
                         },
                         ValidatorNodeChange::Remove { public_key } => {
+                            if self.inner.is_epoch_locked(epoch) {
+                                warn!(
+                                    target: LOG_TARGET,
+                                    "⛓️ Ignoring validator node {} deactivation for already-locked epoch {}",
+                                    public_key,
+                                    epoch,
+                                );
+                                continue;
+                            }
                             info!(
                                 target: LOG_TARGET,
                                 "⛓️ Deactivating validator node registration for {}",
@@ -220,8 +242,14 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                             );
 
                             self.inner.deactivate_validator_node(public_key, epoch)?;
+                            if epoch <= self.current_epoch() {
+                                invalidate_committee_cache = true;
+                            }
                         },
                     }
+                }
+                if invalidate_committee_cache {
+                    self.committee_cache.clear().await;
                 }
             },
             EpochEvent::NewValidatorRegistered {

@@ -506,6 +506,13 @@ impl Replica {
                             &mut evaluation.total_leader_fee,
                             &mut evaluation.total_exhaust_burn,
                         ),
+                        Command::SomeAccept(atom) => validator.evaluate_some_accept_command(
+                            tx,
+                            block,
+                            atom,
+                            &substate_store,
+                            &mut change_set,
+                        ),
                         command => panic!("unsupported command {command}"),
                     }
                     .unwrap();
@@ -2247,6 +2254,112 @@ mod locked_epoch {
             ),
             "{:?}",
             evaluation.no_vote
+        );
+    }
+}
+
+mod some_accept {
+    use super::*;
+
+    fn aborted_after_local_accept() -> (Replica, TransactionPoolRecord) {
+        let (replica, id) = accepted_cross_shard_with_fee_intent();
+        let (_, foreign) = local_and_foreign_halves();
+        let mut rec = replica.pending_record(&id);
+        rec.set_remote_decision(Decision::Abort(AbortReason::ExecutionFailure));
+        rec.no_leader_fee();
+        rec.evidence_mut()
+            .add_shard_group(foreign)
+            .set_prepare_qc(PcId::zero());
+        rec.set_ready(true);
+        (replica, rec)
+    }
+
+    #[test]
+    fn an_honest_some_accept_is_voted_for() {
+        let (replica, rec) = aborted_after_local_accept();
+        let atom = rec.get_current_multi_shard_atom();
+
+        let evaluation = replica.evaluate_after(&[Command::SomeAccept(atom)], |change_set| {
+            change_set.set_next_transaction_update(rec).unwrap();
+        });
+
+        assert_voted(&evaluation, TransactionPoolStage::SomeAccepted, false);
+    }
+
+    #[test]
+    fn a_some_accept_with_a_forged_abort_reason_is_refused() {
+        let (replica, rec) = aborted_after_local_accept();
+        let atom = MultiShardAtom {
+            decision: Decision::Abort(AbortReason::InvalidTransaction),
+            ..rec.get_current_multi_shard_atom()
+        };
+
+        let evaluation = replica.evaluate_after(&[Command::SomeAccept(atom)], |change_set| {
+            change_set.set_next_transaction_update(rec).unwrap();
+        });
+
+        assert_eq!(
+            evaluation.no_vote,
+            Some(NoVoteReason::DecisionDisagreement {
+                local: Decision::Abort(AbortReason::ExecutionFailure),
+                remote: Decision::Abort(AbortReason::InvalidTransaction),
+            })
+        );
+    }
+
+    #[test]
+    fn a_some_accept_with_a_leader_fee_is_refused() {
+        let (replica, rec) = aborted_after_local_accept();
+        let atom = MultiShardAtom {
+            leader_fee: Some(calculate_leader_fee(FEE, exhaust_burn(), NonZeroU64::new(2).unwrap())),
+            ..rec.get_current_multi_shard_atom()
+        };
+
+        let evaluation = replica.evaluate_after(&[Command::SomeAccept(atom)], |change_set| {
+            change_set.set_next_transaction_update(rec).unwrap();
+        });
+
+        assert_eq!(evaluation.no_vote, Some(NoVoteReason::LeaderFeeDisagreement));
+    }
+
+    #[test]
+    fn a_some_accept_with_mismatched_fee_intent_only_or_evidence_is_refused() {
+        let (replica, rec) = aborted_after_local_accept();
+        let id = *rec.id();
+        let fee_intent_atom = MultiShardAtom {
+            fee_intent_only: true,
+            ..rec.get_current_multi_shard_atom()
+        };
+
+        let evaluation = replica.evaluate_after(&[Command::SomeAccept(fee_intent_atom)], |change_set| {
+            change_set.set_next_transaction_update(rec.clone()).unwrap();
+        });
+
+        assert_eq!(
+            evaluation.no_vote,
+            Some(NoVoteReason::FeeIntentOnlyDisagreement {
+                transaction_id: id,
+                local_fee_intent_only: false,
+                proposed_fee_intent_only: true,
+            })
+        );
+
+        let mut tampered_evidence = rec.evidence().clone();
+        tampered_evidence.reset();
+        let bad_evidence_atom = MultiShardAtom {
+            evidence: tampered_evidence,
+            ..rec.get_current_multi_shard_atom()
+        };
+
+        let evaluation = replica.evaluate_after(&[Command::SomeAccept(bad_evidence_atom)], |change_set| {
+            change_set.set_next_transaction_update(rec).unwrap();
+        });
+
+        assert_eq!(
+            evaluation.no_vote,
+            Some(NoVoteReason::InvalidEvidence {
+                reason: InvalidEvidenceReason::MismatchedEvidence,
+            })
         );
     }
 }

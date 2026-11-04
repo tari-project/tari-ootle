@@ -23,7 +23,7 @@
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use log::{warn, *};
-use tari_bor::{MaybeTagged, decode_exact};
+use tari_bor::{MaybeTagged, decode_exact, decode_exact_with_max_depth};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_engine_types::{
     Utxo,
@@ -929,6 +929,16 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         // The host can verify each element is well-formed CBOR; full type conformance against the declared parameter
         // type is enforced at the WASM deserialization boundary (the dispatcher's `decode_exact::<T>`).
         for (i, arg) in tf.args.iter().enumerate() {
+            self.charge_engine_arg(arg.as_ref()).map_err(|e| match e {
+                EngineArgChargeError::Unreadable(e) => RuntimeError::InvalidArgument {
+                    argument: "TemplateFunction",
+                    reason: format!(
+                        "spend script '{}' bound argument {} failed to decode: {:?}",
+                        tf.function, i, e
+                    ),
+                },
+                EngineArgChargeError::Runtime(e) => e,
+            })?;
             let _value: tari_bor::Value = decode_exact(arg).map_err(|e| RuntimeError::InvalidArgument {
                 argument: "TemplateFunction",
                 reason: format!(
@@ -2958,6 +2968,8 @@ where
                 // `stealth_transfer` method does.
                 if let Some(ref statement) = arg.statement {
                     self.tracker.account_fee_intent_stealth_transfer()?;
+                    self.tracker
+                        .write_with(|state| state.account_stealth_transfer(statement))?;
                     let has_view_key = self.tracker.write_with(|state| {
                         let resource_lock = state.read_lock_substate(SubstateId::Resource(TARI_TOKEN))?;
                         let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
@@ -4410,6 +4422,11 @@ where
         // instruction and a template's `ResourceManager::stealth_transfer` reach here, so neither route escapes it.
         self.tracker.account_fee_intent_stealth_transfer()?;
 
+        // Pre-check stealth limits and bound aggregate transaction totals before running unmetered substate reads,
+        // WASM authorization hooks, and input authorizations.
+        self.tracker
+            .write_with(|state| state.account_stealth_transfer(&statement))?;
+
         // The whole statement's native verification cost is charged against the payment-funded
         // allowance before any of it runs (the authorisation pass below included), so a transaction
         // that will not pay traps here without extracting the crypto work. The resource peek is a
@@ -4598,7 +4615,7 @@ where
             .chain(args.iter())
             .map(|arg| match arg {
                 InstructionArg::Workspace(id) => self.resolve_workspace_id(id),
-                InstructionArg::Literal(v) => Ok(decode_exact(v)?),
+                InstructionArg::Literal(v) => Ok(decode_exact_with_max_depth(v, limits::MAX_CBOR_NESTING_DEPTH)?),
                 // A blob arg's value is the raw bytes of the referenced blob, decoded as CBOR
                 // by the same path as `Literal`. Lookup is against the surrounding transaction's
                 // `Blobs`, set on the runtime at construction time. Each reference is charged via

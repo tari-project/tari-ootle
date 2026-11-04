@@ -811,6 +811,16 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
+    /// Enforces the stealth-transfer limits and accounts this transfer against the per-transaction totals. Must be
+    /// called before resource auth hooks, spend-script template execution, and proof crypto run, so an over-limit
+    /// transaction is rejected before unmetered work is done.
+    pub fn account_stealth_transfer(&mut self, statement: &StealthTransferStatement) -> Result<(), RuntimeError> {
+        check_stealth_transfer_limits(&limits::STEALTH_LIMITS, statement)?;
+        self.stealth_totals
+            .account_transfer(&limits::STEALTH_LIMITS, statement)?;
+        Ok(())
+    }
+
     /// Decreases the total supply of the locked resource, rejecting the transaction rather than wrapping if the
     /// decrease would underflow. Callers must only call this for a resource with supply tracking enabled.
     pub fn decrease_total_supply(
@@ -2251,11 +2261,6 @@ impl<TStore: StateReader> WorkingState<TStore> {
         statement: StealthTransferStatement,
         revealed_funds_bucket_id: Option<BucketId>,
     ) -> Result<Option<ResourceContainer>, RuntimeError> {
-        check_stealth_transfer_limits(&limits::STEALTH_LIMITS, &statement)?;
-        // Bound the aggregate stealth work across the whole transaction before doing this transfer's crypto, so a
-        // single transaction cannot stack enough native verification to stall the proposing leader.
-        self.stealth_totals
-            .account_transfer(&limits::STEALTH_LIMITS, &statement)?;
         let resource_address = self.resolve_resource_address_ref(resource_address)?;
 
         let resource_lock = self.read_lock_substate(SubstateId::Resource(resource_address))?;
@@ -2435,11 +2440,14 @@ fn exhaust_burn_share(paid: u64, rate: ExhaustBurnRate) -> u64 {
 mod tests {
     use tari_template_lib::{
         models::{Bucket, ComponentAddressAllocation, Proof},
-        types::ObjectKey,
+        types::{ObjectKey, crypto::RistrettoPublicKeyBytes},
     };
 
     use super::*;
-    use crate::{runtime::scope::PushCallFrame, state_store::memory::MemoryStateStore};
+    use crate::{
+        runtime::{error::ArgumentValidationError, scope::PushCallFrame},
+        state_store::memory::MemoryStateStore,
+    };
 
     fn test_working_state() -> WorkingState<MemoryStateStore> {
         WorkingState::new(
@@ -2546,5 +2554,40 @@ mod tests {
         }
         assert_eq!(exhaust_burn_share(100, ExhaustBurnRate::new(500)), 5);
         assert_eq!(exhaust_burn_share(105, ExhaustBurnRate::new(500)), 5);
+    }
+
+    #[test]
+    fn account_stealth_transfer_enforces_statement_and_transaction_limits() {
+        let mut state = test_working_state();
+
+        // 1. Statement exceeding per-statement input limit is rejected.
+        let over_limit_inputs = limits::STEALTH_LIMITS.max_inputs + 1;
+        let mut stmt =
+            StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
+        stmt.inputs_statement.inputs = (0..over_limit_inputs)
+            .map(|_| StealthInput::new(PedersenCommitmentBytes::from_bytes(&[0u8; 32]).unwrap()))
+            .collect();
+        let err = state.account_stealth_transfer(&stmt).unwrap_err();
+        assert!(matches!(
+            err,
+            RuntimeError::ArgumentValidationError(ArgumentValidationError::MaxStealthInputsExceeded {
+                max_inputs,
+                actual_inputs
+            }) if max_inputs == limits::STEALTH_LIMITS.max_inputs && actual_inputs == over_limit_inputs
+        ));
+
+        // 2. Transfers up to the per-transaction transfer limit succeed, but one more is rejected.
+        let valid_stmt =
+            StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
+        for _ in 0..limits::STEALTH_LIMITS.max_transfers_per_transaction {
+            state.account_stealth_transfer(&valid_stmt).unwrap();
+        }
+        let err = state.account_stealth_transfer(&valid_stmt).unwrap_err();
+        assert!(matches!(
+            err,
+            RuntimeError::ArgumentValidationError(
+                ArgumentValidationError::MaxStealthTransfersPerTransactionExceeded { max_transfers }
+            ) if max_transfers == limits::STEALTH_LIMITS.max_transfers_per_transaction
+        ));
     }
 }

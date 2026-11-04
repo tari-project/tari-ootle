@@ -678,8 +678,9 @@ where
         let heads = self.fetch_and_cache_heads(&miss_ids).await?;
 
         for req in misses {
-            // An unproven head that is not up is confirmed with the committee before the lookup
-            // stops at it, as an omitted one is.
+            // An unproven answer that is not up, including a `Down` an unproven head implies for
+            // an earlier version, is confirmed with the committee before the lookup stops at it,
+            // as an omitted one is.
             let from_batch = heads
                 .get(req.substate_id())
                 .and_then(|head| {

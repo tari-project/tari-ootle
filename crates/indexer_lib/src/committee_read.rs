@@ -34,8 +34,9 @@ pub type MemberResponse = Result<(SubstateResult, Option<SubstateProofData>), In
 /// required) answers on the spot. `DoesNotExist` answers only once more than `f` members agree, and
 /// so does a `Down` no member has proven, counted per version: a single member's word that a substate
 /// is down could otherwise make the indexer treat a live substate as spent. When `f` is 0 that one
-/// member is the threshold, so its unproven `Down` answers only once every member has responded and
-/// none has proven anything. The highest unproven `Up`
+/// member is the threshold, so its `DoesNotExist` or unproven `Down` answers only once every member
+/// has responded and none has proven anything (with an unproven `Down` or `Up` taking precedence
+/// over `DoesNotExist`). The highest unproven `Up`
 /// is held as a fallback in case nothing settles the read; an unproven `Down` never is, and a read
 /// that ends with only too few of them fails rather than reporting the substate down or absent.
 ///
@@ -50,7 +51,8 @@ pub type MemberResponse = Result<(SubstateResult, Option<SubstateProofData>), In
 #[derive(Debug)]
 pub struct CommitteeReadTally {
     /// Byzantine tolerance of the committee: `DoesNotExist` needs `f + 1` agreeing members before it
-    /// is believed, since any `f` of them may be lying or behind.
+    /// is believed (or every member when `f` is 0, if none reported `Up` or `Down`), since any `f`
+    /// of them may be lying or behind.
     f: usize,
     verify_substate_proofs: bool,
     /// The version the read asked for, or `None` for the head.

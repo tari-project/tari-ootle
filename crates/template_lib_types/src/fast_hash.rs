@@ -31,7 +31,7 @@ impl Hasher for PassthroughHasher {
     /// across the full key without any multiplication or branching.
     #[inline]
     fn write(&mut self, bytes: &[u8]) {
-        let mut h = 0u64;
+        let mut h = self.0.rotate_left(13);
         for chunk in bytes.chunks(8) {
             let mut buf = [0u8; 8];
             buf[..chunk.len()].copy_from_slice(chunk);
@@ -130,5 +130,40 @@ mod tests {
         let keys_in: Vec<u32> = m.keys().copied().collect();
         let keys_out: Vec<u32> = decoded.keys().copied().collect();
         assert_eq!(keys_in, keys_out, "IndexMap iteration order must round-trip");
+    }
+
+    #[test]
+    fn passthrough_hasher_accumulates_multiple_writes_for_composite_keys() {
+        use core::hash::{BuildHasher, Hash};
+
+        use crate::{NonFungibleAddress, NonFungibleId, ObjectKey, ResourceAddress};
+
+        let hasher_builder = BuildHasherDefault::<PassthroughHasher>::default();
+        let res_a = ResourceAddress::new(ObjectKey::from_array([0x11; 28]));
+        let res_b = ResourceAddress::new(ObjectKey::from_array([0x22; 28]));
+        let badge_res = ResourceAddress::new(ObjectKey::from_array([0x33; 28]));
+
+        let str_badge_1 = NonFungibleAddress::new(badge_res, NonFungibleId::from_string("spender_alpha"));
+        let str_badge_2 = NonFungibleAddress::new(badge_res, NonFungibleId::from_string("spender_beta"));
+
+        let hash_of = |key: &(ResourceAddress, NonFungibleAddress)| {
+            let mut hasher = hasher_builder.build_hasher();
+            key.hash(&mut hasher);
+            hasher.finish()
+        };
+
+        let h_a1 = hash_of(&(res_a, str_badge_1.clone()));
+        let h_a2 = hash_of(&(res_a, str_badge_2));
+        let h_b1 = hash_of(&(res_b, str_badge_1.clone()));
+
+        assert_ne!(h_a1, 0xff);
+        assert_ne!(h_a1, h_a2);
+        assert_ne!(h_a1, h_b1);
+
+        let mut map: PrehashedMap<(ResourceAddress, NonFungibleAddress), u64> = PrehashedMap::default();
+        map.insert((res_a, str_badge_1.clone()), 10);
+        map.insert((res_b, str_badge_1.clone()), 20);
+        assert_eq!(map.get(&(res_a, str_badge_1.clone())), Some(&10));
+        assert_eq!(map.get(&(res_b, str_badge_1)), Some(&20));
     }
 }

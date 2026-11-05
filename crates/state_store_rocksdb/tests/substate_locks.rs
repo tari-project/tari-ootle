@@ -949,15 +949,24 @@ fn a_lock_on_a_pending_block_diff_substate_carries_its_value() {
 
     let tx_id = transaction_id_from_seed(1);
     let substate_id = create_random_substate_id();
+    let read_substate_id = create_random_substate_id();
     let fork_substate_id = create_random_substate_id();
     let value = build_substate_value(None);
+    let read_value = build_substate_value(None);
     let fork_value = build_substate_value(None);
 
-    tx.block_diffs_insert(chain[8].id(), &[SubstateChange::Up {
-        id: substate_id.clone(),
-        shard: chain[8].shard_group().start(),
-        substate: Box::new(Substate::new(SubstateVersion::ZERO, value.clone())),
-    }])
+    tx.block_diffs_insert(chain[8].id(), &[
+        SubstateChange::Up {
+            id: substate_id.clone(),
+            shard: chain[8].shard_group().start(),
+            substate: Box::new(Substate::new(SubstateVersion::ZERO, value.clone())),
+        },
+        SubstateChange::Up {
+            id: read_substate_id.clone(),
+            shard: chain[8].shard_group().start(),
+            substate: Box::new(Substate::new(SubstateVersion::ZERO, read_value.clone())),
+        },
+    ])
     .unwrap();
     tx.block_diffs_insert(fork.id(), &[SubstateChange::Up {
         id: fork_substate_id.clone(),
@@ -973,6 +982,12 @@ fn a_lock_on_a_pending_block_diff_substate_carries_its_value() {
             SubstateLockType::Write,
             false,
         )]),
+        (read_substate_id.clone(), vec![SubstateLock::new(
+            tx_id,
+            SubstateVersion::ZERO,
+            SubstateLockType::Read,
+            false,
+        )]),
         (fork_substate_id.clone(), vec![SubstateLock::new(
             tx_id,
             SubstateVersion::ZERO,
@@ -985,9 +1000,11 @@ fn a_lock_on_a_pending_block_diff_substate_carries_its_value() {
     let locked = tx
         .substate_locks_get_locked_substates_for_transaction(&b9, &tx_id)
         .unwrap();
-    assert_eq!(locked.len(), 2);
+    assert_eq!(locked.len(), 3);
     let on_chain = locked.iter().find(|l| l.substate_id == substate_id).unwrap();
     assert_eq!(on_chain.value, Some(value));
+    let on_chain_read = locked.iter().find(|l| l.substate_id == read_substate_id).unwrap();
+    assert_eq!(on_chain_read.value, Some(read_value));
     let on_fork = locked.iter().find(|l| l.substate_id == fork_substate_id).unwrap();
     assert!(on_fork.value.is_none());
 

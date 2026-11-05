@@ -110,6 +110,7 @@ use crate::{
                 ShardCursor,
                 StateSyncTask,
                 TipAuthority,
+                TransferPermit,
                 ensure_epoch_reached,
                 ensure_history_values_held,
             },
@@ -140,6 +141,8 @@ pub struct ValidatorNodeRpcServiceImpl<TStateStore> {
     batch_responses: Arc<Semaphore>,
     /// Permits for the snapshot pages and state sync streams served at once; see [`MAX_STATE_TRANSFER_STREAMS`].
     state_transfer_streams: Arc<Semaphore>,
+    /// Permits for the bytes of large unary responses held at once; see [`MAX_BUFFERED_RESPONSE_BYTES`].
+    response_bytes: Arc<Semaphore>,
     state_sync_reads: Arc<Semaphore>,
     root_mismatch_log: Arc<RootMismatchLog>,
 }
@@ -162,6 +165,7 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
             epoch_history_length,
             batch_responses: Arc::new(Semaphore::new(MAX_BUFFERED_BATCH_RESPONSES)),
             state_transfer_streams: Arc::new(Semaphore::new(MAX_STATE_TRANSFER_STREAMS)),
+            response_bytes: Arc::new(Semaphore::new(MAX_BUFFERED_RESPONSE_BYTES / RESPONSE_BUDGET_UNIT_BYTES)),
             state_sync_reads: Arc::new(Semaphore::new(max_concurrent_state_sync_reads())),
             root_mismatch_log: Arc::default(),
         }
@@ -241,6 +245,24 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
             );
             RpcStatus::unavailable(STATE_TRANSFER_BUSY)
         })
+    }
+
+    /// `message` as a response holding its share of the response byte budget until it is sent. A node whose budget is
+    /// spent refuses rather than queueing, and the caller retries or asks another member.
+    fn budgeted_response<T: prost::Message>(&self, message: T) -> Result<Response<T>, RpcStatus> {
+        let units = message.encoded_len().div_ceil(RESPONSE_BUDGET_UNIT_BYTES).max(1);
+        let permit = u32::try_from(units)
+            .ok()
+            .and_then(|units| self.response_bytes.clone().try_acquire_many_owned(units).ok())
+            .ok_or_else(|| {
+                debug!(
+                    target: LOG_TARGET,
+                    "Refusing a {}-byte response: {MAX_BUFFERED_RESPONSE_BYTES} bytes of responses are already held",
+                    message.encoded_len(),
+                );
+                RpcStatus::unavailable("This node is holding too many responses; retry later or ask another member")
+            })?;
+        Ok(Response::new(message).with_guard(permit))
     }
 }
 
@@ -417,13 +439,23 @@ const MAX_BATCH_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 /// take, however many sessions peers open.
 const MAX_BUFFERED_BATCH_RESPONSES: usize = 32;
 
-/// How many shard snapshot pages and `sync_state` streams the node serves at once, each from the request until the
-/// server has finished sending the response. A snapshot page holds up to `MAX_SNAPSHOT_PAGE_BYTES`, and a stream a
-/// few state sync batches (one queued, one being sent, and the version being split into them), so this bounds the
-/// memory state transfer responses take however many sessions peers open.
+/// How many shard snapshot pages and `sync_state` streams with messages to send the node serves at once. A snapshot
+/// page holds its permit until the server has finished sending it, and a stream holds one while it has messages in
+/// flight (see [`TransferPermit`]). A page holds up to `MAX_SNAPSHOT_PAGE_BYTES`, and a stream a few state sync
+/// batches (one queued, one being sent, and the version being split into them), so this bounds the memory state
+/// transfer responses take however many sessions peers open. A followed stream waiting at the tip holds none.
 const MAX_STATE_TRANSFER_STREAMS: usize = 32;
 
 const STATE_TRANSFER_BUSY: &str = "This node is serving too many state transfers; retry later or ask another member";
+
+/// The most encoded bytes of large unary responses (substates, transaction results, checkpoints) the node holds at
+/// once, from the read until the server has finished sending them. A peer that does not read its response holds its
+/// share, so this bounds the memory those responses take however many sessions peers open.
+const MAX_BUFFERED_RESPONSE_BYTES: usize = 128 * 1024 * 1024;
+
+/// The bytes one permit of [`MAX_BUFFERED_RESPONSE_BYTES`] stands for. A response takes one permit per unit of its
+/// encoded size, at least one.
+const RESPONSE_BUDGET_UNIT_BYTES: usize = 64 * 1024;
 
 /// Streams `responses` to the peer. The stream holds `permit` until the server has finished sending
 /// the response and drops it.
@@ -817,7 +849,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             Self::attach_substate_proof(&tx, info.num_preshards(), anchor_at, &substate, &mut resp)?;
         }
 
-        Ok(Response::new(resp))
+        self.budgeted_response(resp)
     }
 
     async fn get_transaction_result(
@@ -852,7 +884,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             .optional()
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
-        Ok(Response::new(GetTransactionResultResponse {
+        self.budgeted_response(GetTransactionResultResponse {
             status: PayloadResultStatus::Finalized.into(),
 
             final_decision: Some(proto::consensus::Decision::from(execution.decision())),
@@ -863,7 +895,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             abort_details: execution.abort_reason().map(|r| r.to_string()).unwrap_or_default(),
             // For simplicity, we simply encode the whole result as a CBOR blob.
             execution_result: encode(execution.result()).map_err(RpcStatus::log_internal_error(LOG_TARGET))?,
-        }))
+        })
     }
 
     async fn get_checkpoints(
@@ -917,9 +949,9 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                         "No checkpoint for epoch {from_epoch} shard group {shard_group}"
                     ))
                 })?;
-            return Ok(Response::new(GetCheckpointsResponse {
+            return self.budgeted_response(GetCheckpointsResponse {
                 checkpoints: vec![checkpoint.into()],
-            }));
+            });
         }
 
         if msg.num_to_return > 100 {
@@ -938,9 +970,9 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             .with_read_tx(|tx| EpochCheckpoint::get_all_from_epoch(tx, from_epoch, limit.get()))
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
-        Ok(Response::new(GetCheckpointsResponse {
+        self.budgeted_response(GetCheckpointsResponse {
             checkpoints: checkpoints.into_iter().map(Into::into).collect(),
-        }))
+        })
     }
 
     async fn sync_state(&self, request: Request<SyncStateRequest>) -> Result<Streaming<SyncStateResponse>, RpcStatus> {
@@ -1048,11 +1080,12 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                 value_filter_flags,
                 req.include_version_proofs,
                 self.state_sync_reads.clone(),
+                TransferPermit::held(self.state_transfer_streams.clone(), response_permit),
             )
             .run(),
         );
 
-        Ok(Streaming::new(receiver).with_guard(response_permit))
+        Ok(Streaming::new(receiver))
     }
 
     async fn get_consensus_state(
@@ -1865,6 +1898,57 @@ mod tests {
             1024,
             10,
         )
+    }
+
+    /// Substate responses hold their share of the response byte budget until they are dropped, which the server does
+    /// once the peer has taken them, so the bytes of unsent responses a node holds stay within
+    /// [`MAX_BUFFERED_RESPONSE_BYTES`] however many sessions its peers open.
+    #[tokio::test]
+    async fn a_node_holding_its_response_budget_refuses_another_response_until_one_is_sent() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        let record = template_record(1, 512 * 1024);
+        let mut batch = SubstateUpdateBatch::new(Network::LocalNet, Epoch::zero());
+        batch.with_transition(Shard::global(), 1).push(SubstateTransition::Up {
+            id: record.substate_id().clone(),
+            version: SubstateVersion::ZERO,
+            substate_or_hash: SubstateValueOrHash::Value(Box::new(record.substate_value().unwrap().clone())),
+        });
+        store.with_write_tx(|tx| tx.substates_commit_batch(batch)).unwrap();
+        let service = rpc_service(store);
+        let request = || {
+            Request::new(2.into(), GetSubstateRequest {
+                substate_requirement: Some(SubstateRequirement::unversioned(record.substate_id().clone()).into()),
+                include_proof: false,
+            })
+        };
+
+        let mut held = Vec::new();
+        let refused = loop {
+            match service.get_substate(request()).await {
+                Ok(response) => held.push(response),
+                Err(status) => break status,
+            }
+            assert!(
+                held.len() <= MAX_BUFFERED_RESPONSE_BYTES / (512 * 1024),
+                "the budget was never spent"
+            );
+        };
+        assert_eq!(refused.as_status_code(), tari_rpc_framework::RpcStatusCode::Unavailable);
+        let held_bytes = held
+            .iter()
+            .map(|response| response.payload.encoded_len())
+            .sum::<usize>();
+        assert!(
+            held_bytes <= MAX_BUFFERED_RESPONSE_BYTES,
+            "{held_bytes} bytes of responses held"
+        );
+
+        held.pop();
+        service
+            .get_substate(request())
+            .await
+            .expect("a sent response frees its share");
     }
 
     fn snapshot_request() -> GetShardSnapshotRequest {

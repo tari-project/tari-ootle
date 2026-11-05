@@ -32,7 +32,7 @@ use tari_ootle_storage::{
 };
 use tari_rpc_framework::RpcStatus;
 use tari_state_tree::Version;
-use tokio::sync::{Semaphore, broadcast, mpsc};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, broadcast, mpsc};
 
 use crate::{consensus::ConsensusHandle, p2p::rpc::CONSENSUS_NOT_RUNNING};
 
@@ -241,6 +241,27 @@ impl TipAuthority {
     }
 }
 
+/// A stream's share of the node-wide state transfer budget, which bounds the memory unsent state sync messages take.
+///
+/// It is held from the request until the stream's last message has been taken from the channel, and is given back
+/// while a followed stream waits at the tip with nothing to send. The channel holds one message, and the server
+/// takes the next only once it has finished sending the last, so a stream that holds no permit has at most its last
+/// message, a completion marker, still being sent.
+pub struct TransferPermit {
+    pool: Arc<Semaphore>,
+    held: Option<OwnedSemaphorePermit>,
+}
+
+impl TransferPermit {
+    /// `permit`, taken from `pool`.
+    pub fn held(pool: Arc<Semaphore>, permit: OwnedSemaphorePermit) -> Self {
+        Self {
+            pool,
+            held: Some(permit),
+        }
+    }
+}
+
 pub struct StateSyncTask<TStateStore: StateStore> {
     store: TStateStore,
     sender: mpsc::Sender<Result<rpc::SyncStateResponse, RpcStatus>>,
@@ -260,6 +281,7 @@ pub struct StateSyncTask<TStateStore: StateStore> {
     /// The state version reads every stream on this node shares. A permit is held for one version's read and
     /// released before its batches are sent, so a stream waiting on its peer holds none.
     reads: Arc<Semaphore>,
+    transfer: TransferPermit,
 }
 
 impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
@@ -276,6 +298,7 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
         value_filters: SubstateValueFilterFlags,
         include_version_proofs: bool,
         reads: Arc<Semaphore>,
+        transfer: TransferPermit,
     ) -> Self {
         Self {
             store,
@@ -290,10 +313,51 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
             value_filters,
             include_version_proofs,
             reads,
+            transfer,
         }
     }
 
     pub async fn run(mut self) -> Result<(), ()> {
+        let result = self.stream().await;
+        // The stream has ended, so this only waits for its last messages to be taken. A peer that has gone away
+        // fails it at once.
+        let _ignore = self.release_transfer().await;
+        result
+    }
+
+    /// Takes back this stream's state transfer permit, waiting for one to come free.
+    async fn acquire_transfer(&mut self) -> Result<(), ()> {
+        if self.transfer.held.is_some() {
+            return Ok(());
+        }
+        let permit = tokio::select! {
+            biased;
+            _ = self.sender.closed() => {
+                debug!(target: LOG_TARGET, "Peer stream closed by client while waiting to stream. Ending followed stream");
+                return Err(());
+            },
+            permit = self.transfer.pool.clone().acquire_owned() => permit.map_err(|_| ())?,
+        };
+        self.transfer.held = Some(permit);
+        Ok(())
+    }
+
+    /// Gives back this stream's state transfer permit once every message it has sent but the last has been sent to
+    /// the peer, which is when the channel's one slot comes free.
+    async fn release_transfer(&mut self) -> Result<(), ()> {
+        if self.transfer.held.is_none() {
+            return Ok(());
+        }
+        let drained = self.sender.reserve().await.is_ok();
+        self.transfer.held = None;
+        if !drained {
+            debug!(target: LOG_TARGET, "Peer stream closed by client before completing. Aborting");
+            return Err(());
+        }
+        Ok(())
+    }
+
+    async fn stream(&mut self) -> Result<(), ()> {
         // Each shard's updates are streamed contiguously, in the order the caller listed them, so a
         // consumer can finalise a shard the moment its completion marker arrives.
         let mut cursors = std::mem::take(&mut self.cursors);
@@ -346,6 +410,8 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
         events: &mut broadcast::Receiver<HotstuffEvent>,
     ) -> Result<(), ()> {
         loop {
+            // A stream waiting at the tip has nothing to send, so it leaves the budget to streams that do.
+            self.release_transfer().await?;
             // The client going away is otherwise only noticed by the next send, a block time later.
             let event = tokio::select! {
                 event = events.recv() => event,
@@ -365,6 +431,7 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
                     return Ok(());
                 },
             };
+            self.acquire_transfer().await?;
             for cursor in cursors.iter_mut() {
                 self.follow_shard(cursor, force_marker).await?;
             }
@@ -1360,23 +1427,135 @@ mod tests {
         start_state_version: Version,
     ) -> StateSyncTask<TStore> {
         let (events, _) = broadcast::channel(1);
+        let pool = Arc::new(Semaphore::new(1));
+        let mut task = transfer_task(store, sender, &events, transfer_from(&pool), false);
+        task.cursors[0].start_state_version = start_state_version;
+        task.value_filters = value_filters;
+        task.reads = reads;
+        task
+    }
+
+    /// A task streaming the global shard from v1 with `transfer`, through epoch 1 or, when `follow` is set, to the tip
+    /// and on.
+    fn transfer_task<TStore: StateStore>(
+        store: TStore,
+        sender: mpsc::Sender<Result<rpc::SyncStateResponse, RpcStatus>>,
+        events: &broadcast::Sender<HotstuffEvent>,
+        transfer: TransferPermit,
+        follow: bool,
+    ) -> StateSyncTask<TStore> {
         StateSyncTask::new(
             store,
             sender,
             vec![ShardCursor {
                 shard: Shard::global(),
-                start_state_version,
+                start_state_version: 1,
             }],
-            Some(Epoch(1)),
-            ConsensusHandle::for_test(&events),
+            (!follow).then_some(Epoch(1)),
+            ConsensusHandle::for_test(events),
             dummy_epoch_manager(),
             None,
-            false,
+            follow,
             max_updates(),
-            value_filters,
+            SubstateValueFilterFlags::all_substates(),
             false,
-            reads,
+            Arc::new(Semaphore::new(1)),
+            transfer,
         )
+    }
+
+    /// `pool`'s only permit, taken.
+    fn transfer_from(pool: &Arc<Semaphore>) -> TransferPermit {
+        TransferPermit::held(pool.clone(), pool.clone().try_acquire_owned().unwrap())
+    }
+
+    async fn until_available(pool: &Semaphore, why: &str) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while pool.available_permits() == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{why}"));
+    }
+
+    /// A stream holds its state transfer permit while its peer has messages left to take, and gives it back once the
+    /// last has been taken.
+    #[tokio::test]
+    async fn a_stream_holds_its_transfer_permit_until_its_messages_are_taken() {
+        let (store, _dir) = store_with_history(10);
+        let pool = Arc::new(Semaphore::new(1));
+        let (events, _) = broadcast::channel(1);
+        let (sender, mut receiver) = mpsc::channel(1);
+        let task = tokio::spawn(transfer_task(store, sender, &events, transfer_from(&pool), false).run());
+
+        while receiver.is_empty() {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            pool.available_permits(),
+            0,
+            "a stream its peer is not reading gave back its permit"
+        );
+
+        while receiver.recv().await.is_some() {}
+        task.await.unwrap().unwrap();
+        assert_eq!(pool.available_permits(), 1, "a finished stream kept its permit");
+    }
+
+    #[tokio::test]
+    async fn a_stream_its_peer_abandons_gives_back_its_transfer_permit() {
+        let (store, _dir) = store_with_history(10);
+        let pool = Arc::new(Semaphore::new(1));
+        let (events, _) = broadcast::channel(1);
+        let (sender, receiver) = mpsc::channel(1);
+        let task = tokio::spawn(transfer_task(store, sender, &events, transfer_from(&pool), false).run());
+        while receiver.is_empty() {
+            tokio::task::yield_now().await;
+        }
+
+        drop(receiver);
+        assert!(task.await.unwrap().is_err());
+        assert_eq!(pool.available_permits(), 1);
+    }
+
+    /// A followed stream waits at the tip for as long as the chain runs, with nothing to send, so it holds no share of
+    /// the budget while it waits.
+    #[tokio::test]
+    async fn a_followed_stream_waiting_at_the_tip_holds_no_transfer_permit() {
+        let (store, _dir) = store_with_history(10);
+        let pool = Arc::new(Semaphore::new(1));
+        let (events, _) = broadcast::channel(16);
+        let (sender, mut receiver) = mpsc::channel(1);
+        let _task = tokio::spawn(transfer_task(store, sender, &events, transfer_from(&pool), true).run());
+
+        loop {
+            let response = receiver.recv().await.unwrap().unwrap();
+            if let Some(rpc::sync_state_response::Response::Complete(complete)) = response.response {
+                assert!(!complete.is_final);
+                break;
+            }
+        }
+        until_available(&pool, "a followed stream at the tip kept its permit").await;
+
+        // A pass at the tip takes the permit back while it streams, and gives it back again once it is done.
+        events
+            .send(HotstuffEvent::EpochChanged {
+                epoch: Epoch(2),
+                registered_shard_group: None,
+            })
+            .unwrap();
+        let response = tokio::time::timeout(Duration::from_secs(10), receiver.recv())
+            .await
+            .expect("a followed stream did not answer an epoch change")
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            response.response,
+            Some(rpc::sync_state_response::Response::Complete(_))
+        ));
+        until_available(&pool, "a followed stream kept its permit after a pass").await;
     }
 
     /// The batches a stream of the global shard from `start_state_version` sends before it ends, as `(version,

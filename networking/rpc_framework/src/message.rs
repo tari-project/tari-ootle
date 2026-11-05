@@ -31,7 +31,7 @@ impl Request<Bytes> {
 }
 
 impl<T> Request<T> {
-    pub(super) fn new(method: RpcMethod, message: T) -> Self {
+    pub fn new(method: RpcMethod, message: T) -> Self {
         Self {
             inner: BaseRequest::new(method, message),
         }

@@ -949,6 +949,8 @@ async fn a_foreign_proposal_that_fails_to_process_is_rejected_when_no_transactio
     .await
     .expect("committee 0 never sent a foreign proposal");
 
+    // Inject directly into the store because `with_locked_epoch` alters the command and header without re-signing the
+    // commit proof, which inbound message validation would reject before `on_propose` runs.
     let invalid = with_locked_epoch(&genuine, Epoch(2));
     let invalid_id = invalid.calculate_block_id();
     test.get_validator(&output_member)

@@ -1624,6 +1624,10 @@ where
 
                 let access_rules: ComponentAccessRules = args.assert_one_arg()?;
 
+                let template_addr = self.tracker.get_template_address()?;
+                let template_def = self.get_template_def(&template_addr)?;
+                validate_component_access_rule_methods(&access_rules, &template_def)?;
+
                 if access_rules.contains_scoped_to_component_or_template() {
                     return Err(RuntimeError::InvalidArgument {
                         argument: "access_rules",

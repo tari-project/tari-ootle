@@ -169,6 +169,13 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
         has_processed_first_block: bool,
     ) -> IncomingMessageResult<TConsensusSpec::Addr> {
         let current_epoch = epoch_state.epoch();
+        if current_height.is_zero() {
+            let epoch_start_view = View::new(current_epoch, NodeHeight::zero());
+            self.buffer.discard_before(epoch_start_view);
+            if let Some((_, (from, message))) = self.buffer.pop_front(&epoch_start_view) {
+                return Ok(Some(InboundMessage::Ready { from, message }));
+            }
+        }
         let next_view = active_buffer_view(current_epoch, current_height, has_processed_first_block);
         // Clear buffer with lower (epoch, heights)
         let num_discarded = self.buffer.discard_before(next_view);
@@ -819,34 +826,30 @@ mod tests {
         const NETWORK: Network = Network::LocalNet;
         const EPOCH: Epoch = Epoch(1);
 
-        /// A proposal justified at `justify_height` that skips the failed view `justify_height + 1` on a timeout
-        /// certificate.
-        fn timeout_recovery_proposal(justify_height: NodeHeight) -> HotstuffMessage {
+        fn proposal_at(
+            epoch: Epoch,
+            justify_height: NodeHeight,
+            block_height: NodeHeight,
+            tc: Option<TimeoutCertificate>,
+        ) -> HotstuffMessage {
             let shard_group = ShardGroup::all_shards(NumPreshards::P256);
             let justify = ProposalCertificate::new(
                 FixedHash::zero(),
                 BlockId::zero(),
                 justify_height,
-                EPOCH,
+                epoch,
                 shard_group,
                 ProposalCertificate::genesis_signatures(),
                 QuorumDecision::Accept,
             );
-            let tc = TimeoutCertificate::new(EPOCH, justify_height + NodeHeight(1), TcSignatures::Schnorr {
-                signers: SignerBitmap::from_indices(1, 0..1).unwrap(),
-                timeouts: vec![SignedTimeout {
-                    high_pc_height: justify_height,
-                    signature: SchnorrSignatureBytes::zero(),
-                }],
-            });
             let header = BlockHeader::create_unsigned(
                 NETWORK,
-                ProtocolVersion::at(NETWORK, EPOCH),
+                ProtocolVersion::at(NETWORK, epoch),
                 BlockId::zero(),
                 justify.calculate_id(),
-                Some(tc.calculate_id()),
-                tc.height() + NodeHeight(1),
-                EPOCH,
+                tc.as_ref().map(|tc| tc.calculate_id()),
+                block_height,
+                epoch,
                 shard_group,
                 RistrettoPublicKeyBytes::default(),
                 FixedHash::zero(),
@@ -859,13 +862,26 @@ mod tests {
             )
             .unwrap();
             HotstuffMessage::new_proposal(ProposalMessage {
-                block: Block::new(header, justify, BlockCommands::empty(), Some(tc)),
+                block: Block::new(header, justify, BlockCommands::empty(), tc),
                 foreign_proposals: vec![],
             })
         }
 
-        /// `MessageBuffer::next` releases a message buffered at view `h` once the node reaches height `h - 1`, so a
-        /// future proposal must be buffered at the view after the first height at which it is current.
+        /// A proposal justified at `justify_height` that skips the failed view `justify_height + 1` on a timeout
+        /// certificate.
+        fn timeout_recovery_proposal(justify_height: NodeHeight) -> HotstuffMessage {
+            let tc = TimeoutCertificate::new(EPOCH, justify_height + NodeHeight(1), TcSignatures::Schnorr {
+                signers: SignerBitmap::from_indices(1, 0..1).unwrap(),
+                timeouts: vec![SignedTimeout {
+                    high_pc_height: justify_height,
+                    signature: SchnorrSignatureBytes::zero(),
+                }],
+            });
+            proposal_at(EPOCH, justify_height, tc.height() + NodeHeight(1), Some(tc))
+        }
+
+        /// `MessageBuffer::next` releases a message buffered at view `h` once the active buffer view reaches `h`:
+        /// height `h` before the first block of the epoch is processed, or height `h - 1` afterwards.
         #[test]
         fn a_future_timeout_recovery_proposal_is_released_at_the_first_view_it_is_current() {
             let justify_height = NodeHeight(10);
@@ -885,47 +901,11 @@ mod tests {
             ));
         }
 
-        fn proposal_at(epoch: Epoch, justify_height: NodeHeight, block_height: NodeHeight) -> HotstuffMessage {
-            let shard_group = ShardGroup::all_shards(NumPreshards::P256);
-            let justify = ProposalCertificate::new(
-                FixedHash::zero(),
-                BlockId::zero(),
-                justify_height,
-                epoch,
-                shard_group,
-                ProposalCertificate::genesis_signatures(),
-                QuorumDecision::Accept,
-            );
-            let header = BlockHeader::create_unsigned(
-                NETWORK,
-                ProtocolVersion::at(NETWORK, epoch),
-                BlockId::zero(),
-                justify.calculate_id(),
-                None,
-                block_height,
-                epoch,
-                shard_group,
-                RistrettoPublicKeyBytes::default(),
-                FixedHash::zero(),
-                &BlockCommands::empty(),
-                0,
-                0,
-                FixedHash::zero(),
-                ShardGroupAccumulatedData::default(),
-                ExtraData::new(),
-            )
-            .unwrap();
-            HotstuffMessage::new_proposal(ProposalMessage {
-                block: Block::new(header, justify, BlockCommands::empty(), None),
-                foreign_proposals: vec![],
-            })
-        }
-
         #[test]
         fn next_epoch_proposals_are_buffered_at_the_active_buffer_view_when_the_epoch_opens() {
             let next_epoch = EPOCH + Epoch(1);
-            let first = proposal_at(next_epoch, NodeHeight::zero(), NodeHeight(1));
-            let second = proposal_at(next_epoch, NodeHeight(1), NodeHeight(2));
+            let first = proposal_at(next_epoch, NodeHeight::zero(), NodeHeight(1), None);
+            let second = proposal_at(next_epoch, NodeHeight(1), NodeHeight(2), None);
 
             let MessageRelativeView::Future {
                 epoch: first_epoch,

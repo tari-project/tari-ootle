@@ -48,15 +48,28 @@ use tari_common::{
     configuration::bootstrap::prompt,
     exit_codes::{ExitCode, ExitError},
 };
+use tari_common_types::seeds::{
+    cipher_seed::CipherSeed,
+    error::{CipherError, MnemonicError},
+    mnemonic::{Mnemonic, MnemonicLanguage},
+    seed_words::SeedWords,
+};
 use tari_crypto::{
     keys::{PublicKey as _, SecretKey as _},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
 #[cfg(feature = "p2p")]
 use tari_ootle_p2p::PeerAddress;
+use tari_ootle_wallet_crypto::derive_ristretto_key;
+use tari_utilities::SafePassword;
 
 const REQUIRED_IDENTITY_PERMS: u32 = 0o100600;
 const LOG_TARGET: &str = "tari::application::identity";
+
+/// Key derivation branch for Tari validator node identity keypairs.
+pub const VN_IDENTITY_BRANCH: &[u8] = b"validator_node";
+/// Key derivation branch for Tari validator node fee claim keypairs.
+pub const VN_FEE_CLAIM_BRANCH: &[u8] = b"fee_claim";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
@@ -71,6 +84,23 @@ impl RistrettoKeypair {
     pub fn from_secret_key(secret_key: RistrettoSecretKey) -> Self {
         let public_key = RistrettoPublicKey::from_secret_key(&secret_key);
         Self(Arc::new(KeyPairInner { secret_key, public_key }))
+    }
+
+    /// Derives a keypair deterministically from a cipher seed, branch, and index.
+    pub fn derive_from_seed(seed: &CipherSeed, branch: &[u8], index: u64) -> Self {
+        let secret_key = derive_ristretto_key(seed.entropy(), branch, index);
+        Self::from_secret_key(secret_key)
+    }
+
+    /// Derives a keypair deterministically from a 24-word seed phrase, optional passphrase, branch, and index.
+    pub fn derive_from_seed_words(
+        seed_words: &SeedWords,
+        passphrase: Option<SafePassword>,
+        branch: &[u8],
+        index: u64,
+    ) -> Result<Self, IdentityError> {
+        let seed = CipherSeed::from_mnemonic(seed_words, passphrase)?;
+        Ok(Self::derive_from_seed(&seed, branch, index))
     }
 
     pub fn secret_key(&self) -> &RistrettoSecretKey {
@@ -97,14 +127,54 @@ struct KeyPairInner {
 ///
 /// ## Parameters
 /// - `identity_file` - Reference to file path
-/// - `public_address` - Network address of the base node
 /// - `create_id` - Only applies if the identity_file does not exist or is malformed. If true, a new identity will be
 ///   created, otherwise the user will be prompted to create a new ID
-/// - `peer_features` - Enables features of the base node
 ///
 /// # Return
 /// A NodeIdentity wrapped in an atomic reference counter on success, the exit code indicating the reason on failure
 pub fn setup_keypair_prompt<P: AsRef<Path>>(identity_file: P, create_id: bool) -> Result<RistrettoKeypair, ExitError> {
+    setup_keypair_from_seed_prompt(identity_file, None, None, create_id)
+}
+
+/// Sets up a node identity, supporting restore from seed words when provided, or creating a fresh seed-derived
+/// identity.
+///
+/// ## Parameters
+/// - `identity_file` - Reference to file path
+/// - `seed_words` - Optional 24-word seed phrase for deterministic recovery
+/// - `passphrase` - Optional passphrase for seed decryption
+/// - `create_id` - If true, creates a new seed and identity if the file does not exist
+pub fn setup_keypair_from_seed_prompt<P: AsRef<Path>>(
+    identity_file: P,
+    seed_words: Option<&SeedWords>,
+    passphrase: Option<SafePassword>,
+    create_id: bool,
+) -> Result<RistrettoKeypair, ExitError> {
+    if let Some(words) = seed_words {
+        let identity_file_path = identity_file.as_ref().to_string_lossy();
+        info!(
+            target: LOG_TARGET,
+            "Restoring node identity from seed phrase at {}...",
+            identity_file_path
+        );
+        match create_new_keypair_from_seed_words(&identity_file, words, passphrase) {
+            Ok(id) => {
+                info!(
+                    target: LOG_TARGET,
+                    "Node identity successfully restored from seed with public key: {}",
+                    id.public_key()
+                );
+                return Ok(id);
+            },
+            Err(e) => {
+                return Err(ExitError::new(
+                    ExitCode::ConfigError,
+                    format!("Failed to restore node identity from seed phrase: {e}"),
+                ));
+            },
+        }
+    }
+
     match load_keypair(&identity_file) {
         Ok(id) => Ok(id),
         Err(IdentityError::InvalidPermissions) => Err(ExitError::new(
@@ -121,13 +191,13 @@ pub fn setup_keypair_prompt<P: AsRef<Path>>(identity_file: P, create_id: bool) -
                 if matches!(e, IdentityError::NotFound) {
                     debug!(
                         target: LOG_TARGET,
-                        "Node identity file not found at {}. Creating new ID",
+                        "Node identity file not found at {}. Creating new ID from seed phrase",
                         identity_file_path
                     );
                 } else {
                     warn!(
                         target: LOG_TARGET,
-                        "Existing node identity file at {} is invalid ({}). Creating new ID",
+                        "Existing node identity file at {} is invalid ({}). Creating new ID from seed phrase",
                         identity_file_path,
                         e
                     );
@@ -151,15 +221,32 @@ pub fn setup_keypair_prompt<P: AsRef<Path>>(identity_file: P, create_id: bool) -
                     ));
                 };
             }
-            debug!(target: LOG_TARGET, "Existing node id not found. {}. Creating new ID", e);
+            debug!(target: LOG_TARGET, "Existing node id not found. {}. Creating new ID from seed phrase", e);
 
-            match create_new_keypair(&identity_file) {
-                Ok(id) => {
+            match create_new_keypair_with_seed_words(&identity_file) {
+                Ok((id, words)) => {
                     info!(
                         target: LOG_TARGET,
                         "New node identity with public key {} has been created at {}.",
                         id.public_key(),
                         identity_file.as_ref().to_str().unwrap_or("?"),
+                    );
+                    info!(
+                        target: LOG_TARGET,
+                        "================================================================================"
+                    );
+                    info!(
+                        target: LOG_TARGET,
+                        "Validator Node Recovery Seed Phrase (SAVE THIS SAFELY!):"
+                    );
+                    info!(
+                        target: LOG_TARGET,
+                        "{}",
+                        words.join(" ").reveal()
+                    );
+                    info!(
+                        target: LOG_TARGET,
+                        "================================================================================"
                     );
                     Ok(id)
                 },
@@ -205,6 +292,52 @@ pub fn create_new_keypair<P: AsRef<Path>>(path: P) -> Result<RistrettoKeypair, I
     let node_identity = RistrettoKeypair::random(&mut rand::rng());
     save_as_json(&path, &node_identity)?;
     Ok(node_identity)
+}
+
+/// Create a new node identity derived from a CipherSeed and save it to disk.
+pub fn create_new_keypair_from_seed<P: AsRef<Path>>(
+    path: P,
+    seed: &CipherSeed,
+) -> Result<RistrettoKeypair, IdentityError> {
+    let node_identity = RistrettoKeypair::derive_from_seed(seed, VN_IDENTITY_BRANCH, 0);
+    save_as_json(&path, &node_identity)?;
+    Ok(node_identity)
+}
+
+/// Create a new node identity derived from 24 seed words and save it to disk.
+pub fn create_new_keypair_from_seed_words<P: AsRef<Path>>(
+    path: P,
+    seed_words: &SeedWords,
+    passphrase: Option<SafePassword>,
+) -> Result<RistrettoKeypair, IdentityError> {
+    let seed = CipherSeed::from_mnemonic(seed_words, passphrase)?;
+    create_new_keypair_from_seed(path, &seed)
+}
+
+/// Generate a fresh random seed, derive the validator node identity keypair,
+/// save the identity to disk, and return `(RistrettoKeypair, SeedWords)`.
+pub fn create_new_keypair_with_seed_words<P: AsRef<Path>>(
+    path: P,
+) -> Result<(RistrettoKeypair, SeedWords), IdentityError> {
+    let seed = CipherSeed::random();
+    let seed_words = seed.to_mnemonic(MnemonicLanguage::English, None)?;
+    let keypair = create_new_keypair_from_seed(path, &seed)?;
+    Ok((keypair, seed_words))
+}
+
+/// Derives the fee claim keypair from a CipherSeed.
+pub fn derive_fee_claim_keypair_from_seed(seed: &CipherSeed, index: u64) -> RistrettoKeypair {
+    RistrettoKeypair::derive_from_seed(seed, VN_FEE_CLAIM_BRANCH, index)
+}
+
+/// Derives the fee claim keypair from 24 seed words and an optional passphrase.
+pub fn derive_fee_claim_keypair_from_seed_words(
+    seed_words: &SeedWords,
+    passphrase: Option<SafePassword>,
+    index: u64,
+) -> Result<RistrettoKeypair, IdentityError> {
+    let seed = CipherSeed::from_mnemonic(seed_words, passphrase)?;
+    Ok(derive_fee_claim_keypair_from_seed(&seed, index))
 }
 
 /// Loads the node identity from json at the given path
@@ -355,6 +488,62 @@ pub enum IdentityError {
     NotFile,
     #[error("Malformed identity file: {0}")]
     JsonError(#[from] serde_json5::Error),
+    #[error("Cipher seed error: {0}")]
+    CipherError(#[from] CipherError),
+    #[error("Mnemonic error: {0}")]
+    MnemonicError(#[from] MnemonicError),
     #[error(transparent)]
     Io(#[from] io::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deterministic_derivation_from_seed() {
+        let seed = CipherSeed::random();
+        let keypair1 = RistrettoKeypair::derive_from_seed(&seed, VN_IDENTITY_BRANCH, 0);
+        let keypair2 = RistrettoKeypair::derive_from_seed(&seed, VN_IDENTITY_BRANCH, 0);
+        assert_eq!(keypair1.public_key(), keypair2.public_key());
+        assert_eq!(keypair1.secret_key(), keypair2.secret_key());
+
+        let fee_claim_keypair = derive_fee_claim_keypair_from_seed(&seed, 0);
+        // Fee claim key and validator node identity key must be domain-separated and distinct
+        assert_ne!(keypair1.public_key(), fee_claim_keypair.public_key());
+        assert_ne!(keypair1.secret_key(), fee_claim_keypair.secret_key());
+    }
+
+    #[test]
+    fn deterministic_derivation_from_seed_words() {
+        let dir = tempfile::tempdir().unwrap();
+        let id_file = dir.path().join("identity.json");
+
+        let (keypair1, seed_words) = create_new_keypair_with_seed_words(&id_file).unwrap();
+        assert_eq!(seed_words.len(), 24);
+
+        // Derive again directly from seed words
+        let keypair2 = RistrettoKeypair::derive_from_seed_words(&seed_words, None, VN_IDENTITY_BRANCH, 0).unwrap();
+        assert_eq!(keypair1.public_key(), keypair2.public_key());
+        assert_eq!(keypair1.secret_key(), keypair2.secret_key());
+
+        // Restore to another file path
+        let restore_file = dir.path().join("restored_identity.json");
+        let restored_keypair = create_new_keypair_from_seed_words(&restore_file, &seed_words, None).unwrap();
+        assert_eq!(keypair1.public_key(), restored_keypair.public_key());
+
+        let loaded = load_keypair(&restore_file).unwrap();
+        assert_eq!(keypair1.public_key(), loaded.public_key());
+    }
+
+    #[test]
+    fn fee_claim_keypair_reproducible_from_seed_words() {
+        let seed = CipherSeed::random();
+        let words = seed.to_mnemonic(MnemonicLanguage::English, None).unwrap();
+
+        let fee_key1 = derive_fee_claim_keypair_from_seed(&seed, 0);
+        let fee_key2 = derive_fee_claim_keypair_from_seed_words(&words, None, 0).unwrap();
+        assert_eq!(fee_key1.public_key(), fee_key2.public_key());
+        assert_eq!(fee_key1.secret_key(), fee_key2.secret_key());
+    }
 }

@@ -84,6 +84,15 @@ pub struct Cli {
     /// passed. Diverges from the network; intended only for a node whose state is being discarded.
     #[clap(long)]
     pub allow_past_protocol_activation: bool,
+    /// 24-word seed phrase to restore or initialize the validator node identity and fee claim keys
+    #[clap(long, env = "TARI_VN_SEED_WORDS")]
+    pub seed_words: Option<String>,
+    /// Path to a file containing 24-word seed phrase
+    #[clap(long, env = "TARI_VN_SEED_WORDS_FILE")]
+    pub seed_words_file: Option<PathBuf>,
+    /// Optional passphrase for enciphered seed words
+    #[clap(long, env = "TARI_VN_SEED_PASSPHRASE")]
+    pub seed_passphrase: Option<String>,
     #[clap(subcommand)]
     pub command: Option<Subcommand>,
 }
@@ -185,7 +194,20 @@ pub enum Subcommand {
     /// Compact the database and exit
     CompactDb,
     /// Generate an identity keypair if one does not exist and exit
-    GenerateIdentity,
+    GenerateIdentity {
+        /// Optional 24-word seed phrase to restore the identity from
+        #[clap(long)]
+        seed_words: Option<String>,
+        /// Optional path to a file containing 24 seed words
+        #[clap(long)]
+        seed_words_file: Option<PathBuf>,
+        /// Optional passphrase for enciphered seed words
+        #[clap(long)]
+        seed_passphrase: Option<String>,
+        /// Overwrite existing identity file if it already exists
+        #[clap(long)]
+        overwrite: bool,
+    },
 }
 
 #[cfg(test)]
@@ -219,5 +241,41 @@ mod tests {
             config.epoch_oracle.base_layer.base_node_grpc_url.unwrap().as_str(),
             "http://my-node:18142/"
         );
+    }
+
+    #[test]
+    fn parse_seed_words_cli() {
+        let cli = Cli::parse_from([
+            "tari_validator_node",
+            "--seed-words",
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon \
+             abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art",
+        ]);
+        assert_eq!(
+            cli.seed_words.as_deref(),
+            Some(
+                "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon \
+                 abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
+            )
+        );
+
+        let cli_gen = Cli::parse_from([
+            "tari_validator_node",
+            "generate-identity",
+            "--seed-words-file",
+            "/tmp/seed.txt",
+            "--overwrite",
+        ]);
+        match cli_gen.command {
+            Some(Subcommand::GenerateIdentity {
+                seed_words_file,
+                overwrite,
+                ..
+            }) => {
+                assert_eq!(seed_words_file, Some(PathBuf::from("/tmp/seed.txt")));
+                assert!(overwrite);
+            },
+            _ => panic!("Expected GenerateIdentity subcommand"),
+        }
     }
 }

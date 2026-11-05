@@ -22,17 +22,50 @@
 
 mod cli;
 
-use std::{fs, fs::OpenOptions, io::Write, panic, time::SystemTime};
+use std::{fs, fs::OpenOptions, io::Write, panic, path::Path, time::SystemTime};
 
 use clap::Parser;
 use log::*;
-use tari_ootle_app_utilities::{configuration::load_configuration, keypair::setup_keypair_prompt};
+use tari_common::exit_codes::{ExitCode, ExitError};
+use tari_common_types::seeds::seed_words::SeedWords;
+use tari_crypto::ristretto::RistrettoPublicKey;
+use tari_ootle_app_utilities::{
+    configuration::load_configuration,
+    keypair::{derive_fee_claim_keypair_from_seed_words, setup_keypair_from_seed_prompt, setup_keypair_prompt},
+};
 use tari_shutdown::Shutdown;
+use tari_utilities::SafePassword;
 use tari_validator_node::{ApplicationConfig, node, run_validator_node};
 
 use crate::cli::Cli;
 
 const LOG_TARGET: &str = "tari::validator_node::app";
+
+fn load_seed_words(seed_words: Option<&str>, seed_words_file: Option<&Path>) -> Result<Option<SeedWords>, ExitError> {
+    if let Some(words) = seed_words {
+        let parsed = words
+            .trim()
+            .parse::<SeedWords>()
+            .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Invalid seed words: {e}")))?;
+        return Ok(Some(parsed));
+    }
+    if let Some(path) = seed_words_file {
+        let content = fs::read_to_string(path).map_err(|e| {
+            ExitError::new(
+                ExitCode::ConfigError,
+                format!("Failed to read seed words file {}: {e}", path.display()),
+            )
+        })?;
+        let parsed = content.trim().parse::<SeedWords>().map_err(|e| {
+            ExitError::new(
+                ExitCode::ConfigError,
+                format!("Invalid seed words in {}: {e}", path.display()),
+            )
+        })?;
+        return Ok(Some(parsed));
+    }
+    Ok(None)
+}
 
 #[cfg(feature = "tokio_debug")]
 const DEBUG_PORT: u16 = console_subscriber::Server::DEFAULT_PORT;
@@ -91,25 +124,91 @@ async fn main() -> anyhow::Result<()> {
         },
         Some(cli::Subcommand::Start) | None => {
             let shutdown = Shutdown::new();
-            let keypair = setup_keypair_prompt(
+            let parsed_seed_words = load_seed_words(cli.seed_words.as_deref(), cli.seed_words_file.as_deref())?;
+            let passphrase = cli
+                .seed_passphrase
+                .as_deref()
+                .map(SafePassword::from_str)
+                .transpose()
+                .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Invalid seed passphrase: {e}")))?;
+
+            let keypair = setup_keypair_from_seed_prompt(
                 &config.validator_node.identity_file,
+                parsed_seed_words.as_ref(),
+                passphrase.clone(),
                 !config.validator_node.dont_create_id,
             )?;
+
+            // If seed words were provided and fee claim public key was not explicitly configured, derive it
+            if let Some(ref words) = parsed_seed_words &&
+                config.validator_node.fee_claim_public_key == RistrettoPublicKey::default()
+            {
+                if let Ok(fee_key) = derive_fee_claim_keypair_from_seed_words(words, passphrase, 0) {
+                    info!(
+                        target: LOG_TARGET,
+                        "Fee claim public key derived from seed: {}",
+                        fee_key.public_key()
+                    );
+                    config.validator_node.fee_claim_public_key = *fee_key.public_key();
+                }
+            }
 
             run_validator_node(keypair, config, shutdown).await?;
             info!(target: LOG_TARGET, "Validator node shutdown successfully");
         },
-        Some(cli::Subcommand::GenerateIdentity) => {
-            let keypair = setup_keypair_prompt(
+        Some(cli::Subcommand::GenerateIdentity {
+            seed_words,
+            seed_words_file,
+            seed_passphrase,
+            overwrite,
+        }) => {
+            let seed_words_arg = seed_words.as_deref().or(cli.seed_words.as_deref());
+            let seed_words_file_arg = seed_words_file.as_deref().or(cli.seed_words_file.as_deref());
+            let passphrase_arg = seed_passphrase.as_deref().or(cli.seed_passphrase.as_deref());
+
+            let parsed_seed_words = load_seed_words(seed_words_arg, seed_words_file_arg)?;
+            let passphrase = passphrase_arg
+                .map(SafePassword::from_str)
+                .transpose()
+                .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Invalid seed passphrase: {e}")))?;
+
+            if overwrite && config.validator_node.identity_file.exists() {
+                info!(
+                    target: LOG_TARGET,
+                    "Removing existing identity file at {} due to --overwrite",
+                    config.validator_node.identity_file.display()
+                );
+                let _ = fs::remove_file(&config.validator_node.identity_file);
+            }
+
+            let keypair = setup_keypair_from_seed_prompt(
                 &config.validator_node.identity_file,
-                !config.validator_node.dont_create_id,
+                parsed_seed_words.as_ref(),
+                passphrase.clone(),
+                true,
             )?;
 
             info!(
                 target: LOG_TARGET,
-                "Generated identity with public key: {}",
+                "Node identity ready with public key: {}",
                 keypair.public_key()
             );
+            #[cfg(feature = "p2p")]
+            info!(
+                target: LOG_TARGET,
+                "Node peer address: {}",
+                keypair.to_peer_address()
+            );
+
+            if let Some(ref words) = parsed_seed_words {
+                if let Ok(fee_key) = derive_fee_claim_keypair_from_seed_words(words, passphrase, 0) {
+                    info!(
+                        target: LOG_TARGET,
+                        "Derived fee claim public key: {}",
+                        fee_key.public_key()
+                    );
+                }
+            }
         },
     }
 

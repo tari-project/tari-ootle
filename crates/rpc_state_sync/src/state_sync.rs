@@ -1728,7 +1728,7 @@ mod tests {
     #[test]
     fn interrupted_multi_group_sync_does_not_match_partial_checkpoint_set() {
         let tmp = tempfile::tempdir().unwrap();
-        let store: RocksDbStateStore<u8> =
+        let store: RocksDbStateStore<PeerAddress> =
             RocksDbStateStore::open(tmp.path().join("rocksdb"), DatabaseOptions::default()).unwrap();
 
         let group_a = ShardGroup::new(Shard::from(1u32), Shard::from(2u32));
@@ -1752,7 +1752,7 @@ mod tests {
     #[test]
     fn local_state_below_checkpoint_version_does_not_match() {
         let tmp = tempfile::tempdir().unwrap();
-        let store: RocksDbStateStore<u8> =
+        let store: RocksDbStateStore<PeerAddress> =
             RocksDbStateStore::open(tmp.path().join("rocksdb"), DatabaseOptions::default()).unwrap();
 
         let shard = Shard::from(1u32);
@@ -1935,6 +1935,10 @@ mod tests {
         }
 
         async fn get_birthday_epoch(&self) -> Result<Option<Epoch>, EmError> {
+            unimplemented!()
+        }
+
+        async fn get_pending_activation(&self) -> Result<Option<tari_epoch_manager::PendingActivation>, EmError> {
             unimplemented!()
         }
     }

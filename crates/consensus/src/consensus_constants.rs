@@ -195,8 +195,10 @@ pub struct ConsensusConstants {
     /// Must be at least `max_transaction_input_load_bytes`, so a transaction at the cap fits an empty block. A
     /// leader counts the inputs of transactions it then leaves out of the block as well, so a validator never
     /// counts more than the leader did for the same block. The loads of a transaction aborted for exceeding the
-    /// per-transaction cap count too, and are the one way a block ends past this: by at most that cap plus one
-    /// substate. CONSENSUS RULE: must be uniform network-wide, otherwise nodes diverge on block validity.
+    /// per-transaction cap count too, and the input that trips that cap is the one input not checked against this
+    /// budget first, so a block ends past this by at most one substate (`limits::ENGINE_LIMITS.max_substate_size`),
+    /// and only once: every later load is refused. CONSENSUS RULE: must be uniform network-wide, otherwise nodes
+    /// diverge on block validity.
     pub max_block_input_load_bytes: usize,
     /// The most encoded bytes of foreign proposals a leader packs into a block that carries more than
     /// one. A local proposal travels with every foreign proposal it includes, in one message that must

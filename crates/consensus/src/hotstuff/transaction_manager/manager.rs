@@ -2466,6 +2466,7 @@ mod tests {
                 FixedExecutor(fixture.execution(&transaction, requires_held_version)),
                 2160,
                 usize::MAX,
+                usize::MAX,
             );
             manager.prepare_local_input_transaction(
                 store,

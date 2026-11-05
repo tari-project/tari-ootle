@@ -426,9 +426,14 @@ impl Test {
         self.network.start();
     }
 
+    /// Waits until every validator that is active at its current epoch runs consensus.
     pub async fn wait_for_all_validators_to_start_consensus(&mut self) {
         let mut complete = HashSet::new();
-        let total_validators = self.validators.len();
+        let total_validators = self
+            .validators
+            .values()
+            .filter(|v| !v.epoch_manager.is_pending_activation())
+            .count();
         loop {
             let validators = self.validators.values_mut();
             for validator in validators {

@@ -14,10 +14,14 @@ pub enum EpochEvent {
         epoch: Epoch,
         node_changes: Vec<ValidatorNodeChange>,
     },
+    /// A registration detected ahead of its activation. Speculative: the validator joins committees only through
+    /// `ActiveValidatorNodeSetChanged`, so this event must never feed committee assignment.
     NewValidatorRegistered {
         epoch: Epoch,
         claim_public_key: RistrettoPublicKeyBytes,
         validator_node_public_key: RistrettoPublicKeyBytes,
+        activation_epoch: Epoch,
+        shard_key: SubstateAddress,
     },
     NewValidatorNodeExit {
         epoch: Epoch,
@@ -55,11 +59,14 @@ impl Display for EpochEvent {
                 epoch,
                 claim_public_key,
                 validator_node_public_key,
+                activation_epoch,
+                shard_key,
             } => {
                 write!(
                     f,
-                    "NewValidatorRegistered {{ epoch: {}, claim_public_key: {}, validator_node_public_key: {} }}",
-                    epoch, claim_public_key, validator_node_public_key
+                    "NewValidatorRegistered {{ epoch: {}, claim_public_key: {}, validator_node_public_key: {}, \
+                     activation_epoch: {}, shard_key: {} }}",
+                    epoch, claim_public_key, validator_node_public_key, activation_epoch, shard_key
                 )
             },
             EpochEvent::NewValidatorNodeExit {

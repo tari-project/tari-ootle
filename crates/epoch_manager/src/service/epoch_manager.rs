@@ -100,6 +100,10 @@ where TSpec: EpochManagerSpec
         &self.config
     }
 
+    pub fn node_public_key(&self) -> &RistrettoPublicKeyBytes {
+        &self.node_public_key
+    }
+
     pub fn load_initial_state(&mut self) -> Result<(), EpochManagerError> {
         info!(target: LOG_TARGET, "Retrieving current epoch and block info from database");
         let mut tx = self.global_db.create_transaction()?;

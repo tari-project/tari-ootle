@@ -631,9 +631,6 @@ where TSpec: WalletSdkSpec
         }
 
         for (id, nft) in updated_nft_data_cache {
-            if !existing_nft_ids.contains(&id) || !latest_nft_ids.contains(&id) {
-                continue;
-            }
             let non_fungible = build_non_fungible_token(*latest_vault.resource_address(), vault_id, id, &nft);
             non_fungibles_api.save_nft(&non_fungible)?;
             has_changed = true;
@@ -1207,15 +1204,9 @@ mod tests {
         );
 
         let updated = updated_nfts_for_vault(&vault_a, &diff);
-        let container = updated.get(&shared_id).unwrap();
-        let token = build_non_fungible_token(
-            resource_a,
-            VaultId::new(ObjectKey::from_array([3u8; ObjectKey::LENGTH])),
-            shared_id,
-            container,
-        );
-        assert_eq!(token.data, tari_bor::Value::Text("nft-a".to_string()));
-        assert_eq!(token.mutable_data, tari_bor::Value::Integer(10.into()));
-        assert!(!token.is_burnt);
+        assert_eq!(updated.len(), 1);
+        let contents = updated.get(&shared_id).unwrap().contents().unwrap();
+        assert_eq!(contents.data(), &tari_bor::Value::Text("nft-a".to_string()));
+        assert_eq!(contents.mutable_data(), &tari_bor::Value::Integer(10.into()));
     }
 }

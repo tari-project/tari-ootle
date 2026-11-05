@@ -161,6 +161,7 @@ pub struct SendArgs {
     destination_public_key: FromHex<Vec<u8>>,
     #[clap(flatten)]
     common: CommonSubmitArgs,
+    #[clap(long = "account", short = 'a', alias = "source-account-name")]
     source_account_name: Option<ComponentAddressOrName>,
 }
 
@@ -928,4 +929,67 @@ fn parse_globals(globals: Vec<String>) -> Result<HashMap<String, ManifestValue>,
 fn base64_decode<T: AsRef<[u8]>>(s: T) -> Result<Vec<u8>, base64::DecodeError> {
     use base64::Engine;
     base64::prelude::BASE64_STANDARD.decode(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+
+    #[derive(Debug, Parser)]
+    struct CliTest {
+        #[clap(subcommand)]
+        command: TransactionSubcommand,
+    }
+
+    #[test]
+    fn test_send_args_parsing_with_account_flag() {
+        let dummy_resource = "resource_0101010101010101010101010101010101010101010101010101010101010101";
+        let dummy_pubkey = "000102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f";
+
+        let cli = CliTest::try_parse_from([
+            "wallet",
+            "send",
+            "1000",
+            dummy_resource,
+            dummy_pubkey,
+            "--account",
+            "my_special_acc",
+        ])
+        .expect("Failed to parse transaction send with --account");
+
+        match cli.command {
+            TransactionSubcommand::Send(args) => {
+                assert_eq!(args.amount, 1000);
+                assert!(matches!(
+                    args.source_account_name,
+                    Some(ComponentAddressOrName::Name(ref n)) if n == "my_special_acc"
+                ));
+            },
+            _ => panic!("Expected TransactionSubcommand::Send"),
+        }
+
+        let cli_short = CliTest::try_parse_from([
+            "wallet",
+            "send",
+            "2000",
+            dummy_resource,
+            dummy_pubkey,
+            "-a",
+            "another_acc",
+        ])
+        .expect("Failed to parse transaction send with -a");
+
+        match cli_short.command {
+            TransactionSubcommand::Send(args) => {
+                assert_eq!(args.amount, 2000);
+                assert!(matches!(
+                    args.source_account_name,
+                    Some(ComponentAddressOrName::Name(ref n)) if n == "another_acc"
+                ));
+            },
+            _ => panic!("Expected TransactionSubcommand::Send"),
+        }
+    }
 }

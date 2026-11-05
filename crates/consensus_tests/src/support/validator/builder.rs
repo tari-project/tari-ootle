@@ -38,7 +38,7 @@ use tempfile::TempDir;
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::support::{
-    RoundRobinLeaderStrategy,
+    SmoothWeightedRoundRobin,
     TEST_NUM_PRESHARDS,
     TestBlockTransactionProcessor,
     TestConsensusSpec,
@@ -62,7 +62,7 @@ pub struct ValidatorBuilder {
     pub shard_group: ShardGroup,
     pub rocks_tmp_path: TempDir,
     pub rocks_override_path: Option<PathBuf>,
-    pub leader_strategy: RoundRobinLeaderStrategy,
+    pub leader_strategy: SmoothWeightedRoundRobin,
     pub num_committees: u32,
     pub epoch_manager: Option<TestEpochManager>,
     pub transaction_executions: TestExecutionSpecStore,
@@ -82,7 +82,7 @@ impl ValidatorBuilder {
             shard_group: ShardGroup::all_shards(TEST_NUM_PRESHARDS),
             rocks_override_path: None,
             rocks_tmp_path: tempfile::tempdir().unwrap(),
-            leader_strategy: RoundRobinLeaderStrategy::new(),
+            leader_strategy: SmoothWeightedRoundRobin::new(),
             epoch_manager: None,
             transaction_executions: TestExecutionSpecStore::new(),
             config: None,
@@ -127,7 +127,7 @@ impl ValidatorBuilder {
         self
     }
 
-    pub fn with_leader_strategy(&mut self, leader_strategy: RoundRobinLeaderStrategy) -> &mut Self {
+    pub fn with_leader_strategy(&mut self, leader_strategy: SmoothWeightedRoundRobin) -> &mut Self {
         self.leader_strategy = leader_strategy;
         self
     }

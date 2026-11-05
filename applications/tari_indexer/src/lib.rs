@@ -201,7 +201,9 @@ where
 }
 
 async fn handle_epoch_manager_event(services: &Services, event: EpochManagerEvent) -> Result<(), anyhow::Error> {
-    let EpochManagerEvent::EpochChanged { epoch, .. } = event;
+    let EpochManagerEvent::EpochChanged { epoch, .. } = event else {
+        return Ok(());
+    };
     let all_vns = services.epoch_manager.get_all_validator_nodes(epoch).await?;
     services
         .networking

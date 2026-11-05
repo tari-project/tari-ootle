@@ -272,14 +272,39 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
+    /// Inserts a new substate. A component is refused: [`Self::new_component_substate`] creates components, validating
+    /// their state on the way in.
     pub fn new_substate<K: Into<SubstateId>, V: Into<SubstateValue>>(
         &mut self,
         address: K,
         value: V,
     ) -> Result<(), RuntimeError> {
         let address = address.into();
-        self.check_write_allowed(&address)?;
         let value = value.into();
+        if value.as_component().is_some() {
+            return Err(RuntimeError::InvariantError {
+                function: "new_substate",
+                details: format!("Component {address} must be created with new_component_substate"),
+            });
+        }
+        self.insert_new_substate(address, value)
+    }
+
+    /// Inserts a new component after validating its state. Together with [`Self::modify_component_with`], this is
+    /// the only way component state is written, so every state the engine stores has passed
+    /// `validate_component_state`.
+    pub fn new_component_substate(
+        &mut self,
+        address: ComponentAddress,
+        component: Component,
+    ) -> Result<(), RuntimeError> {
+        let indexed = IndexedWellKnownTypes::from_value(component.state())?;
+        self.validate_component_state(None, &indexed)?;
+        self.insert_new_substate(address.into(), SubstateValue::Component(component))
+    }
+
+    fn insert_new_substate(&mut self, address: SubstateId, value: SubstateValue) -> Result<(), RuntimeError> {
+        self.check_write_allowed(&address)?;
         Self::enforce_substate_size_limit(&address, &value)?;
         self.current_call_scope_mut()?.add_substate_to_scope(address.clone())?;
         self.store.insert(address, value)?;
@@ -350,7 +375,8 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(component)
     }
 
-    pub fn get_component_mut(&mut self, locked: &LockedSubstate) -> Result<&mut Component, RuntimeError> {
+    /// Private so that component state is written only through [`Self::modify_component_with`], which validates it.
+    fn get_component_mut(&mut self, locked: &LockedSubstate) -> Result<&mut Component, RuntimeError> {
         let (address, substate) = self.store.get_locked_substate_mut(locked.lock_id())?;
         let component_mut = substate
             .component_mut()
@@ -427,6 +453,18 @@ impl<TStore: StateReader> WorkingState<TStore> {
         ))?;
 
         Ok(())
+    }
+
+    /// Points the locked component at `new_template` and returns the template it used before.
+    pub fn set_component_template_address(
+        &mut self,
+        locked: &LockedSubstate,
+        new_template: TemplateAddress,
+    ) -> Result<TemplateAddress, RuntimeError> {
+        let component_mut = self.get_component_mut(locked)?;
+        let prev_template = *component_mut.template_address();
+        component_mut.set_template_address(new_template);
+        Ok(prev_template)
     }
 
     pub fn get_resource(&self, locked: &LockedSubstate) -> Result<&Resource, RuntimeError> {
@@ -539,9 +577,29 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(substate)
     }
 
-    pub fn get_locked_substate_mut(&mut self, lock: &LockedSubstate) -> Result<&mut SubstateValue, RuntimeError> {
-        let (_, substate) = self.store.get_locked_substate_mut(lock.lock_id())?;
-        Ok(substate)
+    pub fn get_utxo_mut(&mut self, locked: &LockedSubstate) -> Result<&mut Utxo, RuntimeError> {
+        let (addr, substate) = self.store.get_locked_substate_mut(locked.lock_id())?;
+        substate
+            .as_utxo_mut()
+            .ok_or_else(|| RuntimeError::LockSubstateMismatch {
+                lock_id: locked.lock_id(),
+                id: addr,
+                expected_type: "Utxo",
+            })
+    }
+
+    pub fn get_confidential_output_mut(
+        &mut self,
+        locked: &LockedSubstate,
+    ) -> Result<&mut ConfidentialOutput, RuntimeError> {
+        let (addr, substate) = self.store.get_locked_substate_mut(locked.lock_id())?;
+        substate
+            .as_confidential_output_mut()
+            .ok_or_else(|| RuntimeError::LockSubstateMismatch {
+                lock_id: locked.lock_id(),
+                id: addr,
+                expected_type: "ConfidentialOutput",
+            })
     }
 
     pub fn get_vault(&self, locked: &LockedSubstate) -> Result<&Vault, RuntimeError> {
@@ -1309,11 +1367,28 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(id)
     }
 
+    /// Finds a pending allocation for `address` in any call frame. Naming a pending address grants nothing, so value
+    /// checks and hook template lookups may use this.
     pub fn get_allocated_address_by_address<T: Into<SubstateId>>(&self, address: T) -> Option<&AllocatedAddress> {
         let substate_id = address.into();
         self.address_allocations
             .values()
             .find(|alloc| *alloc.substate_id() == substate_id)
+    }
+
+    /// Finds a pending allocation for `address` that the current call frame holds. Use this wherever holding the
+    /// allocation confers authority, such as skipping a resource auth hook.
+    pub fn get_allocated_address_in_current_scope<T: Into<SubstateId>>(
+        &self,
+        address: T,
+    ) -> Result<Option<&AllocatedAddress>, RuntimeError> {
+        let scope = self.current_call_scope()?;
+        let substate_id = address.into();
+        Ok(self
+            .address_allocations
+            .iter()
+            .find(|(id, alloc)| scope.is_address_allocation_in_scope(**id) && *alloc.substate_id() == substate_id)
+            .map(|(_, alloc)| alloc))
     }
 
     pub fn get_template_for_component(
@@ -1409,7 +1484,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(resource_container)
     }
 
-    pub fn validate_component_state(
+    fn validate_component_state(
         &mut self,
         previous_state: Option<&IndexedWellKnownTypes>,
         next_state: &IndexedWellKnownTypes,
@@ -1448,6 +1523,18 @@ impl<TStore: StateReader> WorkingState<TStore> {
         // single vault.
         let new_values = diff_values.as_ref().unwrap_or(next_state);
         self.check_all_substates_in_scope(new_values)?;
+
+        // A vault belongs to exactly one component. It starts as an orphan of the frame that created it, which must
+        // attach it before the frame is popped, and attaching it removes it from the orphans. So a newly referenced
+        // vault that is not an orphan here is already held by a component.
+        let scope = self.current_call_scope()?;
+        if let Some(vault_id) = new_values
+            .vault_ids()
+            .iter()
+            .find(|vault_id| !scope.orphans().contains(&SubstateId::from(**vault_id)))
+        {
+            return Err(RuntimeError::VaultAlreadyOwned { vault_id: *vault_id });
+        }
 
         let scope_mut = self.current_call_scope_mut()?;
         for address in next_state.referenced_substates() {
@@ -2435,7 +2522,11 @@ fn exhaust_burn_share(paid: u64, rate: ExhaustBurnRate) -> u64 {
 mod tests {
     use tari_template_lib::{
         models::{Bucket, ComponentAddressAllocation, Proof},
-        types::ObjectKey,
+        types::{
+            ObjectKey,
+            SubstateOwnerRule,
+            access_rules::{ComponentAccessRules, UpdateRule},
+        },
     };
 
     use super::*;
@@ -2522,6 +2613,33 @@ mod tests {
             state.check_all_substates_known(&forged_resx_alloc),
             Err(RuntimeError::AddressAllocationNotInScope { id }) if id == resx_alloc_id
         ));
+    }
+
+    #[test]
+    fn new_substate_rejects_a_component() {
+        let mut state = test_working_state();
+        let address = ComponentAddress::from_array([1u8; ObjectKey::LENGTH]);
+        let component = Component {
+            header: tari_engine_types::component::ComponentHeader {
+                template_address: TemplateAddress::default(),
+                owner_rule: SubstateOwnerRule::None,
+                access_rules: ComponentAccessRules::new(),
+                entity_id: address.entity_id(),
+                upgrade_rule: UpdateRule::default(),
+            },
+            body: tari_engine_types::component::ComponentBody {
+                state: tari_bor::Value::Null,
+            },
+        };
+
+        assert!(matches!(
+            state.new_substate(address, SubstateValue::Component(component)),
+            Err(RuntimeError::InvariantError {
+                function: "new_substate",
+                ..
+            })
+        ));
+        assert!(!state.substate_exists(&address.into()).unwrap());
     }
 
     #[test]

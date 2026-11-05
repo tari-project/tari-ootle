@@ -54,6 +54,22 @@ pub(super) struct ChangeLog {
     head: HashMap<SubstateId, usize>,
     /// Append only list of changes ordered oldest to newest
     changes: Vec<SubstateChange>,
+    /// What the `put_diff` in progress has overwritten
+    undo: Option<UndoLog>,
+}
+
+/// The entries a [`ChangeLog::put_diff`] overwrites, in the order it overwrote them, so that a failure part way can
+/// restore the log as it was before the diff.
+#[derive(Debug, Clone, Default)]
+struct UndoLog {
+    /// The number of changes before the diff
+    num_changes: usize,
+    /// Each `pending` entry the diff set, with its previous index
+    pending: Vec<(SubstateAddress, Option<usize>)>,
+    /// Each `head` entry the diff set, with its previous index
+    head: Vec<(SubstateId, Option<usize>)>,
+    /// Each change from before the diff that the diff rewrote in place, with its previous value
+    rewritten: Vec<(usize, SubstateChange)>,
 }
 
 impl ChangeLog {
@@ -82,17 +98,47 @@ impl ChangeLog {
     }
 
     fn get_head_mut(&mut self, id: &SubstateId) -> Option<&mut SubstateChange> {
-        self.head
-            .get(id)
-            .map(|&pos| self.changes.get_mut(pos).expect("diff and head are not in sync"))
+        let pos = *self.head.get(id)?;
+        let change = self.changes.get_mut(pos).expect("diff and head are not in sync");
+        if let Some(undo) = &mut self.undo &&
+            pos < undo.num_changes
+        {
+            undo.rewritten.push((pos, change.clone()));
+        }
+        Some(change)
     }
 
     fn insert(&mut self, change: SubstateChange) {
         let index = self.changes.len();
-        self.pending.insert(change.to_substate_address(), index);
-        self.head
-            .insert(change.versioned_substate_id().substate_id().clone(), index);
+        let address = change.to_substate_address();
+        let id = change.versioned_substate_id().substate_id().clone();
+        let prev_pending = self.pending.insert(address, index);
+        let prev_head = self.head.insert(id.clone(), index);
+        if let Some(undo) = &mut self.undo {
+            undo.pending.push((address, prev_pending));
+            undo.head.push((id, prev_head));
+        }
         self.changes.push(change)
+    }
+
+    /// Restores the log to what it was when `undo` began recording.
+    fn rollback(&mut self, undo: UndoLog) {
+        self.changes.truncate(undo.num_changes);
+        for (pos, change) in undo.rewritten.into_iter().rev() {
+            self.changes[pos] = change;
+        }
+        for (address, prev) in undo.pending.into_iter().rev() {
+            match prev {
+                Some(index) => self.pending.insert(address, index),
+                None => self.pending.remove(&address),
+            };
+        }
+        for (id, prev) in undo.head.into_iter().rev() {
+            match prev {
+                Some(index) => self.head.insert(id, index),
+                None => self.head.remove(&id),
+            };
+        }
     }
 
     pub fn get<B: SubstateLayer>(
@@ -209,14 +255,6 @@ impl ChangeLog {
 
     /// Records `change` once the version it replaces is DOWN (an UP) or the version it spends is UP (a DOWN).
     pub fn put<B: SubstateLayer>(&mut self, base: &B, change: SubstateChange) -> Result<(), SubstateStoreError> {
-        self.put_then(base, change, |_| {})
-    }
-
-    fn put_then<B, F>(&mut self, base: &B, change: SubstateChange, on_put: F) -> Result<(), SubstateStoreError>
-    where
-        B: SubstateLayer,
-        F: FnOnce(&SubstateChange),
-    {
         match &change {
             SubstateChange::Up { id, substate, .. } => {
                 if let Some(v) = substate.previous_version() {
@@ -228,40 +266,65 @@ impl ChangeLog {
             },
         }
 
-        on_put(&change);
         self.insert(change);
         Ok(())
     }
 
-    /// Puts every DOWN, then every UP, then every validator fee withdrawal in `diff`, calling `on_put` with each
-    /// DOWN and UP as it is recorded. A failure part way leaves the changes before it recorded.
+    /// Puts every DOWN, then every UP, then every validator fee withdrawal in `diff`, then calls `on_put` with each
+    /// DOWN and UP. A failure part way leaves `self` unchanged and does not call `on_put`.
     pub fn put_diff<B, F>(&mut self, base: &B, diff: &SubstateDiff, mut on_put: F) -> Result<(), SubstateStoreError>
     where
         B: SubstateLayer,
         F: FnMut(&SubstateChange),
     {
+        let num_changes = self.changes.len();
+        self.undo = Some(UndoLog {
+            num_changes,
+            ..UndoLog::default()
+        });
+        let result = self.put_diff_changes(base, diff);
+        let undo = self.undo.take().expect("set above");
+        match result {
+            Ok(num_puts) => {
+                for change in &self.changes[num_changes..num_changes + num_puts] {
+                    on_put(change);
+                }
+                Ok(())
+            },
+            Err(err) => {
+                self.rollback(undo);
+                Err(err)
+            },
+        }
+    }
+
+    /// The changes of [`Self::put_diff`]. Returns the number of DOWNs and UPs, which precede the withdrawals.
+    fn put_diff_changes<B: SubstateLayer>(
+        &mut self,
+        base: &B,
+        diff: &SubstateDiff,
+    ) -> Result<usize, SubstateStoreError> {
+        let num_changes = self.changes.len();
         let num_preshards = base.num_preshards();
         for (id, version) in diff.down_iter() {
             let id = VersionedSubstateId::new(id.clone(), *version);
             let shard = id.to_shard(num_preshards);
             debug!(target: LOG_TARGET, "🔽️ Down: {id} {shard}");
-            self.put_then(base, SubstateChange::Down { id, shard }, &mut on_put)?;
+            self.put(base, SubstateChange::Down { id, shard })?;
         }
 
         for (id, substate) in diff.up_iter() {
             let vid = VersionedSubstateIdRef::new(id, substate.version());
             let shard = vid.to_shard(num_preshards);
             debug!(target: LOG_TARGET, "🔼️ Up: {} v{} {}", id, substate.version(), shard);
-            self.put_then(
-                base,
-                SubstateChange::Up {
-                    id: id.clone(),
-                    shard,
-                    substate: Box::new(substate.clone()),
-                },
-                &mut on_put,
-            )?;
+            self.put(base, SubstateChange::Up {
+                id: id.clone(),
+                shard,
+                substate: Box::new(substate.clone()),
+            })?;
         }
+
+        let num_puts = self.changes.len() - num_changes;
 
         for withdraw in diff.validator_fee_withdrawals() {
             let id = withdraw.address.into();
@@ -300,7 +363,7 @@ impl ChangeLog {
             )?;
         }
 
-        Ok(())
+        Ok(num_puts)
     }
 
     /// Applies `updater` to the latest value of `substate_id`, or `creator` if it is DOWN or has never existed.

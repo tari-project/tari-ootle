@@ -30,14 +30,8 @@ use std::{
 use borsh::{BorshDeserialize, BorshSerialize};
 use ootle_network::Network;
 use serde::{Deserialize, Serialize};
-use tari_bor::{decode_exact_with_max_depth, encode, BorError};
+use tari_bor::{BorError, decode_exact_with_max_depth, encode};
 use tari_template_lib::types::{
-    address_prefixes,
-    constants::{
-        BURN_RATE_GOVERNANCE_COMPONENT_ADDRESS,
-        PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-        STEALTH_TARI_RESOURCE_ADDRESS,
-    },
     ClaimedOutputTombstoneAddress,
     ComponentAddress,
     ConfidentialOutputAddress,
@@ -50,14 +44,25 @@ use tari_template_lib::types::{
     UtxoAddress,
     ValidatorFeePoolAddress,
     VaultId,
+    address_prefixes,
+    constants::{
+        BURN_RATE_GOVERNANCE_COMPONENT_ADDRESS,
+        PUBLIC_IDENTITY_RESOURCE_ADDRESS,
+        STEALTH_TARI_RESOURCE_ADDRESS,
+    },
 };
 
 use crate::{
+    Epoch,
+    ProtocolVersion,
+    SubstateVersion,
+    ValidatorFeePool,
+    ValidatorFeeWithdrawal,
     component::Component,
     confidential::ClaimedOutputTombstone,
     confidential_output::ConfidentialOutput,
     encoded::Encoded,
-    hashing::{hasher32, substate_value_hasher32, EngineHashDomainLabel},
+    hashing::{EngineHashDomainLabel, hasher32, substate_value_hasher32},
     limits,
     non_fungible::NonFungibleContainer,
     published_template::{PublishedTemplate, PublishedTemplateAddress, PublishedTemplateMetadata},
@@ -66,11 +71,6 @@ use crate::{
     transaction_receipt::TransactionReceipt,
     utxo::Utxo,
     vault::Vault,
-    Epoch,
-    ProtocolVersion,
-    SubstateVersion,
-    ValidatorFeePool,
-    ValidatorFeeWithdrawal,
 };
 
 #[derive(Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize)]
@@ -1263,17 +1263,17 @@ mod tests {
 
     mod encoded_len {
         use tari_template_lib::types::{
-            crypto::{RistrettoPublicKeyBytes, UtxoTag},
-            stealth::SpendAuthorization,
             EncryptedData,
             TemplateMetadataHash,
+            crypto::{RistrettoPublicKeyBytes, UtxoTag},
+            stealth::SpendAuthorization,
         };
 
         use super::*;
         use crate::{
+            UtxoOutput,
             crypto::{ElgamalVerifiableBalanceBytes, OutputBody},
             validator_fee::ValidatorFeePool,
-            UtxoOutput,
         };
 
         fn output_body(memo_len: usize, viewable: bool) -> OutputBody {

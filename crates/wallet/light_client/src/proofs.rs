@@ -213,8 +213,9 @@ pub fn check_result_matches_receipt(
     check_diff_matches_receipt(network, transaction_id, receipt, diff)
 }
 
-/// Checks that `diff` is the diff of the transaction whose verified receipt is `receipt`: it ups exactly the substate
-/// versions and values the receipt commits to, plus the receipt itself, and downs exactly the substates the receipt
+/// Checks that `diff` is the diff of the transaction whose verified receipt is `receipt`: it carries the receipt's
+/// validator fee withdrawals, ups each substate at most once to the exact versions and values the receipt commits to
+/// (plus the receipt itself at version zero), and downs each substate at most once to the exact versions the receipt
 /// lists as downed.
 pub fn check_diff_matches_receipt(
     network: Network,
@@ -234,31 +235,20 @@ pub fn check_diff_matches_receipt(
     }
 
     let receipt_id = SubstateId::TransactionReceipt(transaction_id.into_receipt_address());
+    let receipt_value = SubstateValue::TransactionReceipt(receipt.clone());
     let epoch = receipt.epoch();
 
     let mut upped_ids = HashSet::with_capacity(diff.up_len());
-    for (id, substate) in diff.up_iter() {
+    for (id, _) in diff.up_iter() {
         if !upped_ids.insert(id) {
             return Err(LightClientError::DiffDoesNotMatchReceipt {
                 details: format!("the diff ups {id} more than once"),
             });
         }
-        if *id == receipt_id {
-            let receipt_value = SubstateValue::TransactionReceipt(receipt.clone());
-            if substate.version() != SubstateVersion::ZERO ||
-                hash_substate(network, substate.substate_value(), substate.version(), epoch) !=
-                    hash_substate(network, &receipt_value, SubstateVersion::ZERO, epoch)
-            {
-                return Err(LightClientError::DiffDoesNotMatchReceipt {
-                    details: "the receipt substate in the diff is not the verified receipt".to_string(),
-                });
-            }
-        }
     }
 
     let diff_ups = diff
         .up_iter()
-        .filter(|(id, _)| *id != receipt_id)
         .map(|(id, substate)| {
             let value_hash = hash_substate(network, substate.substate_value(), substate.version(), epoch);
             (id, substate.version(), value_hash)
@@ -269,6 +259,11 @@ pub fn check_diff_matches_receipt(
         .upped
         .iter()
         .map(|up| (&up.substate_id, up.version, up.value_hash))
+        .chain(std::iter::once((
+            &receipt_id,
+            SubstateVersion::ZERO,
+            hash_substate(network, &receipt_value, SubstateVersion::ZERO, epoch),
+        )))
         .collect::<BTreeSet<_>>();
     check_same("up", &diff_ups, &receipt_ups, |(id, version, _)| {
         format!("{id}v{version}")

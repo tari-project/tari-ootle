@@ -243,21 +243,31 @@ fn diff_of(ups: &[(SubstateId, SubstateValue)], downs: &[(SubstateId, u64)]) -> 
     diff
 }
 
-#[test]
-fn a_diff_matches_the_receipt_built_from_it() {
-    let transaction_id = TransactionId::new([9; 32]);
-    let diff = diff_of(&[tombstone(1), tombstone(2)], &[
-        (tombstone(3).0, 4),
-        (tombstone(1).0, 0),
-    ]);
-    let receipt = receipt(DiffSummary::from_diff(NETWORK, &diff, EPOCH));
-
-    // The diff the engine returns also ups the receipt itself.
-    let mut full_diff = diff.clone();
-    full_diff.up(
+fn with_receipt(mut diff: SubstateDiff, transaction_id: TransactionId, receipt: &TransactionReceipt) -> SubstateDiff {
+    diff.up(
         SubstateId::TransactionReceipt(transaction_id.into_receipt_address()),
         Substate::new(SubstateVersion::ZERO, receipt.clone()),
     );
+    diff
+}
+
+#[test]
+fn a_diff_matches_the_receipt_built_from_it() {
+    let transaction_id = TransactionId::new([9; 32]);
+    let mut diff = diff_of(&[tombstone(1), tombstone(2)], &[
+        (tombstone(3).0, 4),
+        (tombstone(1).0, 0),
+    ]);
+    let withdrawal = ValidatorFeeWithdrawal {
+        address: ValidatorFeePoolAddress::from_array([7; 32]),
+        amount: 250,
+    };
+    diff.set_once_fee_withdrawals(vec![withdrawal.clone()]);
+    let mut receipt = receipt(DiffSummary::from_diff(NETWORK, &diff, EPOCH));
+    receipt.fee_withdrawals = Box::new([withdrawal]);
+
+    // The diff the engine returns also ups the receipt itself.
+    let full_diff = with_receipt(diff, transaction_id, &receipt);
     check_diff_matches_receipt(NETWORK, transaction_id, &receipt, &full_diff).unwrap();
 }
 
@@ -265,11 +275,12 @@ fn a_diff_matches_the_receipt_built_from_it() {
 fn a_diff_that_differs_from_the_receipt_is_rejected() {
     let transaction_id = TransactionId::new([9; 32]);
     let receipt_id = SubstateId::TransactionReceipt(transaction_id.into_receipt_address());
-    let base_diff = diff_of(&[tombstone(1), tombstone(2)], &[
+    let raw_diff = diff_of(&[tombstone(1), tombstone(2)], &[
         (tombstone(3).0, 4),
         (tombstone(1).0, 0),
     ]);
-    let verified_receipt = receipt(DiffSummary::from_diff(NETWORK, &base_diff, EPOCH));
+    let verified_receipt = receipt(DiffSummary::from_diff(NETWORK, &raw_diff, EPOCH));
+    let base_diff = with_receipt(raw_diff.clone(), transaction_id, &verified_receipt);
 
     let mut forged_v0_down = base_diff.clone();
     forged_v0_down.down(tombstone(2).0, SubstateVersion::ZERO);
@@ -278,6 +289,7 @@ fn a_diff_that_differs_from_the_receipt_is_rejected() {
     missing_implied_down.up(tombstone(1).0, Substate::new(SubstateVersion::new(1), tombstone(1).1));
     missing_implied_down.up(tombstone(2).0, Substate::new(SubstateVersion::ZERO, tombstone(2).1));
     missing_implied_down.down(tombstone(3).0, SubstateVersion::new(4));
+    let missing_implied_down = with_receipt(missing_implied_down, transaction_id, &verified_receipt);
 
     let mut wrong_implied_down = missing_implied_down.clone();
     wrong_implied_down.down(tombstone(1).0, SubstateVersion::new(2));
@@ -285,13 +297,13 @@ fn a_diff_that_differs_from_the_receipt_is_rejected() {
     let mut forged_receipt_down = base_diff.clone();
     forged_receipt_down.down(receipt_id.clone(), SubstateVersion::ZERO);
 
-    let mut tampered_receipt_up = base_diff.clone();
+    let mut tampered_receipt_up = raw_diff.clone();
     tampered_receipt_up.up(
         receipt_id.clone(),
         Substate::new(SubstateVersion::ZERO, receipt(DiffSummary::default())),
     );
 
-    let mut non_zero_receipt_up = base_diff.clone();
+    let mut non_zero_receipt_up = raw_diff.clone();
     non_zero_receipt_up.up(
         receipt_id,
         Substate::new(SubstateVersion::new(1), verified_receipt.clone()),
@@ -312,33 +324,54 @@ fn a_diff_that_differs_from_the_receipt_is_rejected() {
     let cases = [
         (
             "an extra up",
-            diff_of(&[tombstone(1), tombstone(2), tombstone(4)], &[
-                (tombstone(3).0, 4),
-                (tombstone(1).0, 0),
-            ]),
+            with_receipt(
+                diff_of(&[tombstone(1), tombstone(2), tombstone(4)], &[
+                    (tombstone(3).0, 4),
+                    (tombstone(1).0, 0),
+                ]),
+                transaction_id,
+                &verified_receipt,
+            ),
         ),
         (
             "a missing up",
-            diff_of(&[tombstone(1)], &[(tombstone(3).0, 4), (tombstone(1).0, 0)]),
+            with_receipt(
+                diff_of(&[tombstone(1)], &[(tombstone(3).0, 4), (tombstone(1).0, 0)]),
+                transaction_id,
+                &verified_receipt,
+            ),
         ),
         (
             "another value",
-            diff_of(&[(tombstone(1).0, tombstone(2).1), tombstone(2)], &[
-                (tombstone(3).0, 4),
-                (tombstone(1).0, 0),
-            ]),
+            with_receipt(
+                diff_of(&[(tombstone(1).0, tombstone(2).1), tombstone(2)], &[
+                    (tombstone(3).0, 4),
+                    (tombstone(1).0, 0),
+                ]),
+                transaction_id,
+                &verified_receipt,
+            ),
         ),
         (
             "a missing down",
-            diff_of(&[tombstone(1), tombstone(2)], &[(tombstone(1).0, 0)]),
+            with_receipt(
+                diff_of(&[tombstone(1), tombstone(2)], &[(tombstone(1).0, 0)]),
+                transaction_id,
+                &verified_receipt,
+            ),
         ),
         (
             "another down version",
-            diff_of(&[tombstone(1), tombstone(2)], &[
-                (tombstone(3).0, 5),
-                (tombstone(1).0, 0),
-            ]),
+            with_receipt(
+                diff_of(&[tombstone(1), tombstone(2)], &[
+                    (tombstone(3).0, 5),
+                    (tombstone(1).0, 0),
+                ]),
+                transaction_id,
+                &verified_receipt,
+            ),
         ),
+        ("a missing receipt substate in ups", raw_diff),
         ("a forged down of a newly created substate", forged_v0_down),
         ("a missing implied down for an updated substate", missing_implied_down),
         (
@@ -363,13 +396,14 @@ fn a_diff_that_differs_from_the_receipt_is_rejected() {
 
 /// A committed transaction's diff, the receipt it committed and its result, with an event and fees in both.
 fn committed(transaction_id: TransactionId) -> (SubstateDiff, TransactionReceipt, FinalizeResult) {
-    let diff = diff_of(&[tombstone(1)], &[(tombstone(3).0, 4)]);
-    let mut receipt = receipt(DiffSummary::from_diff(NETWORK, &diff, EPOCH));
+    let raw_diff = diff_of(&[tombstone(1)], &[(tombstone(3).0, 4)]);
+    let mut receipt = receipt(DiffSummary::from_diff(NETWORK, &raw_diff, EPOCH));
     receipt.events = Box::new([event("std.vault.deposit")]);
     receipt.fee_receipt = FeeReceipt::builder()
         .with_total_fee_payment(800)
         .with_total_fees_paid(500)
         .build();
+    let diff = with_receipt(raw_diff, transaction_id, &receipt);
     let result = FinalizeResult::new(
         Hash32::from_array(transaction_id.into_array()),
         vec![],

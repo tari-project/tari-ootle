@@ -343,8 +343,16 @@ where
                     }
                 }
 
-                Some(Ok(node_id)) = self.tasks.next() => {
-                    self.on_session_complete(&node_id);
+                Some(result) = self.tasks.next(), if !self.tasks.is_empty() => {
+                    match result {
+                        Ok(node_id) => self.on_session_complete(&node_id),
+                        Err(err) => {
+                            error!(
+                                target: LOG_TARGET,
+                                "Session task panicked: {}", err
+                            );
+                        },
+                    }
                 },
 
                 Some(req) = self.request_rx.recv() => {
@@ -730,7 +738,7 @@ where
             // Let the client know that they have disobeyed the spec
             let status = RpcStatus::bad_request(format!(
                 "Invalid deadline ({:.0?}). The deadline MUST be greater than {:.0?}.",
-                self.peer_id, deadline,
+                deadline, self.config.minimum_client_deadline,
             ));
             let bad_request = proto::RpcResponse {
                 request_id,
@@ -1303,6 +1311,15 @@ mod keepalive_tests {
             assert_eq!(response.status, RpcStatus::ok().as_code());
             assert_eq!(response.payload, b"pong");
         }
+    }
+
+    #[tokio::test]
+    async fn a_deadline_below_the_minimum_is_rejected_with_the_configured_minimum_in_details() {
+        let config = RpcServerBuilder::default().with_minimum_client_deadline(Duration::from_secs(5));
+        let response = serve_one_request_with_deadline(config, 2).await;
+        assert_eq!(response.status, RpcStatus::bad_request("").as_code());
+        let details = std::str::from_utf8(&response.payload).unwrap();
+        assert_eq!(details, "Invalid deadline (2s). The deadline MUST be greater than 5s.");
     }
 
     #[test]

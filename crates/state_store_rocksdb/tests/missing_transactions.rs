@@ -72,6 +72,10 @@ fn missing_transactions_operations(db: impl StateStore) {
     let unparked = tx.parked_block_remove_missing_transaction(atom1.id()).unwrap();
     assert!(unparked.is_empty());
 
+    // Duplicate deliveries keep the missing set tied to the first parked record.
+    tx.parked_block_insert(&block1, &[], ProposalOrigin::Live, [&atom1.id, &atom2.id])
+        .unwrap();
+
     // The last missing transaction unparks the block
     let mut unparked = tx.parked_block_remove_missing_transaction(atom2.id()).unwrap();
     assert_eq!(unparked.len(), 1);

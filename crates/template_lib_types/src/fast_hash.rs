@@ -25,10 +25,8 @@ use xxhash_rust::xxh3::Xxh3Builder;
 pub struct PassthroughHasher(u64);
 
 impl Hasher for PassthroughHasher {
-    /// XOR-folds `bytes` into a `u64` in 8-byte chunks.
-    ///
-    /// For a 32-byte key this performs 4 XOR operations, giving good avalanche
-    /// across the full key without any multiplication or branching.
+    /// Rotates the running state and XOR-folds `bytes` into it in 8-byte chunks, so every field of
+    /// a multi-write key contributes to the hash.
     #[inline]
     fn write(&mut self, bytes: &[u8]) {
         let mut h = self.0.rotate_left(13);
@@ -139,9 +137,9 @@ mod tests {
         use crate::{NonFungibleAddress, NonFungibleId, ObjectKey, ResourceAddress};
 
         let hasher_builder = BuildHasherDefault::<PassthroughHasher>::default();
-        let res_a = ResourceAddress::new(ObjectKey::from_array([0x11; 28]));
-        let res_b = ResourceAddress::new(ObjectKey::from_array([0x22; 28]));
-        let badge_res = ResourceAddress::new(ObjectKey::from_array([0x33; 28]));
+        let res_a = ResourceAddress::new(ObjectKey::from_array([0x11; ObjectKey::LENGTH]));
+        let res_b = ResourceAddress::new(ObjectKey::from_array([0x22; ObjectKey::LENGTH]));
+        let badge_res = ResourceAddress::new(ObjectKey::from_array([0x33; ObjectKey::LENGTH]));
 
         let str_badge_1 = NonFungibleAddress::new(badge_res, NonFungibleId::from_string("spender_alpha"));
         let str_badge_2 = NonFungibleAddress::new(badge_res, NonFungibleId::from_string("spender_beta"));

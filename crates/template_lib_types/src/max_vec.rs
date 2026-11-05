@@ -137,9 +137,9 @@ where T: minicbor::Decode<'b, C>
                         N, n
                     )));
                 }
-                let len = n as usize;
-                let mut elems = Vec::with_capacity(len.min(64));
-                for _ in 0..len {
+                let count = n as usize;
+                let mut elems = Vec::with_capacity(count.min(64));
+                for _ in 0..count {
                     elems.push(T::decode(d, ctx)?);
                 }
                 Ok(MaxVec {

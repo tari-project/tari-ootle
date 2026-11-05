@@ -19,7 +19,7 @@ impl<const N: usize> borsh::BorshDeserialize for MaxString<N> {
         let len = s.len();
         Self::new_checked(s).ok_or_else(|| {
             borsh::io::Error::new(
-                borsh::io::ErrorKind::InvalidInput,
+                borsh::io::ErrorKind::InvalidData,
                 format!("string length exceeds maximum of {}: got {}", N, len),
             )
         })

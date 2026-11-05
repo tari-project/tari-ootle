@@ -30,8 +30,8 @@ pub enum ProtocolVersion {
     V1 = 1,
 }
 
-/// The epoch Esmeralda activates V1 at: L1 height 1,036,080, about 2026-11-06 12:00 UTC. Every Esmeralda validator
-/// and indexer must run a binary carrying this schedule before then.
+/// The epoch Esmeralda activates V1 at: L1 height 1,036,080, about 2026-11-06 12:00 UTC. It is consensus-bound once
+/// Esmeralda reaches it and must never move.
 const ESMERALDA_V1_ACTIVATION: Epoch = Epoch(12951);
 
 /// The epoch LocalNet activates V1 at. It is low but non-zero so that local networks and tests run under V0 first and

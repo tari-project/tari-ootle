@@ -13,8 +13,10 @@ activates.
 ### ⚠️ Upgrade notes
 
 - **Validators and indexers run 0.50.0 before Esmeralda epoch 12951** (L1 height 1,036,080, about
-  2026-11-06 12:00 UTC), when protocol V1 activates. No data directory is deleted, and walletd
-  migrates its database on first start. (#3327)
+  2026-11-06 12:00 UTC), when protocol V1 activates. A node upgraded in time keeps its data
+  directory, and walletd migrates its database on first start. A node still on 0.49 at that epoch
+  forks off, and 0.50.0 refuses to start it on that data: delete its data directory and resync.
+  (#3327)
 - **The whole fleet upgrades together**: metering, call resolution and state validation change
   with no activation epoch. (#3213, #3261, #3262, #3267, #3268, #3273, #3282, #3328)
 - **Template authors build against `tari_template_lib` 0.38.** Template definitions move to V2,

@@ -10,6 +10,7 @@ use tari_consensus_types::{
     Decision,
     HighPc,
     LastSentVote,
+    LastVoted,
     PcId,
     ProposalCertificate,
     ProposalVote,
@@ -84,6 +85,16 @@ pub struct OnReceiveLocalProposalHandler<TConsensusSpec: ConsensusSpec> {
     /// until the local oracle observes the new epoch.
     pending_end_of_epoch: Option<PendingEndOfEpoch>,
     reported_divergence: ReportedDivergence,
+    unvoted_catch_up_block: Option<UnvotedCatchUpBlock>,
+}
+
+/// The most recent block processed from a catch-up delivery that this node would have voted on had it arrived as a
+/// proposal. Whether a block comes as a catch-up response is the sending peer's choice, so a proposal for the block
+/// that arrives afterwards still gets the vote.
+#[derive(Debug, Clone, Copy)]
+struct UnvotedCatchUpBlock {
+    block_id: BlockId,
+    decision: QuorumDecision,
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +166,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             change_set: None,
             pending_end_of_epoch: None,
             reported_divergence: ReportedDivergence::default(),
+            unvoted_catch_up_block: None,
         }
     }
 
@@ -210,6 +222,10 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             self.pacemaker
                 .enter_view(existing.epoch(), view_height, justify_height)
                 .await?;
+            if !origin.is_catch_up() {
+                self.vote_on_proposal_processed_through_catch_up(epoch_state, &existing)
+                    .await?;
+            }
             return Ok(None);
         }
 
@@ -303,6 +319,46 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 self.hooks.on_block_validation_failed(&err);
             }
         })
+    }
+
+    /// Casts the vote withheld from `block` when it was processed from a catch-up delivery, now that it has arrived
+    /// as a proposal. As for any proposal, the vote is only cast above the height this node last voted at.
+    async fn vote_on_proposal_processed_through_catch_up(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        block: &Block,
+    ) -> Result<(), HotStuffError> {
+        let Some(unvoted) = self
+            .unvoted_catch_up_block
+            .take_if(|unvoted| unvoted.block_id == *block.id())
+        else {
+            return Ok(());
+        };
+        if block.epoch() != epoch_state.epoch() {
+            return Ok(());
+        }
+        let last_voted = self
+            .store
+            .with_read_tx(|tx| LastVoted::get(tx, block.epoch()).optional())?;
+        if let Some(last_voted) = last_voted &&
+            block.height() <= last_voted.height()
+        {
+            debug!(
+                target: LOG_TARGET,
+                "Not voting on proposal {}: already voted at height {}",
+                block,
+                last_voted.height(),
+            );
+            return Ok(());
+        }
+
+        info!(
+            target: LOG_TARGET,
+            "🗳️ Voting on proposal {}, first processed from a catch-up delivery",
+            block,
+        );
+        self.vote_on_block(epoch_state.local_committee(), block, unvoted.decision)
+            .await
     }
 
     /// Foreign proposals embedded in a local proposal are relayed by the local leader rather than fetched from the
@@ -520,9 +576,13 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             if origin.is_catch_up() {
                 debug!(
                     target: LOG_TARGET,
-                    "🌐 Not voting on {}: it arrived through catch-up, so the committee has already certified it",
+                    "🌐 Not voting on {}: it arrived through catch-up. A proposal for it later gets the vote.",
                     valid_block.block(),
                 );
+                self.unvoted_catch_up_block = Some(UnvotedCatchUpBlock {
+                    block_id: *valid_block.id(),
+                    decision,
+                });
             } else {
                 self.vote_on_block(local_committee, valid_block.block(), decision)
                     .await?;

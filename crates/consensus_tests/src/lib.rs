@@ -5,6 +5,8 @@ mod catch_up_no_vote;
 #[cfg(test)]
 mod catch_up_on_proposal_ahead;
 #[cfg(test)]
+mod catch_up_relay;
+#[cfg(test)]
 mod catch_up_rewind;
 #[cfg(test)]
 mod consensus;

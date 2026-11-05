@@ -61,41 +61,24 @@ impl RealTimeEpochTicker {
 
 impl EpochTicker for RealTimeEpochTicker {
     fn poll_tick(&mut self, cx: &mut Context) -> Poll<Option<EpochTickerData>> {
-        let target_epoch = self.calc_current_epoch().max(self.initial_epoch);
-
-        // Emit quickly to catch up to the target epoch
-        if target_epoch >= self.epoch {
-            let epoch = self.increment_epoch();
-            let epoch_hash = calc_static_epoch_hash(epoch);
-            return Poll::Ready(Some(EpochTickerData {
-                epoch,
-                epoch_hash,
-                // Catching up
-                done_for_now: target_epoch == epoch,
-            }));
-        }
-
-        if let Some(interval_mut) = self.interval.as_mut() {
-            loop {
-                // Every tick, check if we need to emit a new epoch
-                ready!(interval_mut.poll_tick(cx));
-
-                let target_epoch = self.calc_current_epoch().max(self.initial_epoch);
-                if target_epoch >= self.epoch {
-                    let epoch = self.increment_epoch();
-                    let epoch_hash = calc_static_epoch_hash(epoch);
-                    return Poll::Ready(Some(EpochTickerData {
-                        epoch,
-                        epoch_hash,
-                        // Catching up if target_epoch > self.epoch
-                        done_for_now: target_epoch == epoch,
-                    }));
-                }
+        loop {
+            let target_epoch = self.calc_current_epoch().max(self.initial_epoch);
+            if target_epoch >= self.epoch {
+                let epoch = self.increment_epoch();
+                let epoch_hash = calc_static_epoch_hash(epoch);
+                return Poll::Ready(Some(EpochTickerData {
+                    epoch,
+                    epoch_hash,
+                    // Catching up
+                    done_for_now: target_epoch == epoch,
+                }));
             }
+
+            let Some(interval_mut) = self.interval.as_mut() else {
+                return Poll::Pending;
+            };
+            ready!(interval_mut.poll_tick(cx));
         }
-        // Ticks have been disabled, never return any new epochs
-        assert!(self.interval.is_none(), "If interval is Some, we should not reach here");
-        Poll::Pending
     }
 }
 fn calc_static_epoch_hash(epoch: Epoch) -> FixedHash {

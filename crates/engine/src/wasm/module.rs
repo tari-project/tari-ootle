@@ -666,10 +666,7 @@ mod tests {
             long_other.clone(),
             Type::Vec(Box::new(long_other.clone())),
             Type::Option(Box::new(long_other.clone())),
-            Type::Result {
-                ok: Box::new(Type::Unit),
-                err: Box::new(long_other.clone()),
-            },
+            Type::Option(Box::new(Type::Tuple(vec![long_other.clone()]))),
             Type::Tuple(vec![Type::U8, long_other]),
         ] {
             let def = template_def_with_func(FunctionKind::Function, vec![], bad_type.clone());

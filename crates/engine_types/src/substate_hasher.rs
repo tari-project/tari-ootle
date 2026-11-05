@@ -272,14 +272,14 @@ impl<'a> From<&'a SubstateValue> for SubstateValueCborHashMessage<'a> {
     }
 }
 
-/// Borsh-serializes the CBOR encoding of `T` as a length-prefixed byte string.
+/// Writes the CBOR encoding of `T` straight into the borsh writer, with no length prefix. A CBOR data item is
+/// self-delimiting, so the preimage stays unambiguous whatever follows it.
 #[derive(Debug, Clone, Copy)]
 pub struct Cbor<T>(T);
 
 impl<T: minicbor::Encode<()>> BorshSerialize for Cbor<T> {
     fn serialize<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-        let bytes = tari_bor::encode(&self.0).map_err(io::Error::other)?;
-        BorshSerialize::serialize(&bytes, writer)
+        tari_bor::encode_into_writer(&self.0, writer).map_err(io::Error::other)
     }
 }
 
@@ -288,17 +288,16 @@ impl<T: minicbor::Encode<()>> BorshSerialize for Cbor<T> {
 pub struct CborHash<T>(T);
 
 impl<T: minicbor::Encode<()>> CborHash<T> {
-    fn hash(&self) -> io::Result<Hash32> {
-        let bytes = tari_bor::encode(&self.0).map_err(io::Error::other)?;
-        Ok(hasher32(EngineHashDomainLabel::SubstateValuePart)
-            .chain(&bytes)
-            .result())
+    fn hash(&self) -> Hash32 {
+        hasher32(EngineHashDomainLabel::SubstateValuePart)
+            .chain(&Cbor(&self.0))
+            .result()
     }
 }
 
 impl<T: minicbor::Encode<()>> BorshSerialize for CborHash<T> {
     fn serialize<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-        BorshSerialize::serialize(&self.hash()?, writer)
+        BorshSerialize::serialize(&self.hash(), writer)
     }
 }
 
@@ -363,10 +362,7 @@ impl<C, T: minicbor::Encode<()> + ?Sized> minicbor::Encode<C> for CborHashField<
         e: &mut minicbor::Encoder<W>,
         _ctx: &mut C,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        let hash = CborHash(self.0)
-            .hash()
-            .map_err(|err| minicbor::encode::Error::message(err.to_string()))?;
-        e.encode(hash)?;
+        e.encode(CborHash(self.0).hash())?;
         Ok(())
     }
 }
@@ -621,7 +617,7 @@ mod tests {
     fn version_1_receipt_hash_is_pinned() {
         assert_eq!(
             hex(hash_at(ProtocolVersion::V1, &receipt(123))),
-            "bf90e85dc11a478f88f0bfd49371222c39b41f74d64bdd394cf297461049669a"
+            "8fd17d048c64cc9920ad3b5a87c1fa2b591744bf865062288ff94b5cb2c7d996"
         );
         assert_eq!(
             hash_substate(Network::MainNet, &receipt(123), SubstateVersion::ZERO, Epoch(3)),
@@ -633,7 +629,7 @@ mod tests {
     fn version_1_resource_hash_is_pinned() {
         assert_eq!(
             hex(hash_at(ProtocolVersion::V1, &resource(UpdateRule::Locked))),
-            "ce45f48e2955eaa58f0c59a85e0cd14c278c203ff7dbf1a0db4e484e1636f4c7"
+            "70e3fb6f623fc393d7cabdb4bacf0b0e8ad200c69ebc517a74fd768ed83a2437"
         );
     }
 
@@ -644,7 +640,7 @@ mod tests {
                 ProtocolVersion::V1,
                 &SubstateValue::Template(template(b"wasm"))
             )),
-            "6977ceed9250317fa84901b0ec9b8a4424de6b3760fcc62b2e621b9648693d54"
+            "4dfb68e6282b4bb095a5f9844c0d96ef52d9357bcae81fea648c63675f99f9df"
         );
     }
 
@@ -655,7 +651,7 @@ mod tests {
                 ProtocolVersion::V1,
                 &component(UpdateRule::Locked, tari_bor::Value::Integer(1.into()))
             )),
-            "4dd94a716a3beff436fdae64e1cb5d41707c0e4391c67f7d00182a2b8bef515e"
+            "dcdc056ddfb314380df502d731c97f6d77c15fd0a1d3fe885c5e88fea529fdff"
         );
     }
 
@@ -827,22 +823,22 @@ mod tests {
                     ResourceAddress::new(ObjectKey::from_array([1u8; ObjectKey::LENGTH])),
                     BTreeSet::new(),
                 ))),
-                "6c971b3745518e4f168b1713d13b543a518fea0dba826fb4986890ffbed3aa27",
+                "ea5ca8bc145ad0e5b3707f5ae44cd6c1afe7c317e76daa3a6ea49f312046f7ac",
             ),
             (
                 SubstateValue::NonFungible(NonFungibleContainer::new(
                     tari_bor::Value::Integer(1.into()),
                     tari_bor::Value::Null,
                 )),
-                "73d230102f65ad78d3c9ef94cda1ce74f1dfe1ff1d3f71e3ad4993daafc226ca",
+                "05021cb09e455e42c15db9d227b4ae612d4a31d7fd78e1340d69b3cdbab2037c",
             ),
             (
                 SubstateValue::ClaimedOutputTombstone(ClaimedOutputTombstone { value: 1 }),
-                "3f936da5906c8894dde118ba72ce1ce6fac41192a4f03f491aa6962e8bfcdd3d",
+                "5350f738ab75ce8b44a30862937166e9f44aa221a4e2f72a0473cec5a5d36a70",
             ),
             (
                 SubstateValue::ValidatorFeePool(ValidatorFeePool::new(RistrettoPublicKeyBytes::default(), 5)),
-                "abf9f17fec650232238efef74b8a6c2416b62f1cd89999e32c658d9212d26701",
+                "2ee3e66ca5f9236d7ec2ac6682fda5d85b067cbbe469f7a013495b773102bfb4",
             ),
             (
                 SubstateValue::Utxo(Utxo::new(UtxoOutput {
@@ -850,11 +846,11 @@ mod tests {
                     auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::from_bytes(&[3u8; 32]).unwrap()),
                     tag: UtxoTag::new(4),
                 })),
-                "fbfd477a67bf6983ee391e98b7b15584b594090628ef34ebd79d18ebefc1aec0",
+                "529bef0cc6cadea61d2a4d4660e066deb80bcb3e7bee54508a103fc643eb24c6",
             ),
             (
                 SubstateValue::ConfidentialOutput(ConfidentialOutput::new(output)),
-                "21334cfbe386757cbd370e05b1431831e204dba322017a4fcc75e15aef245a06",
+                "697e794bab61ab553024ac6e2c7ad96c3cb45c02894fd5b6bcc987c13494ff2a",
             ),
         ];
         for (value, expected) in &values {

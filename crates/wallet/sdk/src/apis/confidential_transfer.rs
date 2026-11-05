@@ -208,7 +208,7 @@ where TSpec: WalletSdkSpec
 
                 let revealed_to_spend = spend_amount.saturating_sub(amount_locked);
 
-                if src_vault.revealed_balance < revealed_to_spend {
+                if available_revealed_funds < revealed_to_spend {
                     return Err(ConfidentialTransferApiError::InsufficientFunds);
                 }
 
@@ -402,7 +402,7 @@ where TSpec: WalletSdkSpec
 
             let change_value = statement.amount;
 
-            if change_value > 0 {
+            if change_value > 0 && !params.is_dry_run {
                 self.confidential_outputs_api.add_output(ConfidentialOutputModel {
                     account_address: *from_account.component_address(),
                     vault_id: src_vault.id,
@@ -476,10 +476,13 @@ where TSpec: WalletSdkSpec
             .with_inputs(inputs)
             .build_and_seal(&account_key.secret);
 
-        let tx_id = transaction.calculate_id();
-        self.transaction_api.locks_set_transaction_id(lock.id(), tx_id)?;
-
-        let lock_id = lock.keep_locked();
+        let lock_id = if params.is_dry_run {
+            lock.id()
+        } else {
+            let tx_id = transaction.calculate_id();
+            self.transaction_api.locks_set_transaction_id(lock.id(), tx_id)?;
+            lock.keep_locked()
+        };
 
         Ok(TransferOutput {
             transaction,
@@ -530,6 +533,8 @@ where TSpec: WalletSdkSpec
 
 pub struct TransferOutput {
     pub transaction: Transaction,
+    /// Lock ID holding the inputs and change output for this transfer. Meaningful only when `params.is_dry_run` is
+    /// `false`; on a dry run, the lock is released before `transfer` returns.
     pub transaction_proof_id: WalletLockId,
 }
 

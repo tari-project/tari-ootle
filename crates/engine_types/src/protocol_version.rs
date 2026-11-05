@@ -30,9 +30,9 @@ pub enum ProtocolVersion {
     V1 = 1,
 }
 
-/// Stands in for the V1 activation epoch on a live network until one is chosen. No epoch reaches it, so the network
-/// stays on V0. It must be replaced by a real epoch, far enough ahead to roll every node, before V1 ships there.
-const V1_ACTIVATION_UNSCHEDULED: Epoch = Epoch(u64::MAX);
+/// The epoch Esmeralda activates V1 at: L1 height 1,036,080, about 2026-11-06 12:00 UTC. Every Esmeralda validator
+/// and indexer must run a binary carrying this schedule before then.
+const ESMERALDA_V1_ACTIVATION: Epoch = Epoch(12951);
 
 /// The epoch LocalNet activates V1 at. It is low but non-zero so that local networks and tests run under V0 first and
 /// cross the activation.
@@ -60,7 +60,7 @@ impl ProtocolVersion {
             Network::StageNet => &[(Epoch(0), Self::V1)],
             Network::NextNet => &[(Epoch(0), Self::V1)],
             Network::Igor => &[(Epoch(0), Self::V1)],
-            Network::Esmeralda => &[(Epoch(0), Self::V0), (V1_ACTIVATION_UNSCHEDULED, Self::V1)],
+            Network::Esmeralda => &[(Epoch(0), Self::V0), (ESMERALDA_V1_ACTIVATION, Self::V1)],
             Network::LocalNet => &[(Epoch(0), Self::V0), (LOCALNET_V1_ACTIVATION, Self::V1)],
         }
     }
@@ -311,14 +311,12 @@ mod tests {
     }
 
     #[test]
-    fn an_unscheduled_activation_is_never_reached() {
+    fn esmeralda_crosses_into_v1() {
+        let before = Epoch(ESMERALDA_V1_ACTIVATION.as_u64() - 1);
+        assert_eq!(ProtocolVersion::at(Network::Esmeralda, before), ProtocolVersion::V0);
         assert_eq!(
-            ProtocolVersion::newest_scheduled_activation(Network::Esmeralda),
-            Some((V1_ACTIVATION_UNSCHEDULED, ProtocolVersion::V1))
-        );
-        assert_eq!(
-            ProtocolVersion::at(Network::Esmeralda, Epoch(u64::MAX - 1)),
-            ProtocolVersion::V0
+            ProtocolVersion::at(Network::Esmeralda, ESMERALDA_V1_ACTIVATION),
+            ProtocolVersion::V1
         );
     }
 

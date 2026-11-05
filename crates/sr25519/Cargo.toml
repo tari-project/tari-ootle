@@ -1,6 +1,6 @@
 [package]
 name = "tari_ootle_sr25519"
-version = "0.1.0"
+version = "0.2.0"
 description = "sr25519 (schnorrkel-compatible) signing and verification over tari_crypto Ristretto keys"
 edition.workspace = true
 authors.workspace = true

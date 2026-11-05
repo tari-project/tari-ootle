@@ -273,15 +273,17 @@ impl NonFungibleResourceBuilder {
         address
     }
 
+    /// Builds the resource with the given initial non-fungible token IDs and returns a bucket holding them.
+    ///
+    /// # Panics
+    /// Panics if `initial_supply` contains duplicate `NonFungibleId` entries.
     pub fn initial_supply<I: IntoIterator<Item = NonFungibleId>>(self, initial_supply: I) -> Bucket {
         let mut tokens = BTreeMap::new();
         for id in initial_supply {
-            if tokens
-                .insert(id.clone(), (tari_bor::Value::Null, tari_bor::Value::Null))
-                .is_some()
-            {
-                panic!("Non-fungible token with ID {id} already exists in the resource");
+            if tokens.contains_key(&id) {
+                panic!("initial_supply contains duplicate non-fungible ID {id}");
             }
+            tokens.insert(id, (tari_bor::Value::Null, tari_bor::Value::Null));
         }
         let mint_arg = MintArg::NonFungible { tokens };
 
@@ -289,6 +291,11 @@ impl NonFungibleResourceBuilder {
         bucket.expect("[initial_supply] Bucket not returned from engine")
     }
 
+    /// Builds the resource with the given initial non-fungible tokens and their immutable/mutable data, returning a
+    /// bucket holding them.
+    ///
+    /// # Panics
+    /// Panics if `initial_supply` contains duplicate `NonFungibleId` entries or if any token data fails to encode.
     pub fn initial_supply_with_data<'a, I, T, U>(self, initial_supply: I) -> Bucket
     where
         I: IntoIterator<Item = (NonFungibleId, (&'a T, &'a U))>,
@@ -297,13 +304,14 @@ impl NonFungibleResourceBuilder {
     {
         let mut tokens = BTreeMap::new();
         for (id, (data, mutable)) in initial_supply {
+            if tokens.contains_key(&id) {
+                panic!("initial_supply contains duplicate non-fungible ID {id}");
+            }
             let value = (
                 to_value(data).expect("failed to encode immutable NFT data"),
                 to_value(mutable).expect("failed to encode mutable NFT data"),
             );
-            if tokens.insert(id.clone(), value).is_some() {
-                panic!("Non-fungible token with ID {id} already exists in the resource");
-            }
+            tokens.insert(id, value);
         }
         let mint_arg = MintArg::NonFungible { tokens };
 
@@ -337,14 +345,14 @@ mod tests {
     use crate::resource::builder::ResourceBuilder;
 
     #[test]
-    #[should_panic(expected = "Non-fungible token with ID u64_1 already exists in the resource")]
+    #[should_panic(expected = "initial_supply contains duplicate non-fungible ID u64_1")]
     fn initial_supply_rejects_duplicate_ids() {
         let id = NonFungibleId::from_u64(1);
         ResourceBuilder::non_fungible().initial_supply([id.clone(), id]);
     }
 
     #[test]
-    #[should_panic(expected = "Non-fungible token with ID u64_1 already exists in the resource")]
+    #[should_panic(expected = "initial_supply contains duplicate non-fungible ID u64_1")]
     fn initial_supply_with_data_rejects_duplicate_ids() {
         let id = NonFungibleId::from_u64(1);
         let tokens = [(id.clone(), (&1u32, &2u32)), (id, (&3u32, &4u32))];

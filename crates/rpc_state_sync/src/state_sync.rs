@@ -1029,12 +1029,11 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
             // through here and resumes the sync.
             let maybe_checkpoint = self
                 .state_store
-                .with_read_tx(|tx| EpochCheckpoint::get_last_checkpoint(tx))
+                .with_read_tx(EpochCheckpoint::get_last_checkpoint)
                 .optional()?;
-            if let Some(checkpoint) = maybe_checkpoint &&
-                checkpoint_admits_leafless_join(checkpoint.epoch(), oracle_epoch) &&
-                self.local_state_matches_checkpoint(checkpoint.epoch(), checkpoint.epoch() + Epoch(1))
-                    .await?
+            if let Some(cp) = maybe_checkpoint &&
+                checkpoint_admits_leafless_join(cp.epoch(), oracle_epoch) &&
+                self.local_state_matches_checkpoint(cp.epoch(), cp.epoch() + Epoch(1)).await?
             {
                 return Ok(SyncStatus::UpToDate);
             }
@@ -1783,8 +1782,7 @@ mod tests {
         assert!(matches_after);
     }
 
-    // Defined inline because `tari_consensus_tests` is a higher-level test crate that is not in
-    // `tari_rpc_state_sync`'s dev-dependencies.
+    // Stub EpochManagerReader modelling a validator registered in `shard_group` from `registered_from` onward.
     struct RegisteredFromEpoch {
         registered_from: Epoch,
         shard_group: ShardGroup,

@@ -493,7 +493,7 @@ mod tests {
     #[test]
     fn a_checkpoint_with_a_shard_outside_its_shard_group_is_rejected() {
         let committed = metadata(ValidatorSetHash::from_array([9; 32]));
-        let valid = checkpoint(&committed, committed);
+        let valid = checkpoint(&committed, committed.clone());
         let out_of_group_shard = Shard::from(99u32);
         let forged = EpochCheckpoint::new(
             valid.proof().clone(),

@@ -254,7 +254,7 @@ impl CommandOrHash {
             return Self::Command(command.clone());
         }
         match protocol_version {
-            ProtocolVersion::V0 => match command {
+            ProtocolVersion::V0 | ProtocolVersion::V1 => match command {
                 Command::EndEpoch(_) => Self::Command(command.clone()),
                 Command::LocalOnly(_) |
                 Command::LocalPrepare(_) |
@@ -273,7 +273,7 @@ impl CommandOrHash {
     pub fn merkle_leaf(&self, protocol_version: ProtocolVersion) -> FixedHash {
         match (self, protocol_version) {
             (Self::Command(cmd), _) => cmd.merkle_leaf(protocol_version),
-            (Self::Pruned(pruned), ProtocolVersion::V0) => {
+            (Self::Pruned(pruned), ProtocolVersion::V0 | ProtocolVersion::V1) => {
                 command_leaf(&pruned.hash, &pruned.full_command_shard_groups)
             },
         }

@@ -395,7 +395,9 @@ impl<'a> WriteTransaction<'a> {
             let revealed_before =
                 Amount::from_str(&revealed_before).map_err(|e| WalletStorageError::DataInconsistent {
                     operation: OPERATION,
-                    details: format!("Corrupt db: invalid revealed balance '{revealed_before}' for lock {lock_id}: {e}"),
+                    details: format!(
+                        "Corrupt db: invalid revealed balance '{revealed_before}' for lock {lock_id}: {e}"
+                    ),
                 })?;
             let amount = Amount::from_str(&amount).map_err(|e| WalletStorageError::DataInconsistent {
                 operation: OPERATION,
@@ -1673,15 +1675,16 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                          {vault_id}: {e}"
                     ),
                 })?;
-            let new_balance = revealed_amount
-                .checked_sub(amount)
-                .ok_or_else(|| WalletStorageError::OperationError {
-                    operation: OPERATION,
-                    details: format!(
-                        "Corrupt db: revealed balance {revealed_balance} is less than locked amount {amount} for \
-                         vault_id {vault_id}"
-                    ),
-                })?;
+            let new_balance =
+                revealed_amount
+                    .checked_sub(amount)
+                    .ok_or_else(|| WalletStorageError::OperationError {
+                        operation: OPERATION,
+                        details: format!(
+                            "Corrupt db: revealed balance {revealed_balance} is less than locked amount {amount} for \
+                             vault_id {vault_id}"
+                        ),
+                    })?;
 
             let num_rows = diesel::update(vaults::table)
                 .set(vaults::revealed_balance.eq(new_balance.to_string()))

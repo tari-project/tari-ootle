@@ -244,8 +244,8 @@ mod account_template {
                 // Else no-op
             } else {
                 let current = self.approval(spender_badge.clone(), resource);
-                assert!(
-                    current == expected_current,
+                assert_eq!(
+                    current, expected_current,
                     "Approval for badge {} on resource {} is {}, not the expected {}; read the current approval and \
                      retry",
                     spender_badge,

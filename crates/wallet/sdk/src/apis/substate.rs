@@ -114,6 +114,30 @@ where
         Ok(read)
     }
 
+    /// Fetches the latest version of each of `ids` that exists, enforcing cryptographic proof verification
+    /// regardless of the general [`IndexerTrust`] setting. This MUST be used at sign-act points where substate values
+    /// or versions are used to construct instructions to be signed.
+    pub async fn get_substates_for_signing(
+        &self,
+        ids: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, Substate>, SubstateApiError> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let FetchedSubstates { substates, proofs } = self
+            .network_interface
+            .get_substates(ids, true)
+            .await
+            .map_err(|e| SubstateApiError::NetworkInterfaceError(e.into()))?;
+        let mut read = HashMap::with_capacity(substates.len());
+        for (id, substate) in substates {
+            let read_substate = self.read_served(&id, &substate, true, proofs.get(&id)).await?;
+            read.insert(id, read_substate.substate);
+        }
+        Ok(read)
+    }
+
     /// Fetches the latest version of each of `ids` in one fetch, and returns each one's result on its own: a
     /// substate the indexer does not serve is [`SubstateApiError::SubstateDoesNotExist`], and under
     /// [`IndexerTrust::Verify`] each served substate must be proven as [`Self::fetch_substate_from_network`] describes.
@@ -417,6 +441,65 @@ where
         debug!(
             target: LOG_TARGET,
             "Found substate {} at version {}", address, resp.version
+        );
+        Ok(ValidatorScanResult {
+            id: VersionedSubstateId::new(address.clone(), resp.version),
+            substate,
+        })
+    }
+
+    /// Fetches `address` at `version_hint` or later, enforcing cryptographic proof verification regardless of
+    /// the general [`IndexerTrust`] setting. This MUST be used at sign-act points where substate values
+    /// or versions are used to construct instructions to be signed.
+    pub async fn fetch_substate_for_signing(
+        &self,
+        address: &SubstateId,
+        version_hint: Option<SubstateVersion>,
+    ) -> Result<ValidatorScanResult, SubstateApiError> {
+        debug!(
+            target: LOG_TARGET,
+            "Fetching for substate {} at version {} for signing (proof verification enforced)",
+            address,
+            version_hint.display()
+        );
+
+        let resp = self
+            .network_interface
+            .query_substate(address, version_hint, false, true)
+            .await
+            .optional()
+            .map_err(|e| SubstateApiError::NetworkInterfaceError(e.into()))?
+            .ok_or_else(|| SubstateApiError::SubstateDoesNotExist {
+                address: address.clone(),
+            })?;
+        if let Some(requested) = version_hint &&
+            resp.version < requested
+        {
+            return Err(SubstateApiError::SubstateOlderThanRequested {
+                substate_id: address.clone(),
+                requested,
+                served: resp.version,
+            });
+        }
+        let SubstateState::Up { substate } = resp.state else {
+            return Err(SubstateApiError::SubstateDoesNotExist {
+                address: address.clone(),
+            });
+        };
+        let substate = self
+            .read_served(
+                address,
+                &EncodedSubstate::new(resp.version, substate),
+                true,
+                resp.proof.as_ref(),
+            )
+            .await?
+            .substate
+            .into_substate_value();
+
+        debug!(
+            target: LOG_TARGET,
+            "Found verified substate {} at version {} for signing", address, resp.version
         );
         Ok(ValidatorScanResult {
             id: VersionedSubstateId::new(address.clone(), resp.version),

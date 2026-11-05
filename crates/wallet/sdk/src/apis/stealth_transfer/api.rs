@@ -965,7 +965,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 fee_inputs_to_spend
                     .inputs
                     .iter()
-                    // We may lock the fee change UTXO for spending, however since this does not exist yet, we do not include it as a tx input
+                    // We may lock the fee change UTXO for spending, however since this does not exist yet, we do not
+                    // include it as a tx input
                     .filter(|i| i.is_on_chain)
                     .map(|i| &i.commitment)
                     .map(|commitment| UtxoAddress::new(fee_resource, (*commitment).into()))
@@ -1095,7 +1096,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 // We need to determine if the account exists and fetch any existing vault for that resource
                 let to_account_substate = self
                     .substate_api
-                    .fetch_substate_from_network(&SubstateId::Component(destination_account), None)
+                    .fetch_substate_for_signing(&SubstateId::Component(destination_account), None)
                     .await
                     .optional()?;
 
@@ -1170,13 +1171,19 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         let transaction = Transaction::builder(network.as_byte(), params.max_epoch)
             .with_dry_run(params.is_dry_run)
             .with_fee_instructions_builder(|builder| {
-                let fee_resource = params.fee_params.pay_fee_with_swap.as_ref().map(|swap| swap.input_resource).unwrap_or(TARI_TOKEN);
+                let fee_resource = params
+                    .fee_params
+                    .pay_fee_with_swap
+                    .as_ref()
+                    .map(|swap| swap.input_resource)
+                    .unwrap_or(TARI_TOKEN);
                 builder
                     .then(|b| {
                         // When there are no stealth inputs or outputs, skip the stealth transfer instruction
                         // and use a standard withdraw instead. A stealth transfer would still work correctly,
                         // but a plain withdraw is more fee-efficient.
-                        let has_no_inputs_or_outputs = fee_transfer_statement.outputs_statement.outputs.is_empty() && fee_transfer_statement.inputs_statement.inputs.is_empty();
+                        let has_no_inputs_or_outputs = fee_transfer_statement.outputs_statement.outputs.is_empty() &&
+                            fee_transfer_statement.inputs_statement.inputs.is_empty();
                         if has_no_inputs_or_outputs {
                             return b.call_method(*owner_account.component_address(), "withdraw", args![
                                 fee_resource,
@@ -1192,7 +1199,11 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                             ])
                             .put_last_instruction_output_on_workspace("fee_other_resx_input_bucket")
                             // Transfer
-                            .stealth_transfer_with_input_bucket(fee_resource, fee_transfer_statement, "fee_other_resx_input_bucket")
+                            .stealth_transfer_with_input_bucket(
+                                fee_resource,
+                                fee_transfer_statement,
+                                "fee_other_resx_input_bucket",
+                            )
                         } else {
                             b.stealth_transfer(fee_resource, fee_transfer_statement)
                         }
@@ -1200,14 +1211,21 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                     .then(|b| {
                         if let Some(swap) = params.fee_params.pay_fee_with_swap.as_ref() {
                             b.put_last_instruction_output_on_workspace("fee_swap_input_bucket")
-                             .call_method(swap.pool_address, "swap", args![Workspace("fee_swap_input_bucket")])
-                             .put_last_instruction_output_on_workspace("fee_swap_output_bucket")
-                             // Slippage protection - ensure that the output from the swap is at least the minimum fee amount
-                             .assert_bucket_contains_at_least("fee_swap_output_bucket", TARI_TOKEN, swap.min_xtr_output_amount)
-                             // Take only max_fee from the swap output for the fee payment
-                             .take_from_bucket("fee_swap_output_bucket", params.max_fee, "fee_input_bucket")
-                             // Deposit any excess TARI back to the user's account
-                             .call_method(*owner_account.component_address(), "deposit", args![Workspace("fee_swap_output_bucket")])
+                                .call_method(swap.pool_address, "swap", args![Workspace("fee_swap_input_bucket")])
+                                .put_last_instruction_output_on_workspace("fee_swap_output_bucket")
+                                // Slippage protection - ensure that the output from the swap is at least the minimum
+                                // fee amount
+                                .assert_bucket_contains_at_least(
+                                    "fee_swap_output_bucket",
+                                    TARI_TOKEN,
+                                    swap.min_xtr_output_amount,
+                                )
+                                // Take only max_fee from the swap output for the fee payment
+                                .take_from_bucket("fee_swap_output_bucket", params.max_fee, "fee_input_bucket")
+                                // Deposit any excess TARI back to the user's account
+                                .call_method(*owner_account.component_address(), "deposit", args![Workspace(
+                                    "fee_swap_output_bucket"
+                                )])
                         } else {
                             b.put_last_instruction_output_on_workspace("fee_input_bucket")
                         }
@@ -1245,7 +1263,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 // When there are no stealth inputs or outputs, skip the stealth transfer instruction
                 // and use a standard withdraw instead. A stealth transfer would still work correctly,
                 // but a plain withdraw is more fee-efficient.
-                let has_no_inputs_or_outputs = transfer_statement.outputs_statement.outputs.is_empty() && transfer_statement.inputs_statement.inputs.is_empty();
+                let has_no_inputs_or_outputs = transfer_statement.outputs_statement.outputs.is_empty() &&
+                    transfer_statement.inputs_statement.inputs.is_empty();
                 if has_no_inputs_or_outputs {
                     return withdraw_from_account(
                         builder,
@@ -1264,8 +1283,12 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                         revealed_input_amount,
                         &params.badge_usage,
                     )
-                        .put_last_instruction_output_on_workspace("input_bucket")
-                        .stealth_transfer_with_input_bucket(params.resource_address, transfer_statement, "input_bucket")
+                    .put_last_instruction_output_on_workspace("input_bucket")
+                    .stealth_transfer_with_input_bucket(
+                        params.resource_address,
+                        transfer_statement,
+                        "input_bucket",
+                    )
                 } else {
                     builder.stealth_transfer(params.resource_address, transfer_statement)
                 }

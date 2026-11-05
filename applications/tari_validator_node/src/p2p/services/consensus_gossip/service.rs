@@ -86,14 +86,20 @@ impl ConsensusGossipService {
                             warn!(target: LOG_TARGET, "Consensus events receiver lagged by {} messages", n);
                         },
                         Err(broadcast::error::RecvError::Closed) => {
-                            info!(target: LOG_TARGET, "Consensus gossip service shutting down");
+                            info!(
+                                target: LOG_TARGET,
+                                "Consensus events channel closed; consensus gossip service stopping"
+                            );
                             break;
                         },
                     }
                 },
                 msg = self.rx_gossip.recv() => {
                     let Some(msg) = msg else {
-                        info!(target: LOG_TARGET, "Consensus gossip service shutting down");
+                        info!(
+                            target: LOG_TARGET,
+                            "Gossip channel closed; consensus gossip service stopping"
+                        );
                         break;
                     };
                     if let Err(err) = self.handle_incoming_gossip_message(msg).await {
@@ -112,7 +118,10 @@ impl ConsensusGossipService {
                             warn!(target: LOG_TARGET, "Epoch manager events receiver lagged by {} messages", n);
                         },
                         Err(broadcast::error::RecvError::Closed) => {
-                            info!(target: LOG_TARGET, "Consensus gossip service shutting down");
+                            info!(
+                                target: LOG_TARGET,
+                                "Epoch manager events channel closed; consensus gossip service stopping"
+                            );
                             break;
                         },
                     }

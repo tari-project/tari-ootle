@@ -166,10 +166,11 @@ where
         .map_err(|e| ExitError::new(ExitCode::IOError, e))?;
 
     let mut epoch_manager_events = services.epoch_manager.subscribe();
+    let mut epoch_events_closed = false;
 
     loop {
         tokio::select! {
-            result = epoch_manager_events.recv() => {
+            result = epoch_manager_events.recv(), if !epoch_events_closed => {
                 match result {
                     Ok(event) => {
                         if let Err(err) = handle_epoch_manager_event(&services, event).await {
@@ -180,8 +181,8 @@ where
                         warn!(target: LOG_TARGET, "Epoch manager event subscriber lagged by {} event(s)", n);
                     },
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        debug!(target: LOG_TARGET, "Epoch manager event stream closed");
-                        break;
+                        warn!(target: LOG_TARGET, "Epoch manager event stream closed");
+                        epoch_events_closed = true;
                     },
                 }
             },

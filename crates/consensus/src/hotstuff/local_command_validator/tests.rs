@@ -506,6 +506,13 @@ impl Replica {
                             &mut evaluation.total_leader_fee,
                             &mut evaluation.total_exhaust_burn,
                         ),
+                        Command::SomeAccept(atom) => validator.evaluate_some_accept_command(
+                            tx,
+                            block,
+                            atom,
+                            &substate_store,
+                            &mut change_set,
+                        ),
                         command => panic!("unsupported command {command}"),
                     }
                     .unwrap();
@@ -1808,6 +1815,128 @@ mod all_accept {
                     fee_intent_only: true,
                     execution_fee_intent_only: false,
                     ..
+                })
+            ),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
+}
+
+fn adopt_foreign_abort_accept(replica: &Replica, id: &TransactionId) -> (TransactionPoolRecord, MultiShardAtom) {
+    let (_, foreign) = local_and_foreign_halves();
+    let mut rec = replica.pending_record(id);
+    rec.set_remote_decision(Decision::Abort(AbortReason::ExecutionFailure));
+    rec.evidence_mut()
+        .add_shard_group(foreign)
+        .set_accept_qc(PcId::zero());
+    let atom = rec.get_current_multi_shard_atom().unwrap();
+    (rec, atom)
+}
+
+mod some_accept {
+    use super::*;
+
+    fn evaluate_some_accept(replica: &Replica, rec: TransactionPoolRecord, atom: MultiShardAtom) -> Evaluation {
+        replica.evaluate_after(&[Command::SomeAccept(atom)], |change_set| {
+            change_set.set_next_transaction_update(rec).unwrap();
+        })
+    }
+
+    #[test]
+    fn an_honest_some_accept_after_a_foreign_abort_is_voted_for() {
+        let (replica, id) = accepted_cross_shard_with_fee_intent();
+        let (rec, atom) = adopt_foreign_abort_accept(&replica, &id);
+
+        let evaluation = evaluate_some_accept(&replica, rec, atom);
+
+        assert_voted(&evaluation, TransactionPoolStage::SomeAccepted, false);
+    }
+
+    #[test]
+    fn a_some_accept_with_a_different_abort_reason_is_refused() {
+        let (replica, id) = accepted_cross_shard_with_fee_intent();
+        let (rec, atom) = adopt_foreign_abort_accept(&replica, &id);
+        let forged = MultiShardAtom {
+            decision: Decision::Abort(AbortReason::LockInputsFailed),
+            ..atom
+        };
+
+        let evaluation = evaluate_some_accept(&replica, rec, forged);
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::DecisionDisagreement {
+                    local: Decision::Abort(AbortReason::ExecutionFailure),
+                    remote: Decision::Abort(AbortReason::LockInputsFailed),
+                })
+            ),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
+
+    #[test]
+    fn a_some_accept_claiming_fee_intent_only_is_refused() {
+        let (replica, id) = accepted_cross_shard_with_fee_intent();
+        let (rec, atom) = adopt_foreign_abort_accept(&replica, &id);
+        let forged = MultiShardAtom {
+            fee_intent_only: true,
+            ..atom
+        };
+
+        let evaluation = evaluate_some_accept(&replica, rec, forged);
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::FeeIntentOnlyDisagreement {
+                    local: false,
+                    remote: true,
+                    ..
+                })
+            ),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
+
+    #[test]
+    fn a_some_accept_carrying_a_leader_fee_is_refused() {
+        let (replica, id) = accepted_cross_shard_with_fee_intent();
+        let (rec, atom) = adopt_foreign_abort_accept(&replica, &id);
+        let forged = MultiShardAtom {
+            leader_fee: Some(local_leader_fee()),
+            ..atom
+        };
+
+        let evaluation = evaluate_some_accept(&replica, rec, forged);
+
+        assert!(
+            matches!(evaluation.no_vote, Some(NoVoteReason::LeaderFeeDisagreement)),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
+
+    #[test]
+    fn a_some_accept_with_mismatched_evidence_is_refused() {
+        let (replica, id) = accepted_cross_shard_with_fee_intent();
+        let (rec, mut forged) = adopt_foreign_abort_accept(&replica, &id);
+        let (_, foreign) = local_and_foreign_halves();
+        forged
+            .evidence
+            .add_shard_group(foreign)
+            .set_prepare_qc(PcId::zero());
+
+        let evaluation = evaluate_some_accept(&replica, rec, forged);
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::InvalidEvidence {
+                    reason: InvalidEvidenceReason::MismatchedEvidence,
                 })
             ),
             "{:?}",

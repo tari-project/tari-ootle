@@ -148,6 +148,11 @@ where
                     block,
                 )));
             },
+            PreparedTransaction::InputLoadBudgetReached { total_bytes, max_bytes } => {
+                let reason = NoVoteReason::BlockInputLoadBytesExceeded { total_bytes, max_bytes };
+                warn!(target: LOG_TARGET, "❌ NO VOTE: {reason} (LocalOnly transaction {} in block {})", atom.id(), block);
+                return Ok(Some(reason));
+            },
             PreparedTransaction::InputsLocked { .. } => {
                 return Err(HotStuffError::InvariantError(format!(
                     "Transaction {} in block {} was deferred for its locked inputs, which only a proposer checks",
@@ -312,6 +317,11 @@ where
                     atom.id(),
                     block,
                 )));
+            },
+            PreparedTransaction::InputLoadBudgetReached { total_bytes, max_bytes } => {
+                let reason = NoVoteReason::BlockInputLoadBytesExceeded { total_bytes, max_bytes };
+                warn!(target: LOG_TARGET, "❌ NO VOTE: {reason} ({proposed_kind} transaction {} in block {})", atom.id(), block);
+                return Ok(Some(reason));
             },
             PreparedTransaction::InputsLocked { .. } => {
                 return Err(HotStuffError::InvariantError(format!(

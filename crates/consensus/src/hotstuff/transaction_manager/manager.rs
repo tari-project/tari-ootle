@@ -47,10 +47,17 @@ use super::{PledgedTransaction, PreparedTransaction, UncommittedTemplateStore};
 use crate::{
     hotstuff::{
         block_change_set::ProposedBlockChangeSet,
-        substate_store::{InputPledge, LockFailedError, LockStatus, PendingSubstateStore, SubstateStoreError},
+        substate_store::{
+            InputLoad,
+            InputPledge,
+            LockFailedError,
+            LockStatus,
+            PendingSubstateStore,
+            SubstateStoreError,
+        },
     },
     tracing::TraceTimer,
-    traits::{BlockTransactionExecutor, BlockTransactionExecutorError, ReadableSubstateStore},
+    traits::{BlockTransactionExecutor, BlockTransactionExecutorError},
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::block_transaction_executor";
@@ -61,19 +68,63 @@ pub struct ConsensusTransactionManager<TExecutor, TStateStore> {
     uncommitted_templates: UncommittedTemplateStore,
     max_transaction_validity_epochs: u64,
     max_transaction_pledge_bytes: usize,
+    max_transaction_input_load_bytes: usize,
     _store: PhantomData<TStateStore>,
 }
 
 impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
     ConsensusTransactionManager<TExecutor, TStateStore>
 {
-    pub fn new(executor: TExecutor, max_transaction_validity_epochs: u64, max_transaction_pledge_bytes: usize) -> Self {
+    pub fn new(
+        executor: TExecutor,
+        max_transaction_validity_epochs: u64,
+        max_transaction_pledge_bytes: usize,
+        max_transaction_input_load_bytes: usize,
+    ) -> Self {
         Self {
             executor,
             uncommitted_templates: UncommittedTemplateStore::default(),
             max_transaction_validity_epochs,
             max_transaction_pledge_bytes,
+            max_transaction_input_load_bytes,
             _store: PhantomData,
+        }
+    }
+
+    /// Loads the transaction's local inputs, counting them toward what the block loads. Returns the loaded inputs,
+    /// or what the transaction is prepared as instead: an abort if its inputs alone are more than any transaction
+    /// may have loaded, or a deferral if they only do not fit in this block. Only the shard group holding the inputs
+    /// measures them, so it aborts unilaterally and the other shard groups adopt the abort from its foreign proposal.
+    fn load_local_inputs<TTx: StateStoreReadTransaction, I>(
+        &self,
+        store: &mut PendingSubstateStore<TTx>,
+        transaction_id: &TransactionId,
+        inputs: I,
+        abort_as: fn(TransactionExecution) -> PreparedTransaction,
+    ) -> Result<Result<HashMap<SubstateRequirement, Substate>, PreparedTransaction>, BlockTransactionExecutorError>
+    where
+        I: IntoIterator<Item = (SubstateRequirement, SubstateVersion)>,
+    {
+        match store.load_inputs(inputs, self.max_transaction_input_load_bytes)? {
+            InputLoad::Loaded(inputs) => Ok(Ok(inputs)),
+            InputLoad::TransactionTooLarge { bytes } => {
+                warn!(
+                    target: LOG_TARGET,
+                    "⚠️ PREPARE: Transaction {transaction_id} has more than {} bytes of local inputs ({bytes} loaded \
+                     before stopping), more than a validator loads for one transaction. Aborting.",
+                    self.max_transaction_input_load_bytes,
+                );
+                let execution = TransactionExecution::abort(transaction_id, RejectReason::Abort {
+                    reason: AbortReason::InputLoadTooLarge,
+                });
+                Ok(Err(abort_as(execution)))
+            },
+            InputLoad::BlockBudgetReached { total_bytes, max_bytes } => {
+                Ok(Err(PreparedTransaction::InputLoadBudgetReached {
+                    total_bytes,
+                    max_bytes,
+                }))
+            },
         }
     }
 
@@ -572,11 +623,17 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             }
         }
 
-        let local_inputs = store.get_many(
+        let local_inputs = match self.load_local_inputs(
+            store,
+            &transaction_id,
             local_versions
                 .iter()
                 .map(|(req, v)| (req.to_substate_requirement_ref().to_owned(), *v)),
-        )?;
+            PreparedTransaction::new_local_early_abort,
+        )? {
+            Ok(inputs) => inputs,
+            Err(prepared) => return Ok(prepared),
+        };
         let execution = self.execute_or_fetch(
             store,
             local_committee_info,
@@ -786,13 +843,29 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         // This shard group does not hold every input, so it cannot execute to discover how each one is
         // used and must lock on what the transaction declared.
+        let local_inputs = match self.load_local_inputs(
+            store,
+            &transaction_id,
+            local_versions
+                .iter()
+                .map(|(decl, version)| (decl.to_substate_requirement_ref().to_owned(), *version)),
+            |execution| PreparedTransaction::new_multishard_executed(execution, LockStatus::new()),
+        )? {
+            Ok(inputs) => inputs,
+            Err(prepared) => return Ok(prepared),
+        };
         let requested_locks = local_versions
             .iter()
             .map(|(decl, version)| {
-                let substate = store.get(VersionedSubstateIdRef::new(decl.substate_id(), *version))?;
+                let requirement = decl.to_substate_requirement_ref().to_owned();
+                let substate = local_inputs.get(&requirement).ok_or_else(|| {
+                    BlockTransactionExecutorError::InvariantError(format!(
+                        "Transaction {transaction_id} declared input {requirement} was not loaded"
+                    ))
+                })?;
                 Ok(declared_lock_intent(decl, *version).with_pledged_value(substate.substate_value()))
             })
-            .collect::<Result<Vec<_>, SubstateStoreError>>()?;
+            .collect::<Result<Vec<_>, BlockTransactionExecutorError>>()?;
 
         let lock_status = lock_multishard(store, transaction_id, &requested_locks)?;
         if let Some(err) = lock_status.hard_conflict() {
@@ -1335,7 +1408,7 @@ mod tests {
     }
 
     fn manager() -> ConsensusTransactionManager<RefusingExecutor, RocksDbStateStore<String>> {
-        ConsensusTransactionManager::new(RefusingExecutor, 2160, usize::MAX)
+        ConsensusTransactionManager::new(RefusingExecutor, 2160, usize::MAX, usize::MAX)
     }
 
     fn calling(component: ComponentAddress) -> PledgedTransaction {
@@ -1782,6 +1855,7 @@ mod tests {
                 let manager = ConsensusTransactionManager::<_, RocksDbStateStore<String>>::new(
                     FixedExecutor(execution),
                     2160,
+                    usize::MAX,
                     usize::MAX,
                 );
                 let ResolvedTransactionInputs::OnlyLocalInputs { local_versions } =

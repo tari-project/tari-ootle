@@ -25,6 +25,7 @@ use tari_ootle_storage::{
         StateTransition,
         StateVersionProof,
         StateVersionTransitions,
+        SubstateUpdateProof,
         SubstateValueFilterFlags,
         is_state_version_proof_point,
     },
@@ -723,18 +724,17 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
         .await
     }
 
-    /// Sends `transitions` in batches.
+    /// Sends `transitions` in batches, each built only once the one before it has been taken.
     async fn send_batches(&mut self, transitions: StateVersionTransitions) -> Result<(), ()> {
-        let batches = match into_batches(transitions, self.batch_size) {
-            Ok(batches) => batches,
-            Err(status) => {
-                error!(target: LOG_TARGET, "🌍 {}", status);
-                self.send(Err(status)).await?;
-                return Err(());
-            },
-        };
-
-        for batch in batches {
+        for batch in SubstateBatches::new(transitions, self.batch_size) {
+            let batch = match batch {
+                Ok(batch) => batch,
+                Err(status) => {
+                    error!(target: LOG_TARGET, "🌍 {}", status);
+                    self.send(Err(status)).await?;
+                    return Err(());
+                },
+            };
             self.send(Ok(rpc::SyncStateResponse {
                 response: Some(rpc::sync_state_response::Response::Batch(batch)),
             }))
@@ -745,54 +745,99 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
     }
 }
 
-/// Splits one state version's transitions into the batches that stream it, all but the last marked `has_more`.
+/// The batches that stream one state version's transitions, all but the last marked `has_more`, each converted from
+/// the transitions as it is taken.
 ///
 /// Each batch is one RPC response, so it is bounded by encoded size as well as by `max_updates`: a single block can
-/// commit far more substate bytes to a shard than one response carries. Fails if one update alone exceeds
-/// `MAX_BATCH_UPDATE_BYTES`, which no substate the engine commits does.
-fn into_batches(
-    transitions: StateVersionTransitions,
+/// commit far more substate bytes to a shard than one response carries. Yields an error, and nothing after it, for an
+/// update that alone exceeds `MAX_BATCH_UPDATE_BYTES`, which no substate the engine commits does.
+struct SubstateBatches {
+    epoch: Epoch,
+    shard: Shard,
+    state_version: Version,
+    updates: std::vec::IntoIter<SubstateUpdateProof>,
     max_updates: NonZeroUsize,
-) -> Result<Vec<rpc::SubstateBatch>, RpcStatus> {
-    let StateVersionTransitions {
-        epoch,
-        shard,
-        state_version,
-        updates,
-    } = transitions;
-    let empty_batch = || rpc::SubstateBatch {
-        state_version,
-        updates: Vec::new(),
-        has_more: true,
-        epoch: Some(epoch.into()),
-        shard: shard.as_u32(),
-    };
+    /// The update that did not fit the last batch, with its encoded size. It opens the next one.
+    carried: Option<(rpc::SubstateUpdate, usize)>,
+    failed: bool,
+}
 
-    let mut batches = Vec::new();
-    let mut batch = empty_batch();
-    let mut batch_bytes = 0usize;
-    for update in updates {
+impl SubstateBatches {
+    fn new(transitions: StateVersionTransitions, max_updates: NonZeroUsize) -> Self {
+        let StateVersionTransitions {
+            epoch,
+            shard,
+            state_version,
+            updates,
+        } = transitions;
+        Self {
+            epoch,
+            shard,
+            state_version,
+            updates: updates.into_iter(),
+            max_updates,
+            carried: None,
+            failed: false,
+        }
+    }
+
+    fn next_update(&mut self) -> Option<Result<(rpc::SubstateUpdate, usize), RpcStatus>> {
+        if let Some(carried) = self.carried.take() {
+            return Some(Ok(carried));
+        }
+        let update = self.updates.next()?;
         let substate_id = update.substate_id().clone();
         let update = rpc::SubstateUpdate::from(update);
         let update_bytes = prost::encoding::message::encoded_len(SUBSTATE_BATCH_UPDATES_TAG, &update);
         if update_bytes > MAX_BATCH_UPDATE_BYTES {
-            return Err(RpcStatus::general(format!(
+            let Self {
+                state_version, shard, ..
+            } = self;
+            return Some(Err(RpcStatus::general(format!(
                 "Substate {substate_id} at state version {state_version} of {shard} encodes to {update_bytes} bytes, \
                  more than the {MAX_BATCH_UPDATE_BYTES} a state sync batch carries"
-            )));
+            ))));
         }
-        if batch.updates.len() >= max_updates.get() || batch_bytes + update_bytes > MAX_BATCH_UPDATE_BYTES {
-            batches.push(std::mem::replace(&mut batch, empty_batch()));
-            batch_bytes = 0;
-        }
-        batch.updates.push(update);
-        batch_bytes += update_bytes;
+        Some(Ok((update, update_bytes)))
     }
-    if !batch.updates.is_empty() {
+}
+
+impl Iterator for SubstateBatches {
+    type Item = Result<rpc::SubstateBatch, RpcStatus>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.failed {
+            return None;
+        }
+        let mut batch = rpc::SubstateBatch {
+            state_version: self.state_version,
+            updates: Vec::new(),
+            has_more: true,
+            epoch: Some(self.epoch.into()),
+            shard: self.shard.as_u32(),
+        };
+        let mut batch_bytes = 0usize;
+        while let Some(next) = self.next_update() {
+            let (update, update_bytes) = match next {
+                Ok(next) => next,
+                Err(status) => {
+                    self.failed = true;
+                    return Some(Err(status));
+                },
+            };
+            if batch.updates.len() >= self.max_updates.get() || batch_bytes + update_bytes > MAX_BATCH_UPDATE_BYTES {
+                self.carried = Some((update, update_bytes));
+                return Some(Ok(batch));
+            }
+            batch.updates.push(update);
+            batch_bytes += update_bytes;
+        }
+        if batch.updates.is_empty() {
+            return None;
+        }
         batch.has_more = false;
-        batches.push(batch);
+        Some(Ok(batch))
     }
-    Ok(batches)
 }
 
 /// The wire form of `proof`.
@@ -897,6 +942,13 @@ mod tests {
         }
     }
 
+    fn into_batches(
+        transitions: StateVersionTransitions,
+        max_updates: NonZeroUsize,
+    ) -> Result<Vec<rpc::SubstateBatch>, RpcStatus> {
+        SubstateBatches::new(transitions, max_updates).collect()
+    }
+
     fn response_len(batch: &rpc::SubstateBatch) -> usize {
         rpc::SyncStateResponse {
             response: Some(rpc::sync_state_response::Response::Batch(batch.clone())),
@@ -982,6 +1034,17 @@ mod tests {
             template_id(2),
             template_id(3)
         ]);
+    }
+
+    /// A stream waiting on its peer holds the batch it is sending and the version's unconverted transitions, never the
+    /// whole version converted into batches.
+    #[test]
+    fn a_version_s_batches_are_built_one_at_a_time() {
+        let mut batches = SubstateBatches::new(transitions((0..250).map(destroy).collect()), max_updates());
+
+        assert_eq!(batches.next().unwrap().unwrap().updates.len(), 100);
+        assert!(batches.carried.is_some());
+        assert_eq!(batches.updates.len(), 149);
     }
 
     #[test]

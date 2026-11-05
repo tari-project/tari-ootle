@@ -551,6 +551,48 @@ async fn a_stream_abandoned_while_the_server_is_held_up_writing_it_ends_and_the_
     assert_greeted(&raw_response(&mut framed, 2).await);
 }
 
+const REPLY_WITH_MSG_OF_SIZE_METHOD: u32 = 6;
+
+async fn until_guarded_responses(service: &GreetingService, expected: usize, why: &str) {
+    time::timeout(Duration::from_secs(5), async {
+        while service.guarded_responses() != expected {
+            time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{why}: {} guarded response(s) held", service.guarded_responses()));
+}
+
+/// A unary response's guard lives until the server has finished sending the response, so it bounds whatever the
+/// response holds for a client that is slow to take it.
+#[tokio::test]
+async fn a_unary_response_holds_its_guard_until_the_server_is_done_sending_it() {
+    let service_impl = GreetingService::default();
+    let server = TestRpcServer::with_sessions(service_impl.clone(), 2);
+
+    let mut client = connect(server.dial()).await.unwrap();
+    client.reply_with_msg_of_size(1024).await.unwrap();
+    until_guarded_responses(&service_impl, 0, "a response the client took kept its guard").await;
+
+    // A window smaller than the response, read by nobody, holds the server up mid-write.
+    let mut stalled = server.dial_with_window(4);
+    Handshake::new(&mut stalled).perform_client_handshake().await.unwrap();
+    stalled
+        .send(raw_request(1, REPLY_WITH_MSG_OF_SIZE_METHOD, 1024u64.encode_to_vec()))
+        .await
+        .unwrap();
+    until_guarded_responses(&service_impl, 1, "the server never answered").await;
+    time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        service_impl.guarded_responses(),
+        1,
+        "a response the client has not taken released its guard"
+    );
+
+    drop(stalled);
+    until_guarded_responses(&service_impl, 0, "a response to a closed session kept its guard").await;
+}
+
 #[tokio::test]
 async fn a_session_beyond_the_server_s_limit_is_refused() {
     // A server with no session slots refuses every session it is offered.

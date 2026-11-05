@@ -861,7 +861,7 @@ where
         #[cfg(feature = "metrics")]
         let protocol = self.protocol.clone();
         let mut stream = body
-            .into_message()
+            .into_guarded_body()
             .map(|result| into_response(request_id, result))
             .map(move |mut message| {
                 if message.payload.len() > max_response_payload_size() {

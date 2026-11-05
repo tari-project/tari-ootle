@@ -138,6 +138,8 @@ pub struct ValidatorNodeRpcServiceImpl<TStateStore> {
     epoch_history_length: u64,
     /// Permits for the batch responses held in memory at once; see [`MAX_BUFFERED_BATCH_RESPONSES`].
     batch_responses: Arc<Semaphore>,
+    /// Permits for the snapshot pages and state sync streams served at once; see [`MAX_STATE_TRANSFER_STREAMS`].
+    state_transfer_streams: Arc<Semaphore>,
     state_sync_reads: Arc<Semaphore>,
     root_mismatch_log: Arc<RootMismatchLog>,
 }
@@ -159,6 +161,7 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
             max_transaction_size_bytes,
             epoch_history_length,
             batch_responses: Arc::new(Semaphore::new(MAX_BUFFERED_BATCH_RESPONSES)),
+            state_transfer_streams: Arc::new(Semaphore::new(MAX_STATE_TRANSFER_STREAMS)),
             state_sync_reads: Arc::new(Semaphore::new(max_concurrent_state_sync_reads())),
             root_mismatch_log: Arc::default(),
         }
@@ -225,6 +228,91 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
             epoch,
             shard_group: self.local_shard_group_at(epoch).await?,
         })
+    }
+
+    /// A permit to serve one state transfer response. A peer that does not read its response holds the permit, so a
+    /// node already serving [`MAX_STATE_TRANSFER_STREAMS`] refuses rather than queueing, and the caller asks another
+    /// member.
+    fn try_acquire_state_transfer(&self, what: &str) -> Result<OwnedSemaphorePermit, RpcStatus> {
+        self.state_transfer_streams.clone().try_acquire_owned().map_err(|_| {
+            debug!(
+                target: LOG_TARGET,
+                "Refusing a {what} request: {MAX_STATE_TRANSFER_STREAMS} state transfers are already being served",
+            );
+            RpcStatus::unavailable(STATE_TRANSFER_BUSY)
+        })
+    }
+}
+
+impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcServiceImpl<TStateStore> {
+    async fn shard_snapshot(
+        &self,
+        req: GetShardSnapshotRequest,
+    ) -> Result<Response<GetShardSnapshotResponse>, RpcStatus> {
+        let shard = Shard::from_u32(req.shard);
+        if shard > NumPreshards::MAX_SHARD {
+            return Err(RpcStatus::bad_request(format!(
+                "Shard {shard} out of range. Maximum shard is {}",
+                NumPreshards::MAX_SHARD
+            )));
+        }
+        let after = if req.after_leaf_key.is_empty() {
+            None
+        } else {
+            let key = TreeHash::try_from_bytes(&req.after_leaf_key)
+                .map_err(|_| RpcStatus::bad_request("after_leaf_key must be empty or 32 bytes"))?;
+            Some(LeafKey::new(key))
+        };
+        let value_filters = SubstateValueFilterFlags::from_bits_truncate(req.value_filters);
+        if value_filters.is_empty() {
+            return Err(RpcStatus::bad_request(
+                "At least one SubstateValueFilterFlag must be set",
+            ));
+        }
+        let limit = usize::try_from(req.limit)
+            .unwrap_or(usize::MAX)
+            .clamp(1, MAX_SNAPSHOT_PAGE_SUBSTATES);
+
+        let response_permit = self.try_acquire_state_transfer("shard snapshot")?;
+        // A page is a synchronous read like a state sync version's, so it takes the same permits. Any node holding the
+        // tree at the version serves it: the caller checks the leaves against a quorum-signed root.
+        let _permit = self
+            .state_sync_reads
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        let store = self.state_store.clone();
+        let state_version = req.state_version;
+        let page = task::spawn_blocking(move || {
+            store
+                .with_read_tx(|tx| read_shard_snapshot(tx, shard, state_version, after.as_ref(), limit, value_filters))
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))
+        })
+        .await
+        .map_err(RpcStatus::log_internal_error(LOG_TARGET))??;
+
+        let response = match page {
+            ShardSnapshotPage::Unavailable => GetShardSnapshotResponse {
+                version_unavailable: true,
+                ..Default::default()
+            },
+            ShardSnapshotPage::Page {
+                substates,
+                is_last,
+                last_leaf_proof,
+            } => GetShardSnapshotResponse {
+                substates,
+                is_last,
+                version_unavailable: false,
+                last_leaf_proof: last_leaf_proof
+                    .map(|proof| tari_bor::serde_codec::to_vec(&proof))
+                    .transpose()
+                    .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
+                    .unwrap_or_default(),
+            },
+        };
+        Ok(Response::new(response).with_guard(response_permit))
     }
 }
 
@@ -328,6 +416,14 @@ const MAX_BATCH_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 /// dropped. Together with [`MAX_BATCH_RESPONSE_BYTES`] this bounds the memory batch responses can
 /// take, however many sessions peers open.
 const MAX_BUFFERED_BATCH_RESPONSES: usize = 32;
+
+/// How many shard snapshot pages and `sync_state` streams the node serves at once, each from the request until the
+/// server has finished sending the response. A snapshot page holds up to `MAX_SNAPSHOT_PAGE_BYTES`, and a stream a
+/// few state sync batches (one queued, one being sent, and the version being split into them), so this bounds the
+/// memory state transfer responses take however many sessions peers open.
+const MAX_STATE_TRANSFER_STREAMS: usize = 32;
+
+const STATE_TRANSFER_BUSY: &str = "This node is serving too many state transfers; retry later or ask another member";
 
 /// Streams `responses` to the peer. The stream holds `permit` until the server has finished sending
 /// the response and drops it.
@@ -850,8 +946,6 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
     async fn sync_state(&self, request: Request<SyncStateRequest>) -> Result<Streaming<SyncStateResponse>, RpcStatus> {
         let req = request.into_message();
 
-        let (sender, receiver) = mpsc::channel(10);
-
         let cursors = ShardCursor::validate_all(req.cursors)?;
 
         let end_epoch = req.until_epoch.map(Epoch::from);
@@ -934,6 +1028,10 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             req.follow,
         );
 
+        let response_permit = self.try_acquire_state_transfer("state sync")?;
+        // The task builds the next message only once the last has been taken, so a stream holds one message in the
+        // channel and one being sent.
+        let (sender, receiver) = mpsc::channel(1);
         task::spawn(
             StateSyncTask::new(
                 self.state_store.clone(),
@@ -954,7 +1052,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             .run(),
         );
 
-        Ok(Streaming::new(receiver))
+        Ok(Streaming::new(receiver).with_guard(response_permit))
     }
 
     async fn get_consensus_state(
@@ -1052,69 +1150,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         &self,
         req: Request<GetShardSnapshotRequest>,
     ) -> Result<Response<GetShardSnapshotResponse>, RpcStatus> {
-        let req = req.into_message();
-        let shard = Shard::from_u32(req.shard);
-        if shard > NumPreshards::MAX_SHARD {
-            return Err(RpcStatus::bad_request(format!(
-                "Shard {shard} out of range. Maximum shard is {}",
-                NumPreshards::MAX_SHARD
-            )));
-        }
-        let after = if req.after_leaf_key.is_empty() {
-            None
-        } else {
-            let key = TreeHash::try_from_bytes(&req.after_leaf_key)
-                .map_err(|_| RpcStatus::bad_request("after_leaf_key must be empty or 32 bytes"))?;
-            Some(LeafKey::new(key))
-        };
-        let value_filters = SubstateValueFilterFlags::from_bits_truncate(req.value_filters);
-        if value_filters.is_empty() {
-            return Err(RpcStatus::bad_request(
-                "At least one SubstateValueFilterFlag must be set",
-            ));
-        }
-        let limit = usize::try_from(req.limit)
-            .unwrap_or(usize::MAX)
-            .clamp(1, MAX_SNAPSHOT_PAGE_SUBSTATES);
-
-        // A page is a synchronous read like a state sync version's, so it takes the same permits. Any node holding the
-        // tree at the version serves it: the caller checks the leaves against a quorum-signed root.
-        let _permit = self
-            .state_sync_reads
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-        let store = self.state_store.clone();
-        let state_version = req.state_version;
-        let page = task::spawn_blocking(move || {
-            store
-                .with_read_tx(|tx| read_shard_snapshot(tx, shard, state_version, after.as_ref(), limit, value_filters))
-                .map_err(RpcStatus::log_internal_error(LOG_TARGET))
-        })
-        .await
-        .map_err(RpcStatus::log_internal_error(LOG_TARGET))??;
-
-        Ok(Response::new(match page {
-            ShardSnapshotPage::Unavailable => GetShardSnapshotResponse {
-                version_unavailable: true,
-                ..Default::default()
-            },
-            ShardSnapshotPage::Page {
-                substates,
-                is_last,
-                last_leaf_proof,
-            } => GetShardSnapshotResponse {
-                substates,
-                is_last,
-                version_unavailable: false,
-                last_leaf_proof: last_leaf_proof
-                    .map(|proof| tari_bor::serde_codec::to_vec(&proof))
-                    .transpose()
-                    .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
-                    .unwrap_or_default(),
-            },
-        }))
+        self.shard_snapshot(req.into_message()).await
     }
 
     async fn get_substate_batch(
@@ -1809,5 +1845,61 @@ mod tests {
             anchor_for(&store, 5, None).is_none(),
             "a node outside every shard group"
         );
+    }
+
+    fn rpc_service(store: RocksDbStateStore<String>) -> ValidatorNodeRpcServiceImpl<RocksDbStateStore<String>> {
+        let (tx_request, _) = mpsc::channel(1);
+        let (tx_events, _) = tokio::sync::broadcast::channel(1);
+        let epoch_manager = EpochManagerHandle::new(
+            tx_request,
+            tx_events.downgrade(),
+            Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            tari_epoch_manager::service::CommitteeCache::new(),
+        );
+        let (consensus_events, _) = tokio::sync::broadcast::channel(1);
+        ValidatorNodeRpcServiceImpl::new(
+            epoch_manager,
+            store,
+            MempoolHandle::for_test(),
+            ConsensusHandle::for_test(&consensus_events),
+            1024,
+            10,
+        )
+    }
+
+    fn snapshot_request() -> GetShardSnapshotRequest {
+        GetShardSnapshotRequest {
+            shard: 0,
+            state_version: 1,
+            after_leaf_key: Vec::new(),
+            limit: 1000,
+            value_filters: SubstateValueFilterFlags::all().bits(),
+        }
+    }
+
+    /// A snapshot response holds its permit until it is dropped, which the server does once the peer has taken it, so
+    /// a node holds at most [`MAX_STATE_TRANSFER_STREAMS`] unsent pages however many sessions its peers open.
+    #[tokio::test]
+    async fn a_node_holding_its_most_snapshot_responses_refuses_another_until_one_is_sent() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        let service = rpc_service(store);
+
+        let mut held = Vec::new();
+        for _ in 0..MAX_STATE_TRANSFER_STREAMS {
+            held.push(service.shard_snapshot(snapshot_request()).await.unwrap());
+        }
+
+        let refused = service
+            .shard_snapshot(snapshot_request())
+            .await
+            .expect_err("a node holding its most snapshot responses served another");
+        assert_eq!(refused.as_status_code(), tari_rpc_framework::RpcStatusCode::Unavailable);
+
+        held.pop();
+        service
+            .shard_snapshot(snapshot_request())
+            .await
+            .expect("a sent response frees its permit");
     }
 }

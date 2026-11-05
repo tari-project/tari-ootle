@@ -54,7 +54,7 @@ mod template {
                 }
                 let id = NonFungibleId::from_u64(self.serial_number);
                 counter += 1;
-                self.serial_number = self.serial_number.checked_add(1).expect("Serial number overflow");
+                self.serial_number += 1;
                 Some(id)
             })
         }

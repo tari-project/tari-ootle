@@ -895,11 +895,7 @@ mod tests {
         let definite_long = tari_bor::encode(&[1u64, 2, 3, 4]).unwrap();
         assert!(tari_bor::decode::<Amount>(&definite_long).is_err());
 
-        for indef_short in [
-            vec![0x9f, 0xff],
-            vec![0x9f, 0x01, 0xff],
-            vec![0x9f, 0x01, 0x02, 0xff],
-        ] {
+        for indef_short in [vec![0x9f, 0xff], vec![0x9f, 0x01, 0xff], vec![0x9f, 0x01, 0x02, 0xff]] {
             assert!(tari_bor::decode::<Amount>(&indef_short).is_err());
         }
 

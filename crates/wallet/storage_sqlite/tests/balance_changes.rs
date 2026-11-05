@@ -1509,4 +1509,40 @@ fn lock_finalize_records_revealed_spends_across_multiple_vaults() {
         .balance_changes_get_page_by_account(&account, 0, 10, None, Some(&transaction_id), None)
         .unwrap();
     assert_eq!(page.total, 2);
+    let first_change = page
+        .changes
+        .iter()
+        .find(|c| c.vault_address == Some(first_vault))
+        .unwrap();
+    assert_eq!(first_change.revealed_before, Amount::from(10_000u64));
+    assert_eq!(first_change.revealed_after, Amount::from(9_750u64));
+    let stealth_change = page
+        .changes
+        .iter()
+        .find(|c| c.vault_address == Some(stealth_vault))
+        .unwrap();
+    assert_eq!(stealth_change.revealed_before, Amount::from(50_000u64));
+    assert_eq!(stealth_change.revealed_after, Amount::from(38_000u64));
+    drop(tx);
+
+    // An unlinked lock (no transaction_id or diff entry) relies solely on the per-vault deduction loop in
+    // `vaults_finalized_locked_revealed_funds`.
+    let mut tx = store.create_write_tx().unwrap();
+    let unlinked_lock = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.vaults_lock_revealed_funds(unlinked_lock, &first_vault, Amount::from(750u64))
+        .unwrap();
+    tx.vaults_lock_revealed_funds(unlinked_lock, &stealth_vault, Amount::from(8_000u64))
+        .unwrap();
+    tx.locks_unlock_finalized(unlinked_lock, &SubstateDiff::new()).unwrap();
+    tx.commit().unwrap();
+    drop(tx);
+
+    let mut tx = store.create_read_tx().unwrap();
+    let first_vault_unlinked = tx.vaults_get(&first_vault).unwrap();
+    assert_eq!(first_vault_unlinked.revealed_balance, Amount::from(9_000u64));
+    assert_eq!(first_vault_unlinked.locked_revealed_balance, Amount::zero());
+
+    let stealth_vault_unlinked = tx.vaults_get(&stealth_vault).unwrap();
+    assert_eq!(stealth_vault_unlinked.revealed_balance, Amount::from(30_000u64));
+    assert_eq!(stealth_vault_unlinked.locked_revealed_balance, Amount::zero());
 }

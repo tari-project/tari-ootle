@@ -466,7 +466,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                     foreign_unparked_blocks.extend(foreign_unparked.into_iter().map(Into::into));
                 }
             }
-            unparked_blocks.sort_by_key(|(msg, _)| (msg.block.epoch(), msg.block.height()));
+            sort_unparked_local_blocks(&mut unparked_blocks);
             Ok((unparked_blocks, foreign_unparked_blocks))
         })
     }
@@ -1014,6 +1014,10 @@ impl<TAddr: PartialEq> MissingTransactionRequests<TAddr> {
 
 type UnparkedLocalBlocks = Vec<(ProposalMessage, ProposalOrigin)>;
 
+fn sort_unparked_local_blocks(blocks: &mut [(ProposalMessage, ProposalOrigin)]) {
+    blocks.sort_by_key(|(msg, _)| (msg.block.epoch(), msg.block.height()));
+}
+
 fn proposal_message(origin: ProposalOrigin, proposal: ProposalMessage) -> HotstuffMessage {
     match origin {
         ProposalOrigin::Live => HotstuffMessage::new_proposal(proposal),
@@ -1170,5 +1174,69 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(err, RequestedTransactionsError::Duplicate { .. }), "{err}");
+    }
+
+    #[test]
+    fn sort_unparked_local_blocks_orders_parents_before_children_by_epoch_and_height() {
+        use tari_common_types::types::FixedHash;
+        use tari_consensus_types::{ProposalCertificate, QuorumDecision, ShardGroupAccumulatedData};
+        use tari_ootle_common_types::{ExtraData, NumPreshards, ProtocolVersion, ShardGroup};
+        use tari_ootle_storage::consensus_models::{BlockCommands, BlockHeader};
+        use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+
+        fn proposal_at(epoch: Epoch, height: NodeHeight) -> (ProposalMessage, ProposalOrigin) {
+            let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+            let justify = ProposalCertificate::new(
+                FixedHash::zero(),
+                BlockId::zero(),
+                height.saturating_sub(NodeHeight(1)),
+                epoch,
+                shard_group,
+                ProposalCertificate::genesis_signatures(),
+                QuorumDecision::Accept,
+            );
+            let header = BlockHeader::create_unsigned(
+                Network::LocalNet,
+                ProtocolVersion::at(Network::LocalNet, epoch),
+                BlockId::zero(),
+                justify.calculate_id(),
+                None,
+                height,
+                epoch,
+                shard_group,
+                RistrettoPublicKeyBytes::default(),
+                FixedHash::zero(),
+                &BlockCommands::empty(),
+                0,
+                0,
+                FixedHash::zero(),
+                ShardGroupAccumulatedData::default(),
+                ExtraData::new(),
+            )
+            .unwrap();
+            (
+                ProposalMessage {
+                    block: Block::new(header, justify, BlockCommands::empty(), None),
+                    foreign_proposals: vec![],
+                },
+                ProposalOrigin::Live,
+            )
+        }
+
+        let mut blocks = vec![
+            proposal_at(Epoch(2), NodeHeight(1)),
+            proposal_at(Epoch(1), NodeHeight(5)),
+            proposal_at(Epoch(1), NodeHeight(4)),
+        ];
+        sort_unparked_local_blocks(&mut blocks);
+        let order = blocks
+            .iter()
+            .map(|(msg, _)| (msg.block.epoch(), msg.block.height()))
+            .collect::<Vec<_>>();
+        assert_eq!(order, vec![
+            (Epoch(1), NodeHeight(4)),
+            (Epoch(1), NodeHeight(5)),
+            (Epoch(2), NodeHeight(1)),
+        ]);
     }
 }

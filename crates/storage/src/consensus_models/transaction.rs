@@ -270,18 +270,24 @@ impl TransactionRecord {
         tx.transactions_finalize_all(epoch, transactions)
     }
 
-    pub fn has_all_required_input_pledges<TTx: StateStoreReadTransaction>(
+    pub fn has_all_required_input_pledges<'p, TTx, I>(
         &self,
         tx: &TTx,
         leaf_block: &LeafBlock,
         local_committee_info: &CommitteeInfo,
-    ) -> Result<bool, StorageError> {
+        additional_foreign_pledges: I,
+    ) -> Result<bool, StorageError>
+    where
+        TTx: StateStoreReadTransaction,
+        I: IntoIterator<Item = &'p SubstatePledge>,
+    {
         let inputs = self
             .transaction()
             .all_inputs_iter()
             .map(|req| (local_committee_info.includes_substate_id(req.substate_id()), req));
         let locks = LockedSubstateValue::get_all_for_transaction(tx, leaf_block, self.id())?;
-        let pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.id())?;
+        let mut pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.id())?;
+        pledges.extend(additional_foreign_pledges.into_iter().cloned());
         for (is_local, input) in inputs {
             if is_local {
                 if locks.iter().all(|i| !i.satisfies_requirements(input)) {

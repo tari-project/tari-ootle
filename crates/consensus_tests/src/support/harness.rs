@@ -64,7 +64,7 @@ use super::{
 };
 use crate::{
     support::{
-        RoundRobinLeaderStrategy,
+        SmoothWeightedRoundRobin,
         ValidatorChannels,
         address::TestAddress,
         epoch_manager::TestEpochManager,
@@ -80,7 +80,7 @@ use crate::{
 pub struct Test {
     validators: HashMap<TestAddress, Validator>,
     network: TestNetwork,
-    _leader_strategy: RoundRobinLeaderStrategy,
+    _leader_strategy: SmoothWeightedRoundRobin,
     _epoch_manager: TestEpochManager,
     num_committees: u32,
     submitted_transactions: Vec<TransactionId>,
@@ -831,7 +831,7 @@ impl TestBuilder {
     }
 
     async fn build_validators(
-        leader_strategy: &RoundRobinLeaderStrategy,
+        leader_strategy: &SmoothWeightedRoundRobin,
         epoch_manager: &TestEpochManager,
         rocks_path_override: Option<String>,
         config: HotstuffConfig,
@@ -905,7 +905,7 @@ impl TestBuilder {
         let committees = build_committees(self.committees);
         let num_committees = u32::try_from(committees.len()).expect("WAAAY too many committees");
 
-        let leader_strategy = RoundRobinLeaderStrategy::new();
+        let leader_strategy = SmoothWeightedRoundRobin::new();
         let (tx_epoch_events, _) = broadcast::channel(10);
         let epoch_manager = TestEpochManager::new(tx_epoch_events);
         epoch_manager.add_committees(committees).await;

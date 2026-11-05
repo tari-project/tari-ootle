@@ -187,6 +187,46 @@ mod template {
             }
         }
 
+        /// Creates one vault and names it in the state of two new components.
+        pub fn with_vault_in_two_components() -> Component<Self> {
+            let vault = Vault::new_empty(STEALTH_TARI_RESOURCE_ADDRESS);
+            let vault_id = vault.vault_id();
+            let _first = Component::new(Self {
+                vault: Some(vault),
+                ..Default::default()
+            })
+            .create();
+            Component::new(Self {
+                vault: Some(Vault::for_test(vault_id)),
+                ..Default::default()
+            })
+            .create()
+        }
+
+        /// Names this component's vault in the state of a new component.
+        pub fn share_vault_with_new_component(&self) -> Component<Self> {
+            let vault_id = self.vault.as_ref().unwrap().vault_id();
+            Component::new(Self {
+                vault: Some(Vault::for_test(vault_id)),
+                ..Default::default()
+            })
+            .with_access_rules(AccessRules::allow_all())
+            .create()
+        }
+
+        /// Creates a component holding a new vault, then names that vault in this component's state as well.
+        pub fn share_new_component_vault_with_self(&mut self) -> ComponentAddress {
+            let vault = Vault::new_empty(STEALTH_TARI_RESOURCE_ADDRESS);
+            let vault_id = vault.vault_id();
+            let other = Component::new(Self {
+                vault: Some(vault),
+                ..Default::default()
+            })
+            .create();
+            self.vault_copy = Some(Vault::for_test(vault_id));
+            *other.address()
+        }
+
         pub fn dangling_resource() -> Self {
             let _resx = ResourceBuilder::non_fungible().build();
             Self::default()

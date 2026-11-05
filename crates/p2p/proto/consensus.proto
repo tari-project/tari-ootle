@@ -144,6 +144,13 @@ message MultiShardAtom {
   uint64 fee = 5;
   LeaderFee leader_fee = 6;
   bool fee_intent_only = 7;
+  LockedEpoch locked_epoch = 8;
+}
+
+message LockedEpoch {
+  uint64 epoch = 1;
+  bytes hash = 2;
+  uint32 exhaust_burn_rate_bps = 3;
 }
 
 message LocalOnlyAtom {

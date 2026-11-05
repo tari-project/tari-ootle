@@ -54,6 +54,7 @@ use tari_ootle_walletd_client::{
 use super::context::{AuthIdentity, HandlerContext};
 use crate::handlers::{
     component_upgrades::component_upgrades,
+    helpers,
     helpers::{invalid_params, invalid_request},
 };
 
@@ -345,7 +346,7 @@ fn requester_of(auth: AuthIdentity) -> SigningRequester {
 /// authorizer of a stealth statement's revealed funds, in a transaction walletd
 /// seals itself, so a co-signature for another party never needs one.
 fn is_signing_key(context: &HandlerContext, key_id: &KeyId) -> Result<bool, anyhow::Error> {
-    let is_signing_key = context.wallet_sdk().key_manager_api().is_signing_key(*key_id)?;
+    let is_signing_key = helpers::is_signing_key(context.wallet_sdk(), "key_id", key_id)?;
     Ok(is_signing_key && key_id.derived_branch() != Some(KeyBranch::Nonce))
 }
 

@@ -143,6 +143,8 @@ pub enum WasmValidationError {
     TooManyTables { count: usize, max_tables: usize },
     #[error("Module declares {count} globals, the maximum is {max_globals}")]
     TooManyGlobals { count: usize, max_globals: usize },
+    #[error("Module declares more active element segments than the maximum of {max_element_segments}")]
+    TooManyElementSegments { max_element_segments: usize },
     #[error("Module contains more than {max_functions} functions")]
     TooManyModuleFunctions { max_functions: usize },
     #[error("Module's functions declare more than {max_variables} parameters and locals")]
@@ -235,6 +237,7 @@ impl WasmValidationError {
             Self::StartSectionNotAllowed |
             Self::TooManyTables { .. } |
             Self::TooManyGlobals { .. } |
+            Self::TooManyElementSegments { .. } |
             Self::TooManyModuleFunctions { .. } |
             Self::TooManyModuleVariables { .. } |
             Self::TooManyFunctionMeteringChecks { .. } |

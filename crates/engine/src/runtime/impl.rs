@@ -57,7 +57,7 @@ use tari_ootle_transaction::{
     ResourceAddressRef,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
 };
-use tari_template_abi::{FunctionDef, TemplateDef, Type};
+use tari_template_abi::{FunctionDef, FunctionKind, TemplateDef, Type};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, is_builtin_template_address};
 use tari_template_lib::{
     SpendContext,
@@ -133,7 +133,7 @@ use tari_template_lib::{
         access_rules::{
             AccessRule,
             ComponentAccessRules,
-            InvalidMOfN,
+            InvalidAccessRule,
             RequireRule,
             ResourceAuthAction,
             RestrictedAccessRule,
@@ -532,10 +532,10 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             }
             // The hook component may still be an unused address allocation when the resource is acted upon in the
             // same call that creates it. For example, commonly a user creates a resource with initial supply and
-            // deposits it into a vault before creating the component. In this case, we "skip" the hook.
-            if state
-                .get_allocated_address_by_address(auth_hook.component_address)
-                .is_some()
+            // deposits it into a vault before creating the component. In this case, we "skip" the hook. Only the
+            // frame holding the allocation, running the template that made it, may skip.
+            if let Some(alloc) = state.get_allocated_address_in_current_scope(auth_hook.component_address)? &&
+                alloc.template_address() == state.current_template().ok()
             {
                 return Ok(true);
             }
@@ -564,11 +564,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         }
 
         let resource_id: SubstateId = (*auth_caller.resource()).into();
-        // The signature of a call back is (action: ResourceAuthAction, auth_caller: AuthHookCaller). The hook's
-        // call decodes the acting component's state from these arguments, so they are charged as a cross-template
-        // call's are.
+        // The signature of a call back is (action: ResourceAuthAction, auth_caller: AuthHookCaller).
         let args = invoke_args![action, auth_caller];
-        self.charge_call_args(&args)?;
 
         // The hook frame only accepts the `AuthHookCaller` argument if the resource it names is in the acting
         // frame's scope. The reference is scoped to the hook call: the acting frame's scope must be the same after
@@ -684,21 +681,6 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         })
     }
 
-    /// Charges for the arguments a template passes to a cross-template call, which the engine
-    /// decodes into the callee's `CallInfo`.
-    fn charge_call_args(&self, args: &[Bytes]) -> Result<(), RuntimeError> {
-        for arg in args {
-            self.charge_engine_arg(arg).map_err(|e| match e {
-                EngineArgChargeError::Unreadable(e) => RuntimeError::InvalidArgument {
-                    argument: "args",
-                    reason: format!("Argument failed to decode. Err: {:?}", e),
-                },
-                EngineArgChargeError::Runtime(e) => e,
-            })?;
-        }
-        Ok(())
-    }
-
     fn invoke_template_function(
         &self,
         template_address: &TemplateAddress,
@@ -812,17 +794,6 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
 
-        if func.arguments.len() != 3 {
-            return Err(RuntimeError::InvalidArgument {
-                argument,
-                reason: format!(
-                    "Authorize hook '{}' must take 3 arguments (incl &self), but found {}",
-                    hook,
-                    func.arguments.len()
-                ),
-            });
-        }
-
         if !func.has_receiver() {
             return Err(RuntimeError::InvalidArgument {
                 argument,
@@ -830,8 +801,19 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
 
+        if func.arguments.len() != 2 {
+            return Err(RuntimeError::InvalidArgument {
+                argument,
+                reason: format!(
+                    "Authorize hook '{}' must take 2 arguments after self, but found {}",
+                    hook,
+                    func.arguments.len()
+                ),
+            });
+        }
+
         if !matches!(
-            func.arguments.get(1).expect("length checked").arg_type.other(),
+            func.arguments.first().expect("length checked").arg_type.other(),
             Some("ResourceAuthAction")
         ) {
             return Err(RuntimeError::InvalidArgument {
@@ -841,7 +823,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         }
 
         if !matches!(
-            func.arguments.get(2).expect("length checked").arg_type.other(),
+            func.arguments.get(1).expect("length checked").arg_type.other(),
             Some("AuthHookCaller")
         ) {
             return Err(RuntimeError::InvalidArgument {
@@ -854,21 +836,14 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     }
 
     /// Validates the shape of a spend-script predicate `FunctionDef`, mirroring `check_resource_auth_hook`. A spend
-    /// script must be a non-mutable, unit-returning function whose last argument is a `SpendContext`. The mutability
-    /// rule is load-bearing: a mutable predicate could take a write lock and cause side effects, defeating the
-    /// read-only guarantee.
+    /// script must be a unit-returning static function whose last argument is a `SpendContext`. Taking no component
+    /// is load-bearing: a predicate that locked a component could write it, defeating the read-only guarantee.
     fn validate_spend_script_signature(func: &FunctionDef) -> Result<(), RuntimeError> {
-        if func.is_mut {
-            return Err(RuntimeError::InvalidArgument {
-                argument: "TemplateFunction",
-                reason: format!("spend script function '{}' must not be mutable", func.name),
-            });
-        }
-        if func.has_receiver() {
+        if func.kind != FunctionKind::Function {
             return Err(RuntimeError::InvalidArgument {
                 argument: "TemplateFunction",
                 reason: format!(
-                    "spend script function '{}' must be a template function, not a method taking &self",
+                    "spend script function '{}' must be a template function, not a method or a migration",
                     func.name
                 ),
             });
@@ -1267,6 +1242,20 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         self.charge_non_fungible_ids_moved(ids.saturating_mul(2))
     }
 
+    /// Charges [`Self::charge_engine_arg`] for an argument's CBOR, then decodes it into the `Value`
+    /// the call is invoked with.
+    ///
+    /// Every argument the engine decodes for a call goes through here: the decode, the indexing of the
+    /// value for well-known types and its encoding into the callee's `CallInfo` all run outside the
+    /// Wasmer meter, and transaction weight prices an argument's bytes, which follow none of that.
+    fn decode_charged_arg(&self, bytes: &[u8]) -> Result<tari_bor::Value, RuntimeError> {
+        self.charge_engine_arg(bytes).map_err(|e| match e {
+            EngineArgChargeError::Unreadable(e) => RuntimeError::from(e),
+            EngineArgChargeError::Runtime(e) => e,
+        })?;
+        Ok(decode_exact_with_max_depth(bytes, limits::MAX_CBOR_NESTING_DEPTH)?)
+    }
+
     /// Charges `points(input.len(), 0)` for the bytes of the CBOR in `input`, then counts its items
     /// and charges `points(0, items)` for them.
     ///
@@ -1511,8 +1500,8 @@ where
                             .to_string(),
                     });
                 }
-                reject_invalid_m_of_n("access_rules", access_rules.find_invalid_m_of_n())?;
-                reject_invalid_m_of_n("owner_rule", owner_rule_m_of_n(&owner_rule))?;
+                reject_invalid_rule("access_rules", access_rules.find_invalid_rule())?;
+                reject_invalid_rule("owner_rule", find_invalid_owner_rule(&owner_rule))?;
                 // A component owner rule is only ever evaluated with the component's own frame on top, so
                 // `component(..)`/`template(..)` would be constant (true for the component's own address).
                 if let OwnerRule::ByAccessRule(rule) = &owner_rule &&
@@ -1533,7 +1522,7 @@ where
                             reason: "component(..)/template(..) cannot be used in a component upgrade rule".to_string(),
                         });
                     }
-                    reject_invalid_m_of_n("upgrade_rule", rule.find_invalid_m_of_n())?;
+                    reject_invalid_rule("upgrade_rule", rule.find_invalid_rule())?;
                 }
 
                 let owner_rule = match owner_rule {
@@ -1657,7 +1646,7 @@ where
                             .to_string(),
                     });
                 }
-                reject_invalid_m_of_n("access_rules", access_rules.find_invalid_m_of_n())?;
+                reject_invalid_rule("access_rules", access_rules.find_invalid_rule())?;
 
                 self.tracker.write_with_authorization(|state| {
                     let component_lock = state
@@ -1712,7 +1701,7 @@ where
                     });
                 }
                 if let SubstateOwnerRule::ByAccessRule(rule) = &owner_rule {
-                    reject_invalid_m_of_n("owner_rule", rule.find_invalid_m_of_n())?;
+                    reject_invalid_rule("owner_rule", rule.find_invalid_rule())?;
                 }
 
                 self.tracker.write_with_authorization(|state| {
@@ -1839,8 +1828,8 @@ where
 
                 Self::check_metadata_values("metadata", &arg.metadata)?;
                 Self::check_token_symbol(&arg.metadata)?;
-                reject_invalid_m_of_n("resource_access_rules", arg.access_rules.find_invalid_m_of_n())?;
-                reject_invalid_m_of_n("resource_owner_rule", owner_rule_m_of_n(&arg.owner_rule))?;
+                reject_invalid_rule("resource_access_rules", arg.access_rules.find_invalid_rule())?;
+                reject_invalid_rule("resource_owner_rule", find_invalid_owner_rule(&arg.owner_rule))?;
 
                 let owner_rule = match arg.owner_rule {
                     OwnerRule::OwnedBySigner => {
@@ -2190,7 +2179,7 @@ where
                             reason: "UpdateAccessRule resource action requires a resource address".to_string(),
                         })?;
                 let UpdateAccessRuleArg { action, new_rule } = args.assert_one_arg()?;
-                reject_invalid_m_of_n("new_rule", new_rule.find_invalid_m_of_n())?;
+                reject_invalid_rule("new_rule", new_rule.find_invalid_rule())?;
 
                 let resource_lock = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
@@ -2450,14 +2439,7 @@ where
                         let id = SubstateId::Utxo(UtxoAddress::new(resource_address, utxo));
                         let locked = state_mut.write_lock_substate(id.clone())?;
 
-                        let utxo_mut = state_mut
-                            .get_locked_substate_mut(&locked)?
-                            .as_utxo_mut()
-                            .ok_or_else(|| RuntimeError::LockSubstateMismatch {
-                                lock_id: locked.lock_id(),
-                                expected_type: "Utxo",
-                                id,
-                            })?;
+                        let utxo_mut = state_mut.get_utxo_mut(&locked)?;
 
                         // Freeze is idempotent.
                         if arg.freeze {
@@ -2508,14 +2490,7 @@ where
                         ));
                         let locked = state_mut.write_lock_substate(id.clone())?;
 
-                        let output_mut = state_mut
-                            .get_locked_substate_mut(&locked)?
-                            .as_confidential_output_mut()
-                            .ok_or_else(|| RuntimeError::LockSubstateMismatch {
-                                lock_id: locked.lock_id(),
-                                expected_type: "ConfidentialOutput",
-                                id,
-                            })?;
+                        let output_mut = state_mut.get_confidential_output_mut(&locked)?;
 
                         // Freeze is idempotent.
                         if arg.freeze {
@@ -2574,14 +2549,7 @@ where
                     let id = SubstateId::Utxo(UtxoAddress::new(resource_address, arg.utxo_id));
                     let utxo_lock = state_mut.write_lock_substate(id.clone())?;
 
-                    let utxo_mut = state_mut
-                        .get_locked_substate_mut(&utxo_lock)?
-                        .as_utxo_mut()
-                        .ok_or_else(|| RuntimeError::LockSubstateMismatch {
-                            lock_id: utxo_lock.lock_id(),
-                            expected_type: "Utxo",
-                            id,
-                        })?;
+                    let utxo_mut = state_mut.get_utxo_mut(&utxo_lock)?;
 
                     if utxo_mut.is_burnt() {
                         return Err(RuntimeError::ResourceError(ResourceError::UtxoBurnFailed {
@@ -4153,7 +4121,6 @@ where
                     args,
                 } = args.assert_one_arg()?;
 
-                self.charge_call_args(&args)?;
                 self.invoke_template_function(
                     &template_address,
                     &function,
@@ -4168,7 +4135,6 @@ where
                     args,
                 } = args.assert_one_arg()?;
 
-                self.charge_call_args(&args)?;
                 self.invoke_component_method(component_address, &method, args, None)?
             },
         };
@@ -4244,9 +4210,7 @@ where
                     details: "No current component lock in call scope".to_string(),
                 })?;
 
-            let component_mut = state_mut.get_component_mut(&locked)?;
-            let prev_template = *component_mut.template_address();
-            component_mut.set_template_address(new_template);
+            let prev_template = state_mut.set_component_template_address(&locked, new_template)?;
 
             state_mut.push_event(Event::std(
                 Some(locked.substate_id().clone()),
@@ -4615,12 +4579,11 @@ where
             .chain(args.iter())
             .map(|arg| match arg {
                 InstructionArg::Workspace(id) => self.resolve_workspace_id(id),
-                InstructionArg::Literal(v) => Ok(decode_exact_with_max_depth(v, limits::MAX_CBOR_NESTING_DEPTH)?),
+                InstructionArg::Literal(v) => self.decode_charged_arg(v),
                 // A blob arg's value is the raw bytes of the referenced blob, decoded as CBOR
                 // by the same path as `Literal`. Lookup is against the surrounding transaction's
-                // `Blobs`, set on the runtime at construction time. Each reference is charged via
-                // `charge_engine_arg` before decoding so repeating a single blob across many
-                // instructions cannot amplify host CBOR decoding without paying per reference.
+                // `Blobs`, set on the runtime at construction time. A blob is paid for once by
+                // transaction weight but may be referenced many times, so each reference is charged.
                 InstructionArg::Blob(idx) => {
                     let blob = self
                         .blobs
@@ -4629,11 +4592,7 @@ where
                             index: *idx,
                             count: self.blobs.len(),
                         })?;
-                    self.charge_engine_arg(blob.as_bytes()).map_err(|e| match e {
-                        EngineArgChargeError::Unreadable(e) => RuntimeError::from(e),
-                        EngineArgChargeError::Runtime(e) => e,
-                    })?;
-                    Ok(decode_exact(blob.as_bytes())?)
+                    self.decode_charged_arg(blob.as_bytes())
                 },
             })
             .collect()
@@ -4652,9 +4611,17 @@ where
     }
 }
 
-fn reject_invalid_m_of_n(argument: &'static str, invalid: Option<InvalidMOfN>) -> Result<(), RuntimeError> {
+fn reject_invalid_rule(argument: &'static str, invalid: Option<InvalidAccessRule>) -> Result<(), RuntimeError> {
     match invalid {
-        Some(InvalidMOfN::ThresholdOutOfRange {
+        Some(InvalidAccessRule::EmptyAnyOf) => Err(RuntimeError::EmptyAccessRuleComposite {
+            argument,
+            composite: "any_of",
+        }),
+        Some(InvalidAccessRule::EmptyAllOf) => Err(RuntimeError::EmptyAccessRuleComposite {
+            argument,
+            composite: "all_of",
+        }),
+        Some(InvalidAccessRule::ThresholdOutOfRange {
             threshold,
             num_requirements,
         }) => Err(RuntimeError::InvalidMOfNThreshold {
@@ -4662,16 +4629,16 @@ fn reject_invalid_m_of_n(argument: &'static str, invalid: Option<InvalidMOfN>) -
             threshold,
             num_requirements,
         }),
-        Some(InvalidMOfN::DuplicateRequirement { requirement }) => {
+        Some(InvalidAccessRule::DuplicateRequirement { requirement }) => {
             Err(RuntimeError::DuplicateMOfNRequirement { argument, requirement })
         },
         None => Ok(()),
     }
 }
 
-fn owner_rule_m_of_n(owner_rule: &OwnerRule) -> Option<InvalidMOfN> {
+fn find_invalid_owner_rule(owner_rule: &OwnerRule) -> Option<InvalidAccessRule> {
     match owner_rule {
-        OwnerRule::ByAccessRule(rule) => rule.find_invalid_m_of_n(),
+        OwnerRule::ByAccessRule(rule) => rule.find_invalid_rule(),
         OwnerRule::OwnedBySigner | OwnerRule::None | OwnerRule::ByPublicKey(_) => None,
     }
 }
@@ -4765,6 +4732,23 @@ mod tests {
             Rc::new(blobs),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn resolving_a_literal_arg_charges_native_points_for_its_items() {
+        let payload: Vec<u64> = (0..128).collect();
+        let encoded = tari_bor::encode(&payload).unwrap();
+        let items = tari_bor::count_data_items_bounded(&encoded, limits::MAX_CBOR_NESTING_DEPTH, u64::MAX)
+            .unwrap()
+            .unwrap();
+        let expected = engine_arg_points(encoded.len() as u64, items);
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let resolved = runtime
+            .resolve_args(None, &[InstructionArg::Literal(encoded.into())])
+            .unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(runtime.native_points_consumed(), expected);
     }
 
     #[test]

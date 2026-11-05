@@ -65,7 +65,7 @@ use tari_networking::{
 use tari_ootle_app_utilities::{
     claim_burn_proof_verifier::TariClaimBurnProofVerifier,
     configuration::convert_network_to_l1_network,
-    epoch_oracle_config::{BaseLayerOracleConfig, EpochOracleType},
+    epoch_oracle_config::{BaseLayerOracleConfig, EpochOracleConfig, EpochOracleType},
     fee_tables::get_fee_table_by_network,
     genesis_governance::resolve_genesis_council,
     identity_management,
@@ -697,21 +697,23 @@ async fn create_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStor
     store: TStore,
     consensus_constants: &ConsensusConstants,
 ) -> anyhow::Result<EpochOracle<TStore>> {
-    match config.epoch_oracle.oracle_type {
+    let oracle_config = config.epoch_oracle.for_network(config.network);
+    match oracle_config.oracle_type {
         EpochOracleType::BaseLayer => {
             let features = BaseLayerEpochOracleFeatures {
                 sync_headers: true,
                 sync_validator_node_changes: true,
             };
-            let oracle = create_base_layer_epoch_oracle(config, store, consensus_constants, features).await?;
+            let oracle =
+                create_base_layer_epoch_oracle(config, &oracle_config, store, consensus_constants, features).await?;
             Ok(EpochOracle::BaseLayer(oracle))
         },
         EpochOracleType::Configured => {
-            let oracle = create_configured_epoch_oracle(config, store).await?;
+            let oracle = create_configured_epoch_oracle(&oracle_config, store).await?;
             Ok(EpochOracle::Configured(oracle))
         },
         EpochOracleType::Hybrid => {
-            let oracle = create_hybrid_epoch_oracle(config, store, consensus_constants).await?;
+            let oracle = create_hybrid_epoch_oracle(config, &oracle_config, store, consensus_constants).await?;
             Ok(EpochOracle::Hybrid(oracle))
         },
     }
@@ -719,20 +721,21 @@ async fn create_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStor
 
 async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Clone + 'static>(
     config: &ApplicationConfig,
+    oracle_config: &EpochOracleConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
     features: BaseLayerEpochOracleFeatures,
 ) -> anyhow::Result<BaseLayerOracle<TStore>> {
-    info!(target: LOG_TARGET, "🔮Base layer epoch oracle: {}", config.epoch_oracle.base_layer);
-    let mut base_node_client = create_base_layer_client(config.network, &config.epoch_oracle.base_layer).await?;
+    info!(target: LOG_TARGET, "🔮Base layer epoch oracle: {}", oracle_config.base_layer);
+    let mut base_node_client = create_base_layer_client(config.network, &oracle_config.base_layer).await?;
     verify_correct_network(&mut base_node_client, config.network).await?;
     Ok(BaseLayerOracle::new(
         store,
         base_node_client,
         BaseLayerEpochOracleConfig {
-            start_height: config.epoch_oracle.base_layer.start_height,
+            start_height: oracle_config.base_layer.start_height,
             height_lag: consensus_constants.base_layer_confirmations,
-            scanning_interval: config.epoch_oracle.base_layer.scanning_interval,
+            scanning_interval: oracle_config.base_layer.scanning_interval,
             sidechain_id: config.validator_node.sidechain_id.as_ref().map(|p| p.to_byte_type()),
             features,
         },
@@ -741,10 +744,10 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBloc
 }
 
 async fn create_configured_epoch_oracle<TStore: EpochOracleStore + Send>(
-    config: &ApplicationConfig,
+    oracle_config: &EpochOracleConfig,
     store: TStore,
 ) -> anyhow::Result<ConfiguredEpochOracle<TStore, RealTimeEpochTicker>> {
-    let oracle_config = config.epoch_oracle.configured.load().await?;
+    let oracle_config = oracle_config.configured.load().await?;
     info!(target: LOG_TARGET, "🔮Configured epoch oracle: {}", oracle_config);
     let oracle = ConfiguredEpochOracle::create(oracle_config, store)?;
     Ok(oracle)
@@ -752,6 +755,7 @@ async fn create_configured_epoch_oracle<TStore: EpochOracleStore + Send>(
 
 async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Clone + Send + 'static>(
     config: &ApplicationConfig,
+    oracle_config: &EpochOracleConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
 ) -> anyhow::Result<HybridEpochOracle<TStore>> {
@@ -761,8 +765,8 @@ async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHea
         sync_validator_node_changes: false,
     };
     let base_layer_oracle =
-        create_base_layer_epoch_oracle(config, store.clone(), consensus_constants, features).await?;
-    let oracle_config = config.epoch_oracle.configured.load().await?;
+        create_base_layer_epoch_oracle(config, oracle_config, store.clone(), consensus_constants, features).await?;
+    let oracle_config = oracle_config.configured.load().await?;
 
     info!(target: LOG_TARGET, "🔮Hybrid epoch oracle initializing: {}", oracle_config);
     let (ticker, trigger) = mpsc_ticker();

@@ -1067,8 +1067,9 @@ mod tests {
     };
     use tari_ootle_transaction::{ComponentReference, Instruction, TransactionBuilder};
     use tari_ootle_wallet_sdk::{
+        apis::key_manager::KeyManagerApiError,
         models::{KeyBranch, WalletLock, WalletTransactionUpdate},
-        storage::WalletStoreReader,
+        storage::{WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
     };
     use tari_ootle_walletd_client::ComponentAddressOrName;
     use tari_template_lib_types::{ComponentAddress, TemplateAddress, crypto::RistrettoPublicKeyBytes};
@@ -1558,5 +1559,104 @@ mod tests {
         ] {
             signer.generate_signature(key, &unsigned).unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn submit_and_dry_run_refuse_nonexistent_imported_keys() {
+        let daemon = TestDaemon::start().await;
+        let reader = daemon.api_key("reader", "transactions:read");
+        let account = KeyId::derived(KeyBranch::Account, 0);
+        let missing_imported = KeyId::imported(999_999);
+        let assert_missing = |err: anyhow::Error, field: &str| {
+            assert_invalid_params(&err, field);
+            assert!(err.to_string().contains("does not exist"), "{err}");
+        };
+
+        let err = handle_submit(
+            &daemon.context,
+            Some(&daemon.session),
+            submit_request(missing_imported, vec![]),
+        )
+        .await
+        .unwrap_err();
+        assert_missing(err, "seal_signer");
+
+        let err = handle_submit(
+            &daemon.context,
+            Some(&daemon.session),
+            submit_request(account, vec![missing_imported]),
+        )
+        .await
+        .unwrap_err();
+        assert_missing(err, "other_signers");
+
+        let err = handle_submit_dry_run(&daemon.context, Some(&reader), submit_request(missing_imported, vec![]))
+            .await
+            .unwrap_err();
+        assert_missing(err, "seal_signer");
+
+        let err = handle_submit_dry_run(
+            &daemon.context,
+            Some(&reader),
+            submit_request(account, vec![missing_imported]),
+        )
+        .await
+        .unwrap_err();
+        assert_missing(err, "other_signers");
+
+        let key_manager = daemon.context.wallet_sdk().key_manager_api();
+        assert!(matches!(
+            key_manager.is_signing_key(missing_imported),
+            Err(KeyManagerApiError::KeyNotFound { .. })
+        ));
+    }
+
+    /// `accounts.create_stealth_transfer_statement` creates a lock for its
+    /// caller, who then submits with it.
+    #[tokio::test]
+    async fn a_caller_submits_with_its_own_lock_once() {
+        let daemon = TestDaemon::start_with_transaction_service().await;
+        let tool = daemon.api_key("tool", "transactions:create,transactions:read");
+        let lock_id = lock_for(&daemon, owner_of(&daemon, &tool));
+
+        let transaction_id = handle_submit(&daemon.context, Some(&tool), submit_with_locks(vec![lock_id]))
+            .await
+            .unwrap()
+            .transaction_id;
+        assert_eq!(get_lock(&daemon, lock_id).transaction_id, Some(transaction_id));
+
+        // The lock now belongs to that transaction.
+        let err = handle_submit(&daemon.context, Some(&tool), submit_with_locks(vec![lock_id]))
+            .await
+            .unwrap_err();
+        assert_invalid_params(&err, "lock_ids");
+        assert_eq!(get_lock(&daemon, lock_id).transaction_id, Some(transaction_id));
+    }
+
+    #[tokio::test]
+    async fn submit_refuses_a_lock_a_live_request_holds() {
+        let daemon = TestDaemon::start().await;
+        let lock_id = lock_for(&daemon, owner_of(&daemon, &daemon.session));
+        daemon
+            .context
+            .wallet_sdk()
+            .store()
+            .with_write_tx(|tx| {
+                tx.transaction_request_insert(
+                    &UnsignedTransaction::new(Network::LocalNet.as_byte(), Epoch(100)),
+                    KeyId::derived(KeyBranch::Account, 0),
+                    &[],
+                    &[],
+                    &[lock_id],
+                    None,
+                    Duration::from_secs(600),
+                )
+            })
+            .unwrap();
+
+        let err = handle_submit(&daemon.context, Some(&daemon.session), submit_with_locks(vec![lock_id]))
+            .await
+            .unwrap_err();
+        assert_invalid_params(&err, "lock_ids");
     }
 }

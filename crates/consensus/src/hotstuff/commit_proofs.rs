@@ -299,7 +299,7 @@ mod tests {
     use tari_ootle_storage::{
         StateStore,
         StateStoreWriteTransaction,
-        consensus_models::{BlockCommands, Command, LocalOnlyAtom, MultiShardAtom},
+        consensus_models::{BlockCommands, Command, LocalOnlyAtom, LockedEpoch, MultiShardAtom},
     };
     use tari_ootle_transaction::{Network, TransactionId};
     use tari_sidechain::{FixedHash, ProposalVoteMessage, QuorumDecision, check_proof_structure};
@@ -496,6 +496,7 @@ mod tests {
                 transaction_fee: 0,
                 leader_fee: None,
                 fee_intent_only: false,
+                locked_epoch: LockedEpoch::new(Epoch(1), Default::default(), Default::default()),
             }),
         ])
         .unwrap();

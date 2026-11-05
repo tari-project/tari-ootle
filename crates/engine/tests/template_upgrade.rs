@@ -19,7 +19,7 @@ use tari_template_lib::types::{
     OwnerRule,
     TemplateAddress,
     VaultId,
-    access_rules::UpdateRule,
+    access_rules::{RestrictedAccessRule, UpdateRule},
     crypto::RistrettoPublicKeyBytes,
     rule,
 };
@@ -82,7 +82,7 @@ fn it_sets_migrate_to_true_in_the_function_def() {
     ]);
     let t2 = test.get_module("TemplateV2"); // Load v2 module
     let migrate_fn = t2.template_def().get_function("migrate_v1_to_v2").unwrap();
-    assert!(migrate_fn.is_migration);
+    assert!(migrate_fn.is_migration());
 }
 
 #[test]
@@ -507,6 +507,13 @@ fn it_rejects_invalid_upgrade_rules_at_creation() {
                 argument: "upgrade_rule",
                 threshold: 2,
                 num_requirements: 1,
+            },
+        ),
+        (
+            AccessRule::Restricted(RestrictedAccessRule::AnyOf(Box::new([]))),
+            RuntimeError::EmptyAccessRuleComposite {
+                argument: "upgrade_rule",
+                composite: "any_of",
             },
         ),
     ];

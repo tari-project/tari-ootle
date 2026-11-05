@@ -1003,8 +1003,8 @@ fn spend_rejects_unknown_function() {
 }
 
 #[test]
-fn spend_rejects_mutable_function() {
-    assert_spend_rejected("bad_mutable", vec![], "must not be mutable");
+fn spend_rejects_mutable_method() {
+    assert_spend_rejected("bad_mutable", vec![], "must be a template function, not a method");
 }
 
 #[test]

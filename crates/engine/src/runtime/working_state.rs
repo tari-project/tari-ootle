@@ -2679,11 +2679,8 @@ mod tests {
     #[test]
     fn account_stealth_transfer_enforces_statement_and_transaction_limits() {
         let mut state = test_working_state();
-        let valid = StealthTransferStatement::revealed_only(
-            Amount::new(1),
-            Amount::new(1),
-            RistrettoPublicKeyBytes::default(),
-        );
+        let valid =
+            StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
 
         let mut too_many_inputs = valid.clone();
         too_many_inputs.inputs_statement.inputs = (0..=limits::STEALTH_LIMITS.max_inputs)

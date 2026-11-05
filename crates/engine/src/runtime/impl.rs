@@ -4811,11 +4811,8 @@ mod tests {
 
     #[test]
     fn stealth_transfer_and_pay_fee_enforce_limits_before_substate_reads_and_auth() {
-        let valid = StealthTransferStatement::revealed_only(
-            Amount::new(1),
-            Amount::new(1),
-            RistrettoPublicKeyBytes::default(),
-        );
+        let valid =
+            StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
         let mut too_many_inputs = valid.clone();
         too_many_inputs.inputs_statement.inputs = (0..=limits::STEALTH_LIMITS.max_inputs)
             .map(|_| StealthInput::new(PedersenCommitmentBytes::from_bytes(&[0u8; 32]).unwrap()))

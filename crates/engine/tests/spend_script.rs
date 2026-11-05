@@ -1091,11 +1091,9 @@ fn validating_a_spend_script_charges_native_points_for_bound_args() {
 
     let (resx_empty, mint_empty) = mint_utxo(
         &mut test,
-        script_condition(
-            script_template,
-            "always_ok_with_bytes",
-            vec![encode_arg(&Vec::<u8>::new())],
-        ),
+        script_condition(script_template, "always_ok_with_bytes", vec![encode_arg(
+            &Vec::<u8>::new(),
+        )]),
     );
     let transfer_empty = spend_into(&mint_empty, key_path(test.to_public_key_bytes()));
     let result_empty = test.execute_expect_success(

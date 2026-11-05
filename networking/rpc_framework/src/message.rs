@@ -273,10 +273,6 @@ impl proto::RpcResponse {
         ))
     }
 
-    pub fn is_fin(&self) -> bool {
-        self.flags().map(|flags| flags.is_fin()).unwrap_or(false)
-    }
-
     /// True if this is a keepalive frame: ACK-flagged and not terminating the stream.
     pub fn is_keepalive(&self) -> bool {
         self.flags()
@@ -314,31 +310,5 @@ impl proto::RpcSessionReply {
                 "handshake reply did not contain a session result",
             )),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rpc_response_is_fin_handles_out_of_range_and_unknown_flags() {
-        let fin_resp = proto::RpcResponse {
-            flags: u32::from(RpcMessageFlags::FIN.bits()),
-            ..Default::default()
-        };
-        assert!(fin_resp.is_fin());
-
-        let ack_resp = proto::RpcResponse {
-            flags: u32::from(RpcMessageFlags::ACK.bits()),
-            ..Default::default()
-        };
-        assert!(!ack_resp.is_fin());
-
-        let out_of_range = proto::RpcResponse {
-            flags: u32::from(u8::MAX) + 1,
-            ..Default::default()
-        };
-        assert!(!out_of_range.is_fin());
     }
 }

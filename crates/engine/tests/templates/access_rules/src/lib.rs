@@ -481,10 +481,12 @@ mod access_rules_template {
                 ResourceType::Fungible,
                 "hook read the wrong resource for action {action:?}"
             );
-            if let Some(state) = caller.component_state() &&
-                let Ok(account) = tari_template_lib::models::Account::from_value(state) &&
-                let Some(vault) = account.get_vault_by_resource(caller.resource())
-            {
+            if let Some(state) = caller.component_state() {
+                let account = tari_template_lib::models::Account::from_value(state)
+                    .expect("acting component state must decode as an Account");
+                let vault = account
+                    .get_vault_by_resource(caller.resource())
+                    .expect("acting account must hold a vault for the guarded resource");
                 let _balance = vault.balance();
             }
         }

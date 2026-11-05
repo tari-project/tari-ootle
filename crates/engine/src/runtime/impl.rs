@@ -657,8 +657,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         vault_id: VaultId,
         action: ResourceAuthAction,
         freeze_flag: VaultFreezeFlag,
-    ) -> Result<Option<RistrettoPublicKey>, RuntimeError> {
-        let (maybe_auth_hook, auth_caller, maybe_view_key) = self.tracker.write_with_authorization(|state_mut| {
+    ) -> Result<ResourceAddress, RuntimeError> {
+        let resource_address = self.tracker.write_with(|state_mut| {
             let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
             let vault = state_mut.get_vault(&vault_lock)?;
             let freeze_flags = vault.freeze_flags();
@@ -668,37 +668,11 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             if freeze_flags.contains(freeze_flag) {
                 return Err(RuntimeError::VaultFrozen { vault_id, freeze_flag });
             }
-
-            let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
-            let resource = state_mut.get_resource(&resource_lock)?;
-
-            state_mut.authorization().check_resource_access_rules(
-                action,
-                resource.as_ownership(),
-                resource.access_rules(),
-            )?;
-
-            let maybe_view_key = resource
-                .to_view_key_public_key()
-                .map_err(|e| RuntimeError::InvariantError {
-                    function: "authorize_vault_action",
-                    details: format!(
-                        "Resource {} has a malformed view key: {}",
-                        resource_lock.substate_id(),
-                        e
-                    ),
-                })?;
-            let auth_hook = resource.auth_hook().cloned();
-            let auth_caller = state_mut.get_auth_caller(&resource_lock)?;
-
-            state_mut.unlock_substate(resource_lock)?;
-            Ok::<_, RuntimeError>((auth_hook, auth_caller, maybe_view_key))
+            Ok::<_, RuntimeError>(resource_address)
         })?;
 
-        if let Some(auth_hook) = maybe_auth_hook {
-            self.invoke_resource_access_hook(auth_hook, auth_caller, action)?;
-        }
-        Ok(maybe_view_key)
+        self.authorize_resource_action(resource_address, action, |_| Ok(()))?;
+        Ok(resource_address)
     }
 
     /// An interface over this transaction's state for a nested call to run against.
@@ -2745,8 +2719,30 @@ where
                 })?;
                 let arg: VaultWithdrawArg = args.assert_one_arg()?;
 
-                let maybe_view_key =
+                let resource_address =
                     self.authorize_vault_action(vault_id, ResourceAuthAction::Withdraw, VaultFreezeFlag::Withdrawals)?;
+
+                let maybe_view_key = if matches!(&arg, VaultWithdrawArg::Confidential { .. }) {
+                    self.tracker.write_with(|state_mut| {
+                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
+                        let resource = state_mut.get_resource(&resource_lock)?;
+                        let maybe_view_key =
+                            resource
+                                .to_view_key_public_key()
+                                .map_err(|e| RuntimeError::InvariantError {
+                                    function: "VaultAction::Withdraw",
+                                    details: format!(
+                                        "Resource {} has a malformed view key: {}",
+                                        resource_lock.substate_id(),
+                                        e
+                                    ),
+                                })?;
+                        state_mut.unlock_substate(resource_lock)?;
+                        Ok::<_, RuntimeError>(maybe_view_key)
+                    })?
+                } else {
+                    None
+                };
 
                 // Charge the withdraw's native verification cost against the payment-funded
                 // allowance before any of its proof crypto runs.

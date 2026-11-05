@@ -2348,8 +2348,9 @@ mod resource_access_rules {
         });
     }
 
-    /// Mint takes the resource's write lock. The hook guards that resource and may legitimately read it, so the
-    /// lock must not be held across the hook call.
+    /// Mint takes the resource's write lock, and vault withdraw, deposit and proof creation take the vault's write
+    /// lock. The hook guards that resource and may legitimately read both the resource and its vault, so neither lock
+    /// must be held across the hook call.
     #[test]
     fn it_allows_a_hook_to_read_the_resource_it_guards() {
         let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);

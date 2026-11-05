@@ -67,6 +67,8 @@ pub struct Handler<TStore> {
     /// The want list the in-flight outbound sync sent. When that sync succeeds and `current_want_list` is still this
     /// list, `current_want_list` is cleared, so a follow-up sync carries only work that arrived after it started.
     in_flight_want_list: Option<Arc<WantList>>,
+    /// The local peer record the in-flight outbound sync sent. If that sync fails, the record is restored to
+    /// `pending_local_peer_record` unless a newer record was pushed while the sync was in flight.
     in_flight_local_peer_record: Option<Arc<SignedPeerRecord>>,
     pending_events: VecDeque<Event>,
     outbound_tasks: futures_bounded::FuturesSet<Event>,
@@ -123,6 +125,13 @@ where TStore: PeerStore
         self.is_complete = false;
         self.must_request_substream = true;
         self.failed_attempts = 0;
+    }
+
+    /// Moves `pending_local_peer_record` into `in_flight_local_peer_record` and returns it for the outbound sync task.
+    fn take_local_record_for_sync(&mut self) -> Option<Arc<SignedPeerRecord>> {
+        let record = self.pending_local_peer_record.take();
+        self.in_flight_local_peer_record.clone_from(&record);
+        record
     }
 
     /// Runs `fut` as this connection's outbound sync of `current_want_list`.
@@ -224,8 +233,7 @@ where TStore: PeerStore
         let store = self.store.clone();
         let config = self.config.clone();
 
-        let pending_local_peer_record = self.pending_local_peer_record.take();
-        self.in_flight_local_peer_record.clone_from(&pending_local_peer_record);
+        let pending_local_peer_record = self.take_local_record_for_sync();
         let fut = outbound_request_want_list_task(
             self.peer_id,
             framed,
@@ -709,7 +717,8 @@ mod tests {
         handler.on_behaviour_event(HandlerAction::PushLocalRecord(initial_record.clone()));
         assert!(is_substream_request(&poll_once(&mut handler)));
 
-        handler.in_flight_local_peer_record = handler.pending_local_peer_record.take();
+        let sent = handler.take_local_record_for_sync();
+        assert!(sent.as_ref().is_some_and(|rec| Arc::ptr_eq(rec, &initial_record)));
         let peer_id = handler.peer_id;
         assert!(matches!(
             complete_outbound_sync(&mut handler, Event::OutboundStreamInterrupted { peer_id }),
@@ -725,6 +734,23 @@ mod tests {
                 .is_some_and(|rec| Arc::ptr_eq(rec, &initial_record))
         );
         assert!(is_substream_request(&poll_once(&mut handler)));
+
+        // A newer record pushed while the retry is in flight must not be overwritten if that sync also fails.
+        let _ = handler.take_local_record_for_sync();
+        let newer_record = local_record();
+        handler.on_behaviour_event(HandlerAction::PushLocalRecord(newer_record.clone()));
+        assert!(matches!(
+            complete_outbound_sync(&mut handler, Event::OutboundStreamInterrupted { peer_id }),
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(
+                Event::OutboundStreamInterrupted { .. }
+            ))
+        ));
+        assert!(
+            handler
+                .pending_local_peer_record
+                .as_ref()
+                .is_some_and(|rec| Arc::ptr_eq(rec, &newer_record))
+        );
     }
 
     #[test]

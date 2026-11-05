@@ -84,8 +84,9 @@ activates.
   errors. (#3364)
 - **networking:** messaging sinks cycle, connection-close events fire and streams queue correctly,
   and peer sync completes its want list. (#3238, #3236)
-- **rpc_framework:** a rejected request deadline reports its bounds, and `RpcResponse::is_fin` is
-  guarded. (#3368)
+- **rpc_framework:** a response whose flags do not fit a byte no longer panics the reader, a
+  panicked session task is logged and frees its peer slot, and a rejected request deadline reports
+  its bounds. (#3368)
 - **validator_node_client:** null JSON-RPC errors and HTTP status errors are handled. (#3243)
 - **wallet:** a transaction can hold several locks and never orphans a linked lock, request
   summaries count locked inputs, invalid M-of-N and oversized spend conditions are refused, and a

@@ -528,8 +528,9 @@ fn validate_abi_type(function: &str, ty: &Type) -> Result<(), WasmValidationErro
                 pending.extend(types.iter().map(|t| (t, depth + 1)));
             },
             Type::Other { name } if name.len() > limits.max_function_name_length => {
-                return Err(WasmValidationError::FunctionNameTooLong {
-                    name: name.clone(),
+                return Err(WasmValidationError::AbiTypeNameTooLong {
+                    function: function.to_string(),
+                    length: name.len(),
                     max_length: limits.max_function_name_length,
                 });
             },

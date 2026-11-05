@@ -1095,10 +1095,13 @@ fn rejects_an_abi_type_past_the_limits_at_any_depth() {
     ];
     for (case, arg_type, output) in cases {
         let code = template_module_defining(&template_def_with(arg_type, output), "", ABI_EXPORTS);
-        assert!(
-            WasmModule::validate_code(&code).is_err(),
-            "{case} past the limits was admitted"
-        );
+        let error = WasmModule::validate_code(&code)
+            .err()
+            .unwrap_or_else(|| panic!("{case} past the limits was admitted"))
+            .to_string();
+        // The error names the function, and none of the type, which is the template's to size.
+        assert!(error.contains("main"), "{case}: {error}");
+        assert!(error.len() < 512, "{case}: a {}-byte error", error.len());
     }
 
     let at_the_limits = Type::Tuple(vec![nested(other(max_name), max_depth - 2); 2]);

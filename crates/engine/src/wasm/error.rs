@@ -130,6 +130,12 @@ pub enum WasmValidationError {
     AbiTypeTooDeep { function: String, max_depth: usize },
     #[error("Function {function} declares a type made of more than {max_types} types")]
     AbiTypeTooLarge { function: String, max_types: usize },
+    #[error("Function {function} declares a type named with {length} bytes, more than the maximum of {max_length}")]
+    AbiTypeNameTooLong {
+        function: String,
+        length: usize,
+        max_length: usize,
+    },
     #[error("Function {function_name} has invalid return type: {return_type:?}")]
     InvalidMigrationReturnType {
         function_name: String,
@@ -238,6 +244,7 @@ impl WasmValidationError {
             Self::TooManyFunctions { .. } |
             Self::AbiTypeTooDeep { .. } |
             Self::AbiTypeTooLarge { .. } |
+            Self::AbiTypeNameTooLong { .. } |
             Self::InvalidMigrationReturnType { .. } |
             Self::DisallowedCustomSection { .. } |
             Self::StartSectionNotAllowed |

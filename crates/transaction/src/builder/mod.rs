@@ -1064,12 +1064,7 @@ impl<D> TransactionBuilder<D> {
                     Assertion::BucketContainsNonFungibles { resource_address, .. },
                 ..
             } => {
-                if *resource_address != TARI_TOKEN {
-                    declare_input(
-                        self.unsigned_transaction.inputs_mut(),
-                        InputDeclaration::read(*resource_address),
-                    );
-                }
+                self.add_resource_input(*resource_address);
             },
             Instruction::UpdateComponentTemplate { component, migrate, .. } => {
                 self.add_input_for_component_ref(component);

@@ -140,6 +140,9 @@ impl TransactionV1 {
         &self.body.unsigned_transaction().main_signer
     }
 
+    /// The public key of the transaction's main signer (`MainSigner::SealSigner` or a declared
+    /// `MainSigner::Authorizer` whose signature is present on the transaction), or `None` when the transaction has no
+    /// main signer (`MainSigner::None` or an unsigned `MainSigner::Authorizer`).
     pub fn main_signer(&self) -> Option<RistrettoPublicKeyBytes> {
         match self.declared_main_signer() {
             MainSigner::None => None,

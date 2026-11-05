@@ -55,6 +55,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> Epoc
                     let event = event?;
                     debug!(target: LOG_TARGET, "⛓️ Base layer epoch event: {}", event);
                     match event {
+                        EpochEvent::Error(err) => return Some(EpochEvent::Error(err)),
                         // Trigger the watch sender for epoch changes
                         EpochEvent::EpochChanged { epoch, epoch_hash } => {
                             let _ignore = self.trigger.send(EpochTickerData {

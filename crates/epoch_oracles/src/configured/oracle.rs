@@ -753,6 +753,22 @@ mod tests {
     }
 
     #[test]
+    fn epoch_zero_emits_done_for_now_when_ticker_is_done() {
+        let config = mk_config(vec![]);
+        let mut oracle = ConfiguredEpochOracle::with_custom_ticker(config, TestStore::default(), ticker_through(0));
+
+        let events = drive_events(&mut oracle);
+
+        assert!(
+            matches!(events.as_slice(), [
+                EpochEvent::EpochChanged { epoch: Epoch(0), .. },
+                EpochEvent::DoneForNow { epoch: Epoch(0), .. }
+            ]),
+            "epoch 0 must emit DoneForNow when done_for_now is true; got {events:?}"
+        );
+    }
+
+    #[test]
     fn skipped_epochs_preserve_configured_activation_epoch_and_epoch_zero_emits_done_for_now() {
         let v1 = mk_validator(1, Epoch(2));
         let v2 = mk_validator(2, Epoch(4));

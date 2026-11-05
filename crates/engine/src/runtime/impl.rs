@@ -4835,15 +4835,14 @@ mod tests {
                 .add_substate_to_scope(vault_id.into())
                 .unwrap();
         });
-        let pay_fee_args = EngineArgs::try_from(vec![
+        let pay_fee_args = EngineArgs::from(vec![
             tari_bor::encode(&PayFeeArg {
                 amount: Amount::zero(),
                 statement: Some(too_many_inputs),
             })
             .unwrap()
             .into(),
-        ])
-        .unwrap();
+        ]);
         assert!(matches!(
             runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args),
             Err(RuntimeError::ArgumentValidationError(

@@ -954,6 +954,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_request_whose_transaction_is_never_stored_can_be_submitted_again() {
+        // The test daemon has no transaction service, so every submit fails before a transaction is stored.
+        let daemon = TestDaemon::start().await;
+        let tool = daemon.api_key("htlc-swap-tool", "transaction_requests:create");
+        let lock_id = lock_for(&daemon, owner_of(&daemon, &tool));
+        let request_id = handle_create(&daemon.context, Some(&tool), create_request(vec![lock_id], 60 * 60))
+            .await
+            .unwrap()
+            .request_id;
+        handle_approve(
+            &daemon.context,
+            Some(&daemon.session),
+            TransactionRequestDecisionRequest { request_id },
+        )
+        .await
+        .unwrap();
+
+        // Each retry seals a new transaction, so the lock must still be free for it.
+        for _ in 0..2 {
+            let err = handle_submit(&daemon.context, Some(&tool), TransactionRequestSubmitRequest {
+                request_id,
+            })
+            .await
+            .unwrap_err();
+            assert!(err.to_string().starts_with("Failed to submit transaction"), "{err}");
+            assert_eq!(status_of(&daemon, request_id), TransactionRequestStatus::Approved);
+            assert_eq!(get_lock(&daemon, lock_id).transaction_id, None);
+        }
+    }
+
+    #[tokio::test]
     async fn a_lock_is_held_by_at_most_one_live_request() {
         let daemon = TestDaemon::start().await;
         let tool = daemon.api_key("htlc-swap-tool", "transaction_requests:create");

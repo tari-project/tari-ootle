@@ -174,8 +174,8 @@ impl TransferOutput {
     /// at all — statement construction filters it out — so a gating intent on one would be silently dropped and the
     /// funds deposited unguarded. Reject it rather than mislead the caller.
     ///
-    /// For a condition set, the tree is built here so a malformed set is reported against the field the caller
-    /// supplied, before any inputs are locked, rather than failing deep in output construction.
+    /// For any intent that commits a condition tree, the tree is built here so a malformed set is reported against the
+    /// field the caller supplied, before any inputs are locked, rather than failing deep in output construction.
     pub fn validate_pay_to(&self) -> Result<(), String> {
         if self.blinded_amount == 0 {
             if matches!(self.pay_to, PayTo::StealthPublicKey) {
@@ -186,8 +186,8 @@ impl TransferOutput {
             );
         }
 
-        if let PayTo::Conditions(conditions) = &self.pay_to {
-            validated_condition_root(conditions).map_err(|e| e.to_string())?;
+        if let Some(conditions) = self.pay_to.conditions() {
+            validated_condition_root(&conditions).map_err(|e| e.to_string())?;
         }
 
         Ok(())
@@ -338,8 +338,9 @@ mod tests {
     use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
     use tari_engine_types::limits::STEALTH_LIMITS;
     use tari_template_lib::types::{
+        access_rules::MAX_ACCESS_RULE_NODES,
         constants::STEALTH_TARI_RESOURCE_ADDRESS,
-        stealth::{AtomicCondition, BuiltinPredicate, SpendCondition},
+        stealth::{AtomicCondition, BuiltinPredicate, SpendCondition, TemplateFunction},
     };
 
     use super::*;
@@ -415,6 +416,17 @@ mod tests {
             AtomicCondition::Builtin(BuiltinPredicate::AfterEpoch(1));
             STEALTH_LIMITS.max_conditions_per_conjunction + 1
         ])]));
+    }
+
+    /// The single-leaf conveniences commit a leaf just as `Conditions` does, so they are held to the same rule: a leaf
+    /// that cannot decode at spend time is never revealed.
+    #[test]
+    fn rejects_a_single_leaf_pay_to_over_the_decode_node_limit() {
+        assert_rejects_pay_to(PayTo::TemplateFunction(TemplateFunction {
+            template: Default::default(),
+            function: "predicate".try_into().unwrap(),
+            args: vec![Default::default(); MAX_ACCESS_RULE_NODES],
+        }));
     }
 
     /// `pay_to` gates the blinded output, which a revealed-only transfer never produces. Silently depositing the

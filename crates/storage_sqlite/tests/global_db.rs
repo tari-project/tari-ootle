@@ -393,3 +393,55 @@ fn copy_into_writes_a_database_that_opens_with_the_same_contents() {
         "copying over an existing file must fail rather than replace it"
     );
 }
+
+fn is_registered_at(
+    validator_nodes: &mut ValidatorNodeDb<'_, '_, SqliteGlobalDbAdapter<PeerAddress>>,
+    public_key: &RistrettoPublicKey,
+    epoch: Epoch,
+) -> bool {
+    let public_key = public_key.to_byte_type();
+    validator_nodes
+        .get_all_registered_within_start_epoch(epoch)
+        .unwrap()
+        .iter()
+        .any(|vn| vn.public_key == public_key)
+}
+
+/// A validator that leaves and registers again has one row per registration. Deactivating the current registration
+/// closes that row only, so the validator stays out of the set for the gap between its registrations.
+#[test]
+fn deactivating_a_registration_leaves_earlier_registrations_closed() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut validator_nodes = db.validator_nodes(&mut tx);
+    let pk = new_public_key();
+
+    insert_vn_with_public_key(&mut validator_nodes, pk.clone(), Epoch(1));
+    validator_nodes.deactivate(pk.to_byte_type(), Epoch(5)).unwrap();
+    insert_vn_with_public_key(&mut validator_nodes, pk.clone(), Epoch(10));
+    validator_nodes.deactivate(pk.to_byte_type(), Epoch(20)).unwrap();
+
+    assert!(is_registered_at(&mut validator_nodes, &pk, Epoch(3)));
+    assert!(!is_registered_at(&mut validator_nodes, &pk, Epoch(7)));
+    assert!(is_registered_at(&mut validator_nodes, &pk, Epoch(15)));
+    assert!(!is_registered_at(&mut validator_nodes, &pk, Epoch(20)));
+}
+
+/// A registration deactivated before its start epoch never becomes active.
+#[test]
+fn deactivating_a_registration_before_it_starts_keeps_it_inactive() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut validator_nodes = db.validator_nodes(&mut tx);
+    let pk = new_public_key();
+
+    insert_vn_with_public_key(&mut validator_nodes, pk.clone(), Epoch(10));
+    validator_nodes.deactivate(pk.to_byte_type(), Epoch(5)).unwrap();
+
+    for epoch in [5, 10, 15] {
+        assert!(
+            !is_registered_at(&mut validator_nodes, &pk, Epoch(epoch)),
+            "epoch {epoch}"
+        );
+    }
+}

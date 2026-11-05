@@ -30,7 +30,6 @@ use log::*;
 use tari_ootle_common_types::{
     Epoch,
     SubstateAddress,
-    VotePower,
     committee::Committee,
     diag_event,
     diagnostics::DiagnosticSink,
@@ -186,20 +185,23 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     self.inner.set_birthday_epoch_if_unset(activation_epoch)?;
                 }
 
+                let mut invalidate_committee_cache = false;
                 for node_change in node_changes {
                     match node_change {
                         ValidatorNodeChange::Add {
                             claim_public_key,
                             validator_node_public_key,
                             activation_epoch,
-                            minimum_value_promise: _minimum_value_promise,
+                            minimum_value_promise: _,
+                            vote_power,
                             shard_key,
                         } => {
                             info!(
                                 target: LOG_TARGET,
-                                "⛓️ Validator node {} activated at {}",
+                                "⛓️ Validator node {} activated at {} with vote power {}",
                                 validator_node_public_key,
                                 activation_epoch,
+                                vote_power.value(),
                             );
 
                             self.inner.add_validator_node_registration(
@@ -207,10 +209,11 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                                 validator_node_public_key,
                                 claim_public_key,
                                 shard_key,
-                                // minimum_value_promise,
-                                // All validators currently get a vote power of 1
-                                VotePower::of(1),
+                                vote_power,
                             )?;
+                            if activation_epoch <= self.current_epoch() {
+                                invalidate_committee_cache = true;
+                            }
                         },
                         ValidatorNodeChange::Remove { public_key } => {
                             info!(
@@ -220,8 +223,14 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                             );
 
                             self.inner.deactivate_validator_node(public_key, epoch)?;
+                            if epoch <= self.current_epoch() {
+                                invalidate_committee_cache = true;
+                            }
                         },
                     }
+                }
+                if invalidate_committee_cache {
+                    self.committee_cache.clear().await;
                 }
             },
             EpochEvent::NewValidatorRegistered {
@@ -598,7 +607,7 @@ mod tests {
     use std::num::NonZeroU32;
 
     use diesel::{Connection, SqliteConnection};
-    use tari_ootle_common_types::{NumPreshards, ShardGroup, diagnostics::NoopSink};
+    use tari_ootle_common_types::{NumPreshards, ShardGroup, VotePower, diagnostics::NoopSink};
     use tari_shutdown::Shutdown;
 
     use super::*;
@@ -689,6 +698,54 @@ mod tests {
         let mut keys = committee.public_keys().copied().collect::<Vec<_>>();
         keys.sort();
         keys
+    }
+
+    #[tokio::test]
+    async fn validator_node_add_stores_the_event_vote_power() {
+        let shutdown = Shutdown::new();
+        let all_shards = ShardGroup::all_shards(NumPreshards::P256);
+        let global_db = GlobalDb::new(SqliteGlobalDbAdapter::new(
+            SqliteConnection::establish(":memory:").unwrap(),
+        ));
+        global_db.adapter().migrate().unwrap();
+        let mut service = create_service(global_db, &shutdown);
+
+        // Registration derives the node address from the public key, so these must be valid points: B and 2B.
+        let heavy =
+            RistrettoPublicKeyBytes::from_hex("e2f2ae0a6abc4e71a884a961c500515f58e30b6aa582dd8db6a65945e08d2d76")
+                .unwrap();
+        let light =
+            RistrettoPublicKeyBytes::from_hex("6a493210f7499cd17fecb510ae0cea23a110e8d5b901f8acadd3095c73a3b919")
+                .unwrap();
+        let add = |public_key: RistrettoPublicKeyBytes, shard_byte: u8, power: u64| ValidatorNodeChange::Add {
+            claim_public_key: public_key,
+            validator_node_public_key: public_key,
+            activation_epoch: Epoch(5),
+            minimum_value_promise: 0,
+            vote_power: VotePower::of(power),
+            shard_key: SubstateAddress::from_array([shard_byte; SubstateAddress::LENGTH]),
+        };
+        service
+            .handle_epoch_event(EpochEvent::ActiveValidatorNodeSetChanged {
+                epoch: Epoch(4),
+                node_changes: vec![add(heavy, 1, 4), add(light, 2, 1)],
+            })
+            .await
+            .unwrap();
+        service
+            .activate_epoch(Epoch(5), FixedHash::from([1; 32]))
+            .await
+            .unwrap();
+
+        let stored = service
+            .inner
+            .get_validator_node_by_public_key(Epoch(5), &heavy)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.vote_power, VotePower::of(4));
+        let info = service.inner.get_committee_info(Epoch(5), all_shards).unwrap();
+        assert_eq!(info.num_shard_group_members(), 2);
+        assert_eq!(info.total_power(), VotePower::of(5));
     }
 
     /// When the oracle corrects the hash of the current, unlocked epoch, the epoch's committees must be

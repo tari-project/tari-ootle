@@ -647,6 +647,27 @@ pub async fn handle_claim_burn(
         proof_file_name,
     )
     .await
+    .map_err(ClaimBurnError::into_inner)
+}
+
+/// Why [`execute_claim_burn`] could not dry run or submit a claim. The split lets an unattended caller tell a
+/// network that has not taken the claim yet from a proof that cannot be claimed.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ClaimBurnError {
+    /// The network could not be read, or did not take the transaction.
+    #[error(transparent)]
+    Network(anyhow::Error),
+    /// The claim transaction could not be built from the proof.
+    #[error(transparent)]
+    Build(anyhow::Error),
+}
+
+impl ClaimBurnError {
+    pub(crate) fn into_inner(self) -> anyhow::Error {
+        match self {
+            Self::Network(error) | Self::Build(error) => error,
+        }
+    }
 }
 
 /// Core claim burn logic: decrypts the burn proof, builds and signs the claim transaction,
@@ -661,9 +682,11 @@ pub(crate) async fn execute_claim_burn(
     max_epoch: Epoch,
     is_dry_run: bool,
     proof_file_name: Option<String>,
-) -> Result<ClaimBurnResponse, anyhow::Error> {
+) -> Result<ClaimBurnResponse, ClaimBurnError> {
     // A claim declares no input of its own; the TARI resource is the one every transaction declares.
-    let input_pricing = DeclaredInputPricing::fetch(sdk, [SubstateId::from(TARI_TOKEN)]).await?;
+    let input_pricing = DeclaredInputPricing::fetch(sdk, [SubstateId::from(TARI_TOKEN)])
+        .await
+        .map_err(ClaimBurnError::Network)?;
     let transaction = build_claim_burn_transaction(
         sdk,
         account,
@@ -672,11 +695,15 @@ pub(crate) async fn execute_claim_burn(
         max_epoch,
         is_dry_run,
         &input_pricing,
-    )?;
+    )
+    .map_err(ClaimBurnError::Build)?;
 
     if is_dry_run {
         let transaction_id = transaction.calculate_id();
-        let result = transaction_service.submit_dry_run_transaction(transaction).await?;
+        let result = transaction_service
+            .submit_dry_run_transaction(transaction)
+            .await
+            .map_err(|e| ClaimBurnError::Network(e.into()))?;
         let required_fees = result.finalize.required_fees();
         return Ok(ClaimBurnResponse {
             transaction_id,
@@ -693,7 +720,8 @@ pub(crate) async fn execute_claim_burn(
     }
     let tx_id = transaction_service
         .submit_transaction_with_opts(transaction, Some(tx_context), None)
-        .await?;
+        .await
+        .map_err(|e| ClaimBurnError::Network(e.into()))?;
 
     Ok(ClaimBurnResponse {
         transaction_id: tx_id,

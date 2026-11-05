@@ -284,14 +284,10 @@ pub fn check_diff_matches_receipt(
     }
 
     // The receipt leaves out the downs that an up of a later version of the same substate implies.
-    let implied_downs = receipt
-        .diff_summary()
-        .upped
-        .iter()
-        .filter_map(|up| {
-            let previous = up.version.as_u64().checked_sub(1)?;
-            Some((&up.substate_id, SubstateVersion::new(previous)))
-        });
+    let implied_downs = receipt.diff_summary().upped.iter().filter_map(|up| {
+        let previous = up.version.as_u64().checked_sub(1)?;
+        Some((&up.substate_id, SubstateVersion::new(previous)))
+    });
     let diff_downs = diff
         .down_iter()
         .map(|(id, version)| (id, *version))

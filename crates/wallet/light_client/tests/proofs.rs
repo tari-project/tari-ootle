@@ -328,7 +328,10 @@ fn a_diff_that_differs_from_the_receipt_is_rejected() {
                 (tombstone(1).0, 0),
             ]),
         ),
-        ("a missing down", diff_of(&[tombstone(1), tombstone(2)], &[(tombstone(1).0, 0)])),
+        (
+            "a missing down",
+            diff_of(&[tombstone(1), tombstone(2)], &[(tombstone(1).0, 0)]),
+        ),
         (
             "another down version",
             diff_of(&[tombstone(1), tombstone(2)], &[
@@ -338,7 +341,10 @@ fn a_diff_that_differs_from_the_receipt_is_rejected() {
         ),
         ("a forged down of a newly created substate", forged_v0_down),
         ("a missing implied down for an updated substate", missing_implied_down),
-        ("a wrong implied down version for an updated substate", wrong_implied_down),
+        (
+            "a wrong implied down version for an updated substate",
+            wrong_implied_down,
+        ),
         ("a forged down of the receipt substate", forged_receipt_down),
         ("a tampered receipt substate in ups", tampered_receipt_up),
         ("a non-zero receipt substate version in ups", non_zero_receipt_up),

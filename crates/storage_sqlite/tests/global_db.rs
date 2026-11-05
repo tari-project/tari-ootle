@@ -393,3 +393,124 @@ fn copy_into_writes_a_database_that_opens_with_the_same_contents() {
         "copying over an existing file must fail rather than replace it"
     );
 }
+
+#[test]
+fn deactivating_a_reregistered_validator_preserves_prior_exit_epoch() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut validator_nodes = db.validator_nodes(&mut tx);
+
+    let pk = new_public_key();
+    let pk_bytes = pk.to_byte_type();
+    let shard_key = derived_substate_address(&pk);
+    let first_claim_key = new_public_key().to_byte_type();
+    let second_claim_key = new_public_key().to_byte_type();
+
+    validator_nodes
+        .insert_validator_node(
+            pk.clone().into(),
+            pk_bytes,
+            shard_key,
+            Epoch(1),
+            first_claim_key,
+            VotePower::of(1),
+        )
+        .unwrap();
+    validator_nodes.deactivate(pk_bytes, Epoch(3)).unwrap();
+
+    validator_nodes
+        .insert_validator_node(
+            pk.clone().into(),
+            pk_bytes,
+            shard_key,
+            Epoch(5),
+            second_claim_key,
+            VotePower::of(1),
+        )
+        .unwrap();
+    validator_nodes.deactivate(pk_bytes, Epoch(8)).unwrap();
+
+    for epoch in [1, 2, 5, 6, 7] {
+        assert_eq!(validator_nodes.count(Epoch(epoch)).unwrap(), 1, "active at {epoch}");
+        assert_eq!(
+            validator_nodes
+                .get_all_registered_within_start_epoch(Epoch(epoch))
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+    for epoch in [0, 3, 4, 8, 9] {
+        assert_eq!(validator_nodes.count(Epoch(epoch)).unwrap(), 0, "inactive at {epoch}");
+        assert!(
+            validator_nodes
+                .get_all_registered_within_start_epoch(Epoch(epoch))
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    let all_shards = ShardGroup::all_shards(NumPreshards::P256);
+    set_committee_shard_group(&mut validator_nodes, &pk, all_shards, Epoch(2));
+    set_committee_shard_group(&mut validator_nodes, &pk, all_shards, Epoch(6));
+    assert_eq!(
+        validator_nodes
+            .get_by_public_key(Epoch(2), &pk_bytes)
+            .unwrap()
+            .fee_claim_public_key,
+        first_claim_key
+    );
+    assert_eq!(
+        validator_nodes
+            .get_by_public_key(Epoch(6), &pk_bytes)
+            .unwrap()
+            .fee_claim_public_key,
+        second_claim_key
+    );
+}
+
+#[test]
+fn duplicate_start_epoch_rows_resolve_consistently_to_latest_row() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut validator_nodes = db.validator_nodes(&mut tx);
+
+    let pk = new_public_key();
+    let pk_bytes = pk.to_byte_type();
+    let shard_key = derived_substate_address(&pk);
+    let first_claim_key = new_public_key().to_byte_type();
+    let second_claim_key = new_public_key().to_byte_type();
+
+    for claim_key in [first_claim_key, second_claim_key] {
+        validator_nodes
+            .insert_validator_node(
+                pk.clone().into(),
+                pk_bytes,
+                shard_key,
+                Epoch(10),
+                claim_key,
+                VotePower::of(1),
+            )
+            .unwrap();
+    }
+
+    set_committee_shard_group(
+        &mut validator_nodes,
+        &pk,
+        ShardGroup::all_shards(NumPreshards::P256),
+        Epoch(10),
+    );
+
+    let registered = validator_nodes
+        .get_all_registered_within_start_epoch(Epoch(10))
+        .unwrap();
+    assert_eq!(registered.len(), 1);
+    assert_eq!(registered[0].fee_claim_public_key, second_claim_key);
+    assert_eq!(
+        validator_nodes
+            .get_by_public_key(Epoch(10), &pk_bytes)
+            .unwrap()
+            .fee_claim_public_key,
+        second_claim_key
+    );
+}

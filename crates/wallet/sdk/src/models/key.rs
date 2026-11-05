@@ -7,10 +7,11 @@ use anyhow::anyhow;
 use tari_bor::{Deserialize, Serialize};
 use tari_crypto::{
     keys::PublicKey as _,
-    ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_ootle_address::RistrettoOotleAddress;
-use tari_ootle_transaction::Signable;
+use tari_ootle_common_types::signature::Sr25519SignatureBytes;
+use tari_ootle_transaction::{Signable, TRANSACTION_SIGNING_CONTEXT};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
@@ -46,6 +47,19 @@ impl KeyBranch {
             Self::Nonce => "nonce",
             Self::ViewOnlyKey => "view_only_key",
         }
+    }
+
+    /// Whether keys in this branch blind output commitments. A mask's public key unblinds the
+    /// commitments made with it, so it must never leave the wallet.
+    pub const fn is_mask(&self) -> bool {
+        matches!(self, Self::StealthMask | Self::ConfidentialMask)
+    }
+
+    /// Whether keys in this branch may produce signatures that leave the wallet. Mask and view branches
+    /// protect the wallet's outputs and never sign. Nonce keys sign as the throw-away authorizer of a
+    /// stealth transfer's revealed funds.
+    pub const fn is_signing_branch(&self) -> bool {
+        matches!(self, Self::Account | Self::Transaction | Self::Nonce)
     }
 }
 
@@ -174,10 +188,9 @@ impl WalletSecretKey {
         RistrettoPublicKey::from_secret_key(&self.secret)
     }
 
-    pub fn sign<T: Signable<C>, C>(&self, context: C, item: &T) -> RistrettoSchnorr {
+    pub fn sign<T: Signable<C>, C>(&self, context: C, item: &T) -> Sr25519SignatureBytes {
         let message = item.to_signing_message(context);
-        RistrettoSchnorr::sign(&self.secret, message.as_ref(), &mut rand::rng())
-            .expect("message is hashed internally into canonical form, so signing is infallible")
+        TRANSACTION_SIGNING_CONTEXT.sign(&self.secret, &message)
     }
 }
 
@@ -341,6 +354,9 @@ impl TryFrom<KeyId> for DerivedKeyId {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct StealthUtxoSpendKeyId {
     pub account_key_id: KeyId,
+    /// The view key of the account that received the UTXO. The one-time spend key is tweaked by
+    /// `H(v·R)`, so spending needs it alongside the account key.
+    pub view_key_id: KeyId,
     pub public_nonce: RistrettoPublicKeyBytes,
 }
 
@@ -389,6 +405,14 @@ impl KeyId {
         match self {
             Self::Derived { key_branch, .. } => Some(*key_branch),
             Self::Imported { .. } => None,
+        }
+    }
+
+    /// Whether this key may produce signatures that leave the wallet. See [`KeyBranch::is_signing_branch`].
+    pub fn is_signing_key(&self) -> bool {
+        match self {
+            Self::Derived { key_branch, .. } => key_branch.is_signing_branch(),
+            Self::Imported { .. } => true,
         }
     }
 }

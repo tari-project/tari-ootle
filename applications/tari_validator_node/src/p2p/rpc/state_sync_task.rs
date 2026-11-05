@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::num::NonZeroUsize;
+use std::{num::NonZeroUsize, sync::Arc};
 
 use log::*;
 use tari_consensus::hotstuff::{HotstuffEvent, commit_proofs::state_version_commit_proof};
@@ -31,7 +31,7 @@ use tari_ootle_storage::{
 };
 use tari_rpc_framework::RpcStatus;
 use tari_state_tree::Version;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{Semaphore, broadcast, mpsc};
 
 use crate::{consensus::ConsensusHandle, p2p::rpc::CONSENSUS_NOT_RUNNING};
 
@@ -111,10 +111,6 @@ impl ShardCursor {
                     "Shard cursors must be ordered by strictly ascending shard",
                 ));
             }
-            // Genesis is committed at version 0 and is never synced - every node bootstraps it.
-            if cursor.start_state_version == 0 {
-                return Err(RpcStatus::bad_request("start_state_version must be greater than 0"));
-            }
             prev_shard = Some(shard);
             validated.push(Self {
                 shard,
@@ -183,6 +179,26 @@ pub fn ensure_epoch_reached(until_epoch: Epoch, current_epoch: Epoch) -> Result<
     Ok(())
 }
 
+/// Rejects a bounded request for history through `until_epoch` once this node's epoch GC may have pruned a value the
+/// stream must carry. GC prunes the value of a substate destroyed at epoch `d` once the store reaches epoch
+/// `d + epoch_history_length`. Past `until_epoch + epoch_history_length`, a substate that is live at `until_epoch` and
+/// destroyed after it can therefore be left with only its hash, and the stream ends before the destruction that would
+/// account for the missing value.
+pub fn ensure_history_values_held(
+    until_epoch: Epoch,
+    store_epoch: Epoch,
+    epoch_history_length: u64,
+) -> Result<(), RpcStatus> {
+    let horizon = until_epoch.checked_add(Epoch(epoch_history_length));
+    if horizon.is_some_and(|horizon| store_epoch > horizon) {
+        return Err(RpcStatus::unavailable(format!(
+            "This node has pruned substate values that history through epoch {until_epoch} needs (current epoch is \
+             {store_epoch})"
+        )));
+    }
+    Ok(())
+}
+
 /// Rejects a shard that `committee_info` does not cover. Every committee holds the global shard, so it
 /// is always in range.
 fn ensure_shard_is_stored(shard: Shard, committee_info: &CommitteeInfo) -> Result<(), RpcStatus> {
@@ -240,6 +256,9 @@ pub struct StateSyncTask<TStateStore: StateStore> {
     value_filters: SubstateValueFilterFlags,
     /// Whether to interleave state version proofs, which only a bounded stream does.
     include_version_proofs: bool,
+    /// The state version reads every stream on this node shares. A permit is held for one version's read and
+    /// released before its batches are sent, so a stream waiting on its peer holds none.
+    reads: Arc<Semaphore>,
 }
 
 impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
@@ -255,6 +274,7 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
         batch_size: NonZeroUsize,
         value_filters: SubstateValueFilterFlags,
         include_version_proofs: bool,
+        reads: Arc<Semaphore>,
     ) -> Self {
         Self {
             store,
@@ -268,6 +288,7 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
             batch_size,
             value_filters,
             include_version_proofs,
+            reads,
         }
     }
 
@@ -402,7 +423,19 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
             },
         };
         loop {
-            match self.fetch_next_batch(shard, current_state_version) {
+            // A version whose updates are all filtered out sends nothing, so the scan checks for its peer before
+            // every version it reads.
+            let read = tokio::select! {
+                biased;
+                _ = self.sender.closed() => {
+                    debug!(target: LOG_TARGET, "Peer stream closed by client during the scan of {}. Aborting", shard);
+                    return Err(());
+                },
+                read = self.reads.acquire() => read.map_err(|_| ())?,
+            };
+            let fetched = self.fetch_next_batch(shard, current_state_version);
+            drop(read);
+            match fetched {
                 Ok(Some(transitions)) => {
                     if let Some(end_epoch) = self.end_epoch {
                         // TODO(perf): might be better to not load in the first place, however also might incur the cost
@@ -414,6 +447,10 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
                     }
                     if !transitions.updates.is_empty() {
                         debug!(target: LOG_TARGET, "🌍 Fetched {} state transition(s) for {} up to v{}", transitions.updates.len(), shard, transitions.state_version);
+                    }
+                    if current_state_version == 0 && transitions.state_version > 0 {
+                        self.send_empty_genesis(shard).await?;
+                        last_sent_version = Some(0);
                     }
 
                     current_state_version = transitions.state_version + 1;
@@ -433,6 +470,9 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
                     if has_updates {
                         last_sent_version = Some(state_version);
                     }
+                    // Reads are synchronous and a filtered-out version awaits nothing, so the scan yields after every
+                    // version to share its runtime worker.
+                    tokio::task::yield_now().await;
                 },
                 Ok(None) => {
                     // TODO: differentiate between not found and end of stream
@@ -447,6 +487,10 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
             }
         }
 
+        if current_state_version == 0 {
+            self.send_empty_genesis(shard).await?;
+            last_sent_version = Some(0);
+        }
         if let Some(proofs) = proofs.as_mut() {
             let end = proofs.last.saturating_add(1);
             self.send_proof_points_before(shard, proofs, end).await?;
@@ -663,6 +707,22 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
         .await
     }
 
+    /// Streams v0 of `shard` with no updates. A shard's history starts at v0, which holds its genesis state, so a shard
+    /// with none has no v0 record but is still streamed one: its accumulator after v0 is zero, which a verified leaf
+    /// at v0 or later checks.
+    async fn send_empty_genesis(&mut self, shard: Shard) -> Result<(), ()> {
+        self.send(Ok(rpc::SyncStateResponse {
+            response: Some(rpc::sync_state_response::Response::Batch(rpc::SubstateBatch {
+                state_version: 0,
+                updates: Vec::new(),
+                has_more: false,
+                epoch: Some(Epoch::zero().into()),
+                shard: shard.as_u32(),
+            })),
+        }))
+        .await
+    }
+
     /// Sends `transitions` in batches.
     async fn send_batches(&mut self, transitions: StateVersionTransitions) -> Result<(), ()> {
         let batches = match into_batches(transitions, self.batch_size) {
@@ -757,21 +817,34 @@ fn version_proof_message<TTx: StateStoreReadTransaction>(
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+        time::Duration,
+    };
+
     use prost::Message;
     use tari_engine_types::{
         limits::ENGINE_LIMITS,
         published_template::{PublishedTemplate, PublishedTemplateAddress},
         substate::SubstateId,
     };
+    use tari_epoch_manager::service::CommitteeCache;
     use tari_ootle_common_types::{SubstateVersion, VotePower};
-    use tari_ootle_storage::consensus_models::{
-        SubstateCreate,
-        SubstateData,
-        SubstateDestroy,
-        SubstateUpdateProof,
-        SubstateValueOrHash,
+    use tari_ootle_storage::{
+        StateStoreWriteTransaction,
+        consensus_models::{
+            SubstateCreate,
+            SubstateData,
+            SubstateDestroy,
+            SubstateTransition,
+            SubstateUpdateBatch,
+            SubstateUpdateProof,
+            SubstateValueOrHash,
+        },
     };
+    use tari_ootle_transaction::Network;
     use tari_rpc_framework::max_response_payload_size;
+    use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
     use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
     use tari_validator_node_rpc::STATE_SYNC_MAX_BATCH_SIZE;
 
@@ -787,19 +860,22 @@ mod tests {
         SubstateId::Template(PublishedTemplateAddress::from(Hash32::from_array(hash)))
     }
 
-    fn create_template(seed: u16, binary_len: usize) -> SubstateUpdateProof {
-        let template = PublishedTemplate {
+    fn published_template(binary_len: usize) -> PublishedTemplate {
+        PublishedTemplate {
             template_name: "test".try_into().unwrap(),
             author: RistrettoPublicKeyBytes::default(),
             binary: vec![0xAB; binary_len].try_into().unwrap(),
             at_epoch: 0,
             metadata_hash: None,
-        };
+        }
+    }
+
+    fn create_template(seed: u16, binary_len: usize) -> SubstateUpdateProof {
         SubstateUpdateProof::Create(Box::new(SubstateCreate {
             substate: SubstateData {
                 substate_id: template_id(seed),
                 version: SubstateVersion::ZERO,
-                value: SubstateValueOrHash::Value(Box::new(template.into())),
+                value: SubstateValueOrHash::Value(Box::new(published_template(binary_len).into())),
                 template_metadata: None,
             },
         }))
@@ -954,6 +1030,15 @@ mod tests {
     }
 
     #[test]
+    fn it_rejects_history_whose_values_epoch_gc_may_have_pruned() {
+        assert!(ensure_history_values_held(Epoch(4), Epoch(5), 1).is_ok());
+        let err = ensure_history_values_held(Epoch(4), Epoch(6), 1).unwrap_err();
+        assert!(err.is_unavailable());
+        assert!(ensure_history_values_held(Epoch(4), Epoch(6), 2).is_ok());
+        assert!(ensure_history_values_held(Epoch::max(), Epoch::max(), 1).is_ok());
+    }
+
+    #[test]
     fn a_member_that_committed_the_epoch_holds_its_shards() {
         let history = held(&[(1, 32)], Some((1, 32)), None);
         assert!(history.holds(Shard::from(1u32)));
@@ -1047,8 +1132,9 @@ mod tests {
     }
 
     #[test]
-    fn it_rejects_a_zero_start_state_version() {
-        assert!(ShardCursor::validate_all(vec![cursor(1, 1), cursor(2, 0)]).is_err());
+    fn it_accepts_a_cursor_from_the_genesis_version() {
+        let cursors = ShardCursor::validate_all(vec![cursor(1, 1), cursor(2, 0)]).unwrap();
+        assert_eq!(cursors[1].start_state_version, 0);
     }
 
     #[test]
@@ -1115,5 +1201,251 @@ mod tests {
         let cursors = ShardCursor::validate_all(vec![cursor(9, 1), cursor(17, 1)]).unwrap();
         let err = ShardCursor::ensure_all_stored(&cursors, &committee_info(9, 16)).unwrap_err();
         assert!(err.details().contains("does not store Shard(17)"), "{err}");
+    }
+
+    /// A store that counts the read transactions opened on it. A sync reads each state version it scans in a read
+    /// transaction of its own.
+    #[derive(Clone)]
+    struct CountingStore<T> {
+        inner: T,
+        reads: Arc<AtomicUsize>,
+    }
+
+    impl<T: StateStore> StateStore for CountingStore<T> {
+        type Addr = T::Addr;
+        type ReadTransaction<'a>
+            = T::ReadTransaction<'a>
+        where Self: 'a;
+        type WriteTransaction<'a>
+            = T::WriteTransaction<'a>
+        where Self: 'a;
+
+        fn create_read_tx(&self) -> Result<Self::ReadTransaction<'_>, StorageError> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            self.inner.create_read_tx()
+        }
+
+        fn create_write_tx(&self) -> Result<Self::WriteTransaction<'_>, StorageError> {
+            self.inner.create_write_tx()
+        }
+
+        fn create_durable_write_tx(&self) -> Result<Self::WriteTransaction<'_>, StorageError> {
+            self.inner.create_durable_write_tx()
+        }
+    }
+
+    /// A store holding `num_versions` state versions of the global shard from v1, each bringing up one template.
+    fn store_with_history(num_versions: u16) -> (CountingStore<RocksDbStateStore<String>>, tempfile::TempDir) {
+        store_with_versions(1..=num_versions)
+    }
+
+    /// A store holding `versions` of the global shard, each bringing up one template.
+    fn store_with_versions(
+        versions: impl IntoIterator<Item = u16>,
+    ) -> (CountingStore<RocksDbStateStore<String>>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        store
+            .with_write_tx(|tx| {
+                let mut batch = SubstateUpdateBatch::new(Network::LocalNet, Epoch::zero());
+                for seed in versions {
+                    batch
+                        .with_transition(Shard::global(), u64::from(seed))
+                        .push(SubstateTransition::Up {
+                            id: template_id(seed),
+                            version: SubstateVersion::ZERO,
+                            substate_or_hash: SubstateValueOrHash::Value(Box::new(published_template(1).into())),
+                        });
+                }
+                tx.substates_commit_batch(batch)
+            })
+            .unwrap();
+        let store = CountingStore {
+            inner: store,
+            reads: Arc::new(AtomicUsize::new(0)),
+        };
+        (store, dir)
+    }
+
+    fn dummy_epoch_manager() -> EpochManagerHandle<PeerAddress> {
+        let (tx_request, _) = mpsc::channel(1);
+        let (tx_events, _) = broadcast::channel(1);
+        EpochManagerHandle::new(
+            tx_request,
+            tx_events.downgrade(),
+            Arc::new(AtomicU64::new(0)),
+            CommitteeCache::new(),
+        )
+    }
+
+    /// A task syncing the global shard from v1 through epoch 1.
+    fn sync_task<TStore: StateStore>(
+        store: TStore,
+        sender: mpsc::Sender<Result<rpc::SyncStateResponse, RpcStatus>>,
+        value_filters: SubstateValueFilterFlags,
+        reads: Arc<Semaphore>,
+    ) -> StateSyncTask<TStore> {
+        sync_task_from(store, sender, value_filters, reads, 1)
+    }
+
+    /// A task syncing the global shard from `start_state_version` through epoch 1.
+    fn sync_task_from<TStore: StateStore>(
+        store: TStore,
+        sender: mpsc::Sender<Result<rpc::SyncStateResponse, RpcStatus>>,
+        value_filters: SubstateValueFilterFlags,
+        reads: Arc<Semaphore>,
+        start_state_version: Version,
+    ) -> StateSyncTask<TStore> {
+        let (events, _) = broadcast::channel(1);
+        StateSyncTask::new(
+            store,
+            sender,
+            vec![ShardCursor {
+                shard: Shard::global(),
+                start_state_version,
+            }],
+            Some(Epoch(1)),
+            ConsensusHandle::for_test(&events),
+            dummy_epoch_manager(),
+            None,
+            false,
+            max_updates(),
+            value_filters,
+            false,
+            reads,
+        )
+    }
+
+    /// The batches a stream of the global shard from `start_state_version` sends before it ends, as `(version,
+    /// number of updates)`.
+    async fn streamed_versions(
+        store: CountingStore<RocksDbStateStore<String>>,
+        start_state_version: Version,
+    ) -> Vec<(Version, usize)> {
+        let (sender, mut receiver) = mpsc::channel(100);
+        let task = sync_task_from(
+            store,
+            sender,
+            SubstateValueFilterFlags::all(),
+            Arc::new(Semaphore::new(1)),
+            start_state_version,
+        );
+        let handle = tokio::spawn(task.run());
+        let mut versions = Vec::new();
+        while let Some(Ok(response)) = receiver.recv().await {
+            match response.response {
+                Some(rpc::sync_state_response::Response::Batch(batch)) => {
+                    versions.push((batch.state_version, batch.updates.len()));
+                },
+                _ => break,
+            }
+        }
+        drop(receiver);
+        handle.await.unwrap().ok();
+        versions
+    }
+
+    #[tokio::test]
+    async fn a_stream_from_v0_streams_a_shard_without_genesis_state_an_empty_v0_first() {
+        let (store, _dir) = store_with_history(2);
+        assert_eq!(streamed_versions(store, 0).await, [(0, 0), (1, 1), (2, 1)]);
+    }
+
+    #[tokio::test]
+    async fn a_stream_from_v0_streams_the_genesis_state_of_a_shard_that_has_it() {
+        let (store, _dir) = store_with_versions(0..=1);
+        assert_eq!(streamed_versions(store, 0).await, [(0, 1), (1, 1)]);
+    }
+
+    #[tokio::test]
+    async fn a_stream_from_v0_of_a_shard_with_no_history_streams_an_empty_v0() {
+        let (store, _dir) = store_with_versions([]);
+        assert_eq!(streamed_versions(store, 0).await, [(0, 0)]);
+    }
+
+    #[tokio::test]
+    async fn a_stream_from_v1_streams_no_v0() {
+        let (store, _dir) = store_with_history(2);
+        assert_eq!(streamed_versions(store, 1).await, [(1, 1), (2, 1)]);
+    }
+
+    #[tokio::test]
+    async fn a_scan_that_streams_nothing_stops_once_the_peer_is_gone() {
+        const VERSIONS: u16 = 500;
+        let (store, _dir) = store_with_history(VERSIONS);
+        let reads = store.reads.clone();
+        let (sender, receiver) = mpsc::channel(10);
+        // Every substate in the history is a template, so a component filter selects none of them.
+        let task = sync_task(
+            store,
+            sender,
+            SubstateValueFilterFlags::COMPONENT,
+            Arc::new(Semaphore::new(1)),
+        );
+
+        let handle = tokio::spawn(task.run());
+        // The scan runs until it first yields this thread, and the peer goes away in the meantime.
+        tokio::task::yield_now().await;
+        drop(receiver);
+
+        assert!(handle.await.unwrap().is_err());
+        let reads = reads.load(Ordering::SeqCst);
+        assert!(
+            reads < usize::from(VERSIONS / 10),
+            "the scan read {reads} state version(s) of {VERSIONS} for a peer that went away"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_scan_waiting_for_a_read_stops_once_the_peer_is_gone() {
+        let (store, _dir) = store_with_history(10);
+        let reads = store.reads.clone();
+        let (sender, receiver) = mpsc::channel(10);
+        let task = sync_task(
+            store,
+            sender,
+            SubstateValueFilterFlags::all_substates(),
+            Arc::new(Semaphore::new(0)),
+        );
+
+        let handle = tokio::spawn(task.run());
+        tokio::task::yield_now().await;
+        drop(receiver);
+
+        let result = tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("the scan kept waiting for a read after its peer went away");
+        assert!(result.unwrap().is_err());
+        assert_eq!(reads.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn a_stream_waiting_on_its_peer_holds_no_read() {
+        let (store, _dir) = store_with_history(30);
+        let shared_reads = Arc::new(Semaphore::new(1));
+        // This peer takes nothing, so its stream stalls once the channel is full.
+        let (stalled_sender, stalled_receiver) = mpsc::channel(1);
+        let stalled = sync_task(
+            store.clone(),
+            stalled_sender,
+            SubstateValueFilterFlags::all_substates(),
+            shared_reads.clone(),
+        );
+        let _stalled = tokio::spawn(stalled.run());
+        while stalled_receiver.is_empty() {
+            tokio::task::yield_now().await;
+        }
+
+        let (sender, mut receiver) = mpsc::channel(10);
+        let task = sync_task(store, sender, SubstateValueFilterFlags::COMPONENT, shared_reads);
+        let _handle = tokio::spawn(task.run());
+
+        let response = tokio::time::timeout(Duration::from_secs(10), receiver.recv())
+            .await
+            .expect("a stream waiting on its peer kept every read");
+        assert!(matches!(
+            response.unwrap().unwrap().response,
+            Some(rpc::sync_state_response::Response::Complete(_))
+        ));
     }
 }

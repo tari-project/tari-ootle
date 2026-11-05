@@ -14,12 +14,14 @@ use tari_engine::{
     transaction::{ModulesCollection, TransactionError, TransactionProcessor},
 };
 use tari_engine_types::{
-    commit_result::ExecuteResult,
-    fees::ExhaustBurnRate,
+    commit_result::{ExecuteResult, FeeIntentFallback},
+    creation_check::CreationCheck,
+    fees::{ExhaustBurnRate, FeeScale, FeeScaleSchedule},
     substate::Substate,
     virtual_substate::VirtualSubstates,
 };
 use tari_ootle_common_types::{
+    Epoch,
     SubstateLockType,
     SubstateRequirement,
     VersionedSubstateId,
@@ -34,18 +36,28 @@ const _LOG_TARGET: &str = "tari::ootle::transaction_executor";
 pub trait TransactionExecutor<TStore> {
     type Error: std::error::Error + Send + Sync + 'static;
 
-    fn execute(
+    /// Executes `transaction`, resolving every template it calls from `template_provider`.
+    ///
+    /// `input_fanout` is [`Transaction::input_fanout`] for the shard layout the transaction executes
+    /// under. `creation_check` answers for substates the transaction creates outside its inputs.
+    fn execute<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>>(
         &self,
         transaction: &Transaction,
+        template_provider: TTemplateProvider,
         state_store: TStore,
         virtual_substates: VirtualSubstates,
         burn_rate: ExhaustBurnRate,
+        input_fanout: u32,
+        creation_check: &dyn CreationCheck,
     ) -> Result<ExecutionOutput, Self::Error>;
 }
 
 #[derive(Debug, Clone)]
 pub struct ExecutionOutput {
     pub result: ExecuteResult,
+    /// What committing only the fee intent would persist, settled for transactions that commit in full outside a
+    /// dry run.
+    pub fee_intent_fallback: Option<FeeIntentFallback>,
 }
 
 impl ExecutionOutput {
@@ -97,19 +109,17 @@ impl ExecutionOutput {
 }
 
 #[derive(Clone)]
-pub struct TariTransactionProcessor<TStore, TTemplateProvider> {
+pub struct TariTransactionProcessor<TStore> {
     network: Network,
-    template_provider: Arc<TTemplateProvider>,
     modules: ModulesCollection<TStore>,
     dry_run: bool,
     claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
     wasm_metering_rate: WasmMeteringRate,
 }
 
-impl<TStore: StateReader + 'static, TTemplateProvider> TariTransactionProcessor<TStore, TTemplateProvider> {
+impl<TStore: StateReader + 'static> TariTransactionProcessor<TStore> {
     pub fn new(
         network: Network,
-        template_provider: TTemplateProvider,
         fee_table: FeeTable,
         dry_run: bool,
         claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
@@ -120,7 +130,6 @@ impl<TStore: StateReader + 'static, TTemplateProvider> TariTransactionProcessor<
         let modules = vec![Box::new(FeeModule::new(0, fee_table)) as Box<dyn RuntimeModule<TStore>>];
         Self {
             network,
-            template_provider: Arc::new(template_provider),
             modules: Arc::from(modules),
             dry_run,
             claim_burn_proof_verifier,
@@ -129,18 +138,18 @@ impl<TStore: StateReader + 'static, TTemplateProvider> TariTransactionProcessor<
     }
 }
 
-impl<TStore: StateReader + Clone + 'static, TTemplateProvider> TransactionExecutor<TStore>
-    for TariTransactionProcessor<TStore, TTemplateProvider>
-where TTemplateProvider: TemplateProvider<Template = LoadedTemplate>
-{
+impl<TStore: StateReader + Clone + 'static> TransactionExecutor<TStore> for TariTransactionProcessor<TStore> {
     type Error = TransactionProcessorError;
 
-    fn execute(
+    fn execute<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>>(
         &self,
         transaction: &Transaction,
+        template_provider: TTemplateProvider,
         state_store: TStore,
         virtual_substates: VirtualSubstates,
         burn_rate: ExhaustBurnRate,
+        input_fanout: u32,
+        creation_check: &dyn CreationCheck,
     ) -> Result<ExecutionOutput, Self::Error> {
         // Include signature public key badges for all transaction signers in the initial auth scope
         // NOTE: we assume all signatures have already been validated.
@@ -151,9 +160,14 @@ where TTemplateProvider: TemplateProvider<Template = LoadedTemplate>
         let auth_params = AuthParams {
             initial_ownership_proofs,
         };
+        // A transaction executed with no current epoch cannot finalize, since its receipt names the
+        // epoch, so the scale it would otherwise be charged at is never billed.
+        let fee_scale = virtual_substates
+            .current_epoch()
+            .map_or(FeeScale::ONE, |epoch| FeeScaleSchedule::at(self.network, Epoch(epoch)));
 
         let processor = TransactionProcessor::new(
-            self.template_provider.clone(),
+            Arc::new(template_provider),
             state_store,
             auth_params,
             virtual_substates,
@@ -161,12 +175,24 @@ where TTemplateProvider: TemplateProvider<Template = LoadedTemplate>
             self.claim_burn_proof_verifier.clone(),
             self.wasm_metering_rate,
             burn_rate,
+            input_fanout,
+            fee_scale,
             self.network,
             self.dry_run,
         );
-        let result = processor.execute(transaction.clone())?;
-
-        Ok(ExecutionOutput { result })
+        if self.dry_run {
+            let result = processor.execute(transaction.clone())?;
+            return Ok(ExecutionOutput {
+                result,
+                fee_intent_fallback: None,
+            });
+        }
+        let (result, fee_intent_fallback) =
+            processor.execute_with_fee_intent_fallback(transaction.clone(), creation_check)?;
+        Ok(ExecutionOutput {
+            result,
+            fee_intent_fallback,
+        })
     }
 }
 
@@ -209,6 +235,7 @@ mod tests {
                 wasm_execution_points: 0,
                 native_execution_points: 0,
             },
+            fee_intent_fallback: None,
         }
     }
 

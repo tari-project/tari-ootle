@@ -1,6 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_engine_types::SubstateVersion;
+use tari_ootle_common_types::Epoch;
 use tari_ootle_wallet_crypto::memo::Memo;
 use tari_template_lib::types::{
     Amount,
@@ -38,6 +40,22 @@ pub struct StealthOutputModel {
     pub is_on_chain: bool,
     pub is_condition_spendable: bool,
     pub lock_id: Option<WalletLockId>,
+    /// The latest version of the output the wallet has verified a proof of, if any.
+    #[serde(default)]
+    pub proven_up: Option<ProvenUp>,
+    /// The latest version of the output the wallet has seen go down in a spend it verified, if any.
+    #[serde(default)]
+    pub spent_version: Option<SubstateVersion>,
+}
+
+/// A version of an output that a verified proof showed in the state of a block of `epoch`.
+///
+/// A version that goes down never comes back up, so a verified exclusion of `version` at a block of a later epoch
+/// proves it gone, as a down proof does, without the inclusion half that validators keep only for a while.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProvenUp {
+    pub version: SubstateVersion,
+    pub epoch: Epoch,
 }
 
 impl StealthOutputModel {

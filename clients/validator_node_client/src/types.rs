@@ -26,7 +26,6 @@ use indexmap::IndexMap;
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use tari_base_node_client::types::BaseLayerValidatorNode;
-use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, Decision};
 use tari_engine_types::{
     commit_result::FinalizeResult,
@@ -51,8 +50,8 @@ use tari_ootle_storage::{
     time::PrimitiveDateTime,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
-use tari_sidechain::QuorumDecision;
-use tari_template_abi::{ArgDef, version::WasmAbiVersion};
+use tari_sidechain::{FixedHash, QuorumDecision};
+use tari_template_abi::{ArgDef, FunctionKind, version::WasmAbiVersion};
 use tari_template_lib_types::{TemplateAddress, crypto::RistrettoPublicKeyBytes};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,9 +100,10 @@ pub struct TemplateAbi {
 )]
 pub struct FunctionDef {
     pub name: String,
+    pub kind: FunctionKind,
+    /// The parameters the caller supplies, after a method's receiver or a migration's previous state.
     pub arguments: Vec<ArgDef>,
     pub output: String,
-    pub is_mut: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,7 +266,7 @@ pub struct ListBlocksResponse {
     pub blocks: Vec<Block>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
 pub struct GetTxPoolResponse {
     pub tx_pool: Vec<TransactionPoolRecord>,
@@ -331,14 +331,22 @@ pub enum LogLevel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "validator-node-client/", rename = "VnGetCommitteeRequest")
+)]
 pub struct GetCommitteeRequest {
     pub epoch: Epoch,
     pub substate_address: SubstateAddress,
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "validator-node-client/", rename = "VnGetCommitteeResponse")
+)]
 pub struct GetCommitteeResponse {
     pub committee: Arc<Committee<PeerAddress>>,
 }
@@ -462,7 +470,7 @@ pub struct AddPeerRequest {
 )]
 pub struct AddPeerResponse {}
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -510,7 +518,7 @@ pub struct GetFilteredBlocksCountRequest {
     pub filter: Option<String>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -529,7 +537,7 @@ pub struct Connection {
     pub user_agent: Option<Arc<String>>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -540,7 +548,7 @@ pub enum ConnectionDirection {
     Outbound,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -550,7 +558,7 @@ pub struct GetConnectionsResponse {
     pub connections: Vec<Connection>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
 pub struct GetMempoolStatsResponse {
     pub size: usize,
@@ -635,6 +643,15 @@ pub struct ClearDiagnosticEventsRequest {
 pub struct ClearDiagnosticEventsResponse {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub deleted: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
+pub struct CreateBackupSnapshotResponse {
+    /// The new snapshot directory. The caller deletes it once it has been copied off the host; another snapshot
+    /// cannot be taken while it exists.
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub path: PathBuf,
 }
 
 impl GetDiagnosticEventsRequest {

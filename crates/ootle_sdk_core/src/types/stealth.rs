@@ -212,7 +212,7 @@ impl UtxoTagBytes {
 /// A boundary memo: the small, language-neutral subset of the internal stealth memo that the
 /// confidential-transfer surface needs.
 ///
-/// The internal memo carries more variants (U256, pay-ref, sender address); the boundary
+/// The internal memo carries more variants (U256, destination tag, sender address); the boundary
 /// deliberately exposes only the two general-purpose ones. The output path maps these to the
 /// internal memo; the scan path maps a decoded internal memo back to one of these (other internal
 /// variants surface as [`StealthMemo::Bytes`]).
@@ -388,11 +388,11 @@ pub struct InboundStealthOutput {
     /// [`spend_public_key`]: InboundStealthOutput::spend_public_key
     pub pay_to: StealthPayTo,
     /// For a `StealthPayTo::StealthPublicKey` output, the on-chain one-time spend public key
-    /// (`SpendAuthorization::Key`). When present and the caller supplies their account secret, the
-    /// scanner verifies the output is addressed to that account. `None` for `AccessRuleAllowAll`.
+    /// (`SpendAuthorization::Key`). The scanner re-derives it from the view secret and the account
+    /// public key to confirm the output is spendable by that account. `None` for `AccessRuleAllowAll`.
     pub spend_public_key: Option<PublicKeyBytes>,
-    /// The UTXO scanning tag (4 bytes), when present. Verified against the receiver-derived tag when
-    /// the caller supplies their account secret.
+    /// The UTXO scanning tag (4 bytes), when present. Verified against the tag the scanner derives from
+    /// its view secret.
     pub utxo_tag: Option<UtxoTagBytes>,
     /// The resource being transferred (needed to re-derive the scanning tag).
     pub resource_address: ResourceAddressStr,

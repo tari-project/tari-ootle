@@ -284,6 +284,15 @@ impl ProposedBlockChangeSet {
         matches!(self.quorum_decision, Some(QuorumDecision::Accept))
     }
 
+    pub fn block(&self) -> &LeafBlock {
+        &self.block
+    }
+
+    /// The local substate changes the block makes, saved as its block diff.
+    pub fn local_substate_changes(&self) -> &[SubstateChange] {
+        &self.local_substate_changes
+    }
+
     pub fn quorum_decision(&self) -> Option<QuorumDecision> {
         self.quorum_decision
     }
@@ -333,6 +342,19 @@ impl ProposedBlockChangeSet {
 
         change_mut.execution = Some(execution);
         Ok(self)
+    }
+
+    /// Records the aborting `execution` for the transaction, replacing a committing execution recorded earlier in the
+    /// block, such as the fee-intent commit a foreign proposal switched the transaction to. An abort decided after a
+    /// commit always wins.
+    pub fn add_abort_execution(&mut self, transaction_id: TransactionId, execution: TransactionExecution) -> &mut Self {
+        debug_assert!(
+            execution.decision().is_abort(),
+            "add_abort_execution called with a committing execution for {transaction_id}"
+        );
+        let execution = execution.for_block(self.block, transaction_id);
+        self.transaction_changes.entry(transaction_id).or_default().execution = Some(execution);
+        self
     }
 
     /// Returns the pool record as this change set leaves it, or as the chain up to its leaf left it if this change set
@@ -628,10 +650,14 @@ impl TransactionChangeSet {
 
 #[cfg(test)]
 mod tests {
-    use std::mem::size_of;
+    use std::{mem::size_of, time::Duration};
 
     use tari_consensus_types::Decision;
-    use tari_engine_types::commit_result::AbortReason;
+    use tari_engine_types::{
+        commit_result::{AbortReason, ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
+        fees::FeeReceipt,
+        substate::SubstateDiff,
+    };
     use tari_ootle_common_types::{Epoch, NumPreshards, SubstateVersion, VersionedSubstateId};
     use tari_ootle_storage::consensus_models::{SubstatePledge, TransactionPoolStage};
     use tari_template_lib_types::ComponentAddress;
@@ -676,6 +702,67 @@ mod tests {
         );
     }
 
+    /// A proposer derives the commands of a block from batched records brought up to date with the block's change set,
+    /// so a foreign proposal in the block that makes the transaction commit only its fee intent must reach them.
+    #[test]
+    fn a_batched_record_commits_only_the_fee_intent_a_foreign_proposal_in_the_block_switched_it_to() {
+        let leaf = LeafBlock {
+            block_id: BlockId::zero(),
+            height: NodeHeight(1),
+            epoch: Epoch(1),
+            shard_group: ShardGroup::all_shards(NumPreshards::P256),
+        };
+        let mut change_set = ProposedBlockChangeSet::new(leaf);
+        let mut switched = local_prepared_record();
+        switched.set_fee_intent_only(true);
+        change_set.set_next_transaction_update(switched).unwrap();
+
+        let mut batched = local_prepared_record();
+        change_set.apply_transaction_update(&mut batched);
+
+        assert!(batched.is_fee_intent_only());
+    }
+
+    /// A foreign proposal can switch a transaction to its fee-intent commit, recording that execution, before another
+    /// proposal or the transaction's own command in the same block aborts it.
+    #[test]
+    fn an_abort_replaces_the_commit_recorded_earlier_in_the_block() {
+        let leaf = LeafBlock {
+            block_id: BlockId::zero(),
+            height: NodeHeight(1),
+            epoch: Epoch(1),
+            shard_group: ShardGroup::all_shards(NumPreshards::P256),
+        };
+        let mut change_set = ProposedBlockChangeSet::new(leaf);
+        let transaction_id = *local_prepared_record().id();
+        let commit = TransactionExecution::new(
+            ExecuteResult {
+                finalize: FinalizeResult::new(
+                    transaction_id.into_array().into(),
+                    vec![],
+                    vec![],
+                    TransactionResult::Accept(SubstateDiff::new()),
+                    FeeReceipt::default(),
+                ),
+                execution_time: Duration::ZERO,
+                execute_epoch: None,
+                wasm_execution_points: 0,
+                native_execution_points: 0,
+            },
+            vec![],
+            vec![],
+        );
+        change_set.add_transaction_execution(transaction_id, commit).unwrap();
+
+        change_set.add_abort_execution(
+            transaction_id,
+            TransactionExecution::abort(&transaction_id, RejectReason::ForeignPledgeInputConflict),
+        );
+
+        let execution = change_set.transaction_execution(&transaction_id).unwrap();
+        assert!(execution.decision().is_abort(), "{execution}");
+    }
+
     fn local_prepared_record() -> TransactionPoolRecord {
         TransactionPoolRecord::load(
             TransactionId::new([1; 32]),
@@ -695,6 +782,7 @@ mod tests {
             None,
             0,
             0,
+            false,
         )
     }
 

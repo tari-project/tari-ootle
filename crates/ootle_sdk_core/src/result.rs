@@ -15,8 +15,8 @@
 //! [`tari_indexer_client::types::IndexerTransactionFinalizedResult`] is the canonical wire type, but
 //! that crate pulls `reqwest`/`tokio` into its tree, which the pure core forbids. So we deserialize
 //! into a local serde mirror ([`WireFinalizedResult`]) whose variant names and fields match the
-//! indexer enum byte-for-byte on the wire, embedding the engine's serde-derived [`ExecuteResult`] and
-//! the canonical [`Decision`]. The timestamp / duration fields are accepted as opaque
+//! indexer enum byte-for-byte on the wire, embedding the engine's [`ExecuteResult`] in its base64 CBOR encoding
+//! and the canonical [`Decision`]. The timestamp / duration fields are accepted as opaque
 //! `serde_json::Value` (we never read them), so we avoid a dependency on the `time` crate.
 //!
 //! ## Indexer vs wallet-daemon wrapper
@@ -28,8 +28,8 @@
 //! ## Dry-run results
 //!
 //! A **dry run** (the indexer `POST /transactions/dry-run`, response
-//! `SubmitTransactionDryRunResponse { transaction_id, result: ExecuteResult }`) executes the
-//! transaction without committing and meters the fee. Its wire shape is a different object — an
+//! `SubmitTransactionDryRunResponse { transaction_id, result }`, `result` the base64 CBOR `ExecuteResult`) executes
+//! the transaction without committing and meters the fee. Its wire shape is a different object — an
 //! unwrapped `ExecuteResult` under a `result` key rather than the `Finalized`/`Rejected`/`Pending`
 //! enum envelope — so [`parse_finalized_result`] shape-dispatches: a top-level `result` key routes to
 //! [`parse_dry_run_result`], which fills the additive `estimated_fee` (the engine's
@@ -40,6 +40,7 @@ use serde::Deserialize;
 use tari_consensus_types::Decision;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, TransactionResult},
+    encoded::Encoded,
     fees::FeeSource,
     substate::SubstateDiff,
 };
@@ -75,7 +76,7 @@ enum WireFinalizedResult {
     /// The transaction was finalized (committed or aborted) by the network.
     Finalized {
         final_decision: Decision,
-        execution_result: Option<Box<ExecuteResult>>,
+        execution_result: Option<Encoded<ExecuteResult>>,
         #[serde(default)]
         execution_time: serde_json::Value,
         #[serde(default)]
@@ -144,7 +145,10 @@ pub fn parse_finalized_result(raw: &str) -> Result<FinalizedResult, OotleSdkErro
             abort_details,
             ..
         } => match execution_result {
-            Some(result) => {
+            Some(encoded) => {
+                let result = encoded
+                    .decode()
+                    .map_err(|e| OotleSdkError::Parse(format!("indexer execution_result CBOR: {e}")))?;
                 // Defensive cross-check: the envelope's `final_decision` is redundant with
                 // `finalize.result`. If they disagree (a version-skewed / buggy indexer), refuse to
                 // silently return a wrong outcome.
@@ -184,9 +188,9 @@ pub fn parse_finalized_result(raw: &str) -> Result<FinalizedResult, OotleSdkErro
 /// surfaces), and we never need the wrapper's `transaction_id`.
 #[derive(Debug, Deserialize)]
 struct WireDryRunResult {
-    /// The full engine execution result (same `ExecuteResult` shape a committed transaction yields),
+    /// The CBOR-encoded engine execution result (same `ExecuteResult` a committed transaction yields),
     /// metered for fees but never written to the ledger.
-    result: Box<ExecuteResult>,
+    result: Encoded<ExecuteResult>,
 }
 
 /// Parses a raw **indexer dry-run** result JSON (`SubmitTransactionDryRunResponse`) into the typed
@@ -207,8 +211,12 @@ pub fn parse_dry_run_result(raw: &str) -> Result<FinalizedResult, OotleSdkError>
 fn parse_dry_run_result_value(value: serde_json::Value) -> Result<FinalizedResult, OotleSdkError> {
     let wire: WireDryRunResult =
         serde_json::from_value(value).map_err(|e| OotleSdkError::Parse(format!("indexer dry-run result JSON: {e}")))?;
-    let mut finalized = finalized_from_execute_result(&wire.result);
-    finalized.estimated_fee = Some(wire.result.finalize.required_fees());
+    let result = wire
+        .result
+        .decode()
+        .map_err(|e| OotleSdkError::Parse(format!("indexer dry-run result CBOR: {e}")))?;
+    let mut finalized = finalized_from_execute_result(&result);
+    finalized.estimated_fee = Some(result.finalize.required_fees());
     Ok(finalized)
 }
 
@@ -276,6 +284,8 @@ fn fee_source_name(source: FeeSource) -> &'static str {
         FeeSource::WasmExecution => "WasmExecution",
         FeeSource::TemplatePublish => "TemplatePublish",
         FeeSource::NativeExecution => "NativeExecution",
+        FeeSource::InputLoad => "InputLoad",
+        FeeSource::InputFanout => "InputFanout",
     }
 }
 
@@ -411,6 +421,7 @@ mod tests {
                 owner_rule: SubstateOwnerRule::None,
                 access_rules: ComponentAccessRules::new(),
                 entity_id: EntityId::from_array([0u8; EntityId::LENGTH]),
+                upgrade_rule: Default::default(),
             },
             body: ComponentBody::from_cbor_value(tari_bor::to_value(&Vec::<VaultId>::new()).unwrap()),
         }
@@ -418,23 +429,23 @@ mod tests {
 
     /// Serializes an `ExecuteResult` into the indexer **dry-run** response JSON
     /// (`SubmitTransactionDryRunResponse { transaction_id, result }`), exactly as `POST
-    /// /transactions/dry-run` hands it back.
+    /// /transactions/dry-run` hands it back (the `result` is its base64 CBOR encoding).
     fn dry_run_wire_json(result: ExecuteResult) -> String {
         serde_json::json!({
             "transaction_id": result.finalize.transaction_hash,
-            "result": result,
+            "result": Encoded::encode(&result).unwrap(),
         })
         .to_string()
     }
 
     /// Serializes an `ExecuteResult` into the indexer `Finalized` wrapper JSON, exactly as the indexer
-    /// REST API hands it back (the `execution_result` is plain serde JSON).
+    /// REST API hands it back (the `execution_result` is its base64 CBOR encoding).
     fn finalized_wire_json(result: ExecuteResult) -> String {
         let decision = Decision::from(&result.finalize.result);
         serde_json::json!({
             "Finalized": {
                 "final_decision": decision,
-                "execution_result": result,
+                "execution_result": Encoded::encode(&result).unwrap(),
                 "execution_time": { "secs": 1, "nanos": 0 },
                 "finalized_time": "2026-06-12 00:00:00.0",
                 "abort_details": null,
@@ -598,7 +609,7 @@ mod tests {
         let json = serde_json::json!({
             "Finalized": {
                 "final_decision": { "Abort": "EpochExpired" },
-                "execution_result": exec,
+                "execution_result": Encoded::encode(&exec).unwrap(),
                 "execution_time": { "secs": 1, "nanos": 0 },
                 "finalized_time": "2026-06-12 00:00:00.0",
                 "abort_details": null,
@@ -607,5 +618,6 @@ mod tests {
         .to_string();
         let err = parse_finalized_result(&json).unwrap_err();
         assert_eq!(err.code(), "PARSE");
+        assert!(err.to_string().contains("disagrees"), "{err}");
     }
 }

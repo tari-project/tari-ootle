@@ -2,12 +2,15 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use axum::{Extension, Json, extract::Path};
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{encoded::Encoded, substate::SubstateId};
 use tari_indexer_client::types::GetResourceResponse;
 use tari_ootle_common_types::SubstateRequirementRef;
 use tari_template_lib_types::{ResourceAddress, constants::TARI_TOKEN};
 
-use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
+use crate::{
+    rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult},
+    substate_manager::decode_substate,
+};
 
 #[utoipa::path(
     get,
@@ -45,7 +48,8 @@ pub async fn get_resource(
         .map_err(|e| ErrorResponse::internal_error(format!("Error getting resource: {}", e)))?
         .ok_or_else(|| ErrorResponse::not_found(format!("Resource {} not found", resource_address)))?;
 
-    let substate = fetched.substate;
+    let substate = decode_substate(&resource_address, &fetched.substate)
+        .map_err(|e| ErrorResponse::internal_error(format!("Error getting resource: {e}")))?;
     let version = substate.version();
     let resource = substate.into_substate_value().into_resource().ok_or_else(|| {
         ErrorResponse::general_error(format!(
@@ -65,6 +69,9 @@ pub async fn get_resource(
     } else {
         resource.total_supply()
     };
+
+    let resource = Encoded::encode(&resource)
+        .map_err(|e| ErrorResponse::internal_error(format!("Error encoding resource: {e}")))?;
 
     Ok(Json(GetResourceResponse {
         resource,

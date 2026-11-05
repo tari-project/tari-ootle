@@ -5,12 +5,12 @@ use std::fmt::{Display, Formatter};
 
 use tari_engine_types::confidential::{ClaimBurnOutputData, MinotariBurnClaimProof};
 use tari_ootle_common_types::displayable::Displayable;
-use tari_ootle_template_metadata::MetadataHash;
 use tari_template_lib_types::{
     Amount,
     FunctionName,
     OwnerRule,
     TemplateAddress,
+    TemplateMetadataHash,
     ValidatorFeePoolAddress,
     access_rules::ComponentAccessRules,
     crypto::RistrettoPublicKeyBytes,
@@ -81,8 +81,6 @@ pub enum Instruction {
         #[n(0)]
         address: ValidatorFeePoolAddress,
         #[n(1)]
-        #[cfg_attr(feature = "serde", serde(default))]
-        #[cbor(default)]
         max_amount: Option<Amount>,
     },
     #[n(7)]
@@ -109,12 +107,11 @@ pub enum Instruction {
         /// binary, which the engine resolves via the surrounding `Blobs` at execution time.
         #[n(0)]
         binary: BlobIndex,
-        /// Optional multihash of off-chain CBOR metadata
+        /// Optional reference to off-chain template metadata, stored on the published template without
+        /// interpretation (conventionally a multihash of the CBOR metadata)
         #[n(1)]
-        #[cfg_attr(feature = "serde", serde(default))]
-        #[cbor(default)]
         #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-        metadata_hash: Option<MetadataHash>,
+        metadata_hash: Option<TemplateMetadataHash>,
     },
     #[n(11)]
     AllocateAddress {
@@ -156,6 +153,19 @@ pub enum Instruction {
         #[n(1)]
         dest: WorkspaceOffsetId,
     },
+    /// Opens an authorization window over the workspace proof at `proof`: native instructions and calls that follow
+    /// see it until a matching `DropProofAuthorization` or the end of the instruction phase.
+    #[n(16)]
+    AuthorizeProof {
+        #[n(0)]
+        proof: WorkspaceOffsetId,
+    },
+    /// Closes the authorization window over the workspace proof at `proof`. The proof stays on the workspace.
+    #[n(17)]
+    DropProofAuthorization {
+        #[n(0)]
+        proof: WorkspaceOffsetId,
+    },
 }
 
 impl Instruction {
@@ -170,6 +180,7 @@ impl Instruction {
     pub fn referenced_template(&self) -> Option<&TemplateAddress> {
         match self {
             Self::CallFunction { address, .. } => Some(address),
+            Self::UpdateComponentTemplate { new_template, .. } => Some(new_template),
             _ => None,
         }
     }
@@ -202,7 +213,9 @@ impl Instruction {
             Self::PutIntoBucket { .. } |
             Self::AllocateAddress { .. } |
             Self::StealthTransfer { .. } |
-            Self::PayFeeFromBucket { .. } => {},
+            Self::PayFeeFromBucket { .. } |
+            Self::AuthorizeProof { .. } |
+            Self::DropProofAuthorization { .. } => {},
         }
         out
     }
@@ -247,7 +260,9 @@ impl Instruction {
             Self::PutIntoBucket { .. } |
             Self::AllocateAddress { .. } |
             Self::StealthTransfer { .. } |
-            Self::PayFeeFromBucket { .. } => {},
+            Self::PayFeeFromBucket { .. } |
+            Self::AuthorizeProof { .. } |
+            Self::DropProofAuthorization { .. } => {},
         }
     }
 
@@ -328,6 +343,9 @@ impl Instruction {
             },
             Self::PayFeeFromBucket { bucket } => {
                 bucket.remap_id(id_offset);
+            },
+            Self::AuthorizeProof { proof } | Self::DropProofAuthorization { proof } => {
+                proof.remap_id(id_offset);
             },
             Self::UpdateComponentTemplate { component, migrate, .. } => {
                 component.remap_workspace_id(id_offset);
@@ -434,6 +452,12 @@ impl Display for Instruction {
             },
             Self::PutIntoBucket { src, dest } => {
                 write!(f, "PutIntoBucket {{ src: {}, dest: {} }}", src, dest)
+            },
+            Self::AuthorizeProof { proof } => {
+                write!(f, "AuthorizeProof {{ proof: {} }}", proof)
+            },
+            Self::DropProofAuthorization { proof } => {
+                write!(f, "DropProofAuthorization {{ proof: {} }}", proof)
             },
             Self::PublishTemplate { .. } => {
                 write!(f, "PublishTemplate")
@@ -563,5 +587,80 @@ mod tests {
         let encoded = tari_bor::encode(&instruction).unwrap();
         let decoded: Instruction = tari_bor::decode(&encoded).unwrap();
         assert_eq!(instruction, decoded);
+
+        for instruction in [
+            Instruction::AuthorizeProof {
+                proof: WorkspaceOffsetId::new(3).with_offset(1),
+            },
+            Instruction::DropProofAuthorization {
+                proof: WorkspaceOffsetId::new(3),
+            },
+        ] {
+            let encoded = tari_bor::encode(&instruction).unwrap();
+            let decoded: Instruction = tari_bor::decode(&encoded).unwrap();
+            assert_eq!(instruction, decoded);
+        }
+    }
+
+    /// Pins the borsh bytes of the authorization window instructions in the signing preimage: the variant's
+    /// declaration index (15 and 16, distinct from their CBOR tags 16 and 17), then the workspace id as a
+    /// little-endian `u16` and the optional offset as a little-endian `u64`.
+    #[test]
+    fn proof_authorization_borsh_preimage() {
+        let instruction = Instruction::AuthorizeProof {
+            proof: WorkspaceOffsetId::new(3),
+        };
+        assert_eq!(borsh::to_vec(&instruction).unwrap(), [15, 3, 0, 0]);
+
+        let instruction = Instruction::AuthorizeProof {
+            proof: WorkspaceOffsetId::new(3).with_offset(1),
+        };
+        assert_eq!(borsh::to_vec(&instruction).unwrap(), [
+            15, 3, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0
+        ]);
+
+        let instruction = Instruction::DropProofAuthorization {
+            proof: WorkspaceOffsetId::new(3),
+        };
+        assert_eq!(borsh::to_vec(&instruction).unwrap(), [16, 3, 0, 0]);
+    }
+
+    #[test]
+    fn remap_workspace_ids_shifts_proof_authorization() {
+        let mut instruction = Instruction::AuthorizeProof {
+            proof: WorkspaceOffsetId::new(3).with_offset(1),
+        };
+        instruction.remap_workspace_ids(10);
+        assert_eq!(instruction, Instruction::AuthorizeProof {
+            proof: WorkspaceOffsetId::new(13).with_offset(1),
+        });
+
+        let mut instruction = Instruction::DropProofAuthorization {
+            proof: WorkspaceOffsetId::new(3),
+        };
+        instruction.remap_workspace_ids(10);
+        assert_eq!(instruction, Instruction::DropProofAuthorization {
+            proof: WorkspaceOffsetId::new(13),
+        });
+    }
+
+    /// Pins the borsh bytes that a publish instruction contributes to the signing preimage: the variant's declaration
+    /// index (9, distinct from its CBOR tag 10), the blob index, the `Some` tag, then the metadata hash as a
+    /// little-endian `u32` length and its bytes. Hardware and host-SDK signers reproduce this byte for byte.
+    #[test]
+    fn publish_template_borsh_preimage() {
+        let instruction = Instruction::PublishTemplate {
+            binary: 7,
+            metadata_hash: TemplateMetadataHash::from_bytes(vec![0xaa, 0xbb, 0xcc]),
+        };
+        assert_eq!(borsh::to_vec(&instruction).unwrap(), [
+            9, 7, 1, 3, 0, 0, 0, 0xaa, 0xbb, 0xcc
+        ]);
+
+        let instruction = Instruction::PublishTemplate {
+            binary: 7,
+            metadata_hash: None,
+        };
+        assert_eq!(borsh::to_vec(&instruction).unwrap(), [9, 7, 0]);
     }
 }

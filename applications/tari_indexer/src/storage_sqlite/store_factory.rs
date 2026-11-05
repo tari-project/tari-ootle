@@ -1,7 +1,7 @@
 //   Copyright 2022 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{fmt::Debug, fs::create_dir_all, path::PathBuf, sync::Arc, time::Duration};
+use std::{fmt::Debug, fs::create_dir_all, path::PathBuf, pin::pin, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use deadpool_diesel::{
@@ -12,7 +12,10 @@ use diesel::{Connection, RunQueryDsl, SqliteConnection, sql_query};
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use tari_ootle_storage::StorageError;
 use tari_ootle_storage_sqlite::{SqliteTransaction, error::SqliteStorageError};
-use tokio::sync::Mutex;
+use tokio::{
+    sync::{Mutex, OwnedMutexGuard},
+    time,
+};
 
 #[cfg(feature = "metrics")]
 use crate::storage_sqlite::metrics::{StorageFileStats, StorageMetrics};
@@ -24,6 +27,13 @@ use crate::{
 const LOG_TARGET: &str = "tari::indexer::storage_sqlite";
 const POOL_MAX_SIZE: usize = 16;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long a writer queues for `write_lock` before the wait is logged. Writes hold the lock for
+/// milliseconds, so a queue this slow is either long or held up by a writer at its front.
+const WRITE_LOCK_WARN_AFTER: Duration = Duration::from_secs(5);
+/// How long a writer queues for `write_lock` before it gives up with an error. A writer handed the
+/// lock but never polled again holds every writer behind it, and this bound turns that into errors
+/// on the writers behind it.
+const WRITE_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./src/storage_sqlite/migrations");
 
 #[derive(Clone)]
@@ -88,6 +98,35 @@ impl SqliteIndexerStore {
     pub fn with_metrics(mut self, metrics: StorageMetrics) -> Self {
         self.metrics = Some(metrics);
         self
+    }
+
+    /// Queues for `write_lock`, giving up after [`WRITE_LOCK_TIMEOUT`]. A waiter that gives up leaves
+    /// the queue without taking the lock.
+    async fn lock_for_write(&self) -> Result<OwnedMutexGuard<()>, StorageError> {
+        let mut lock = pin!(self.write_lock.clone().lock_owned());
+        if let Ok(guard) = time::timeout(WRITE_LOCK_WARN_AFTER, &mut lock).await {
+            return Ok(guard);
+        }
+        log::warn!(
+            target: LOG_TARGET,
+            "Still waiting for the indexer store's write lock after {}s: the write lock queue has not reached this writer",
+            WRITE_LOCK_WARN_AFTER.as_secs()
+        );
+        time::timeout(WRITE_LOCK_TIMEOUT.saturating_sub(WRITE_LOCK_WARN_AFTER), lock)
+            .await
+            .map_err(|_| StorageError::General {
+                details: format!(
+                    "Timed out after {}s waiting for the indexer store's write lock",
+                    WRITE_LOCK_TIMEOUT.as_secs()
+                ),
+            })
+    }
+
+    /// Takes the write lock and holds it until the guard drops, standing in for a writer that has
+    /// stopped progressing.
+    #[cfg(test)]
+    pub(crate) async fn hold_write_lock(&self) -> OwnedMutexGuard<()> {
+        self.write_lock.clone().lock_owned().await
     }
 
     async fn acquire(&self) -> Result<deadpool_diesel::sqlite::Connection, StorageError> {
@@ -207,7 +246,14 @@ impl IndexerStore for SqliteIndexerStore {
         // Taken before a pooled connection so that queued writers do not hold connections readers
         // need. The guard moves into the closure because `interact` keeps running on its blocking
         // thread if this future is dropped, and the lock must be held until the transaction ends.
-        let write_guard = self.write_lock.clone().lock_owned().await;
+        let write_guard = self.lock_for_write().await;
+        #[cfg(feature = "metrics")]
+        if write_guard.is_err() &&
+            let Some(metrics) = &self.metrics
+        {
+            metrics.observe_write_lock_wait(lock_requested.elapsed());
+        }
+        let write_guard = write_guard?;
         let conn = self.acquire().await?;
         #[cfg(feature = "metrics")]
         let metrics = self.metrics.clone();
@@ -282,20 +328,26 @@ fn apply_pragmas(conn: &mut SqliteConnection) -> Result<(), diesel::result::Erro
 /// Appends one event per topic to the store at `db_path`, taking the next ids in the order given.
 #[cfg(test)]
 pub(crate) fn insert_test_events(db_path: &std::path::Path, topics: &[&str]) {
-    use tari_common_types::types::FixedHash;
+    use tari_engine_types::events::Event;
+    use tari_sidechain::FixedHash;
 
-    use crate::storage_sqlite::{models::NewEvent, schema::events, serialization::serialize_json};
+    use crate::storage_sqlite::{models::NewEvent, schema::events, serialization::encode_committed};
 
     let mut conn = SqliteConnection::establish(db_path.to_str().unwrap()).unwrap();
     let tx_hash = FixedHash::zero().to_string();
-    let payload = serialize_json(&tari_template_lib_types::Metadata::new()).unwrap();
     for topic in topics {
+        let event = Event::new(
+            None,
+            Default::default(),
+            topic.to_string(),
+            tari_template_lib_types::Metadata::new(),
+        );
         diesel::insert_into(events::table)
             .values(NewEvent {
                 template_address: FixedHash::zero().to_string(),
                 tx_hash: &tx_hash,
                 topic,
-                payload: payload.clone(),
+                event: encode_committed(&event).unwrap(),
                 substate_id: None,
                 resource_address: None,
                 epoch: 0,
@@ -306,19 +358,20 @@ pub(crate) fn insert_test_events(db_path: &std::path::Path, topics: &[&str]) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use tari_common_types::types::FixedHash;
     use tari_engine_types::{
+        encoded::Encoded,
         fees::FeeReceiptBuilder,
         substate::SubstateId,
         transaction_receipt::{FinalizeOutcome, TransactionReceipt},
     };
     use tari_indexer_client::types::TransactionSource;
     use tari_indexer_lib::substate_cache::{FetchWatermark, SubstateCacheEntry, SubstateCacheEntryRef};
-    use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, StateVersion, SubstateVersion};
+    use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, StateVersion, SubstateVersion, shard::Shard};
     use tari_ootle_transaction::{Transaction, TransactionId};
+    use tari_sidechain::FixedHash;
     use tari_validator_node_rpc::client::SubstateResult;
 
     use super::*;
@@ -347,7 +400,7 @@ mod tests {
 
     /// One state version covers a whole synced batch, so a shard's UTXOs cluster into version
     /// groups. These build a shard whose groups straddle the read limit.
-    fn utxo_resource() -> tari_template_lib_types::ResourceAddress {
+    pub(crate) fn utxo_resource() -> tari_template_lib_types::ResourceAddress {
         use std::str::FromStr;
         tari_template_lib_types::ResourceAddress::from_str(
             "resource_0000000000000000000000000000000000000000000000000000000000000000",
@@ -355,7 +408,7 @@ mod tests {
         .unwrap()
     }
 
-    fn unspent_at(seq: u8, state_version: u64) -> crate::storage_sqlite::models::UtxoUpdateRecord {
+    pub(crate) fn unspent_at(seq: u8, state_version: u64) -> crate::storage_sqlite::models::UtxoUpdateRecord {
         use tari_engine_types::{UtxoOutput, crypto::OutputBody};
         use tari_template_lib_types::{
             EncryptedData,
@@ -386,7 +439,7 @@ mod tests {
         }))
     }
 
-    async fn store_with_utxos(groups: &[(u64, u8)]) -> (tempfile::TempDir, SqliteIndexerStore) {
+    pub(crate) async fn store_with_utxos(groups: &[(u64, u8)]) -> (tempfile::TempDir, SqliteIndexerStore) {
         let (dir, store) = temp_store().await;
         let mut seq = 0u8;
         let mut records = Vec::new();
@@ -403,8 +456,31 @@ mod tests {
         (dir, store)
     }
 
+    pub(crate) fn spent_at(seq: u8, state_version: u64) -> crate::storage_sqlite::models::UtxoUpdateRecord {
+        use tari_template_lib_types::{UtxoAddress, UtxoId};
+
+        use crate::storage_sqlite::models::{UtxoSpent, UtxoUpdateRecord};
+
+        UtxoUpdateRecord::Spent(UtxoSpent {
+            address: UtxoAddress::new(utxo_resource(), UtxoId::from_array([seq; 32])),
+            version: SubstateVersion::ZERO,
+            shard: tari_ootle_common_types::shard::Shard::from(1u32),
+            state_version: StateVersion::new(state_version),
+        })
+    }
+
     async fn read_updates(
         store: &SqliteIndexerStore,
+        from: u64,
+        limit: u32,
+    ) -> tari_indexer_client::types::UtxoStateUpdateSet {
+        read_filtered_updates(store, Epoch(0), false, from, limit).await
+    }
+
+    async fn read_filtered_updates(
+        store: &SqliteIndexerStore,
+        from_epoch: Epoch,
+        unspent_only: bool,
         from: u64,
         limit: u32,
     ) -> tari_indexer_client::types::UtxoStateUpdateSet {
@@ -412,10 +488,10 @@ mod tests {
             .with_read_tx(move |tx| {
                 tx.utxos_get_updates(
                     utxo_resource(),
-                    Epoch(0),
+                    from_epoch,
                     tari_ootle_common_types::shard::Shard::from(1u32),
                     StateVersion::new(from),
-                    false,
+                    unspent_only,
                     limit,
                 )
             })
@@ -423,30 +499,36 @@ mod tests {
             .unwrap()
     }
 
-    /// An unspent output's `(resource, public nonce, tag)` is unique among unspent rows. A clash
-    /// means some sync peer was faulty, and must not fail the commit, which would stall the shard's
-    /// sync on every peer.
+    /// Unspent outputs may share a public nonce and tag, as a sender chooses the nonce. A version
+    /// already indexed is skipped and the commit goes on, as failing it would stall the shard's
+    /// sync.
     #[tokio::test]
-    async fn an_unspent_utxo_clashing_with_a_stored_one_is_skipped() {
+    async fn unspent_utxos_sharing_a_nonce_and_tag_are_all_indexed_and_a_version_once() {
         use tari_template_lib_types::{UtxoAddress, UtxoId};
 
         use crate::storage_sqlite::models::UtxoUpdateRecord;
 
         let (_dir, store) = store_with_utxos(&[(1, 1)]).await;
-        let UtxoUpdateRecord::Unspent(mut clashing) = unspent_at(1, 2) else {
+        let UtxoUpdateRecord::Unspent(mut sharing) = unspent_at(1, 2) else {
             unreachable!()
         };
-        let clashing_address = UtxoAddress::new(utxo_resource(), UtxoId::from_array([99; 32]));
-        clashing.address = clashing_address.clone();
+        sharing.address = UtxoAddress::new(utxo_resource(), UtxoId::from_array([99; 32]));
+        let UtxoUpdateRecord::Unspent(indexed) = unspent_at(1, 2) else {
+            unreachable!()
+        };
+        let indexed_address = indexed.address.clone();
 
         let skipped = store
             .with_write_tx(move |tx| {
-                tx.batch_insert_utxo_updates(Epoch(1), [UtxoUpdateRecord::Unspent(clashing), unspent_at(2, 2)])
+                tx.batch_insert_utxo_updates(Epoch(1), [
+                    UtxoUpdateRecord::Unspent(sharing),
+                    UtxoUpdateRecord::Unspent(indexed),
+                ])
             })
             .await
             .unwrap();
 
-        assert_eq!(skipped, [clashing_address]);
+        assert_eq!(skipped, [indexed_address]);
         let set = read_updates(&store, 0, 10).await;
         assert_eq!(set.updates.len(), 2);
     }
@@ -508,14 +590,6 @@ mod tests {
         assert_eq!(set.updates.len(), 3);
         assert_eq!(set.max_state_version, StateVersion::new(u64::MAX));
         assert!(!set.has_more);
-
-        let max = store
-            .with_read_tx(|tx| {
-                tx.utxos_get_max_state_version(utxo_resource(), tari_ootle_common_types::shard::Shard::from(1u32))
-            })
-            .await
-            .unwrap();
-        assert_eq!(max, StateVersion::new(u64::MAX));
     }
 
     #[tokio::test]
@@ -542,10 +616,605 @@ mod tests {
         assert_eq!(set.max_state_version, StateVersion::new(20));
     }
 
-    async fn temp_store() -> (tempfile::TempDir, SqliteIndexerStore) {
+    /// The limit counts the rows read, so a read whose `from_epoch` excludes everything stops at the
+    /// limit and reports how far it got, rather than walking the shard's history to find a match.
+    #[tokio::test]
+    async fn a_read_its_filters_exclude_stops_at_the_limit_and_moves_the_cursor() {
+        let (_dir, store) = store_with_utxos(&[(10, 2), (20, 2), (30, 2)]).await;
+
+        let set = read_filtered_updates(&store, Epoch(2), false, 0, 3).await;
+        assert!(set.updates.is_empty());
+        assert!(set.has_more);
+        assert_eq!(set.max_state_version, StateVersion::new(10));
+
+        let mut cursor = set.max_state_version.as_u64();
+        let mut passes = 1;
+        loop {
+            let set = read_filtered_updates(&store, Epoch(2), false, cursor, 3).await;
+            assert!(set.updates.is_empty());
+            assert!(
+                set.max_state_version.as_u64() > cursor,
+                "the read must move past the cursor"
+            );
+            cursor = set.max_state_version.as_u64();
+            passes += 1;
+            if !set.has_more {
+                break;
+            }
+        }
+        assert_eq!(passes, 3);
+        assert_eq!(cursor, 30);
+    }
+
+    /// Freezing or unfreezing an output takes its version down and brings the next one up under the
+    /// same commitment. Each spend is reported at the state version and substate version it took down.
+    #[tokio::test]
+    async fn a_re_versioned_utxo_reports_each_version_spent_once() {
+        use tari_indexer_client::types::WalletUtxoUpdate;
+
+        use crate::storage_sqlite::models::UtxoUpdateRecord;
+
+        fn at_version(record: UtxoUpdateRecord, version: u64) -> UtxoUpdateRecord {
+            match record {
+                UtxoUpdateRecord::Unspent(mut unspent) => {
+                    unspent.version = SubstateVersion::new(version);
+                    UtxoUpdateRecord::Unspent(unspent)
+                },
+                UtxoUpdateRecord::Spent(mut spent) => {
+                    spent.version = SubstateVersion::new(version);
+                    UtxoUpdateRecord::Spent(spent)
+                },
+                UtxoUpdateRecord::Burnt(mut burnt) => {
+                    burnt.version = SubstateVersion::new(version);
+                    UtxoUpdateRecord::Burnt(burnt)
+                },
+            }
+        }
+
+        let (_dir, store) = store_with_utxos(&[(10, 1)]).await;
+        for (state_version, version) in [(20, 0), (30, 1)] {
+            store
+                .with_write_tx(move |tx| {
+                    tx.batch_insert_utxo_updates(Epoch(1), [
+                        at_version(spent_at(1, state_version), version),
+                        at_version(unspent_at(1, state_version), version + 1),
+                    ])
+                })
+                .await
+                .unwrap();
+        }
+
+        let spent_versions = |set: &tari_indexer_client::types::UtxoStateUpdateSet| {
+            set.updates
+                .iter()
+                .filter_map(|update| match update {
+                    WalletUtxoUpdate::Spent(spent) => Some(spent.version),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        // Each version's row is the record of its latest transition, so v1, spent at 30, no longer
+        // shows as unspent at 20.
+        let set = read_updates(&store, 10, 1).await;
+        assert_eq!(set.max_state_version, StateVersion::new(20));
+        assert_eq!(spent_versions(&set), [SubstateVersion::ZERO]);
+        assert_eq!(set.updates.len(), 1);
+
+        let set = read_updates(&store, 20, 10).await;
+        assert_eq!(set.max_state_version, StateVersion::new(30));
+        assert_eq!(spent_versions(&set), [SubstateVersion::new(1)]);
+        assert!(matches!(set.updates[1], WalletUtxoUpdate::Unspent(_)));
+    }
+
+    fn burnt_at(seq: u8, state_version: u64) -> crate::storage_sqlite::models::UtxoUpdateRecord {
+        use crate::storage_sqlite::models::UtxoUpdateRecord;
+
+        let UtxoUpdateRecord::Spent(spent) = spent_at(seq, state_version) else {
+            unreachable!()
+        };
+        UtxoUpdateRecord::Burnt(spent)
+    }
+
+    /// A burn reports the version it took down as burnt, and the output leaves the unspent set.
+    #[tokio::test]
+    async fn a_burn_reports_the_version_it_took_down_burnt() {
+        use tari_indexer_client::types::WalletUtxoUpdate;
+
+        let (_dir, store) = store_with_utxos(&[(10, 2)]).await;
+        store
+            .with_write_tx(|tx| tx.batch_insert_utxo_updates(Epoch(1), [burnt_at(1, 20)]))
+            .await
+            .unwrap();
+
+        let set = read_updates(&store, 10, 10).await;
+        assert_eq!(set.updates.len(), 1);
+        assert!(
+            matches!(&set.updates[0], WalletUtxoUpdate::Burnt(burnt) if burnt.version == SubstateVersion::ZERO),
+            "{:?}",
+            set.updates[0]
+        );
+
+        let set = read_filtered_updates(&store, Epoch(0), true, 0, 10).await;
+        assert_eq!(set.updates.len(), 1);
+        assert!(matches!(set.updates[0], WalletUtxoUpdate::Unspent(_)));
+    }
+
+    /// A burn of an output this indexer never held unspent is reported burnt all the same.
+    #[tokio::test]
+    async fn a_burn_of_an_output_never_held_unspent_is_reported_burnt() {
+        use tari_indexer_client::types::WalletUtxoUpdate;
+
+        let (_dir, store) = temp_store().await;
+        store
+            .with_write_tx(|tx| tx.batch_insert_utxo_updates(Epoch(1), [burnt_at(1, 20)]))
+            .await
+            .unwrap();
+
+        let set = read_updates(&store, 0, 10).await;
+        assert_eq!(set.updates.len(), 1);
+        assert!(
+            matches!(&set.updates[0], WalletUtxoUpdate::Burnt(burnt) if burnt.version == SubstateVersion::ZERO),
+            "{:?}",
+            set.updates[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unspent_only_read_counts_spent_rows_against_its_limit() {
+        let (_dir, store) = store_with_utxos(&[(10, 2)]).await;
+        store
+            .with_write_tx(|tx| tx.batch_insert_utxo_updates(Epoch(1), [spent_at(1, 20), spent_at(2, 20)]))
+            .await
+            .unwrap();
+        store
+            .with_write_tx(|tx| tx.batch_insert_utxo_updates(Epoch(1), [unspent_at(3, 30)]))
+            .await
+            .unwrap();
+
+        let set = read_filtered_updates(&store, Epoch(0), true, 0, 1).await;
+        assert!(set.updates.is_empty());
+        assert!(set.has_more);
+        assert_eq!(set.max_state_version, StateVersion::new(20));
+
+        let set = read_filtered_updates(&store, Epoch(0), true, 20, 1).await;
+        assert_eq!(set.updates.len(), 1);
+        assert!(!set.has_more);
+        assert_eq!(set.max_state_version, StateVersion::new(30));
+    }
+
+    #[tokio::test]
+    async fn a_read_with_nothing_past_the_cursor_reports_the_cursor() {
+        let (_dir, store) = store_with_utxos(&[(10, 2)]).await;
+
+        let set = read_updates(&store, 10, 5).await;
+
+        assert!(set.updates.is_empty());
+        assert!(!set.has_more);
+        assert_eq!(set.max_state_version, StateVersion::new(10));
+    }
+
+    fn spent_in_shard(seq: u8, state_version: u64, shard: u32) -> crate::storage_sqlite::models::UtxoUpdateRecord {
+        use crate::storage_sqlite::models::UtxoUpdateRecord;
+
+        let UtxoUpdateRecord::Spent(mut spent) = spent_at(seq, state_version) else {
+            unreachable!("spent_at builds a spend")
+        };
+        spent.shard = Shard::from(shard);
+        UtxoUpdateRecord::Spent(spent)
+    }
+
+    async fn spend_in_epoch(
+        store: &SqliteIndexerStore,
+        epoch: u64,
+        record: crate::storage_sqlite::models::UtxoUpdateRecord,
+    ) {
+        store
+            .with_write_tx(move |tx| tx.batch_insert_utxo_updates(Epoch(epoch), [record]))
+            .await
+            .unwrap();
+    }
+
+    async fn tombstone_horizon(store: &SqliteIndexerStore, shard: u32) -> Option<StateVersion> {
+        store
+            .with_read_tx(move |tx| tx.utxo_tombstone_horizon(Shard::from(shard)))
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn tombstone_pruning_deletes_spends_before_the_cutoff_and_raises_each_shards_horizon() {
+        use tari_indexer_client::types::WalletUtxoUpdate;
+        use tari_template_lib_types::UtxoId;
+
+        let (_dir, store) = store_with_utxos(&[(10, 4)]).await;
+        spend_in_epoch(&store, 5, spent_at(1, 20)).await;
+        spend_in_epoch(&store, 9, spent_at(2, 30)).await;
+        spend_in_epoch(&store, 10, spent_at(3, 40)).await;
+        spend_in_epoch(&store, 6, spent_in_shard(9, 25, 2)).await;
+
+        let num_pruned = store
+            .with_write_tx(|tx| tx.prune_utxo_tombstones_before_epoch(Epoch(10), 100))
+            .await
+            .unwrap();
+        assert_eq!(num_pruned, 3);
+
+        assert_eq!(tombstone_horizon(&store, 1).await, Some(StateVersion::new(30)));
+        assert_eq!(tombstone_horizon(&store, 2).await, Some(StateVersion::new(25)));
+        let set = read_updates(&store, 0, 10).await;
+        assert!(
+            matches!(
+                &set.updates[..],
+                [WalletUtxoUpdate::Unspent(_), WalletUtxoUpdate::Spent(spent)] if spent.id == UtxoId::from_array([3; 32])
+            ),
+            "the unspent output and the spend at the cutoff remain: {:?}",
+            set.updates
+        );
+    }
+
+    #[tokio::test]
+    async fn tombstone_pruning_never_lowers_a_horizon() {
+        let (_dir, store) = store_with_utxos(&[(10, 1)]).await;
+        spend_in_epoch(&store, 5, spent_at(1, 20)).await;
+        store
+            .with_write_tx(|tx| tx.raise_utxo_tombstone_horizon(Shard::from(1u32), StateVersion::new(100)))
+            .await
+            .unwrap();
+
+        let num_pruned = store
+            .with_write_tx(|tx| tx.prune_utxo_tombstones_before_epoch(Epoch(10), 100))
+            .await
+            .unwrap();
+        assert_eq!(num_pruned, 1);
+        assert_eq!(tombstone_horizon(&store, 1).await, Some(StateVersion::new(100)));
+    }
+
+    #[tokio::test]
+    async fn tombstone_pruning_with_nothing_aged_out_leaves_no_horizon() {
+        let (_dir, store) = store_with_utxos(&[(10, 1)]).await;
+        spend_in_epoch(&store, 10, spent_at(1, 20)).await;
+
+        let num_pruned = store
+            .with_write_tx(|tx| tx.prune_utxo_tombstones_before_epoch(Epoch(10), 100))
+            .await
+            .unwrap();
+        assert_eq!(num_pruned, 0);
+        assert_eq!(tombstone_horizon(&store, 1).await, None);
+    }
+
+    /// State versions from 2^63 up are stored negative, so the highest version pruned from a shard
+    /// must be found on the decoded versions.
+    #[tokio::test]
+    async fn the_tombstone_horizon_covers_state_versions_stored_negative() {
+        let (_dir, store) = temp_store().await;
+        spend_in_epoch(&store, 5, spent_at(1, 20)).await;
+        spend_in_epoch(&store, 5, spent_at(2, u64::MAX - 1)).await;
+
+        let num_pruned = store
+            .with_write_tx(|tx| tx.prune_utxo_tombstones_before_epoch(Epoch(10), 100))
+            .await
+            .unwrap();
+        assert_eq!(num_pruned, 2);
+        assert_eq!(
+            tombstone_horizon(&store, 1).await,
+            Some(StateVersion::new(u64::MAX - 1))
+        );
+    }
+
+    /// The tombstone prune select must be servable from `utxos_spent_epoch_idx`, or it scans every
+    /// UTXO under the write lock on each pass, including the common one that prunes nothing.
+    #[tokio::test]
+    async fn tombstone_prune_select_is_served_by_the_spent_epoch_index() {
+        use crate::storage_sqlite::writer::spent_utxos_before_epoch_query;
+
+        let (_dir, store) = temp_store().await;
+        let plan = query_plan(&store, sql_of(&spent_utxos_before_epoch_query(Epoch(100), 500))).await;
+
+        assert!(
+            plan.contains("utxos_spent_epoch_idx"),
+            "tombstone prune select does not use the spent epoch index: {plan}"
+        );
+        assert!(
+            !plan.contains("SCAN utxos"),
+            "tombstone prune select falls back to a scan: {plan}"
+        );
+    }
+
+    /// A spend can arrive for an output this indexer never held unspent: one whose creation was
+    /// streamed without its value because it was already spent. The spend is still served, as the id
+    /// and version it took down.
+    #[tokio::test]
+    async fn a_spend_of_an_output_never_held_unspent_is_served() {
+        use tari_indexer_client::types::WalletUtxoUpdate;
+        use tari_template_lib_types::{
+            UtxoId,
+            crypto::{RistrettoPublicKeyBytes, UtxoTag},
+        };
+
+        let (_dir, store) = store_with_utxos(&[(10, 1)]).await;
+        store
+            .with_write_tx(|tx| tx.batch_insert_utxo_updates(Epoch(1), [spent_at(7, 20)]))
+            .await
+            .unwrap();
+
+        let set = read_updates(&store, 10, 10).await;
+        assert_eq!(set.max_state_version, StateVersion::new(20));
+        assert!(
+            matches!(&set.updates[..], [WalletUtxoUpdate::Spent(spent)] if spent.id == UtxoId::from_array([7; 32]) && spent.version == SubstateVersion::ZERO),
+            "{:?}",
+            set.updates
+        );
+        let unspent_only = read_filtered_updates(&store, Epoch(0), true, 0, 10).await;
+        assert_eq!(unspent_only.updates.len(), 1);
+
+        let pair = (
+            UtxoTag::from(0u32),
+            RistrettoPublicKeyBytes::from_bytes(&[7; 32]).unwrap(),
+        );
+        let spent = store
+            .with_read_tx(move |tx| tx.utxos_get_spent_public_nonce_and_tag(&utxo_resource(), &[pair]))
+            .await
+            .unwrap();
+        assert!(
+            spent.is_empty(),
+            "a tombstone without a nonce and tag is not found by them"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_tombstone_horizon_only_rises() {
+        use tari_ootle_common_types::shard::Shard;
+
+        let (_dir, store) = temp_store().await;
+        let raise = |shard: u32, version: u64| {
+            let store = store.clone();
+            async move {
+                store
+                    .with_write_tx(move |tx| {
+                        tx.raise_utxo_tombstone_horizon(Shard::from(shard), StateVersion::new(version))
+                    })
+                    .await
+                    .unwrap()
+            }
+        };
+        // Stored negative, so it would order below every other version in SQL.
+        let high = 1u64 << 63;
+
+        raise(1, 10).await;
+        raise(1, 5).await;
+        raise(2, high).await;
+        raise(2, 10).await;
+
+        let horizons = store.with_read_tx(|tx| tx.utxo_tombstone_horizons()).await.unwrap();
+        assert_eq!(horizons, [
+            (Shard::from(1u32), StateVersion::new(10)),
+            (Shard::from(2u32), StateVersion::new(high)),
+        ]);
+        let unset = store
+            .with_read_tx(|tx| tx.utxo_tombstone_horizon(Shard::from(3u32)))
+            .await
+            .unwrap();
+        assert_eq!(unset, None);
+    }
+
+    /// The SQL diesel generates for `query`, with its parameters unbound. Unbound parameters do
+    /// not change the plan.
+    fn sql_of<Q: diesel::query_builder::QueryFragment<diesel::sqlite::Sqlite>>(query: &Q) -> String {
+        use diesel::query_builder::QueryBuilder;
+
+        let mut builder = diesel::sqlite::SqliteQueryBuilder::new();
+        query.to_sql(&mut builder, &diesel::sqlite::Sqlite).unwrap();
+        builder.finish()
+    }
+
+    /// A read that finds fewer rows than its limit (an empty shard, or an epoch past every row)
+    /// visits every index entry its search key admits. Every per-shard read of `utxos` must narrow
+    /// its key to the requested shard so that this is bounded by that shard's rows, not the
+    /// resource's whole history.
+    #[tokio::test]
+    async fn every_shard_utxo_read_seeks_to_the_shard() {
+        use diesel::{ExpressionMethods, QueryDsl};
+
+        use crate::storage_sqlite::{reader::utxo_updates_query, schema::utxos};
+
+        let (_dir, store) = temp_store().await;
+        let shard = Shard::from(7u32);
+        let assert_seeks_to_shard = |read: &str, plan: String| {
+            assert!(
+                plan.starts_with("SEARCH ") && plan.contains("shard=?"),
+                "{read} does not seek to the shard: {plan}"
+            );
+            assert!(!plan.contains("TEMP B-TREE"), "{read} sorts outside the index: {plan}");
+        };
+
+        let updates = || utxo_updates_query(utxo_resource(), shard);
+        let reads = [
+            (
+                "after a non-negative version",
+                updates().filter(utxos::state_version.gt(0)).limit(2),
+            ),
+            (
+                "after a negative version",
+                updates()
+                    .filter(utxos::state_version.gt(-5))
+                    .filter(utxos::state_version.lt(0))
+                    .limit(2),
+            ),
+            (
+                "of the negative half",
+                updates().filter(utxos::state_version.lt(0)).limit(2),
+            ),
+            ("of a whole version", updates().filter(utxos::state_version.eq(5))),
+        ];
+        for (read, query) in reads {
+            assert_seeks_to_shard(&format!("update read {read}"), query_plan(&store, sql_of(&query)).await);
+        }
+    }
+
+    /// Listing, fetching and marking a UTXO spent each address a few of one resource's rows by key.
+    /// Each must seek to those rows, so that its cost does not grow with the resource's history or
+    /// the table's.
+    #[tokio::test]
+    async fn utxo_lookups_by_key_seek_to_their_rows() {
+        use diesel::ExpressionMethods;
+        use tari_template_lib_types::{
+            UtxoId,
+            crypto::{RistrettoPublicKeyBytes, UtxoTag},
+        };
+
+        use crate::storage_sqlite::{
+            reader::{
+                spent_utxos_by_tag_and_nonce_query,
+                unspent_utxos_by_tag_and_nonce_page_query,
+                unspent_utxos_by_tag_and_nonce_query,
+            },
+            schema::utxos,
+        };
+
+        let (_dir, store) = temp_store().await;
+        let resource = utxo_resource();
+        let assert_seeks = |read: &str, plan: String, key: &str| {
+            assert!(
+                plan.lines()
+                    .all(|step| !step.starts_with("SCAN ") || step.contains("CONSTANT ROW")),
+                "{read} scans the table: {plan}"
+            );
+            assert!(!plan.contains("TEMP B-TREE"), "{read} sorts outside the index: {plan}");
+            assert!(plan.contains(key), "{read} does not search on {key}: {plan}");
+        };
+
+        let nonce = RistrettoPublicKeyBytes::from_bytes(&[1; 32]).unwrap();
+        let fetch = unspent_utxos_by_tag_and_nonce_query(&resource, &[(UtxoTag::from(0u32), nonce)]);
+        assert_seeks(
+            "fetch by tag and nonce",
+            query_plan(&store, sql_of(&fetch)).await,
+            "utxos_resource_public_nonce_utxo_tag_unspent_idx (resource_address=? AND public_nonce=?",
+        );
+        // A page sorts only the rows matching its pairs, outside any index
+        let fetch_page = unspent_utxos_by_tag_and_nonce_page_query(
+            &resource,
+            &[(UtxoTag::from(0u32), nonce)],
+            Some(UtxoId::from_array([7; 32])),
+            1000,
+        );
+        let plan = query_plan(&store, sql_of(&fetch_page)).await;
+        assert!(
+            plan.lines()
+                .all(|step| !step.starts_with("SCAN ") || step.contains("CONSTANT ROW")),
+            "fetch a page by tag and nonce scans the table: {plan}"
+        );
+        assert!(
+            plan.contains("utxos_resource_public_nonce_utxo_tag_unspent_idx (resource_address=? AND public_nonce=?"),
+            "fetch a page by tag and nonce does not search on its pairs: {plan}"
+        );
+        let fetch_spent = spent_utxos_by_tag_and_nonce_query(&resource, &[(UtxoTag::from(0u32), nonce)]);
+        assert_seeks(
+            "fetch spent by tag and nonce",
+            query_plan(&store, sql_of(&fetch_spent)).await,
+            "utxos_resource_public_nonce_utxo_tag_spent_idx (resource_address=? AND public_nonce=?",
+        );
+
+        let mark_spent = diesel::update(utxos::table)
+            .filter(utxos::resource_address.eq(resource.to_string()))
+            .filter(utxos::commitment.eq(UtxoId::from_array([1; 32]).to_commitment_hex_string()))
+            .filter(utxos::version.eq(0))
+            .set(utxos::is_spent.eq(true));
+        assert_seeks(
+            "mark spent",
+            query_plan(&store, sql_of(&mark_spent)).await,
+            "resource_address=? AND commitment=?",
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_finds_unspent_utxos_by_key() {
+        use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, UtxoTag};
+
+        let (_dir, store) = store_with_utxos(&[(10, 4)]).await;
+        store
+            .with_write_tx(|tx| tx.batch_insert_utxo_updates(Epoch(1), [spent_at(2, 20)]))
+            .await
+            .unwrap();
+        let fetch = |seq: u8| {
+            let store = store.clone();
+            async move {
+                let pair = (
+                    UtxoTag::from(0u32),
+                    RistrettoPublicKeyBytes::from_bytes(&[seq; 32]).unwrap(),
+                );
+                store
+                    .with_read_tx(move |tx| {
+                        tx.utxos_get_unspent_by_public_nonce_and_tag(&utxo_resource(), &[pair], None, 10)
+                    })
+                    .await
+                    .unwrap()
+            }
+        };
+        assert_eq!(fetch(3).await.len(), 1);
+        assert!(fetch(2).await.is_empty(), "a spent UTXO is not fetched");
+
+        let pair = |seq: u8| {
+            (
+                UtxoTag::from(0u32),
+                RistrettoPublicKeyBytes::from_bytes(&[seq; 32]).unwrap(),
+            )
+        };
+        let spent = store
+            .with_read_tx(move |tx| {
+                tx.utxos_get_spent_public_nonce_and_tag(&utxo_resource(), &[pair(2), pair(3), pair(99)])
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            spent,
+            [pair(2)],
+            "only the spent pair is reported spent, not an unspent or unknown one"
+        );
+    }
+
+    pub(crate) async fn temp_store() -> (tempfile::TempDir, SqliteIndexerStore) {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteIndexerStore::try_create(dir.path().join("indexer.db")).unwrap();
         (dir, store)
+    }
+
+    async fn write_marker(store: &SqliteIndexerStore, value: u64) -> Result<(), StorageError> {
+        store
+            .with_write_tx(move |tx| tx.key_value_set(Key::TariAccumulatedFees, value))
+            .await
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_writer_queued_behind_a_held_write_lock_gives_up_after_the_timeout() {
+        let (_dir, store) = temp_store().await;
+        let held = store.hold_write_lock().await;
+
+        let started = time::Instant::now();
+        let err = write_marker(&store, 1).await.unwrap_err();
+        assert_eq!(started.elapsed(), WRITE_LOCK_TIMEOUT);
+        assert!(
+            err.to_string()
+                .contains("Timed out after 30s waiting for the indexer store's write lock"),
+            "{err}"
+        );
+
+        // The waiter that gave up holds no place in the queue, so the next writer takes the lock as
+        // soon as it is released.
+        drop(held);
+        write_marker(&store, 2).await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_writer_queued_behind_a_progressing_writer_takes_the_lock() {
+        let (_dir, store) = temp_store().await;
+        let held = store.hold_write_lock().await;
+        let release = tokio::spawn(async move {
+            time::sleep(WRITE_LOCK_WARN_AFTER + Duration::from_secs(1)).await;
+            drop(held);
+        });
+
+        write_marker(&store, 1).await.unwrap();
+        release.await.unwrap();
     }
 
     #[tokio::test]
@@ -853,6 +1522,53 @@ mod tests {
             .with_read_tx(move |tx| tx.get_transaction_receipt(&receipt_address))
             .await
             .unwrap();
+    }
+
+    /// Starts `table`'s AUTOINCREMENT counter at `u32::MAX`, so its next ids need more than 32 bits.
+    async fn seed_ids_beyond_32_bits(store: &SqliteIndexerStore, table: &'static str) {
+        store
+            .with_write_tx(move |tx| {
+                sql_query(format!(
+                    "insert into sqlite_sequence (name, seq) values ('{table}', {})",
+                    u32::MAX
+                ))
+                .execute(tx.connection())
+                .map_err(|e| StorageError::general("seed sqlite_sequence", e))
+            })
+            .await
+            .unwrap();
+    }
+
+    /// AUTOINCREMENT ids never reuse, so a long-running indexer's ids outgrow 32 bits even when
+    /// retention keeps the live row count small. Paging and pruning must hold across that range.
+    #[tokio::test]
+    async fn transaction_ids_beyond_32_bits_page_and_prune() {
+        let (_dir, store) = temp_store().await;
+        seed_ids_beyond_32_bits(&store, "transactions").await;
+
+        let ids = insert_transactions(&store, &[Epoch(5), Epoch(6), Epoch(20)]).await;
+
+        let first_page = store
+            .with_read_tx(move |tx| tx.list_recent_transactions(None, 2, None))
+            .await
+            .unwrap();
+        assert_eq!(first_page.iter().map(|e| e.transaction_id).collect::<Vec<_>>(), [
+            ids[2], ids[1]
+        ]);
+        let cursor = first_page[1].transaction_id;
+        let second_page = store
+            .with_read_tx(move |tx| tx.list_recent_transactions(Some(cursor), 2, None))
+            .await
+            .unwrap();
+        assert_eq!(second_page.iter().map(|e| e.transaction_id).collect::<Vec<_>>(), [
+            ids[0]
+        ]);
+
+        let num_pruned = store
+            .with_write_tx(move |tx| tx.prune_transactions_before_epoch(Epoch(10), 100))
+            .await
+            .unwrap();
+        assert_eq!(num_pruned, 2);
     }
 
     /// A transaction that never commits gets no receipt — mempool rejection and a consensus abort that
@@ -1347,13 +2063,48 @@ mod tests {
             .with_read_tx(|tx| tx.get_transaction_receipt(&receipt_address(1)))
             .await
             .unwrap();
-        assert_eq!(stored.fee_receipt.total_fees_paid(), 123);
+        assert_eq!(stored.decode().unwrap().fee_receipt.total_fees_paid(), 123);
         assert_eq!(event_epochs(&store).await, [2]);
         let count = store
             .with_read_tx(|tx| tx.key_value_get_value::<_, u64>(Key::TransactionReceiptCount))
             .await
             .unwrap();
         assert_eq!(count, 2);
+    }
+
+    #[tokio::test]
+    async fn a_receipt_and_its_events_are_read_back_as_their_cbor_encoding() {
+        let (_dir, store) = temp_store().await;
+        let receipt = receipt_with_events_at(Epoch(2), 1);
+        insert_receipts(&store, vec![(1, receipt.clone())]).await;
+
+        let stored = store
+            .with_read_tx(|tx| tx.get_transaction_receipt(&receipt_address(1)))
+            .await
+            .unwrap();
+        assert_eq!(stored, Encoded::encode(&receipt).unwrap());
+        let listed = store
+            .with_read_tx(|tx| tx.list_transaction_receipts(None, 10, tari_ootle_storage::Ordering::Ascending))
+            .await
+            .unwrap();
+        assert_eq!(listed, [(receipt_address(1), stored)]);
+
+        let query = crate::store::EventQuery {
+            topic: None,
+            substate_id: None,
+            template_address: None,
+            resource_address: None,
+            wildcard_scan_limit: 10,
+        };
+        let page = store
+            .with_read_tx(move |tx| tx.get_events(&query, None, 0, 10))
+            .await
+            .unwrap();
+        let [event] = page.events.as_slice() else {
+            panic!("expected one event, got {:?}", page.events);
+        };
+        assert_eq!(event.topic, receipt.events[0].topic());
+        assert_eq!(event.event, Encoded::encode(&receipt.events[0]).unwrap());
     }
 
     async fn insert_transactions(store: &SqliteIndexerStore, max_epochs: &[Epoch]) -> Vec<TransactionId> {
@@ -1436,7 +2187,8 @@ mod tests {
             .collect()
     }
 
-    async fn query_plan(store: &SqliteIndexerStore, query: &'static str) -> String {
+    async fn query_plan(store: &SqliteIndexerStore, query: impl Into<String>) -> String {
+        let query = query.into();
         #[derive(diesel::QueryableByName)]
         struct QueryPlanRow {
             #[diesel(sql_type = diesel::sql_types::Text)]
@@ -1479,6 +2231,35 @@ mod tests {
             .unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].0, receipt_address(3));
+    }
+
+    #[tokio::test]
+    async fn receipt_ids_beyond_32_bits_page_and_prune() {
+        let (_dir, store) = temp_store().await;
+        seed_ids_beyond_32_bits(&store, "transaction_receipts").await;
+        insert_receipts(&store, vec![
+            (1, receipt_at(Epoch(5))),
+            (2, receipt_at(Epoch(6))),
+            (3, receipt_at(Epoch(20))),
+        ])
+        .await;
+
+        let page = store
+            .with_read_tx(|tx| {
+                tx.list_transaction_receipts(Some(receipt_address(1)), 10, tari_ootle_storage::Ordering::Ascending)
+            })
+            .await
+            .unwrap();
+        assert_eq!(page.iter().map(|(address, _)| *address).collect::<Vec<_>>(), [
+            receipt_address(2),
+            receipt_address(3)
+        ]);
+
+        let num_pruned = store
+            .with_write_tx(move |tx| tx.prune_transaction_receipts_before_epoch(Epoch(10), 100))
+            .await
+            .unwrap();
+        assert_eq!(num_pruned, 2);
     }
 
     #[tokio::test]
@@ -1569,6 +2350,56 @@ mod tests {
             .unwrap();
     }
 
+    /// A stream cursor is stale exactly when an event above it was pruned, so the pruner must record
+    /// the highest id it deleted, and never lower it on a later pass.
+    #[tokio::test]
+    async fn pruning_events_records_the_highest_pruned_id() {
+        use crate::store::ReadOnlyStore;
+
+        let (_dir, store) = temp_store().await;
+        let reader = ReadOnlyStore::new(store.clone());
+        assert_eq!(reader.get_events_pruned_through_id().await.unwrap(), 0);
+
+        insert_receipts(&store, vec![
+            (1, receipt_with_events_at(Epoch(5), 2)),
+            (2, receipt_with_events_at(Epoch(10), 1)),
+        ])
+        .await;
+        store
+            .with_write_tx(move |tx| tx.prune_events_before_epoch(Epoch(10), 100))
+            .await
+            .unwrap();
+        assert_eq!(reader.get_events_pruned_through_id().await.unwrap(), 2);
+
+        let query = || crate::store::EventQuery {
+            topic: None,
+            substate_id: None,
+            template_address: None,
+            resource_address: None,
+            wildcard_scan_limit: 100,
+        };
+        assert!(
+            reader
+                .get_unpruned_events_after_id(query(), 1, 10)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let page = reader
+            .get_unpruned_events_after_id(query(), 2, 10)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(page.events.len(), 1);
+
+        // A pass that deletes nothing leaves the recorded id in place.
+        store
+            .with_write_tx(move |tx| tx.prune_events_before_epoch(Epoch(10), 100))
+            .await
+            .unwrap();
+        assert_eq!(reader.get_events_pruned_through_id().await.unwrap(), 2);
+    }
+
     /// As with transactions, the prune selects run under the write lock on every pass, so they must be
     /// served from the epoch indexes rather than a table scan.
     #[tokio::test]
@@ -1590,60 +2421,6 @@ mod tests {
         .await;
         assert!(plan.contains("events_epoch_idx"), "{plan}");
         assert!(!plan.contains("SCAN events"), "{plan}");
-    }
-
-    /// Indexers upgrading in place carry receipts and events stored before either recorded an epoch.
-    /// The migration must date them from the receipt, or enabling retention would prune the whole
-    /// backlog as epoch 0 on its first pass.
-    #[tokio::test]
-    async fn the_retention_migration_dates_existing_receipts_and_events() {
-        use diesel_migrations::MigrationHarness;
-
-        use crate::{
-            storage_sqlite::serialization::{serialize_hex, serialize_json},
-            store::ReadOnlyStore,
-        };
-
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("indexer.db");
-        {
-            let mut conn = SqliteConnection::establish(path.to_str().unwrap()).unwrap();
-            // Only the initial migration: the schema an indexer upgrading in place already has.
-            conn.run_next_migration(MIGRATIONS).unwrap();
-
-            let dated = serialize_hex(receipt_address(1).as_object_key());
-            let orphan = serialize_hex(receipt_address(2).as_object_key());
-            sql_query("insert into transaction_receipts (address, data) values (?, ?)")
-                .bind::<diesel::sql_types::Text, _>(&dated)
-                .bind::<diesel::sql_types::Text, _>(serialize_json(&receipt_at(Epoch(7))).unwrap())
-                .execute(&mut conn)
-                .unwrap();
-            for tx_hash in [&dated, &orphan] {
-                sql_query(
-                    "insert into events (template_address, tx_hash, topic, payload) values ('00', ?, 'test', '{}')",
-                )
-                .bind::<diesel::sql_types::Text, _>(tx_hash)
-                .execute(&mut conn)
-                .unwrap();
-            }
-        }
-
-        let store = SqliteIndexerStore::try_create(path).unwrap();
-
-        let receipt_epochs = store
-            .with_read_tx(|tx| {
-                sql_query("select epoch from transaction_receipts")
-                    .load::<EpochRow>(tx.connection())
-                    .map_err(|e| StorageError::general("receipt_epochs", e))
-            })
-            .await
-            .unwrap();
-        assert_eq!(receipt_epochs.iter().map(|r| r.epoch).collect::<Vec<_>>(), vec![7]);
-        // An event whose receipt this indexer never stored has nothing to date it by.
-        assert_eq!(event_epochs(&store).await, vec![7, 0]);
-
-        let econ = ReadOnlyStore::new(store.clone()).get_tari_economics().await.unwrap();
-        assert_eq!(econ.transaction_receipt_count, 1);
     }
 
     #[cfg(feature = "metrics")]
@@ -1773,14 +2550,15 @@ mod tests {
     async fn put_up(store: &SqliteIndexerStore, id: &SubstateId, version: SubstateVersion, watermark: u64) -> bool {
         use tari_engine_types::{
             non_fungible::NonFungibleContainer,
-            substate::{Substate, SubstateValue},
+            substate::{EncodedSubstate, Substate, SubstateValue},
         };
 
         let result = SubstateResult::Up {
-            substate: Box::new(Substate::new(
+            substate: EncodedSubstate::encode(&Substate::new(
                 version,
                 SubstateValue::NonFungible(NonFungibleContainer::no_data()),
-            )),
+            ))
+            .unwrap(),
         };
         let id = id.clone();
         store
@@ -2338,7 +3116,7 @@ mod tests {
     }
 
     fn page_ids(page: &crate::store::EventsPage) -> Vec<i64> {
-        page.events.iter().map(|(id, _, _)| *id).collect()
+        page.events.iter().map(|stored| stored.id).collect()
     }
 
     #[tokio::test]
@@ -2535,5 +3313,171 @@ mod tests {
             read_proof_marker(&store, &newer, SubstateVersion::new(1)).await,
             Some(2)
         );
+    }
+
+    /// A checkpoint whose header commits to the metadata preimage it carries.
+    pub(crate) fn epoch_checkpoint(
+        epoch: u64,
+        shard_group: ShardGroup,
+    ) -> tari_ootle_storage::consensus_models::EpochCheckpoint {
+        use tari_ootle_storage::consensus_models::{BlockHeaderMetadata, EndOfEpochCommand, EpochCheckpoint};
+
+        let header_metadata = BlockHeaderMetadata {
+            total_leader_fee: 0,
+            timestamp: 0,
+            extra_data: Default::default(),
+            timeout_certificate_id: None,
+            is_dummy: false,
+        };
+        use tari_sidechain::{CommandCommitProof, SidechainBlockCommitProof, SidechainBlockHeader};
+        use tari_state_tree::{TreeHash, compute_proof_for_hashes};
+
+        let key = TreeHash::new([1; 32]);
+        let (_, inclusion_proof) = compute_proof_for_hashes([key].into_iter(), key).unwrap();
+        let commit_proof = SidechainBlockCommitProof {
+            header: SidechainBlockHeader {
+                network: 0,
+                protocol_version: 0,
+                parent_id: FixedHash::zero(),
+                justify_id: FixedHash::zero(),
+                height: 0,
+                epoch,
+                epoch_hash: FixedHash::zero(),
+                shard_group: tari_sidechain::ShardGroup {
+                    start: shard_group.start().as_u32(),
+                    end_inclusive: shard_group.end().as_u32(),
+                },
+                proposed_by: Default::default(),
+                state_merkle_root: FixedHash::zero(),
+                command_merkle_root: FixedHash::zero(),
+                transaction_merkle_root: FixedHash::zero(),
+                signature: Default::default(),
+                accumulated_data: Default::default(),
+                metadata_hash: header_metadata.calculate_hash(),
+            },
+            proof_elements: vec![],
+        };
+        EpochCheckpoint::new(
+            CommandCommitProof::new(EndOfEpochCommand::new(FixedHash::zero()), commit_proof, inclusion_proof),
+            Default::default(),
+            header_metadata,
+        )
+    }
+
+    async fn checkpoint_keys(
+        store: &SqliteIndexerStore,
+        from_epoch: Epoch,
+        shard: Option<Shard>,
+    ) -> Vec<(Epoch, ShardGroup)> {
+        crate::store::ReadOnlyStore::new(store.clone())
+            .epoch_checkpoint_get_all(from_epoch, shard, 100)
+            .await
+            .unwrap()
+            .iter()
+            .map(|checkpoint| (checkpoint.epoch(), checkpoint.checked_shard_group().unwrap()))
+            .collect()
+    }
+
+    /// A wallet follows one shard across epochs, through whichever shard group holds it as the number of committees
+    /// changes.
+    #[tokio::test]
+    async fn checkpoints_are_selected_by_the_shard_their_shard_group_contains() {
+        use crate::store::IndexerStoreWriteTransaction;
+
+        let (_dir, store) = temp_store().await;
+        let low = ShardGroup::new(1u32, 127u32);
+        let high = ShardGroup::new(128u32, 255u32);
+        let all = ShardGroup::new(1u32, 255u32);
+        store
+            .with_write_tx(move |tx| {
+                for checkpoint in [
+                    epoch_checkpoint(1, all),
+                    epoch_checkpoint(2, low),
+                    epoch_checkpoint(2, high),
+                    epoch_checkpoint(3, low),
+                    epoch_checkpoint(3, high),
+                ] {
+                    tx.insert_or_ignore_epoch_checkpoint(&checkpoint)?;
+                }
+                Ok::<_, StorageError>(())
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            checkpoint_keys(&store, Epoch(0), Some(Shard::from(200u32))).await,
+            vec![(Epoch(1), all), (Epoch(2), high), (Epoch(3), high)]
+        );
+        assert_eq!(
+            checkpoint_keys(&store, Epoch(2), Some(Shard::from(127u32))).await,
+            vec![(Epoch(2), low), (Epoch(3), low)]
+        );
+        assert_eq!(checkpoint_keys(&store, Epoch(0), None).await.len(), 5);
+    }
+
+    async fn latest_of_each_shard_group(store: &SqliteIndexerStore) -> Vec<(Epoch, ShardGroup)> {
+        crate::store::ReadOnlyStore::new(store.clone())
+            .epoch_checkpoint_get_latest_of_each_shard_group()
+            .await
+            .unwrap()
+            .iter()
+            .map(|checkpoint| (checkpoint.epoch(), checkpoint.checked_shard_group().unwrap()))
+            .collect()
+    }
+
+    async fn store_checkpoints(
+        store: &SqliteIndexerStore,
+        checkpoints: Vec<tari_ootle_storage::consensus_models::EpochCheckpoint>,
+    ) {
+        use crate::store::IndexerStoreWriteTransaction;
+        store
+            .with_write_tx(move |tx| {
+                for checkpoint in &checkpoints {
+                    tx.insert_or_ignore_epoch_checkpoint(checkpoint)?;
+                }
+                Ok::<_, StorageError>(())
+            })
+            .await
+            .unwrap();
+    }
+
+    /// Each shard group is at its own latest epoch, so a group whose next checkpoint this indexer has not stored yet is
+    /// served at the epoch before.
+    #[tokio::test]
+    async fn the_latest_checkpoint_of_each_shard_group_is_read_once_in_shard_order() {
+        let (_dir, store) = temp_store().await;
+        assert_eq!(latest_of_each_shard_group(&store).await, vec![]);
+
+        let low = ShardGroup::new(1u32, 127u32);
+        let high = ShardGroup::new(128u32, 255u32);
+        let all = ShardGroup::new(1u32, 255u32);
+        store_checkpoints(&store, vec![
+            epoch_checkpoint(1, all),
+            epoch_checkpoint(2, low),
+            epoch_checkpoint(2, high),
+            epoch_checkpoint(3, low),
+        ])
+        .await;
+        assert_eq!(latest_of_each_shard_group(&store).await, vec![
+            (Epoch(3), low),
+            (Epoch(2), high)
+        ]);
+
+        store_checkpoints(&store, vec![epoch_checkpoint(5, all)]).await;
+        assert_eq!(latest_of_each_shard_group(&store).await, vec![(Epoch(5), all)]);
+    }
+
+    /// Where the shard groups split and only some of the new groups' checkpoints are stored, a group of the layout
+    /// before still holds the shards past them.
+    #[tokio::test]
+    async fn the_latest_checkpoints_of_two_shard_group_layouts_can_share_shards() {
+        let (_dir, store) = temp_store().await;
+        let low = ShardGroup::new(1u32, 127u32);
+        let all = ShardGroup::new(1u32, 255u32);
+        store_checkpoints(&store, vec![epoch_checkpoint(1, all), epoch_checkpoint(2, low)]).await;
+        assert_eq!(latest_of_each_shard_group(&store).await, vec![
+            (Epoch(2), low),
+            (Epoch(1), all)
+        ]);
     }
 }

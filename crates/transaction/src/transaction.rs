@@ -16,10 +16,12 @@ use tari_ootle_common_types::{
     Epoch,
     InputDeclaration,
     InputDeclarationRef,
+    NumPreshards,
     SubstateAddress,
     ToSubstateAddress,
     VersionedSubstateId,
     committee::CommitteeInfo,
+    input_fanout,
 };
 use tari_template_lib_types::{
     ClaimedOutputTombstoneAddress,
@@ -32,6 +34,7 @@ use tari_template_lib_types::{
 use crate::{
     Blobs,
     Instruction,
+    MainSigner,
     TransactionIntent,
     TransactionSealSignature,
     TransactionSignature,
@@ -155,20 +158,36 @@ impl Transaction {
         }
     }
 
+    #[must_use]
     pub fn verify_all_signatures(&self) -> bool {
         match self {
             Self::V1(tx) => tx.verify_all_signatures(),
         }
     }
 
-    /// Returns the public key of the main signer: the authorized seal signer if present, otherwise
-    /// the first transaction signer. `None` if the transaction has no signers and the seal signer is
-    /// not authorized.
-    pub fn main_signer(&self) -> Option<RistrettoPublicKeyBytes> {
-        if self.is_seal_signer_authorized() {
-            return Some(*self.seal_signature().public_key());
+    pub fn declared_main_signer(&self) -> &MainSigner {
+        match self {
+            Self::V1(tx) => tx.declared_main_signer(),
         }
-        self.signatures().first().map(|sig| *sig.public_key())
+    }
+
+    /// Returns the public key of the main signer the transaction declares, or `None` if it declares none. A declared
+    /// [`MainSigner::Authorizer`] counts only if that key signed the transaction.
+    pub fn main_signer(&self) -> Option<RistrettoPublicKeyBytes> {
+        match self.declared_main_signer() {
+            MainSigner::None => None,
+            MainSigner::SealSigner => Some(*self.seal_signature().public_key()),
+            MainSigner::Authorizer(public_key) => self
+                .signatures()
+                .iter()
+                .any(|sig| sig.public_key() == public_key)
+                .then_some(*public_key),
+        }
+    }
+
+    /// True if the seal signer is authorized or the transaction carries at least one authorization signature.
+    pub fn has_authorizer(&self) -> bool {
+        self.is_seal_signer_authorized() || !self.signatures().is_empty()
     }
 
     pub fn inputs(&self) -> &IndexSet<InputDeclaration> {
@@ -283,6 +302,28 @@ impl Transaction {
         self.has_publish_template() || self.all_inputs_substate_ids_iter().any(|id| id.is_global())
     }
 
+    /// How many shard groups, beyond the first, this transaction's declared inputs are pledged to
+    /// under a layout of `num_committees` committees: the groups holding its inputs and the burn
+    /// claim tombstones it creates, less one.
+    ///
+    /// A [global](Self::is_global) transaction executes in every group, and each group pledges its
+    /// inputs to all the others, so its fanout is every group less one. The receipt's group is left
+    /// out because the receipt address follows from the transaction id, which a fee estimate made
+    /// before the transaction is sealed cannot know.
+    pub fn input_fanout(&self, num_preshards: NumPreshards, num_committees: u32) -> u32 {
+        if self.is_global() {
+            return num_committees.saturating_sub(1);
+        }
+        let inputs = self
+            .all_inputs_iter()
+            // The version does not affect the shard group
+            .map(|input| input.or_zero_version().to_substate_address());
+        let tombstones = self
+            .claim_burn_outputs_iter()
+            .map(|c| SubstateAddress::from_object_key(c.as_object_key(), SubstateVersion::ZERO));
+        input_fanout(num_preshards, num_committees, inputs.chain(tombstones))
+    }
+
     /// The binary each `PublishTemplate` instruction carries, across both instruction lists so that
     /// this agrees with [`Self::has_publish_template`] about what counts as a publish.
     ///
@@ -342,13 +383,7 @@ impl Transaction {
         self.instructions()
             .iter()
             .chain(self.fee_instructions())
-            .filter_map(|instruction| {
-                if let Instruction::CallFunction { address, .. } = instruction {
-                    Some(address)
-                } else {
-                    None
-                }
-            })
+            .filter_map(|instruction| instruction.referenced_template())
     }
 
     /// Returns all substates addresses referenced by this transaction
@@ -444,6 +479,7 @@ impl PrunedTransaction {
         }
     }
 
+    #[must_use]
     pub fn verify_all_signatures(&self) -> bool {
         match self {
             Self::V1(tx) => tx.verify_all_signatures(),
@@ -506,7 +542,7 @@ mod tests {
     };
     use tari_engine_types::SubstateVersion;
     use tari_ootle_common_types::crypto::create_key_pair;
-    use tari_template_lib_types::{TemplateAddress, bytes::Bytes};
+    use tari_template_lib_types::{TemplateAddress, bytes::Bytes, constants::TARI_TOKEN};
 
     use super::*;
     use crate::{args, call_args};
@@ -534,6 +570,67 @@ mod tests {
                 SubstateId::Component(ComponentAddress::from_array([1; 32])),
                 SubstateVersion::new(1),
             ))
+    }
+
+    /// A component that lands in the shard its first byte selects, whatever `rest` is.
+    fn component(first_byte: u8, rest: u8) -> SubstateId {
+        let mut bytes = [rest; 32];
+        bytes[0] = first_byte;
+        SubstateId::Component(ComponentAddress::from_array(bytes))
+    }
+
+    fn fanout_of(inputs: &[SubstateId], num_committees: u32) -> u32 {
+        let (k, _) = create_key_pair();
+        inputs
+            .iter()
+            .fold(Transaction::builder_localnet(Epoch(1)), |builder, id| {
+                builder.add_input(InputDeclaration::read(id.clone()))
+            })
+            .build_and_seal(&k)
+            .input_fanout(NumPreshards::P256, num_committees)
+    }
+
+    #[test]
+    fn input_fanout_counts_the_further_groups_holding_its_inputs() {
+        // One committee per shard, so each shard is a group of its own.
+        let num_committees = NumPreshards::P256.as_u32();
+        let shard_of =
+            |id: &SubstateId| SubstateAddress::from_substate_id(id, SubstateVersion::ZERO).to_shard(NumPreshards::P256);
+        // Every transaction declares the TARI resource, so the inputs below avoid its shard.
+        let tari_shard = shard_of(&SubstateId::from(TARI_TOKEN));
+        let [first, second] = [0x00u8, 0x40, 0x80]
+            .into_iter()
+            .map(|byte| component(byte, 0))
+            .filter(|id| shard_of(id) != tari_shard)
+            .take(2)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        let one_input = fanout_of(std::slice::from_ref(&first), num_committees);
+        assert_eq!(one_input, 1, "the input and the TARI resource sit in two groups");
+
+        let same_group = component(first.as_component_address().unwrap().as_bytes()[0], 0xff);
+        assert_eq!(fanout_of(&[first.clone(), same_group], num_committees), one_input);
+        assert_eq!(fanout_of(&[first.clone(), second], num_committees), one_input + 1);
+
+        assert_eq!(fanout_of(&[first], 1), 0);
+    }
+
+    #[test]
+    fn a_global_transaction_is_pledged_to_every_further_group() {
+        let template = SubstateId::Template(PublishedTemplateAddress::from_template_address(
+            TemplateAddress::from_array([0x99; 32]),
+        ));
+        assert_eq!(fanout_of(std::slice::from_ref(&template), 4), 3);
+        assert_eq!(fanout_of(&[component(0x00, 0), template.clone()], 4), 3);
+        assert_eq!(fanout_of(&[template], 1), 0);
+
+        let (k, _) = create_key_pair();
+        let publish = Transaction::builder_localnet(Epoch(1))
+            .publish_template(b"template".to_vec())
+            .build_and_seal(&k);
+        assert_eq!(publish.input_fanout(NumPreshards::P256, 4), 3);
     }
 
     #[test]
@@ -570,9 +667,38 @@ mod tests {
     fn seal_preserves_explicitly_unauthorized_seal_signer() {
         let (k, _) = create_key_pair();
         let subject = create_transaction()
-            .with_seal_signer_authorized(false)
+            .with_main_signer(MainSigner::None)
             .build_and_seal(&k);
         assert!(!subject.is_seal_signer_authorized());
+        assert!(subject.main_signer().is_none());
         assert!(subject.verify_all_signatures());
+    }
+
+    #[test]
+    fn main_signer_is_the_declared_authorizer_wherever_it_signs() {
+        let (seal_secret, _) = create_key_pair();
+        let (main_secret, main_public) = create_key_pair();
+        let (other_secret, _) = create_key_pair();
+        let seal_public = RistrettoPublicKey::from_secret_key(&seal_secret).to_byte_type();
+        let main_public = main_public.to_byte_type();
+
+        let unsigned = create_transaction()
+            .with_main_signer(MainSigner::Authorizer(main_public))
+            .build_unsigned();
+        let main_sig = TransactionSignature::sign(&main_secret, &seal_public, &unsigned);
+        let other_sig = TransactionSignature::sign(&other_secret, &seal_public, &unsigned);
+
+        for signatures in [vec![main_sig.clone(), other_sig.clone()], vec![
+            other_sig.clone(),
+            main_sig.clone(),
+        ]] {
+            let subject = unsigned.clone().with_signatures(signatures).seal(&seal_secret);
+            assert!(subject.verify_all_signatures());
+            assert_eq!(subject.main_signer(), Some(main_public));
+        }
+
+        let subject = unsigned.with_signatures(vec![other_sig]).seal(&seal_secret);
+        assert!(subject.verify_all_signatures());
+        assert_eq!(subject.main_signer(), None);
     }
 }

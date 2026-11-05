@@ -26,7 +26,7 @@ impl From<KeyValueEntry> for KeyValue<String> {
 #[derive(Debug, Identifiable, Queryable)]
 #[diesel(table_name = key_values)]
 pub(crate) struct KeyValueEntry {
-    pub id: i32,
+    pub id: i64,
     pub key: String,
     pub value: String,
     pub created_at: PrimitiveDateTime,
@@ -61,6 +61,10 @@ pub enum Key {
     /// The number of transaction receipts this indexer has indexed, including those it has since pruned.
     /// type: u64
     TransactionReceiptCount,
+    /// The highest id of any event deleted by retention pruning. Event ids are assigned in insertion
+    /// order and never reused, so a client cursor below this has missed at least one event.
+    /// type: i64
+    EventsPrunedThroughId,
 }
 
 impl Key {
@@ -73,6 +77,7 @@ impl Key {
             Self::TariAccumulatedFees => "tari_accumulated_fees",
             Self::TariAccumulatedReceiptExhaustBurn => "tari_accumulated_receipt_exhaust_burn",
             Self::TransactionReceiptCount => "transaction_receipt_count",
+            Self::EventsPrunedThroughId => "events_pruned_through_id",
         }
     }
 }

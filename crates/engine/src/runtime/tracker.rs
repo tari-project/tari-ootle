@@ -32,12 +32,12 @@ use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
     component::{Component, ComponentBody, ComponentHeader},
     events::Event,
-    fees::{ExhaustBurnRate, FeeBreakdown, FeeReceipt, FeeSource},
+    fees::{ExhaustBurnRate, FeeBreakdown, FeeReceipt, FeeScale, FeeSource},
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     limits,
     lock::LockFlag,
     logs::LogEntry,
-    substate::{Substate, SubstateId, SubstateValue},
+    substate::{Substate, SubstateId},
     transaction_receipt::FinalizeOutcome,
     virtual_substate::VirtualSubstates,
 };
@@ -51,17 +51,19 @@ use tari_template_lib::{
         Metadata,
         SubstateOwnerRule,
         TemplateAddress,
-        access_rules::ComponentAccessRules,
+        access_rules::{ComponentAccessRules, UpdateRule},
     },
 };
 
 use crate::{
     fees::WasmMeteringRate,
+    intrinsics::IntrinsicEnv,
     runtime::{
         RuntimeError,
         error::ArgumentValidationError,
+        fee_state::FeeState,
         locking::LockedSubstate,
-        scope::{CallScope, FrameWriteMode, PushCallFrame},
+        scope::{CallScope, FrameWriteMode, PushCallFrame, RestrictedFrame},
         working_state::{ChargeableState, WorkingState},
         workspace::Workspace,
     },
@@ -80,11 +82,22 @@ pub struct FinalizedState<TStore> {
     /// What committing the whole transaction was priced at, captured before the second charging
     /// pass re-derives the charges over whichever state was chosen.
     total_fees_required: u64,
+    /// On a fee-intent commit, the fee state as the fee checkpoint left it: what the fee intent
+    /// alone was charged and paid. `state` carries the whole transaction's fee state, main intent
+    /// included.
+    fee_intent_fees: Option<FeeState>,
 }
 
 impl<TStore> FinalizedState<TStore> {
     pub fn chargeable_state(&mut self) -> ChargeableState<'_, TStore> {
         ChargeableState::new(&mut self.state)
+    }
+
+    /// The persisted state as the fee intent alone is charged for it. `None` unless this is a
+    /// fee-intent commit.
+    pub fn fee_intent_chargeable_state(&mut self) -> Option<ChargeableState<'_, TStore>> {
+        let fee_state = self.fee_intent_fees.as_mut()?;
+        Some(ChargeableState::with_fee_state(&mut self.state, fee_state))
     }
 
     pub fn outcome(&self) -> FinalizeOutcome {
@@ -111,6 +124,17 @@ pub enum ComputeFunding {
     Payment,
 }
 
+/// What a transaction's declared inputs weigh as every executing validator loads them and pledges
+/// them across shard groups. Measured before execution starts, from the declared inputs alone, so it
+/// is charged whatever the transaction goes on to do with them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DeclaredInputLoad {
+    /// Encoded bytes of the values of the declared inputs, global ones excepted.
+    pub bytes: u64,
+    /// The other shard groups the declared inputs are pledged to.
+    pub fanout: u32,
+}
+
 /// The transaction's execution state, shared by every frame that runs under it.
 ///
 /// A nested call re-enters the engine against the same tracker the outer frame is running on, so
@@ -121,11 +145,26 @@ pub struct StateTracker<TStore> {
     working_state: RefCell<Option<WorkingState<TStore>>>,
     fee_checkpoint: RefCell<Option<WorkingState<TStore>>>,
     transaction_weight: TransactionWeight,
+    declared_input_load: DeclaredInputLoad,
     wasm_metering_rate: WasmMeteringRate,
     /// Stealth transfers performed so far in the fee intent. Lives here rather than in `WorkingState` because the fee
     /// intent is delimited by `fee_checkpoint`, and because the checkpoint clones the working state — a count held
     /// there would be duplicated into the clone.
     fee_intent_stealth_transfers: Cell<usize>,
+}
+
+impl<TStore: StateReader> IntrinsicEnv for StateTracker<TStore> {
+    fn network(&self) -> Network {
+        self.read_with(|state| state.network())
+    }
+
+    fn current_template(&self) -> Result<TemplateAddress, RuntimeError> {
+        self.read_with(|state| state.current_template().copied())
+    }
+
+    fn current_component(&self) -> Result<Option<ComponentAddress>, RuntimeError> {
+        self.read_with(|state| state.current_component())
+    }
 }
 
 impl<TStore: StateReader> StateTracker<TStore> {
@@ -138,8 +177,10 @@ impl<TStore: StateReader> StateTracker<TStore> {
         transaction_hash: Hash32,
         intent_commitment: Hash32,
         transaction_weight: TransactionWeight,
+        declared_input_load: DeclaredInputLoad,
         wasm_metering_rate: WasmMeteringRate,
         burn_rate: ExhaustBurnRate,
+        fee_scale: FeeScale,
         network: Network,
         dry_run: bool,
     ) -> Self {
@@ -152,11 +193,13 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 transaction_hash,
                 intent_commitment,
                 burn_rate,
+                fee_scale,
                 network,
                 dry_run,
             ))),
             fee_checkpoint: RefCell::new(None),
             transaction_weight,
+            declared_input_load,
             wasm_metering_rate,
             fee_intent_stealth_transfers: Cell::new(0),
         }
@@ -164,6 +207,10 @@ impl<TStore: StateReader> StateTracker<TStore> {
 
     pub fn get_transaction_weight(&self) -> TransactionWeight {
         self.transaction_weight
+    }
+
+    pub fn declared_input_load(&self) -> DeclaredInputLoad {
+        self.declared_input_load
     }
 
     /// The compute this transaction may still consume, and what authorizes it. `None` when no bound
@@ -182,13 +229,17 @@ impl<TStore: StateReader> StateTracker<TStore> {
     ///
     /// Past the checkpoint the credit ends and compute is funded by what the payment has *left*,
     /// not by the whole of it. The charges standing at the checkpoint are what the fallback commit
-    /// costs, so funding compute out of the full payment would let a transaction spend the lot on
-    /// execution and leave its own fee-intent commit unaffordable — a rejection that again collects
-    /// nothing.
+    /// costs, and that share of the payment is already spoken for; funding compute out of the full
+    /// payment would run work nothing is left to pay for.
+    ///
+    /// The execution charges are left out of what the payment has spent: the allowance is in
+    /// points, and its users subtract every point the transaction has consumed — the fee intent's
+    /// included — so deducting the fee intent's priced execution here as well would count it twice.
     ///
     /// That payment-funded figure is measured against the charges *standing when it is asked*.
-    /// Anything charged after the last call — a host call inside the final invocation — is outside
-    /// it, so it bounds the unpaid work rather than reducing it to zero.
+    /// Anything charged after the last call — instructions that follow the final invocation — is
+    /// outside it, so the total can end a little past the payment. The fallback commit is decided
+    /// on the fee intent's own charges, so it still settles and collects the whole payment.
     pub fn compute_allowance(&self) -> Option<ComputeAllowance> {
         let rate = self.wasm_metering_rate;
         let is_fee_intent = self.fee_checkpoint.borrow().is_none();
@@ -211,11 +262,16 @@ impl<TStore: StateReader> StateTracker<TStore> {
             if fee_state.is_dry_run() {
                 return None;
             }
-            let unspent = fee_state.total_payments().saturating_sub(fee_state.total_charges());
+            let unspent = fee_state
+                .total_payments()
+                .saturating_sub(fee_state.total_charges_excluding_execution());
             Some(ComputeAllowance {
                 // `prices_execution` above is the only case that yields no figure, so nothing here
-                // may widen the allowance by failing to produce one.
-                points: rate.points_funded_by(unspent).unwrap_or(0),
+                // may widen the allowance by failing to produce one. The rate is the fee table's, so
+                // the payment is taken back to fee-table terms before it is converted.
+                points: rate
+                    .points_funded_by(fee_state.fee_scale().unapply(unspent))
+                    .unwrap_or(0),
                 funding: ComputeFunding::Payment,
             })
         })
@@ -275,6 +331,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         owner_rule: SubstateOwnerRule,
         access_rules: ComponentAccessRules,
         address_allocation: Option<ComponentAddressAllocation>,
+        upgrade_rule: UpdateRule,
     ) -> Result<ComponentAddress, RuntimeError> {
         self.write_with(|state| {
             let template_address = *state.current_template()?;
@@ -282,6 +339,15 @@ impl<TStore: StateReader> StateTracker<TStore> {
             let component_address = match address_allocation {
                 Some(address_allocation) => {
                     let alloc = state.use_allocated_address(address_allocation.id())?;
+                    if let Some(allocated_template) = alloc.template_address() &&
+                        *allocated_template != template_address
+                    {
+                        return Err(RuntimeError::AddressAllocationTemplateMismatch {
+                            id: address_allocation.id(),
+                            allocated_by: *allocated_template,
+                            used_by: template_address,
+                        });
+                    }
                     alloc.substate_id().as_component_address().ok_or_else(|| {
                         RuntimeError::AddressAllocationTypeMismatch {
                             id: alloc.substate_id().clone(),
@@ -298,6 +364,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 access_rules,
                 owner_rule,
                 entity_id: component_address.entity_id(),
+                upgrade_rule,
             };
 
             let component = Component { header, body };
@@ -309,10 +376,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 });
             }
 
-            let indexed = IndexedWellKnownTypes::from_value(&component.body.state)?;
-            state.validate_component_state(None, &indexed)?;
-
-            state.new_substate(substate_id.clone(), SubstateValue::Component(component))?;
+            state.new_component_substate(component_address, component)?;
 
             state.push_event(Event::std(
                 Some(substate_id),
@@ -338,7 +402,11 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.write_with(|state| state.unlock_substate(locked))
     }
 
-    pub fn push_call_frame(&self, push_frame: PushCallFrame) -> Result<(), RuntimeError> {
+    pub fn push_call_frame(
+        &self,
+        push_frame: PushCallFrame,
+        restrict_to: Option<FrameWriteMode>,
+    ) -> Result<(), RuntimeError> {
         self.write_with(|state| {
             // If substates used in args are in scope for the current frame, we can bring then into scope for the new
             // frame
@@ -349,7 +417,12 @@ impl<TStore: StateReader> StateTracker<TStore> {
             );
             state.check_all_substates_in_scope(push_frame.arg_scope())?;
 
-            let new_frame = push_frame.into_new_call_frame();
+            let mut new_frame = push_frame.into_new_call_frame();
+            // Restricted before the push, so the push installs neither signer badges nor a loan into a confined
+            // frame.
+            if let Some(mode) = restrict_to {
+                new_frame.restrict(mode);
+            }
             trace!(target: LOG_TARGET, "NEW CALL FRAME:\n{}", new_frame.scope());
 
             state.push_frame(new_frame, limits::ENGINE_LIMITS.max_call_depth)
@@ -379,7 +452,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         }
 
         self.write_with(|state| {
-            debug!(target: LOG_TARGET, "Add fee: source: {:?}, amount: {}", source, amount);
+            trace!(target: LOG_TARGET, "Add fee: source: {:?}, amount: {}", source, amount);
             state.fee_state_mut().add_charge(source, amount);
         })
     }
@@ -450,6 +523,26 @@ impl<TStore: StateReader> StateTracker<TStore> {
         }
     }
 
+    /// Runs `f` on the working state with access-rule evaluation metered, then charges what the evaluation used as
+    /// native execution. Every access rule is evaluated inside `f`, while the working state is borrowed and no charge
+    /// can be made, so the meter is opened with [`Self::native_execution_headroom`] read beforehand and evaluation
+    /// stops once it has used that. A transaction that cannot pay for the evaluation then fails out of compute here,
+    /// whatever `f` returned.
+    pub(super) fn write_with_authorization<R, E, F>(&self, f: F) -> Result<R, E>
+    where
+        F: FnOnce(&mut WorkingState<TStore>) -> Result<R, E>,
+        E: From<RuntimeError>,
+    {
+        let budget = self.native_execution_headroom();
+        let (result, used) = self.write_with(|state| {
+            state.authorization_meter().open(budget);
+            let result = f(state);
+            (result, state.authorization_meter().close())
+        });
+        self.charge_native_execution(used)?;
+        result
+    }
+
     /// Chooses the state that finalization will persist.
     ///
     /// A transaction that failed — either explicitly, or by not covering the fees charged against
@@ -493,15 +586,16 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 outcome: FinalizeOutcome::Commit,
                 reason: None,
                 total_fees_required,
+                fee_intent_fees: None,
             });
         };
 
         let mut checkpoint_state = self.take_fee_checkpoint().ok_or(RuntimeError::NoFeeCheckpoint)?;
         // Preserve fee state across resets so that we can charge for fees incurred during execution before the
         // failure
-        self.read_with(|state| {
+        let fee_intent_fees = self.read_with(|state| {
             // Fee state in `state` includes the payments and charges from the fee transaction
-            *checkpoint_state.fee_state_mut() = state.fee_state().clone();
+            std::mem::replace(checkpoint_state.fee_state_mut(), state.fee_state().clone())
         });
 
         Ok(FinalizedState {
@@ -509,6 +603,27 @@ impl<TStore: StateReader> StateTracker<TStore> {
             outcome: FinalizeOutcome::FeeIntentCommit,
             reason: Some(reason),
             total_fees_required,
+            fee_intent_fees: Some(fee_intent_fees),
+        })
+    }
+
+    /// The state a fee-intent commit of `committed` would persist: the fee checkpoint, billed with
+    /// the whole transaction's fee state, as [`Self::select_finalized_state`] chooses it when the main
+    /// intent fails. `None` unless `committed` is a full commit, since any other outcome has already
+    /// consumed the checkpoint or has no main intent to fall back from.
+    pub fn select_fee_intent_fallback(&self, committed: &FinalizedState<TStore>) -> Option<FinalizedState<TStore>> {
+        if !committed.outcome.is_commit() {
+            return None;
+        }
+        let mut checkpoint_state = self.take_fee_checkpoint()?;
+        let fee_intent_fees = std::mem::replace(checkpoint_state.fee_state_mut(), committed.state.fee_state().clone());
+        Some(FinalizedState {
+            state: checkpoint_state,
+            outcome: FinalizeOutcome::FeeIntentCommit,
+            // Only consensus learns why the full result cannot commit, and the receipt does not record it.
+            reason: None,
+            total_fees_required: committed.total_fees_required,
+            fee_intent_fees: Some(fee_intent_fees),
         })
     }
 
@@ -518,18 +633,32 @@ impl<TStore: StateReader> StateTracker<TStore> {
             outcome,
             reason,
             total_fees_required,
+            fee_intent_fees,
         } = finalized;
 
-        // Committing costs whatever the charges now say, and they have just been recomputed over
-        // this exact state. A payment that cannot cover that commits nothing: a fee-intent commit
+        // Whether this state may commit turns on what the commit itself costs. On a full commit
+        // that is every charge, and the commit path cannot fail here: its charges were tested
+        // against payments to reach it, and recomputing them over the same state does not change
+        // them.
+        //
+        // On a fee-intent commit it is what the fee intent alone is charged for the state it
+        // persists. A fee intent that cannot cover that commits nothing: a fee-intent commit
         // persists real state — substates, and a receipt carrying every event the intent emitted —
         // and there is no shallower checkpoint left to fall back to. Letting it through is what
         // would make an underfunded fee intent a way to write state for free.
         //
-        // The commit path cannot fail here: its charges were tested against payments to reach it,
-        // and recomputing them over the same state does not change them.
-        let fee_state = state.fee_state();
-        if !fee_state.is_dry_run() && !fee_state.is_paid_in_full() {
+        // The fee checkpoint already rejects a payment short of this figure before the main intent
+        // may run, since the fee module prices the checkpoint exactly as it prices the fallback
+        // here. This check is the backstop for a module whose persist-time charges exceed what it
+        // charged at the checkpoint.
+        //
+        // The compute allowance holds the main intent's charges inside the payment only up to the
+        // last allowance it sized, so charges accrued past that can leave the total a little over
+        // the payment. A fee intent that paid for itself commits regardless, and settlement collects
+        // the whole payment against the larger total.
+        let commit_fees = fee_intent_fees.as_ref().unwrap_or_else(|| state.fee_state());
+        if !commit_fees.is_dry_run() && !commit_fees.is_paid_in_full() {
+            let fee_state = state.fee_state();
             // Whatever rejected the main intent is why the transaction failed and stays the reason
             // reported; the shortfall below only decides that not even the fee intent survives it.
             let reason = reason.unwrap_or_else(|| {
@@ -635,7 +764,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
 
     /// A copy of the charges metered so far.
     pub fn fee_charges(&self) -> FeeBreakdown {
-        self.read_with(|state| state.fee_state().fee_charges().clone())
+        self.read_with(|state| state.fee_state().fee_charges())
     }
 
     pub fn total_fee_charges(&self) -> u64 {
@@ -644,6 +773,10 @@ impl<TStore: StateReader> StateTracker<TStore> {
 
     pub fn is_fee_state_dry_run(&self) -> bool {
         self.read_with(|state| state.fee_state().is_dry_run())
+    }
+
+    pub fn current_restricted_frame(&self) -> RestrictedFrame {
+        self.read_with(|state| state.current_restricted_frame())
     }
 
     /// The write mode of the current call frame. Used by the engine's core sandbox enforcement to deny the few
@@ -670,6 +803,10 @@ impl<TStore: StateReader> StateTracker<TStore> {
             .borrow_mut()
             .as_mut()
             .expect("BUG: write_with called after finalize consumed working state"))
+    }
+
+    pub fn created_substate_ids(&self) -> Result<Vec<SubstateId>, RuntimeError> {
+        self.read_with(|state| state.store().created_substate_ids())
     }
 
     pub(super) fn is_fee_intent_checkpointed(&self) -> bool {
@@ -701,11 +838,14 @@ impl<TStore: StateReader> StateTracker<TStore> {
 impl<TStore: StateReader + Clone> StateTracker<TStore> {
     pub fn fee_checkpoint(&self) -> Result<(), RuntimeError> {
         let state = self.write_with(|state| {
-            // Check that the checkpoint is in a valid state
+            // Check that the checkpoint is in a valid state. It is what commits if the main intent
+            // fails, so it is held to every limit a full commit is.
             state.validate_finalized()?;
+            state.enforce_output_size_limit()?;
             let checkpoint_state = state.clone();
 
             // After checkpointing, the main intent has a cleared workspace
+            drop(state.take_last_instruction_output());
             state.workspace_mut().clear_items();
             let proofs = state.workspace_mut().take_all_proofs();
             for proof_id in proofs {
@@ -716,5 +856,45 @@ impl<TStore: StateReader + Clone> StateTracker<TStore> {
 
         *self.fee_checkpoint.borrow_mut() = Some(state);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_engine_types::virtual_substate::{VirtualSubstate, VirtualSubstateId};
+
+    use super::*;
+    use crate::state_store::memory::MemoryStateStore;
+
+    #[test]
+    fn fee_checkpoint_clears_last_instruction_output_and_workspace() {
+        let tracker = StateTracker::new(
+            MemoryStateStore::new(),
+            [(VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(0))]
+                .into_iter()
+                .collect(),
+            CallScope::new(),
+            HashSet::new(),
+            Hash32::zero(),
+            Hash32::zero(),
+            TransactionWeight::new(0),
+            DeclaredInputLoad::default(),
+            WasmMeteringRate::unmetered(),
+            ExhaustBurnRate::new(0),
+            FeeScale::default(),
+            Network::LocalNet,
+            true,
+        );
+
+        let output = IndexedValue::from_type(&123u64).unwrap();
+        let item = IndexedValue::from_type(&456u64).unwrap();
+        tracker.write_with(|state| {
+            state.set_last_instruction_output(output);
+            state.workspace_mut().insert(1, item).unwrap();
+        });
+        tracker.fee_checkpoint().unwrap();
+
+        assert!(tracker.take_last_instruction_output().is_none());
+        tracker.read_with(|state| assert_eq!(state.workspace().all_ids_iter().count(), 0));
     }
 }

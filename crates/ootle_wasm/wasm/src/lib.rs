@@ -1,7 +1,16 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use js_sys::BigInt;
 use wasm_bindgen::prelude::*;
+
+/// Converts a JS `bigint` amount argument to a `u64`, rejecting any value outside `[0, 2^64 - 1]`.
+///
+/// Exports take amounts as `BigInt` because wasm-bindgen passes a `u64` parameter as a wasm `i64`, which
+/// the JS engine fills by reducing the caller's `bigint` modulo 2^64 before Rust ever sees it.
+fn u64_arg(name: &str, value: BigInt) -> Result<u64, JsError> {
+    u64::try_from(value).map_err(|_| JsError::new(&format!("{name} must be an integer in [0, 2^64 - 1]")))
+}
 
 /// Called automatically when the WASM module is instantiated. Do not call directly.
 #[wasm_bindgen(start)]
@@ -42,7 +51,7 @@ pub struct DecryptedOutputResult {
     pub mask: Vec<u8>,
     /// The plaintext value (u64).
     pub value: u64,
-    /// JSON-encoded `Memo` (variants: `U256` / `Message` / `Bytes` / `PayRefAndBytes`), or `null` if
+    /// JSON-encoded `Memo` (variants: `U256` / `Message` / `Bytes` / `DestinationTagAndBytes`), or `null` if
     /// the payload carried no memo or `skipMemo` was set.
     pub memo_json: Option<String>,
 }
@@ -74,8 +83,8 @@ pub struct ParsedOotleAddress {
     pub view_key: Vec<u8>,
     /// The network byte.
     pub network: u8,
-    /// Optional pay reference / memo bytes.
-    pub memo: Option<Vec<u8>>,
+    /// Optional destination tag bytes.
+    pub destination_tag: Option<Vec<u8>>,
 }
 
 /// Seal a transaction (unsigned or unsealed JSON) with the seal signer's secret key.
@@ -102,21 +111,49 @@ pub fn add_transaction_signer(
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Seal a transaction (unsigned or unsealed JSON) with a signature from an external signer (HSM, MPC).
+///
+/// `signature` is the 64-byte sr25519 signature (scheme in the NPM README) over the hash from
+/// `hashUnsealedTransaction`, made by the key for `seal_signer_public_key`. The seal and any
+/// authorization signatures are verified.
+/// Returns the sealed `Transaction` as a JSON string.
+#[wasm_bindgen(js_name = "attachSealSignature")]
+pub fn attach_seal_signature(
+    tx_json: &str,
+    seal_signer_public_key: &[u8],
+    signature: &[u8],
+) -> Result<String, JsError> {
+    ootle_wasm_core::transaction::attach_seal_signature_json(tx_json, seal_signer_public_key, signature)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Add an authorization signature from an external signer (HSM, MPC) to a transaction (unsigned or
+/// unsealed JSON).
+///
+/// `signature` is the 64-byte sr25519 signature (scheme in the NPM README) over the hash from
+/// `hashUnsignedTransaction` for `seal_signer_public_key`, made by the key for
+/// `signer_public_key`. It is verified before it is appended.
+/// Returns the `UnsealedTransactionV1` (with the new signature appended) as a JSON string.
+#[wasm_bindgen(js_name = "attachTransactionSignature")]
+pub fn attach_transaction_signature(
+    tx_json: &str,
+    signer_public_key: &[u8],
+    signature: &[u8],
+    seal_signer_public_key: &[u8],
+) -> Result<String, JsError> {
+    ootle_wasm_core::transaction::attach_transaction_signature_json(
+        tx_json,
+        signer_public_key,
+        signature,
+        seal_signer_public_key,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
+}
+
 /// BOR-encode a Transaction (JSON string) → base64 string (TransactionEnvelope format).
 #[wasm_bindgen(js_name = "borEncodeTransaction")]
 pub fn bor_encode_transaction(transaction_json: &str) -> Result<String, JsError> {
     ootle_wasm_core::bor::bor_encode_transaction_json(transaction_json).map_err(|e| JsError::new(&e.to_string()))
-}
-
-/// Schnorr-sign a message with a secret key.
-/// Returns { public_nonce: Uint8Array, signature: Uint8Array }.
-#[wasm_bindgen(js_name = "schnorrSign")]
-pub fn schnorr_sign(secret_key: &[u8], message: &[u8]) -> Result<SchnorrSignatureResult, JsError> {
-    let result = ootle_wasm_core::sign::schnorr_sign(secret_key, message).map_err(|e| JsError::new(&e.to_string()))?;
-    Ok(SchnorrSignatureResult {
-        public_nonce: result.public_nonce,
-        signature: result.signature,
-    })
 }
 
 /// Derive the public key from a secret key (both raw bytes).
@@ -136,14 +173,25 @@ pub fn generate_keypair() -> KeypairResult {
     }
 }
 
-/// Hash an UnsignedTransactionV1 (JSON string) for signing.
-/// Returns the 64-byte signing message that must be Schnorr-signed.
+/// Hash a transaction (unsigned or unsealed JSON) for an authorization signature.
+/// Returns the 64-byte signing message that must be sr25519-signed.
+///
+/// The message excludes attached signatures, so it is the same before and after `attachTransactionSignature`.
 ///
 /// `seal_signer_public_key` is the raw bytes of the seal signer's public key (account owner).
 #[wasm_bindgen(js_name = "hashUnsignedTransaction")]
 pub fn hash_unsigned_transaction(unsigned_tx_json: &str, seal_signer_public_key: &[u8]) -> Result<Vec<u8>, JsError> {
     ootle_wasm_core::hash::hash_unsigned_transaction_json(unsigned_tx_json, seal_signer_public_key)
         .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Hash a transaction (unsigned or unsealed JSON) for sealing.
+/// Returns the 64-byte seal message that the seal signer must sign.
+///
+/// The seal message covers every authorization signature, so attach all of them before hashing.
+#[wasm_bindgen(js_name = "hashUnsealedTransaction")]
+pub fn hash_unsealed_transaction(tx_json: &str) -> Result<Vec<u8>, JsError> {
+    ootle_wasm_core::hash::hash_unsealed_transaction_json(tx_json).map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Generate a new random pair of Ootle secret keys (owner + view).
@@ -176,20 +224,25 @@ pub fn ootle_public_key_from_secret_key(owner_key: &[u8], view_key: &[u8]) -> Re
 /// Generate an Ootle address (bech32m string) from public keys.
 ///
 /// `network` is the network byte (0x00 = MainNet, 0x10 = LocalNet, 0x26 = Esmeralda, etc.).
-/// `memo` is an optional pay reference (max 64 bytes).
+/// `destination_tag` is optional (max 64 bytes).
 #[wasm_bindgen(js_name = "generateOotleAddress")]
 pub fn generate_ootle_address(
     owner_public_key: &[u8],
     view_public_key: &[u8],
     network: u8,
-    memo: Option<Vec<u8>>,
+    destination_tag: Option<Vec<u8>>,
 ) -> Result<String, JsError> {
-    ootle_wasm_core::address::generate_ootle_address(owner_public_key, view_public_key, network, memo.as_deref())
-        .map_err(|e| JsError::new(&e.to_string()))
+    ootle_wasm_core::address::generate_ootle_address(
+        owner_public_key,
+        view_public_key,
+        network,
+        destination_tag.as_deref(),
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Parse a bech32m Ootle address string into its components.
-/// Returns { owner_key: Uint8Array, view_key: Uint8Array, network: number, memo: Uint8Array | undefined }.
+/// Returns { owner_key: Uint8Array, view_key: Uint8Array, network: number, destination_tag: Uint8Array | undefined }.
 #[wasm_bindgen(js_name = "parseOotleAddress")]
 pub fn parse_ootle_address(address: &str) -> Result<ParsedOotleAddress, JsError> {
     let result = ootle_wasm_core::address::parse_ootle_address(address).map_err(|e| JsError::new(&e.to_string()))?;
@@ -197,7 +250,7 @@ pub fn parse_ootle_address(address: &str) -> Result<ParsedOotleAddress, JsError>
         owner_key: result.owner_key,
         view_key: result.view_key,
         network: result.network,
-        memo: result.memo,
+        destination_tag: result.destination_tag,
     })
 }
 
@@ -230,12 +283,12 @@ pub fn parse_ootle_address(address: &str) -> Result<ParsedOotleAddress, JsError>
 #[wasm_bindgen(js_name = "generateStealthOutputsStatement")]
 pub fn generate_stealth_outputs_statement(
     witnesses_json: &str,
-    revealed_output_amount_microtari: u64,
+    revealed_output_amount_microtari: BigInt,
     revealed_receiver: &[u8],
 ) -> Result<StealthOutputsResult, JsError> {
     let result = ootle_wasm_core::stealth::outputs::generate_stealth_outputs_statement(
         witnesses_json,
-        revealed_output_amount_microtari,
+        u64_arg("revealed_output_amount_microtari", revealed_output_amount_microtari)?,
         revealed_receiver,
     )
     .map_err(|e| JsError::new(&e.to_string()))?;
@@ -284,24 +337,24 @@ pub fn create_stealth_output_witness(
     network: u8,
     destination_account_public_key: &[u8],
     destination_view_public_key: &[u8],
-    amount: u64,
+    amount: BigInt,
     resource_address: &str,
     resource_view_key: Option<Vec<u8>>,
     memo_json: Option<String>,
     pay_to_json: Option<String>,
-    minimum_value_promise: u64,
+    minimum_value_promise: BigInt,
 ) -> Result<String, JsError> {
     ootle_wasm_core::stealth::outputs::create_stealth_output_witness(
         ootle_wasm_core::stealth::outputs::CreateStealthOutputWitnessParams {
             network,
             destination_account_public_key,
             destination_view_public_key,
-            amount,
+            amount: u64_arg("amount", amount)?,
             resource_address,
             resource_view_key: resource_view_key.as_deref(),
             memo_json: memo_json.as_deref(),
             pay_to_json: pay_to_json.as_deref(),
-            minimum_value_promise,
+            minimum_value_promise: u64_arg("minimum_value_promise", minimum_value_promise)?,
         },
     )
     .map_err(|e| JsError::new(&e.to_string()))
@@ -317,10 +370,13 @@ pub fn create_stealth_output_witness(
 #[wasm_bindgen(js_name = "buildStealthInputsStatement")]
 pub fn build_stealth_inputs_statement(
     input_commitments: &[u8],
-    revealed_amount_microtari: u64,
+    revealed_amount_microtari: BigInt,
 ) -> Result<String, JsError> {
-    ootle_wasm_core::stealth::inputs::build_stealth_inputs_statement(input_commitments, revealed_amount_microtari)
-        .map_err(|e| JsError::new(&e.to_string()))
+    ootle_wasm_core::stealth::inputs::build_stealth_inputs_statement(
+        input_commitments,
+        u64_arg("revealed_amount_microtari", revealed_amount_microtari)?,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Build a `StealthInputsStatement` JSON from a JSON array of per-input `{commitment, witness}` pairs
@@ -330,17 +386,19 @@ pub fn build_stealth_inputs_statement(
 /// this accepts a caller-supplied `witness` per input -- the only way to spend an output committed with
 /// `PayTo::Conditions` (e.g. claiming or refunding an HTLC-style hashlock/timelock output). Build each
 /// script-path input's witness with `buildScriptPathWitness` first; a plain key-path input can still be
-/// included in the same call, either with `"witness":"KeyPath"` or by omitting `witness` entirely
-/// (defaults to key path).
+/// included in the same call with `"witness":"KeyPath"`.
 ///
-/// `inputs_json` shape: `[{ "commitment": <hex 32 bytes>, "witness"?: <SpendWitness> }, ...]`.
+/// `inputs_json` shape: `[{ "commitment": <hex 32 bytes>, "witness": <SpendWitness> }, ...]`.
 #[wasm_bindgen(js_name = "buildStealthInputsStatementFromInputs")]
 pub fn build_stealth_inputs_statement_from_inputs(
     inputs_json: &str,
-    revealed_amount_microtari: u64,
+    revealed_amount_microtari: BigInt,
 ) -> Result<String, JsError> {
-    ootle_wasm_core::stealth::inputs::build_stealth_inputs_statement_from_inputs(inputs_json, revealed_amount_microtari)
-        .map_err(|e| JsError::new(&e.to_string()))
+    ootle_wasm_core::stealth::inputs::build_stealth_inputs_statement_from_inputs(
+        inputs_json,
+        u64_arg("revealed_amount_microtari", revealed_amount_microtari)?,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Build a script-path `SpendWitness` revealing `leaf` from the committed `conditions` set, optionally
@@ -382,16 +440,16 @@ pub fn build_script_path_witness(conditions_json: &str, leaf_json: &str, data: &
 #[wasm_bindgen(js_name = "buildStealthTransferStatement")]
 pub fn build_stealth_transfer_statement(
     input_witnesses_json: &str,
-    revealed_input_amount_microtari: u64,
+    revealed_input_amount_microtari: BigInt,
     output_witnesses_json: &str,
-    revealed_output_amount_microtari: u64,
+    revealed_output_amount_microtari: BigInt,
     revealed_receiver: &[u8],
 ) -> Result<String, JsError> {
     ootle_wasm_core::stealth::transfer::build_stealth_transfer_statement(
         input_witnesses_json,
-        revealed_input_amount_microtari,
+        u64_arg("revealed_input_amount_microtari", revealed_input_amount_microtari)?,
         output_witnesses_json,
-        revealed_output_amount_microtari,
+        u64_arg("revealed_output_amount_microtari", revealed_output_amount_microtari)?,
         revealed_receiver,
     )
     .map_err(|e| JsError::new(&e.to_string()))
@@ -515,14 +573,19 @@ pub fn unblind_output(
     })
 }
 
-/// Derive the recipient's stealth spending scalar `c + k`, where `c = H(network || k.G * r)`. The
-/// receiver runs this with their account secret key (`private_key`) and the sender-provided public
-/// nonce to obtain the one-time secret that controls the stealth output.
+/// Derive the recipient's stealth spending scalar `c + k`, where `c = H(network || v·R)`. The
+/// receiver runs this with their account secret key `k`, view secret key `v` and the sender-provided
+/// public nonce `R` to obtain the one-time secret that controls the stealth output.
 ///
 /// `network` is the network byte (0x00 = MainNet, 0x10 = LocalNet, 0x26 = Esmeralda, ...).
 #[wasm_bindgen(js_name = "stealthDhSecret")]
-pub fn stealth_dh_secret(network: u8, private_key: &[u8], public_nonce: &[u8]) -> Result<Vec<u8>, JsError> {
-    ootle_wasm_core::stealth::kdfs::stealth_dh_secret(network, private_key, public_nonce)
+pub fn stealth_dh_secret(
+    network: u8,
+    account_secret: &[u8],
+    view_secret: &[u8],
+    public_nonce: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    ootle_wasm_core::stealth::kdfs::stealth_dh_secret(network, account_secret, view_secret, public_nonce)
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
@@ -542,13 +605,13 @@ pub fn encrypted_data_dh_kdf_aead(private_key: &[u8], public_key: &[u8]) -> Resu
 #[wasm_bindgen(js_name = "generateElgamalViewableBalanceProof")]
 pub fn generate_elgamal_viewable_balance_proof(
     mask: &[u8],
-    amount: u64,
+    amount: BigInt,
     commitment: &[u8],
     view_public_key: &[u8],
 ) -> Result<String, JsError> {
     ootle_wasm_core::stealth::viewable_balance::generate_elgamal_viewable_balance_proof(
         mask,
-        amount,
+        u64_arg("amount", amount)?,
         commitment,
         view_public_key,
     )
@@ -570,16 +633,16 @@ pub fn decrypt_elgamal_viewable_balance(
     commitment: &[u8],
     view_public_key: &[u8],
     view_secret_key: &[u8],
-    min_value: u64,
-    max_value: u64,
+    min_value: BigInt,
+    max_value: BigInt,
 ) -> Result<Option<u64>, JsError> {
     ootle_wasm_core::stealth::viewable_balance::decrypt_elgamal_viewable_balance(
         proof_json,
         commitment,
         view_public_key,
         view_secret_key,
-        min_value,
-        max_value,
+        u64_arg("min_value", min_value)?,
+        u64_arg("max_value", max_value)?,
     )
     .map_err(|e| JsError::new(&e.to_string()))
 }

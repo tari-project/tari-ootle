@@ -316,7 +316,7 @@ impl ConsensusConstants {
         max_block_pledge_bytes: MAX_BLOCK_PLEDGE_BYTES,
         max_block_foreign_proposal_bytes: MAX_BLOCK_FOREIGN_PROPOSAL_BYTES,
         max_block_validation_foreign_proposal_bytes: MAX_BLOCK_VALIDATION_FOREIGN_PROPOSAL_BYTES,
-        exhaust_burn_rate: ExhaustBurnRate::new(500), // 5%
+        exhaust_burn_rate: ExhaustBurnRate::new(10_000), // 100%
         max_transaction_validity_epochs: 2160,
     };
     pub const TESTNET: Self = Self {
@@ -495,6 +495,7 @@ mod tests {
         INVOCATION_FLOOR,
         MAX_SIGNATURES_PER_TRANSACTION,
         MIN_INVOCATION_ENCODED_BYTES,
+        Sr25519SignatureBytes,
         Transaction,
         TransactionSignature,
         args,
@@ -504,7 +505,7 @@ mod tests {
         ComponentAddress,
         ObjectKey,
         constants::TARI_TOKEN,
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes},
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
         stealth::{StealthInput, StealthInputsStatement, StealthOutputsStatement, StealthTransferStatement},
     };
 
@@ -662,7 +663,7 @@ mod tests {
             .stealth_transfer(TARI_TOKEN, statement)
             .with_signatures(
                 (0..count)
-                    .map(|_| TransactionSignature::new(RistrettoPublicKeyBytes::zero(), SchnorrSignatureBytes::zero()))
+                    .map(|_| TransactionSignature::new(RistrettoPublicKeyBytes::zero(), Sr25519SignatureBytes::zero()))
                     .collect(),
             )
             .seal(&PrivateKey::from(1u64))

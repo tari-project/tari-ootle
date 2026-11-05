@@ -29,8 +29,18 @@
 # Allow cross-origin browser requests to the JSON-RPC (default = false)
 #enable_permissive_cors = false
 
+# Host names a request may address the JSON-RPC and web UI by, beyond localhost and IP addresses. Add the name a
+# reverse proxy forwards or a LAN/container host name; requests naming any other host are refused.
+# "*" accepts every name. Also settable with --json-rpc-allowed-host. (default = [])
+#json_rpc_allowed_hosts = ["vn.internal"]
+
 # Set to true to enable auto registration for each epoch (default = true)
 #auto_register = true
+
+# The number of most recent epoch checkpoints at whose versions each shard's whole state tree is kept, so that indexers
+# can take a shard snapshot at one. Disk use grows with the distinct substates changed since the oldest. At least 2.
+# (default = 2)
+#pinned_checkpoint_epochs = 2
 
 #[validator_node.consensus]
 ## Skip the startup state-sync check and go straight into consensus (default = false)
@@ -43,6 +53,29 @@
 ## The streaming rate, in bytes per second, at which a state version's bytes extend that time, 0 for no extension
 ## (default = 262144)
 #state_sync_min_throughput_bytes_per_sec = 262144
+## How often, in seconds, stale state tree nodes past the history window are deleted (default = 3600)
+#state_tree_cleanup_interval_secs = 3600
+
+#[validator_node.logging]
+## A filter is a comma-separated list of `target=level` directives plus an optional bare level for every other target.
+## A directive matches every target it prefixes and the longest match decides; `off` silences a target. A sink whose
+## writer falls behind drops lines, so logging never slows the node, and warns about it.
+## The directory log files are written to, relative to the base path (default = "log/validator-node")
+#directory = "log/validator-node"
+## The events printed to stdout. RUST_LOG, when set, replaces it. (default = "warn,tari=info,...")
+#console = "warn,tari=info"
+## How events are printed to stdout: "text", or "json" (one object per event, for log shippers) (default = "text")
+#console_format = "text"
+#
+## Each [validator_node.logging.files.<name>] table configures <directory>/<name>.log. The defaults are ootle,
+## consensus, engine, network, libp2p and other. A table changes only the keys it sets, and a new name adds a file.
+#[validator_node.logging.files.engine]
+## The events written to this file; "off" disables it (default = "tari::ootle::engine=debug")
+#filter = "tari::ootle::engine=info"
+## Rotate the file at this size: engine.log becomes engine.1.log, and so on (default = 100)
+#max_file_size_mb = 100
+## The number of rotated files kept (default = 5)
+#max_rotated_files = 5
 
 #[validator_node.database]
 ## The type of database ("rocksdb" or "sqlite") to use (default = "sqlite")

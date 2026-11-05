@@ -56,7 +56,7 @@ import { IoPaperPlaneOutline } from "react-icons/io5";
 import { QRCode } from "react-qr-code";
 
 function AccountDetails() {
-  const [payRefDialogOpen, setPayRefDialogOpen] = useState(false);
+  const [destinationTagDialogOpen, setDestinationTagDialogOpen] = useState(false);
   const { account, address } = useAccountStore();
 
   if (!account) {
@@ -72,7 +72,11 @@ function AccountDetails() {
 
   return (
     <TableContainer>
-      <PayRefDialog address={address} open={payRefDialogOpen} onClose={() => setPayRefDialogOpen(false)} />
+      <DestinationTagDialog
+        address={address}
+        open={destinationTagDialogOpen}
+        onClose={() => setDestinationTagDialogOpen(false)}
+      />
       <Table>
         <TableHead>
           <TableRow>
@@ -97,8 +101,8 @@ function AccountDetails() {
             <DataTableCell>
               <Stack direction="row" gap={1}>
                 <CopyAddress address={address} />
-                <Tooltip title="PayRef address">
-                  <IconButton size="small" onClick={(_e) => setPayRefDialogOpen(true)} color="primary">
+                <Tooltip title="Destination tag address">
+                  <IconButton size="small" onClick={(_e) => setDestinationTagDialogOpen(true)} color="primary">
                     <IoPaperPlaneOutline />
                   </IconButton>
                 </Tooltip>
@@ -114,20 +118,20 @@ function AccountDetails() {
   );
 }
 
-type PayRefDialogProps = {
+type DestinationTagDialogProps = {
   address: OotleAddress;
   open: boolean;
   onClose: () => void;
 };
 
-function PayRefDialog(props: PayRefDialogProps) {
+function DestinationTagDialog(props: DestinationTagDialogProps) {
   const { address, open, onClose } = props;
 
   const [currentAddress, setCurrentAddress] = useState(address);
 
   const handleOnChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const decoded = decodeOotleAddress(address);
-    decoded.payRef = event.target.value;
+    decoded.destinationTag = event.target.value;
     const addr = encodeOotleAddress(decoded);
     setCurrentAddress(addr);
   };
@@ -140,10 +144,10 @@ function PayRefDialog(props: PayRefDialogProps) {
       aria-describedby="alert-dialog-description"
     >
       <form onSubmit={() => {}}>
-        <DialogTitle id="alert-dialog-title">Pay Ref Address</DialogTitle>
+        <DialogTitle id="alert-dialog-title">Destination Tag Address</DialogTitle>
         <DialogContent>
           <DialogContentText id="alert-dialog-description">
-            Generate an address with an embedded payment reference
+            Generate an address with an embedded destination tag
           </DialogContentText>
           <div
             style={{
@@ -156,7 +160,7 @@ function PayRefDialog(props: PayRefDialogProps) {
             <TextField
               name="link"
               placeholder="Inv12345...."
-              label="Payment Ref."
+              label="Destination tag"
               fullWidth
               onChange={handleOnChange}
             />

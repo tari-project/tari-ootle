@@ -124,6 +124,7 @@ diesel::table! {
         transaction_id -> Nullable<Text>,
         timeout_at -> Nullable<Timestamp>,
         created_at -> Timestamp,
+        owner -> Nullable<Text>,
     }
 }
 
@@ -156,6 +157,20 @@ diesel::table! {
         auth_hook -> Nullable<Text>,
         updated_at -> Timestamp,
         created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    shard_state_version_claims (id) {
+        id -> Integer,
+        account_id -> Integer,
+        resource_id -> Integer,
+        shard -> Integer,
+        state_version -> BigInt,
+        first_state_version -> BigInt,
+        verified_epoch -> Nullable<BigInt>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
     }
 }
 
@@ -213,6 +228,9 @@ diesel::table! {
         is_frozen -> Bool,
         is_on_chain -> Bool,
         is_condition_spendable -> Bool,
+        proven_version -> Nullable<BigInt>,
+        proven_up_epoch -> Nullable<BigInt>,
+        spent_version -> Nullable<BigInt>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -256,6 +274,7 @@ diesel::table! {
         finalized_time -> Nullable<Timestamp>,
         new_account_info -> Nullable<Text>,
         invalid_reason -> Nullable<Text>,
+        submitted_at -> Nullable<Timestamp>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -280,12 +299,23 @@ diesel::table! {
 }
 
 diesel::table! {
+    trusted_validator_sets (epoch) {
+        epoch -> BigInt,
+        validator_set -> Text,
+        anchor -> Nullable<Text>,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     utxo_process_queue (id) {
         id -> Integer,
         account_id -> Integer,
         resource_address -> Text,
         utxo_tag -> Integer,
         public_nonce -> Text,
+        shard -> Nullable<Integer>,
+        state_version -> Nullable<BigInt>,
         created_at -> Timestamp,
     }
 }
@@ -331,8 +361,10 @@ diesel::table! {
     webauthn_registration_passkeys (id) {
         id -> Integer,
         registration_id -> Integer,
+        label -> Text,
         passkey -> Binary,
         created_at -> Timestamp,
+        last_used_at -> Nullable<Timestamp>,
         updated_at -> Timestamp,
     }
 }
@@ -360,6 +392,8 @@ diesel::table! {
 diesel::joinable!(confidential_outputs -> accounts (account_id));
 diesel::joinable!(confidential_outputs -> vaults (vault_id));
 diesel::joinable!(non_fungible_tokens -> vaults (vault_id));
+diesel::joinable!(shard_state_version_claims -> accounts (account_id));
+diesel::joinable!(shard_state_version_claims -> resources (resource_id));
 diesel::joinable!(shard_state_versions -> accounts (account_id));
 diesel::joinable!(shard_state_versions -> resources (resource_id));
 diesel::joinable!(stealth_outputs -> accounts (owner_account_id));
@@ -384,6 +418,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     locks,
     non_fungible_tokens,
     resources,
+    shard_state_version_claims,
     shard_state_versions,
     signing_requests,
     stealth_outputs,
@@ -391,6 +426,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     transaction_accounts,
     transaction_requests,
     transactions,
+    trusted_validator_sets,
     utxo_process_queue,
     vault_locks,
     vaults,

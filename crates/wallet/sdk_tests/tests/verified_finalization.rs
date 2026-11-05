@@ -1,0 +1,982 @@
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+//! A wallet that verifies its indexer commits a transaction only once the indexer proves the receipt the network
+//! committed for it, against a validator set the wallet walked to from its anchor.
+
+mod support;
+
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use tari_consensus_types::Decision;
+use tari_crypto::ristretto::RistrettoSecretKey;
+use tari_engine_types::{
+    commit_result::{ExecuteResult, FinalizeResult, TransactionResult},
+    encoded::Encoded,
+    fees::FeeReceipt,
+    substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
+    transaction_receipt::{DiffSummary, FinalizeOutcome, TransactionReceipt},
+};
+use tari_indexer_client::types::ProvenTransactionReceipt;
+use tari_ootle_common_types::{Epoch, SubstateVersion};
+use tari_ootle_light_client::test_fixtures::{
+    CheckpointSpec,
+    NETWORK,
+    Signers,
+    ValidatorSetFixture,
+    checkpoint_entry,
+    substate_proof,
+};
+use tari_ootle_transaction::{Transaction, TransactionId, args};
+use tari_ootle_wallet_sdk::{
+    IndexerTrust,
+    apis::{
+        config::ConfigKey,
+        transaction::{Submission, TRANSACTION_EXPIRY_GRACE_EPOCHS, TransactionApiError},
+        validator_set::ValidatorSetApiError,
+    },
+    models::{
+        TransactionContext,
+        TransactionContextKind,
+        TransactionStatus,
+        ValidatorSetAnchor,
+        WalletEvent,
+        WalletTransactionUpdate,
+    },
+    network::{TransactionFinalizedResult, TransactionQueryResult},
+    storage::{ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
+};
+use tari_ootle_wallet_sdk_services::{
+    notify::Notify,
+    transaction_service::{TransactionService, TransactionServiceConfig},
+};
+use tari_shutdown::Shutdown;
+use tari_template_lib::types::Hash32;
+use time::{OffsetDateTime, PrimitiveDateTime};
+
+use crate::support::{ProvingNetwork, Test, TestWithNetwork};
+
+fn now() -> PrimitiveDateTime {
+    let now = OffsetDateTime::now_utc();
+    PrimitiveDateTime::new(now.date(), now.time())
+}
+
+/// Validator sets of epochs 1 to 3.
+fn sets() -> Vec<ValidatorSetFixture> {
+    (1..=3).map(ValidatorSetFixture::new).collect()
+}
+
+fn build_transaction() -> Transaction {
+    build_transaction_valid_until(Epoch(100))
+}
+
+fn build_transaction_valid_until(max_epoch: Epoch) -> Transaction {
+    Transaction::builder_localnet(max_epoch)
+        .allocate_component_address("component")
+        .put_last_instruction_output_on_workspace("bucket")
+        .call_method("component", "new", args!["bucket"])
+        .build_and_seal(&RistrettoSecretKey::from(1u64))
+}
+
+/// The result of `transaction_id` committing in `set`'s epoch, with its receipt proven at a block that `set`'s
+/// committee of the receipt's shard group signed.
+fn committed_result(transaction_id: TransactionId, set: &ValidatorSetFixture) -> TransactionQueryResult {
+    let receipt_id = SubstateId::TransactionReceipt(transaction_id.into_receipt_address());
+    let fee_receipt = FeeReceipt::builder()
+        .with_total_fee_payment(1000)
+        .with_total_fees_paid(800)
+        .build();
+    let receipt = TransactionReceipt {
+        outcome: FinalizeOutcome::Commit,
+        diff_summary: DiffSummary::from_diff(NETWORK, &SubstateDiff::new(), set.epoch),
+        fee_withdrawals: Box::new([]),
+        events: Box::new([]),
+        fee_receipt: fee_receipt.clone(),
+        epoch: set.epoch,
+        intent_commitment: Hash32::from_array([3; 32]),
+    };
+    let mut diff = SubstateDiff::new();
+    diff.up(
+        receipt_id.clone(),
+        Substate::new(SubstateVersion::ZERO, receipt.clone()),
+    );
+    let finalize = FinalizeResult::new(
+        transaction_id.into_array().into(),
+        vec![],
+        vec![],
+        TransactionResult::Accept(diff),
+        fee_receipt,
+    );
+    let proof = substate_proof(
+        set,
+        &receipt_id,
+        SubstateVersion::ZERO,
+        &SubstateValue::from(receipt.clone()),
+    );
+    let execute_result = ExecuteResult {
+        finalize,
+        execution_time: Duration::from_secs(1),
+        execute_epoch: None,
+        wasm_execution_points: 0,
+        native_execution_points: 0,
+    };
+
+    TransactionQueryResult {
+        transaction_id,
+        encoded_execution_result: Some(Encoded::encode(&execute_result).unwrap()),
+        result: TransactionFinalizedResult::Finalized {
+            final_decision: Decision::Commit,
+            execution_result: Some(Box::new(execute_result)),
+            execution_time: Duration::from_secs(1),
+            finalized_time: now(),
+            abort_details: None,
+        },
+        receipt: Some(ProvenTransactionReceipt {
+            version: SubstateVersion::ZERO,
+            value: Encoded::encode(&SubstateValue::from(receipt)).unwrap(),
+            proof: Some(proof),
+        }),
+    }
+}
+
+/// A verifying wallet on `network` holding `transaction`, not yet finalized.
+fn wallet(network: ProvingNetwork, transaction: &Transaction) -> TestWithNetwork<ProvingNetwork> {
+    let test = TestWithNetwork::without_accounts_trusting(network, IndexerTrust::Verify);
+    test.store()
+        .with_write_tx(|tx| tx.transactions_insert(transaction, None, &[Test::test_account_address()], false))
+        .unwrap();
+    test
+}
+
+#[tokio::test]
+async fn a_commit_with_a_proven_receipt_is_finalized_and_anchors_on_first_use() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 1);
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    network.set_result(committed_result(transaction_id, &sets[2]));
+    let test = wallet(network, &transaction);
+
+    let finalized = test
+        .sdk()
+        .transaction_api()
+        .check_and_store_finalized_transaction(transaction_id)
+        .await
+        .unwrap()
+        .expect("the transaction is finalized");
+    assert_eq!(finalized.status, TransactionStatus::Accepted);
+    assert_eq!(finalized.final_fee, Some(800));
+
+    let anchor = test.sdk().validator_set_api().anchor().unwrap().unwrap();
+    assert_eq!(anchor.anchor, ValidatorSetAnchor::FirstUse);
+    assert_eq!(anchor.validator_set.epoch(), Epoch(3));
+    assert_eq!(*anchor.validator_set.validator_set_hash(), sets[2].hash());
+}
+
+#[tokio::test]
+async fn a_commit_stays_pending_until_its_receipt_is_proven() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 1);
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    let test = wallet(network.clone(), &transaction);
+
+    let mut unproven = committed_result(transaction_id, &sets[2]);
+    unproven.receipt.as_mut().unwrap().proof = None;
+    let mut without_receipt = unproven.clone();
+    without_receipt.receipt = None;
+    for result in [unproven, without_receipt] {
+        network.set_result(result);
+        let pending = test
+            .sdk()
+            .transaction_api()
+            .check_and_store_finalized_transaction(transaction_id)
+            .await
+            .unwrap();
+        assert!(pending.is_none());
+        let stored = test.sdk().transaction_api().get(transaction_id).unwrap();
+        assert_eq!(stored.status, TransactionStatus::New);
+        assert!(stored.finalize.is_none());
+    }
+}
+
+#[tokio::test]
+async fn a_transaction_with_no_outcome_expires_by_the_epoch_of_the_trusted_validator_set() {
+    // The latest checkpoint names the set of epoch 6.
+    let sets = (1..=6).map(ValidatorSetFixture::new).collect::<Vec<_>>();
+    let trusted_epoch = 6;
+
+    for (max_epoch, expires) in [
+        (trusted_epoch - TRANSACTION_EXPIRY_GRACE_EPOCHS - 1, true),
+        (trusted_epoch - TRANSACTION_EXPIRY_GRACE_EPOCHS, false),
+    ] {
+        let network = ProvingNetwork::new(&sets, 4);
+        let transaction = build_transaction_valid_until(Epoch(max_epoch));
+        let transaction_id = transaction.calculate_id();
+        network.set_result(TransactionQueryResult {
+            transaction_id,
+            result: TransactionFinalizedResult::Pending,
+            receipt: None,
+            encoded_execution_result: None,
+        });
+        let test = wallet(network, &transaction);
+        let trusted = test.sdk().validator_set_api().sync().await.unwrap();
+        assert_eq!(trusted.epoch(), Epoch(trusted_epoch));
+
+        // The network panics if asked for the current epoch.
+        let resolved = test
+            .sdk()
+            .transaction_api()
+            .check_and_store_finalized_transaction(transaction_id)
+            .await
+            .unwrap();
+
+        let stored = test.sdk().transaction_api().get(transaction_id).unwrap();
+        if expires {
+            assert!(resolved.is_some(), "max_epoch {max_epoch} expires");
+            assert_eq!(stored.status, TransactionStatus::InvalidTransaction);
+        } else {
+            assert!(resolved.is_none(), "max_epoch {max_epoch} may still finalize");
+            assert_eq!(stored.status, TransactionStatus::New);
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_receipt_proven_by_a_committee_outside_the_trusted_sets_is_refused() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 1);
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    let impostors = ValidatorSetFixture::with_signers(NETWORK, 3, Signers::new(0xe0, 4), Signers::new(0xe1, 4));
+    network.set_result(committed_result(transaction_id, &impostors));
+    let test = wallet(network, &transaction);
+
+    let err = test
+        .sdk()
+        .transaction_api()
+        .check_and_store_finalized_transaction(transaction_id)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, TransactionApiError::FinalizationUnverified { .. }),
+        "{err}"
+    );
+    let stored = test.sdk().transaction_api().get(transaction_id).unwrap();
+    assert!(stored.finalize.is_none());
+}
+
+#[tokio::test]
+async fn a_result_other_than_its_proven_receipt_commits_is_refused() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 1);
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    let mut result = committed_result(transaction_id, &sets[2]);
+    let TransactionFinalizedResult::Finalized { execution_result, .. } = &result.result else {
+        unreachable!()
+    };
+    let mut other = execution_result.as_deref().unwrap().clone();
+    other.finalize.fee_receipt = FeeReceipt::builder().with_total_fees_paid(1).build();
+    result.encoded_execution_result = Some(Encoded::encode(&other).unwrap());
+    network.set_result(result);
+    let test = wallet(network, &transaction);
+
+    let err = test
+        .sdk()
+        .transaction_api()
+        .check_and_store_finalized_transaction(transaction_id)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, TransactionApiError::FinalizationUnverified { .. }),
+        "{err}"
+    );
+    let stored = test.sdk().transaction_api().get(transaction_id).unwrap();
+    assert!(stored.finalize.is_none());
+}
+
+#[tokio::test]
+async fn the_committed_result_is_stored_in_place_of_the_served_one() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 1);
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    let mut result = committed_result(transaction_id, &sets[2]);
+    let TransactionFinalizedResult::Finalized { execution_result, .. } = &mut result.result else {
+        unreachable!()
+    };
+    execution_result.as_mut().unwrap().finalize.fee_receipt = FeeReceipt::builder().with_total_fees_paid(1).build();
+    network.set_result(result);
+    let test = wallet(network, &transaction);
+
+    test.sdk()
+        .transaction_api()
+        .check_and_store_finalized_transaction(transaction_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let stored = test.sdk().transaction_api().get(transaction_id).unwrap();
+    assert_eq!(stored.finalize.unwrap().fee_receipt.total_fees_paid(), 800);
+}
+
+#[tokio::test]
+async fn the_wallet_walks_to_the_validator_set_that_proves_a_later_receipt() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 0);
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    let test = wallet(network.clone(), &transaction);
+    let anchored = test.sdk().validator_set_api().sync().await.unwrap();
+    assert_eq!(anchored.epoch(), Epoch(2));
+
+    network.set_latest(1);
+    network.set_result(committed_result(transaction_id, &sets[2]));
+    let finalized = test
+        .sdk()
+        .transaction_api()
+        .check_and_store_finalized_transaction(transaction_id)
+        .await
+        .unwrap()
+        .expect("the transaction is finalized");
+    assert_eq!(finalized.status, TransactionStatus::Accepted);
+
+    let validator_set_api = test.sdk().validator_set_api();
+    assert_eq!(validator_set_api.latest().unwrap().unwrap().epoch(), Epoch(3));
+    let anchor = validator_set_api.anchor().unwrap().unwrap();
+    assert_eq!(anchor.anchor, ValidatorSetAnchor::FirstUse);
+    assert_eq!(anchor.validator_set.epoch(), Epoch(2));
+    let walked = test
+        .store()
+        .with_read_tx(|tx| tx.trusted_validator_sets_get(Epoch(3)))
+        .unwrap();
+    assert_eq!(*walked.validator_set_hash(), sets[2].hash());
+}
+
+#[tokio::test]
+async fn a_receipt_proven_in_an_earlier_epoch_verifies_against_the_set_kept_for_it() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 0);
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    let test = wallet(network.clone(), &transaction);
+    test.sdk().validator_set_api().sync().await.unwrap();
+    network.set_latest(1);
+    test.sdk().validator_set_api().sync().await.unwrap();
+
+    // Proven at a block of epoch 2, after the wallet walked on to epoch 3.
+    network.set_result(committed_result(transaction_id, &sets[1]));
+    let finalized = test
+        .sdk()
+        .transaction_api()
+        .check_and_store_finalized_transaction(transaction_id)
+        .await
+        .unwrap()
+        .expect("the transaction is finalized");
+    assert_eq!(finalized.status, TransactionStatus::Accepted);
+}
+
+#[tokio::test]
+async fn a_receipt_proven_before_the_anchor_stays_pending() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 1);
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    network.set_result(committed_result(transaction_id, &sets[1]));
+    let test = wallet(network, &transaction);
+
+    let pending = test
+        .sdk()
+        .transaction_api()
+        .check_and_store_finalized_transaction(transaction_id)
+        .await
+        .unwrap();
+    assert!(
+        pending.is_none(),
+        "the wallet anchored on epoch 3 and trusts no set for 2"
+    );
+}
+
+fn mark_submitted(
+    test: &TestWithNetwork<ProvingNetwork>,
+    transaction_id: TransactionId,
+    submitted_at: PrimitiveDateTime,
+) {
+    test.store()
+        .with_write_tx(|tx| {
+            tx.transactions_update(
+                WalletTransactionUpdate::new(transaction_id)
+                    .with_new_status(TransactionStatus::Pending)
+                    .with_submitted_at(submitted_at),
+            )
+        })
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_transaction_submitted_before_the_anchor_takes_the_served_result_of_a_receipt_proven_before_it() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 1);
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    network.set_result(committed_result(transaction_id, &sets[1]));
+    let test = wallet(network, &transaction);
+    mark_submitted(&test, transaction_id, now() - Duration::from_secs(3600));
+
+    let finalized = test
+        .sdk()
+        .transaction_api()
+        .check_and_store_finalized_transaction(transaction_id)
+        .await
+        .unwrap()
+        .expect("the result of a transaction submitted before the anchor is stored");
+    assert_eq!(finalized.status, TransactionStatus::Accepted);
+    assert_eq!(finalized.final_fee, Some(800));
+    let anchor = test.sdk().validator_set_api().anchor().unwrap().unwrap();
+    assert_eq!(anchor.validator_set.epoch(), Epoch(3));
+}
+
+#[tokio::test]
+async fn a_receipt_proven_before_the_anchor_of_a_transaction_submitted_after_it_stays_pending() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 1);
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    network.set_result(committed_result(transaction_id, &sets[1]));
+    let test = wallet(network, &transaction);
+    test.sdk().validator_set_api().sync().await.unwrap();
+    mark_submitted(&test, transaction_id, now());
+
+    let pending = test
+        .sdk()
+        .transaction_api()
+        .check_and_store_finalized_transaction(transaction_id)
+        .await
+        .unwrap();
+    assert!(
+        pending.is_none(),
+        "a transaction submitted after the anchor commits in its epoch or later"
+    );
+    let stored = test.sdk().transaction_api().get(transaction_id).unwrap();
+    assert_eq!(stored.status, TransactionStatus::Pending);
+    assert!(stored.finalize.is_none());
+}
+
+/// A network whose history breaks after epoch 2: its checkpoint ending epoch 2 names a validator set whose committee is
+/// of epoch `far`, so no walk from epoch 2 connects to the latest checkpoint, which ends `far`.
+fn broken_history(far: u64) -> (Vec<ValidatorSetFixture>, ProvingNetwork) {
+    let sets = vec![
+        ValidatorSetFixture::new(1),
+        ValidatorSetFixture::new(2),
+        ValidatorSetFixture::new(far),
+        ValidatorSetFixture::new(far + 1),
+    ];
+    let network = ProvingNetwork::new(&sets, 0);
+    (sets, network)
+}
+
+/// Sets the wallet's last validator set sync to `ago` before now.
+fn last_synced(test: &TestWithNetwork<ProvingNetwork>, ago: Duration) {
+    let at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap() - ago;
+    test.store()
+        .with_write_tx(|tx| tx.config_set(ConfigKey::ValidatorSetSyncedAt.as_key_str(), &at.as_secs(), false))
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_wallet_synced_recently_never_reanchors_on_a_claimed_gap() {
+    let far = 600;
+    let (sets, network) = broken_history(far);
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    let test = wallet(network.clone(), &transaction);
+    test.sdk().validator_set_api().sync().await.unwrap();
+
+    // The indexer claims the network is `far` epochs on, and proves the receipt with the set it names there.
+    network.set_latest(2);
+    network.set_result(committed_result(transaction_id, &sets[3]));
+    let err = test
+        .sdk()
+        .transaction_api()
+        .check_and_store_finalized_transaction(transaction_id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, TransactionApiError::ValidatorSet(_)), "{err}");
+
+    let stored = test.sdk().transaction_api().get(transaction_id).unwrap();
+    assert!(stored.finalize.is_none());
+    let anchor = test.sdk().validator_set_api().anchor().unwrap().unwrap();
+    assert_eq!(anchor.anchor, ValidatorSetAnchor::FirstUse);
+    assert_eq!(anchor.validator_set.epoch(), Epoch(2));
+    assert!(test.sdk().validator_set_api().reanchors(10).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_wallet_out_of_sync_long_enough_reanchors_when_the_walk_fails() {
+    let far = 600;
+    let (_, network) = broken_history(far);
+    let transaction = build_transaction();
+    let test = wallet(network.clone(), &transaction);
+    let validator_set_api = test.sdk().validator_set_api();
+    validator_set_api.sync().await.unwrap();
+
+    network.set_latest(2);
+    last_synced(&test, Duration::from_secs(365 * 24 * 60 * 60));
+    let trusted = validator_set_api.sync().await.unwrap();
+    assert_eq!(trusted.epoch(), Epoch(far + 1));
+    assert_eq!(trusted.anchor_epoch(), Epoch(far + 1));
+    let anchor = validator_set_api.anchor().unwrap().unwrap();
+    assert_eq!(anchor.anchor, ValidatorSetAnchor::Reanchor);
+    assert_eq!(anchor.validator_set.epoch(), Epoch(far + 1));
+    let forgotten = test.store().with_read_tx(|tx| tx.trusted_validator_sets_get(Epoch(2)));
+    assert!(forgotten.is_err(), "the old chain is forgotten");
+
+    let reanchors = validator_set_api.reanchors(10).unwrap();
+    assert_eq!(reanchors.len(), 1);
+    assert_eq!(reanchors[0].event.previous_epoch, Some(Epoch(2)));
+    assert_eq!(reanchors[0].event.epoch, Epoch(far + 1));
+    assert_eq!(reanchors[0].event.validator_set_hash, *trusted.validator_set_hash());
+}
+
+#[tokio::test]
+async fn the_latest_reanchors_are_read_back_newest_first() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 0);
+    let transaction = build_transaction();
+    let test = wallet(network.clone(), &transaction);
+    let validator_set_api = test.sdk().validator_set_api();
+    validator_set_api.sync().await.unwrap();
+
+    network.set_latest(1);
+    validator_set_api.reanchor().await.unwrap();
+    validator_set_api.reanchor().await.unwrap();
+
+    let previous_epochs = |limit| {
+        validator_set_api
+            .reanchors(limit)
+            .unwrap()
+            .into_iter()
+            .map(|reanchor| reanchor.event.previous_epoch)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(previous_epochs(10), [Some(Epoch(3)), Some(Epoch(2))]);
+    assert_eq!(previous_epochs(1), [Some(Epoch(3))]);
+}
+
+#[tokio::test]
+async fn a_wallet_far_behind_walks_the_whole_way() {
+    let sets = (1..=510).map(ValidatorSetFixture::new).collect::<Vec<_>>();
+    let network = ProvingNetwork::new(&sets, 0);
+    let transaction = build_transaction();
+    let test = wallet(network.clone(), &transaction);
+    let validator_set_api = test.sdk().validator_set_api();
+    validator_set_api.sync().await.unwrap();
+
+    network.set_latest(sets.len() - 2);
+    last_synced(&test, Duration::from_secs(365 * 24 * 60 * 60));
+    let trusted = validator_set_api.sync().await.unwrap();
+    assert_eq!(trusted.epoch(), Epoch(510));
+    let anchor = validator_set_api.anchor().unwrap().unwrap();
+    assert_eq!(anchor.anchor, ValidatorSetAnchor::FirstUse);
+    assert_eq!(anchor.validator_set.epoch(), Epoch(2));
+}
+
+#[tokio::test]
+async fn a_walk_the_indexer_withholds_fails_and_keeps_the_trusted_set() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 0);
+    let transaction = build_transaction();
+    let test = wallet(network.clone(), &transaction);
+    let validator_set_api = test.sdk().validator_set_api();
+    validator_set_api.sync().await.unwrap();
+
+    network.set_latest(1);
+    network.withhold_walk();
+    let err = validator_set_api.sync().await.unwrap_err();
+    assert!(
+        matches!(err, ValidatorSetApiError::CheckpointNotServed { epoch } if epoch == Epoch(2)),
+        "{err}"
+    );
+    assert_eq!(validator_set_api.latest().unwrap().unwrap().epoch(), Epoch(2));
+}
+
+#[tokio::test]
+async fn a_walk_stops_at_a_checkpoint_the_indexer_has_not_served_yet() {
+    let sets = (1..=5).map(ValidatorSetFixture::new).collect::<Vec<_>>();
+    let network = ProvingNetwork::new(&sets, 0);
+    let transaction = build_transaction();
+    let test = wallet(network.clone(), &transaction);
+    let validator_set_api = test.sdk().validator_set_api();
+    validator_set_api.sync().await.unwrap();
+
+    // An indexer backfilling its checkpoints has the latest one but not yet the one ending epoch 3.
+    network.set_latest(3);
+    network.leave_unserved(Epoch(3));
+    let err = validator_set_api.sync().await.unwrap_err();
+    assert!(
+        matches!(err, ValidatorSetApiError::CheckpointNotServed { epoch } if epoch == Epoch(3)),
+        "{err}"
+    );
+    assert_eq!(validator_set_api.latest().unwrap().unwrap().epoch(), Epoch(3));
+}
+
+#[tokio::test]
+async fn concurrent_syncs_walk_once() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 0);
+    let transaction = build_transaction();
+    let test = wallet(network.clone(), &transaction);
+    test.sdk().validator_set_api().sync().await.unwrap();
+
+    network.set_latest(1);
+    let (first_api, second_api) = (test.sdk().validator_set_api(), test.sdk().validator_set_api());
+    let (first, second) = tokio::join!(first_api.sync(), second_api.sync());
+    assert_eq!(first.unwrap().epoch(), Epoch(3));
+    assert_eq!(second.unwrap().epoch(), Epoch(3));
+    assert_eq!(network.walk_requests(), 1);
+}
+
+#[tokio::test]
+async fn the_wallet_anchors_before_its_first_submission() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 1);
+    let transaction = build_transaction();
+    let test = wallet(network, &transaction);
+    assert!(test.sdk().validator_set_api().anchor().unwrap().is_none());
+
+    let submission = test
+        .sdk()
+        .transaction_api()
+        .submit_transaction(transaction.calculate_id())
+        .await
+        .unwrap();
+    assert_eq!(submission, Submission::Submitted);
+
+    let anchor = test.sdk().validator_set_api().anchor().unwrap().unwrap();
+    assert_eq!(anchor.anchor, ValidatorSetAnchor::FirstUse);
+    assert_eq!(anchor.validator_set.epoch(), Epoch(3));
+}
+
+#[tokio::test]
+async fn before_the_first_checkpoint_the_wallet_anchors_on_the_current_epochs_set() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 0);
+    network.withhold_checkpoints();
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    let test = wallet(network.clone(), &transaction);
+
+    let submission = test
+        .sdk()
+        .transaction_api()
+        .submit_transaction(transaction_id)
+        .await
+        .unwrap();
+    assert_eq!(submission, Submission::Submitted);
+    let anchor = test.sdk().validator_set_api().anchor().unwrap().unwrap();
+    assert_eq!(anchor.anchor, ValidatorSetAnchor::FirstUse);
+    assert_eq!(anchor.validator_set.epoch(), Epoch(1));
+    assert_eq!(*anchor.validator_set.validator_set_hash(), sets[0].hash());
+
+    network.set_result(committed_result(transaction_id, &sets[0]));
+    let finalized = test
+        .sdk()
+        .transaction_api()
+        .check_and_store_finalized_transaction(transaction_id)
+        .await
+        .unwrap()
+        .expect("the transaction is finalized");
+    assert_eq!(finalized.status, TransactionStatus::Accepted);
+}
+
+#[tokio::test]
+async fn before_the_first_checkpoint_a_wallet_holds_back_until_the_consensus_epoch_is_observed() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 0);
+    network.withhold_checkpoints();
+    network.set_observes_consensus_epoch(false);
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    let test = wallet(network.clone(), &transaction);
+    let transaction_api = test.sdk().transaction_api();
+
+    let err = test.sdk().validator_set_api().sync().await.unwrap_err();
+    assert!(matches!(err, ValidatorSetApiError::ConsensusEpochUnobserved), "{err}");
+    let submission = transaction_api.submit_transaction(transaction_id).await.unwrap();
+    assert_eq!(submission, Submission::Deferred);
+    assert_eq!(network.submissions(), 0);
+
+    network.set_observes_consensus_epoch(true);
+    let submission = transaction_api.submit_transaction(transaction_id).await.unwrap();
+    assert_eq!(submission, Submission::Submitted);
+    let anchor = test.sdk().validator_set_api().anchor().unwrap().unwrap();
+    assert_eq!(anchor.validator_set.epoch(), Epoch(1));
+}
+
+#[tokio::test]
+async fn a_set_anchored_before_the_first_checkpoint_walks_through_it() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 0);
+    network.withhold_checkpoints();
+    let transaction = build_transaction();
+    let test = wallet(network.clone(), &transaction);
+    let validator_set_api = test.sdk().validator_set_api();
+    assert_eq!(validator_set_api.sync().await.unwrap().epoch(), Epoch(1));
+    assert_eq!(validator_set_api.sync().await.unwrap().epoch(), Epoch(1));
+
+    network.set_latest(0);
+    assert_eq!(validator_set_api.sync().await.unwrap().epoch(), Epoch(2));
+    let anchor = validator_set_api.anchor().unwrap().unwrap();
+    assert_eq!(anchor.validator_set.epoch(), Epoch(1));
+}
+
+#[tokio::test]
+async fn a_wallet_that_cannot_anchor_holds_its_transaction_back() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 1);
+    network.disconnect();
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    let test = wallet(network.clone(), &transaction);
+
+    let submission = test
+        .sdk()
+        .transaction_api()
+        .submit_transaction(transaction_id)
+        .await
+        .unwrap();
+
+    assert_eq!(submission, Submission::Deferred);
+    assert_eq!(network.submissions(), 0);
+    let held = test.sdk().transaction_api().get(transaction_id).unwrap();
+    assert_eq!(held.status, TransactionStatus::New);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_transaction_service_submits_a_held_back_transaction_once_the_wallet_anchors() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 1);
+    network.disconnect();
+    let test = TestWithNetwork::without_accounts_trusting(network.clone(), IndexerTrust::Verify);
+    let config = TransactionServiceConfig {
+        poll_interval: Duration::from_millis(20),
+        ..TransactionServiceConfig::default()
+    };
+    let shutdown = Shutdown::new();
+    let (service, handle) =
+        TransactionService::with_config(config, Notify::new(16), test.sdk().clone(), shutdown.to_signal());
+    tokio::spawn(service.run());
+
+    let transaction = build_transaction();
+    network.set_result(TransactionQueryResult {
+        result: TransactionFinalizedResult::Pending,
+        transaction_id: transaction.calculate_id(),
+        receipt: None,
+        encoded_execution_result: None,
+    });
+    let transaction_id = handle.submit_transaction(transaction).await.unwrap();
+    assert_eq!(network.submissions(), 0);
+    let held = test.sdk().transaction_api().get(transaction_id).unwrap();
+    assert_eq!(held.status, TransactionStatus::New);
+
+    network.reconnect();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while network.submissions() == 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the service never submitted the held-back transaction");
+    let submitted = test.sdk().transaction_api().get(transaction_id).unwrap();
+    assert_eq!(submitted.status, TransactionStatus::Pending);
+    let anchor = test
+        .sdk()
+        .validator_set_api()
+        .anchor()
+        .unwrap()
+        .expect("the wallet anchored");
+    let submitted_at = submitted.submitted_at.expect("the submission time is recorded");
+    assert!(
+        submitted_at >= anchor.anchored_at,
+        "a transaction held back for the anchor is submitted after it"
+    );
+}
+
+#[tokio::test]
+async fn a_held_back_transaction_is_announced_with_the_context_it_was_submitted_with() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 1);
+    network.disconnect();
+    let test = TestWithNetwork::without_accounts_trusting(network.clone(), IndexerTrust::Verify);
+    let config = TransactionServiceConfig {
+        poll_interval: Duration::from_millis(20),
+        ..TransactionServiceConfig::default()
+    };
+    let shutdown = Shutdown::new();
+    let notify = Notify::new(16);
+    let mut events = notify.subscribe();
+    let (service, handle) = TransactionService::with_config(config, notify, test.sdk().clone(), shutdown.to_signal());
+    tokio::spawn(service.run());
+
+    let transaction = build_transaction();
+    network.set_result(TransactionQueryResult {
+        result: TransactionFinalizedResult::Pending,
+        transaction_id: transaction.calculate_id(),
+        receipt: None,
+        encoded_execution_result: None,
+    });
+    let context = TransactionContext::default().with_kind(TransactionContextKind::ClaimBurn {
+        file_name: "burn.json".to_string(),
+    });
+    let transaction_id = handle
+        .submit_transaction_with_opts(transaction, Some(context), None)
+        .await
+        .unwrap();
+    assert_eq!(network.submissions(), 0);
+
+    network.reconnect();
+    let submitted = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let WalletEvent::TransactionSubmitted(event) = events.recv().await.unwrap() {
+                return event;
+            }
+        }
+    })
+    .await
+    .expect("the service never submitted the held-back transaction");
+    assert_eq!(submitted.transaction_id, transaction_id);
+    assert!(
+        matches!(
+            submitted.context.and_then(|c| c.kind),
+            Some(TransactionContextKind::ClaimBurn { file_name }) if file_name == "burn.json"
+        ),
+        "the submission lost its claim burn context"
+    );
+}
+
+#[tokio::test]
+async fn a_walk_that_keeps_failing_for_a_day_reanchors() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 0);
+    let transaction = build_transaction();
+    let test = wallet(network.clone(), &transaction);
+    let validator_set_api = test.sdk().validator_set_api();
+    validator_set_api.sync().await.unwrap();
+
+    // The next checkpoint is signed by a committee outside the trusted set, so no walk connects.
+    let impostors = Signers::new(0xee, 4);
+    network.replace_checkpoint(
+        1,
+        checkpoint_entry(CheckpointSpec {
+            signers: &impostors,
+            ..CheckpointSpec::handover(&sets[1], &sets[2])
+        }),
+    );
+    network.set_latest(1);
+    last_synced(&test, Duration::from_secs(60 * 60));
+    let synced_at = validator_set_api.status().unwrap().unwrap().synced_at;
+    let err = validator_set_api.sync().await.unwrap_err();
+    assert!(matches!(err, ValidatorSetApiError::Unverified(_)), "{err}");
+    assert_eq!(
+        validator_set_api.anchor().unwrap().unwrap().anchor,
+        ValidatorSetAnchor::FirstUse,
+        "a walk that just started failing is no reason to re-anchor"
+    );
+    let status = validator_set_api.status().unwrap().unwrap();
+    assert!(status.walk_failing_since.is_some(), "the status shows the walk failing");
+    assert_eq!(status.synced_at, synced_at, "a failed walk is no sync");
+
+    let a_day_ago = SystemTime::now().duration_since(UNIX_EPOCH).unwrap() - Duration::from_secs(25 * 60 * 60);
+    test.store()
+        .with_write_tx(|tx| {
+            tx.config_set(
+                ConfigKey::ValidatorSetWalkFailingSince.as_key_str(),
+                &Some(a_day_ago.as_secs()),
+                false,
+            )
+        })
+        .unwrap();
+    let trusted = validator_set_api.sync().await.unwrap();
+    assert_eq!(trusted.epoch(), Epoch(3));
+    let anchor = validator_set_api.anchor().unwrap().unwrap();
+    assert_eq!(anchor.anchor, ValidatorSetAnchor::Reanchor);
+    assert_eq!(anchor.validator_set.epoch(), Epoch(3));
+    let reanchors = validator_set_api.reanchors(10).unwrap();
+    assert_eq!(reanchors.len(), 1);
+    assert_eq!(reanchors[0].event.epoch, Epoch(3));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_transaction_service_keeps_the_trusted_validator_set_up_to_date() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 1);
+    // No transaction to submit, so nothing but the periodic sync anchors.
+    let test = TestWithNetwork::without_accounts_trusting(network, IndexerTrust::Verify);
+    let config = TransactionServiceConfig {
+        validator_set_sync_interval: Duration::from_millis(20),
+        ..TransactionServiceConfig::default()
+    };
+    let shutdown = Shutdown::new();
+    let (service, _handle) =
+        TransactionService::with_config(config, Notify::new(16), test.sdk().clone(), shutdown.to_signal());
+    tokio::spawn(service.run());
+
+    let anchored = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(anchor) = test.sdk().validator_set_api().anchor().unwrap() {
+                break anchor;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the service never synced the trusted validator set");
+    assert_eq!(anchored.validator_set.epoch(), Epoch(3));
+}
+
+#[tokio::test]
+async fn a_wallet_out_of_sync_for_less_than_the_gap_takes_does_not_reanchor() {
+    let far = 600;
+    let (_, network) = broken_history(far);
+    let transaction = build_transaction();
+    let test = wallet(network.clone(), &transaction);
+    let validator_set_api = test.sdk().validator_set_api();
+    validator_set_api.sync().await.unwrap();
+
+    // 600 epochs take at least 150 hours at 15 minutes an epoch.
+    network.set_latest(2);
+    last_synced(&test, Duration::from_secs(72 * 60 * 60));
+    let err = validator_set_api.sync().await.unwrap_err();
+    assert!(matches!(err, ValidatorSetApiError::Unverified(_)), "{err}");
+    let anchor = validator_set_api.anchor().unwrap().unwrap();
+    assert_eq!(anchor.anchor, ValidatorSetAnchor::FirstUse);
+}
+
+#[tokio::test]
+async fn the_status_reports_the_current_anchor() {
+    let far = 600;
+    let (_, network) = broken_history(far);
+    let transaction = build_transaction();
+    let test = wallet(network.clone(), &transaction);
+    let validator_set_api = test.sdk().validator_set_api();
+    assert!(
+        validator_set_api.status().unwrap().is_none(),
+        "nothing is trusted before the first sync"
+    );
+
+    validator_set_api.sync().await.unwrap();
+    let status = validator_set_api.status().unwrap().unwrap();
+    assert_eq!(status.anchor.anchor, ValidatorSetAnchor::FirstUse);
+    assert_eq!(status.anchor.validator_set.epoch(), Epoch(2));
+    assert_eq!(status.latest.epoch(), Epoch(2));
+    assert!(status.synced_at.is_some());
+
+    network.set_latest(2);
+    last_synced(&test, Duration::from_secs(365 * 24 * 60 * 60));
+    validator_set_api.sync().await.unwrap();
+    let status = validator_set_api.status().unwrap().unwrap();
+    assert_eq!(status.anchor.anchor, ValidatorSetAnchor::Reanchor);
+    assert_eq!(status.anchor.validator_set.epoch(), Epoch(far + 1));
+    assert_eq!(status.latest, status.anchor.validator_set);
+    assert_eq!(status.walk_failing_since, None);
+}

@@ -18,11 +18,11 @@ use tari_engine_types::{
     Utxo,
     ValidatorFeeWithdrawal,
     bucket::Bucket,
-    component::Component,
+    component::{Component, ComponentHeader},
     confidential_output::ConfidentialOutput,
     crypto,
     events::Event,
-    fees::{ExhaustBurnRate, FeeReceipt},
+    fees::{ExhaustBurnRate, FeeReceipt, FeeScale},
     id_provider::{IdProvider, ObjectIds},
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     limits,
@@ -60,7 +60,7 @@ use tari_template_lib::{
         VaultId,
         access_rules::ResourceAuthAction,
         confidential::ConfidentialWithdrawProof,
-        constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS},
+        constants::STEALTH_TARI_RESOURCE_ADDRESS,
         crypto::{CommitmentValueProof, PedersenCommitmentBytes},
         metadata,
         stealth::{RevealedOutput, SpendAuthorization, StealthInput, StealthTransferStatement},
@@ -79,9 +79,9 @@ use crate::{
         address_allocation::AllocatedAddress,
         fee_state::FeeState,
         locking::LockedSubstate,
-        scope::{CallFrame, CallScope, FrameWriteMode},
+        scope::{CallFrame, CallScope, FrameWriteMode, RestrictedFrame},
         state_store::WorkingStateStore,
-        tracker_auth::Authorization,
+        tracker_auth::{Authorization, AuthorizationMeter},
         validation::{
             ConfidentialTransactionTotals,
             StealthTransactionTotals,
@@ -102,11 +102,21 @@ const LOG_TARGET: &str = "tari::ootle::engine::runtime::working_state";
 /// API that [`super::RuntimeModule`] defines.
 pub struct ChargeableState<'a, TStore> {
     state: &'a mut WorkingState<TStore>,
+    /// The fee state charges are recorded against, when it is not the one `state` carries.
+    fee_state: Option<&'a mut FeeState>,
 }
 
 impl<'a, TStore> ChargeableState<'a, TStore> {
     pub(super) fn new(state: &'a mut WorkingState<TStore>) -> Self {
-        Self { state }
+        Self { state, fee_state: None }
+    }
+
+    /// Prices `state` into `fee_state` instead of the fee state `state` carries.
+    pub(super) fn with_fee_state(state: &'a mut WorkingState<TStore>, fee_state: &'a mut FeeState) -> Self {
+        Self {
+            state,
+            fee_state: Some(fee_state),
+        }
     }
 }
 
@@ -127,11 +137,17 @@ impl<TStore: StateReader> ChargeableState<'_, TStore> {
     }
 
     pub fn fee_state(&self) -> &FeeState {
-        self.state.fee_state()
+        match &self.fee_state {
+            Some(fee_state) => fee_state,
+            None => self.state.fee_state(),
+        }
     }
 
     pub fn fee_state_mut(&mut self) -> &mut FeeState {
-        self.state.fee_state_mut()
+        match &mut self.fee_state {
+            Some(fee_state) => fee_state,
+            None => self.state.fee_state_mut(),
+        }
     }
 }
 
@@ -177,6 +193,7 @@ pub(super) struct WorkingState<TStore> {
     /// any one transaction can incur (see `limits::STEALTH_LIMITS`).
     stealth_totals: StealthTransactionTotals,
     confidential_totals: ConfidentialTransactionTotals,
+    authorization_meter: AuthorizationMeter,
 }
 
 impl<TStore: StateReader> WorkingState<TStore> {
@@ -188,12 +205,14 @@ impl<TStore: StateReader> WorkingState<TStore> {
         transaction_hash: Hash32,
         intent_commitment: Hash32,
         burn_rate: ExhaustBurnRate,
+        fee_scale: FeeScale,
         network: Network,
         dry_run: bool,
     ) -> Self {
         let mut fee_state = FeeState::new();
         fee_state.set_burn_rate(burn_rate);
         fee_state.set_dry_run(dry_run);
+        fee_state.set_fee_scale(fee_scale);
         Self {
             network,
             transaction_hash,
@@ -220,6 +239,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             object_ids: ObjectIds::new(limits::ENGINE_LIMITS.max_substate_outputs),
             stealth_totals: StealthTransactionTotals::default(),
             confidential_totals: ConfidentialTransactionTotals::default(),
+            authorization_meter: AuthorizationMeter::default(),
         }
     }
 
@@ -227,13 +247,12 @@ impl<TStore: StateReader> WorkingState<TStore> {
         self.transaction_hash
     }
 
+    pub fn network(&self) -> Network {
+        self.network
+    }
+
     pub fn substate_exists(&self, address: &SubstateId) -> Result<bool, RuntimeError> {
-        // All public identity resources exist
-        if address
-            .as_non_fungible_address()
-            .map(|a| *a.resource_address() == PUBLIC_IDENTITY_RESOURCE_ADDRESS)
-            .unwrap_or(false)
-        {
+        if address.is_virtual_badge() {
             return Ok(true);
         }
 
@@ -253,14 +272,39 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
+    /// Inserts a new substate. A component is refused: [`Self::new_component_substate`] creates components, validating
+    /// their state on the way in.
     pub fn new_substate<K: Into<SubstateId>, V: Into<SubstateValue>>(
         &mut self,
         address: K,
         value: V,
     ) -> Result<(), RuntimeError> {
         let address = address.into();
-        self.check_write_allowed(&address)?;
         let value = value.into();
+        if value.as_component().is_some() {
+            return Err(RuntimeError::InvariantError {
+                function: "new_substate",
+                details: format!("Component {address} must be created with new_component_substate"),
+            });
+        }
+        self.insert_new_substate(address, value)
+    }
+
+    /// Inserts a new component after validating its state. Together with [`Self::modify_component_with`], this is
+    /// the only way component state is written, so every state the engine stores has passed
+    /// `validate_component_state`.
+    pub fn new_component_substate(
+        &mut self,
+        address: ComponentAddress,
+        component: Component,
+    ) -> Result<(), RuntimeError> {
+        let indexed = IndexedWellKnownTypes::from_value(component.state())?;
+        self.validate_component_state(None, &indexed)?;
+        self.insert_new_substate(address.into(), SubstateValue::Component(component))
+    }
+
+    fn insert_new_substate(&mut self, address: SubstateId, value: SubstateValue) -> Result<(), RuntimeError> {
+        self.check_write_allowed(&address)?;
         Self::enforce_substate_size_limit(&address, &value)?;
         self.current_call_scope_mut()?.add_substate_to_scope(address.clone())?;
         self.store.insert(address, value)?;
@@ -301,7 +345,10 @@ impl<TStore: StateReader> WorkingState<TStore> {
     fn check_write_allowed(&self, addr: &SubstateId) -> Result<(), RuntimeError> {
         match self.current_frame_write_mode() {
             FrameWriteMode::Full => Ok(()),
-            FrameWriteMode::OwnComponent => Err(RuntimeError::WriteOutsideOwnComponent { id: addr.clone() }),
+            FrameWriteMode::OwnComponent => Err(RuntimeError::WriteOutsideOwnComponent {
+                id: addr.clone(),
+                frame: self.current_restricted_frame(),
+            }),
             FrameWriteMode::ReadOnly => Err(RuntimeError::WriteInReadOnlyContext),
         }
     }
@@ -328,7 +375,8 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(component)
     }
 
-    pub fn get_component_mut(&mut self, locked: &LockedSubstate) -> Result<&mut Component, RuntimeError> {
+    /// Private so that component state is written only through [`Self::modify_component_with`], which validates it.
+    fn get_component_mut(&mut self, locked: &LockedSubstate) -> Result<&mut Component, RuntimeError> {
         let (address, substate) = self.store.get_locked_substate_mut(locked.lock_id())?;
         let component_mut = substate
             .component_mut()
@@ -383,6 +431,40 @@ impl<TStore: StateReader> WorkingState<TStore> {
         ))?;
 
         Ok(())
+    }
+
+    /// Applies `f` to the locked component's header and records the update. The state is out of
+    /// `f`'s reach, so a header change costs nothing that grows with the state: the state was
+    /// indexed and validated when it was set and is left as it is.
+    pub fn update_component_header<F: FnOnce(&mut ComponentHeader)>(
+        &mut self,
+        locked: &LockedSubstate,
+        f: F,
+    ) -> Result<(), RuntimeError> {
+        f(&mut self.get_component_mut(locked)?.header);
+
+        let template_address = *self.current_template()?;
+        self.push_event(Event::std(
+            Some(locked.substate_id().clone()),
+            template_address,
+            "component",
+            "updated",
+            metadata!(),
+        ))?;
+
+        Ok(())
+    }
+
+    /// Points the locked component at `new_template` and returns the template it used before.
+    pub fn set_component_template_address(
+        &mut self,
+        locked: &LockedSubstate,
+        new_template: TemplateAddress,
+    ) -> Result<TemplateAddress, RuntimeError> {
+        let component_mut = self.get_component_mut(locked)?;
+        let prev_template = *component_mut.template_address();
+        component_mut.set_template_address(new_template);
+        Ok(prev_template)
     }
 
     pub fn get_resource(&self, locked: &LockedSubstate) -> Result<&Resource, RuntimeError> {
@@ -495,9 +577,29 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(substate)
     }
 
-    pub fn get_locked_substate_mut(&mut self, lock: &LockedSubstate) -> Result<&mut SubstateValue, RuntimeError> {
-        let (_, substate) = self.store.get_locked_substate_mut(lock.lock_id())?;
-        Ok(substate)
+    pub fn get_utxo_mut(&mut self, locked: &LockedSubstate) -> Result<&mut Utxo, RuntimeError> {
+        let (addr, substate) = self.store.get_locked_substate_mut(locked.lock_id())?;
+        substate
+            .as_utxo_mut()
+            .ok_or_else(|| RuntimeError::LockSubstateMismatch {
+                lock_id: locked.lock_id(),
+                id: addr,
+                expected_type: "Utxo",
+            })
+    }
+
+    pub fn get_confidential_output_mut(
+        &mut self,
+        locked: &LockedSubstate,
+    ) -> Result<&mut ConfidentialOutput, RuntimeError> {
+        let (addr, substate) = self.store.get_locked_substate_mut(locked.lock_id())?;
+        substate
+            .as_confidential_output_mut()
+            .ok_or_else(|| RuntimeError::LockSubstateMismatch {
+                lock_id: locked.lock_id(),
+                id: addr,
+                expected_type: "ConfidentialOutput",
+            })
     }
 
     pub fn get_vault(&self, locked: &LockedSubstate) -> Result<&Vault, RuntimeError> {
@@ -635,10 +737,10 @@ impl<TStore: StateReader> WorkingState<TStore> {
             .ok_or(RuntimeError::ProofNotFound { proof_id })
     }
 
-    /// Reads a proof the current frame holds. Proof ids come from a counter shared by the whole transaction, so the
-    /// scope check is what keeps one frame from reading the contents of another frame's proof.
+    /// Reads a proof the current frame holds or was shown. Proof ids come from a counter shared by the whole
+    /// transaction, so the scope check is what keeps one frame from reading the contents of another frame's proof.
     pub fn get_proof_in_scope(&self, proof_id: ProofId) -> Result<&Proof, RuntimeError> {
-        if !self.current_call_scope()?.is_proof_in_scope(&proof_id) {
+        if !self.current_call_scope()?.can_read_proof(&proof_id) {
             return Err(RuntimeError::ProofNotInScope { proof_id });
         }
         self.get_proof(proof_id)
@@ -885,9 +987,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
     pub fn drop_proof(&mut self, proof_id: ProofId) -> Result<(), RuntimeError> {
         let call_frame_mut = self.current_call_scope_mut()?;
-        if !call_frame_mut.is_proof_in_scope(&proof_id) {
-            return Err(RuntimeError::ProofNotInScope { proof_id });
-        }
+        call_frame_mut.require_held_proof(&proof_id)?;
         call_frame_mut.remove_proof_from_scope(&proof_id);
 
         // Fetch the proof
@@ -1198,7 +1298,21 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(resource_container)
     }
 
+    /// Buckets, proofs and address allocations are transaction-scoped engine state that no write lock guards. A
+    /// restricted frame can neither deposit, drop nor consume them, so it may not create them either.
+    fn check_create_allowed(&self, operation: &'static str) -> Result<(), RuntimeError> {
+        match self.current_frame_write_mode() {
+            FrameWriteMode::Full => Ok(()),
+            FrameWriteMode::OwnComponent => Err(RuntimeError::ForbiddenInRestrictedFrame {
+                operation,
+                frame: self.current_restricted_frame(),
+            }),
+            FrameWriteMode::ReadOnly => Err(RuntimeError::ForbiddenInReadOnlyContext { operation }),
+        }
+    }
+
     pub fn new_bucket(&mut self, bucket_id: BucketId, resource: ResourceContainer) -> Result<(), RuntimeError> {
+        self.check_create_allowed("new_bucket")?;
         debug!(
             target: LOG_TARGET,
             "New bucket {} for resource {} {:?}", bucket_id, resource.resource_address(), resource.resource_type()
@@ -1223,6 +1337,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     pub fn new_proof(&mut self, proof_id: ProofId, locked_funds: LockedResource) -> Result<(), RuntimeError> {
+        self.check_create_allowed("new_proof")?;
         debug!(target: LOG_TARGET, "New proof {}", proof_id);
         if self.proofs.insert(proof_id, Proof::new(locked_funds)).is_some() {
             return Err(RuntimeError::DuplicateProof { proof_id });
@@ -1236,6 +1351,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         &mut self,
         address: T,
     ) -> Result<AddressAllocationId, RuntimeError> {
+        self.check_create_allowed("new_address_allocation")?;
         let id = self.address_allocation_id;
         self.address_allocation_id = self
             .address_allocation_id
@@ -1251,11 +1367,28 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(id)
     }
 
+    /// Finds a pending allocation for `address` in any call frame. Naming a pending address grants nothing, so value
+    /// checks and hook template lookups may use this.
     pub fn get_allocated_address_by_address<T: Into<SubstateId>>(&self, address: T) -> Option<&AllocatedAddress> {
         let substate_id = address.into();
         self.address_allocations
             .values()
             .find(|alloc| *alloc.substate_id() == substate_id)
+    }
+
+    /// Finds a pending allocation for `address` that the current call frame holds. Use this wherever holding the
+    /// allocation confers authority, such as skipping a resource auth hook.
+    pub fn get_allocated_address_in_current_scope<T: Into<SubstateId>>(
+        &self,
+        address: T,
+    ) -> Result<Option<&AllocatedAddress>, RuntimeError> {
+        let scope = self.current_call_scope()?;
+        let substate_id = address.into();
+        Ok(self
+            .address_allocations
+            .iter()
+            .find(|(id, alloc)| scope.is_address_allocation_in_scope(**id) && *alloc.substate_id() == substate_id)
+            .map(|(_, alloc)| alloc))
     }
 
     pub fn get_template_for_component(
@@ -1351,16 +1484,17 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(resource_container)
     }
 
-    pub fn validate_component_state(
+    fn validate_component_state(
         &mut self,
         previous_state: Option<&IndexedWellKnownTypes>,
         next_state: &IndexedWellKnownTypes,
     ) -> Result<(), RuntimeError> {
         // Check that no vaults were dropped
         if let Some(prev_state) = previous_state {
+            let next_vaults = next_state.vault_ids().iter().collect::<HashSet<_>>();
             for existing_vault in prev_state.vault_ids() {
                 // Vaults can never be removed from components
-                if !next_state.vault_ids().contains(existing_vault) {
+                if !next_vaults.contains(existing_vault) {
                     return Err(RuntimeError::OrphanedSubstate {
                         id: (*existing_vault).into(),
                     });
@@ -1390,6 +1524,18 @@ impl<TStore: StateReader> WorkingState<TStore> {
         let new_values = diff_values.as_ref().unwrap_or(next_state);
         self.check_all_substates_in_scope(new_values)?;
 
+        // A vault belongs to exactly one component. It starts as an orphan of the frame that created it, which must
+        // attach it before the frame is popped, and attaching it removes it from the orphans. So a newly referenced
+        // vault that is not an orphan here is already held by a component.
+        let scope = self.current_call_scope()?;
+        if let Some(vault_id) = new_values
+            .vault_ids()
+            .iter()
+            .find(|vault_id| !scope.orphans().contains(&SubstateId::from(**vault_id)))
+        {
+            return Err(RuntimeError::VaultAlreadyOwned { vault_id: *vault_id });
+        }
+
         let scope_mut = self.current_call_scope_mut()?;
         for address in next_state.referenced_substates() {
             // Anything the state references now belongs to the component, not to this frame
@@ -1399,8 +1545,12 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
+    pub fn authorization_meter(&self) -> &AuthorizationMeter {
+        &self.authorization_meter
+    }
+
     pub fn authorization(&self) -> Authorization<'_, TStore> {
-        Authorization::new(self)
+        Authorization::new(self, &self.authorization_meter)
     }
 
     pub fn take_mutated_substates(&mut self) -> IndexMap<SubstateId, SubstateValue> {
@@ -1522,25 +1672,13 @@ impl<TStore: StateReader> WorkingState<TStore> {
             .unwrap_or(FrameWriteMode::Full)
     }
 
-    /// Restricts the current (most recently pushed) call frame to `mode` and disables its cross-template calls.
-    /// Must be called immediately after the frame is pushed and before its code executes.
-    pub fn restrict_current_frame(&mut self, mode: FrameWriteMode) -> Result<(), RuntimeError> {
+    /// The kind of confined frame currently executing, for naming it in a refusal. `AuthHook` when no frame is
+    /// active, which cannot occur in `OwnComponent` mode.
+    pub fn current_restricted_frame(&self) -> RestrictedFrame {
         self.call_frames
-            .last_mut()
-            .ok_or(RuntimeError::NoActiveCallFrame)?
-            .restrict(mode);
-        Ok(())
-    }
-
-    /// Takes the boundary proofs away from the current (most recently pushed) call frame. Must be called once the
-    /// frame's access rule has been evaluated and before anything acts in the frame.
-    pub fn revoke_boundary_proofs(&mut self) -> Result<(), RuntimeError> {
-        self.call_frames
-            .last_mut()
-            .ok_or(RuntimeError::NoActiveCallFrame)?
-            .scope_mut()
-            .revoke_boundary_proofs();
-        Ok(())
+            .last()
+            .and_then(CallFrame::restricted_frame)
+            .unwrap_or(RestrictedFrame::AuthHook)
     }
 
     pub fn current_call_scope(&self) -> Result<&CallScope, RuntimeError> {
@@ -1623,25 +1761,41 @@ impl<TStore: StateReader> WorkingState<TStore> {
             });
         }
 
+        // A restricted frame — a resource auth hook, a spend-script predicate or a component migration — is lent
+        // nothing: whatever authorized the action that reached it (for a migration, the upgrade rule evaluated in
+        // the pushing scope before this point) does not extend to the code that runs in it. A hook or migration
+        // frame carries no signer badges either, since the signer chose neither the hook nor the migration code. A
+        // predicate is the output owner's own spend condition and keeps them.
+        let is_restricted = new_frame.is_restricted();
+        let is_confined = new_frame.restricted_frame().is_some();
         match self.call_frames.last() {
-            // If this is the first call frame, then we use the base auth scope (virtual proofs are carried from the
-            // base to the first call scope). A top-level instruction has no caller frame, so there is no caller
-            // identity to stamp: the signer is the caller.
+            // A top-level instruction has no caller frame, so there is no caller identity to stamp: the signer is
+            // the caller. The frame starts with the signer badges and a loan of the proofs the transaction has
+            // authorized so far.
             None => {
-                new_frame
-                    .scope_mut()
-                    .set_auth_scope(self.initial_call_scope.auth_scope().clone());
+                if !is_confined {
+                    let base = self.initial_call_scope.auth_scope();
+                    *new_frame.scope_mut().auth_scope_mut() = if is_restricted {
+                        base.badges_only()
+                    } else {
+                        base.for_top_level_frame()
+                    };
+                }
             },
-            // Otherwise stamp the pushing frame's identity into the callee's scope as virtual badges. This is the
-            // callee's only view of who called it, and it is not inherited: the frame the callee pushes in turn gets
-            // the callee's identity, not this one.
+            // Otherwise stamp the pushing frame's identity into the callee's scope as virtual badges, and lend it the
+            // caller's authorized proofs. Neither is inherited further: the frame the callee pushes in turn gets
+            // the callee's identity and the callee's own windows, not these.
             Some(caller) => {
                 let component = caller
                     .scope()
                     .get_current_component_lock()
                     .and_then(|lock| lock.substate_id().as_component_address());
                 let template = *caller.current_template();
-                new_frame.scope_mut().auth_scope_mut().set_caller(component, template);
+                let callee_scope = new_frame.scope_mut().auth_scope_mut();
+                callee_scope.set_caller(component, template);
+                if !is_restricted {
+                    caller.scope().auth_scope().lend_to_callee(callee_scope);
+                }
                 new_frame.inherit_restrictions(caller);
             },
         }
@@ -1674,10 +1828,11 @@ impl<TStore: StateReader> WorkingState<TStore> {
         // A bucket or proof this frame created is either consumed here or named in the return value. One that is
         // still live and unreturned has no owner, so it fails the call. An emptied bucket carries nothing and is
         // tolerated, matching `validate_finalized`, so that the transaction has one rule for it rather than two.
+        let returned_buckets = returned.bucket_ids().iter().collect::<HashSet<_>>();
         let dangling_buckets = scope
             .buckets_owed()
             .filter(|id| self.buckets.get(id).is_some_and(|bucket| !bucket.is_empty()))
-            .filter(|id| !returned.bucket_ids().contains(id))
+            .filter(|id| !returned_buckets.contains(id))
             .copied()
             .collect::<Vec<_>>();
         if !dangling_buckets.is_empty() {
@@ -1686,10 +1841,11 @@ impl<TStore: StateReader> WorkingState<TStore> {
             });
         }
 
+        let returned_proofs = returned.proof_ids().iter().collect::<HashSet<_>>();
         let dangling_proofs = scope
             .proofs_owed()
             .filter(|id| self.proofs.contains_key(id))
-            .filter(|id| !returned.proof_ids().contains(id))
+            .filter(|id| !returned_proofs.contains(id))
             .copied()
             .collect::<Vec<_>>();
         if !dangling_proofs.is_empty() {
@@ -1715,6 +1871,19 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
     pub fn workspace_mut(&mut self) -> &mut Workspace {
         &mut self.workspace
+    }
+
+    /// The proof held by the workspace item at `key`. The item must be a single proof, so an authorization
+    /// instruction covers exactly the proof it names.
+    pub fn workspace_proof(&self, key: WorkspaceOffsetId) -> Result<ProofId, RuntimeError> {
+        let value = self
+            .workspace()
+            .get(key)?
+            .ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
+                id: key,
+                existing_ids: self.workspace().all_ids_iter().collect(),
+            })?;
+        tari_bor::from_value::<ProofId>(value).map_err(|_| RuntimeError::WorkspaceItemNotAProof { key })
     }
 
     pub fn workspace_assert(&self, key: WorkspaceOffsetId, assertion: Assertion) -> Result<(), RuntimeError> {
@@ -1879,28 +2048,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 return Err(RuntimeError::ReferencedSubstateNotFound { id: id.clone() });
             }
         }
-        for bucket_id in value.bucket_ids() {
-            if !self.buckets().contains_key(bucket_id) {
-                return Err(RuntimeError::BucketNotInScope { bucket_id: *bucket_id });
-            }
-        }
-        for proof_id in value.proof_ids() {
-            if !self.proofs().contains_key(proof_id) {
-                return Err(RuntimeError::ProofNotInScope { proof_id: *proof_id });
-            }
-        }
-        for allocation in value.component_address_allocations() {
-            if !self.address_allocations.contains_key(&allocation.id()) {
-                return Err(RuntimeError::AddressAllocationNotInScope { id: allocation.id() });
-            }
-        }
-        for allocation in value.resource_address_allocations() {
-            if !self.address_allocations.contains_key(&allocation.id()) {
-                return Err(RuntimeError::AddressAllocationNotInScope { id: allocation.id() });
-            }
-        }
-
-        Ok(())
+        self.check_capabilities_held(value)
     }
 
     pub fn check_all_substates_in_scope(&self, value: &IndexedWellKnownTypes) -> Result<(), RuntimeError> {
@@ -1927,36 +2075,39 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 // OK
             }
         }
+        self.check_capabilities_held(value)
+    }
+
+    /// Requires the current frame to hold every bucket, proof and address allocation `value` names. Naming one in an
+    /// argument or a return value passes it on, so a frame may name only what it holds: a proof it was shown is
+    /// already its caller's. A bucket or allocation this frame lent to a callee stays in its scope after the callee
+    /// consumes it, so membership is checked together with liveness.
+    fn check_capabilities_held(&self, value: &IndexedWellKnownTypes) -> Result<(), RuntimeError> {
+        let scope = self.current_call_scope()?;
         for bucket_id in value.bucket_ids() {
-            if !scope.is_bucket_in_scope(*bucket_id) {
+            if !scope.is_bucket_in_scope(*bucket_id) || !self.buckets.contains_key(bucket_id) {
                 return Err(RuntimeError::BucketNotInScope { bucket_id: *bucket_id });
             }
         }
         for proof_id in value.proof_ids() {
-            if !scope.is_proof_in_scope(proof_id) {
-                return Err(RuntimeError::ProofNotInScope { proof_id: *proof_id });
+            scope.require_held_proof(proof_id)?;
+        }
+        let allocation_ids = value
+            .component_address_allocations()
+            .iter()
+            .map(|allocation| allocation.id())
+            .chain(
+                value
+                    .resource_address_allocations()
+                    .iter()
+                    .map(|allocation| allocation.id()),
+            );
+        for id in allocation_ids {
+            if !scope.is_address_allocation_in_scope(id) || !self.address_allocations.contains_key(&id) {
+                return Err(RuntimeError::AddressAllocationNotInScope { id });
             }
         }
-        for allocation in value.component_address_allocations() {
-            if !scope.is_address_allocation_in_scope(allocation.id()) {
-                return Err(RuntimeError::AddressAllocationNotInScope { id: allocation.id() });
-            }
-        }
-        for allocation in value.resource_address_allocations() {
-            if !scope.is_address_allocation_in_scope(allocation.id()) {
-                return Err(RuntimeError::AddressAllocationNotInScope { id: allocation.id() });
-            }
-        }
-
         Ok(())
-    }
-
-    pub fn buckets(&self) -> &HashMap<BucketId, Bucket> {
-        &self.buckets
-    }
-
-    pub fn proofs(&self) -> &HashMap<ProofId, Proof> {
-        &self.proofs
     }
 
     pub fn push_log(&mut self, log: LogEntry) -> Result<&LogEntry, RuntimeError> {
@@ -2369,7 +2520,127 @@ fn exhaust_burn_share(paid: u64, rate: ExhaustBurnRate) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use tari_template_lib::{
+        models::{Bucket, ComponentAddressAllocation, Proof},
+        types::{
+            ObjectKey,
+            SubstateOwnerRule,
+            access_rules::{ComponentAccessRules, UpdateRule},
+        },
+    };
+
     use super::*;
+    use crate::{runtime::scope::PushCallFrame, state_store::memory::MemoryStateStore};
+
+    fn test_working_state() -> WorkingState<MemoryStateStore> {
+        WorkingState::new(
+            MemoryStateStore::new(),
+            VirtualSubstates::empty(),
+            CallScope::new(),
+            HashSet::new(),
+            Hash32::zero(),
+            Hash32::zero(),
+            ExhaustBurnRate::new(0),
+            FeeScale::default(),
+            Network::LocalNet,
+            false,
+        )
+    }
+
+    #[test]
+    fn check_all_substates_known_rejects_capabilities_outside_current_call_scope() {
+        let mut state = test_working_state();
+        let bucket_id = BucketId::from(0u32);
+        let proof_id = ProofId::from(0u32);
+        let comp_addr = ComponentAddress::from_array([1u8; ObjectKey::LENGTH]);
+        let resx_addr = ResourceAddress::new(ObjectKey::from_array([2u8; ObjectKey::LENGTH]));
+
+        state
+            .new_bucket(
+                bucket_id,
+                ResourceContainer::public_fungible(STEALTH_TARI_RESOURCE_ADDRESS, Amount::from(10u64)),
+            )
+            .unwrap();
+        state
+            .new_proof(
+                proof_id,
+                LockedResource::new(
+                    ContainerRef::Runtime,
+                    ResourceContainer::public_fungible(STEALTH_TARI_RESOURCE_ADDRESS, Amount::from(10u64)),
+                ),
+            )
+            .unwrap();
+        let comp_alloc_id = state.new_address_allocation(comp_addr).unwrap();
+        let resx_alloc_id = state.new_address_allocation(resx_addr).unwrap();
+
+        let child_frame = PushCallFrame::Static {
+            template_address: TemplateAddress::default(),
+            module_name: "Child".to_string(),
+            arg_scope: IndexedWellKnownTypes::new(),
+            entity_id: EntityId::default(),
+        }
+        .into_new_call_frame();
+        state.push_frame(child_frame, 10).unwrap();
+
+        let forged_bucket =
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&Bucket::from_id(bucket_id)).unwrap()).unwrap();
+        assert!(matches!(
+            state.check_all_substates_known(&forged_bucket),
+            Err(RuntimeError::BucketNotInScope { bucket_id: id }) if id == bucket_id
+        ));
+
+        let forged_proof =
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&Proof::from_id(proof_id)).unwrap()).unwrap();
+        assert!(matches!(
+            state.check_all_substates_known(&forged_proof),
+            Err(RuntimeError::ProofNotInScope { proof_id: id }) if id == proof_id
+        ));
+
+        let forged_comp_alloc = IndexedWellKnownTypes::from_value(
+            &tari_bor::to_value(&ComponentAddressAllocation::new(comp_alloc_id)).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            state.check_all_substates_known(&forged_comp_alloc),
+            Err(RuntimeError::AddressAllocationNotInScope { id }) if id == comp_alloc_id
+        ));
+
+        let forged_resx_alloc = IndexedWellKnownTypes::from_value(
+            &tari_bor::to_value(&ResourceAddressAllocation::new(resx_alloc_id)).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            state.check_all_substates_known(&forged_resx_alloc),
+            Err(RuntimeError::AddressAllocationNotInScope { id }) if id == resx_alloc_id
+        ));
+    }
+
+    #[test]
+    fn new_substate_rejects_a_component() {
+        let mut state = test_working_state();
+        let address = ComponentAddress::from_array([1u8; ObjectKey::LENGTH]);
+        let component = Component {
+            header: tari_engine_types::component::ComponentHeader {
+                template_address: TemplateAddress::default(),
+                owner_rule: SubstateOwnerRule::None,
+                access_rules: ComponentAccessRules::new(),
+                entity_id: address.entity_id(),
+                upgrade_rule: UpdateRule::default(),
+            },
+            body: tari_engine_types::component::ComponentBody {
+                state: tari_bor::Value::Null,
+            },
+        };
+
+        assert!(matches!(
+            state.new_substate(address, SubstateValue::Component(component)),
+            Err(RuntimeError::InvariantError {
+                function: "new_substate",
+                ..
+            })
+        ));
+        assert!(!state.substate_exists(&address.into()).unwrap());
+    }
 
     #[test]
     fn the_burn_is_a_floor_share_of_what_was_paid_and_the_leader_gets_the_rest() {

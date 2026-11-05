@@ -53,6 +53,10 @@ pub struct Cli {
     /// Allow cross-origin browser requests to the JSON-RPC
     #[clap(long)]
     pub enable_permissive_cors: bool,
+    /// A host name, beyond localhost and IP addresses, that requests may address the JSON-RPC and web UI by (e.g. the
+    /// name a reverse proxy forwards). Repeat it, or separate names with commas. `*` accepts every name.
+    #[clap(long = "json-rpc-allowed-host", value_delimiter = ',')]
+    pub json_rpc_allowed_hosts: Vec<String>,
     #[clap(long, alias = "node-grpc", short = 'g', env = "TARI_VN_MINOTARI_NODE_GRPC_URL")]
     pub epoch_oracle_minotari_node_grpc_url: Option<Url>,
     #[clap(long, alias = "oracle-config")]
@@ -116,6 +120,12 @@ impl ConfigOverrideProvider for Cli {
         if self.enable_permissive_cors {
             overrides.push(("validator_node.enable_permissive_cors".to_string(), "true".to_string()));
         }
+        if !self.json_rpc_allowed_hosts.is_empty() {
+            overrides.push((
+                "validator_node.json_rpc_allowed_hosts".to_string(),
+                self.json_rpc_allowed_hosts.join(","),
+            ));
+        }
         if !self.peer_seeds.is_empty() {
             overrides.push((
                 format!("{}.peer_seeds", PeerSeedsConfig::main_key_prefix()),
@@ -155,6 +165,12 @@ impl ConfigOverrideProvider for Cli {
                 "epoch_oracle.base_layer.base_node_grpc_url".to_string(),
                 url.to_string(),
             ));
+            // Network presets set this key in `[<network>.epoch_oracle.base_layer]`, which the loader merges over the
+            // root section after these overrides are applied.
+            overrides.push((
+                format!("{}.epoch_oracle.base_layer.base_node_grpc_url", network),
+                url.to_string(),
+            ));
         }
         // `epoch_oracle_config` is applied after the config is loaded (see main) so it can override an inline
         // `config_json` shipped in a network preset without tripping the "both set" error.
@@ -170,4 +186,38 @@ pub enum Subcommand {
     CompactDb,
     /// Generate an identity keypair if one does not exist and exit
     GenerateIdentity,
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_app_utilities::configuration::{
+        get_default_config,
+        load_configuration_with_overrides,
+        write_config_to,
+    };
+    use tari_validator_node::ApplicationConfig;
+
+    use super::*;
+
+    #[test]
+    fn grpc_url_flag_overrides_the_network_preset() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        write_config_to(&config_path, &get_default_config()).unwrap();
+        let cli = Cli::parse_from([
+            "tari_validator_node",
+            "--network",
+            "esmeralda",
+            "-g",
+            "http://my-node:18142",
+        ]);
+
+        let cfg = load_configuration_with_overrides(&config_path, &cli, Some(cli.network())).unwrap();
+        let config = ApplicationConfig::load_from(&cfg).unwrap();
+
+        assert_eq!(
+            config.epoch_oracle.base_layer.base_node_grpc_url.unwrap().as_str(),
+            "http://my-node:18142/"
+        );
+    }
 }

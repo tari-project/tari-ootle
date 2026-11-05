@@ -5,9 +5,9 @@ use tari_engine_types::stealth::MergedStealthTransferShape;
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_transaction::UnsignedTransaction;
 use tari_ootle_wallet_crypto::{StealthInputWitness, memo::Memo, pay_to::PayTo};
-use tari_template_lib::types::{Amount, ComponentAddress, VaultId};
+use tari_template_lib::types::{Amount, ComponentAddress, VaultId, stealth::StealthTransferStatement};
 
-use crate::models::{InputSpendData, StealthUtxoSpendKeyId, WalletPublicKey};
+use crate::models::{InputSpendData, KeyId, StealthUtxoSpendKeyId, WalletPublicKey};
 
 pub struct StealthTransferOutput {
     pub transaction: UnsignedTransaction,
@@ -21,6 +21,16 @@ pub struct StealthTransferOutput {
     pub statically_priced_shape: Option<StaticallyPricedShape>,
 }
 
+/// The statements built by `StealthTransferApi::create_transfer_statements`, in request order, and the keys that must
+/// sign a transaction carrying them.
+pub struct TransferStatements {
+    pub statements: Vec<StealthTransferStatement>,
+    /// The signer of each statement, without repeats. A statement's revealed output is authorised to its signer.
+    pub signing_keys: Vec<KeyId>,
+    /// The stealth spend keys of every input the statements spend.
+    pub utxo_signers: Vec<StealthUtxoSpendKeyId>,
+}
+
 /// The counts a [`MergedStealthTransferShape`] is built from, recorded while the transfer is built.
 ///
 /// Present only when the build is the shape the estimate models: one stealth transfer statement that
@@ -29,7 +39,8 @@ pub struct StealthTransferOutput {
 /// a template load and the WASM execution behind it — so the estimate must not be applied to them.
 ///
 /// The transaction's weight is missing because it is not known until the transaction is signed and
-/// sealed: [`Self::with_transaction_weight`] completes the shape once it is.
+/// sealed, and what its declared inputs weigh because measuring them takes the network:
+/// [`Self::with_transaction`] completes the shape once both are known.
 #[derive(Debug, Clone, Copy)]
 pub struct StaticallyPricedShape {
     num_inputs: usize,
@@ -54,14 +65,22 @@ impl StaticallyPricedShape {
     }
 
     /// The shape a fee estimate prices, given the weight of the sealed transaction this build
-    /// produced.
-    pub fn with_transaction_weight(&self, transaction_weight: u64) -> MergedStealthTransferShape {
+    /// produced, the encoded bytes of its declared inputs and the other shard groups they are pledged
+    /// to.
+    pub fn with_transaction(
+        &self,
+        transaction_weight: u64,
+        input_bytes: u64,
+        input_fanout: u32,
+    ) -> MergedStealthTransferShape {
         MergedStealthTransferShape {
             num_inputs: self.num_inputs,
             num_outputs: self.num_outputs,
             persisted_output_bytes: self.persisted_output_bytes,
             has_view_key: self.has_view_key,
             transaction_weight,
+            input_bytes,
+            input_fanout,
         }
     }
 }

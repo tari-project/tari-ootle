@@ -15,13 +15,13 @@ use tari_engine_types::{
     SubstateVersion,
     Utxo,
     commit_result::ExecuteResult,
+    encoded::Encoded,
     events::Event,
     resource::Resource,
-    substate::{Substate, SubstateId, SubstateValue},
+    substate::{EncodedSubstate, SubstateId, SubstateValue},
     transaction_receipt::{FinalizeOutcome, TransactionReceipt},
 };
-use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, StateVersion, shard::Shard};
-use tari_ootle_template_metadata::MetadataHash;
+use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, StateVersion, ValidatorSetHash, shard::Shard};
 use tari_ootle_transaction::{Network, PrunedTransaction, TransactionEnvelope, TransactionId};
 use tari_template_abi::TemplateDef;
 use tari_template_lib_types::{
@@ -29,6 +29,7 @@ use tari_template_lib_types::{
     Hash32,
     ResourceAddress,
     TemplateAddress,
+    TemplateMetadataHash,
     TransactionReceiptAddress,
     UtxoId,
     crypto::{RistrettoPublicKeyBytes, UtxoTag},
@@ -79,17 +80,48 @@ pub struct GetSubstateRequest {
 pub struct GetSubstateResponse {
     #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
     pub version: SubstateVersion,
-    #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
-    pub substate: SubstateValue,
-    /// True when the indexer verified this substate's value against the shard group committee (via a
-    /// merkle proof). False when proofs are disabled, or when no committee member could supply a
-    /// proof yet (e.g. nothing committed since an epoch change) and the value was served unverified.
+    /// What the shard group holds for `version`. Only a request with `include_proof` that names the version is
+    /// answered with [`SubstateState::Down`], and only with a proof the indexer verified for it: a down proof, or an
+    /// exclusion when more than `f` committee members agree the version is down. Any other down is a 404.
+    pub state: SubstateState,
+    /// True when the indexer verified this answer against the shard group committee (via a merkle
+    /// proof). False when proofs are disabled, or when no committee member could supply a proof yet
+    /// (e.g. nothing committed since an epoch change) and the value was served unverified. A down answer
+    /// is verified only with a down proof: an exclusion alone does not show the version was ever up.
     pub verified: bool,
-    /// The proof the indexer verified this substate with. Present only when `include_proof` was set
-    /// and a committee member could prove the substate.
+    /// The proof the indexer verified this answer with. Present only when `include_proof` was set
+    /// and a committee member could prove the answer. A down answer always carries one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub proof: Option<SubstateProof>,
+}
+
+impl GetSubstateResponse {
+    /// The substate's encoded value, or `None` when `version` is down.
+    pub fn into_substate_value(self) -> Option<Encoded<SubstateValue>> {
+        match self.state {
+            SubstateState::Up { substate } => Some(substate),
+            SubstateState::Down {} => None,
+        }
+    }
+}
+
+/// What the shard group holds for a substate version.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub enum SubstateState {
+    /// The version is live, holding `substate`.
+    Up {
+        /// The CBOR-encoded `SubstateValue`, as the validator that answered the indexer served it. A proof is checked
+        /// against the value these bytes decode to.
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        #[cfg_attr(feature = "utoipa", schema(value_type = String, format = Byte))]
+        substate: Encoded<SubstateValue>,
+    },
+    /// The version was live and has been spent. The proof's `down_proof` shows both.
+    Down {},
 }
 
 /// Proof that a substate value was committed by its shard group.
@@ -122,6 +154,22 @@ pub struct SubstateProof {
     /// verifier needs it to recompute the leaf.
     #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
     pub value_hash_epoch: Epoch,
+    /// CBOR-encoded `SubstateDownProof`, present when the substate version is down and the committee still holds it:
+    /// an inclusion proof that the version was committed, anchored at a block of its own, and an exclusion proof
+    /// under `anchor.state_merkle_root` that it is no longer in the state tree. `value_proof` is that exclusion
+    /// proof.
+    ///
+    /// A down version without one is served with `value_proof` alone. A version that never existed also satisfies
+    /// it, as does one committed after the anchor, so it shows the version gone only to a reader that has proven the
+    /// version up at a block of an earlier epoch than the anchor's.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "ootle_serde::base64::option"
+    )]
+    #[cfg_attr(feature = "ts", ts(optional, type = "string"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>, format = Byte))]
+    pub down_proof: Option<Vec<u8>>,
 }
 
 /// The committed block a [`SubstateProof`] is anchored at.
@@ -140,6 +188,9 @@ pub struct SubstateProofAnchor {
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub state_merkle_root: Hash32,
 }
+
+/// The most substates the indexer serves in one [`GetSubstatesRequest`].
+pub const MAX_SUBSTATES_PER_FETCH: usize = 20;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
@@ -164,14 +215,106 @@ pub struct GetSubstatesRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetSubstatesResponse {
+    /// Each live substate's version and CBOR-encoded value, as in [`SubstateState::Up`].
     #[cfg_attr(feature = "utoipa", schema(value_type = HashMap<String, Object>))]
-    pub substates: HashMap<SubstateId, Substate>,
-    /// The proof each substate was verified with, when `include_proofs` was set. A substate no
-    /// committee member could prove has no entry.
+    pub substates: HashMap<SubstateId, EncodedSubstate>,
+    /// The proof each substate was verified with, when `include_proofs` was set, less the commit proof of the block
+    /// it is anchored at, which is in `commit_proofs`. A substate no committee member could prove has no entry.
     #[serde(default)]
-    #[cfg_attr(feature = "utoipa", schema(value_type = HashMap<String, SubstateProof>))]
-    pub proofs: HashMap<SubstateId, SubstateProof>,
+    #[cfg_attr(feature = "utoipa", schema(value_type = HashMap<String, BatchedSubstateProof>))]
+    pub proofs: HashMap<SubstateId, BatchedSubstateProof>,
+    /// The commit proof of each block a proof in `proofs` is anchored at, by block id. Proofs anchored at the same
+    /// block share it.
+    #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(type = "{ [block_id in string]?: string }"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = HashMap<String, String>))]
+    pub commit_proofs: HashMap<Hash32, CommitProofBytes>,
 }
+
+impl GetSubstatesResponse {
+    /// A response serving `substates` with `proofs`, each anchor block's commit proof served once.
+    pub fn new(
+        substates: HashMap<SubstateId, EncodedSubstate>,
+        proofs: impl IntoIterator<Item = (SubstateId, SubstateProof)>,
+    ) -> Self {
+        let mut commit_proofs = HashMap::new();
+        let proofs = proofs
+            .into_iter()
+            .map(|(id, proof)| {
+                commit_proofs
+                    .entry(proof.anchor.block_id)
+                    .or_insert(CommitProofBytes(proof.commit_proof));
+                (id, BatchedSubstateProof {
+                    anchor: proof.anchor,
+                    value_proof: proof.value_proof,
+                    value_hash_epoch: proof.value_hash_epoch,
+                    down_proof: proof.down_proof,
+                })
+            })
+            .collect();
+        Self {
+            substates,
+            proofs,
+            commit_proofs,
+        }
+    }
+
+    /// The substates, and each proof whole with the commit proof of its anchor block. A proof whose anchor block has
+    /// no commit proof in the response is left out, so its substate reads as unproven.
+    pub fn into_proven(self) -> (HashMap<SubstateId, EncodedSubstate>, HashMap<SubstateId, SubstateProof>) {
+        let Self {
+            substates,
+            proofs,
+            commit_proofs,
+        } = self;
+        let proofs = proofs
+            .into_iter()
+            .filter_map(|(id, proof)| {
+                let commit_proof = commit_proofs.get(&proof.anchor.block_id)?;
+                Some((id, SubstateProof {
+                    anchor: proof.anchor,
+                    commit_proof: commit_proof.0.clone(),
+                    value_proof: proof.value_proof,
+                    value_hash_epoch: proof.value_hash_epoch,
+                    down_proof: proof.down_proof,
+                }))
+            })
+            .collect();
+        (substates, proofs)
+    }
+}
+
+/// A [`SubstateProof`] served in a [`GetSubstatesResponse`], whose commit proof the response serves once for every
+/// proof anchored at the same block.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct BatchedSubstateProof {
+    /// The committed block the proof is anchored at. The response's `commit_proofs` holds its commit proof under
+    /// `anchor.block_id`.
+    pub anchor: SubstateProofAnchor,
+    /// CBOR-encoded `SubstateValueProof`, as in [`SubstateProof::value_proof`].
+    #[serde(with = "ootle_serde::base64")]
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = String, format = Byte))]
+    pub value_proof: Vec<u8>,
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub value_hash_epoch: Epoch,
+    /// CBOR-encoded `SubstateDownProof`, as in [`SubstateProof::down_proof`].
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "ootle_serde::base64::option"
+    )]
+    #[cfg_attr(feature = "ts", ts(optional, type = "string"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>, format = Byte))]
+    pub down_proof: Option<Vec<u8>>,
+}
+
+/// CBOR-encoded `SidechainBlockCommitProof`: a block's header and the chain of quorum certificates that committed it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CommitProofBytes(#[serde(with = "ootle_serde::base64")] pub Vec<u8>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
@@ -234,7 +377,7 @@ pub struct SubmitTransactionResponse {
     ts(
         export,
         export_to = "tari-indexer-client/",
-        rename = "IndexerSubmitTransactionResponse"
+        rename = "IndexerSubmitTransactionDryRunResponse"
     )
 )]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -242,10 +385,11 @@ pub struct SubmitTransactionDryRunResponse {
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     /// The ID of the transaction that was dry-run
     pub transaction_id: TransactionId,
-    #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
-    /// The result of the dry-run execution, including any emitted events and state changes, but without a final
-    /// decision or commitment to the ledger
-    pub result: ExecuteResult,
+    /// The CBOR-encoded `ExecuteResult` of the dry run, including any emitted events and state changes, but without
+    /// a final decision or commitment to the ledger.
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = String, format = Byte))]
+    pub result: Encoded<ExecuteResult>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -286,7 +430,7 @@ pub struct TemplateCatalogueItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-    pub metadata_hash: Option<MetadataHash>,
+    pub metadata_hash: Option<TemplateMetadataHash>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -349,8 +493,11 @@ pub struct GetTransactionResultQuery {
 pub struct ProvenTransactionReceipt {
     #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
     pub version: SubstateVersion,
-    #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
-    pub receipt: TransactionReceipt,
+    /// The receipt substate's CBOR-encoded `SubstateValue`, as in [`SubstateState::Up`]. It decodes to
+    /// `SubstateValue::TransactionReceipt`.
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = String, format = Byte))]
+    pub value: Encoded<SubstateValue>,
     /// `None` when no committee member could prove the receipt, e.g. when nothing has been committed
     /// since an epoch change.
     pub proof: Option<SubstateProof>,
@@ -395,8 +542,10 @@ pub struct QueryTransactionEventsRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct QueryTransactionEventsResponse {
-    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(String, Object)>))]
-    pub events: Vec<(TransactionId, Event)>,
+    /// Each event's transaction and its CBOR-encoded `Event`.
+    #[cfg_attr(feature = "ts", ts(type = "Array<[string, string]>"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(String, String)>))]
+    pub events: Vec<(TransactionId, Encoded<Event>)>,
     /// The `before_id` for the next page, or `None` once no older event can match. A wildcard
     /// topic query examines a bounded number of events per request, so a page can be short, or
     /// empty, and still carry a cursor.
@@ -540,8 +689,10 @@ pub enum IndexerTransactionFinalizedResult {
     Finalized {
         #[cfg_attr(feature = "utoipa", schema(value_type = String))]
         final_decision: Decision,
-        #[cfg_attr(feature = "utoipa", schema(value_type = Option<Object>))]
-        execution_result: Option<Box<ExecuteResult>>,
+        /// The CBOR-encoded `ExecuteResult`, as the committee member that answered served it.
+        #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+        #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>, format = Byte))]
+        execution_result: Option<Encoded<ExecuteResult>>,
         #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number}"))]
         execution_time: Duration,
         #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -678,6 +829,10 @@ pub struct GetUtxoUpdatesRequest {
     pub resource_address: ResourceAddress,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unspent_only: bool,
+    /// The number of UTXO rows to read per shard in this pass, from 1 to 1000. `from_epoch` and
+    /// `unspent_only` are applied to the rows read, so a shard can return fewer updates than this,
+    /// or none, and still have more: `StartOfShard::has_more` says whether it does. A state version
+    /// wider than the limit is returned whole, overrunning it.
     pub per_shard_limit: u32,
 }
 
@@ -692,11 +847,15 @@ pub struct UtxoUpdateSet {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoStateUpdateSet {
     pub updates: Vec<WalletUtxoUpdate>,
-    /// The highest state version in `updates`. Every update at that version is included, so it is a
-    /// resume point: a later request filtering on `state_version > max_state_version` loses nothing.
+    /// The state version the read reached. Every update of the shard at or below it is either in
+    /// `updates` or excluded by the request's filters, so it is a resume point: a later request
+    /// filtering on `state_version > max_state_version` loses nothing. It can be above the highest
+    /// version in `updates`: a read that found nothing past the cursor reports the cursor, and one
+    /// with `has_more` false reports at least the shard's tombstone horizon.
     pub max_state_version: StateVersion,
     pub max_epoch: Epoch,
-    /// The shard holds further updates above `max_state_version`.
+    /// The shard holds further rows above `max_state_version`, which may or may not pass the
+    /// request's filters.
     pub has_more: bool,
 }
 
@@ -737,6 +896,9 @@ pub struct GetUtxoUpdatesResponse {
     pub updates: UtxoUpdateSet,
 }
 
+/// A shard and a state version of it.
+pub type ShardStateVersion = (Shard, StateVersion);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -745,33 +907,41 @@ pub struct GetUtxosRequest {
     pub tag_and_nonce_pairs: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub resource_address: ResourceAddress,
+    /// Empty, or for each pair of `tag_and_nonce_pairs` in order, the shard and state version the client saw its UTXO
+    /// unspent at, or `null` when it does not know them. A pair with no unspent UTXO is reported in `spent` once this
+    /// indexer has indexed its shard through that state version, as this indexer keeps every unspent UTXO.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "ts", ts(optional, as = "Option<_>"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<Option<(u32, u64)>>))]
+    pub unspent_at: Vec<Option<ShardStateVersion>>,
+    /// Resume after the previous page: pass its `next_cursor`. UTXOs are paged in the order of their ids, which every
+    /// indexer shares, so any indexer can resume a page another returned. A UTXO created or spent while the pages are
+    /// read may or may not be returned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional, as = "Option<_>"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub cursor: Option<UtxoId>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetUtxosResponse {
-    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(String, Object)>))]
-    pub utxos: Vec<(UtxoId, Utxo)>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct ListUtxosRequest {
-    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
-    pub resource_address: ResourceAddress,
-    pub limit: u32,
+    /// The unspent UTXOs matching a requested tag and nonce pair, each a CBOR-encoded `Utxo`, in id order. Any number
+    /// of UTXOs may share a pair.
+    #[cfg_attr(feature = "ts", ts(type = "Array<[string, string]>"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(String, String)>))]
+    pub utxos: Vec<(UtxoId, Encoded<Utxo>)>,
+    /// The requested tag and nonce pairs this indexer holds as spent or burnt. A requested pair in neither list is
+    /// unknown to this indexer, which may not yet have indexed it, or may have pruned its tombstone.
+    #[serde(default)]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(u32, String)>))]
+    pub spent: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
+    /// The `cursor` for the next page, or `None` once `utxos` holds the last matching UTXO.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional, as = "Option<_>"))]
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
-    pub from_id: Option<UtxoId>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct ListUtxosResponse {
-    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(String, Object)>))]
-    pub utxos: Vec<(UtxoId, Utxo)>,
+    pub next_cursor: Option<UtxoId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -813,8 +983,9 @@ pub struct GetIndexerInfoResponse {
     /// `transaction_retention_epochs`, so a retained transaction always has its receipt.
     pub transaction_receipt_retention_epochs: Option<u64>,
     /// How many epochs past the epoch its transaction committed in this indexer retains an event
-    /// before pruning it. `None` means events are retained indefinitely. Event queries and the event
-    /// stream's catch-up answer no further back than this.
+    /// before pruning it. `None` means events are retained indefinitely. Event queries answer no
+    /// further back than this, and the event stream refuses with 410 to resume from a cursor older
+    /// than the newest pruned event.
     pub event_retention_epochs: Option<u64>,
     /// Whether this indexer stores transactions observed on the network gossip topic in addition to
     /// those submitted directly to it. When false, a transaction submitted elsewhere is unknown to
@@ -840,6 +1011,18 @@ pub struct GetIndexerInfoResponse {
     /// Whether this indexer stores every event on the network. When false it is configured with event
     /// filters, so event queries answer over a subset and absence is not proof an event did not occur.
     pub indexes_all_events: bool,
+    /// How many epochs past the epoch a UTXO was spent in this indexer retains its tombstone before
+    /// pruning it. `None` means tombstones are retained indefinitely. Pruning raises the shard's
+    /// entry in `utxo_tombstone_horizons`, so a UTXO stream resuming from further back is told its
+    /// spends are incomplete.
+    pub utxo_tombstone_retention_epochs: Option<u64>,
+    /// Per shard, the state version at and below which this indexer may lack the tombstone of a spent
+    /// UTXO, ascending by shard. A shard's first sync fetches only its live substates, so a spend
+    /// before it is not seen, and pruning a tombstone raises the horizon over it. A shard not listed
+    /// has every tombstone. The UTXO stream sets `StartOfShard::spends_incomplete` for a shard whose
+    /// cursor is below its horizon. This is sync state, and rises while the indexer runs.
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(u32, u64)>))]
+    pub utxo_tombstone_horizons: Vec<(Shard, StateVersion)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -852,6 +1035,227 @@ pub struct GetNetworkSyncStateResponse {
     /// validators that have never been contacted for a sync will not appear here.
     #[serde(default)]
     pub validators: Vec<ValidatorStatus>,
+    /// What each shard group's sync is doing, ascending by shard group.
+    #[serde(default)]
+    pub shard_groups: Vec<ShardGroupSyncStatus>,
+    /// How far each shard of the network is synced, ascending by shard, from the global shard.
+    #[serde(default)]
+    pub shards: Vec<ShardSyncStatus>,
+    /// The width in seconds of each bucket of `ShardGroupSyncStatus::activity`.
+    #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub activity_bucket_secs: u64,
+}
+
+/// One shard group's sync, as its loop last reported it. Kept in memory, so it starts empty when the indexer does.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ShardGroupSyncStatus {
+    #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
+    pub shard_group: ShardGroup,
+    pub phase: ShardGroupSyncPhase,
+    /// Unix timestamp (seconds) at which the group entered `phase`.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub phase_since_unix_s: u64,
+    /// libp2p PeerId of the committee member the group's current or last round streams from.
+    pub stream_peer: Option<String>,
+    /// The group's most recent blames, oldest first.
+    pub blames: Vec<SyncBlame>,
+    /// libp2p PeerIds of every peer blamed during the current epoch, each excluded from the group for the rest of it.
+    pub excluded_peers: Vec<String>,
+    /// The group's latest committed tip whose commit proof verified.
+    pub tip: Option<SyncObservedTip>,
+    /// The epoch of the last checkpoint the group stored, and when it was stored.
+    pub last_checkpoint: Option<SyncStoredCheckpoint>,
+    /// The versions and transactions promoted from the group's shards in each bucket of the last ten minutes, oldest
+    /// first. The last bucket is still filling.
+    pub activity: Vec<SyncActivityBucket>,
+}
+
+/// What a shard group's sync loop is doing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub enum ShardGroupSyncPhase {
+    /// No round has started yet.
+    Starting,
+    SyncingCheckpoints,
+    /// Indexing a new shard from a verified snapshot of its tree.
+    Snapshotting {
+        #[cfg_attr(feature = "utoipa", schema(value_type = u32))]
+        shard: Shard,
+    },
+    /// Following a stream from `ShardGroupSyncStatus::stream_peer`.
+    Streaming,
+    /// Waiting until `until_unix_s` before the next round.
+    Paused {
+        reason: String,
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
+        until_unix_s: u64,
+    },
+    /// Every committee member streamed history of `shard` above `from_version` that mismatches a verified leaf, which
+    /// points at this indexer's own recomputation. The group stops following until the epoch moves.
+    Halted {
+        #[cfg_attr(feature = "utoipa", schema(value_type = u32))]
+        shard: Shard,
+        #[cfg_attr(feature = "utoipa", schema(value_type = Option<u64>))]
+        from_version: Option<StateVersion>,
+    },
+}
+
+/// Peers blamed for history no verified leaf covers. A blamed peer is excluded from its shard group for the rest of
+/// `epoch`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SyncBlame {
+    /// libp2p PeerIds of the blamed peers.
+    pub peer_ids: Vec<String>,
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub epoch: Epoch,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub at_unix_s: u64,
+    pub details: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SyncObservedTip {
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub epoch: Epoch,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub height: u64,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub observed_at_unix_s: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SyncStoredCheckpoint {
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub epoch: Epoch,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub stored_at_unix_s: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SyncActivityBucket {
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub start_unix_s: u64,
+    /// State versions promoted to the indexed tables.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub versions: u64,
+    /// Transaction receipts promoted to the indexed tables.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub transactions: u64,
+}
+
+/// How far one shard is synced.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ShardSyncStatus {
+    #[cfg_attr(feature = "utoipa", schema(value_type = u32))]
+    pub shard: Shard,
+    pub state: ShardSyncState,
+    /// The last version a verified leaf authenticated, through which every version is promoted to the indexed tables.
+    pub verified: Option<ShardVersionAt>,
+    /// The last version staged, where the stream resumes. Those above `verified` await a verified leaf.
+    pub staged: Option<ShardVersionAt>,
+    /// The latest verified leaf a probe of the shard's committee returned.
+    pub tip_leaf: Option<ShardObservedLeaf>,
+    /// The version the stream last found the shard level with its committee at.
+    pub level: Option<ShardLevel>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub last_promoted_at_unix_s: Option<u64>,
+    /// State versions promoted in the last minute.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub versions_last_minute: u64,
+    /// When a peer was last blamed for this shard's history, and why.
+    pub last_mismatch: Option<ShardMismatch>,
+    pub snapshot: Option<ShardSnapshotProgress>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub enum ShardSyncState {
+    /// Nothing of the shard is staged or verified yet.
+    Waiting,
+    /// Indexing the shard from a verified snapshot of its tree.
+    Snapshotting,
+    /// Streaming or verifying history the shard's committee is ahead of.
+    CatchingUp,
+    /// Level with the shard's committee recently enough that the substate cache serves it.
+    Following,
+    /// The shard's group stopped following. See `ShardGroupSyncPhase::Halted`.
+    Halted,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ShardVersionAt {
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub state_version: StateVersion,
+    /// The epoch the version was committed in.
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub epoch: Epoch,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ShardObservedLeaf {
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub state_version: StateVersion,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub observed_at_unix_s: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ShardLevel {
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub state_version: StateVersion,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub confirmed_secs_ago: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ShardMismatch {
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub at_unix_s: u64,
+    pub details: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ShardSnapshotProgress {
+    /// The version of the verified leaf the snapshot is taken at.
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub state_version: StateVersion,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub substates: u64,
+    /// How far through the shard's leaf key space the snapshot has paged, from 0 to 1. Leaf keys are hashes, so this
+    /// estimates the share of the shard's substates received.
+    pub fraction: f64,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub started_at_unix_s: u64,
 }
 
 /// The latest probe of one validator's consensus pacemaker state, made by the indexer when it
@@ -1022,24 +1426,30 @@ pub enum Ordering {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ListTransactionReceiptsResponse {
-    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(String, Object)>))]
-    pub receipts: Vec<(TransactionReceiptAddress, TransactionReceipt)>,
+    /// Each receipt's address and its CBOR-encoded `TransactionReceipt`.
+    #[cfg_attr(feature = "ts", ts(type = "Array<[string, string]>"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<(String, String)>))]
+    pub receipts: Vec<(TransactionReceiptAddress, Encoded<TransactionReceipt>)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetTransactionReceiptResponse {
-    #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
-    pub receipt: TransactionReceipt,
+    /// The CBOR-encoded `TransactionReceipt`.
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = String, format = Byte))]
+    pub receipt: Encoded<TransactionReceipt>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetResourceResponse {
-    #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
-    pub resource: Resource,
+    /// The CBOR-encoded `Resource`.
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = String, format = Byte))]
+    pub resource: Encoded<Resource>,
     #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
     pub version: SubstateVersion,
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
@@ -1098,33 +1508,146 @@ pub struct ScheduledBurnRate {
     pub rate_bps: u16,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ListEpochCheckpointsRequest {
     /// The epoch to start listing from (inclusive). Defaults to 0.
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<u64>))]
     pub from_epoch: Option<Epoch>,
-    /// Maximum number of checkpoints to return (default: 20, max: 20).
+    /// Maximum number of checkpoints to return (default: 20, max: 100).
     pub limit: Option<u32>,
+    /// Only the checkpoint of the shard group that contains this shard, one per epoch. Shard groups change when the
+    /// number of committees does, so a fixed shard is what follows one line of committees across epochs.
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<u32>))]
+    pub shard: Option<Shard>,
+    /// Include, with each checkpoint, the next epoch's committee for the shard group that contains `shard`, proved
+    /// against the validator set hash the checkpoint names. Requires `shard`.
+    #[serde(default)]
+    pub include_committees: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ListEpochCheckpointsResponse {
-    #[cfg_attr(feature = "ts", ts(type = "Array<Record<string, unknown>>"))]
-    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<Object>))]
-    pub checkpoints: Vec<serde_json::Value>,
+    /// Ascending by epoch. Only checkpoints that carry their end-of-epoch header's metadata preimage are listed.
+    pub checkpoints: Vec<EpochCheckpointEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetLatestEpochCheckpointRequest {
+    /// The latest checkpoint of the shard group that contains this shard, rather than of any shard group.
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<u32>))]
+    pub shard: Option<Shard>,
+    /// Include the next epoch's committee for the shard group that contains `shard`, proved against the validator set
+    /// hash the checkpoint names. Requires `shard`.
+    #[serde(default)]
+    pub include_committees: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetLatestEpochCheckpointResponse {
-    #[cfg_attr(feature = "ts", ts(type = "Record<string, unknown>"))]
+    pub checkpoint: EpochCheckpointEntry,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetLatestShardGroupCheckpointsResponse {
+    /// The latest checkpoint of the shard group holding each shard, each listed once, in shard order and without
+    /// committees. Each group is at its own latest epoch, so where the shard group layout changed and this indexer
+    /// holds the new layout's checkpoints of only some groups, two listed groups can share shards. Empty while this
+    /// indexer holds no checkpoint.
+    pub checkpoints: Vec<EpochCheckpointEntry>,
+}
+
+/// A shard group's checkpoint of the end of an epoch: the commit proof of its end-of-epoch block, which the
+/// committee of `epoch` signed.
+///
+/// Every field but `checkpoint` is read out of `checkpoint` for convenience, and is untrusted until the checkpoint
+/// verifies against that committee.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct EpochCheckpointEntry {
+    /// The epoch the checkpoint ends.
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub epoch: Epoch,
     #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
-    pub checkpoint: serde_json::Value,
+    pub shard_group: ShardGroup,
+    /// The validator set hash of the next epoch that the end-of-epoch block names, read from the header metadata
+    /// preimage the checkpoint carries. Absent if the block names none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional, type = "string"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+    pub next_epoch_validator_set_hash: Option<ValidatorSetHash>,
+    /// CBOR-encoded `EpochCheckpoint`.
+    #[serde(with = "ootle_serde::base64")]
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = String, format = Byte))]
+    pub checkpoint: Vec<u8>,
+    /// The next epoch's committee for the requested shard, when `include_committees` was set and this indexer holds
+    /// that epoch's validator set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub next_epoch_committee: Option<ValidatorSetCommittee>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetCommitteeRequest {
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub epoch: Epoch,
+    /// Any shard of the shard group whose committee to return.
+    #[cfg_attr(feature = "utoipa", schema(value_type = u32))]
+    pub shard: Shard,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetCommitteeResponse {
+    pub committee: ValidatorSetCommittee,
+}
+
+/// One shard group's committee in an epoch, with the proof that it is that shard group's committee in the validator
+/// set `validator_set_hash` commits to.
+///
+/// The proof is only as good as the hash it is checked against: a verifier checks it against a validator set hash it
+/// trusts, such as one a verified end-of-epoch checkpoint names, never against `validator_set_hash` alone.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ValidatorSetCommittee {
+    #[cfg_attr(feature = "utoipa", schema(value_type = u64))]
+    pub epoch: Epoch,
+    #[cfg_attr(feature = "utoipa", schema(value_type = Object))]
+    pub shard_group: ShardGroup,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub validator_set_hash: ValidatorSetHash,
+    /// Ascending by public key.
+    pub members: Vec<ValidatorSetCommitteeMember>,
+    /// CBOR-encoded `ValidatorSetCommitteeProof`. It carries the members, and a verifier reads them from it.
+    #[serde(with = "ootle_serde::base64")]
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = String, format = Byte))]
+    pub proof: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ValidatorSetCommitteeMember {
+    #[cfg_attr(feature = "utoipa", schema(value_type = String))]
+    pub public_key: RistrettoPublicKeyBytes,
+    pub vote_power: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1173,4 +1696,84 @@ pub struct WatchedTemplateItem {
     #[cfg_attr(feature = "utoipa", schema(value_type = String))]
     pub template_address: TemplateAddress,
     pub template_name: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_engine_types::{
+        confidential::ClaimedOutputTombstone,
+        substate::{Substate, SubstateValue},
+    };
+    use tari_template_lib_types::ClaimedOutputTombstoneAddress;
+
+    use super::*;
+
+    fn substate_id(seed: u8) -> SubstateId {
+        SubstateId::ClaimedOutputTombstone(ClaimedOutputTombstoneAddress::from_bytes(&[seed; 32]).unwrap())
+    }
+
+    fn substate() -> EncodedSubstate {
+        EncodedSubstate::encode(&Substate::new(
+            0,
+            SubstateValue::ClaimedOutputTombstone(ClaimedOutputTombstone { value: 1 }),
+        ))
+        .unwrap()
+    }
+
+    fn proof(block: u8, seed: u8) -> SubstateProof {
+        SubstateProof {
+            anchor: SubstateProofAnchor {
+                epoch: Epoch(3),
+                shard_group: ShardGroup::new(0u32, 255u32),
+                height: 7,
+                block_id: Hash32::from_array([block; 32]),
+                state_merkle_root: Hash32::from_array([block; 32]),
+            },
+            commit_proof: vec![block; 64],
+            value_proof: vec![seed; 8],
+            value_hash_epoch: Epoch(2),
+            down_proof: seed.is_multiple_of(2).then(|| vec![seed; 4]),
+        }
+    }
+
+    #[test]
+    fn proofs_anchored_at_one_block_share_its_commit_proof() {
+        let ids = [substate_id(1), substate_id(2), substate_id(3)];
+        let substates = ids.iter().map(|id| (id.clone(), substate())).collect();
+        let proofs = [
+            (ids[0].clone(), proof(10, 1)),
+            (ids[1].clone(), proof(10, 2)),
+            (ids[2].clone(), proof(11, 3)),
+        ];
+
+        let resp = GetSubstatesResponse::new(substates, proofs.clone());
+        assert_eq!(resp.commit_proofs.len(), 2);
+
+        let json = serde_json::to_string(&resp).unwrap();
+        let (substates, served) = serde_json::from_str::<GetSubstatesResponse>(&json)
+            .unwrap()
+            .into_proven();
+        assert_eq!(substates.len(), 3);
+        assert_eq!(served.len(), 3);
+        for (id, proof) in proofs {
+            let served = &served[&id];
+            assert_eq!(served.anchor.block_id, proof.anchor.block_id);
+            assert_eq!(served.commit_proof, proof.commit_proof);
+            assert_eq!(served.value_proof, proof.value_proof);
+            assert_eq!(served.value_hash_epoch, proof.value_hash_epoch);
+            assert_eq!(served.down_proof, proof.down_proof);
+        }
+    }
+
+    #[test]
+    fn a_proof_whose_commit_proof_is_not_served_is_left_out() {
+        let id = substate_id(1);
+        let substates = [(id.clone(), substate())].into();
+        let mut resp = GetSubstatesResponse::new(substates, [(id.clone(), proof(10, 1))]);
+        resp.commit_proofs.clear();
+
+        let (substates, proofs) = resp.into_proven();
+        assert!(substates.contains_key(&id));
+        assert!(proofs.is_empty());
+    }
 }

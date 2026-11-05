@@ -5,12 +5,12 @@ use tari_consensus::traits::{ConsensusSpec, hooks::NoopHooks};
 
 use super::TestBlockTransactionProcessor;
 use crate::support::{
-    RoundRobinLeaderStrategy,
+    SmoothWeightedRoundRobin,
     address::TestAddress,
     epoch_manager::TestEpochManager,
     messaging_impls::{TestInboundMessaging, TestOutboundMessaging},
     signing_service::TestVoteSignatureService,
-    sync::AlwaysSyncedSyncManager,
+    sync::TestSyncManager,
 };
 
 pub type TestStore = tari_state_store_rocksdb::RocksDbStateStore<TestAddress>;
@@ -23,11 +23,11 @@ impl ConsensusSpec for TestConsensusSpec {
     type EpochManager = TestEpochManager;
     type Hooks = NoopHooks;
     type InboundMessaging = TestInboundMessaging;
-    type LeaderStrategy = RoundRobinLeaderStrategy;
+    type LeaderStrategy = SmoothWeightedRoundRobin;
     type OutboundMessaging = TestOutboundMessaging;
     type SignerService = TestVoteSignatureService;
     type StateStore = TestStore;
-    type SyncManager = AlwaysSyncedSyncManager;
+    type SyncManager = TestSyncManager;
     type TransactionExecutor = TestBlockTransactionProcessor;
     type TransactionValidator = TestBlockTransactionProcessor;
 }

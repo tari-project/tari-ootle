@@ -9,6 +9,7 @@ use std::str::FromStr;
 use axum_extra::headers::{Authorization, authorization::Bearer};
 use tari_ootle_address::Network;
 use tari_ootle_wallet_sdk::{
+    IndexerTrust,
     WalletSdkConfig,
     cipher_seed::CipherSeedRestore,
     models::EpochBirthday,
@@ -31,7 +32,7 @@ use crate::{
     config::{WalletDaemonAuth, WalletDaemonConfig},
     handlers::{
         HandlerContext,
-        auth::{api_keys, create_authenticator},
+        auth::{api_keys, cookie, create_authenticator},
     },
 };
 
@@ -39,6 +40,9 @@ pub(crate) struct TestDaemon {
     pub context: HandlerContext,
     /// The wallet's own interactive session, holding `admin`.
     pub session: Bearer,
+    /// The daemon's local `.cookie` bearer token (`tc_...`).
+    pub cookie: Bearer,
+    _shutdown: Shutdown,
     _temp: tempfile::TempDir,
 }
 
@@ -46,6 +50,16 @@ impl TestDaemon {
     /// A handler context on LocalNet whose indexer is a closed port, so any
     /// handler path that reaches the network fails fast.
     pub async fn start() -> Self {
+        Self::init(false).await
+    }
+
+    /// Like [`Self::start`], with the transaction service left running so
+    /// handlers can submit transactions.
+    pub async fn start_with_transaction_service() -> Self {
+        Self::init(true).await
+    }
+
+    async fn init(run_transaction_service: bool) -> Self {
         let temp = tempfile::tempdir().unwrap();
         let store = SqliteWalletStore::try_open(temp.path().join("wallet.sqlite")).unwrap();
         store.run_migrations().unwrap();
@@ -55,6 +69,7 @@ impl TestDaemon {
             WalletSdkConfig {
                 network: Network::LocalNet,
                 override_keyring_password: Some(SafePassword::from_str("test wallet password").unwrap()),
+                indexer_trust: IndexerTrust::default(),
             },
             EpochBirthday::far_future(),
         )
@@ -72,6 +87,10 @@ impl TestDaemon {
         let mut config = WalletDaemonConfig::default();
         config.network = Network::LocalNet;
         config.authentication = WalletDaemonAuth::None;
+        let cookie_token = cookie::mint_cookie_token();
+        let cookie_permissions = config.parsed_cookie_scopes().unwrap();
+        let cookie_str = std::str::from_utf8(cookie_token.reveal()).expect("ASCII cookie token");
+        let cookie = Authorization::<Bearer>::bearer(cookie_str).unwrap().0;
         let context = HandlerContext::new(
             sdk,
             notify,
@@ -81,19 +100,26 @@ impl TestDaemon {
             create_authenticator(&config, store).unwrap(),
             SafePassword::from_str("test jwt secret").unwrap(),
             shutdown.to_signal(),
-        );
+        )
+        .with_cookie_token(Some((cookie_token, cookie_permissions)));
 
-        // Handlers need only the context, so the background workers shut down now.
-        shutdown.trigger();
+        // The other background workers are not needed by handlers, so they stop now.
         drop(account_monitor);
-        drop(transaction_service);
         utxo_worker.abort();
         drop(utxo_worker.await);
+        if run_transaction_service {
+            tokio::spawn(transaction_service.run());
+        } else {
+            shutdown.trigger();
+            drop(transaction_service);
+        }
 
         let session = Self::jwt(&context, "admin", false);
         Self {
             context,
             session,
+            cookie,
+            _shutdown: shutdown,
             _temp: temp,
         }
     }
@@ -121,6 +147,7 @@ impl TestDaemon {
             .generate_auth_claims(Permissions::from_str(permissions).unwrap())
             .unwrap();
         claims.delegated = delegated;
+        claims.delegation_id = delegated.then(rand::random);
         Authorization::<Bearer>::bearer(&context.jwt_api().grant(&claims).unwrap())
             .unwrap()
             .0

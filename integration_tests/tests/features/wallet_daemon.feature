@@ -66,6 +66,8 @@ Feature: Wallet Daemon
     Then VN has scanned to at least height 40
 
     When I wait for proof BURN_PROOF to confirm on wallet MINOTARI_WALLET
+    When miner MINER mines to the next epoch
+    Then VN is past the epoch burn proof BURN_PROOF was mined in
 
     When I claim burn BURN_PROOF and spend it into account ACCOUNT_1 using wallet daemon WALLET_D
     When I print the cucumber world
@@ -89,3 +91,19 @@ Feature: Wallet Daemon
     When I transfer 1 tokens of resource ACC1/resources/tNFT from account ACC1 to account ACC2 via the wallet daemon WALLET_D named TRANSFER
     When I check the balance of ACC2 for resource ACC1/resources/tNFT on wallet daemon WALLET_D the amount is exactly 1
 
+
+  Scenario: View-only account on another wallet daemon sees incoming stealth deposits
+    Given a network with spec
+  """
+  walletds:
+    - name: WALLET_A
+    - name: WALLET_B
+  """
+
+    When I create an account SENDER via the wallet daemon WALLET_A with 10000 XTR
+    When I create an account COLD via the wallet daemon WALLET_A
+    When I import account COLD from wallet daemon WALLET_A as view-only account WATCH into wallet daemon WALLET_B
+
+    When I do a stealth transfer of 50 from account SENDER on wallet daemon WALLET_A to account WATCH on wallet daemon WALLET_B with destination tag bridge-uuid
+    Then wallet daemon WALLET_B lists a stealth output of 50 for account WATCH with destination tag bridge-uuid sent by account SENDER on wallet daemon WALLET_A
+    When I check the balance of WATCH on wallet daemon WALLET_B the amount is exactly 50

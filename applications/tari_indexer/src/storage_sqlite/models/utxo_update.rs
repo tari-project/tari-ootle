@@ -10,6 +10,9 @@ use tari_template_lib_types::UtxoAddress;
 pub enum UtxoUpdateRecord {
     Unspent(Box<UtxoUnspent>),
     Spent(UtxoSpent),
+    /// A burn takes the output's version down and brings up the next version with no output, under the same
+    /// commitment.
+    Burnt(UtxoSpent),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

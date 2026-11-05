@@ -4,7 +4,7 @@
 use axum_extra::headers::authorization::Bearer;
 use indexmap::IndexMap;
 use log::info;
-use tari_ootle_address::{Network, OotleAddress, PayRef};
+use tari_ootle_address::{DestinationTag, Network, OotleAddress};
 use tari_ootle_wallet_crypto::memo::Memo;
 use tari_ootle_walletd_client::{
     permissions::{Crud, Permission},
@@ -63,14 +63,14 @@ pub async fn handle_list(
 }
 
 /// Reconstructs the sender's [`OotleAddress`] from a `SenderAddress` memo using the wallet's network, including
-/// any attached pay reference. Returns `None` for any other memo variant or if the embedded keys are malformed.
+/// any attached destination tag. Returns `None` for any other memo variant or if the embedded keys are malformed.
 fn resolve_sender_address(memo: Option<&Memo>, network: Network) -> Option<OotleAddress> {
-    let (account_key, view_key, pay_ref) = memo?.as_sender_address()?;
+    let (account_key, view_key, destination_tag) = memo?.as_sender_address()?;
     let account_key = RistrettoPublicKeyBytes::from_bytes(account_key).ok()?;
     let view_key = RistrettoPublicKeyBytes::from_bytes(view_key).ok()?;
     let mut address = OotleAddress::new(network, view_key, account_key);
-    if let Some(pay_ref) = PayRef::from_bytes(pay_ref) {
-        address = address.with_pay_ref(pay_ref);
+    if let Some(destination_tag) = DestinationTag::from_bytes(destination_tag) {
+        address = address.with_destination_tag(destination_tag);
     }
     Some(address)
 }
@@ -101,7 +101,7 @@ pub async fn handle_decrypt_value(
         .map(Into::into)
         .collect::<Vec<_>>();
 
-    let substates = sdk.substate_api().get_substates_from_network(utxo_ids).await?;
+    let substates = sdk.substate_api().get_substates_from_network(&utxo_ids).await?;
 
     // Get view secret key
     let view_key = sdk.key_manager_api().get_key(req.view_key_id)?;

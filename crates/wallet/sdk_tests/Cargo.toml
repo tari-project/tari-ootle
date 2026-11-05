@@ -21,12 +21,14 @@ tari_consensus_types = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_ootle_wallet_crypto = { workspace = true, features = ["serde"] }
+tari_bor = { workspace = true }
 tari_ootle_transaction = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_template_abi = { workspace = true }
 tari_template_builtin = { workspace = true }
 tari_ootle_address = { workspace = true, features = ["serde"] }
 tari_indexer_client = { workspace = true, default-features = false }
+tari_ootle_light_client = { workspace = true, features = ["test-fixtures"] }
 
 ootle_byte_type = { workspace = true }
 tempfile = { workspace = true }
@@ -36,4 +38,4 @@ time = { workspace = true }
 futures = { workspace = true }
 tokio-stream = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "test-util", "time"] }

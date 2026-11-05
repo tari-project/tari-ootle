@@ -50,7 +50,7 @@ const ADD_SIGNER_SEQ: &[SigningField] = &[
     SigningField::Inputs,
     SigningField::MinEpoch,
     SigningField::MaxEpoch,
-    SigningField::IsSealSignerAuthorized,
+    SigningField::MainSigner,
     SigningField::DryRun,
     SigningField::BlobHashes,
 ];
@@ -65,7 +65,7 @@ const SEAL_SEQ: &[SigningField] = &[
     SigningField::Inputs,
     SigningField::MinEpoch,
     SigningField::MaxEpoch,
-    SigningField::IsSealSignerAuthorized,
+    SigningField::MainSigner,
     SigningField::DryRun,
     SigningField::BlobHashes,
     SigningField::Signatures,
@@ -298,7 +298,19 @@ fn to_hex(bytes: &[u8]) -> String {
 pub fn sign_approved(review: &SignReview) -> Result<SignTransactionResponse, AppStatus> {
     let account_secret = zeroize::Zeroizing::new(derive_from_bip32_key(review.account, review.index, review.key_type)?);
     let secret = match review.stealth_public_nonce {
-        Some(nonce) => zeroize::Zeroizing::new(derive_stealth_secret(review.display.network, &account_secret, &nonce)?),
+        Some(nonce) => {
+            let view_secret = zeroize::Zeroizing::new(derive_from_bip32_key(
+                review.account,
+                review.index,
+                KeyType::ViewOnlyKey,
+            )?);
+            zeroize::Zeroizing::new(derive_stealth_secret(
+                review.display.network,
+                &account_secret,
+                &view_secret,
+                &nonce,
+            )?)
+        },
         None => account_secret,
     };
     let (public_key, signature) = sign_message(&secret, &review.message)?;

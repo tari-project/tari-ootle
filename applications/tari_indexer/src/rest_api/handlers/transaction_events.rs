@@ -11,18 +11,25 @@ use axum::{
 };
 use futures::Stream;
 use log::*;
-use tari_engine_types::substate::SubstateId;
-use tari_indexer_client::{event::TransactionEvent, types::StreamTransactionEventsRequest};
+use tari_engine_types::{encoded::Encoded, events::Event};
+use tari_indexer_client::{
+    event::{StreamedTransactionEvent, TransactionEvent},
+    types::StreamTransactionEventsRequest,
+};
 use tari_ootle_transaction::TransactionId;
-use tari_template_lib_types::{Metadata, TemplateAddress};
 use tokio_stream::StreamExt;
 
 use crate::{
-    event_manager::WILDCARD_TOPIC_SCAN_LIMIT,
+    event_query_limits::WILDCARD_TOPIC_SCAN_LIMIT,
     network_state_sync::EventFilter,
-    rest_api::{context::HandlerContext, handlers::HandlerResult, streaming::disable_proxy_buffering},
+    rest_api::{
+        context::HandlerContext,
+        error::ErrorResponse,
+        handlers::HandlerResult,
+        streaming::disable_proxy_buffering,
+    },
     storage_sqlite::SqliteIndexerStore,
-    store::{EventQuery, ReadOnlyStore},
+    store::{EventQuery, ReadOnlyStore, StoredEvent},
 };
 
 const LOG_TARGET: &str = "tari::indexer::rest_api::handlers::transaction_events";
@@ -51,7 +58,10 @@ const REPLAY_LIMITS: ReplayLimits = ReplayLimits {
     get,
     path = "/transactions/events/stream",
     description = "SSE stream of template-emitted transaction events. Supports catch-up via \
-                    the `after_id` query parameter or `Last-Event-ID` header.",
+                    the `after_id` query parameter or `Last-Event-ID` header. A cursor older than the \
+                    indexer's event retention window (see `event_retention_epochs` on /info) is refused \
+                    with 410, and a stream whose catch-up reaches pruned events ends, so the reconnect is \
+                    refused the same way.",
     params(
         ("topic" = Option<String>, Query, description = "Filter by event topic"),
         ("substate_id" = Option<String>, Query, description = "Filter by substate ID"),
@@ -60,6 +70,10 @@ const REPLAY_LIMITS: ReplayLimits = ReplayLimits {
             Matches only std.resource.* events, which carry the resource as their substate_id. \
             Vault events name no resource: filter those by substate_id (the vault ID)"),
         ("after_id" = Option<i64>, Query, description = "Resume from this event ID (exclusive)"),
+    ),
+    responses(
+        (status = 200, description = "SSE stream of transaction events"),
+        (status = 410, description = "Events after the resume cursor have been pruned", body = ErrorResponse),
     )
 )]
 pub async fn sse_transaction_events(
@@ -83,6 +97,18 @@ pub async fn sse_transaction_events(
     };
 
     if let Some(id) = after_id {
+        let pruned_through = context
+            .read_only_store()
+            .get_events_pruned_through_id()
+            .await
+            .map_err(ErrorResponse::anyhow)?;
+        if id < pruned_through {
+            return Err(ErrorResponse::gone(format!(
+                "Events after id {id} have aged past this indexer's event retention window (see \
+                 event_retention_epochs on /info). Resynchronise from current state, then reconnect without after_id \
+                 or Last-Event-ID."
+            )));
+        }
         info!(target: LOG_TARGET, "Client connected to transaction events SSE stream (catch-up from id={})", id);
     } else {
         info!(target: LOG_TARGET, "Client connected to transaction events SSE stream (live)");
@@ -140,9 +166,15 @@ fn replay_then_live_stream(
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<sse::Event, axum::Error>>(256);
 
     tokio::spawn(async move {
-        let result = run_replay_then_live(store, broadcast_rx, filter, after_id, REPLAY_LIMITS, &tx).await;
-        if let Err(e) = result {
-            warn!(target: LOG_TARGET, "SSE replay-then-live stream error: {}", e);
+        // `run_replay_then_live` only observes a closed stream when it sends, and a filter that
+        // matches nothing never sends, so the task also waits on `tx.closed()`.
+        tokio::select! {
+            result = run_replay_then_live(store, broadcast_rx, filter, after_id, REPLAY_LIMITS, &tx) => {
+                if let Err(e) = result {
+                    warn!(target: LOG_TARGET, "SSE replay-then-live stream error: {}", e);
+                }
+            },
+            () = tx.closed() => {},
         }
         // tx is dropped here, which closes the stream
     });
@@ -160,10 +192,13 @@ async fn run_replay_then_live(
 ) -> Result<(), anyhow::Error> {
     // Phase 1: Replay from DB
     let query = replay_query(&filter, limits.wildcard_scan_limit);
-    let Some(mut highest_id) = replay_stored(&store, &query, after_id, limits.page_size, limits.max_pages, tx).await?
-    else {
-        // Client disconnected
-        return Ok(());
+    let mut highest_id = match replay_stored(&store, &query, after_id, limits.page_size, limits.max_pages, tx).await? {
+        Replay::CaughtUp(id) => id,
+        Replay::Disconnected => return Ok(()),
+        Replay::Pruned => {
+            info!(target: LOG_TARGET, "SSE replay reached pruned events, ending the stream");
+            return Ok(());
+        },
     };
 
     debug!(target: LOG_TARGET, "SSE replay complete (highest_id={})", highest_id);
@@ -197,8 +232,12 @@ async fn run_replay_then_live(
                 // the client. Before that, it continues the reconnect replay and keeps its budget.
                 let max_pages = if received_live { u32::MAX } else { limits.max_pages };
                 match replay_stored(&store, &query, highest_id, limits.page_size, max_pages, tx).await? {
-                    Some(caught_up_to) => highest_id = caught_up_to,
-                    None => return Ok(()),
+                    Replay::CaughtUp(caught_up_to) => highest_id = caught_up_to,
+                    Replay::Disconnected => return Ok(()),
+                    Replay::Pruned => {
+                        info!(target: LOG_TARGET, "SSE lag catch-up reached pruned events, ending the stream");
+                        return Ok(());
+                    },
                 }
             },
             Err(tokio::sync::broadcast::error::RecvError::Closed) => {
@@ -208,9 +247,18 @@ async fn run_replay_then_live(
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum Replay {
+    /// The client has been brought up to this event id.
+    CaughtUp(i64),
+    Disconnected,
+    /// Retention pruned an event above the client's position before the replay could send it. Ending
+    /// the stream makes the client reconnect from its last event id, which is then refused.
+    Pruned,
+}
+
 /// Sends the stored events matching `query` with id above `after_id`, reading at most
-/// `max_pages` pages of `page_size`. Returns the id the client has been brought up to, or `None`
-/// if the client disconnected.
+/// `max_pages` pages of `page_size`.
 async fn replay_stored(
     store: &ReadOnlyStore<SqliteIndexerStore>,
     query: &EventQuery,
@@ -218,16 +266,21 @@ async fn replay_stored(
     page_size: u32,
     max_pages: u32,
     tx: &tokio::sync::mpsc::Sender<Result<sse::Event, axum::Error>>,
-) -> Result<Option<i64>, anyhow::Error> {
+) -> Result<Replay, anyhow::Error> {
     let mut highest_id = after_id;
     for _ in 0..max_pages {
-        let page = store.get_events_after_id(query.clone(), highest_id, page_size).await?;
+        let Some(page) = store
+            .get_unpruned_events_after_id(query.clone(), highest_id, page_size)
+            .await?
+        else {
+            return Ok(Replay::Pruned);
+        };
 
-        for (id, transaction_id, event) in &page.events {
-            highest_id = *id;
-            let sse_event = encode_replay_event(*id, transaction_id, event);
+        for stored in &page.events {
+            highest_id = stored.id;
+            let sse_event = encode_replay_event(stored);
             if tx.send(sse_event).await.is_err() {
-                return Ok(None);
+                return Ok(Replay::Disconnected);
             }
         }
 
@@ -236,7 +289,7 @@ async fn replay_stored(
             None => break,
         }
     }
-    Ok(Some(highest_id))
+    Ok(Replay::CaughtUp(highest_id))
 }
 
 fn replay_query(filter: &EventFilter, wildcard_scan_limit: u32) -> EventQuery {
@@ -250,85 +303,89 @@ fn replay_query(filter: &EventFilter, wildcard_scan_limit: u32) -> EventQuery {
 }
 
 /// Encode a live TransactionEvent (which already carries its DB id) as an SSE event.
-/// The SSE event type is set to the event topic (e.g. "std.vault.withdraw").
 fn encode_transaction_event(event: &TransactionEvent) -> Result<sse::Event, axum::Error> {
-    sse::Event::default()
-        .event(event.event.topic())
-        .id(event.id.to_string())
-        .json_data(TransactionEventMinimal::from(event))
+    to_sse_event(
+        event.id,
+        event.event.topic(),
+        event.transaction_id,
+        event.encoded.clone(),
+    )
 }
 
 /// Encode a replayed event from the DB as an SSE event.
-fn encode_replay_event(
+fn encode_replay_event(stored: &StoredEvent) -> Result<sse::Event, axum::Error> {
+    to_sse_event(stored.id, &stored.topic, stored.transaction_id, stored.event.clone())
+}
+
+/// The SSE event type is the event topic (e.g. "std.vault.withdraw").
+fn to_sse_event(
     id: i64,
-    transaction_id: &TransactionId,
-    event: &tari_engine_types::events::Event,
+    topic: &str,
+    transaction_id: TransactionId,
+    event: Encoded<Event>,
 ) -> Result<sse::Event, axum::Error> {
-    let tx_event = TransactionEventMinimal {
-        transaction_id,
-        event: event.into(),
-    };
     sse::Event::default()
-        .event(event.topic())
+        .event(topic)
         .id(id.to_string())
-        .json_data(&tx_event)
-}
-
-#[derive(serde::Serialize)]
-struct TransactionEventMinimal<'a> {
-    pub transaction_id: &'a TransactionId,
-    pub event: EventMinimal<'a>,
-}
-
-impl<'a> From<&'a TransactionEvent> for TransactionEventMinimal<'a> {
-    fn from(tx_event: &'a TransactionEvent) -> Self {
-        let event = &*tx_event.event;
-        Self {
-            transaction_id: &tx_event.transaction_id,
-            event: event.into(),
-        }
-    }
-}
-
-#[derive(serde::Serialize)]
-struct EventMinimal<'a> {
-    substate_id: Option<&'a SubstateId>,
-    template_address: &'a TemplateAddress,
-    payload: &'a Metadata,
-    // no topic since it is already emitted in the SSE event
-}
-
-impl<'a> From<&'a tari_engine_types::events::Event> for EventMinimal<'a> {
-    fn from(event: &'a tari_engine_types::events::Event) -> Self {
-        Self {
-            substate_id: event.substate_id(),
-            template_address: event.template_address(),
-            payload: event.payload(),
-        }
-    }
+        .json_data(StreamedTransactionEvent { transaction_id, event })
 }
 
 #[cfg(test)]
 mod tests {
     use std::{sync::Arc, time::Duration};
 
-    use tari_engine_types::events::Event;
+    use tari_ootle_common_types::Epoch;
+    use tari_template_lib_types::{Metadata, TemplateAddress};
     use tokio::sync::{broadcast, mpsc};
 
     use super::*;
-    use crate::storage_sqlite::insert_test_events;
+    use crate::{
+        storage_sqlite::insert_test_events,
+        store::{IndexerStore, IndexerStoreWriteTransaction},
+    };
 
     fn live_event(id: i64, topic: &str) -> TransactionEvent {
+        let event = Event::new(None, TemplateAddress::default(), topic.to_string(), Metadata::new());
         TransactionEvent {
             id,
             transaction_id: TransactionId::default(),
-            event: Arc::new(Event::new(
-                None,
-                TemplateAddress::default(),
-                topic.to_string(),
-                Metadata::new(),
-            )),
+            encoded: Encoded::encode(&event).unwrap(),
+            event: Arc::new(event),
         }
+    }
+
+    /// The JSON `data` of `event` as a client receives it.
+    async fn sent_data(event: sse::Event) -> StreamedTransactionEvent {
+        let stream = futures::stream::iter([Ok::<_, std::convert::Infallible>(event)]);
+        let body = Sse::new(stream).into_response().into_body();
+        let text = String::from_utf8(axum::body::to_bytes(body, usize::MAX).await.unwrap().to_vec()).unwrap();
+        let data = text
+            .lines()
+            .find_map(|line| line.strip_prefix("data: "))
+            .unwrap_or_else(|| panic!("no data line in {text:?}"));
+        serde_json::from_str(data).unwrap()
+    }
+
+    #[tokio::test]
+    async fn live_and_replayed_events_are_sent_as_the_same_streamed_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("indexer.db");
+        let store = ReadOnlyStore::new(SqliteIndexerStore::try_create(db_path.clone()).unwrap());
+        insert_test_events(&db_path, &["std.vault.deposit"]);
+        let live = live_event(1, "std.vault.deposit");
+
+        let page = store
+            .get_unpruned_events_after_id(replay_query(&EventFilter::default(), 10), 0, 10)
+            .await
+            .unwrap()
+            .unwrap();
+        let replayed = sent_data(encode_replay_event(&page.events[0]).unwrap()).await;
+        let sent_live = sent_data(encode_transaction_event(&live).unwrap()).await;
+
+        assert_eq!(sent_live.transaction_id, live.transaction_id);
+        assert_eq!(sent_live.event.decode().unwrap(), *live.event);
+        assert_eq!(replayed.transaction_id, live.transaction_id);
+        assert_eq!(replayed.event, sent_live.event);
     }
 
     async fn next_event_id(rx: &mut mpsc::Receiver<Result<sse::Event, axum::Error>>) -> Option<String> {
@@ -389,5 +446,49 @@ mod tests {
             publisher.send(live_event(id, topic)).unwrap();
         }
         assert_eq!(next_event_id(&mut rx).await.as_deref(), Some("8"));
+    }
+
+    #[tokio::test]
+    async fn a_replay_from_behind_a_pruned_event_reports_it_pruned() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("indexer.db");
+        let store = SqliteIndexerStore::try_create(db_path.clone()).unwrap();
+        insert_test_events(&db_path, &["a.hit"; 2]);
+        store
+            .with_write_tx(|tx| tx.prune_events_before_epoch(Epoch(1), 100))
+            .await
+            .unwrap();
+        insert_test_events(&db_path, &["a.hit"]);
+
+        let store = ReadOnlyStore::new(store);
+        let query = replay_query(&EventFilter::default(), 10);
+        let (tx, _rx) = mpsc::channel(16);
+        let replay = |after_id| replay_stored(&store, &query, after_id, 10, 10, &tx);
+
+        assert_eq!(replay(1).await.unwrap(), Replay::Pruned);
+        assert_eq!(replay(2).await.unwrap(), Replay::CaughtUp(3));
+    }
+
+    #[tokio::test]
+    async fn dropping_a_replay_stream_releases_its_subscription_without_a_matching_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteIndexerStore::try_create(dir.path().join("indexer.db")).unwrap();
+        let (publisher, broadcast_rx) = broadcast::channel(4);
+        let filter = EventFilter {
+            topic: Some("never.emitted".into()),
+            ..Default::default()
+        };
+
+        let stream = replay_then_live_stream(ReadOnlyStore::new(store), broadcast_rx, filter, 0);
+        drop(stream);
+        publisher.send(live_event(1, "common.miss")).unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while publisher.receiver_count() > 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the replay task outlived its response stream");
     }
 }

@@ -29,8 +29,6 @@
 # HTTP UI listener address (default = "127.0.0.1:15000")
 #web_ui_address = "127.0.0.1:15000"
 
-# How often do we want to scan for changes. (default = 10)
-#block_scanning_interval=10
 # How long a shard group waits before reopening its state sync stream after it fails, or after a
 # validator that does not follow its tip closes it. (default = 60)
 #state_scanning_interval=60
@@ -59,18 +57,45 @@
 #transaction_retention_epochs = 50
 
 # How many epochs past the epoch its transaction committed in a transaction receipt is retained.
-# Unset (the default) or "forever" retains receipts indefinitely. A stored transaction reports its
+# "forever" retains receipts indefinitely. (default = 1000) A stored transaction reports its
 # outcome from its receipt, so a window not longer than transaction_retention_epochs is raised to one
 # epoch longer, and receipts are retained forever while transactions are.
 #transaction_receipt_retention_epochs = 1000
 
-# How many epochs past the epoch its transaction committed in an event is retained. Unset (the default)
-# or "forever" retains events indefinitely. A pruned event no longer answers event queries.
+# How many epochs past the epoch its transaction committed in an event is retained. "forever" retains
+# events indefinitely. (default = 1000) A pruned event no longer answers event queries, and the event
+# stream refuses (410) to resume from a cursor older than the newest pruned event.
 #event_retention_epochs = 1000
+
+# How many epochs past the epoch a UTXO was spent in its tombstone is retained. "forever" retains
+# tombstones indefinitely. (default = 504, about a week) A UTXO stream resuming from below a pruned
+# tombstone is told its spends are incomplete, and the wallet checks the outputs it holds in that shard.
+#utxo_tombstone_retention_epochs = 504
 
 # How long, in seconds, each pruner idles between passes once it has nothing left to prune.
 # Only used when a retention window is set. (default = 3600)
 #prune_interval = 3600
+
+#[indexer.logging]
+## A filter is a comma-separated list of `target=level` directives plus an optional bare level for every other target.
+## A directive matches every target it prefixes and the longest match decides; `off` silences a target. A sink whose
+## writer falls behind drops lines, so logging never slows the node, and warns about it.
+## The directory log files are written to, relative to the base path (default = "log/indexer")
+#directory = "log/indexer"
+## The events printed to stdout. RUST_LOG, when set, replaces it. (default = "tari::application=info,...")
+#console = "tari::application=info,tari::indexer=info,tari::ootle=info"
+## How events are printed to stdout: "text", or "json" (one object per event, for log shippers) (default = "text")
+#console_format = "text"
+#
+## Each [indexer.logging.files.<name>] table configures <directory>/<name>.log. The default is indexer. A table changes
+## only the keys it sets, and a new name adds a file.
+#[indexer.logging.files.indexer]
+## The events written to this file; "off" disables it (default = "tari::application=debug,tari::indexer=debug,...")
+#filter = "tari::indexer=debug,tari::ootle=info"
+## Rotate the file at this size: indexer.log becomes indexer.1.log, and so on (default = 200)
+#max_file_size_mb = 200
+## The number of rotated files kept (default = 4)
+#max_rotated_files = 4
 
 [indexer.p2p]
 #enable_mdns = true

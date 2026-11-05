@@ -26,7 +26,6 @@ use std::{fs, fs::OpenOptions, io::Write, panic, time::SystemTime};
 
 use clap::Parser;
 use log::*;
-use tari_common::initialize_logging;
 use tari_ootle_app_utilities::{configuration::load_configuration, keypair::setup_keypair_prompt};
 use tari_shutdown::Shutdown;
 use tari_validator_node::{ApplicationConfig, node, run_validator_node};
@@ -40,24 +39,9 @@ const DEBUG_PORT: u16 = console_subscriber::Server::DEFAULT_PORT;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Setup a panic hook which prints the default rust panic message but also exits the process. This makes a panic in
-    // any thread "crash" the system instead of silently continuing.
-    let default_hook = panic::take_hook();
-    panic::set_hook(Box::new(move |info| {
-        handle_panic(info);
-        default_hook(info);
-        node::trigger_panic_notifier();
-    }));
+    install_panic_hook(cfg!(panic = "abort"));
 
     let cli = Cli::parse();
-    // enable tokio tracing via tokio-console
-    #[cfg(feature = "tokio_debug")]
-    console_subscriber::Builder::default()
-        .server_addr((
-            std::net::Ipv4Addr::LOCALHOST,
-            cli.tokio_console_port.unwrap_or(DEBUG_PORT),
-        ))
-        .init();
 
     let config_path = cli.common.config_path();
     let cfg = load_configuration(config_path, true, &cli, Some(cli.network()))?;
@@ -76,12 +60,19 @@ async fn main() -> anyhow::Result<()> {
             );
         }
     });
-    if let Err(e) = initialize_logging(
-        &cli.common.log_config_path("validator"),
-        &cli.common.get_base_path(),
-        include_str!("../log4rs_sample.yml"),
-    ) {
-        eprintln!("{}", e);
+    let _logging = tari_logging::init(
+        &config.validator_node.logging,
+        config.common.base_path(),
+        extra_log_layers(&cli),
+    )?;
+    let log4rs_config = cli.common.log_config_path("validator");
+    if log4rs_config.exists() {
+        warn!(
+            target: LOG_TARGET,
+            "{} is not read: logging is configured in the [validator_node.logging] section of {}",
+            log4rs_config.display(),
+            cli.common.config_path().display(),
+        );
     }
 
     match cli.command {
@@ -134,6 +125,40 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Makes a panic in any thread crash the node: the hook logs and records the panic, prints the default message and
+/// notifies the node to shut down.
+///
+/// A process that aborts on panic exits as soon as the hook returns, without running the destructor that drains the
+/// log queues, so `abort_follows` has the hook drain them itself. Logging is closed from then on.
+fn install_panic_hook(abort_follows: bool) {
+    let default_hook = panic::take_hook();
+    panic::set_hook(Box::new(move |info| {
+        handle_panic(info);
+        default_hook(info);
+        node::trigger_panic_notifier();
+        if abort_follows {
+            tari_logging::flush_and_close();
+        }
+    }));
+}
+
+#[cfg(feature = "tokio_debug")]
+fn extra_log_layers(cli: &Cli) -> Vec<tari_logging::BoxedLayer> {
+    vec![Box::new(
+        console_subscriber::ConsoleLayer::builder()
+            .server_addr((
+                std::net::Ipv4Addr::LOCALHOST,
+                cli.tokio_console_port.unwrap_or(DEBUG_PORT),
+            ))
+            .spawn::<tari_logging::Registry>(),
+    )]
+}
+
+#[cfg(not(feature = "tokio_debug"))]
+fn extra_log_layers(_cli: &Cli) -> Vec<tari_logging::BoxedLayer> {
+    Vec::new()
+}
+
 fn handle_panic(panic_info: &panic::PanicHookInfo) {
     fn format_current_time() -> String {
         let now = SystemTime::now();
@@ -170,5 +195,67 @@ fn handle_panic(panic_info: &panic::PanicHookInfo) {
         })
     {
         warn!(target: LOG_TARGET, "Failed to write panic log file: {}", err);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{env, process::Command};
+
+    use tari_validator_node::logging::default_logging_config;
+
+    use super::*;
+
+    const CHILD_DIR_VAR: &str = "OOTLE_VN_PANIC_TEST_DIR";
+    const PANIC_MESSAGE: &str = "panic-flush-test-4f1c";
+    const BACKLOG_BYTES: usize = 32 * 1024 * 1024;
+
+    /// Under `panic = 'abort'` the process ends as the hook returns, so the panic line reaches the log file only if
+    /// the hook drains the queue. The child panics in a process that aborts right after the hook.
+    #[test]
+    fn panic_message_reaches_the_log_file_when_the_process_aborts() {
+        let dir = tempfile::tempdir().unwrap();
+        let status = Command::new(env::current_exe().unwrap())
+            .args([
+                "tests::panicking_child",
+                "--exact",
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CHILD_DIR_VAR, dir.path())
+            .status()
+            .unwrap();
+        assert!(!status.success(), "the child must abort");
+
+        let log = fs::read_to_string(dir.path().join("log/validator-node/ootle.log")).unwrap_or_default();
+        assert!(
+            log.contains(PANIC_MESSAGE),
+            "panic message missing from the {} bytes of ootle.log",
+            log.len()
+        );
+    }
+
+    #[test]
+    #[ignore = "run as a child process by panic_message_reaches_the_log_file_when_the_process_aborts"]
+    fn panicking_child() {
+        let Some(dir) = env::var_os(CHILD_DIR_VAR) else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+        // The panic hook also writes a panic file into the working directory.
+        env::set_current_dir(&dir).unwrap();
+        let _logging = tari_logging::init(&default_logging_config(), &dir, Vec::new()).unwrap();
+        // A line large enough to keep the writer busy while the hook runs, so the panic line is still queued behind it
+        // when the hook returns.
+        debug!(target: LOG_TARGET, "{}", "x".repeat(BACKLOG_BYTES));
+
+        install_panic_hook(true);
+        let hook = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            hook(info);
+            std::process::abort();
+        }));
+        panic!("{PANIC_MESSAGE}");
     }
 }

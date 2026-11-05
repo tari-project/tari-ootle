@@ -1,10 +1,10 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common_types::types::FixedHash;
 use tari_consensus_types::Decision;
 use tari_ootle_common_types::hashing::finalized_transaction_hasher;
 use tari_ootle_transaction::TransactionId;
+use tari_sidechain::FixedHash;
 use tari_state_tree::{KeyedProofTree, LeafKey, TreeHash};
 
 use super::{BlockCommands, BlockError, Command};
@@ -82,6 +82,8 @@ mod tests {
             evidence: Default::default(),
             transaction_fee: 0,
             leader_fee: None,
+            fee_intent_only: false,
+            locked_epoch: crate::consensus_models::LockedEpoch::zero(),
         }
     }
 
@@ -126,28 +128,12 @@ mod tests {
     }
 
     fn root_of(block: &Block) -> TreeHash {
-        let root = block
-            .header()
-            .transaction_merkle_root()
-            .expect("a version 2 block has a root");
-        TreeHash::from(root.into_array())
-    }
-
-    #[test]
-    fn a_block_before_version_2_has_no_transaction_merkle_root() {
-        for protocol_version in [ProtocolVersion::V0, ProtocolVersion::V1] {
-            let block = block(protocol_version, commands()).unwrap();
-            assert_eq!(block.header().transaction_merkle_root(), None);
-            assert!(matches!(
-                block.compute_transaction_proof(&tx(1)),
-                Err(BlockError::NoTransactionMerkleRoot { .. })
-            ));
-        }
+        TreeHash::from(block.header().transaction_merkle_root().into_array())
     }
 
     #[test]
     fn each_finalized_transaction_proves_its_decision() {
-        let block = block(ProtocolVersion::V2, commands()).unwrap();
+        let block = block(ProtocolVersion::V0, commands()).unwrap();
         let root = root_of(&block);
 
         for (seed, decision) in [(1, abort()), (2, Decision::Commit), (3, abort())] {
@@ -174,7 +160,7 @@ mod tests {
 
     #[test]
     fn a_transaction_the_block_does_not_finalize_proves_absent() {
-        let block = block(ProtocolVersion::V2, commands()).unwrap();
+        let block = block(ProtocolVersion::V0, commands()).unwrap();
         let root = root_of(&block);
 
         for seed in [4, 5, 6] {
@@ -188,7 +174,7 @@ mod tests {
 
     #[test]
     fn the_block_id_commits_to_each_decision() {
-        let original = block(ProtocolVersion::V2, commands()).unwrap();
+        let original = block(ProtocolVersion::V0, commands()).unwrap();
 
         let commands = BlockCommands::init(commands().into_iter().map(|cmd| {
             if cmd == local_only(1, abort()) {
@@ -198,15 +184,38 @@ mod tests {
             }
         }))
         .unwrap();
-        let changed = block(ProtocolVersion::V2, commands).unwrap();
+        let changed = block(ProtocolVersion::V0, commands).unwrap();
 
         assert_ne!(root_of(&original), root_of(&changed));
         assert_ne!(original.id(), changed.id());
     }
 
     #[test]
+    fn a_header_whose_root_disagrees_with_the_commands_proves_nothing() {
+        let honest = block(ProtocolVersion::V0, commands()).unwrap();
+        let other = block(
+            ProtocolVersion::V0,
+            BlockCommands::init([local_only(99, Decision::Commit)]).unwrap(),
+        )
+        .unwrap();
+        let mismatched = Block::new(
+            other.header().clone(),
+            honest.justify().clone(),
+            honest.commands().clone(),
+            None,
+        );
+
+        for seed in [2, 99] {
+            assert!(matches!(
+                mismatched.compute_transaction_proof(&tx(seed)),
+                Err(BlockError::TransactionMerkleRootMismatch { .. })
+            ));
+        }
+    }
+
+    #[test]
     fn an_empty_block_commits_to_the_empty_tree() {
-        let block = block(ProtocolVersion::V2, BlockCommands::empty()).unwrap();
+        let block = block(ProtocolVersion::V0, BlockCommands::empty()).unwrap();
         assert_eq!(root_of(&block), tari_state_tree::SPARSE_MERKLE_PLACEHOLDER_HASH);
     }
 }

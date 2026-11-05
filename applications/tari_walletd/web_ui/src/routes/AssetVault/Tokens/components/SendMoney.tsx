@@ -65,7 +65,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     badge: null,
     memo: "",
     attachSenderAddress: false,
-    payRef: "",
+    destinationTag: "",
     swapPoolAddress: "",
     swapInputAmount: "",
   };
@@ -110,16 +110,16 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     }
   }, [props.open, props.resource_type, props.resource_address]);
 
-  // Pre-fill the pay-ref input from the destination address's embedded pay-ref (if any). The pay-ref is
-  // decoupled from the "attach sender address" toggle: it drives either a PayRefAndBytes memo or, when sender
-  // address is attached, the pay-ref slot inside the SenderAddress memo. Skips when the user has already typed
-  // something or the destination's pay-ref is non-UTF-8 bytes.
+  // Pre-fill the destination tag input from the tag embedded in the destination address (if any). The tag is
+  // decoupled from the "attach sender address" toggle: it drives either a DestinationTagAndBytes memo or, when sender
+  // address is attached, the tag slot inside the SenderAddress memo. Skips when the user has already typed something
+  // or the address's destination tag is non-UTF-8 bytes.
   useEffect(() => {
     if (!transferFormState.address) return;
     const decoded = decodeOotleAddressOrNull(transferFormState.address);
-    if (!decoded || typeof decoded.payRef !== "string" || decoded.payRef.length === 0) return;
-    const prefill = decoded.payRef;
-    setTransferFormState((prev) => (prev.payRef ? prev : { ...prev, payRef: prefill }));
+    if (!decoded || typeof decoded.destinationTag !== "string" || decoded.destinationTag.length === 0) return;
+    const prefill = decoded.destinationTag;
+    setTransferFormState((prev) => (prev.destinationTag ? prev : { ...prev, destinationTag: prefill }));
   }, [transferFormState.address]);
 
   const fetchPoolRate = useCallback(async (poolAddress: string) => {
@@ -316,16 +316,16 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
             ? { Message: transferFormState.memo }
             : undefined,
         attach_sender_address: transferFormState.attachSenderAddress,
-        pay_ref: transferFormState.payRef || null,
+        destination_tag: transferFormState.destinationTag || null,
         swap_pool_address: transferFormState.swapPoolAddress || null,
         swap_input_amount: dryRunSwapInputAmount,
       };
 
-      const result = await sendIt?.({ ...currentTransfer, dry_run: true, max_fee: 1 });
-      const resp = await transactionsWaitResult({ transaction_id: result.transaction_id, timeout_secs: null });
-      const transactionResult = resp.result?.result;
+      const resp = await sendIt?.({ ...currentTransfer, dry_run: true, max_fee: 1 });
+      const transactionResult = resp?.dry_run_result?.finalize.result;
+      const estimatedFee = resp?.required_fees;
 
-      if (!transactionResult) {
+      if (!transactionResult || estimatedFee == null) {
         throw new Error("Fee estimation failed");
       }
       if ("Reject" in transactionResult) {
@@ -334,8 +334,6 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
       if ("AcceptFeeRejectRest" in transactionResult) {
         throw new Error(`Transaction rejected: ${rejectReasonToString(transactionResult.AcceptFeeRejectRest[1])}`);
       }
-
-      const estimatedFee = resp.final_fee;
 
       // Ask the server to calculate the precise swap input from the actual fee estimate
       let swapInputAmount = "";
@@ -449,7 +447,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
             ? { Message: transferFormState.memo }
             : undefined,
         attach_sender_address: transferFormState.attachSenderAddress,
-        pay_ref: transferFormState.payRef || null,
+        destination_tag: transferFormState.destinationTag || null,
         swap_pool_address: transferFormState.swapPoolAddress || null,
         swap_input_amount: transferFormState.swapInputAmount ? BigInt(transferFormState.swapInputAmount) : null,
       };

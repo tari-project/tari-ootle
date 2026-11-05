@@ -43,7 +43,8 @@ impl KeyType {
 /// public nonce `R`, and the network the resulting key is bound to.
 ///
 /// Both travel together because neither is meaningful alone — the tweak is
-/// `c = H_stealth_owner(network, k·R)`, so the same nonce yields a different key on each network.
+/// `c = H_stealth_owner(network, v·R)` (`v` the view key at the same derivation path), so the same
+/// nonce yields a different key on each network.
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct StealthTweak {
     pub network: u8,
@@ -129,7 +130,7 @@ pub enum SigningField {
     Inputs = 5,
     MinEpoch = 6,
     MaxEpoch = 7,
-    IsSealSignerAuthorized = 8,
+    MainSigner = 8,
     DryRun = 9,
     TransactionNonce = 10,
     BlobHashes = 11,
@@ -157,7 +158,7 @@ impl TryFrom<u8> for SigningField {
             5 => Ok(Inputs),
             6 => Ok(MinEpoch),
             7 => Ok(MaxEpoch),
-            8 => Ok(IsSealSignerAuthorized),
+            8 => Ok(MainSigner),
             9 => Ok(DryRun),
             10 => Ok(TransactionNonce),
             11 => Ok(BlobHashes),
@@ -173,9 +174,10 @@ impl TryFrom<u8> for SigningField {
 /// procedure. The transaction fields themselves follow as `Segment` frames.
 ///
 /// `stealth_public_nonce` is set for confidential (stealth) transfers: when present, the device
-/// signs with the stealth-derived key `c + k` (`c = H_stealth_owner(network, k·R)`, `R` the spent
-/// UTXO's sender public nonce) instead of the raw account key. It is a key-derivation parameter
-/// only — not part of the signed message — so the message recipe is identical to the public path.
+/// signs with the stealth-derived key `c + k` (`c = H_stealth_owner(network, v·R)`, `v` the view key
+/// at the same derivation path, `R` the spent UTXO's sender public nonce) instead of the raw account
+/// key. It is a key-derivation parameter only — not part of the signed message — so the message
+/// recipe is identical to the public path.
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct SignTransactionHeader {
     pub account: u64,
@@ -187,7 +189,8 @@ pub struct SignTransactionHeader {
 
 /// Response returned on the `Finalize` frame once the user approves.
 ///
-/// `signature` is the tari `SchnorrSignatureBytes` layout: `R.compress()(32) || s(32)`.
+/// `signature` is the standard 64-byte sr25519 encoding: `R.compress()(32) || s(32)` with the
+/// marker bit `0x80` set in the last byte.
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct SignTransactionResponse {
     pub public_key: [u8; 32],

@@ -57,16 +57,15 @@ use std::{cell::RefCell, fmt::Debug, rc::Rc};
 
 pub use pay_fee::PayFee;
 use tari_engine_types::{
-    commit_result::{FinalizeResult, RejectReason},
-    component::Component,
+    commit_result::{FeeIntentFallback, FinalizeResult, RejectReason},
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     fees::FeeReceipt,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     limits::{CompileCounts, ModuleShape},
     lock::LockFlag,
     published_template::TemplateBlob,
+    substate::SubstateId,
 };
-use tari_ootle_template_metadata::MetadataHash;
 use tari_ootle_transaction::{
     AllocatableAddressType,
     ComponentReference,
@@ -106,13 +105,14 @@ use tari_template_lib::{
         Metadata,
         NonFungibleAddress,
         TemplateAddress,
+        TemplateMetadataHash,
         ValidatorFeePoolAddress,
         crypto::RistrettoPublicKeyBytes,
         engine_args::IntrinsicId,
         stealth::StealthTransferStatement,
     },
 };
-pub use tracker::{ComputeAllowance, ComputeFunding, FinalizedState, StateTracker};
+pub use tracker::{ComputeAllowance, ComputeFunding, DeclaredInputLoad, FinalizedState, StateTracker};
 pub use working_state::ChargeableState;
 
 use crate::{
@@ -123,13 +123,26 @@ use crate::{
     wasm::WasmInstanceCache,
 };
 
+/// What a call on a component needs of it: the header fields its frame runs under, and the
+/// substates its state holds.
+#[derive(Debug, Clone)]
+pub struct LoadedComponent {
+    pub address: ComponentAddress,
+    pub template_address: TemplateAddress,
+    pub entity_id: EntityId,
+    pub state_scope: IndexedWellKnownTypes,
+}
+
 pub trait RuntimeInterface {
     fn next_entity_id(&self) -> Result<EntityId, RuntimeError>;
     fn emit_event(&self, topic: String, payload: Metadata) -> Result<(), RuntimeError>;
 
     fn emit_log(&self, level: LogLevel, message: String) -> Result<(), RuntimeError>;
 
-    fn load_component(&self, call: ComponentReference) -> Result<(ComponentAddress, Component), RuntimeError>;
+    /// Loads a component and indexes its state, charging
+    /// [`tari_engine_types::limits::component_load_points`] for what the state holds before
+    /// indexing it. The state itself stays in the store.
+    fn load_component(&self, call: ComponentReference) -> Result<LoadedComponent, RuntimeError>;
 
     fn lock_component(&self, address: ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError>;
 
@@ -195,7 +208,13 @@ pub trait RuntimeInterface {
     ) -> Result<BucketId, RuntimeError>;
 
     fn checkpoint_fee_intent(&self) -> Result<(), RuntimeError>;
+    /// The substates the transaction has created so far, excluding new versions of substates it was given.
+    fn created_substates(&self) -> Result<Vec<SubstateId>, RuntimeError>;
     fn finalize(&self) -> Result<FinalizeResult, RuntimeError>;
+    /// [`Self::finalize`], also settling what committing the fee intent alone would persist, for
+    /// consensus to commit if it cannot commit the full result. The fallback is `None` unless the
+    /// transaction commits in full and its fee intent can pay for the state it persists.
+    fn finalize_with_fee_intent_fallback(&self) -> Result<(FinalizeResult, Option<FeeIntentFallback>), RuntimeError>;
     fn finalize_failure(&self, reason: RejectReason) -> Result<FinalizeResult, RuntimeError>;
     fn validate_finalized(&self) -> Result<(), RuntimeError>;
 
@@ -213,12 +232,10 @@ pub trait RuntimeInterface {
 
     /// Checks whether the current execution context has access to the given component method.
     fn check_component_access_rules(&self, method: &str) -> Result<(), RuntimeError>;
-    /// Checks whether the current execution context has owner permission of the given component.
-    fn check_component_ownership(&self, action: ActionIdent) -> Result<(), RuntimeError>;
-
-    /// Ends the current frame's call boundary by revoking the proofs that were in scope only for the boundary
-    /// check. Must run after the frame's access rule has been evaluated and before anything acts in the frame.
-    fn revoke_boundary_proofs(&self) -> Result<(), RuntimeError>;
+    /// Checks the upgrade rule of the component behind `component_lock` against the current frame's scope. Runs
+    /// before the migration frame is pushed: the migration frame carries no authority of its own, so whoever is
+    /// upgrading must satisfy the rule in the scope the instruction runs in.
+    fn check_component_upgrade_rule(&self, component_lock: &LockedSubstate) -> Result<(), RuntimeError>;
 
     /// Asserts that the signer badge for `public_key` is in the transaction's base auth scope, i.e. that the
     /// transaction is signed by that key.
@@ -233,7 +250,7 @@ pub trait RuntimeInterface {
     fn publish_template(
         &self,
         template: TemplateBlob,
-        metadata_hash: Option<MetadataHash>,
+        metadata_hash: Option<TemplateMetadataHash>,
         template_def: TemplateDef,
     ) -> Result<(), RuntimeError>;
     fn put_on_workspace(&self, id: WorkspaceId, value: IndexedValue) -> Result<(), RuntimeError>;
@@ -296,6 +313,17 @@ pub trait RuntimeInterface {
     /// items as the transaction can still pay for, and checks their nesting depth on the way.
     /// Input holding more is charged what was read and fails out of compute.
     fn charge_engine_arg(&self, input: &[u8]) -> Result<(), EngineArgChargeError>;
+
+    /// Charges the flat host-side cost of an engine call, before its argument is read.
+    /// Priced by [`tari_engine_types::limits::NativeExecutionPoints::PER_ENGINE_CALL`] and charged
+    /// against the same compute allowance as native verification.
+    fn charge_engine_call(&self) -> Result<(), RuntimeError>;
+
+    /// Charges an engine call's encoded `response` before it is written into the template's memory.
+    /// Priced by [`tari_engine_types::limits::engine_response_points`] and charged against the same
+    /// compute allowance as native verification. Its items are counted as
+    /// [`Self::charge_engine_arg`] counts an argument's.
+    fn charge_engine_response(&self, response: &[u8]) -> Result<(), RuntimeError>;
 
     /// The template instances this transaction has created. A borrow of it must not be held across a
     /// template call, which may reach it again through a nested call.

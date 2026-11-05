@@ -41,7 +41,8 @@ export type Instruction =
          */
         binary: number;
         /**
-         * Optional multihash of off-chain CBOR metadata
+         * Optional reference to off-chain template metadata, stored on the published template without
+         * interpretation (conventionally a multihash of the CBOR metadata)
          */
         metadata_hash: string | null;
       };
@@ -58,4 +59,6 @@ export type Instruction =
   | {
       UpdateComponentTemplate: { component: ComponentReference; migrate: MigrateFunction | null; new_template: Hash32 };
     }
-  | { PutIntoBucket: { src: WorkspaceOffsetId; dest: WorkspaceOffsetId } };
+  | { PutIntoBucket: { src: WorkspaceOffsetId; dest: WorkspaceOffsetId } }
+  | { AuthorizeProof: { proof: WorkspaceOffsetId } }
+  | { DropProofAuthorization: { proof: WorkspaceOffsetId } };

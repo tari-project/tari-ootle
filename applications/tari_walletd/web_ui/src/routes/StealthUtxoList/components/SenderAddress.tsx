@@ -22,18 +22,18 @@ import { shortenString } from "@utils/helpers";
 import { useMemo, useState } from "react";
 import { MdCheckCircle, MdPerson, MdPersonAdd } from "react-icons/md";
 
-function formatPayRef(payRef: string | Uint8Array | null | undefined): string | null {
-  if (!payRef) return null;
-  if (typeof payRef === "string") return payRef.length > 0 ? payRef : null;
-  if (payRef.length === 0) return null;
+function formatDestinationTag(destinationTag: string | Uint8Array | null | undefined): string | null {
+  if (!destinationTag) return null;
+  if (typeof destinationTag === "string") return destinationTag.length > 0 ? destinationTag : null;
+  if (destinationTag.length === 0) return null;
   // Non-UTF-8 bytes: show as hex so the user can still copy/identify the value.
-  return Array.from(payRef)
+  return Array.from(destinationTag)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
 
-// Identity key for "is this the same account?" comparisons. We drop the optional pay-ref so an incoming
-// SenderAddress with a pay-ref still matches the wallet's own account address (which has no pay-ref) or an
+// Identity key for "is this the same account?" comparisons. We drop the optional destination tag so an incoming
+// SenderAddress with a destination tag still matches the wallet's own account address (which has no tag) or an
 // address-book entry stored without one.
 function identityKey(address: string): string | null {
   const decoded = decodeOotleAddressOrNull(address);
@@ -52,7 +52,7 @@ export function SenderAddress({ address }: { address: string }) {
 
   // The sender may be one of the wallet's own accounts (e.g. a self-transfer or change) — there's nothing to
   // "add to contacts" in that case. We compare on the (account_key, view_key) identity so a SenderAddress that
-  // carries a pay-ref still matches the bare account or address-book entry.
+  // carries a destination tag still matches the bare account or address-book entry.
   const senderIdentity = useMemo(() => identityKey(address), [address]);
   const ownAccount = useMemo(
     () => accountsData?.accounts?.find((a) => senderIdentity !== null && identityKey(a.address) === senderIdentity),
@@ -63,7 +63,10 @@ export function SenderAddress({ address }: { address: string }) {
       addressBook?.entries?.find((entry) => senderIdentity !== null && identityKey(entry.address) === senderIdentity),
     [addressBook, senderIdentity],
   );
-  const payRefText = useMemo(() => formatPayRef(decodeOotleAddressOrNull(address)?.payRef ?? null), [address]);
+  const destinationTagText = useMemo(
+    () => formatDestinationTag(decodeOotleAddressOrNull(address)?.destinationTag ?? null),
+    [address],
+  );
 
   const handleClose = () => {
     setDialogOpen(false);
@@ -92,9 +95,9 @@ export function SenderAddress({ address }: { address: string }) {
         <span>{shortenString(address)}</span>
       </Tooltip>
       <CopyToClipboard copy={address} />
-      {payRefText && (
-        <Tooltip title={`Pay reference: ${payRefText}`}>
-          <Chip size="small" color="info" variant="outlined" label={`ref: ${shortenString(payRefText)}`} />
+      {destinationTagText && (
+        <Tooltip title={`Destination tag: ${destinationTagText}`}>
+          <Chip size="small" color="info" variant="outlined" label={`ref: ${shortenString(destinationTagText)}`} />
         </Tooltip>
       )}
       {ownAccount ? (

@@ -13,7 +13,7 @@ enum MemoTag {
     U256 = 0x01,
     Message = 0x10,
     Bytes = 0x11,
-    PayRefAndBytes = 0x12,
+    DestinationTagAndBytes = 0x12,
     SenderAddress = 0x13,
 }
 
@@ -23,7 +23,7 @@ impl MemoTag {
             0x01 => Some(Self::U256),
             0x10 => Some(Self::Message),
             0x11 => Some(Self::Bytes),
-            0x12 => Some(Self::PayRefAndBytes),
+            0x12 => Some(Self::DestinationTagAndBytes),
             0x13 => Some(Self::SenderAddress),
             _ => None,
         }
@@ -34,10 +34,11 @@ const MAX_BYTES_LENGTH: usize = 253;
 
 /// Length of the key portion of a sender address memo body: account public key (32) + view public key (32).
 const SENDER_ADDRESS_KEYS_LENGTH: usize = 64;
-/// Maximum pay reference length carried by a sender address memo. Matches `tari_ootle_address::PayRef::MAX_LEN`.
-const SENDER_ADDRESS_MAX_PAY_REF_LENGTH: usize = 64;
-/// Maximum encoded sender address body: keys (64) + pay-ref length prefix (1) + pay reference (<= 64).
-const SENDER_ADDRESS_MAX_LENGTH: usize = SENDER_ADDRESS_KEYS_LENGTH + 1 + SENDER_ADDRESS_MAX_PAY_REF_LENGTH;
+/// Maximum destination tag length carried by a sender address memo. Matches
+/// `tari_ootle_address::DestinationTag::MAX_LEN`.
+const SENDER_ADDRESS_MAX_DESTINATION_TAG_LENGTH: usize = 64;
+/// Maximum encoded sender address body: keys (64) + destination tag length prefix (1) + destination tag (<= 64).
+const SENDER_ADDRESS_MAX_LENGTH: usize = SENDER_ADDRESS_KEYS_LENGTH + 1 + SENDER_ADDRESS_MAX_DESTINATION_TAG_LENGTH;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -51,13 +52,13 @@ pub enum Memo {
     Message(#[cfg_attr(feature = "ts", ts(type = "string"))] MaxString<MAX_BYTES_LENGTH>),
     /// Arbitrary bytes
     Bytes(#[cfg_attr(feature = "ts", ts(type = "string"))] MaxBytes<MAX_BYTES_LENGTH>),
-    /// Payment reference and bytes delimited by a single byte length prefix.
-    /// Length-delimited format: [pay_ref_len][pay_ref][arb bytes (typically utf-8 message)]
-    PayRefAndBytes(#[cfg_attr(feature = "ts", ts(type = "string"))] MaxBytes<MAX_BYTES_LENGTH>),
+    /// Destination tag and bytes delimited by a single byte length prefix.
+    /// Length-delimited format: [destination_tag_len][destination_tag][arb bytes (typically utf-8 message)]
+    DestinationTagAndBytes(#[cfg_attr(feature = "ts", ts(type = "string"))] MaxBytes<MAX_BYTES_LENGTH>),
     /// The sender's Ootle address, allowing the recipient to identify and save the sender as a contact.
     /// Encoded like an `OotleAddress` without the leading network byte (the network is implied by the wallet that
-    /// decrypts the memo): account public key (32) ++ view public key (32) ++ pay-ref length (1) ++ pay reference
-    /// (0-64). The pay reference is optional.
+    /// decrypts the memo): account public key (32) ++ view public key (32) ++ destination tag length (1) ++ destination
+    /// tag (0-64). The destination tag is optional.
     SenderAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] MaxBytes<SENDER_ADDRESS_MAX_LENGTH>),
 }
 
@@ -71,16 +72,16 @@ impl Memo {
     }
 
     /// Create a new `Memo::SenderAddress` from the sender's account public key, view public key and an optional
-    /// pay reference. Returns `None` if `pay_ref` exceeds the maximum pay reference length (64 bytes).
-    pub fn new_sender_address(account_key: [u8; 32], view_key: [u8; 32], pay_ref: &[u8]) -> Option<Self> {
-        if pay_ref.len() > SENDER_ADDRESS_MAX_PAY_REF_LENGTH {
+    /// destination tag. Returns `None` if `destination_tag` exceeds the maximum destination tag length (64 bytes).
+    pub fn new_sender_address(account_key: [u8; 32], view_key: [u8; 32], destination_tag: &[u8]) -> Option<Self> {
+        if destination_tag.len() > SENDER_ADDRESS_MAX_DESTINATION_TAG_LENGTH {
             return None;
         }
-        let mut body = Vec::with_capacity(SENDER_ADDRESS_KEYS_LENGTH + 1 + pay_ref.len());
+        let mut body = Vec::with_capacity(SENDER_ADDRESS_KEYS_LENGTH + 1 + destination_tag.len());
         body.extend_from_slice(&account_key);
         body.extend_from_slice(&view_key);
-        body.push(pay_ref.len() as u8); // <= 64, fits in u8
-        body.extend_from_slice(pay_ref);
+        body.push(destination_tag.len() as u8); // <= 64, fits in u8
+        body.extend_from_slice(destination_tag);
         let b = MaxBytes::new_checked(body)?;
         Some(Self::SenderAddress(b))
     }
@@ -97,53 +98,59 @@ impl Memo {
         Some(Self::Bytes(b))
     }
 
-    pub fn new_pay_ref_and_message<P: AsRef<[u8]>>(pay_ref: P, msg: &str) -> Option<Self> {
-        Self::new_pay_ref_and_bytes(pay_ref, msg)
+    pub fn new_destination_tag_and_message<P: AsRef<[u8]>>(destination_tag: P, msg: &str) -> Option<Self> {
+        Self::new_destination_tag_and_bytes(destination_tag, msg)
     }
 
-    /// Create a new `Memo::PayRefAndBytes` from a payment reference and message. If the combined length exceeds
+    /// Create a new `Memo::DestinationTagAndBytes` from a destination tag and message. If the combined length exceeds
     /// the maximum allowed length, the message is truncated to fit.
-    pub fn new_pay_ref_and_message_truncate<P: AsRef<[u8]>>(pay_ref: P, msg: &str) -> Option<Self> {
-        Self::new_pay_ref_and_bytes_truncate(pay_ref, msg.as_bytes())
+    pub fn new_destination_tag_and_message_truncate<P: AsRef<[u8]>>(destination_tag: P, msg: &str) -> Option<Self> {
+        Self::new_destination_tag_and_bytes_truncate(destination_tag, msg.as_bytes())
     }
 
-    /// Create a new `Memo::PayRefAndBytes` from a payment reference and bytes. If the combined length exceeds
+    /// Create a new `Memo::DestinationTagAndBytes` from a destination tag and bytes. If the combined length exceeds
     /// the maximum allowed length, the memo bytes are truncated to fit.
     ///
-    /// Returns `None` if the payment reference alone exceeds the maximum allowed length (i.e. it cannot fit even with
+    /// Returns `None` if the destination tag alone exceeds the maximum allowed length (i.e. it cannot fit even with
     /// an empty message).
-    pub fn new_pay_ref_and_bytes_truncate<P: AsRef<[u8]>, B: AsRef<[u8]>>(pay_ref: P, msg_bytes: B) -> Option<Self> {
-        let pr = pay_ref.as_ref();
-        let available_len = (Self::MAX_BYTES_LENGTH - 1).checked_sub(pr.len())?; // -1 for length prefix byte
+    pub fn new_destination_tag_and_bytes_truncate<P: AsRef<[u8]>, B: AsRef<[u8]>>(
+        destination_tag: P,
+        msg_bytes: B,
+    ) -> Option<Self> {
+        let tag = destination_tag.as_ref();
+        let available_len = (Self::MAX_BYTES_LENGTH - 1).checked_sub(tag.len())?; // -1 for length prefix byte
         let mb = msg_bytes.as_ref();
         let mb = if mb.len() > available_len {
             &mb[..available_len]
         } else {
             mb
         };
-        Self::new_pay_ref_and_bytes(pay_ref, mb)
+        Self::new_destination_tag_and_bytes(destination_tag, mb)
     }
 
-    pub fn new_pay_ref_and_bytes<P: AsRef<[u8]>, B: AsRef<[u8]>>(pay_ref: P, msg_bytes: B) -> Option<Self> {
-        let pr = pay_ref.as_ref();
+    pub fn new_destination_tag_and_bytes<P: AsRef<[u8]>, B: AsRef<[u8]>>(
+        destination_tag: P,
+        msg_bytes: B,
+    ) -> Option<Self> {
+        let tag = destination_tag.as_ref();
         let mb = msg_bytes.as_ref();
         // - 1 for length prefix byte
-        if mb.len() + pr.len() > Self::MAX_BYTES_LENGTH - 1 {
+        if mb.len() + tag.len() > Self::MAX_BYTES_LENGTH - 1 {
             return None;
         }
-        let mut combined = Vec::with_capacity(mb.len() + pr.len());
-        combined.push(u8::try_from(pr.len()).expect("new_pay_ref_and_bytes: length checked"));
-        combined.extend_from_slice(pr);
+        let mut combined = Vec::with_capacity(mb.len() + tag.len());
+        combined.push(u8::try_from(tag.len()).expect("new_destination_tag_and_bytes: length checked"));
+        combined.extend_from_slice(tag);
         combined.extend_from_slice(mb);
         let b = MaxBytes::new_checked(combined)?;
-        Some(Self::PayRefAndBytes(b))
+        Some(Self::DestinationTagAndBytes(b))
     }
 
     pub fn len(&self) -> usize {
         match self {
             Self::Message(s) => s.len(),
             Self::Bytes(b) => b.len(),
-            Self::PayRefAndBytes(b) => b.len(),
+            Self::DestinationTagAndBytes(b) => b.len(),
             Self::U256(b) => b.len(),
             Self::SenderAddress(b) => b.len(),
         }
@@ -159,7 +166,7 @@ impl Memo {
         match self {
             Self::Message(s) => Some(s),
             Self::Bytes(b) => str::from_utf8(b.as_ref()).ok(),
-            Self::PayRefAndBytes(body) => {
+            Self::DestinationTagAndBytes(body) => {
                 let (_, msg_bytes) = split_len_prefixed(body)?;
                 str::from_utf8(msg_bytes).ok()
             },
@@ -170,37 +177,38 @@ impl Memo {
     pub fn as_memo_message(&self) -> Option<&str> {
         match self {
             Self::Message(s) => Some(s),
-            Self::Bytes(_) | Self::PayRefAndBytes(_) | Self::U256(_) | Self::SenderAddress(_) => None,
+            Self::Bytes(_) | Self::DestinationTagAndBytes(_) | Self::U256(_) | Self::SenderAddress(_) => None,
         }
     }
 
     pub fn as_memo_bytes(&self) -> Option<&[u8]> {
         match self {
             Self::Bytes(b) => Some(b.as_ref()),
-            Self::Message(_) | Self::PayRefAndBytes(_) | Self::U256(_) | Self::SenderAddress(_) => None,
+            Self::Message(_) | Self::DestinationTagAndBytes(_) | Self::U256(_) | Self::SenderAddress(_) => None,
         }
     }
 
-    pub fn as_pay_ref(&self) -> Option<&[u8]> {
+    pub fn as_destination_tag(&self) -> Option<&[u8]> {
         match self {
             Self::U256(_) | Self::Message(_) | Self::Bytes(_) | Self::SenderAddress(_) => None,
-            Self::PayRefAndBytes(body) => split_len_prefixed(body).map(|(pay_ref, _)| pay_ref),
+            Self::DestinationTagAndBytes(body) => split_len_prefixed(body).map(|(destination_tag, _)| destination_tag),
         }
     }
 
-    pub fn as_pay_ref_and_message(&self) -> Option<(&[u8], &str)> {
-        self.as_pay_ref_and_bytes().and_then(|(pay_ref, msg_bytes)| {
-            let msg = str::from_utf8(msg_bytes).ok()?;
-            Some((pay_ref, msg))
-        })
+    pub fn as_destination_tag_and_message(&self) -> Option<(&[u8], &str)> {
+        self.as_destination_tag_and_bytes()
+            .and_then(|(destination_tag, msg_bytes)| {
+                let msg = str::from_utf8(msg_bytes).ok()?;
+                Some((destination_tag, msg))
+            })
     }
 
-    pub fn as_pay_ref_and_bytes(&self) -> Option<(&[u8], &[u8])> {
+    pub fn as_destination_tag_and_bytes(&self) -> Option<(&[u8], &[u8])> {
         match self {
             Self::U256(_) | Self::Message(_) | Self::Bytes(_) | Self::SenderAddress(_) => None,
-            Self::PayRefAndBytes(body) => {
-                let (pay_ref, msg_bytes) = split_len_prefixed(body)?;
-                Some((pay_ref, msg_bytes))
+            Self::DestinationTagAndBytes(body) => {
+                let (destination_tag, msg_bytes) = split_len_prefixed(body)?;
+                Some((destination_tag, msg_bytes))
             },
         }
     }
@@ -208,17 +216,17 @@ impl Memo {
     pub fn as_u256_bytes(&self) -> Option<&[u8]> {
         match self {
             Self::U256(b) => Some(b.as_ref()),
-            Self::Message(_) | Self::Bytes(_) | Self::PayRefAndBytes(_) | Self::SenderAddress(_) => None,
+            Self::Message(_) | Self::Bytes(_) | Self::DestinationTagAndBytes(_) | Self::SenderAddress(_) => None,
         }
     }
 
-    /// Returns the sender's `(account_public_key, view_public_key, pay_ref)` byte slices if this is a
-    /// `SenderAddress` memo. The account and view keys are 32 bytes each; `pay_ref` is 0-64 bytes (empty when no
-    /// pay reference was attached).
+    /// Returns the sender's `(account_public_key, view_public_key, destination_tag)` byte slices if this is a
+    /// `SenderAddress` memo. The account and view keys are 32 bytes each; `destination_tag` is 0-64 bytes (empty when
+    /// no destination tag was attached).
     pub fn as_sender_address(&self) -> Option<(&[u8], &[u8], &[u8])> {
         match self {
             Self::SenderAddress(b) => split_sender_address(b.as_ref()),
-            Self::U256(_) | Self::Message(_) | Self::Bytes(_) | Self::PayRefAndBytes(_) => None,
+            Self::U256(_) | Self::Message(_) | Self::Bytes(_) | Self::DestinationTagAndBytes(_) => None,
         }
     }
 
@@ -244,13 +252,13 @@ impl Memo {
                 writer.write_all(&[len])?;
                 writer.write_all(b.as_ref())?;
             },
-            Self::PayRefAndBytes(b) => {
-                writer.write_all(&[MemoTag::PayRefAndBytes as u8])?;
+            Self::DestinationTagAndBytes(b) => {
+                writer.write_all(&[MemoTag::DestinationTagAndBytes as u8])?;
                 writer.write_all(&[len])?;
                 writer.write_all(b.as_ref())?;
             },
             Self::SenderAddress(b) => {
-                // The body is self-delimiting (fixed-size keys + internal pay-ref length prefix), so we do not
+                // The body is self-delimiting (fixed-size keys + internal destination tag length prefix), so we do not
                 // write an outer length prefix.
                 writer.write_all(&[MemoTag::SenderAddress as u8])?;
                 writer.write_all(b.as_ref())?;
@@ -279,24 +287,24 @@ impl Memo {
                 Ok(Self::new_u256(arr))
             },
             MemoTag::SenderAddress => {
-                // Read the fixed-size keys and the pay-ref length prefix, then the pay reference itself.
+                // Read the fixed-size keys and the destination tag length prefix, then the destination tag itself.
                 let mut head = [0u8; SENDER_ADDRESS_KEYS_LENGTH + 1];
                 reader.read_exact(&mut head)?;
-                let pay_ref_len = head[SENDER_ADDRESS_KEYS_LENGTH] as usize;
-                if pay_ref_len > SENDER_ADDRESS_MAX_PAY_REF_LENGTH {
+                let destination_tag_len = head[SENDER_ADDRESS_KEYS_LENGTH] as usize;
+                if destination_tag_len > SENDER_ADDRESS_MAX_DESTINATION_TAG_LENGTH {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!(
-                            "Sender address pay reference length {} exceeds maximum {}",
-                            pay_ref_len, SENDER_ADDRESS_MAX_PAY_REF_LENGTH
+                            "Sender address destination tag length {} exceeds maximum {}",
+                            destination_tag_len, SENDER_ADDRESS_MAX_DESTINATION_TAG_LENGTH
                         ),
                     ));
                 }
-                let mut body = Vec::with_capacity(head.len() + pay_ref_len);
+                let mut body = Vec::with_capacity(head.len() + destination_tag_len);
                 body.extend_from_slice(&head);
-                let mut pay_ref = vec![0u8; pay_ref_len];
-                reader.read_exact(&mut pay_ref)?;
-                body.extend_from_slice(&pay_ref);
+                let mut destination_tag = vec![0u8; destination_tag_len];
+                reader.read_exact(&mut destination_tag)?;
+                body.extend_from_slice(&destination_tag);
                 let b = MaxBytes::new_checked(body).expect("length checked (body <= SENDER_ADDRESS_MAX_LENGTH)");
                 Ok(Self::SenderAddress(b))
             },
@@ -314,15 +322,16 @@ impl Memo {
                 reader.read_exact(&mut buf)?;
                 Ok(Self::new_bytes(buf).expect("length checked (buf.len() <= MAX_BYTES_LENGTH)"))
             },
-            MemoTag::PayRefAndBytes => {
+            MemoTag::DestinationTagAndBytes => {
                 let len = read_len_prefix(reader)?;
                 let mut buf = vec![0u8; len];
                 reader.read_exact(&mut buf)?;
                 // Validate the length-delimited encoding
-                let _ = split_len_prefixed(&buf)
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid MessageAndPayRef encoding"))?;
+                let _ = split_len_prefixed(&buf).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "Invalid MessageAndDestinationTag encoding")
+                })?;
                 let bytes = MaxBytes::new_checked(buf).expect("length checked (buf.len() <= MAX_BYTES_LENGTH)");
-                Ok(Self::PayRefAndBytes(bytes))
+                Ok(Self::DestinationTagAndBytes(bytes))
             },
         }
     }
@@ -342,29 +351,29 @@ impl Display for Memo {
                 write_hex_fmt(f, b)?;
                 write!(f, ")")
             },
-            Self::PayRefAndBytes(b) => {
-                let Some((pay_ref, msg_bytes)) = split_len_prefixed(b) else {
-                    return write!(f, "PayRefAndBytes(<invalid encoding>)");
+            Self::DestinationTagAndBytes(b) => {
+                let Some((destination_tag, msg_bytes)) = split_len_prefixed(b) else {
+                    return write!(f, "DestinationTagAndBytes(<invalid encoding>)");
                 };
                 write!(
                     f,
-                    "PayRefAndBytes(pay_ref: {}, bytes: ",
-                    std::str::from_utf8(pay_ref).unwrap_or("<not utf-8>"),
+                    "DestinationTagAndBytes(destination_tag: {}, bytes: ",
+                    std::str::from_utf8(destination_tag).unwrap_or("<not utf-8>"),
                 )?;
                 write_hex_fmt(f, msg_bytes)?;
                 write!(f, ")")
             },
             Self::SenderAddress(b) => {
-                let Some((account_key, view_key, pay_ref)) = split_sender_address(b) else {
+                let Some((account_key, view_key, destination_tag)) = split_sender_address(b) else {
                     return write!(f, "SenderAddress(<invalid encoding>)");
                 };
                 write!(f, "SenderAddress(account_key: ")?;
                 write_hex_fmt(f, account_key)?;
                 write!(f, ", view_key: ")?;
                 write_hex_fmt(f, view_key)?;
-                if !pay_ref.is_empty() {
-                    write!(f, ", pay_ref: ")?;
-                    write_hex_fmt(f, pay_ref)?;
+                if !destination_tag.is_empty() {
+                    write!(f, ", destination_tag: ")?;
+                    write_hex_fmt(f, destination_tag)?;
                 }
                 write!(f, ")")
             },
@@ -409,17 +418,18 @@ fn read_len_prefix<R: io::Read>(reader: &mut R) -> io::Result<usize> {
     Ok(len)
 }
 
-/// Splits a `SenderAddress` body into `(account_public_key, view_public_key, pay_ref)`. The body layout is
-/// `account(32) ++ view(32) ++ pay_ref_len(1) ++ pay_ref`. Returns `None` if the body is malformed.
+/// Splits a `SenderAddress` body into `(account_public_key, view_public_key, destination_tag)`. The body layout is
+/// `account(32) ++ view(32) ++ destination_tag_len(1) ++ destination_tag`. Returns `None` if the body is malformed.
 fn split_sender_address(body: &[u8]) -> Option<(&[u8], &[u8], &[u8])> {
     if body.len() < SENDER_ADDRESS_KEYS_LENGTH + 1 {
         return None;
     }
     let account_key = &body[..32];
     let view_key = &body[32..SENDER_ADDRESS_KEYS_LENGTH];
-    let pay_ref_len = body[SENDER_ADDRESS_KEYS_LENGTH] as usize;
-    let pay_ref = body.get(SENDER_ADDRESS_KEYS_LENGTH + 1..SENDER_ADDRESS_KEYS_LENGTH + 1 + pay_ref_len)?;
-    Some((account_key, view_key, pay_ref))
+    let destination_tag_len = body[SENDER_ADDRESS_KEYS_LENGTH] as usize;
+    let destination_tag =
+        body.get(SENDER_ADDRESS_KEYS_LENGTH + 1..SENDER_ADDRESS_KEYS_LENGTH + 1 + destination_tag_len)?;
+    Some((account_key, view_key, destination_tag))
 }
 
 fn split_len_prefixed(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
@@ -460,8 +470,8 @@ mod tests {
         let decoded = Memo::decode_from(&mut buf.as_slice()).unwrap();
         assert_eq!(memo, decoded);
 
-        let memo = Memo::new_pay_ref_and_message([], "").unwrap();
-        assert_eq!(memo.len(), 1); // 1 byte for the pay_ref length
+        let memo = Memo::new_destination_tag_and_message([], "").unwrap();
+        assert_eq!(memo.len(), 1); // 1 byte for the destination_tag length
         // Encode/decode empty
         let mut buf = Vec::new();
         memo.encode_into(&mut buf).unwrap();
@@ -512,10 +522,10 @@ mod tests {
         let decoded = Memo::decode_from(&mut buf.as_slice()).unwrap();
         assert_eq!(original, decoded);
 
-        // PayRef and Message
-        let pay_ref = [1, 2, 3];
+        // DestinationTag and Message
+        let destination_tag = [1, 2, 3];
         let msg = "Payment for services";
-        let original = Memo::new_pay_ref_and_message(pay_ref, msg).unwrap();
+        let original = Memo::new_destination_tag_and_message(destination_tag, msg).unwrap();
         let mut buf = Vec::new();
         original.encode_into(&mut buf).unwrap();
         let decoded = Memo::decode_from(&mut buf.as_slice()).unwrap();
@@ -560,50 +570,50 @@ mod tests {
     }
 
     #[test]
-    fn it_encodes_and_decodes_sender_address_without_pay_ref() {
+    fn it_encodes_and_decodes_sender_address_without_destination_tag() {
         let account_key = [7u8; 32];
         let view_key = [9u8; 32];
         let original = Memo::new_sender_address(account_key, view_key, &[]).unwrap();
 
         let mut buf = Vec::new();
         original.encode_into(&mut buf).unwrap();
-        // tag (1) + account_key (32) + view_key (32) + pay_ref_len (1)
+        // tag (1) + account_key (32) + view_key (32) + destination_tag_len (1)
         assert_eq!(buf.len(), 1 + SENDER_ADDRESS_KEYS_LENGTH + 1);
         assert_eq!(buf[0], MemoTag::SenderAddress as u8);
 
         let decoded = Memo::decode_from(&mut buf.as_slice()).unwrap();
         assert_eq!(original, decoded);
 
-        let (decoded_account, decoded_view, decoded_pay_ref) = decoded.as_sender_address().unwrap();
+        let (decoded_account, decoded_view, decoded_destination_tag) = decoded.as_sender_address().unwrap();
         assert_eq!(decoded_account, &account_key);
         assert_eq!(decoded_view, &view_key);
-        assert!(decoded_pay_ref.is_empty());
+        assert!(decoded_destination_tag.is_empty());
     }
 
     #[test]
-    fn it_encodes_and_decodes_sender_address_with_pay_ref() {
+    fn it_encodes_and_decodes_sender_address_with_destination_tag() {
         let account_key = [7u8; 32];
         let view_key = [9u8; 32];
-        let pay_ref = vec![3u8; SENDER_ADDRESS_MAX_PAY_REF_LENGTH];
-        let original = Memo::new_sender_address(account_key, view_key, &pay_ref).unwrap();
+        let destination_tag = vec![3u8; SENDER_ADDRESS_MAX_DESTINATION_TAG_LENGTH];
+        let original = Memo::new_sender_address(account_key, view_key, &destination_tag).unwrap();
 
         let mut buf = Vec::new();
         original.encode_into(&mut buf).unwrap();
-        // tag (1) + keys (64) + pay_ref_len (1) + pay_ref (64)
-        assert_eq!(buf.len(), 1 + SENDER_ADDRESS_KEYS_LENGTH + 1 + pay_ref.len());
+        // tag (1) + keys (64) + destination_tag_len (1) + destination_tag (64)
+        assert_eq!(buf.len(), 1 + SENDER_ADDRESS_KEYS_LENGTH + 1 + destination_tag.len());
 
         let decoded = Memo::decode_from(&mut buf.as_slice()).unwrap();
         assert_eq!(original, decoded);
 
-        let (decoded_account, decoded_view, decoded_pay_ref) = decoded.as_sender_address().unwrap();
+        let (decoded_account, decoded_view, decoded_destination_tag) = decoded.as_sender_address().unwrap();
         assert_eq!(decoded_account, &account_key);
         assert_eq!(decoded_view, &view_key);
-        assert_eq!(decoded_pay_ref, pay_ref.as_slice());
+        assert_eq!(decoded_destination_tag, destination_tag.as_slice());
     }
 
     #[test]
-    fn it_rejects_sender_address_pay_ref_that_is_too_long() {
-        let too_long = vec![1u8; SENDER_ADDRESS_MAX_PAY_REF_LENGTH + 1];
+    fn it_rejects_sender_address_destination_tag_that_is_too_long() {
+        let too_long = vec![1u8; SENDER_ADDRESS_MAX_DESTINATION_TAG_LENGTH + 1];
         assert!(Memo::new_sender_address([0u8; 32], [0u8; 32], &too_long).is_none());
     }
 
@@ -619,9 +629,9 @@ mod tests {
     }
 
     #[test]
-    fn it_fails_to_decode_with_an_invalid_payref_length() {
-        // PayRef length (10) exceeds actual data length (5)
-        let encoded = [vec![MemoTag::PayRefAndBytes as u8, 10u8], vec![1u8; 5]].concat();
+    fn it_fails_to_decode_with_an_invalid_destination_tag_length() {
+        // DestinationTag length (10) exceeds actual data length (5)
+        let encoded = [vec![MemoTag::DestinationTagAndBytes as u8, 10u8], vec![1u8; 5]].concat();
         let _err = Memo::decode_from(&mut encoded.as_slice()).unwrap_err();
     }
 }

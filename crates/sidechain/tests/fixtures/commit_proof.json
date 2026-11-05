@@ -1,0 +1,128 @@
+{
+  "header": {
+    "network": 16,
+    "protocol_version": 0,
+    "parent_id": "0101010101010101010101010101010101010101010101010101010101010101",
+    "justify_id": "0202020202020202020202020202020202020202020202020202020202020202",
+    "height": 20,
+    "epoch": 1,
+    "epoch_hash": "0303030303030303030303030303030303030303030303030303030303030303",
+    "shard_group": {
+      "start": 1,
+      "end_inclusive": 256
+    },
+    "proposed_by": "5c7f0fec164142986ada18df7c0950d93827925ece06b0e6a1247b6a3a304c7c",
+    "state_merkle_root": "0404040404040404040404040404040404040404040404040404040404040404",
+    "command_merkle_root": "0505050505050505050505050505050505050505050505050505050505050505",
+    "transaction_merkle_root": "0707070707070707070707070707070707070707070707070707070707070707",
+    "signature": {
+      "public_nonce": "0000000000000000000000000000000000000000000000000000000000000000",
+      "signature": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "accumulated_data": {
+      "total_exhaust_burn": 0
+    },
+    "metadata_hash": "0606060606060606060606060606060606060606060606060606060606060606"
+  },
+  "proof_elements": [
+    {
+      "QuorumCertificate": {
+        "header_hash": "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
+        "parent_id": "28b2f7939b5a25baba40725cfd47f0c9f23dbb20230d37da894752f7160bc1db",
+        "protocol_version": 0,
+        "epoch": 1,
+        "height": 22,
+        "signatures": {
+          "Schnorr": {
+            "signers": "0f",
+            "signatures": [
+              {
+                "public_nonce": "90093008f1d82fe949a72e08ef4b7f19675b7502aab85aad176e84706ef3f46e",
+                "signature": "b0a80f3294b21a34d4fec91ea588cbc071a1c6878ef26ef3bfabfa78902aab0a"
+              },
+              {
+                "public_nonce": "ecb3963d405ebc232bb35cdd387b18ad008d8219073c338c47cbf7b5e6755f4e",
+                "signature": "2980e70d9c5d62dfa3e99bc14239ffcf230901b039ad9d86f72ea2ca6bf80208"
+              },
+              {
+                "public_nonce": "5edc23571dc2539648dfecd7b3f5e1d56193420a887dedba31932256ac8c263d",
+                "signature": "95644e7a65ff3c9a2bbb29fd92a2731ce628b822e13440fcb2c902cdf5148002"
+              },
+              {
+                "public_nonce": "d44aed7b7d036155a6aac6aa9e95fc629ab8ee2b4632dafa983d226e5ee8861f",
+                "signature": "8cc09d602b6685e8c836f3b218fa2875d8ad5073dce65ad34e73b7b582fa070a"
+              }
+            ]
+          }
+        },
+        "decision": "Accept"
+      }
+    },
+    {
+      "QuorumCertificate": {
+        "header_hash": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+        "parent_id": "6ea15995e1dae9c6117ee13bf2a907aecf33dd581fc27e83d589eb0bc348485d",
+        "protocol_version": 0,
+        "epoch": 1,
+        "height": 21,
+        "signatures": {
+          "Schnorr": {
+            "signers": "0f",
+            "signatures": [
+              {
+                "public_nonce": "2e7f861b20eeaeeb1d537e26e511a392d28741c4913c257134c91f43bc91233c",
+                "signature": "cf0e810ad74f8b24ee78a93dce5ebd299dfaf94ba33210b4930400372bebd705"
+              },
+              {
+                "public_nonce": "5cece6d7dc155ed065feb250afa5cde069c96581ba9013ce1a7b0f1ca730971a",
+                "signature": "b84e265fd36d82955c7e3f379097a15f9ec80b38cf82e3b2324977dfd2a89e0b"
+              },
+              {
+                "public_nonce": "3e91f2ca04a953a4675df4158c07b62ba30c8f0c1d9dfb2bd6ad4eb17b2fe929",
+                "signature": "facb65cf6038a64d47eeccc1868890f223c7efac1d1b82e593c0bc1495e2c705"
+              },
+              {
+                "public_nonce": "3a7f327772bc700f6a8db4246920467038ae9f4ee05bd544206a309dd50dcb22",
+                "signature": "3f5399c8c2a649e35face0e068c46593f0b1a6f0a0b97a36a8f2a2a73b2c960a"
+              }
+            ]
+          }
+        },
+        "decision": "Accept"
+      }
+    },
+    {
+      "QuorumCertificate": {
+        "header_hash": "27dc0822d624a548cb96b3cf8571e5d7fed0df8b50042f10fe66c8e93eb9b728",
+        "parent_id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "protocol_version": 0,
+        "epoch": 1,
+        "height": 20,
+        "signatures": {
+          "Schnorr": {
+            "signers": "0f",
+            "signatures": [
+              {
+                "public_nonce": "30c31d01287fff473e3b023f48b6598b299c47ab80187f83e318cfc544768e1f",
+                "signature": "c8afe637eb8e4374e382bd0ee1fa4c690de00fc7f86fe0809e71c937624b7802"
+              },
+              {
+                "public_nonce": "188c7d654280856045af1ffc8360f6350261dc3cbc9e37ec0b012efc9603055e",
+                "signature": "3acd4c12bf9b892be922347136a604b494a6160edbb85b436ac51b584773b50a"
+              },
+              {
+                "public_nonce": "0c1d71a38fa6a39e86be2cd893e6e1a1ec43418f6e634d9d5f919d232c5d9a67",
+                "signature": "cfab28e2568e4c32794182fece3d64a25c19e27dfd007b8282292796a7fd8802"
+              },
+              {
+                "public_nonce": "e45e1fed0095e3d953da51543e6cc4918c4ad3c843d201183a11228c01bd751f",
+                "signature": "6db7f49460f1a22c9cb53bae0b7ada8c135a759af68c3f5d81f4f155f341e30e"
+              }
+            ]
+          }
+        },
+        "decision": "Accept"
+      }
+    }
+  ]
+}

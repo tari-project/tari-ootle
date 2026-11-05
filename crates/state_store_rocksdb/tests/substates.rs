@@ -13,6 +13,7 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    StateTreeRetention,
     consensus_models::{Block, SubstateDestroyed, SubstateTransition, SubstateUpdateBatch, SubstateValueFilterFlags},
 };
 use tari_ootle_transaction::Network;
@@ -228,8 +229,8 @@ fn substate_head_iter() {
 
     // TODO: substate_head_iter only works correctly after pruning downed values.
     // This is because we iterate the nodes as a "flat" list, a correct iterator would need to incorporate JMT logic.
-    tx.state_tree_nodes_clear_stale(tari_ootle_common_types::NumPreshards::current(), usize::MAX)
-        .unwrap();
+    let retention = StateTreeRetention::read(&*tx, tari_ootle_common_types::NumPreshards::current(), 0).unwrap();
+    tx.state_tree_nodes_clear_stale(&retention, usize::MAX).unwrap();
 
     let iter = tx
         .substate_tree_iter(SHARD, 0, SubstateValueFilterFlags::all_substates())
@@ -254,7 +255,11 @@ fn substate_head_iter() {
 /// interrupted, are cleared by a later run.
 #[test]
 fn downed_values_of_earlier_epochs_are_pruned_in_batches() {
-    let (db, _tmp) = create_rocksdb_with_opts(DatabaseOptions::default().with_epoch_history_length(1));
+    let (db, _tmp) = create_rocksdb_with_opts(
+        DatabaseOptions::default()
+            .with_epoch_history_length(1)
+            .with_pinned_checkpoint_epochs(1),
+    );
     let ups = [10, 11].map(|seed| build_substate_record(&substate_id(seed), SubstateVersion::ZERO, 1));
     db.with_write_tx(|tx| tx.substates_commit_batch(create_substate_update_batch(Epoch(1), &ups)))
         .unwrap();
@@ -289,4 +294,41 @@ fn downed_values_of_earlier_epochs_are_pruned_in_batches() {
         Ok::<_, tari_ootle_storage::StorageError>(())
     })
     .unwrap();
+}
+
+/// A pinned tree is served with the values of the substates it holds, so a value is kept for as many epochs as
+/// checkpoints are pinned when that exceeds the epoch history.
+#[test]
+fn downed_values_are_kept_for_the_pinned_checkpoint_epochs() {
+    let (db, _tmp) = create_rocksdb_with_opts(
+        DatabaseOptions::default()
+            .with_epoch_history_length(1)
+            .with_pinned_checkpoint_epochs(2),
+    );
+    let up = build_substate_record(&substate_id(12), SubstateVersion::ZERO, 1);
+    db.with_write_tx(|tx| tx.substates_commit_batch(create_substate_update_batch(Epoch(1), [&up])))
+        .unwrap();
+    let mut down = up.clone();
+    down.set_destroyed(SubstateDestroyed {
+        at_epoch: Epoch(2),
+        at_state_version: 3,
+    });
+    db.with_write_tx(|tx| tx.substates_commit_batch(create_substate_update_batch(Epoch(2), [&down])))
+        .unwrap();
+
+    let prune = |epoch| {
+        db.with_write_tx(|tx| tx.epoch_cleanup_step(epoch, EpochCleanupStep::DownedSubstateValues, usize::MAX))
+            .unwrap()
+    };
+    let has_value = || {
+        db.with_read_tx(|tx| {
+            let rec = tx.substates_get(&up.to_substate_address())?;
+            Ok::<_, tari_ootle_storage::StorageError>(rec.substate_value().is_some())
+        })
+        .unwrap()
+    };
+    assert_eq!(prune(Epoch(3)), 0);
+    assert!(has_value());
+    assert_eq!(prune(Epoch(4)), 1);
+    assert!(!has_value());
 }

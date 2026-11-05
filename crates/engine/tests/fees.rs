@@ -5,14 +5,18 @@ use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine::fees::FeeTable;
 use tari_engine_types::{
     commit_result::{ExecutionFailureCode, RejectReason, TransactionResult},
-    fees::{FeeReceipt, FeeSource},
+    creation_check::NoCreationCheck,
+    fees::{FeeReceipt, FeeScale, FeeSource},
     limits::ENGINE_LIMITS,
+    substate::SubstateId,
 };
+use tari_ootle_common_types::InputDeclaration;
 use tari_ootle_transaction::{Epoch, INVOCATION_FLOOR, Transaction, args};
 use tari_template_lib::types::{
     Amount,
     ComponentAddress,
     NonFungibleAddress,
+    ObjectKey,
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
 };
 use tari_template_test_tooling::{
@@ -300,6 +304,141 @@ fn a_fee_intent_commit_is_not_charged_for_the_state_it_abandons() {
     );
 }
 
+/// A transaction that commits in full also settles what committing its fee intent alone would
+/// persist, for consensus to commit if the full result cannot be. It is billed for all of the work
+/// the transaction did, but charged storage only for the fee checkpoint's state.
+#[test]
+fn a_full_commit_settles_its_fee_intent_commit_beside_it() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, private_key) = test.create_funded_account();
+    test.enable_fees();
+
+    let state_template = test.get_template_address("State");
+    let mut builder = test.transaction().pay_fee_from_component(account, 100_000u64);
+    for _ in 0..5 {
+        builder = builder.call_function(state_template, "new", args![]);
+    }
+    let (result, fallback) = test
+        .try_execute_with_fee_intent_fallback(
+            builder.build_and_seal(&private_key),
+            vec![owner_token],
+            &NoCreationCheck,
+        )
+        .unwrap();
+    let diff = result.expect_success();
+    let fallback = fallback.expect("a full commit settles a fee-intent fallback");
+
+    let created_components = diff
+        .up_iter()
+        .filter(|(_, s)| s.substate_value().as_component().is_some())
+        .map(|(id, _)| id)
+        .filter(|id| id.as_component_address() != Some(account))
+        .collect::<Vec<_>>();
+    assert_eq!(created_components.len(), 5);
+    for id in created_components {
+        assert!(
+            !fallback.diff.up_iter().any(|(up, _)| up == id),
+            "{id} is a main-intent output"
+        );
+    }
+
+    let receipt = fallback
+        .diff
+        .up_iter()
+        .find_map(|(_, s)| s.substate_value().as_transaction_receipt())
+        .expect("the fallback carries a transaction receipt");
+    assert!(receipt.outcome.is_fee_intent_commit());
+
+    let full_fees = result.finalize.fee_receipt.fee_breakdown();
+    let fallback_fees = fallback.fee_receipt.fee_breakdown();
+    for source in [
+        FeeSource::WasmExecution,
+        FeeSource::RuntimeCall,
+        FeeSource::TransactionWeight,
+    ] {
+        assert_eq!(fallback_fees.get(source), full_fees.get(source), "{source:?}");
+    }
+    assert!(fallback_fees.get(FeeSource::Storage) < full_fees.get(FeeSource::Storage));
+    assert!(fallback.fee_receipt.is_paid_in_full());
+    assert_eq!(
+        fallback.fee_receipt.total_fees_paid(),
+        fallback.fee_receipt.total_fees_charged()
+    );
+
+    let rejected = fallback.into_finalize_result(&result.finalize, RejectReason::FailedToLockOutputs("x".to_string()));
+    assert!(rejected.is_fee_only());
+    assert_eq!(rejected.charged_fees(), result.finalize.charged_fees());
+}
+
+/// A main intent that fails already commits only its fee intent, so there is nothing to fall back to.
+#[test]
+fn a_fee_intent_commit_has_no_fallback() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, private_key) = test.create_funded_account();
+    test.enable_fees();
+
+    let (result, fallback) = test
+        .try_execute_with_fee_intent_fallback(
+            Transaction::builder_localnet(Epoch(1))
+                .pay_fee_from_component(account, 1000u64)
+                .call_function(test.get_template_address("State"), "this_doesnt_exist", args![])
+                .build_and_seal(&private_key),
+            vec![owner_token],
+            &NoCreationCheck,
+        )
+        .unwrap();
+    assert!(result.finalize.is_fee_only());
+    assert!(fallback.is_none());
+}
+
+/// A fee intent that creates a substate the executor reports as taken can never commit, so the
+/// transaction is rejected at the fee checkpoint and its main intent never runs.
+#[test]
+fn a_fee_intent_creating_a_taken_substate_is_rejected_before_the_main_intent() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, private_key) = test.create_funded_account();
+    test.enable_fees();
+
+    let state_template = test.get_template_address("State");
+    let transaction = Transaction::builder_localnet(Epoch(1))
+        .with_fee_instructions_builder(|builder| {
+            builder
+                .pay_fee_from_component(account, 100_000u64)
+                .call_function(state_template, "new", args![])
+        })
+        .call_function(state_template, "new", args![])
+        .build_and_seal(&private_key);
+    let created_components_are_taken =
+        |id: &SubstateId| id.as_component_address().is_some_and(|address| address != account);
+
+    let (result, fallback) = test
+        .try_execute_with_fee_intent_fallback(transaction, vec![owner_token.clone()], &created_components_are_taken)
+        .unwrap();
+
+    let reason = result.finalize.reject().expect("the fee intent is rejected");
+    assert_eq!(
+        reason.execution_failure_code(),
+        Some(ExecutionFailureCode::Conflict),
+        "{reason}"
+    );
+    assert!(fallback.is_none());
+    // The main intent's call never ran, so the transaction metered what its fee intent alone meters
+    let with_main_intent = test.last_execution_points().wasm;
+    test.try_execute_with_fee_intent_fallback(
+        Transaction::builder_localnet(Epoch(1))
+            .with_fee_instructions_builder(|builder| {
+                builder
+                    .pay_fee_from_component(account, 100_000u64)
+                    .call_function(state_template, "new", args![])
+            })
+            .build_and_seal(&private_key),
+        vec![owner_token],
+        &created_components_are_taken,
+    )
+    .unwrap();
+    assert_eq!(with_main_intent, test.last_execution_points().wasm);
+}
+
 /// Compute is funded by what the payment has left after the state the transaction falls back to
 /// committing, not by the whole payment.
 ///
@@ -309,11 +448,16 @@ fn a_fee_intent_commit_is_not_charged_for_the_state_it_abandons() {
 #[test]
 fn compute_cannot_consume_what_the_fee_intent_commit_needs() {
     for burn_rate_bps in [0, 500, 10_000] {
-        spend_the_whole_allowance_and_still_pay(burn_rate_bps);
+        spend_the_whole_allowance_and_still_pay(burn_rate_bps, 10_000);
+    }
+    // The allowance converts the unspent payment back to fee-table terms, so it neither over- nor
+    // under-funds compute at a scale either side of 1x.
+    for fee_scale_bps in [5_000, 15_000, 33_333] {
+        spend_the_whole_allowance_and_still_pay(500, fee_scale_bps);
     }
 }
 
-fn spend_the_whole_allowance_and_still_pay(burn_rate_bps: u16) {
+fn spend_the_whole_allowance_and_still_pay(burn_rate_bps: u16, fee_scale_bps: u16) {
     const MAX_FEE: u64 = 100_000;
 
     let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/infinity_loop"]);
@@ -323,6 +467,7 @@ fn spend_the_whole_allowance_and_still_pay(burn_rate_bps: u16) {
     // Run at a burn too: the burn is a share of what is paid, so it must not narrow what the
     // payment can fund nor leave any of it uncollected.
     test.set_burn_rate_bps(burn_rate_bps);
+    test.set_fee_scale_bps(fee_scale_bps);
 
     // A loop that never returns: it runs until the compute allowance stops it, whatever that
     // allowance is, so the transaction always spends every point it is given.
@@ -1185,4 +1330,243 @@ fn a_fee_account_declared_as_a_read_still_pays_the_fee() {
         vec![owner_token],
     );
     assert!(result.finalize.fee_receipt.is_paid_in_full());
+}
+
+/// The storage charge sizes each persisted substate by its `CborLen`, so that length must equal the
+/// bytes the substate actually encodes to. Richer state is checked the same way at the end of the
+/// stealth, confidential, metadata, NFT-data and event tests, and the leaf substate variants in
+/// `tari_engine_types`.
+#[test]
+fn persisted_substate_lengths_match_their_encoding() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, private_key) = test.create_funded_account();
+
+    test.enable_fees();
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .pay_fee_from_component(account, 2000u64)
+            .call_function(test.get_template_address("State"), "new", args![])
+            .build_and_seal(&private_key),
+        vec![owner_token],
+    );
+
+    test.assert_substate_lengths_match_encoding();
+}
+
+/// Executes a fee-paying transaction from a funded account that declares the account as an input,
+/// taking its inputs to be pledged to `input_fanout` other shard groups. A main intent that calls a
+/// function the template lacks is rejected. Returns the fee receipt and the encoded bytes of the
+/// transaction's declared inputs.
+fn execute_declaring_the_account(input_fanout: u32, main_intent_fails: bool) -> (FeeReceipt, u64) {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, private_key) = test.create_funded_account();
+    test.enable_fees();
+    test.set_input_fanout(input_fanout);
+
+    let function = if main_intent_fails { "this_doesnt_exist" } else { "new" };
+    let transaction = Transaction::builder_localnet(Epoch(1))
+        .add_input(InputDeclaration::write(account))
+        .pay_fee_from_component(account, 100_000u64)
+        .call_function(test.get_template_address("State"), function, args![])
+        .build_and_seal(&private_key);
+    let input_bytes = test.declared_input_bytes(&transaction);
+
+    let result = test.execute_and_commit_on_success(transaction, vec![owner_token]);
+    (result.finalize.fee_receipt, input_bytes)
+}
+
+/// A declared input is charged by the encoded bytes of its value: once for loading it, and again for
+/// each other shard group it is pledged to.
+#[test]
+fn declared_inputs_are_charged_by_the_byte_and_by_each_further_group() {
+    let table = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS).fee_table().clone();
+
+    let (single_group, input_bytes) = execute_declaring_the_account(0, false);
+    assert!(input_bytes > 0);
+    assert_eq!(
+        single_group.fee_breakdown().get(FeeSource::InputLoad),
+        table.per_byte_storage_cost() * input_bytes / table.input_load_bytes_cost_divisor()
+    );
+    assert_eq!(single_group.fee_breakdown().get(FeeSource::InputFanout), 0);
+
+    let (three_groups, fanout_input_bytes) = execute_declaring_the_account(2, false);
+    assert_eq!(fanout_input_bytes, input_bytes);
+    assert_eq!(
+        three_groups.fee_breakdown().get(FeeSource::InputFanout),
+        table.per_byte_storage_cost() * input_bytes * 2 / table.input_fanout_bytes_cost_divisor()
+    );
+    assert_eq!(
+        three_groups.total_fees_charged() - single_group.total_fees_charged(),
+        three_groups.fee_breakdown().get(FeeSource::InputFanout),
+        "the fanout must move nothing but its own charge"
+    );
+}
+
+/// Every shard group resolves a declared global input locally and pledges it to the others, so its
+/// bytes are charged like those of any other declared input.
+#[test]
+fn a_declared_global_input_is_charged_by_the_byte() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, private_key) = test.create_funded_account();
+    let template = compile_template("tests/templates/hello_world", &[]).unwrap();
+    let published = test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .pay_fee_from_component(account, 200_000u64)
+            .publish_template(template.into_code())
+            .build_and_seal(&private_key),
+        vec![owner_token.clone()],
+    );
+    let template_id = published
+        .expect_success()
+        .up_iter()
+        .map(|(id, _)| id.clone())
+        .find(SubstateId::is_template)
+        .expect("the publish creates a template substate");
+
+    test.enable_fees();
+    test.set_input_fanout(2);
+    let table = test.fee_table().clone();
+    let mut run = |declare_template: bool| {
+        let builder = test.transaction().add_input(InputDeclaration::write(account));
+        let builder = if declare_template {
+            builder.add_input(InputDeclaration::read(template_id.clone()))
+        } else {
+            builder
+        };
+        let transaction = builder
+            .pay_fee_from_component(account, 1_000_000u64)
+            .call_function(test.get_template_address("State"), "new", args![])
+            .build_and_seal(&private_key);
+        let input_bytes = test.declared_input_bytes(&transaction);
+        let result = test.execute_and_commit_on_success(transaction, vec![owner_token.clone()]);
+        (result.finalize.fee_receipt, input_bytes)
+    };
+
+    let (without, account_bytes) = run(false);
+    let (with, input_bytes) = run(true);
+    for source in [FeeSource::InputLoad, FeeSource::InputFanout] {
+        assert!(
+            with.fee_breakdown().get(source) > without.fee_breakdown().get(source),
+            "{source:?}"
+        );
+    }
+    assert!(
+        input_bytes > account_bytes + 10_000,
+        "the template's bytes are declared input bytes"
+    );
+    assert_eq!(
+        with.fee_breakdown().get(FeeSource::InputLoad),
+        table.per_byte_storage_cost() * input_bytes / table.input_load_bytes_cost_divisor()
+    );
+    assert_eq!(
+        with.fee_breakdown().get(FeeSource::InputFanout),
+        table.per_byte_storage_cost() * input_bytes * 2 / table.input_fanout_bytes_cost_divisor()
+    );
+}
+
+/// The inputs were loaded and pledged whatever the main intent went on to do, so a transaction whose
+/// main intent is rejected still pays for them.
+#[test]
+fn a_rejected_main_intent_still_pays_for_its_inputs() {
+    let (committed, _) = execute_declaring_the_account(1, false);
+    let (rejected, _) = execute_declaring_the_account(1, true);
+
+    for source in [FeeSource::InputLoad, FeeSource::InputFanout] {
+        assert!(committed.fee_breakdown().get(source) > 0);
+        assert_eq!(
+            rejected.fee_breakdown().get(source),
+            committed.fee_breakdown().get(source),
+            "{source:?}"
+        );
+    }
+}
+
+/// Consensus resolves every declared input before execution, so the engine refuses to price a
+/// transaction whose declared input it was not given.
+#[test]
+fn an_unresolved_declared_input_is_an_invariant_violation() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, private_key) = test.create_funded_account();
+    test.enable_fees();
+
+    let missing = ComponentAddress::from_array([0xab; ObjectKey::LENGTH]);
+    let err = test
+        .try_execute(
+            Transaction::builder_localnet(Epoch(1))
+                .add_input(InputDeclaration::read(missing))
+                .pay_fee_from_component(account, 100_000u64)
+                .build_and_seal(&private_key),
+            vec![owner_token],
+        )
+        .expect_err("a declared input missing from the state store must not execute");
+    assert!(
+        err.to_string().contains("was not resolved before execution"),
+        "unexpected error: {err}"
+    );
+}
+
+/// Every source is charged at the fee scale, each rounded down on its own, and the receipt's total is
+/// what those scaled sources add up to.
+#[test]
+fn each_source_is_charged_at_the_fee_scale() {
+    const MAX_FEE: u64 = 2_000_000;
+
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, key) = test.create_funded_account();
+    test.enable_fees();
+    let build = state_transaction(&test, account, &key);
+    let unscaled = meter_across_max_fees(&mut test, &[MAX_FEE], std::slice::from_ref(&owner_token), &build).remove(0);
+
+    for bps in [5_000, 15_000, 33_333] {
+        test.set_fee_scale_bps(bps);
+        let scaled = meter_across_max_fees(&mut test, &[MAX_FEE], std::slice::from_ref(&owner_token), &build).remove(0);
+        let scale = FeeScale::new(bps);
+        for (source, amount) in unscaled.fee_breakdown().iter() {
+            assert_eq!(
+                scaled.fee_breakdown().get(*source),
+                scale.apply(*amount),
+                "{source:?} at {bps}bps"
+            );
+        }
+        assert_eq!(
+            scaled.total_fees_charged(),
+            scaled.fee_breakdown().get_total(),
+            "at {bps}bps"
+        );
+        assert_eq!(
+            scaled.total_refunded(),
+            MAX_FEE - scaled.total_fees_charged(),
+            "at {bps}bps"
+        );
+    }
+}
+
+/// A dry run's charges plus the allowance derived at the fee scale pay for the real submission, even
+/// when the submission's narrower `max_fee` moves what it meters.
+#[test]
+fn a_dry_run_estimate_pays_for_the_submission_at_the_fee_scale() {
+    for bps in [5_000, 15_000, 33_333] {
+        let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+        let (account, owner_token, key) = test.create_funded_account();
+        test.enable_fees();
+        test.set_fee_scale_bps(bps);
+        let build = state_transaction(&test, account, &key);
+
+        test.set_dry_run(true);
+        let dry_run = test.try_execute(build(999_000_000), vec![owner_token.clone()]).unwrap();
+        let estimate = dry_run.finalize.fee_receipt.total_fees_charged() +
+            test.fee_table().fee_estimate_allowance_at(FeeScale::new(bps));
+
+        test.set_dry_run(false);
+        let result = test.try_execute(build(estimate), vec![owner_token]).unwrap();
+        assert!(
+            matches!(result.finalize.result, TransactionResult::Accept(_)),
+            "at {bps}bps a submission at the estimate {estimate} did not commit: {:?}",
+            result.finalize.result
+        );
+        assert!(
+            result.finalize.fee_receipt.total_fees_charged() <= estimate,
+            "at {bps}bps"
+        );
+    }
 }

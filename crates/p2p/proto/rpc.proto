@@ -117,8 +117,9 @@ message GetSubstateResponse {
   // value hash and bind it to the returned substate value. Only meaningful for status Up.
   uint64 proof_epoch = 9;
   // CBOR-encoded SubstateDownProof, for status Down only: an inclusion proof of the substate at an earlier
-  // committed root, with that root's commit proof, and its exclusion proof under `commit_proof`'s root. A Down is
-  // sent with no proof fields at all when the responder holds no such proof.
+  // committed root, with that root's commit proof, and its exclusion proof under `commit_proof`'s root. Empty for
+  // a Down the responder holds no such proof for, whose `substate_value_proof` is then its exclusion alone: that
+  // shows the version gone only to a reader that has proven it up at a block of an earlier epoch.
   bytes substate_down_proof = 10;
 }
 
@@ -176,44 +177,6 @@ message SubstateDestroy {
   uint64 version = 2;
 }
 
-message SyncBlocksRequest {
-  // Optional (empty for None). Must be provided if the epoch is not provided
-  bytes start_block_id = 1;
-  // Optional - If start_block_id is provided, this is ignored. Must be provided if start_block_id is not provided. 
-  // In which case, start block is implicitly the first block of the epoch.
-  tari.ootle.common.Epoch epoch = 2;
-  // If true, QCs will be streamed.
-  bool stream_qcs = 3;
-  // Weather to stream all substates, only transaction receipts or do not stream any substates
-  StreamSubstateSelection stream_substates = 4;
-  // If true, transactions in the block will be streamed
-  bool stream_transactions = 5;
-}
-
-// Clippy complains about too many bools and prefers an enum
-enum StreamSubstateSelection {
-  No = 0;
-  AllSubstates = 1;
-  TransactionReceiptsOnly = 2;
-}
-
-message SyncBlocksResponse {
-  oneof sync_data {
-    tari.ootle.consensus.Block block = 1;
-    QuorumCertificates quorum_certificates = 2;
-    uint32 substate_count = 3;
-    SubstateUpdate substate_update = 4;
-    uint32 transaction_count = 5;
-    tari.ootle.transaction.Transaction transaction = 6;
-    uint32 transaction_receipt_count = 7;
-    SubstateCreate transaction_receipt = 8;
-  }
-}
-
-message QuorumCertificates {
-  repeated tari.ootle.consensus.QuorumCertificate quorum_certificates = 1;
-}
-
 message GetCheckpointsRequest {
   tari.ootle.common.Epoch from_epoch = 1;
   uint32 num_to_return = 2;
@@ -228,24 +191,28 @@ message GetCheckpointsResponse {
 message EpochCheckpoint {
   bytes proof = 1;
   map<uint32, TreeRootSummary> shard_tree_summary = 2;
+  // CBOR-encoded preimage of the end-of-epoch header's metadata hash.
+  bytes header_metadata = 3;
 }
 
 message TreeRootSummary {
   bytes root_hash = 1;
   uint64 state_version = 2;
+  bytes transition_acc = 3;
 }
 
 // A per-shard resume point. State versions are assigned per shard and only advance when that shard
 // changes, so a shard range cannot share a single start version - each shard carries its own.
 message ShardCursor {
   uint32 shard = 1;
-  // Must be greater than zero. Genesis is committed at version 0 and is never synced.
+  // The first version to stream. A shard's history starts at v0, which holds its genesis state. A stream from v0
+  // sends an empty v0 for a shard with no genesis state, and the genesis transitions the caller's value filters
+  // select for one with it, so a caller that requests every transition, as values or hashes, receives a v0 for
+  // every shard.
   uint64 start_state_version = 2;
 }
 
 message SyncStateRequest {
-  reserved 1, 2;
-  reserved "start_state_version", "shard";
   // Optional - If not provided, state will be streamed until the current epoch
   tari.ootle.common.Epoch until_epoch = 3;
   // Bitflags representing which substates to return.
@@ -312,7 +279,8 @@ message StateVersionProof {
 
 // A batch of substate updates at a single state version of a single shard. A state version whose
 // updates exceed the batch's update count or encoded size limit is split into multiple batches, all
-// but the last carrying has_more = true.
+// but the last carrying has_more = true. The v0 of a shard with no genesis state is one batch with no
+// updates.
 message SubstateBatch {
   uint64 state_version = 1;
   repeated SubstateUpdate updates = 2;
@@ -384,10 +352,6 @@ message ProvenSubstate {
   // The epoch the substate value hash was computed at, needed by the verifier to re-derive the leaf
   // value hash and bind it to the returned value. Only meaningful for an up substate.
   uint64 proof_epoch = 3;
-  // Always empty: a batch answers with each substate's head, which a down proof cannot settle, since it says
-  // nothing of later versions. Kept for wire compatibility. A down proof is served by GetSubstate for a read of the
-  // version it names.
-  bytes substate_down_proof = 4;
 }
 
 message MissingSubstates {
@@ -434,7 +398,11 @@ message GetHighQcResponse {
   tari.ootle.consensus.QuorumCertificate high_qc = 1;
 }
 
-message GetCommittedBlockProofRequest {}
+message GetCommittedBlockProofRequest {
+  // The shards whose leaves in the block's state merkle root the response proves. Shards outside the block's shard
+  // group (other than the global shard) are skipped, as are repeats. At most 257 may be named.
+  repeated uint32 leaf_shards = 1;
+}
 
 message GetCommittedBlockProofResponse {
   // CBOR-encoded SidechainBlockCommitProof for the responder's latest committed block.
@@ -442,4 +410,55 @@ message GetCommittedBlockProofResponse {
   // epoch) against the shard group committee via the committed QC chain. Allows a caller
   // to verify how far the responder has committed without trusting its self-reported state.
   bytes commit_proof = 1;
+  // The leaf of each requested shard in commit_proof's state merkle root, in ascending shard order. Empty if no
+  // shards were requested, or if the responder cannot prove its committed state against that root.
+  repeated ShardStateLeaf shard_leaves = 2;
+}
+
+// A shard's root, state version and transition accumulator as a block's state merkle root commits them. A shard with
+// no state has the placeholder root, version 0 and the zero accumulator, and its proof is an exclusion proof.
+message ShardStateLeaf {
+  uint32 shard = 1;
+  uint64 state_version = 2;
+  bytes shard_root = 3;
+  bytes transition_acc = 4;
+  // CBOR-encoded SparseMerkleProofExt of the shard's leaf in the block's state merkle root.
+  bytes shard_root_proof = 5;
+}
+
+message GetShardSnapshotRequest {
+  uint32 shard = 1;
+  // The state version of the shard whose tree is read. The responder holds a shard's tree only for its recent
+  // versions, so this is normally the version of a recent leaf of the shard.
+  uint64 state_version = 2;
+  // The 32-byte leaf key the page starts above. Empty for the first page.
+  bytes after_leaf_key = 3;
+  // The most substates to return. The responder caps it, and may return fewer to keep the response within its size
+  // limit.
+  uint32 limit = 4;
+  // The SyncStateRequest.value_filters flags selecting the substates whose values are returned. Every other substate
+  // is returned as its state hash.
+  uint32 value_filters = 5;
+}
+
+message GetShardSnapshotResponse {
+  // The substates the shard's tree holds at state_version, in ascending leaf key order, starting above
+  // after_leaf_key.
+  repeated SnapshotSubstate substates = 1;
+  // No substate of the shard's tree at state_version is above the last one returned.
+  bool is_last = 2;
+  // The responder does not hold the shard's tree at state_version: the version is no longer kept, or not yet
+  // reached. No substates are returned.
+  bool version_unavailable = 3;
+  // CBOR-encoded SparseMerkleProofExt of the last substate's leaf in the shard's tree at state_version. Empty if no
+  // substates are returned. With the leaves of every page so far, its siblings to the right of the leaf's path
+  // rebuild the shard's root, which checks each page as it arrives.
+  bytes last_leaf_proof = 4;
+}
+
+// A substate a shard's tree holds, as SyncStateRequest.value_filters select its form.
+message SnapshotSubstate {
+  SubstateData substate = 1;
+  // The epoch the substate was created in, which its value hash commits to.
+  tari.ootle.common.Epoch created_epoch = 2;
 }

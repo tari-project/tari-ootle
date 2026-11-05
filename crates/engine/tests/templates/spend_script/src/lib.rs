@@ -66,6 +66,13 @@ mod spend_scripts {
             assert!(signature.verify(&public_key, SIG_MESSAGE), "invalid spend signature");
         }
 
+        /// Signer lock: authorises only if the spending call carries the badge of `public_key`. A predicate reached
+        /// from a `StealthTransfer` instruction carries the transaction signers' badges; one reached through a
+        /// component's frame carries that component's caller badges instead.
+        pub fn require_signer_badge(public_key: RistrettoPublicKeyBytes, _ctx: SpendContext) {
+            CallerContext::assert_badge_in_scope(&NonFungibleAddress::from_public_key(public_key));
+        }
+
         /// Witness-data lock: authorises only if the spend-supplied witness `data` equals the committed `expected`
         /// bytes. Exercises reading uncommitted witness data (alongside a committed argument) inside a spend script.
         pub fn require_witness_data(expected: Vec<u8>, ctx: SpendContext) {
@@ -75,12 +82,38 @@ mod spend_scripts {
         /// Attempts to mutate ledger state by creating a component. The read-only spend-script sandbox refuses the
         /// underlying `new_substate`/write-lock, so this always aborts the spend.
         pub fn try_write(_ctx: SpendContext) {
-            engine().create_component(0u32, OwnerRule::default(), AccessRules::allow_all(), None);
+            engine().create_component(
+                0u32,
+                OwnerRule::default(),
+                AccessRules::allow_all(),
+                None,
+                UpdateRule::Locked,
+            );
         }
 
         /// Emits an event, which the sandbox permits.
         pub fn emit_event(_ctx: SpendContext) {
             emit_event("spend_script_test", Metadata::new());
+        }
+
+        /// Attempts to allocate a component address. The read-only sandbox refuses `allocate_address_invoke`, so this
+        /// always aborts the spend.
+        pub fn try_allocate_address(_ctx: SpendContext) {
+            let _allocation = CallerContext::allocate_component_address(None);
+        }
+
+        /// Attempts to mint `resource`. For a resource that does not track supply the mint writes nothing, and the
+        /// read-only sandbox refuses the new bucket, so this always aborts the spend.
+        pub fn try_mint(resource: ResourceAddress, _ctx: SpendContext) {
+            let _bucket = ResourceManager::get(resource).mint_fungible(1u32);
+        }
+
+        /// Creates a fungible resource that anyone may mint and that does not track supply.
+        pub fn create_untracked_mintable_resource() -> Bucket {
+            ResourceBuilder::public_fungible()
+                .mintable(rule!(allow_all), LOCKED)
+                .disable_total_supply_tracking()
+                .initial_supply(1u32)
         }
 
         /// Attempts a cross-template call. `call_invoke` is on the read-only deny-list (and cross-template calls are
@@ -101,6 +134,9 @@ mod spend_scripts {
         pub fn bad_mutable(&mut self, _ctx: SpendContext) {
             self.nonce += 1;
         }
+
+        /// Component method — rejected because its first argument is the `&self` receiver.
+        pub fn bad_receiver(&self, _ctx: SpendContext) {}
 
         /// Non-unit return — rejected at creation time.
         pub fn bad_returns_value(_ctx: SpendContext) -> u32 {

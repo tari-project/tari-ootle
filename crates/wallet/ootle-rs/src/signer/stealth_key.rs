@@ -4,6 +4,7 @@
 use std::future::Future;
 
 use tari_crypto::ristretto::RistrettoPublicKey;
+use tari_ootle_transaction::TransactionMessage;
 
 use crate::signer;
 
@@ -11,7 +12,7 @@ pub trait StealthKeyPrehashSigner<S> {
     fn sign_prehash_with_stealth_key(
         &self,
         public_key: &RistrettoPublicKey,
-        prehash: &[u8],
+        prehash: &TransactionMessage,
     ) -> impl Future<Output = signer::Result<S>> + Send;
 
     /// The public key [`sign_prehash_with_stealth_key`](Self::sign_prehash_with_stealth_key) signs with for

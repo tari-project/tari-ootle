@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 
 use log::*;
-use ootle_byte_type::{FromByteType, ToByteType};
+use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
 use ootle_network::Network;
 use tari_crypto::{
     keys::PublicKey,
@@ -37,7 +37,7 @@ use tari_template_lib::types::{
     UtxoAddress,
     access_rules::AccessRule,
     crypto::PedersenCommitmentBytes,
-    stealth::{RevealedOutput, SpendAuthorization, StealthTransferStatement},
+    stealth::{RevealedOutput, SpendAuthorization, StealthTransferStatement, StealthUnspentOutput},
 };
 
 use crate::{
@@ -50,10 +50,12 @@ use crate::{
     },
     models::{
         AccountAndViewKeys,
+        AccountWithAddress,
         InputSpendData,
         KeyBranch,
         KeyId,
         OutputStatus,
+        ProvenUp,
         StealthBalance,
         StealthOutputInfo,
         StealthOutputModel,
@@ -528,6 +530,41 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(())
     }
 
+    /// Records an output that a statement built under `lock_id` creates for `account`. It stays `LockedUnconfirmed`
+    /// until the lock's transaction finalizes, and releasing the lock deletes it.
+    pub fn add_unconfirmed_output(
+        &self,
+        lock_id: WalletLockId,
+        account: &AccountWithAddress,
+        resource_address: ResourceAddress,
+        output: &StealthUnspentOutput,
+        value: u64,
+        memo: Option<Memo>,
+    ) -> Result<(), StealthOutputsApiError> {
+        self.add_output(&StealthOutputModel {
+            owner_account: *account.component_address(),
+            resource_address,
+            commitment: output.output.commitment,
+            value,
+            sender_public_nonce: output.output.sender_public_nonce,
+            view_only_key_id: account.view_only_key_id(),
+            owner_key_id: account.owner_key_id(),
+            encrypted_data: output.output.encrypted_data.clone(),
+            status: OutputStatus::LockedUnconfirmed,
+            memo,
+            auth: output.auth.clone(),
+            minimum_value_promise: output.output.minimum_value_promise,
+            tag_byte: output.tag,
+            lock_id: Some(lock_id),
+            proven_up: None,
+            spent_version: None,
+            is_burnt: false,
+            is_frozen: false,
+            is_on_chain: false,
+            is_condition_spendable: self.is_spendable_auth(&output.auth),
+        })
+    }
+
     /// Whether the wallet can auto-select a UTXO with this authorisation as a spend input. Only key-path UTXOs (whose
     /// one-time `spend_key` the wallet owns) are auto-spendable. Script-path (condition-tree) UTXOs are opaque from the
     /// committed root alone — satisfying a hidden leaf requires caller-provided conditions and witnesses — so they are
@@ -612,19 +649,31 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(balance)
     }
 
-    pub fn count_unspent_outputs_for_account(
+    /// Counts the account's outputs that are unspent or locked by a pending transaction. A spend of
+    /// any of them may still have to reach the wallet through the UTXO scanner.
+    pub fn count_unspent_or_locked_outputs_for_account(
         &self,
         account_address: &ComponentAddress,
         resource_address: &ResourceAddress,
     ) -> Result<u64, StealthOutputsApiError> {
         let count = self.store.with_read_tx(|tx| {
-            tx.stealth_outputs_count_by_status(account_address, resource_address, OutputStatus::Unspent)
+            let mut count = 0;
+            for status in [
+                OutputStatus::Unspent,
+                OutputStatus::LockedForSpend,
+                OutputStatus::LockedUnconfirmed,
+            ] {
+                count += tx.stealth_outputs_count_by_status(account_address, resource_address, status)?;
+            }
+            Ok::<_, StealthOutputsApiError>(count)
         })?;
         Ok(count)
     }
 
-    pub fn upsert_utxo(&self, utxo: &StealthOutputModel) -> Result<(), StealthOutputsApiError> {
-        self.store.with_write_tx(|tx| {
+    /// Inserts `utxo`, or updates the stored output's burnt and frozen flags and, while it is unspent, its status.
+    /// Returns whether the stored output was inserted or changed.
+    pub fn upsert_utxo(&self, utxo: &StealthOutputModel) -> Result<bool, StealthOutputsApiError> {
+        let changed = self.store.with_write_tx(|tx| {
             // TODO(perf): consider a dedicated exists query
             let maybe_utxo = tx
                 .stealth_outputs_get_by_commitment(&utxo.resource_address, &utxo.commitment)
@@ -636,13 +685,68 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                     // EDGE-CASE: scanning picks up a local UTXO that we know was spent
                     _ => None,
                 };
+                // A burn is final, so a burnt output stays burnt.
+                let is_burnt = prev_utxo.is_burnt || utxo.is_burnt;
+                let changed = new_status.is_some_and(|status| status != prev_utxo.status) ||
+                    prev_utxo.is_burnt != is_burnt ||
+                    prev_utxo.is_frozen != utxo.is_frozen;
                 let address = utxo.to_utxo_address();
-                tx.stealth_outputs_update(&address, Some(utxo.is_burnt), new_status, Some(utxo.is_frozen))
+                tx.stealth_outputs_update(&address, Some(is_burnt), new_status, Some(utxo.is_frozen))?;
+                Ok::<_, WalletStorageError>(changed)
             } else {
-                tx.stealth_outputs_insert(utxo)
+                tx.stealth_outputs_insert(utxo)?;
+                Ok(true)
             }
         })?;
-        Ok(())
+        Ok(changed)
+    }
+
+    /// Sets the frozen flag of a stored output. Returns `None` when the wallet holds no output at `address`, and
+    /// otherwise whether the flag changed.
+    pub fn set_utxo_frozen(
+        &self,
+        address: &UtxoAddress,
+        is_frozen: bool,
+    ) -> Result<Option<bool>, StealthOutputsApiError> {
+        let changed = self.store.with_write_tx(|tx| {
+            let Some(prev_utxo) = tx
+                .stealth_outputs_get_by_commitment(address.resource_address(), &address.id().into_commitment_bytes())
+                .optional()?
+            else {
+                return Ok::<_, WalletStorageError>(None);
+            };
+            tx.stealth_outputs_update(address, None, None, Some(is_frozen))?;
+            Ok(Some(prev_utxo.is_frozen != is_frozen))
+        })?;
+        Ok(changed)
+    }
+
+    /// Marks the output the wallet holds at `address` burnt, unless it is spent or burnt already. Returns the account
+    /// that holds it when it was marked.
+    pub fn mark_burnt(&self, address: &UtxoAddress) -> Result<Option<ComponentAddress>, StealthOutputsApiError> {
+        let marked = self.store.with_write_tx(|tx| {
+            let Some(held) = tx
+                .stealth_outputs_get_by_commitment(address.resource_address(), &address.id().into_commitment_bytes())
+                .optional()?
+            else {
+                return Ok::<_, WalletStorageError>(None);
+            };
+            let marked = tx.stealth_outputs_mark_as_burnt(address)?;
+            Ok(marked.then_some(held.owner_account))
+        })?;
+        if marked.is_some() {
+            info!(target: LOG_TARGET, "🔥 Stealth output {} is burnt", address);
+        }
+        Ok(marked)
+    }
+
+    /// Records that a verified proof showed the output at `address` up, unless the wallet holds a proof of the same or
+    /// a later version. Returns whether it was recorded.
+    pub fn record_proven_up(&self, address: &UtxoAddress, proven_up: ProvenUp) -> Result<bool, StealthOutputsApiError> {
+        let recorded = self
+            .store
+            .with_write_tx(|tx| tx.stealth_outputs_record_proven_up(address, proven_up))?;
+        Ok(recorded)
     }
 
     pub fn update_utxo_status(
@@ -669,6 +773,24 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(exists)
     }
 
+    /// The address of each output the wallet holds unspent or locked for spending, on chain, with no proof of any
+    /// version.
+    pub fn get_unproven_held_addresses(&self) -> Result<Vec<UtxoAddress>, StealthOutputsApiError> {
+        let outputs = self.store.with_read_tx(|tx| tx.stealth_outputs_get_unproven_held())?;
+        Ok(outputs.iter().map(StealthOutputModel::to_utxo_address).collect())
+    }
+
+    /// The output the wallet holds at `address`, if any.
+    pub fn get_utxo(&self, address: &UtxoAddress) -> Result<Option<StealthOutputModel>, StealthOutputsApiError> {
+        let output = self
+            .store
+            .with_read_tx(|tx| {
+                tx.stealth_outputs_get_by_commitment(address.resource_address(), &address.id().into_commitment_bytes())
+            })
+            .optional()?;
+        Ok(output)
+    }
+
     pub fn utxos_get_many(
         &self,
         resource_address: &ResourceAddress,
@@ -681,12 +803,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(outputs)
     }
 
-    #[allow(clippy::too_many_lines)]
-    pub fn verify_and_update_outputs<'i, I: IntoIterator<Item = (UtxoAddress, &'i Utxo)>>(
-        &self,
-        outputs: I,
-    ) -> Result<HashSet<(ComponentAddress, ResourceAddress)>, StealthOutputsApiError> {
-        let all_used_view_only_keys = self
+    fn all_used_view_only_keys(&self) -> Result<Vec<AccountAndViewKeys>, StealthOutputsApiError> {
+        let mut keys = self
             .key_manager_api
             .get_all_derived_keys(KeyBranch::ViewOnlyKey)?
             .into_iter()
@@ -704,11 +822,55 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
+        // View-only accounts use an imported view key, which is not in the derived key branch above
+        let accounts = self.store.with_read_tx(|tx| {
+            let count = tx.accounts_count()?;
+            tx.accounts_get_many(0, count as usize)
+        })?;
+        for account in accounts {
+            if !matches!(account.view_only_key_id, KeyId::Imported { .. }) {
+                continue;
+            }
+            let loaded = account
+                .owner_key_id
+                .map(|key_id| self.key_manager_api.get_key(key_id))
+                .transpose()
+                .and_then(|account_key| Ok((account_key, self.key_manager_api.get_key(account.view_only_key_id)?)));
+            // One unreadable key must not stop outputs being checked for every other account
+            let (account_key, view_only_key) = match loaded {
+                Ok(keys) => keys,
+                Err(e) => {
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️ Skipping account {} when checking outputs: its keys could not be loaded: {}",
+                        account.component_address,
+                        e
+                    );
+                    continue;
+                },
+            };
+            keys.push(AccountAndViewKeys {
+                account_public_key: account.owner_public_key,
+                account_key,
+                view_only_key,
+            });
+        }
+        Ok(keys)
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub fn verify_and_update_outputs<'i, I: IntoIterator<Item = (UtxoAddress, &'i Utxo)>>(
+        &self,
+        outputs: I,
+    ) -> Result<UpdatedOutputs, StealthOutputsApiError> {
+        // The keys are only loaded once an output needs validating
+        let mut all_used_view_only_keys = None;
         let network = self.config_api.get_network()?;
 
         let mut found_utxos_count = 0usize;
         let mut num_outputs = 0usize;
         let mut touched_balances = HashSet::new();
+        let mut burnt = Vec::new();
         for (addr, utxo) in outputs {
             num_outputs += 1;
             let commitment = addr.id().into_commitment_bytes();
@@ -719,77 +881,88 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 addr,
             );
 
-            let mut tx = self.store.create_write_tx()?;
-            match tx
-                .stealth_outputs_get_by_commitment(resource_address, &commitment)
-                .optional()?
-            {
-                Some(_) => {
+            // The keys are read through the store, so they are loaded outside the write transaction and the
+            // output is checked again
+            let (mut tx, held) = loop {
+                let mut tx = self.store.create_write_tx()?;
+                let held = tx
+                    .stealth_outputs_get_by_commitment(resource_address, &commitment)
+                    .optional()?;
+                if held.is_some() || utxo.output().is_none() || all_used_view_only_keys.is_some() {
+                    break (tx, held);
+                }
+                drop(tx);
+                all_used_view_only_keys = Some(self.all_used_view_only_keys()?);
+            };
+            if let Some(held) = held {
+                info!(
+                    target: LOG_TARGET,
+                    "Output already exists in the wallet. Updating. (commitment: {})",
+                    commitment
+                );
+                if utxo.is_burnt() {
                     info!(
                         target: LOG_TARGET,
-                        "Output already exists in the wallet. Updating. (commitment: {})",
+                        "🔥 Owned output is burnt with commitment: {}.",
                         commitment
                     );
-                    if utxo.is_burnt() {
-                        info!(
-                            target: LOG_TARGET,
-                            "🔥 Owned output is burnt with commitment: {}.",
-                            commitment
-                        );
-                    }
-                    if utxo.is_frozen() {
-                        info!(
-                            target: LOG_TARGET,
-                            "❄️ Owned output is frozen with commitment: {}.",
-                            commitment
-                        );
-                    }
+                }
+                if utxo.is_frozen() {
+                    info!(
+                        target: LOG_TARGET,
+                        "❄️ Owned output is frozen with commitment: {}.",
+                        commitment
+                    );
+                }
 
-                    // Update is_burnt and is_frozen status to false->true or true->false
-                    tx.stealth_outputs_update(&addr, Some(utxo.is_burnt()), None, Some(utxo.is_frozen()))?;
-                },
-                None => {
-                    let is_frozen = utxo.is_frozen();
-                    let Some(output) = utxo.output() else {
+                tx.stealth_outputs_update(&addr, None, None, Some(utxo.is_frozen()))?;
+                if utxo.is_burnt() && tx.stealth_outputs_mark_as_burnt(&addr)? {
+                    touched_balances.insert((held.owner_account, held.resource_address));
+                    burnt.push((held.owner_account, addr));
+                }
+            } else {
+                let is_frozen = utxo.is_frozen();
+                let Some(output) = utxo.output() else {
+                    debug!(
+                        target: LOG_TARGET,
+                        "Unknown Utxo output is burnt for commitment: {}. Skipping.",
+                        commitment
+                    );
+                    continue;
+                };
+
+                // Output does not exist. Validate it and add it to the store
+                match self.validate_utxo(
+                    all_used_view_only_keys
+                        .as_deref()
+                        .expect("keys are loaded for an output that is not stored"),
+                    network,
+                    *resource_address,
+                    commitment,
+                    output,
+                    is_frozen,
+                ) {
+                    Ok(Some(output)) => {
+                        found_utxos_count += 1;
+                        touched_balances.insert((output.owner_account, output.resource_address));
+                        tx.stealth_outputs_insert(&output)?;
+                    },
+                    Ok(None) => {
                         debug!(
                             target: LOG_TARGET,
-                            "Unknown Utxo output is burnt for commitment: {}. Skipping.",
+                            "🚮 wallet could not extract the value and mask for this output. Assuming it is not owned. (commitment: {})",
                             commitment
                         );
-                        continue;
-                    };
-
-                    // Output does not exist. Validate it and add it to the store
-                    match self.validate_utxo(
-                        &all_used_view_only_keys,
-                        network,
-                        *resource_address,
-                        commitment,
-                        output,
-                        is_frozen,
-                    ) {
-                        Ok(Some(output)) => {
-                            found_utxos_count += 1;
-                            touched_balances.insert((output.owner_account, output.resource_address));
-                            tx.stealth_outputs_insert(&output)?;
-                        },
-                        Ok(None) => {
-                            debug!(
-                                target: LOG_TARGET,
-                                "🚮 wallet could not extract the value and mask for this output. Assuming it is not owned. (commitment: {})",
-                                commitment
-                            );
-                        },
-                        Err(e) => {
-                            warn!(
-                                target: LOG_TARGET,
-                                "Output validation failed. Skipping. (commitment: {}, error: {})",
-                                commitment,
-                                e
-                            );
-                        },
-                    }
-                },
+                    },
+                    Err(e) => {
+                        warn!(
+                            target: LOG_TARGET,
+                            "Output validation failed. Skipping. (commitment: {}, error: {})",
+                            commitment,
+                            e
+                        );
+                    },
+                }
             }
             tx.commit()?;
         }
@@ -803,7 +976,10 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
             );
         }
 
-        Ok(touched_balances)
+        Ok(UpdatedOutputs {
+            touched_balances,
+            burnt,
+        })
     }
 
     #[allow(clippy::too_many_lines)]
@@ -816,24 +992,32 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         output: &UtxoOutput,
         is_frozen: bool,
     ) -> Result<Option<StealthOutputModel>, StealthOutputsApiError> {
-        // Validate the commitment is well-formed.
-        let _output_commitment: PedersenCommitment =
-            commitment
-                .try_from_byte_type()
-                .map_err(|e| StealthOutputsApiError::InvalidParameter {
-                    param: "commitment",
-                    reason: format!("Invalid output commitment bytes: {}", e),
-                })?;
-
-        let output_stealth_public_nonce =
-            output
-                .output
-                .public_nonce
-                .try_from_byte_type()
-                .map_err(|e| StealthOutputsApiError::InvalidParameter {
-                    param: "stealth_public_nonce",
-                    reason: format!("Failed to parse stealth public nonce: {}", e),
-                })?;
+        // The commitment and nonce come from the indexer, so a malformed one makes this output unreadable, and leaves
+        // the other outputs of a batch to be read.
+        match PedersenCommitment::convert_from_byte_type(&commitment) {
+            Ok(_) => {},
+            Err(e) => {
+                warn!(
+                    target: LOG_TARGET,
+                    "⚠️ Output commitment {} is not a valid commitment ({}). Assuming it is not owned.",
+                    commitment,
+                    e
+                );
+                return Ok(None);
+            },
+        }
+        let output_stealth_public_nonce = match output.output.public_nonce.try_from_byte_type() {
+            Ok(nonce) => nonce,
+            Err(e) => {
+                warn!(
+                    target: LOG_TARGET,
+                    "⚠️ Public nonce of output {} is not a valid public key ({}). Assuming it is not owned.",
+                    commitment,
+                    e
+                );
+                return Ok(None);
+            },
+        };
 
         debug!(
             target: LOG_TARGET,
@@ -844,6 +1028,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
             output_stealth_public_nonce,
         );
 
+        let mut invalid_output = None;
         for keys in all_used_account_view_only_keys {
             trace!(
                 target: LOG_TARGET,
@@ -860,33 +1045,49 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
 
             let (value, memo, status) = match unblinded_result {
                 Ok(decrypted) => {
-                    if let Some(ref owner_key) = keys.account_key {
-                        let stealth_secret = self.crypto_api.derive_stealth_owner_secret(
-                            network,
-                            &owner_key.secret,
-                            &output_stealth_public_nonce,
-                        );
-                        let stealth_address = RistrettoPublicKey::from_secret_key(&stealth_secret).to_byte_type();
-                        // A key-path output is owned only if its spend_key is our derived stealth address. A
-                        // condition-tree output (no spend_key) is recognised as viewable but not key-spendable here.
-                        if output.auth.spend_key().is_none_or(|pk| *pk == stealth_address) {
-                            (decrypted.value(), decrypted.memo, OutputStatus::Unspent)
-                        } else {
-                            warn!(
-                                target: LOG_TARGET,
-                                "⚠️ Output owner public key does not match the expected stealth address. (expected: {}, actual: {}). Utxo cannot be spent by this wallet and will be stored as invalid.",
-                                stealth_address,
-                                output.auth.spend_key().as_ref().display()
-                            );
-                            (decrypted.value(), decrypted.memo, OutputStatus::Invalid)
+                    let account_public_key = keys.account_public_key.try_from_byte_type().map_err(|e| {
+                        StealthOutputsApiError::InvalidParameter {
+                            param: "account_public_key",
+                            reason: format!("Invalid account public key bytes: {}", e),
                         }
-                    } else {
-                        info!(
+                    })?;
+                    let stealth_address = self
+                        .crypto_api
+                        .derive_stealth_owner_public_key_from_view_key(
+                            network,
+                            &account_public_key,
+                            &keys.view_only_key.secret,
+                            &output_stealth_public_nonce,
+                        )
+                        .to_byte_type();
+                    // A key-path output is owned only if its spend_key is our derived stealth address. A
+                    // condition-tree output (no spend_key) is recognised as viewable but not key-spendable here.
+                    if keys.account_key.is_none() && output.auth.condition_root().is_some() {
+                        // A condition tree lets whoever satisfies it spend the output, which a view key cannot rule
+                        // out, so for a view-only account it never counts as balance
+                        warn!(
                             target: LOG_TARGET,
-                            "Output can only be viewed, not spent, as there is no owner key for view key {}",
+                            "⚠️ Output with a condition tree for view-only key {} cannot be confirmed as owned and will be stored as invalid.",
                             keys.view_only_key.key_id,
                         );
+                        (decrypted.value(), decrypted.memo, OutputStatus::Invalid)
+                    } else if output.auth.spend_key().is_none_or(|pk| *pk == stealth_address) {
+                        if keys.account_key.is_none() {
+                            info!(
+                                target: LOG_TARGET,
+                                "Output can only be viewed, not spent, as there is no owner key for view key {}",
+                                keys.view_only_key.key_id,
+                            );
+                        }
                         (decrypted.value(), decrypted.memo, OutputStatus::Unspent)
+                    } else {
+                        warn!(
+                            target: LOG_TARGET,
+                            "⚠️ Output owner public key does not match the expected stealth address. (expected: {}, actual: {}). Utxo cannot be spent by this account and will be stored as invalid.",
+                            stealth_address,
+                            output.auth.spend_key().as_ref().display()
+                        );
+                        (decrypted.value(), decrypted.memo, OutputStatus::Invalid)
                     }
                 },
                 Err(e) => {
@@ -911,7 +1112,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 value,
             );
 
-            return Ok(Some(StealthOutputModel {
+            let model = StealthOutputModel {
                 owner_account,
                 // Note that this is not validated and depends on the caller ensuring the resource address belongs to
                 // the stealth output.
@@ -932,10 +1133,18 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 is_on_chain: true,
                 is_condition_spendable: self.is_spendable_auth(&output.auth),
                 lock_id: None,
-            }));
+                proven_up: None,
+                spent_version: None,
+            };
+            // Another key may still own the output, so an invalid result is only returned if none does
+            if matches!(model.status, OutputStatus::Invalid) {
+                invalid_output.get_or_insert(model);
+                continue;
+            }
+            return Ok(Some(model));
         }
 
-        Ok(None)
+        Ok(invalid_output)
     }
 
     pub fn create_output_witness(
@@ -961,7 +1170,12 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         let auth = pay_to_output_authorization(&pay_to, || {
             // Create stealth address that the destination can use at spend time
             self.crypto_api
-                .derive_stealth_owner_public_key(destination.network(), destination.account_key(), &nonce_secret)
+                .derive_stealth_owner_public_key(
+                    destination.network(),
+                    destination.account_key(),
+                    destination.view_only_key(),
+                    &nonce_secret,
+                )
                 .to_byte_type()
         })?;
 
@@ -1066,6 +1280,15 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
             .encrypt_value_and_mask(amount, &mask.key, public_key, &nonce_secret, memo)?;
         Ok((public_nonce, data))
     }
+}
+
+/// What [`StealthOutputsApi::verify_and_update_outputs`] changed.
+#[derive(Debug, Clone, Default)]
+pub struct UpdatedOutputs {
+    /// The `(account, resource)` pairs whose unspent stealth balance changed.
+    pub touched_balances: HashSet<(ComponentAddress, ResourceAddress)>,
+    /// The held outputs marked burnt, with the account that holds each.
+    pub burnt: Vec<(ComponentAddress, UtxoAddress)>,
 }
 
 pub struct TransferStatementParams<'a, I> {

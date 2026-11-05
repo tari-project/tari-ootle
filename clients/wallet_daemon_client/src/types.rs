@@ -38,18 +38,23 @@ use tari_ootle_common_types::{
     ShardGroup,
     SubstateAddress,
     SubstateVersion,
+    ValidatorSetHash,
     shard::Shard,
     substate_type::SubstateType,
 };
 use tari_ootle_template_metadata::{MetadataHash, TemplateMetadata};
 use tari_ootle_transaction::{
+    ComponentReference,
     Instruction,
+    MigrateFunction,
     PrunedTransaction,
     TransactionId,
     TransactionSignature,
     UnsignedTransaction,
 };
+pub use tari_ootle_wallet_sdk::apis::stealth_transfer::InputSelection;
 use tari_ootle_wallet_sdk::{
+    IndexerTrust,
     apis::{
         confidential_transfer::UtxoInputSelection,
         stealth_transfer::{BadgeUsage, TransferFeeParams, TransferOutput},
@@ -74,6 +79,7 @@ use tari_ootle_wallet_sdk::{
         StealthUtxoSpendKeyId,
         TransactionRequestId,
         TransactionStatus,
+        ValidatorSetAnchor,
         WalletLockId,
         WalletTransaction,
     },
@@ -92,6 +98,7 @@ use tari_template_lib_types::{
     UtxoId,
     ValidatorFeePoolAddress,
     VaultId,
+    access_rules::UpdateRule,
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
     stealth::{SpendAuthorization, StealthTransferStatement},
@@ -166,9 +173,11 @@ pub struct TransactionRequestCreateRequest {
     /// it is altered after creation.
     #[serde(default)]
     pub signatures: Vec<TransactionSignature>,
-    /// Locks holding this request's inputs. Their timeouts are extended to
-    /// outlive the approval window. Stealth spend keys are derived from these
-    /// at submit -- a caller cannot name them.
+    /// Locks holding this request's inputs, as returned to this same caller by
+    /// the handler that selected them. Each must be unspent and not held by
+    /// another live request. Their timeouts are extended to outlive the
+    /// approval window. Stealth spend keys are derived from these at submit --
+    /// a caller cannot name them.
     #[serde(default)]
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
     pub lock_ids: Vec<WalletLockId>,
@@ -212,8 +221,9 @@ pub struct TransactionRequestCreateResponse {
     pub expires_at: i64,
 }
 
-/// Net value movement for a stealth or confidential transfer, computed by the
-/// wallet from the request's locks.
+/// Net value of one resource that the transaction's stealth transfers move out
+/// of this wallet, computed by the wallet from the transaction's own
+/// statements.
 ///
 /// A stealth transfer's instructions are commitments and range proofs, so a
 /// human cannot read the amount out of them. The wallet owns the masks and is
@@ -222,12 +232,29 @@ pub struct TransactionRequestCreateResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct TransactionRequestValueSummary {
     pub resource_address: ResourceAddress,
-    /// Total value of the inputs this request spends.
+    /// Total value of this wallet's stealth outputs that the transaction spends.
     pub inputs_total: u64,
-    /// Total value returning to this wallet as change.
+    /// Total value of the outputs the transaction creates that return to this
+    /// wallet as change.
     pub change_total: u64,
     /// `inputs_total - change_total`: what actually leaves, before fees.
     pub amount_leaving: u64,
+}
+
+/// The key a request's transaction acts as wherever the engine needs a single signer
+/// (`OwnerRule::OwnedBySigner`, `CallerContext::transaction_signer_public_key`, a published
+/// template's author), as the wallet resolves it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub enum TransactionRequestMainSigner {
+    /// The request's seal signer, a key of this wallet.
+    SealSigner,
+    /// One of the request's `other_signers`, keys of this wallet.
+    WalletKey { public_key: RistrettoPublicKeyBytes },
+    /// A key outside this wallet. Only a request whose creator supplied that key's signature is accepted.
+    External { public_key: RistrettoPublicKeyBytes },
+    /// The transaction has no main signer, so anything in it that needs one aborts.
+    None,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -239,13 +266,24 @@ pub struct TransactionRequestInfo {
     pub transaction: UnsignedTransaction,
     pub seal_signer: KeyId,
     pub other_signers: Vec<KeyId>,
-    /// Admin-assigned name of the API key that created this request, or `None`
-    /// for a wallet session. Display only -- nothing authorises on it.
+    /// Admin-assigned name of the API key that created this request, `"local-cookie"`
+    /// for a local `.cookie` bearer, or `None` for a wallet session. Display only --
+    /// nothing authorises on it.
     pub requested_by: Option<String>,
     pub status: EffectiveStatus,
     pub transaction_id: Option<TransactionId>,
-    /// `None` for an ordinary transaction, whose instructions are readable.
-    pub value_summary: Option<TransactionRequestValueSummary>,
+    /// One entry per resource whose stealth outputs in this wallet the
+    /// transaction spends; empty when it spends none.
+    pub value_summaries: Vec<TransactionRequestValueSummary>,
+    /// Every `UpdateComponentTemplate` instruction in the transaction, fee instructions first. See
+    /// [`ComponentUpgrade`].
+    #[serde(default)]
+    pub component_upgrades: Vec<ComponentUpgrade>,
+    /// Who the transaction acts as wherever the engine needs a single signer.
+    pub main_signer: TransactionRequestMainSigner,
+    /// Public keys of the signatures the request's creator supplied out of band. Each one authorizes the
+    /// transaction alongside this wallet's keys.
+    pub external_signers: Vec<RistrettoPublicKeyBytes>,
     /// Unix timestamp (seconds).
     pub expires_at: i64,
     /// Unix timestamp (seconds). `None` until approved.
@@ -351,6 +389,10 @@ pub struct SigningRequestInfo {
     pub request_id: SigningRequestId,
     /// The transaction body the signature commits to.
     pub transaction: UnsignedTransaction,
+    /// Every `UpdateComponentTemplate` instruction in `transaction`, fee instructions first. See
+    /// [`ComponentUpgrade`].
+    #[serde(default)]
+    pub component_upgrades: Vec<ComponentUpgrade>,
     pub seal_public_key: RistrettoPublicKeyBytes,
     pub key_id: KeyId,
     /// Public key of `key_id`.
@@ -460,6 +502,42 @@ pub struct TransactionSubmitDryRunResponse {
     /// subtracted since it won't recur with a tighter max_fee.
     pub required_fees: u64,
     pub result: ExecuteResult,
+    /// Components the transaction calls directly, plus components a nested call writes, whose template can still be
+    /// swapped after creation. Whoever satisfies `upgrade_rule` can change that template, so the code that runs on
+    /// submission may differ from the dry run. See [`UpgradableComponent`].
+    ///
+    /// The list leaves out components a nested call only reads, components the transaction creates, and components
+    /// whose upgrade rule is [`UpdateRule::Locked`] or `AccessRule::DenyAll`. An empty list does not mean every
+    /// component the transaction reaches is locked.
+    #[serde(default)]
+    pub upgradable_components: Vec<UpgradableComponent>,
+    /// Every `UpdateComponentTemplate` instruction in the transaction, fee instructions first. See
+    /// [`ComponentUpgrade`].
+    #[serde(default)]
+    pub component_upgrades: Vec<ComponentUpgrade>,
+}
+
+/// An `UpdateComponentTemplate` instruction: the transaction replaces the code of `component` with `new_template`
+/// and runs `migrate` from the new template, if given. Whoever signs the transaction lends their signer badge to the
+/// upgrade, so a signer who satisfies the component's upgrade rule hands its code, and every vault it holds, to the
+/// new template.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ComponentUpgrade {
+    /// A workspace reference names a component the transaction resolves during execution, such as one an earlier
+    /// instruction returns.
+    pub component: ComponentReference,
+    pub new_template: TemplateAddress,
+    pub migrate: Option<MigrateFunction>,
+}
+
+/// A component whose template can be swapped by whoever satisfies `upgrade_rule`, so the code that runs when the
+/// transaction is submitted may differ from the code that ran in the dry run.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct UpgradableComponent {
+    pub component_address: ComponentAddress,
+    pub upgrade_rule: UpdateRule,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -492,6 +570,19 @@ pub struct TransactionSubmitManifestResponse {
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub required_fees: Option<u64>,
     pub result: Option<ExecuteResult>,
+    /// Components the transaction calls directly, plus components a nested call writes, whose template can still be
+    /// swapped after creation. Whoever satisfies `upgrade_rule` can change that template, so the code that runs on
+    /// submission may differ from the dry run. Only populated for dry runs. See [`UpgradableComponent`].
+    ///
+    /// The list leaves out components a nested call only reads, components the transaction creates, and components
+    /// whose upgrade rule is [`UpdateRule::Locked`] or `AccessRule::DenyAll`. An empty list does not mean every
+    /// component the transaction reaches is locked.
+    #[serde(default)]
+    pub upgradable_components: Vec<UpgradableComponent>,
+    /// Every `UpdateComponentTemplate` instruction in the transaction, fee instructions first. Only populated for dry
+    /// runs. See [`ComponentUpgrade`].
+    #[serde(default)]
+    pub component_upgrades: Vec<ComponentUpgrade>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -622,9 +713,9 @@ pub struct TransactionClaimBurnResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct BurnProofsListRequest {
-    /// Optional filter by account public key. Only proofs whose file name starts with this key
-    /// will be returned. Proofs with file names that do not match the expected
-    /// `{public_key}_{commitment}.json` format are always included.
+    /// Optional filter by account public key, compared case-insensitively. A proof is excluded when its file name has
+    /// the `{public_key}-{commitment}.json` format with a different key, or when it parses and its `burn_public_key`
+    /// differs. A file that does not parse is listed unless its name gives a different key.
     pub filter_by_public_key: Option<String>,
 }
 
@@ -743,6 +834,45 @@ pub struct AccountsCreateOrGetResponse {
     pub account: Account,
     pub address: OotleAddress,
     pub created: bool,
+}
+
+/// Adds an account that can view but not spend incoming stealth outputs. The `view_secret_key` is transmitted as hex.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AccountsImportViewOnlyRequest {
+    pub account_name: String,
+    pub account_public_key: RistrettoPublicKeyBytes,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub view_secret_key: RistrettoSecretKey,
+    /// The epoch to start scanning for outputs from. Defaults to the current epoch.
+    pub birthday_epoch: Option<Epoch>,
+    /// Must be omitted or false: the default account pays fees and signs transactions, which a view-only account
+    /// cannot do.
+    pub is_default: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AccountsImportViewOnlyResponse {
+    pub account_address: ComponentAddress,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AccountsExportViewKeyRequest {
+    #[serde(deserialize_with = "string_or_struct")]
+    pub account: ComponentAddressOrName,
+}
+
+/// The values needed to import the account into another wallet with `accounts.import_view_only`. The
+/// `view_secret_key` is transmitted as hex.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct AccountsExportViewKeyResponse {
+    pub account_public_key: RistrettoPublicKeyBytes,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub view_secret_key: RistrettoSecretKey,
+    pub birthday_epoch: Epoch,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -909,6 +1039,11 @@ pub struct AccountsTransferRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AccountsTransferResponse {
     pub transaction_id: TransactionId,
+    /// The fee to submit this transfer with. Only present for dry runs.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub required_fees: Option<u64>,
+    /// The result of the dry run. The wallet does not keep a dry run, so this is the only place it is reported.
+    pub dry_run_result: Option<ExecuteResult>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -954,6 +1089,11 @@ pub struct ConfidentialCreateOutputProofRequest {
     #[cfg_attr(feature = "ts", ts(type = "number | bigint | string"))]
     #[serde(deserialize_with = "ootle_serde::str_number::deserialize")]
     pub amount: u64,
+    pub resource_address: ResourceAddress,
+    /// The address whose view key the output value and mask are encrypted to.
+    pub destination_address: OotleAddress,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_memo: Option<Memo>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -985,6 +1125,11 @@ pub struct ConfidentialTransferRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct ConfidentialTransferResponse {
     pub transaction_id: TransactionId,
+    /// The fee to submit this transfer with. Only present for dry runs.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub required_fees: Option<u64>,
+    /// The result of the dry run. The wallet does not keep a dry run, so this is the only place it is reported.
+    pub dry_run_result: Option<ExecuteResult>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1518,6 +1663,9 @@ pub struct SettingsGetResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct AdvancedUiFeatures {
     pub enable_manifest: bool,
+    /// Shows the page that reports the validator sets the wallet trusts.
+    #[serde(default)]
+    pub enable_validator_set: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1648,10 +1796,25 @@ pub struct WebauthnAlreadyRegisteredResponse {
     pub registered: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct WebauthnStartRegisterRequest {
     pub username: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    /// One-time setup token required for initial passkey enrollment.
+    #[serde(default)]
+    pub setup_token: Option<String>,
+}
+
+impl std::fmt::Debug for WebauthnStartRegisterRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebauthnStartRegisterRequest")
+            .field("username", &self.username)
+            .field("label", &self.label)
+            .field("setup_token", &self.setup_token.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1664,7 +1827,7 @@ pub struct WebauthnStartRegisterResponse {
     pub public_key: PublicKeyCredentialCreationOptions,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct WebauthnFinishRegisterRequest {
     /// Session ID received from [`WebauthnStartRegisterResponse`].
@@ -1672,20 +1835,75 @@ pub struct WebauthnFinishRegisterRequest {
     /// [`RegisterPublicKeyCredential`]
     #[cfg_attr(feature = "ts", ts(type = "object"))]
     pub credential: RegisterPublicKeyCredential,
+    /// One-time setup token required for initial passkey enrollment.
+    #[serde(default)]
+    pub setup_token: Option<String>,
+}
+
+impl std::fmt::Debug for WebauthnFinishRegisterRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebauthnFinishRegisterRequest")
+            .field("session_id", &self.session_id)
+            .field("credential", &self.credential)
+            .field("setup_token", &self.setup_token.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct WebauthnFinishRegisterResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub token: EncodedJwtString,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(type = "string | null", optional))]
+    pub token: Option<EncodedJwtString>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct WebauthnStartAuthRequest {
-    pub username: String,
+pub struct WebauthnPasskeyInfo {
+    pub id: u32,
+    pub label: String,
+    pub counter: u32,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub created_at: i64,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub last_used_at: Option<i64>,
 }
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct WebauthnListPasskeysRequest {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct WebauthnListPasskeysResponse {
+    pub passkeys: Vec<WebauthnPasskeyInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct WebauthnRenamePasskeyRequest {
+    pub id: u32,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct WebauthnRenamePasskeyResponse {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct WebauthnRemovePasskeyRequest {
+    pub id: u32,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct WebauthnRemovePasskeyResponse {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct WebauthnStartAuthRequest {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
@@ -1717,6 +1935,65 @@ pub struct WalletGetInfoResponse {
     pub version: String,
     pub network: String,
     pub network_byte: u8,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ValidatorSetGetStatusRequest {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ValidatorSetGetStatusResponse {
+    /// Whether the wallet verifies what its indexer serves against the validator sets it trusts.
+    #[cfg_attr(feature = "ts", ts(type = "\"verify\" | \"trust\""))]
+    pub indexer_trust: IndexerTrust,
+    /// `None` until the wallet first anchors on a validator set.
+    pub trusted: Option<TrustedValidatorSetInfo>,
+    /// The wallet's latest re-anchors, newest first. On each the wallet took its indexer's word for the set it
+    /// anchored on.
+    pub reanchors: Vec<ValidatorSetReanchorInfo>,
+}
+
+/// A re-anchor the wallet recorded.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct ValidatorSetReanchorInfo {
+    /// The epoch of the latest validator set the wallet trusted before.
+    pub previous_epoch: Option<Epoch>,
+    /// The epoch of the validator set the wallet anchored on.
+    pub epoch: Epoch,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub validator_set_hash: ValidatorSetHash,
+    /// When the wallet re-anchored, in seconds since the Unix epoch.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub reanchored_at: i64,
+}
+
+/// The validator sets the wallet trusts.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct TrustedValidatorSetInfo {
+    /// The epoch of the latest validator set the wallet trusts.
+    pub epoch: Epoch,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub validator_set_hash: ValidatorSetHash,
+    /// The epoch of the validator set every trusted set descends from.
+    pub anchor_epoch: Epoch,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub anchor_validator_set_hash: ValidatorSetHash,
+    /// How the wallet came to trust its anchor. On `Reanchor` the wallet took its indexer's word for the anchor again,
+    /// as it does on first use, in place of walking to it from its earlier anchor.
+    #[cfg_attr(feature = "ts", ts(type = "\"FirstUse\" | \"Reanchor\""))]
+    pub anchor: ValidatorSetAnchor,
+    /// When the wallet anchored, in seconds since the Unix epoch.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub anchored_at: i64,
+    /// When the wallet last brought its trusted set up to date, in seconds since the Unix epoch.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub synced_at: Option<u64>,
+    /// Since when the walk to the latest checkpoint has failed on every sync, in seconds since the Unix epoch.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub walk_failing_since: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1760,50 +2037,11 @@ pub struct TransferStatementRequest {
 }
 
 impl TransferStatementRequest {
-    pub fn total_output_amount(&self) -> Amount {
+    /// The sum of every output's revealed and blinded amounts, or `None` if it exceeds [`Amount::MAX`].
+    pub fn total_output_amount(&self) -> Option<Amount> {
         self.outputs
             .iter()
-            .map(|o| Amount::from(o.blinded_amount) + o.revealed_amount)
-            .sum()
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub enum InputSelection {
-    FromBucket {
-        revealed_amount: Amount,
-    },
-    Selection(UtxoInputSelection),
-    /// Spend exactly the named wallet-owned stealth UTXOs, in the given order. The wallet resolves, validates and
-    /// locks precisely these outputs via `StealthOutputsApi::lock_specific_outputs`, rather than choosing inputs to
-    /// cover an amount.
-    Specific {
-        utxo_addresses: Vec<UtxoAddress>,
-    },
-}
-
-impl InputSelection {
-    pub fn as_selection(&self) -> Option<UtxoInputSelection> {
-        match self {
-            InputSelection::Selection(s) => Some(*s),
-            InputSelection::FromBucket { .. } | InputSelection::Specific { .. } => None,
-        }
-    }
-
-    pub fn as_from_bucket(&self) -> Option<Amount> {
-        match self {
-            InputSelection::FromBucket { revealed_amount } => Some(*revealed_amount),
-            InputSelection::Selection(_) | InputSelection::Specific { .. } => None,
-        }
-    }
-
-    /// The exact UTXOs to spend when this is an [`InputSelection::Specific`] selection.
-    pub fn as_specific(&self) -> Option<&[UtxoAddress]> {
-        match self {
-            InputSelection::Specific { utxo_addresses } => Some(utxo_addresses),
-            InputSelection::FromBucket { .. } | InputSelection::Selection(_) => None,
-        }
+            .try_fold(Amount::zero(), |sum, o| sum.checked_add(o.total_output_amount()?))
     }
 }
 
@@ -1833,8 +2071,11 @@ pub struct StealthTransferRequest {
     pub dry_run: bool,
 }
 
+/// Unknown fields are rejected, so that a request naming the destination tag by an unrecognised field fails instead
+/// of using the destination address's tag.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+#[serde(deny_unknown_fields)]
 pub struct StealthTransfer {
     pub destination_address: OotleAddress,
     #[cfg_attr(feature = "ts", ts(type = "number | bigint | string"))]
@@ -1846,21 +2087,27 @@ pub struct StealthTransfer {
     pub pay_to: PayTo,
     /// If set, the sender's Ootle address is attached as the output memo so the recipient can identify and save
     /// the sender as a contact. Replaces `output_memo` (the sender address takes precedence). Composes with
-    /// `pay_ref`, which is embedded inside the SenderAddress memo when set.
+    /// `destination_tag`, which is embedded inside the SenderAddress memo when set.
     #[serde(default)]
     pub attach_sender_address: bool,
-    /// Optional pay reference (UTF-8, max 64 bytes). When `attach_sender_address` is true it is embedded inside
-    /// the SenderAddress memo; otherwise it builds a `PayRefAndBytes` memo combined with any `output_memo`. If
-    /// unset, the destination address's bech32-embedded pay reference (if any) is used as a fallback for
+    /// Optional destination tag (UTF-8, max 64 bytes). When `attach_sender_address` is true it is embedded inside
+    /// the SenderAddress memo; otherwise it builds a `DestinationTagAndBytes` memo combined with any `output_memo`. If
+    /// unset, the destination address's bech32-embedded destination tag (if any) is used as a fallback for
     /// backward compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pay_ref: Option<String>,
+    pub destination_tag: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct StealthTransferResponse {
     pub transaction_id: TransactionId,
+    /// The fee to submit this transfer with: one a build of the transfer was made at, so a submission at it selects
+    /// the inputs the dry run priced. Only present for dry runs.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub required_fees: Option<u64>,
+    /// The result of the dry run. The wallet does not keep a dry run, so this is the only place it is reported.
+    pub dry_run_result: Option<ExecuteResult>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -2162,6 +2409,25 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn stealth_transfer_rejects_unknown_fields() {
+        let transfer = serde_json::json!({
+            "destination_address": "otl_17mufuvtwdwjlqhjj2rwaffwna5uae5pce7qje34p2jmwcz236f0sd7pjcd8eeytpr4lqk0htsk3e740g7gre3t3s4h47cwz7swvrw3secjh6l",
+            "blinded_output_amount": 100,
+            "revealed_output_amount": 0,
+            "pay_to": "StealthPublicKey",
+            "destination_tag": "",
+        });
+        let parsed: StealthTransfer = serde_json::from_value(transfer.clone()).unwrap();
+        assert_eq!(parsed.destination_tag.as_deref(), Some(""));
+
+        let mut renamed = transfer;
+        let tag = renamed.as_object_mut().unwrap().remove("destination_tag").unwrap();
+        renamed["pay_ref"] = tag;
+        let err = serde_json::from_value::<StealthTransfer>(renamed).unwrap_err();
+        assert!(err.to_string().contains("unknown field `pay_ref`"), "{err}");
+    }
+
     /// A JS client encodes every 64-bit field as a string, because JavaScript cannot hold an integer
     /// above `Number.MAX_SAFE_INTEGER` in a `number` without losing precision. Both encodings must be
     /// accepted, for any magnitude.
@@ -2288,6 +2554,37 @@ mod tests {
         assert!(parsed.as_specific().is_none());
     }
 
+    fn transfer_statement_request(outputs: &[(Amount, u64)]) -> TransferStatementRequest {
+        let address = OotleAddress::new(
+            tari_ootle_address::Network::LocalNet,
+            Default::default(),
+            Default::default(),
+        );
+        serde_json::from_value(serde_json::json!({
+            "sender_account": { "Name": "sender" },
+            "resource_address": tari_template_lib_types::constants::STEALTH_TARI_RESOURCE_ADDRESS,
+            "input_selection": { "FromBucket": { "revealed_amount": "0" } },
+            "outputs": outputs.iter().map(|(revealed_amount, blinded_amount)| serde_json::json!({
+                "address": address.to_string(),
+                "revealed_amount": revealed_amount.to_string(),
+                "blinded_amount": blinded_amount.to_string(),
+                "memo": null,
+                "pay_to": "StealthPublicKey",
+            })).collect::<Vec<_>>(),
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn transfer_statement_total_output_amount_rejects_overflow() {
+        let req = transfer_statement_request(&[(Amount::MAX, 0), (Amount::ONE, 0)]);
+        assert_eq!(req.total_output_amount(), None);
+        let req = transfer_statement_request(&[(Amount::MAX, 1)]);
+        assert_eq!(req.total_output_amount(), None);
+        let req = transfer_statement_request(&[(Amount::MAX - Amount::from(2u64), 1), (Amount::ONE, 0)]);
+        assert_eq!(req.total_output_amount(), Some(Amount::MAX));
+    }
+
     #[test]
     fn input_selection_selection_serialization_is_unchanged() {
         let json = serde_json::to_value(InputSelection::Selection(UtxoInputSelection::ConfidentialOnly)).unwrap();
@@ -2299,5 +2596,100 @@ mod tests {
             Some(UtxoInputSelection::ConfidentialOnly)
         ));
         assert!(parsed.as_specific().is_none());
+    }
+
+    #[test]
+    fn webauthn_passkey_management_types_round_trip_and_preserve_backward_compat() {
+        // Legacy start_register requests without `label` still deserialize cleanly.
+        let legacy_start: WebauthnStartRegisterRequest = serde_json::from_value(serde_json::json!({
+            "username": "tari-wallet-webui",
+        }))
+        .unwrap();
+        assert_eq!(legacy_start.username, "tari-wallet-webui");
+        assert_eq!(legacy_start.label, None);
+
+        let labeled_start: WebauthnStartRegisterRequest = serde_json::from_value(serde_json::json!({
+            "username": "tari-wallet-webui",
+            "label": "Hardware Security Key",
+        }))
+        .unwrap();
+        assert_eq!(labeled_start.label.as_deref(), Some("Hardware Security Key"));
+
+        let list_response = WebauthnListPasskeysResponse {
+            passkeys: vec![
+                WebauthnPasskeyInfo {
+                    id: 1,
+                    label: "Primary Passkey".to_string(),
+                    counter: 3,
+                    created_at: 1_700_000_000,
+                    last_used_at: Some(1_700_000_500),
+                },
+                WebauthnPasskeyInfo {
+                    id: 2,
+                    label: "Backup YubiKey".to_string(),
+                    counter: 0,
+                    created_at: 1_700_000_100,
+                    last_used_at: None,
+                },
+            ],
+        };
+        let list_json = serde_json::to_value(&list_response).unwrap();
+        let parsed_list: WebauthnListPasskeysResponse = serde_json::from_value(list_json).unwrap();
+        assert_eq!(parsed_list.passkeys.len(), 2);
+        assert_eq!(parsed_list.passkeys[0].id, 1);
+        assert_eq!(parsed_list.passkeys[0].label, "Primary Passkey");
+        assert_eq!(parsed_list.passkeys[0].counter, 3);
+        assert_eq!(parsed_list.passkeys[0].last_used_at, Some(1_700_000_500));
+        assert_eq!(parsed_list.passkeys[1].id, 2);
+        assert_eq!(parsed_list.passkeys[1].last_used_at, None);
+
+        let rename_req: WebauthnRenamePasskeyRequest = serde_json::from_value(serde_json::json!({
+            "id": 2,
+            "label": "Renamed Backup Key",
+        }))
+        .unwrap();
+        assert_eq!(rename_req.id, 2);
+        assert_eq!(rename_req.label, "Renamed Backup Key");
+
+        let remove_req: WebauthnRemovePasskeyRequest = serde_json::from_value(serde_json::json!({
+            "id": 2,
+        }))
+        .unwrap();
+        assert_eq!(remove_req.id, 2);
+
+        let finish_bootstrap = WebauthnFinishRegisterResponse {
+            token: Some("jwt-token".to_string().into()),
+        };
+        let finish_bootstrap_json = serde_json::to_value(&finish_bootstrap).unwrap();
+        assert_eq!(finish_bootstrap_json, serde_json::json!({ "token": "jwt-token" }));
+        let parsed_bootstrap: WebauthnFinishRegisterResponse = serde_json::from_value(finish_bootstrap_json).unwrap();
+        assert_eq!(parsed_bootstrap.token.as_ref().map(|t| t.as_str()), Some("jwt-token"));
+
+        let finish_additional = WebauthnFinishRegisterResponse { token: None };
+        let finish_additional_json = serde_json::to_value(&finish_additional).unwrap();
+        assert_eq!(finish_additional_json, serde_json::json!({}));
+        let parsed_additional: WebauthnFinishRegisterResponse = serde_json::from_value(finish_additional_json).unwrap();
+        assert!(parsed_additional.token.is_none());
+    }
+
+    #[test]
+    fn webauthn_start_register_request_accepts_setup_token_and_redacts_debug() {
+        let without_token: WebauthnStartRegisterRequest = serde_json::from_value(serde_json::json!({
+            "username": "tari-wallet-webui",
+        }))
+        .unwrap();
+        assert_eq!(without_token.username, "tari-wallet-webui");
+        assert_eq!(without_token.setup_token, None);
+
+        let secret = "super-secret-setup-token-12345";
+        let with_token: WebauthnStartRegisterRequest = serde_json::from_value(serde_json::json!({
+            "username": "tari-wallet-webui",
+            "setup_token": secret,
+        }))
+        .unwrap();
+        assert_eq!(with_token.setup_token.as_deref(), Some(secret));
+        let debug_str = format!("{with_token:?}");
+        assert!(!debug_str.contains(secret), "Debug output must not leak setup_token");
+        assert!(debug_str.contains("<redacted>"));
     }
 }

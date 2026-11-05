@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{HashMap, HashSet, hash_map::Entry},
+    collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
     time::{Duration, Instant},
 };
 
@@ -18,6 +18,7 @@ use tari_ootle_storage::{
         Block,
         CommandOrHash,
         CommandsCommitProof,
+        FOREIGN_PROPOSAL_EPOCH_WINDOW,
         ForeignProposal,
         ForeignProposalRecord,
         ForeignProposalStatus,
@@ -53,6 +54,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// Notifications a peer may have awaiting a foreign proposal at once. An honest notifier has one outstanding per
 /// recently committed foreign block that involves us, each normally answered well within [`REQUEST_TIMEOUT`].
 pub const MAX_PENDING_REQUESTS_PER_NOTIFIER: usize = 32;
+/// Requests beyond a notifier's allowance whose replies are still accepted, per notifier.
+const MAX_UNRETRIED_REQUESTS_PER_NOTIFIER: usize = 32;
 /// The same deadline the requester applies, so a permit is never held for a response its asker has given up on.
 const PROPOSAL_RESPONSE_TIMEOUT: Duration = REQUEST_TIMEOUT;
 
@@ -88,6 +91,12 @@ where TConsensusSpec: ConsensusSpec
         }
     }
 
+    /// Whether this node asked `from` for the foreign proposal of `block_id` and was still waiting for it. The request
+    /// is closed, so only the first reply to it is processed.
+    pub fn take_reply(&mut self, block_id: &BlockId, from: &TConsensusSpec::Addr) -> bool {
+        self.pending_requests.take_reply(block_id, from)
+    }
+
     pub async fn handle_received(
         &mut self,
         message: ForeignProposalMessage,
@@ -110,13 +119,13 @@ where TConsensusSpec: ConsensusSpec
 
         let is_saved = self.store.with_write_tx(|tx| {
             if let Err(err) = self.validate_and_save(tx, &proposal, local_committee_info) {
-                if matches!(
-                    err.validation_error(),
-                    Some(ProposalValidationError::ForeignPledgesNotCommitted { .. })
-                ) {
-                    // The pledges travel beside the commit proof, so a bad set says nothing about the block itself.
-                    // Nothing is recorded against the block id, so another copy is still accepted. A pending request
-                    // for the block is retried with another member of the foreign committee when it times out.
+                if err
+                    .validation_error()
+                    .is_some_and(|err| err.rejects_message_not_block())
+                {
+                    // Nothing is recorded against the block id, so another delivery of the block is still accepted. A
+                    // pending request for the block is retried with another member of the foreign committee when it
+                    // times out.
                     warn!(target: LOG_TARGET, "⚠️ Discarding foreign proposal: {}", err);
                     return Ok(false);
                 }
@@ -142,27 +151,20 @@ where TConsensusSpec: ConsensusSpec
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     pub async fn handle_notification_received(
         &mut self,
         from: TConsensusSpec::Addr,
-        current_epoch: Epoch,
         message: ForeignProposalNotificationMessage,
         local_committee_info: &CommitteeInfo,
     ) -> Result<(), HotStuffError> {
         debug!(
             target: LOG_TARGET,
-            "🌐 Receive FOREIGN PROPOSAL NOTIFICATION from {} for block {}",
+            "🌐 Receive FOREIGN PROPOSAL NOTIFICATION from {} for block {} of shard group {}",
             from,
             message.block_id,
+            message.shard_group,
         );
-        if self.pending_requests.contains(&message.block_id) {
-            info!(
-                target: LOG_TARGET,
-                "🌐 FOREIGN PROPOSAL: Already requested block {}. Ignoring.",
-                message.block_id,
-            );
-            return Ok(());
-        }
 
         // The notification is gossiped on a single network-wide topic, so every validator receives it. Only fetch the
         // foreign proposal if our shard group is in the intended audience.
@@ -172,6 +174,30 @@ where TConsensusSpec: ConsensusSpec
                 "🌐 FOREIGN PROPOSAL: notification for block {} does not target our shard group {}. Ignoring.",
                 message.block_id,
                 local_committee_info.shard_group(),
+            );
+            return Ok(());
+        }
+
+        if message.shard_group == local_committee_info.shard_group() {
+            warn!(
+                target: LOG_TARGET,
+                "❓️ FOREIGN PROPOSAL: notification from {} names our own shard group {} as the source of block {}. \
+                 Ignoring.",
+                from,
+                message.shard_group,
+                message.block_id,
+            );
+            return Ok(());
+        }
+
+        // A request to one shard group does not stand in for a request to another: a notification naming a different
+        // source is followed up even while an earlier one is still awaiting its reply.
+        if self.pending_requests.contains(&message.block_id, message.shard_group) {
+            info!(
+                target: LOG_TARGET,
+                "🌐 FOREIGN PROPOSAL: Already requested block {} from shard group {}. Ignoring.",
+                message.block_id,
+                message.shard_group,
             );
             return Ok(());
         }
@@ -189,13 +215,15 @@ where TConsensusSpec: ConsensusSpec
             return Ok(());
         }
 
-        // Check if the source is in a foreign committee
-        let Some(foreign_committee_info) = self
+        // The request is charged to the notifier, so only a validator registered in the epoch may cause one. The
+        // request goes to the shard group the notification names, whichever committee the notifier sits in.
+        if self
             .epoch_manager
             .get_committee_info_by_validator_address(message.epoch, &from)
             .await
             .optional()?
-        else {
+            .is_none()
+        {
             warn!(
                 target: LOG_TARGET,
                 "❌ FOREIGN PROPOSAL: notification for block {} from {} who is not a registered validator for epoch {}. \
@@ -205,29 +233,52 @@ where TConsensusSpec: ConsensusSpec
                 message.epoch,
             );
             return Ok(());
-        };
-
-        if local_committee_info.shard_group() == foreign_committee_info.shard_group() {
-            warn!(
-                target: LOG_TARGET,
-                "❓️ FOREIGN PROPOSAL: Received foreign proposal notification from a validator in the same shard group. Ignoring."
-            );
-            return Ok(());
         }
 
-        let selected = self
+        // The shard group is from the notification's epoch, whose committee layout may differ from the current one
+        let Some(foreign_committee_info) = self
             .epoch_manager
-            .get_random_committee_member(
-                current_epoch,
-                Some(foreign_committee_info.shard_group()),
-                Default::default(),
-            )
-            .await?;
+            .get_committee_info(message.epoch, message.shard_group)
+            .await
+            .optional()?
+            .filter(|info| {
+                info.num_shard_group_members() > 0 && info.all_shard_groups_iter().any(|sg| sg == message.shard_group)
+            })
+        else {
+            warn!(
+                target: LOG_TARGET,
+                "❌ FOREIGN PROPOSAL: notification for block {} from {}: no committee for shard group {} in epoch {}. \
+                 Ignoring.",
+                message.block_id,
+                from,
+                message.shard_group,
+                message.epoch,
+            );
+            return Ok(());
+        };
+
+        let Some(selected) = self
+            .epoch_manager
+            .get_random_committee_member(message.epoch, Some(message.shard_group), Default::default())
+            .await
+            .optional()?
+        else {
+            warn!(
+                target: LOG_TARGET,
+                "❌ FOREIGN PROPOSAL: notification for block {} from {}: no committee for shard group {} in epoch {}. \
+                 Ignoring.",
+                message.block_id,
+                from,
+                message.shard_group,
+                message.epoch,
+            );
+            return Ok(());
+        };
 
         info!(
             target: LOG_TARGET,
             "🌐 REQUEST foreign proposal {} for block {} from {}",
-            foreign_committee_info.shard_group(),
+            message.shard_group,
             message.block_id,
             selected,
         );
@@ -324,7 +375,7 @@ where TConsensusSpec: ConsensusSpec
                         &commit_qc,
                         for_shard_group,
                     )?;
-                    let proposal = ForeignProposal::new(commit_proof, block_pledge);
+                    let proposal = ForeignProposal::new(commit_proof, block_pledge, block.header().metadata());
                     Ok::<_, HotStuffError>(Some(proposal))
                 })?
                 else {
@@ -395,17 +446,31 @@ where TConsensusSpec: ConsensusSpec
                     requests.shard_group(),
                     block_id,
                 );
-                // If a FP is never received + proposed by any local member, the transaction will TIMEOUT and ABORT
+                // A transaction left waiting in LocalPrepared on this proposal aborts in the first epoch after its
+                // max_epoch plus `LOCAL_PREPARED_GRACE_EPOCHS` (see
+                // `TransactionPoolRecord::is_local_prepared_expired_at`)
                 continue;
             }
 
             let shard_group = requests.shard_group();
             let epoch = requests.epoch();
 
-            let selected = self
+            let Some(selected) = self
                 .epoch_manager
-                .get_random_committee_member(requests.epoch(), Some(requests.shard_group()), requests.peers.clone())
-                .await?;
+                .get_random_committee_member(epoch, Some(shard_group), requests.peers.clone())
+                .await
+                .optional()?
+            else {
+                warn!(
+                    target: LOG_TARGET,
+                    "🌐 FOREIGN PROPOSAL: No unrequested member of shard group {} in epoch {} for block {}. Aborting \
+                     further requests.",
+                    shard_group,
+                    epoch,
+                    block_id,
+                );
+                continue;
+            };
 
             info!(
                 target: LOG_TARGET,
@@ -469,9 +534,8 @@ where TConsensusSpec: ConsensusSpec
         // Callers authenticate the proposal against its committee with `check_foreign_proposal` before this runs.
         // TODO: these should be in the validator helper module.
         let epoch = local_committee_info.epoch();
-        // Allow one epoch behind as Prepare/Accept rounds may have been conducted in the previous/subsequent epoch
-        // before/after epoch end
-        let epoch_range = epoch.saturating_sub(Epoch(1))..=epoch + Epoch(1);
+        let window = Epoch(FOREIGN_PROPOSAL_EPOCH_WINDOW);
+        let epoch_range = epoch.saturating_sub(window)..=epoch + window;
 
         if !epoch_range.contains(&proposal.epoch()) {
             warn!(
@@ -492,13 +556,15 @@ where TConsensusSpec: ConsensusSpec
             });
         }
 
-        validate_evidence_and_pledges_match(proposal, local_committee_info.shard_group())?;
+        validate_foreign_proposal_contents(proposal, local_committee_info.shard_group())?;
 
         Ok(())
     }
 }
 
-pub(super) fn validate_evidence_and_pledges_match(
+/// Checks what the relayer of an authenticated foreign proposal chose to send for the local shard group: the pledges
+/// match the values the evidence commits to, and every command the local shard group needs is carried in full.
+pub(super) fn validate_foreign_proposal_contents(
     proposal: &ForeignProposal,
     local_shard_group: ShardGroup,
 ) -> Result<(), ProposalValidationError> {
@@ -523,12 +589,18 @@ pub(super) fn validate_evidence_and_pledges_match(
                 shard_group: foreign_shard_group,
                 details: e.into(),
             })?;
-    // TODO: any error will** result in transactions that never resolve.
-    // ** unless the foreign shard sends it again with the correct evidence and pledges
-    // Possible ways to handle this:
-    // - Send a message to the foreign shard to request the pledges again (but why would they return the correct pledges
-    //   this time?)
-    // - Immediately ABORT all transactions with invalid pledges in the block - this is the safest option
+    if let Some(withheld) = proposal.commit_proof().withheld_command_for(local_shard_group) {
+        return Err(ProposalValidationError::ForeignProposalWithholdsCommand {
+            block_id: proposal.calculate_block_id(),
+            shard_group: foreign_shard_group,
+            local_shard_group,
+            command_hash: withheld.hash,
+        });
+    }
+    // A rejected proposal is never applied. A transaction waiting on it in LocalPrepared aborts in the first epoch
+    // after its max_epoch plus `LOCAL_PREPARED_GRACE_EPOCHS` (see
+    // `TransactionPoolRecord::is_local_prepared_expired_at`); one that has already sent its LocalAccept keeps
+    // waiting for the foreign shard group.
     let mut num_applicable = 0usize;
     for (is_local_accept, atom) in proposal.full_commands_iter().filter_map(|cmd| {
         cmd.local_prepare()
@@ -619,23 +691,11 @@ fn generate_transaction_commands_commit_proof_for_shard_group<TTx: StateStoreRea
     for_shard_group: ShardGroup,
 ) -> Result<CommandsCommitProof, HotStuffError> {
     let _timer = TraceTimer::info(LOG_TARGET, "generate_transaction_commands_commit_proof_for_shard_group");
-    let applicable_commands = committed_block.commands().iter().map(|cmd| {
-        let is_involved_local_prepare_with_inputs = cmd
-            .local_prepare()
-            .map(|atom| atom.evidence.has_inputs(for_shard_group))
-            .unwrap_or(false);
-
-        let is_involved_local_accept = cmd
-            .local_accept()
-            .map(|atom| atom.evidence.has(&for_shard_group))
-            .unwrap_or(false);
-
-        if is_involved_local_prepare_with_inputs || is_involved_local_accept {
-            CommandOrHash::Command(cmd.clone())
-        } else {
-            CommandOrHash::Hash(cmd.hash(committed_block.header().protocol_version()))
-        }
-    });
+    let protocol_version = committed_block.header().protocol_version();
+    let applicable_commands = committed_block
+        .commands()
+        .iter()
+        .map(|cmd| CommandOrHash::for_shard_group(protocol_version, cmd, for_shard_group));
 
     let proof = generate_block_commit_proof(tx, commit_qc, committed_block)?;
     let command_commit_proof = CommandsCommitProof::new_latest(applicable_commands.collect(), proof);
@@ -645,9 +705,16 @@ fn generate_transaction_commands_commit_proof_for_shard_group<TTx: StateStoreRea
 /// Requests for foreign proposals we were notified of and have not yet received. Each entry is charged to the peer
 /// whose notification created it, so that no single peer can grow the set beyond
 /// [`MAX_PENDING_REQUESTS_PER_NOTIFIER`].
+///
+/// A foreign proposal is only ever sent in reply to a request, so this is also the record of which peers may send us
+/// which foreign proposals.
+///
+/// A block's requests are kept per shard group named as its source, each retried and exhausted on its own, so a
+/// notification naming a committee that does not hold the block never holds back the request to the one that does.
 struct PendingRequests<TAddr> {
-    pending: HashMap<BlockId, ForeignRequests<TAddr>>,
+    pending: HashMap<BlockId, HashMap<ShardGroup, ForeignRequests<TAddr>>>,
     num_pending_by_notifier: HashMap<TAddr, usize>,
+    unretried: UnretriedRequests<TAddr>,
 }
 
 impl<TAddr: NodeAddressable> PendingRequests<TAddr> {
@@ -655,11 +722,37 @@ impl<TAddr: NodeAddressable> PendingRequests<TAddr> {
         Self {
             pending: HashMap::new(),
             num_pending_by_notifier: HashMap::new(),
+            unretried: UnretriedRequests::new(),
         }
     }
 
-    pub(self) fn contains(&self, block_id: &BlockId) -> bool {
-        self.pending.contains_key(block_id)
+    pub(self) fn contains(&self, block_id: &BlockId, shard_group: ShardGroup) -> bool {
+        self.pending
+            .get(block_id)
+            .is_some_and(|by_shard_group| by_shard_group.contains_key(&shard_group))
+    }
+
+    fn get_mut(&mut self, block_id: &BlockId, shard_group: ShardGroup) -> Option<&mut ForeignRequests<TAddr>> {
+        self.pending.get_mut(block_id)?.get_mut(&shard_group)
+    }
+
+    /// Closes the open request that asked `peer` for the foreign proposal of `block_id`, returning whether there was
+    /// one. Each request admits a single reply, whether or not that reply turns out to be valid.
+    pub(self) fn take_reply(&mut self, block_id: &BlockId, peer: &TAddr) -> bool {
+        let mut was_pending = false;
+        for requests in self.pending.get_mut(block_id).into_iter().flat_map(|r| r.values_mut()) {
+            was_pending |= requests.awaiting.remove(peer);
+        }
+        let was_unretried = self.unretried.take(block_id, peer);
+        was_pending || was_unretried
+    }
+
+    #[cfg(test)]
+    fn is_awaiting_reply(&self, block_id: &BlockId, peer: &TAddr) -> bool {
+        self.pending
+            .get(block_id)
+            .is_some_and(|by_shard_group| by_shard_group.values().any(|requests| requests.awaiting.contains(peer))) ||
+            self.unretried.contains(block_id, peer)
     }
 
     pub(self) fn num_notified_by(&self, notifier: &TAddr) -> usize {
@@ -667,9 +760,9 @@ impl<TAddr: NodeAddressable> PendingRequests<TAddr> {
     }
 
     /// Records a request made in response to a notification from `notified_by` and charges it to that notifier.
-    /// Returns `false`, recording nothing, when the notifier already has [`MAX_PENDING_REQUESTS_PER_NOTIFIER`] charged
-    /// requests. Charged requests are never evicted: gossip delivers a single copy of each notification, so a
-    /// request dropped here is never made again.
+    /// Returns `false` when the notifier already has [`MAX_PENDING_REQUESTS_PER_NOTIFIER`] charged requests, in which
+    /// case the request is recorded as one that is never retried. Charged requests are never evicted: gossip delivers a
+    /// single copy of each notification, so a request recorded as unretried is never made again.
     pub(self) fn insert(
         &mut self,
         notified_by: TAddr,
@@ -677,23 +770,29 @@ impl<TAddr: NodeAddressable> PendingRequests<TAddr> {
         block_id: BlockId,
         committee_info: CommitteeInfo,
     ) -> bool {
-        if let Some(entry) = self.pending.get_mut(&block_id) {
+        if let Some(entry) = self.get_mut(&block_id, committee_info.shard_group()) {
+            entry.awaiting.insert(requested_from.clone());
             entry.peers.insert(requested_from);
             entry.at = Instant::now();
             return true;
         }
 
         if self.num_notified_by(&notified_by) >= MAX_PENDING_REQUESTS_PER_NOTIFIER {
+            self.unretried.insert(notified_by, block_id, requested_from);
             return false;
         }
 
         *self.num_pending_by_notifier.entry(notified_by.clone()).or_default() += 1;
-        self.pending.insert(block_id, ForeignRequests {
-            peers: HashSet::from([requested_from]),
-            charged_to: Some(notified_by),
-            committee_info,
-            at: Instant::now(),
-        });
+        self.pending
+            .entry(block_id)
+            .or_default()
+            .insert(committee_info.shard_group(), ForeignRequests {
+                awaiting: HashSet::from([requested_from.clone()]),
+                peers: HashSet::from([requested_from]),
+                charged_to: Some(notified_by),
+                committee_info,
+                at: Instant::now(),
+            });
         true
     }
 
@@ -707,28 +806,38 @@ impl<TAddr: NodeAddressable> PendingRequests<TAddr> {
         mut requests: ForeignRequests<TAddr>,
         requested_from: TAddr,
     ) {
+        requests.awaiting.insert(requested_from.clone());
         requests.peers.insert(requested_from);
         requests.charged_to = None;
         requests.at = Instant::now();
-        self.pending.insert(block_id, requests);
+        self.pending
+            .entry(block_id)
+            .or_default()
+            .insert(requests.shard_group(), requests);
     }
 
-    pub(self) fn remove(&mut self, block_id: &BlockId) -> Option<ForeignRequests<TAddr>> {
-        let item = self.pending.remove(block_id);
-        if let Some(notifier) = item.as_ref().and_then(|requests| requests.charged_to.as_ref()) {
+    /// Closes every request for `block_id`, whichever shard group it was made to.
+    pub(self) fn remove(&mut self, block_id: &BlockId) {
+        let removed = self.pending.remove(block_id).unwrap_or_default();
+        for notifier in removed.values().filter_map(|requests| requests.charged_to.as_ref()) {
             self.release_notifier(notifier);
         }
+        self.unretried.remove_block(block_id);
         if self.pending.capacity() >= 1000 {
             self.pending.shrink_to_fit();
         }
-        item
     }
 
     pub(self) fn drain_timed_out(&mut self, timeout: Duration) -> Vec<(BlockId, ForeignRequests<TAddr>)> {
-        let timed_out = self
-            .pending
-            .extract_if(|_, reqs| reqs.at.elapsed() >= timeout)
-            .collect::<Vec<_>>();
+        let mut timed_out = Vec::new();
+        self.pending.retain(|block_id, by_shard_group| {
+            timed_out.extend(
+                by_shard_group
+                    .extract_if(|_, reqs| reqs.at.elapsed() >= timeout)
+                    .map(|(_, requests)| (*block_id, requests)),
+            );
+            !by_shard_group.is_empty()
+        });
         for notifier in timed_out.iter().filter_map(|(_, requests)| requests.charged_to.clone()) {
             self.release_notifier(&notifier);
         }
@@ -745,8 +854,69 @@ impl<TAddr: NodeAddressable> PendingRequests<TAddr> {
     }
 }
 
+/// Requests made once beyond a notifier's allowance, which are never retried. Each notifier holds at most
+/// [`MAX_UNRETRIED_REQUESTS_PER_NOTIFIER`], so one notifier's requests never displace another's. Once a notifier is at
+/// that limit its oldest request is forgotten, and a reply to it is no longer accepted.
+struct UnretriedRequests<TAddr> {
+    by_notifier: HashMap<TAddr, VecDeque<(BlockId, TAddr)>>,
+    /// The number of held requests that asked each peer for each block.
+    num_by_request: HashMap<(BlockId, TAddr), usize>,
+}
+
+impl<TAddr: NodeAddressable> UnretriedRequests<TAddr> {
+    fn new() -> Self {
+        Self {
+            by_notifier: HashMap::new(),
+            num_by_request: HashMap::new(),
+        }
+    }
+
+    #[cfg(test)]
+    fn contains(&self, block_id: &BlockId, peer: &TAddr) -> bool {
+        self.num_by_request.contains_key(&(*block_id, peer.clone()))
+    }
+
+    /// Closes every held request that asked `peer` for `block_id`, returning whether there was one.
+    fn take(&mut self, block_id: &BlockId, peer: &TAddr) -> bool {
+        if self.num_by_request.remove(&(*block_id, peer.clone())).is_none() {
+            return false;
+        }
+        self.by_notifier.retain(|_, requests| {
+            requests.retain(|(id, to)| id != block_id || to != peer);
+            !requests.is_empty()
+        });
+        true
+    }
+
+    fn insert(&mut self, notified_by: TAddr, block_id: BlockId, requested_from: TAddr) {
+        let requests = self.by_notifier.entry(notified_by).or_default();
+        if requests.len() >= MAX_UNRETRIED_REQUESTS_PER_NOTIFIER &&
+            let Some(oldest) = requests.pop_front() &&
+            let Entry::Occupied(mut count) = self.num_by_request.entry(oldest)
+        {
+            *count.get_mut() -= 1;
+            if *count.get() == 0 {
+                count.remove();
+            }
+        }
+        requests.push_back((block_id, requested_from.clone()));
+        *self.num_by_request.entry((block_id, requested_from)).or_default() += 1;
+    }
+
+    fn remove_block(&mut self, block_id: &BlockId) {
+        self.num_by_request.retain(|(id, _), _| id != block_id);
+        self.by_notifier.retain(|_, requests| {
+            requests.retain(|(id, _)| id != block_id);
+            !requests.is_empty()
+        });
+    }
+}
+
 struct ForeignRequests<TAddr> {
+    /// Every peer asked for this block, which a retry does not ask again.
     pub peers: HashSet<TAddr>,
+    /// The peers asked that have not yet replied.
+    pub awaiting: HashSet<TAddr>,
     /// The notifier whose allowance this request counts against, until it first times out.
     pub charged_to: Option<TAddr>,
     pub committee_info: CommitteeInfo,
@@ -774,20 +944,81 @@ mod tests {
     use super::*;
 
     fn committee_info() -> CommitteeInfo {
-        CommitteeInfo::new(
-            NumPreshards::P64,
-            1,
-            2,
-            ShardGroup::new(0, 31),
-            Epoch(1),
-            VotePower::of(1),
-        )
+        committee_info_for(ShardGroup::new(0, 31))
+    }
+
+    fn committee_info_for(shard_group: ShardGroup) -> CommitteeInfo {
+        CommitteeInfo::new(NumPreshards::P64, 1, 2, shard_group, Epoch(1), VotePower::of(1))
     }
 
     fn block_id(seed: usize) -> BlockId {
         let mut bytes = [0u8; 32];
         bytes[..8].copy_from_slice(&seed.to_le_bytes());
         BlockId::from(bytes)
+    }
+
+    #[test]
+    fn a_request_to_another_shard_group_is_kept_apart_and_outlives_the_first_ones_exhaustion() {
+        let mut pending = PendingRequests::<String>::new();
+        let (named_first, named_second) = (ShardGroup::new(0, 31), ShardGroup::new(32, 63));
+        let (first, second) = ("first".to_string(), "second".to_string());
+        assert!(pending.insert(
+            first.clone(),
+            "foreign1".to_string(),
+            block_id(0),
+            committee_info_for(named_first)
+        ));
+        assert!(!pending.contains(&block_id(0), named_second));
+        assert!(pending.insert(
+            second.clone(),
+            "foreign2".to_string(),
+            block_id(0),
+            committee_info_for(named_second)
+        ));
+        assert!(pending.contains(&block_id(0), named_first));
+        assert!(pending.contains(&block_id(0), named_second));
+
+        // The first shard group's request times out on its own and is dropped as exhausted, as
+        // `handle_timed_out_requests` does once every member has been asked
+        pending.get_mut(&block_id(0), named_first).unwrap().at = Instant::now() - REQUEST_TIMEOUT;
+        let timed_out = pending.drain_timed_out(REQUEST_TIMEOUT);
+        assert_eq!(timed_out.len(), 1);
+        assert_eq!(timed_out[0].1.shard_group(), named_first);
+        assert!(!pending.contains(&block_id(0), named_first));
+        assert!(pending.contains(&block_id(0), named_second));
+        assert!(pending.is_awaiting_reply(&block_id(0), &"foreign2".to_string()));
+
+        assert!(pending.take_reply(&block_id(0), &"foreign2".to_string()));
+        pending.remove(&block_id(0));
+        assert!(!pending.contains(&block_id(0), named_second));
+        assert!(pending.pending.is_empty());
+        assert_eq!(pending.num_notified_by(&first), 0);
+        assert_eq!(pending.num_notified_by(&second), 0);
+    }
+
+    #[test]
+    fn closing_a_block_releases_every_shard_groups_notifier() {
+        let mut pending = PendingRequests::<String>::new();
+        let (first, second) = ("first".to_string(), "second".to_string());
+        pending.insert(
+            first.clone(),
+            "foreign1".to_string(),
+            block_id(0),
+            committee_info_for(ShardGroup::new(0, 31)),
+        );
+        pending.insert(
+            second.clone(),
+            "foreign2".to_string(),
+            block_id(0),
+            committee_info_for(ShardGroup::new(32, 63)),
+        );
+        assert!(pending.take_reply(&block_id(0), &"foreign1".to_string()));
+        assert!(pending.is_awaiting_reply(&block_id(0), &"foreign2".to_string()));
+
+        pending.remove(&block_id(0));
+        assert!(pending.pending.is_empty());
+        assert_eq!(pending.num_notified_by(&first), 0);
+        assert_eq!(pending.num_notified_by(&second), 0);
     }
 
     #[test]
@@ -808,8 +1039,9 @@ mod tests {
 
         assert_eq!(recorded, MAX_PENDING_REQUESTS_PER_NOTIFIER);
         assert_eq!(pending.num_notified_by(&flooder), MAX_PENDING_REQUESTS_PER_NOTIFIER);
-        assert!(pending.contains(&block_id(0)));
-        assert!(!pending.contains(&block_id(num_notifications - 1)));
+        let shard_group = committee_info().shard_group();
+        assert!(pending.contains(&block_id(0), shard_group));
+        assert!(!pending.contains(&block_id(num_notifications - 1), shard_group));
 
         // Another notifier has its own allowance
         let other = "other".to_string();
@@ -849,6 +1081,7 @@ mod tests {
             pending
                 .pending
                 .values()
+                .flat_map(|by_shard_group| by_shard_group.values())
                 .all(|requests| requests.num_unique_peers() == 2 && requests.charged_to.is_none())
         );
 
@@ -863,5 +1096,157 @@ mod tests {
 
         pending.remove(&block_id(0));
         assert_eq!(pending.num_notified_by(&notifier), 1);
+    }
+
+    #[test]
+    fn only_a_peer_that_was_asked_is_awaited_until_the_proposal_arrives() {
+        let mut pending = PendingRequests::<String>::new();
+        let (asked, retried, other) = ("foreign1".to_string(), "foreign2".to_string(), "foreign3".to_string());
+        pending.insert("notifier".to_string(), asked.clone(), block_id(0), committee_info());
+
+        assert!(pending.is_awaiting_reply(&block_id(0), &asked));
+        assert!(!pending.is_awaiting_reply(&block_id(0), &other));
+        assert!(!pending.is_awaiting_reply(&block_id(1), &asked));
+
+        let (id, requests) = pending.drain_timed_out(Duration::ZERO).pop().unwrap();
+        pending.insert_retry(id, requests, retried.clone());
+        assert!(pending.is_awaiting_reply(&block_id(0), &asked));
+        assert!(pending.is_awaiting_reply(&block_id(0), &retried));
+
+        pending.remove(&block_id(0));
+        assert!(!pending.is_awaiting_reply(&block_id(0), &asked));
+        assert!(!pending.is_awaiting_reply(&block_id(0), &retried));
+    }
+
+    #[test]
+    fn a_request_admits_one_reply_and_a_retry_does_not_reopen_it() {
+        let mut pending = PendingRequests::<String>::new();
+        let (asked, retried) = ("foreign1".to_string(), "foreign2".to_string());
+        pending.insert("notifier".to_string(), asked.clone(), block_id(0), committee_info());
+
+        assert!(pending.take_reply(&block_id(0), &asked));
+        assert!(!pending.take_reply(&block_id(0), &asked));
+
+        let (id, requests) = pending.drain_timed_out(Duration::ZERO).pop().unwrap();
+        pending.insert_retry(id, requests, retried.clone());
+        assert!(!pending.take_reply(&block_id(0), &asked));
+        assert!(pending.take_reply(&block_id(0), &retried));
+        assert!(!pending.take_reply(&block_id(0), &retried));
+        assert_eq!(
+            pending.pending[&block_id(0)][&committee_info().shard_group()].num_unique_peers(),
+            2
+        );
+    }
+
+    #[test]
+    fn an_unretried_request_admits_one_reply() {
+        let mut pending = PendingRequests::<String>::new();
+        let notifier = "notifier".to_string();
+        let foreign = "foreign".to_string();
+        for seed in 0..MAX_PENDING_REQUESTS_PER_NOTIFIER {
+            pending.insert(notifier.clone(), foreign.clone(), block_id(seed), committee_info());
+        }
+        let over_cap = block_id(MAX_PENDING_REQUESTS_PER_NOTIFIER);
+        assert!(!pending.insert(notifier.clone(), foreign.clone(), over_cap, committee_info()));
+
+        assert!(pending.take_reply(&over_cap, &foreign));
+        assert!(!pending.take_reply(&over_cap, &foreign));
+        assert!(!pending.unretried.by_notifier.contains_key(&notifier));
+    }
+
+    #[test]
+    fn a_request_beyond_the_notifiers_allowance_is_awaited_but_not_retried() {
+        let mut pending = PendingRequests::<String>::new();
+        let notifier = "notifier".to_string();
+        let foreign = "foreign".to_string();
+        for seed in 0..MAX_PENDING_REQUESTS_PER_NOTIFIER {
+            pending.insert(notifier.clone(), foreign.clone(), block_id(seed), committee_info());
+        }
+        let over_cap = block_id(MAX_PENDING_REQUESTS_PER_NOTIFIER);
+        assert!(!pending.insert(notifier.clone(), foreign.clone(), over_cap, committee_info()));
+
+        assert!(pending.is_awaiting_reply(&over_cap, &foreign));
+        assert!(!pending.is_awaiting_reply(&over_cap, &notifier));
+        assert!(
+            pending
+                .drain_timed_out(Duration::ZERO)
+                .iter()
+                .all(|(id, _)| *id != over_cap)
+        );
+
+        pending.remove(&over_cap);
+        assert!(!pending.is_awaiting_reply(&over_cap, &foreign));
+    }
+
+    #[test]
+    fn a_notifiers_oldest_unretried_request_is_forgotten_once_its_limit_is_reached() {
+        let mut pending = PendingRequests::<String>::new();
+        let notifier = "notifier".to_string();
+        let foreign = "foreign".to_string();
+        let num_requests = MAX_PENDING_REQUESTS_PER_NOTIFIER + MAX_UNRETRIED_REQUESTS_PER_NOTIFIER + 1;
+        for seed in 0..num_requests {
+            pending.insert(notifier.clone(), foreign.clone(), block_id(seed), committee_info());
+        }
+
+        assert!(!pending.is_awaiting_reply(&block_id(MAX_PENDING_REQUESTS_PER_NOTIFIER), &foreign));
+        assert!(pending.is_awaiting_reply(&block_id(MAX_PENDING_REQUESTS_PER_NOTIFIER + 1), &foreign));
+        assert!(pending.is_awaiting_reply(&block_id(num_requests - 1), &foreign));
+        assert_eq!(
+            pending.unretried.num_by_request.len(),
+            MAX_UNRETRIED_REQUESTS_PER_NOTIFIER
+        );
+    }
+
+    #[test]
+    fn a_notifier_beyond_its_allowance_cannot_displace_another_notifiers_unretried_requests() {
+        let mut pending = PendingRequests::<String>::new();
+        let (honest, flooder) = ("honest".to_string(), "flooder".to_string());
+        let foreign = "foreign".to_string();
+        for seed in 0..=MAX_PENDING_REQUESTS_PER_NOTIFIER {
+            pending.insert(honest.clone(), foreign.clone(), block_id(seed), committee_info());
+        }
+        let honest_unretried = block_id(MAX_PENDING_REQUESTS_PER_NOTIFIER);
+        assert!(pending.is_awaiting_reply(&honest_unretried, &foreign));
+
+        let num_flooded = MAX_PENDING_REQUESTS_PER_NOTIFIER + 10 * MAX_UNRETRIED_REQUESTS_PER_NOTIFIER;
+        for seed in 0..num_flooded {
+            pending.insert(
+                flooder.clone(),
+                foreign.clone(),
+                block_id(seed + 1000),
+                committee_info(),
+            );
+        }
+
+        assert!(pending.is_awaiting_reply(&honest_unretried, &foreign));
+    }
+
+    #[test]
+    fn a_request_unretried_for_two_notifiers_is_awaited_until_both_forget_it() {
+        let mut pending = PendingRequests::<String>::new();
+        let (first, second) = ("first".to_string(), "second".to_string());
+        let foreign = "foreign".to_string();
+        for (offset, notifier) in [(0, &first), (1000, &second)] {
+            for seed in 0..MAX_PENDING_REQUESTS_PER_NOTIFIER {
+                pending.insert(
+                    notifier.clone(),
+                    foreign.clone(),
+                    block_id(seed + offset),
+                    committee_info(),
+                );
+            }
+        }
+        let shared = block_id(usize::MAX);
+        assert!(!pending.insert(first.clone(), foreign.clone(), shared, committee_info()));
+        assert!(!pending.insert(second.clone(), foreign.clone(), shared, committee_info()));
+
+        for seed in 0..MAX_UNRETRIED_REQUESTS_PER_NOTIFIER {
+            pending.insert(first.clone(), foreign.clone(), block_id(seed + 2000), committee_info());
+        }
+        assert!(pending.is_awaiting_reply(&shared, &foreign));
+
+        pending.remove(&shared);
+        assert!(!pending.is_awaiting_reply(&shared, &foreign));
+        assert!(!pending.unretried.by_notifier.contains_key(&second));
     }
 }

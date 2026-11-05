@@ -27,6 +27,7 @@ use ootle_network::Network;
 use tari_engine::{fees::FeeTable, state_store::new_memory_store, traits::ClaimProofVerifier, wasm::WasmModuleCache};
 use tari_engine_types::{
     commit_result::ExecuteResult,
+    creation_check::NoCreationCheck,
     substate::{Substate, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
@@ -36,7 +37,7 @@ use tari_ootle_common_types::{Epoch, SubstateRequirementRef};
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_template_provider::TemplateConfig;
 use tari_ootle_transaction::Transaction;
-use tari_ootle_transaction_validation::{Validator, create_dry_run_transaction_validator};
+use tari_ootle_transaction_validation::{Validator, create_unsigned_structural_transaction_validator};
 use tari_template_lib_types::constants::TARI_TOKEN;
 use tokio::{runtime::Handle, sync::Semaphore, task};
 
@@ -47,7 +48,7 @@ use crate::{
     },
     exhaust_burn_rate::resolve_exhaust_burn_rate_for_epoch,
     network_state_sync::ConsensusEpoch,
-    substate_manager::SubstateManager,
+    substate_manager::{SubstateManager, SubstateManagerError, decode_substate},
 };
 
 const LOG_TARGET: &str = "tari::indexer::dry_run_transaction_processor";
@@ -112,7 +113,7 @@ impl DryRunTransactionProcessor {
 
         info!(target: LOG_TARGET, "process_transaction: {}", transaction.calculate_id());
 
-        create_dry_run_transaction_validator(
+        create_unsigned_structural_transaction_validator(
             self.network,
             self.max_transaction_weight,
             self.max_transaction_size_bytes,
@@ -135,6 +136,7 @@ impl DryRunTransactionProcessor {
 
         // Estimate the burn at the rate in effect for the epoch the transaction executes in.
         let burn_rate = resolve_exhaust_burn_rate_for_epoch(&self.substate_manager, self.network, epoch).await;
+        let input_fanout = self.input_fanout(&transaction, epoch).await?;
 
         let mut state_store = new_memory_store();
         state_store.set_many(found_substates)?;
@@ -142,11 +144,11 @@ impl DryRunTransactionProcessor {
         // execute the payload in the WASM engine and return the result
         let processor = TariTransactionProcessor::new(
             self.network,
-            self.template_provider.clone(),
             self.fee_table.clone(),
             true,
             self.claim_burn_proof_verifier.clone(),
         );
+        let template_provider = self.template_provider.clone();
         let slot = tokio::time::timeout(EXECUTION_SLOT_WAIT, self.execution_slots.clone().acquire_owned())
             .await
             .map_err(|_| {
@@ -156,7 +158,15 @@ impl DryRunTransactionProcessor {
             .expect("execution_slots is never closed");
         let exec_output = task::spawn_blocking(move || {
             let _slot = slot;
-            processor.execute(&transaction, state_store.into_read_only(), virtual_substates, burn_rate)
+            processor.execute(
+                &transaction,
+                template_provider,
+                state_store.into_read_only(),
+                virtual_substates,
+                burn_rate,
+                input_fanout,
+                &NoCreationCheck,
+            )
         })
         .await??;
 
@@ -176,10 +186,25 @@ impl DryRunTransactionProcessor {
                     .map(|req| req.as_ref().to_substate_requirement_ref()),
             )
             .await?;
-        Ok(substates
+        let substates = substates
             .into_iter()
-            .map(|(id, fetched)| (id, fetched.substate))
-            .collect())
+            .map(|(id, fetched)| {
+                let substate = decode_substate(&id, &fetched.substate)?;
+                Ok((id, substate))
+            })
+            .collect::<Result<_, SubstateManagerError>>()?;
+        Ok(substates)
+    }
+
+    /// [`Transaction::input_fanout`] under `epoch`'s shard layout.
+    async fn input_fanout(
+        &self,
+        transaction: &Transaction,
+        epoch: Epoch,
+    ) -> Result<u32, DryRunTransactionProcessorError> {
+        let num_preshards = self.epoch_manager.get_network_description().await?.num_preshards;
+        let num_committees = self.epoch_manager.get_num_committees(epoch).await?;
+        Ok(transaction.input_fanout(num_preshards, num_committees))
     }
 
     /// The epoch the validators would execute the transaction in. Until the state sync has observed

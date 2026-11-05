@@ -105,7 +105,7 @@ pub(crate) fn extract_utxo_output(
 ///
 /// `substate_id` is the UTXO's canonical address string (`utxo_<resource>_<commitment>`) — it carries
 /// the on-chain commitment and resource address, which the value body does **not** (see the module
-/// docs). `substate_value` is the [`SubstateValue`] JSON the indexer returned, passed verbatim.
+/// docs). `substate_value` is the substate value the indexer returned (its base64 CBOR string), passed verbatim.
 ///
 /// Field map:
 /// - `commitment` / `resource_address` ← parsed from `substate_id`,
@@ -116,8 +116,8 @@ pub(crate) fn extract_utxo_output(
 ///   [`AccessRuleAllowAll`](StealthPayTo::AccessRuleAllowAll)),
 /// - `utxo_tag` ← the UTXO's tag.
 ///
-/// `substate_value` is the indexer's `SubstateValue` JSON, passed through verbatim — the same neutral
-/// carrier [`FetchedSubstate`](crate::FetchedSubstate) uses, so the facade stays a thin JSON marshal.
+/// `substate_value` is the indexer's substate value (its base64 CBOR string), passed through verbatim — the same
+/// neutral carrier [`FetchedSubstate`](crate::FetchedSubstate) uses, so the facade stays a thin JSON marshal.
 ///
 /// Errors: a non-UTXO / frozen / burnt substate or a malformed nonce surface as `Invalid` / `Key`
 /// (via [`extract_utxo_output`]); a malformed `substate_id` or undecodable value JSON surface as
@@ -138,9 +138,9 @@ pub fn decode_stealth_utxo(
     let commitment = CommitmentBytes::from_bytes(utxo_address.id().as_bytes())
         .map_err(|e| OotleSdkError::Parse(format!("invalid commitment in '{substate_id}': {e}")))?;
 
-    // Parse the indexer's JSON into the internal SubstateValue (undecodable bytes ⇒ Encoding,
+    // Decode the indexer's value into the internal SubstateValue (undecodable bytes ⇒ Encoding,
     // matching the spend site's convention).
-    let value: SubstateValue = serde_json::from_value(substate_value.clone())
+    let value = crate::encoded_decode::decode_served::<SubstateValue>(substate_value)
         .map_err(|e| OotleSdkError::Encoding(format!("undecodable substate value for '{substate_id}': {e}")))?;
 
     // Validate the substate + recover the nonce via the shared extraction.
@@ -254,7 +254,8 @@ mod tests {
         let tag = crypto.derive_stealth_output_tag(internal_network, &nonce_secret, &view_pk, &resource_internal);
 
         let auth = if with_signed {
-            let owner_pk = crypto.derive_stealth_owner_public_key(internal_network, &account_pk, &nonce_secret);
+            let owner_pk =
+                crypto.derive_stealth_owner_public_key(internal_network, &account_pk, &view_pk, &nonce_secret);
             SpendAuthorization::Key(owner_pk.to_byte_type())
         } else {
             SpendAuthorization::Script(condition_root(&[SpendCondition::access_rule(AccessRule::AllowAll)]).unwrap())
@@ -278,7 +279,7 @@ mod tests {
 
         Built {
             substate_id,
-            value: serde_json::to_value(SubstateValue::Utxo(utxo)).expect("SubstateValue serializes"),
+            value: crate::substate_decode::indexer_substate_json(&SubstateValue::Utxo(utxo)),
             view_secret,
             account_secret,
             mask,
@@ -299,8 +300,9 @@ mod tests {
         assert!(inbound.utxo_tag.is_some());
 
         let view = SecretKeyBytes::from_bytes(b.view_secret.as_bytes()).unwrap();
-        let account = SecretKeyBytes::from_bytes(b.account_secret.as_bytes()).unwrap();
-        let got = scan_stealth_output(net, &view, Some(&account), &inbound, true)
+        let account =
+            PublicKeyBytes::from_bytes(RistrettoPublicKey::from_secret_key(&b.account_secret).as_bytes()).unwrap();
+        let got = scan_stealth_output(net, &view, &account, &inbound, true)
             .unwrap()
             .expect("should be mine");
         assert!(got.is_mine);
@@ -325,8 +327,10 @@ mod tests {
     fn burnt_substate_is_invalid() {
         let net = Network::LocalNet;
         let b = build(net, 1u64, true);
-        // Burn the UTXO by nulling its output body in the JSON.
-        let burnt = serde_json::json!({ "Utxo": { "is_frozen": false, "output": null } });
+        // A burnt UTXO has no output body.
+        let burnt: SubstateValue =
+            serde_json::from_value(serde_json::json!({ "Utxo": { "is_frozen": false, "output": null } })).unwrap();
+        let burnt = crate::substate_decode::indexer_substate_json(&burnt);
         let err = decode_stealth_utxo(&b.substate_id, &burnt).unwrap_err();
         assert_eq!(err.code(), "INVALID");
     }

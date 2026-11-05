@@ -32,6 +32,7 @@ mod metrics;
 
 mod early_close;
 mod router;
+mod write_timeout;
 
 use std::{
     cmp,
@@ -44,7 +45,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures::{AsyncRead, AsyncWrite, SinkExt, StreamExt, stream::FuturesUnordered};
 use libp2p::{PeerId, StreamProtocol};
 use libp2p_substream::{ProtocolEvent, ProtocolNotification};
@@ -73,7 +74,10 @@ use crate::{
     message::{RpcMethod, RpcResponse},
     notify::ProtocolNotificationRx,
     proto,
-    server::early_close::EarlyClose,
+    server::{
+        early_close::{EarlyClose, EarlyCloseError},
+        write_timeout::WriteTimeout,
+    },
 };
 
 const LOG_TARGET: &str = "libp2p::rpc::server";
@@ -169,6 +173,7 @@ pub struct RpcServerBuilder {
     minimum_keepalive_interval: Duration,
     handshake_timeout: Duration,
     idle_session_timeout: Duration,
+    write_timeout: Duration,
 }
 
 impl RpcServerBuilder {
@@ -202,17 +207,30 @@ impl RpcServerBuilder {
     }
 
     /// Sets the longest deadline the server honours. A client asking for a longer one is served this
-    /// one, so that a single request cannot hold its session for an unbounded span.
+    /// one, so that a single request cannot make its session wait an unbounded span for the service
+    /// to produce its response or the next item of it.
     pub fn with_maximum_client_deadline(mut self, deadline: Duration) -> Self {
         self.maximum_client_deadline = deadline;
         self
     }
 
     /// Sets how long a session may wait for its next request before the server closes it and
-    /// releases its slot. Only the gap between requests counts: a request being served is bounded by
-    /// its deadline instead.
+    /// releases its slot. Only the gap between requests counts. While a request is served, its
+    /// deadline bounds each wait for the service and the write timeout each stalled write; neither
+    /// caps how long the whole request takes.
     pub fn with_idle_session_timeout(mut self, timeout: Duration) -> Self {
         self.idle_session_timeout = timeout;
+        self
+    }
+
+    /// Sets how long a write to a session may go without the client taking any of it before the server closes the
+    /// session and releases its slot. A client that stops reading fills the transport's flow-control window, after
+    /// which nothing more can be written to it, so this bounds how long such a client holds its session whatever
+    /// the server was sending. Any write that goes ahead, however small, restarts the timeout: this bounds a stall,
+    /// not the time taken to serve a request, so a client that keeps taking some of a response is served for as
+    /// long as the response lasts.
+    pub fn with_write_timeout(mut self, timeout: Duration) -> Self {
+        self.write_timeout = timeout;
         self
     }
 
@@ -259,6 +277,7 @@ impl Default for RpcServerBuilder {
             minimum_keepalive_interval: crate::DEFAULT_MINIMUM_KEEPALIVE_INTERVAL,
             handshake_timeout: Duration::from_secs(5),
             idle_session_timeout: Duration::from_secs(2 * 60),
+            write_timeout: Duration::from_secs(60),
         }
     }
 }
@@ -392,6 +411,7 @@ where
                     peer_id
                 );
 
+                let substream = WriteTimeout::new(substream, self.config.write_timeout);
                 let framed = framing::canonical(substream, RPC_MAX_FRAME_SIZE);
                 if let Err(err) = self.try_initiate_service(notification.protocol, peer_id, framed).await {
                     debug!(target: LOG_TARGET, "Unable to spawn RPC service: {}", err);
@@ -432,7 +452,7 @@ where
         &mut self,
         protocol: StreamProtocol,
         peer_id: PeerId,
-        framed: CanonicalFraming<TSubstream>,
+        framed: CanonicalFraming<WriteTimeout<TSubstream>>,
     ) -> Result<(), RpcServerError> {
         if !self.executor.can_spawn() {
             reject_session(peer_id, framed, HandshakeRejectReason::NoSessionsAvailable);
@@ -562,6 +582,9 @@ struct ActivePeerRpcService<TSvc, TSubstream> {
     service: TSvc,
     framed: EarlyClose<CanonicalFraming<TSubstream>>,
     logging_context_string: Arc<String>,
+    /// A request the client sent while a response was still streaming to it, which ended that response. It is served
+    /// before anything else is read.
+    next_request: Option<BytesMut>,
 }
 
 impl<TSvc, TSubstream> ActivePeerRpcService<TSvc, TSubstream>
@@ -584,6 +607,7 @@ where
             peer_id: node_id,
             service,
             framed: EarlyClose::new(framed),
+            next_request: None,
         }
     }
 
@@ -612,14 +636,20 @@ where
 
     async fn run(&mut self) -> Result<(), RpcServerError> {
         loop {
-            let Ok(next) = time::timeout(self.config.idle_session_timeout, self.framed.next()).await else {
-                debug!(
-                    target: LOG_TARGET,
-                    "({}) Closing session after {:.0?} without a request",
-                    self.logging_context_string,
-                    self.config.idle_session_timeout
-                );
-                break;
+            let next = match self.next_request.take() {
+                Some(frame) => Some(Ok(frame)),
+                None => {
+                    let Ok(next) = time::timeout(self.config.idle_session_timeout, self.framed.next()).await else {
+                        debug!(
+                            target: LOG_TARGET,
+                            "({}) Closing session after {:.0?} without a request",
+                            self.logging_context_string,
+                            self.config.idle_session_timeout
+                        );
+                        break;
+                    };
+                    next
+                },
             };
             let Some(result) = next else {
                 break;
@@ -845,10 +875,12 @@ where
             })
             .map(|resp| Bytes::from(resp.encode_to_vec()));
 
-        let mut deadline_at = Instant::now() + deadline;
+        // The idle budget is measured from the last message because `now + deadline` may lie beyond what an `Instant`
+        // can represent.
+        let mut last_message_at = Instant::now();
 
         loop {
-            let idle_budget = deadline_at.saturating_duration_since(Instant::now());
+            let idle_budget = deadline.saturating_sub(last_message_at.elapsed());
             let wait = keepalive_interval.map_or(idle_budget, |interval| cmp::min(interval, idle_budget));
 
             let next_item = log_timing(
@@ -858,7 +890,19 @@ where
                 time::timeout(wait, stream.next()),
             );
 
-            let result = next_item.await;
+            // The client sends nothing of its own while a response is outstanding, so whatever it does send means it is
+            // done with this one. Watching for it is what ends a stream that would otherwise run for as long as the
+            // session does.
+            let result = tokio::select! {
+                biased;
+                inbound = self.framed.next() => {
+                    if self.stream_continues_after_inbound(request_id, inbound)? {
+                        continue;
+                    }
+                    break;
+                },
+                result = next_item => result,
+            };
             match result {
                 Ok(Some(msg)) => {
                     #[cfg(feature = "metrics")]
@@ -870,14 +914,16 @@ where
                         msg.len()
                     );
 
-                    self.framed.send(msg).await?;
-                    deadline_at = Instant::now() + deadline;
+                    if !self.send_stream_frame(request_id, msg).await? {
+                        break;
+                    }
+                    last_message_at = Instant::now();
                 },
                 Ok(None) => {
                     debug!(target: LOG_TARGET, "{} Request complete", self.logging_context_string,);
                     break;
                 },
-                Err(_) if keepalive_interval.is_some() && Instant::now() < deadline_at => {
+                Err(_) if keepalive_interval.is_some() && last_message_at.elapsed() < deadline => {
                     trace!(
                         target: LOG_TARGET,
                         "({}) Sending keepalive for request #{}", self.logging_context_string, request_id
@@ -885,7 +931,9 @@ where
                     let keepalive = Bytes::from(RpcResponse::keepalive(request_id).to_proto().encode_to_vec());
                     #[cfg(feature = "metrics")]
                     metrics::outbound_response_bytes(&self.peer_id, &self.protocol).observe(keepalive.len() as f64);
-                    self.framed.send(keepalive).await?;
+                    if !self.send_stream_frame(request_id, keepalive).await? {
+                        break;
+                    }
                 },
                 Err(_) => {
                     debug!(
@@ -907,6 +955,73 @@ where
             }
         } // end loop
         Ok(())
+    }
+
+    /// Sends one frame of the response to `request_id`, returning whether the response goes on. A send held up by a
+    /// client that has stopped reading is cut short by the first frame the client sends, which is taken as it would
+    /// be between frames. The response ends there whatever that frame is: the one being sent may never have been
+    /// queued, and the response cannot go on with a gap in it.
+    async fn send_stream_frame(&mut self, request_id: u32, frame: Bytes) -> Result<bool, RpcServerError> {
+        match self.framed.send(frame).await {
+            Ok(()) => Ok(true),
+            Err(EarlyCloseError::UnexpectedMessage(inbound)) => {
+                self.stream_continues_after(request_id, inbound);
+                Ok(false)
+            },
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    /// Takes what the client's side of the session yielded while the response to `request_id` was streaming,
+    /// returning whether the response goes on.
+    fn stream_continues_after_inbound(
+        &mut self,
+        request_id: u32,
+        inbound: Option<io::Result<BytesMut>>,
+    ) -> Result<bool, RpcServerError> {
+        match inbound {
+            Some(Ok(frame)) => Ok(self.stream_continues_after(request_id, frame)),
+            Some(Err(err)) => Err(err.into()),
+            None => {
+                debug!(
+                    target: LOG_TARGET,
+                    "({}) Client closed the session while request #{} was streaming",
+                    self.logging_context_string,
+                    request_id
+                );
+                Ok(false)
+            },
+        }
+    }
+
+    /// Takes a frame the client sent while the response to `request_id` was streaming, returning whether the
+    /// response goes on. A FIN for `request_id` abandons it. A FIN for any other request concerns one already
+    /// answered. Anything else is the client's next request, served once this response has ended.
+    fn stream_continues_after(&mut self, request_id: u32, frame: BytesMut) -> bool {
+        let fin = u32::from(RpcMessageFlags::FIN.bits());
+        match proto::RpcRequest::decode(frame.as_ref()) {
+            Ok(req) if req.flags & fin != 0 => {
+                if req.request_id == request_id {
+                    debug!(
+                        target: LOG_TARGET,
+                        "({}) Client abandoned request #{}", self.logging_context_string, request_id
+                    );
+                    false
+                } else {
+                    true
+                }
+            },
+            _ => {
+                debug!(
+                    target: LOG_TARGET,
+                    "({}) Client sent its next request while request #{} was streaming. Ending the stream",
+                    self.logging_context_string,
+                    request_id
+                );
+                self.next_request = Some(frame);
+                false
+            },
+        }
     }
 }
 
@@ -959,6 +1074,7 @@ fn err_to_log_level(err: &io::Error) -> log::Level {
         ErrorKind::ConnectionAborted |
         ErrorKind::BrokenPipe |
         ErrorKind::WriteZero |
+        ErrorKind::TimedOut |
         ErrorKind::UnexpectedEof => log::Level::Debug,
         _ => log::Level::Error,
     }
@@ -1134,6 +1250,59 @@ mod keepalive_tests {
         feeder.await.unwrap();
 
         assert_eq!(responses.iter().filter(|r| !r.is_keepalive()).count(), 4);
+    }
+
+    fn answering_session(
+        config: RpcServerBuilder,
+        framed: CanonicalFraming<TestSubstream>,
+    ) -> ActivePeerRpcService<impl Service<Request<Bytes>, Response = Response<Body>, Error = RpcStatus>, TestSubstream>
+    {
+        let service = tower::service_fn(|_: Request<Bytes>| {
+            futures::future::ready(Ok::<_, RpcStatus>(Response::new(Body::single(Bytes::from_static(
+                b"pong",
+            )))))
+        });
+        ActivePeerRpcService::new(
+            config,
+            StreamProtocol::new("/test/deadline/1.0"),
+            PeerId::random(),
+            service,
+            framed,
+        )
+    }
+
+    async fn serve_one_request_with_deadline(config: RpcServerBuilder, deadline_secs: u64) -> proto::RpcResponse {
+        let (server_framed, mut client_framed) = framed_pair();
+        let mut service = answering_session(config, server_framed);
+        let request = proto::RpcRequest {
+            request_id: 1,
+            method: 1,
+            deadline: deadline_secs,
+            ..Default::default()
+        };
+        service.handle_request(request.encode_to_vec().into()).await.unwrap();
+        drop(service);
+
+        let responses = collect_responses(&mut client_framed).await;
+        assert_eq!(responses.len(), 1, "expected a single response, got {responses:?}");
+        responses.into_iter().next().unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_longest_deadline_a_client_can_ask_for_is_served() {
+        let response = serve_one_request_with_deadline(RpcServerBuilder::default(), u64::MAX).await;
+        assert_eq!(response.status, RpcStatus::ok().as_code());
+        assert_eq!(response.payload, b"pong");
+    }
+
+    #[tokio::test]
+    async fn the_longest_deadline_a_client_can_ask_for_is_served_without_a_ceiling() {
+        let config = RpcServerBuilder::default().with_maximum_client_deadline(Duration::MAX);
+        for deadline_secs in [1u64 << 63, u64::MAX] {
+            let response = serve_one_request_with_deadline(config.clone(), deadline_secs).await;
+            assert_eq!(response.status, RpcStatus::ok().as_code());
+            assert_eq!(response.payload, b"pong");
+        }
     }
 
     #[test]

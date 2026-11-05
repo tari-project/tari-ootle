@@ -4,5 +4,5 @@ export type Memo =
   | { U256: string }
   | { Message: string }
   | { Bytes: string }
-  | { PayRefAndBytes: string }
+  | { DestinationTagAndBytes: string }
   | { SenderAddress: string };

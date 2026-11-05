@@ -1,15 +1,14 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-//! Tests for the rule that a proposal certificate becomes the high certificate only at the height and epoch of
-//! the block it certifies.
+//! Tests for the rule that a proposal certificate becomes the high certificate only at the height, epoch and shard
+//! group of the block it certifies.
 //!
 //! A certificate's id and block id are derived from the block's header hash and parent, so neither covers the
-//! height or epoch the certificate claims. The stored block is the authority for those two fields, and
+//! height, epoch or shard group the certificate claims. The stored block is the authority for those fields, and
 //! `CertificateStore::update_highest` checks the certificate against it before writing HighPc, the leaf block or
 //! the certificate record.
 
-use tari_common_types::types::FixedHash;
 use tari_consensus::traits::CertificateStore;
 use tari_consensus_types::{HighPc, LeafBlock, ProposalCertificate};
 use tari_engine_types::fees::ExhaustBurnRate;
@@ -20,7 +19,7 @@ use tari_ootle_storage::{
     consensus_models::{Block, BookkeepingModel},
 };
 use tari_ootle_transaction::Network;
-use tari_sidechain::QuorumDecision;
+use tari_sidechain::{FixedHash, QuorumDecision};
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 
 type TestStore = RocksDbStateStore<PeerAddress>;
@@ -37,7 +36,7 @@ fn create_store() -> (TestStore, tempfile::TempDir) {
 fn genesis_block() -> Block {
     Block::genesis(
         Network::LocalNet,
-        ProtocolVersion::V2,
+        ProtocolVersion::V0,
         TEST_EPOCH,
         FixedHash::zero(),
         ShardGroup::new(0, 127),
@@ -49,13 +48,23 @@ fn genesis_block() -> Block {
 
 /// A certificate for `block` that claims `height` and `epoch`.
 fn certificate_for(block: &Block, height: NodeHeight, epoch: Epoch) -> ProposalCertificate {
+    certificate_claiming(block, height, epoch, block.shard_group())
+}
+
+/// A certificate for `block` that claims `height`, `epoch` and `shard_group`.
+fn certificate_claiming(
+    block: &Block,
+    height: NodeHeight,
+    epoch: Epoch,
+    shard_group: ShardGroup,
+) -> ProposalCertificate {
     let pc = ProposalCertificate::new(
         block.header().calculate_hash(),
         *block.parent(),
         height,
         epoch,
-        block.shard_group(),
-        vec![],
+        shard_group,
+        ProposalCertificate::genesis_signatures(),
         QuorumDecision::Accept,
     );
     assert_eq!(pc.calculate_block_id(), *block.id());
@@ -129,6 +138,32 @@ fn certificate_claiming_another_epoch_is_not_installed() {
         .with_read_tx(|tx| HighPc::get(tx, OTHER_EPOCH).optional())
         .unwrap();
     assert!(high_pc.is_none());
+}
+
+#[test]
+fn certificate_claiming_another_shard_group_is_not_installed() {
+    let (store, _tmp) = create_store();
+    let genesis = genesis_block();
+    store.with_write_tx(|tx| genesis.insert(tx)).unwrap();
+
+    let genuine = certificate_for(&genesis, genesis.height(), genesis.epoch());
+    let relabelled = certificate_claiming(&genesis, genesis.height(), genesis.epoch(), ShardGroup::new(0, 63));
+    assert_ne!(relabelled.shard_group(), genesis.shard_group());
+    assert_eq!(relabelled.calculate_id(), genuine.calculate_id());
+
+    store
+        .with_write_tx(|tx| relabelled.update_highest(tx))
+        .expect_err("a certificate whose shard group differs from its block's must not become the high certificate");
+
+    store
+        .with_read_tx(|tx| {
+            assert!(HighPc::get(tx, TEST_EPOCH).optional()?.is_none());
+            assert!(LeafBlock::get(tx, TEST_EPOCH).optional()?.is_none());
+            let stored = ProposalCertificate::get(tx, TEST_EPOCH, &genuine.calculate_id()).optional()?;
+            assert!(stored.is_none());
+            Ok::<_, tari_ootle_storage::StorageError>(())
+        })
+        .unwrap();
 }
 
 #[test]

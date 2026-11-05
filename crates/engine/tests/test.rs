@@ -197,13 +197,14 @@ fn test_composed() {
 fn test_buggy_template() {
     // Uncomment the following lines to print the template definition bytes embedded in the
     // `tari_tdef` custom section
-    // let bytes = tari_template_abi::TemplateDef::V1(tari_template_abi::TemplateDefV1 {
+    // let encoded = tari_bor::encode(&tari_template_abi::VersionedTemplateDef::V1(tari_template_abi::TemplateDefV1 {
     //     template_name: "Buggy".to_string(),
     //     abi_version: tari_template_abi::version::MINIMUM_SUPPORTED_WASM_ABI_VERSION,
     //     functions: vec![],
-    // })
-    // .encode_for_wasm_embedding()
+    // }))
     // .unwrap();
+    // let mut bytes = ((encoded.len() + 4) as u32).to_le_bytes().to_vec();
+    // bytes.extend(encoded);
     // println!("static _TARI_TEMPLATE_DEF: [u8; {}] = [", bytes.len());
     // for chunk in bytes.chunks(16) {
     //     print!("    ");
@@ -351,7 +352,7 @@ fn test_tuples() {
     assert_eq!(fn_get.output.to_string(), "Tuple<String,U32>");
     // the "set" method accepts a tuple (String, u32) as argument
     let fn_set = module.find_func_by_name("set").unwrap();
-    assert_eq!(fn_set.arguments[1].arg_type.to_string(), "Tuple<String,U32>");
+    assert_eq!(fn_set.arguments[0].arg_type.to_string(), "Tuple<String,U32>");
     // the "new_with_self" constructor returns a tuple (Self, String)
     let fn_new_with_self = module.find_func_by_name("new_with_self").unwrap();
     assert_eq!(fn_new_with_self.output.to_string(), "Tuple<Tuple,String>");
@@ -393,33 +394,6 @@ fn test_get_template_address() {
         vec![],
     );
     assert_eq!(addr, template_test.get_template_address("Account"));
-}
-
-/// `GetOwnerProof` reads the owner rule without a lock, so it must read what the transaction has written, not what
-/// the store had, or a component created in this same transaction has no proof.
-#[test]
-fn test_get_owner_proof_for_a_component_created_in_the_same_transaction() {
-    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/component_manager"]);
-
-    let _: ComponentAddress = template_test.call_function(
-        "ComponentManagerTest",
-        "owner_proof_for_a_component_created_here",
-        args![],
-        vec![],
-    );
-}
-
-#[test]
-fn test_get_owner_proof_is_none_for_a_component_owned_by_an_access_rule() {
-    let mut template_test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/component_manager"]);
-
-    let has_proof: bool = template_test.call_function(
-        "ComponentManagerTest",
-        "has_owner_proof_when_owned_by_an_access_rule",
-        args![],
-        vec![],
-    );
-    assert!(!has_proof);
 }
 
 #[test]
@@ -918,6 +892,8 @@ mod basic_nft {
             .unwrap_err();
 
         assert!(err.to_string().contains("Not enough brightness remaining"));
+
+        template_test.assert_substate_lengths_match_encoding();
     }
 
     #[test]

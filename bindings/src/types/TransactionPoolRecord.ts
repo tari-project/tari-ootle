@@ -41,4 +41,8 @@ export type TransactionPoolRecord = {
    * execution alongside `transaction_fee`.
    */
   exhaust_burn: bigint;
+  /**
+   * Whether the transaction commits only its fee intent. See [`MultiShardAtom::fee_intent_only`].
+   */
+  fee_intent_only: boolean;
 };

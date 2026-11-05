@@ -14,8 +14,10 @@ use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_common_types::Epoch;
 use tari_ootle_transaction::{Network, Transaction, TransactionBuilder, TransactionId};
 use tari_ootle_wallet_sdk::{
+    IndexerTrust,
     WalletSdk as Sdk,
     WalletSdkConfig,
+    apis::transaction::Submission,
     cipher_seed::CipherSeedRestore,
     local_key_store::LocalKeyStore,
     models::EpochBirthday,
@@ -83,9 +85,15 @@ impl Runner {
         let tx_id = self
             .sdk
             .transaction_api()
-            .insert_new_transaction(transaction, None, &[], false)?;
+            .insert_new_transaction(transaction, None, &[], false, &[])?;
 
-        self.sdk.transaction_api().submit_transaction(tx_id).await?;
+        loop {
+            match self.sdk.transaction_api().submit_transaction(tx_id).await? {
+                Submission::Submitted => break,
+                Submission::Rejected => anyhow::bail!("Transaction {tx_id} was rejected"),
+                Submission::Deferred => sleep(Duration::from_secs(1)).await,
+            }
+        }
 
         self.stats.inc_transaction();
         Ok(tx_id)
@@ -150,6 +158,7 @@ fn initialize_wallet_sdk<P: AsRef<Path>>(db_path: P, indexer_url: Url) -> Result
     let sdk_config = WalletSdkConfig {
         network: Network::LocalNet,
         override_keyring_password: Some(SafePassword::from_str("N3Va g0nn4 gu355").unwrap()),
+        indexer_trust: IndexerTrust::default(),
     };
     let indexer = IndexerRestApiNetworkInterface::new(indexer_url);
     let mut sdk = WalletSdk::initialize_with_local_key_store(store, indexer, sdk_config, EpochBirthday::far_future())?;

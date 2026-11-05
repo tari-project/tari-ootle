@@ -22,6 +22,7 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    StateTreeRetention,
     StorageError,
     consensus_models::{
         Block,
@@ -32,7 +33,7 @@ use tari_ootle_storage::{
         verify_state_version_leaf,
     },
 };
-use tari_ootle_transaction::{Network, Transaction};
+use tari_ootle_transaction::{Network, Transaction, TransactionId};
 use tari_state_tree::{
     SPARSE_MERKLE_PLACEHOLDER_HASH,
     SpreadPrefixStateTree,
@@ -185,10 +186,10 @@ async fn commit_state_in_epoch_one(state_history_length: Option<u64>, consume_ou
         .add_committee(0, vec!["1"])
         .start()
         .await;
-    let (_, _, outputs) = test.send_transaction_to_all(Decision::Commit, 100, 1, 10).await;
-    let _ignore = test.send_transaction_to_all(Decision::Commit, 200, 1, 1).await;
+    let (create, _, outputs) = test.send_transaction_to_all(Decision::Commit, 100, 1, 10).await;
+    let (other, _, _) = test.send_transaction_to_all(Decision::Commit, 200, 1, 1).await;
     test.start_epoch(Epoch(1)).await;
-    commit_transaction_pool(&mut test).await;
+    commit_transactions(&mut test, &[*create.id(), *other.id()]).await;
 
     if consume_outputs {
         let inputs = outputs
@@ -211,18 +212,22 @@ async fn commit_state_in_epoch_one(state_history_length: Option<u64>, consume_ou
                 .collect(),
             vec![],
         );
+        let consume = *transaction.id();
         test.send_transaction_to_destination(TestVnDestination::All, transaction)
             .await;
-        commit_transaction_pool(&mut test).await;
+        commit_transactions(&mut test, &[consume]).await;
     }
     test.stop();
     test
 }
 
-async fn commit_transaction_pool(test: &mut Test) {
+async fn commit_transactions(test: &mut Test, transactions: &[TransactionId]) {
     loop {
         test.on_block_committed().await;
-        if test.is_transaction_pool_empty() {
+        if transactions
+            .iter()
+            .all(|id| test.is_transaction_finalized_at_destination(TestVnDestination::All, id))
+        {
             return;
         }
         let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
@@ -264,12 +269,16 @@ fn assert_state_versions_are_provable<TTx: StateStoreReadTransaction>(
             let shard_root = SpreadPrefixStateTree::new(&mut store)
                 .get_root_hash(proof.state_version)
                 .unwrap();
+            let transition_acc = tx
+                .state_transitions_get_accumulator(shard, proof.state_version)
+                .unwrap();
             verify_state_version_leaf(
                 Network::LocalNet,
                 &commit_proof,
                 shard,
                 proof.state_version,
                 &shard_root,
+                &transition_acc,
                 &proof.shard_root_proof,
             )
             .unwrap();
@@ -322,7 +331,10 @@ async fn committed_state_versions_stay_provable_after_their_blocks_are_pruned() 
     // Far enough past epoch 1 that every retention window has passed.
     store.with_write_tx(|tx| tx.epoch_cleanup(Epoch(100))).unwrap();
     store
-        .with_write_tx(|tx| tx.state_tree_nodes_clear_stale(TEST_NUM_PRESHARDS, usize::MAX))
+        .with_write_tx(|tx| {
+            let retention = StateTreeRetention::read(&**tx, TEST_NUM_PRESHARDS, 0)?;
+            tx.state_tree_nodes_clear_stale(&retention, usize::MAX)
+        })
         .unwrap();
 
     store

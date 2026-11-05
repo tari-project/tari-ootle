@@ -146,6 +146,23 @@ The first charges land as soon as the runtime initialises, before any instructio
   a floor of `INVOCATION_FLOOR` (30) on any instruction that invokes a template — an argument-free
   call weighs nothing by its arguments, but still instantiates the template. It prices what the
   network must gossip, store and validate regardless of what execution does.
+- **`InputLoad`** — the encoded bytes of every declared input × `per_byte_storage_cost` /
+  `input_load_bytes_cost_divisor`. It prices reading each input from storage, whether or not
+  execution touches it. Global substates (templates, network governance) are counted like any other
+  input.
+- **`InputFanout`** — the same bytes × the transaction's *input fanout* × `per_byte_storage_cost` /
+  `input_fanout_bytes_cost_divisor`. The input fanout is the number of shard groups holding the
+  transaction's declared inputs (and, for a burn claim, its claim tombstone), less one: the groups
+  each input has to be pledged to beyond its own. Every transaction declares the TARI resource, so a
+  transaction whose other inputs sit in another group pays a fanout of at least one. A global
+  transaction — one that declares a global substate or publishes a template — executes in every
+  shard group, so its input fanout is the number of shard groups less one.
+
+Both input charges price one holder per input: one load, and one pledge to each further group. A
+global substate has a holder in every shard group, and each of them loads it and pledges it to the
+others, so with `n` groups the network does `n` times the work these charges price for it.
+
+Both input charges land before the fee intent runs, so they stand whatever the main intent does.
 
 ---
 
@@ -236,9 +253,13 @@ allowance = points_funded_by( payments − charges_so_far )
 ```
 
 The flat credit is gone — sourcing the fee was its only purpose, and that is done. Funding
-compute from the *unspent* part of the payment (rather than from the whole of it) is what keeps a
-transaction from spending its entire payment on execution and then being unable to afford even its
-own fee-intent fallback, which would settle as a rejection that collects nothing.
+compute from the *unspent* part of the payment (rather than from the whole of it) keeps the share
+of the payment that the fee-intent fallback already owes from also funding execution.
+
+The allowance is sized against the charges standing when each invocation starts, so charges accrued
+after the last one — instructions that follow the final template call — can still take the total a
+few microtari past the payment. That does not affect whether the fee intent commits; see the final
+check below.
 
 Three ceilings apply on top of each other:
 
@@ -291,12 +312,17 @@ The charges computed in these passes:
   call would let a transaction split work into sub-divisor chunks and pay zero for each.
 </Aside>
 
-**The final check.** After pass 2, `payments ≥ charges` is tested one last time. A fee-intent commit
-still persists real state — substates and a receipt carrying every event the intent emitted — so a
-payment that cannot cover *that* commits nothing at all. The transaction is rejected, nothing is
-taken, and the receipt reports the charges as metered against no payment so the payer knows what to
-retry with. Only a fee-intent commit can fail here — a full commit's charges were tested against the
-payment to reach this point.
+**The final check.** After pass 2, the payment is tested one last time against what the commit
+itself costs. A fee-intent commit still persists real state — substates and a receipt carrying every
+event the intent emitted — so a fee intent whose *own* charges (as the checkpoint left them, with the
+persisted state and the fee intent's own execution re-priced) exceed the payment commits nothing at
+all. The transaction is rejected, nothing is taken, and the receipt reports the charges as metered
+against no payment so the payer knows what to retry with. Only a fee-intent commit can fail here — a
+full commit's charges were tested against the payment to reach this point.
+
+A fee intent that covers its own charges always commits, even when the main intent's charges take the
+total past the payment. Settlement then collects the whole payment, and the receipt reports the
+metered charges, so it shows more charged than paid.
 
 ---
 
@@ -321,9 +347,11 @@ Fees flow onward as two separate quantities: leaders are paid `pre_burn_fees_pai
 
 ## The exhaust burn
 
-`exhaust_burn_rate` is a consensus constant — 500 bps (5%) on mainnet — and every validator must
-use the same value or nodes diverge on block headers. It is an `ExhaustBurnRate`, which cannot hold a
-rate above `MAX_EXHAUST_BURN_RATE_BPS` (10 000 bps): the whole of what was paid.
+The exhaust burn rate is resolved once per epoch, at the end-of-epoch block that opens it, and
+carried in every block header of that epoch. The source is the burn rate governance component; while
+its council has scheduled nothing, the rate falls back to the per-network `ExhaustBurnRateSchedule`:
+10 000 bps (100%) at mainnet genesis, 500 bps (5%) on the testnets. It is an `ExhaustBurnRate`,
+which cannot hold a rate above `MAX_EXHAUST_BURN_RATE_BPS` (10 000 bps): the whole of what was paid.
 
 The burn is a **share of what was collected**, not a charge. The fee table alone is the payer's
 price; the rate only splits what was paid between leaders and the burn:
@@ -345,17 +373,19 @@ Three consequences follow, and each shows up as a rule elsewhere on this page:
 
 ## What a transaction is charged for
 
-Rates below are the current testnet values (mainnet placeholders are identical and still to be
-finalised).
+Every network, mainnet included, currently runs on the same fee table; the mainnet rates are still
+to be finalised.
 
-| Source | When | Testnet rate |
+| Source | When | Rate |
 |---|---|---|
 | `Initial` | runtime init | 0 |
 | `TransactionWeight` | runtime init | 1 µT per weight unit |
+| `InputLoad` | runtime init | 1 µT per 64 bytes of declared inputs |
+| `InputFanout` | runtime init | 1 µT per 4 bytes of declared inputs, × input fanout |
 | `RuntimeCall` | every engine host call | 1 µT, plus 1 µT per 64 bytes of a log message |
 | `TemplateLoad` | first load of each template | 10 µT per 3 KB |
 | `Storage` | finalisation | 1 µT per byte |
-| `SubstateCreate` | finalisation | 25 µT per new substate |
+| `SubstateCreate` | finalisation | 250 µT per new substate |
 | `TemplatePublish` | finalisation | 250,000 µT flat; first 96 KiB at the storage rate; 100 µT × units² per KiB beyond |
 | `WasmExecution` | finalisation | 1 µT per 1000 metering points |
 | `NativeExecution` | finalisation | 1 µT per 1000 point-equivalents |
@@ -376,6 +406,20 @@ A source that charges nothing is omitted from the breakdown entirely rather than
 The exhaust burn is not a source: it is settled over the total paid and recorded on the receipt's
 `exhaust_burn` field. `FeeSource::Reserved` holds the slot the surcharge occupied, only so receipts
 persisted before the share model still decode; nothing writes it.
+
+### The fee scale
+
+Every rate above is multiplied by the network's **fee scale**, a basis-point multiplier where
+10 000 bps charges the table as written. Every network is at 10 000 bps today. The scale moves the
+whole table at once: a release changes it by scheduling a new scale from an activation epoch
+(`FeeScaleSchedule`), so it takes effect on every validator in the same epoch.
+
+The engine scales each source's total and rounds it down. The receipt's breakdown and
+`total_fees_charged` are already scaled, so a dry run's `required_fees()` needs no adjustment.
+
+An end-of-epoch block names the scale the next epoch charges at under the `NextEpochFeeScale` header
+field. That lets a client following the signed end-of-epoch blocks learn the scale without carrying
+the schedule.
 
 ---
 
@@ -432,9 +476,10 @@ where the only remedy is to restructure the transaction.
   at, where the fee feeds back into the shape.
 </Aside>
 
-Note that `FeeReceipt::required_fees()` reads only what *that receipt* was charged — on an
-`AcceptFeeRejectRest` outcome that is the fee intent's own cost, not what the transaction needed. Use
-`FinalizeResult::required_fees()` when telling a caller what to resubmit with.
+Note that `FeeReceipt::required_fees()` reads only what *that receipt* was charged. On an
+`AcceptFeeRejectRest` outcome the receipt carries the whole transaction's metered charges, with
+storage priced over the fee checkpoint. That can be less than the transaction needed, and it may exceed
+what was paid. Use `FinalizeResult::required_fees()` when telling a caller what to resubmit with.
 
 ---
 
@@ -443,7 +488,7 @@ Note that `FeeReceipt::required_fees()` reads only what *that receipt* was charg
 | Outcome | State persisted | Fee taken |
 |---|---|---|
 | `Accept` | the full transaction | charges in full, surplus refunded |
-| `AcceptFeeRejectRest` | the fee checkpoint only | charges in full, surplus refunded |
+| `AcceptFeeRejectRest` | the fee checkpoint only | charges up to the whole payment, surplus refunded |
 | `Reject` at the fee checkpoint | none | none |
 | `Reject` at finalisation | none | none; the receipt reports what a commit would have cost |
 

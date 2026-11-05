@@ -26,7 +26,10 @@
 pub use tari_bor::serde;
 pub use tari_bor::{decode, decode_exact, from_value, minicbor};
 pub use tari_template_abi::{CallInfo, OwnedData, alloc_and_encode, rust, wrap_ptr};
-pub use tari_template_lib_types::{OwnerRule, access_rules::ComponentAccessRules};
+pub use tari_template_lib_types::{
+    OwnerRule,
+    access_rules::{ComponentAccessRules, UpdateRule},
+};
 
 #[cfg(target_arch = "wasm32")]
 pub use crate::debug;

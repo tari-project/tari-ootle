@@ -44,6 +44,8 @@ fn stealth_output(value: u64, seed: u8) -> StealthOutputModel {
         is_on_chain: true,
         is_condition_spendable: true,
         lock_id: None,
+        proven_up: None,
+        spent_version: None,
     }
 }
 
@@ -604,4 +606,72 @@ fn rejects_locked_unconfirmed_under_a_different_lock() {
         stored.status
     );
     assert_eq!(stored.lock_id, Some(lock_a.id()));
+}
+
+/// The UTXO scanner streams spends only while this count is non-zero, so an output locked by a pending
+/// transaction must count: its spend still has to reach the wallet.
+#[test]
+fn locked_outputs_count_as_unspent_or_locked() {
+    let test = Test::new();
+    let outputs = test.sdk().stealth_outputs_api();
+    let account = Test::test_account_address();
+    let count = || {
+        outputs
+            .count_unspent_or_locked_outputs_for_account(&account, &STEALTH_TARI_RESOURCE_ADDRESS)
+            .unwrap()
+    };
+
+    let output = stealth_output(10, 1);
+    outputs.add_output(&output).unwrap();
+    let mut spent = stealth_output(20, 2);
+    spent.status = OutputStatus::Spent;
+    outputs.add_output(&spent).unwrap();
+    assert_eq!(count(), 1);
+
+    let lock = test.new_lock();
+    outputs
+        .lock_specific_outputs(&account, &STEALTH_TARI_RESOURCE_ADDRESS, lock.id(), &[
+            output.to_utxo_address()
+        ])
+        .unwrap();
+    assert_eq!(count(), 1);
+}
+
+/// UTXO recovery reports an output only when recording it changes the wallet's view of it.
+#[test]
+fn upserting_an_output_reports_whether_it_changed() {
+    let test = Test::new();
+    let outputs = test.sdk().stealth_outputs_api();
+    let output = stealth_output(10, 1);
+
+    assert!(outputs.upsert_utxo(&output).unwrap(), "a new output is inserted");
+    assert!(
+        !outputs.upsert_utxo(&output).unwrap(),
+        "the same output again changes nothing"
+    );
+
+    let mut frozen = output.clone();
+    frozen.is_frozen = true;
+    assert!(outputs.upsert_utxo(&frozen).unwrap(), "freezing the output changes it");
+    assert!(!outputs.upsert_utxo(&frozen).unwrap());
+}
+
+#[test]
+fn setting_the_frozen_flag_reports_whether_it_changed() {
+    let test = Test::new();
+    let outputs = test.sdk().stealth_outputs_api();
+    let output = stealth_output(10, 1);
+    let address = output.to_utxo_address();
+
+    assert_eq!(
+        outputs.set_utxo_frozen(&address, true).unwrap(),
+        None,
+        "no output is held"
+    );
+
+    outputs.add_output(&output).unwrap();
+    assert_eq!(outputs.set_utxo_frozen(&address, false).unwrap(), Some(false));
+    assert_eq!(outputs.set_utxo_frozen(&address, true).unwrap(), Some(true));
+    assert!(stored_output(&test, &Test::test_account_address(), &output.commitment).is_frozen);
+    assert_eq!(outputs.set_utxo_frozen(&address, true).unwrap(), Some(false));
 }

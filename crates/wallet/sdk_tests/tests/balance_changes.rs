@@ -31,7 +31,7 @@ fn build_transaction() -> Transaction {
         .allocate_component_address("component")
         .put_last_instruction_output_on_workspace("bucket")
         .call_method("component", "new", args!["bucket"])
-        .build_and_seal(&RistrettoSecretKey::from(1))
+        .build_and_seal(&RistrettoSecretKey::from(1u64))
 }
 
 fn stealth_output(account: ComponentAddress, value: u64, seed: u8) -> StealthOutputModel {
@@ -57,6 +57,8 @@ fn stealth_output(account: ComponentAddress, value: u64, seed: u8) -> StealthOut
         is_on_chain: true,
         is_condition_spendable: true,
         lock_id: None,
+        proven_up: None,
+        spent_version: None,
     }
 }
 

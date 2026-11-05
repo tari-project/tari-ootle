@@ -4,10 +4,10 @@
 use tari_consensus::hotstuff::{HotStuffError, ProposalValidationError};
 use tari_consensus_types::BlockId;
 use tari_epoch_manager::EpochManagerError;
-use tari_ootle_common_types::Epoch;
+use tari_ootle_common_types::{Epoch, SubstateAddress, ValidatorSetHash};
 use tari_ootle_storage::{StorageError, consensus_models::TransactionPoolError};
 use tari_rpc_framework::{RpcError, RpcStatus};
-use tari_state_tree::{JmtStorageError, TreeHash};
+use tari_state_tree::{JmtStorageError, TransitionAccumulator, TreeHash, Version};
 use tari_validator_node_rpc::ValidatorNodeRpcClientError;
 
 #[derive(Debug, thiserror::Error)]
@@ -37,12 +37,38 @@ pub enum RpcStateSyncError {
     ConflictsWithCheckpoint(anyhow::Error),
     #[error("State root mismatch. Expected: {expected}, actual: {actual}")]
     StateRootMismatch { expected: TreeHash, actual: TreeHash },
+    /// The stream reached the checkpoint's root through transitions the committee did not commit.
+    #[error("Transition accumulator mismatch. Expected: {expected}, actual: {actual}")]
+    TransitionAccumulatorMismatch {
+        expected: TransitionAccumulator,
+        actual: TransitionAccumulator,
+    },
     #[error("Checkpoint for epoch {epoch} is not yet available from the previous committee")]
     CheckpointNotAvailable { epoch: Epoch },
     #[error("No committees found for epoch {0}")]
     NoCommittees(Epoch),
     #[error("Invariant error: {details}")]
     InvariantError { details: String },
+    #[error(
+        "The previous committee committed validator set {committed} for {epoch}, but this node assigned {local}. This \
+         node disagrees with the network on the validators registered for {epoch} or on how they form committees; \
+         check its epoch oracle and committee configuration."
+    )]
+    ValidatorSetDiverged {
+        epoch: Epoch,
+        local: ValidatorSetHash,
+        committed: ValidatorSetHash,
+    },
+    /// An earlier sync attempt left a substate up without its value, and this attempt reached the checkpoint
+    /// without destroying it. The fault lies with the peer that served the earlier attempt.
+    #[error(
+        "An earlier sync left the substate at {address} (created at v{created_at}) up without its value, and the \
+         checkpoint keeps it up"
+    )]
+    EarlierSyncMissingValue {
+        address: SubstateAddress,
+        created_at: Version,
+    },
 }
 
 impl RpcStateSyncError {
@@ -52,6 +78,7 @@ impl RpcStateSyncError {
             self,
             RpcStateSyncError::InvalidResponse(_) |
                 RpcStateSyncError::StateRootMismatch { .. } |
+                RpcStateSyncError::TransitionAccumulatorMismatch { .. } |
                 RpcStateSyncError::ConflictsWithCheckpoint(_) |
                 RpcStateSyncError::StateTreeError(_)
         )

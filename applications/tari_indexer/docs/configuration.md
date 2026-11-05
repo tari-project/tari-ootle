@@ -47,20 +47,11 @@ Main indexer application settings.
 # API server listening address (default: "127.0.0.1:18300")
 #api_listen_address = "127.0.0.1:18300"
 
-# GraphQL server address (default: "127.0.0.1:18301")
-#graphql_address = "127.0.0.1:18301"
-
 # Web UI server address (default: "127.0.0.1:15000")
 #web_ui_address = "127.0.0.1:15000"
 
 # Public API URL for web UI (optional, defaults to api_listen_address)
 #web_ui_public_api_url = "https://myindexer.example.com:18300"
-
-# Public GraphQL URL for web UI (optional, defaults to graphql_address)
-#web_ui_public_graphql_url = "https://myindexer.example.com:18301"
-
-# Block scanning interval in seconds (default: 10)
-#block_scanning_interval = 10
 
 # How long, in seconds, a shard group waits before reopening its state sync stream after it fails,
 # or after a validator that does not follow its tip closes it (default: 60)
@@ -94,18 +85,25 @@ Main indexer application settings.
 # to the filesystem: SQLite reuses the freed pages rather than shrinking the file.
 #transaction_retention_epochs = 50
 
-# How many epochs past the epoch its transaction committed in a transaction receipt is retained.
-# Unset (the default) or "forever" retains receipts indefinitely. A pruned receipt no longer answers
+# How many epochs past the epoch its transaction committed in a transaction receipt is retained
+# (default: 1000). "forever" retains receipts indefinitely. A pruned receipt no longer answers
 # a result lookup or appears in the receipt listing. A stored transaction reports its outcome from
 # its receipt, so a window not longer than transaction_retention_epochs is raised to one epoch
 # longer, and receipts are retained forever while transactions are. The economic totals on
 # /network/economics, including the receipt count, keep counting pruned receipts.
 #transaction_receipt_retention_epochs = 1000
 
-# How many epochs past the epoch its transaction committed in an event is retained. Unset (the
-# default) or "forever" retains events indefinitely. A pruned event no longer answers event queries
-# or the event stream's catch-up.
+# How many epochs past the epoch its transaction committed in an event is retained (default: 1000).
+# "forever" retains events indefinitely. A pruned event no longer answers event queries, and the
+# event stream answers 410 to a resume cursor older than the newest pruned event, so the client
+# resynchronises from current state instead of silently missing events.
 #event_retention_epochs = 1000
+
+# How many epochs past the epoch a UTXO was spent in its tombstone is retained (default: 504, about a
+# week). "forever" retains tombstones indefinitely. Pruning raises the shard's tombstone horizon on
+# /info, and a UTXO stream resuming from below it is told its spends are incomplete, so the wallet
+# checks the outputs it holds in that shard and still learns of every spend.
+#utxo_tombstone_retention_epochs = 504
 
 # How long each pruner idles between passes once it has nothing left to prune, in seconds. While a
 # backlog remains it drains in back-to-back batches rather than waiting out this interval. Only used
@@ -359,7 +357,6 @@ export TARI_BASE_DIR=/opt/tari
 # Indexer-specific overrides
 export TARI_INDEXER_API_LISTEN_ADDRESS=0.0.0.0:18300
 export TARI_INDEXER_WEB_UI_PUBLIC_API_URL=https://api.myindexer.com
-export TARI_INDEXER_WEB_UI_PUBLIC_GRAPHQL_URL=https://graphql.myindexer.com
 export TARI_INDEXER_MINOTARI_NODE_GRPC_URL=http://localhost:18142
 ```
 
@@ -374,8 +371,7 @@ Use the `-p` flag to override individual configuration properties:
 # Override multiple properties  
 ./tari_indexer \
     -p indexer.api_listen_address=0.0.0.0:8080 \
-    -p indexer.block_scanning_interval=5 \
-    -p epoch_oracle.base_layer.base_node_grpc_url=http://localhost:18142
+    --epoch-oracle-minotari-node-grpc-url http://localhost:18142
 ```
 
 ## Common Configuration Patterns
@@ -388,7 +384,6 @@ network = "localnet"
 [indexer]
 api_listen_address = "127.0.0.1:18300"
 web_ui_address = "127.0.0.1:15000"
-block_scanning_interval = 5  # Faster scanning for development
 state_scanning_interval = 30
 
 [indexer.p2p]
@@ -414,8 +409,6 @@ network = "esmeralda"
 api_listen_address = "0.0.0.0:18300"
 web_ui_address = "0.0.0.0:15000"
 web_ui_public_api_url = "https://indexer.example.com:18300"
-web_ui_public_graphql_url = "https://indexer.example.com:18301"
-block_scanning_interval = 10
 state_scanning_interval = 60
 
 [indexer.p2p]
@@ -450,8 +443,6 @@ topic = "ResourceTransferred"
 network = "esmeralda"
 
 [indexer]
-# Fast scanning for real-time applications
-block_scanning_interval = 2
 state_scanning_interval = 10
 
 # Large cache for better performance

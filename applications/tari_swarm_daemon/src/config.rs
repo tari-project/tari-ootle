@@ -119,7 +119,7 @@ pub struct InstanceConfig {
     pub base_path: Option<PathBuf>,
     pub instance_type: InstanceType,
     pub num_instances: u32,
-    #[serde(alias = "extra_args", default)]
+    #[serde(default)]
     pub settings: HashMap<String, String>,
     #[serde(default)]
     pub envs: Vec<(String, String)>,
@@ -237,7 +237,7 @@ impl Display for InstanceType {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutableConfig {
     pub instance_type: InstanceType,
@@ -253,7 +253,7 @@ impl ExecutableConfig {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CompileConfig {
     pub working_dir: Option<PathBuf>,
     pub package_name: String,

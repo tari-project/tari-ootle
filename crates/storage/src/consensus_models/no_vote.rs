@@ -1,12 +1,12 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, Decision};
-use tari_ootle_common_types::ShardGroup;
+use tari_ootle_common_types::{Epoch, ShardGroup, ValidatorSetHash, displayable::Displayable};
 use tari_ootle_transaction::TransactionId;
+use tari_sidechain::FixedHash;
 
-use crate::consensus_models::TransactionPoolStage;
+use crate::consensus_models::{LockedEpoch, TransactionPoolStage};
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum NoVoteReason {
@@ -24,15 +24,11 @@ pub enum NoVoteReason {
         is_output_only: bool,
         decision: Decision,
     },
-    #[error(
-        "Output only disagreement for local {shard_group}. Transaction ID: {transaction_id}, Stage: {stage}, Command: \
-         {command}"
-    )]
-    OutputOnlyDisagreement {
+    #[error("The leader proposed {remote} for transaction {transaction_id}, but this node derives {local}")]
+    CommandDisagreement {
         transaction_id: TransactionId,
-        shard_group: ShardGroup,
-        stage: TransactionPoolStage,
-        command: &'static str,
+        local: &'static str,
+        remote: &'static str,
     },
     #[error("The transaction is not in the pool")]
     TransactionNotInPool,
@@ -50,6 +46,26 @@ pub enum NoVoteReason {
     },
     #[error("Fee disagreement")]
     FeeDisagreement,
+    #[error(
+        "The leader proposed that transaction {transaction_id} commits {}, but this node commits {}",
+        commit_scope(*proposed_fee_intent_only),
+        commit_scope(*local_fee_intent_only)
+    )]
+    FeeIntentOnlyDisagreement {
+        transaction_id: TransactionId,
+        local_fee_intent_only: bool,
+        proposed_fee_intent_only: bool,
+    },
+    #[error(
+        "Transaction {transaction_id} commits {}, but the execution this node holds for it commits {}",
+        commit_scope(*fee_intent_only),
+        commit_scope(*execution_fee_intent_only)
+    )]
+    FeeIntentExecutionMismatch {
+        transaction_id: TransactionId,
+        fee_intent_only: bool,
+        execution_fee_intent_only: bool,
+    },
     #[error("Leader fee disagreement")]
     LeaderFeeDisagreement,
     #[error("Total leader fee disagreement")]
@@ -78,6 +94,11 @@ pub enum NoVoteReason {
     EndOfEpochWithOtherCommands,
     #[error("The proposer included commands in a block that extends the end-of-epoch block")]
     CommandsAfterEndOfEpoch,
+    #[error(
+        "The proposer ended an epoch that changes the number of committees while a cross-shard transaction is still \
+         in LocalPrepared"
+    )]
+    EndOfEpochWithTransactionsInLocalPrepared,
     #[error("End-of-epoch next-epoch hash mismatch. Local oracle: {local}, proposed: {proposed}")]
     EndOfEpochHashMismatch { local: FixedHash, proposed: FixedHash },
     #[error(
@@ -88,10 +109,20 @@ pub enum NoVoteReason {
     EndOfEpochBurnRateMissing,
     #[error("End-of-epoch next-epoch exhaust burn rate mismatch. Local: {local_bps}bps, proposed: {proposed_bps}bps")]
     EndOfEpochBurnRateMismatch { local_bps: u16, proposed_bps: u16 },
+    #[error("End-of-epoch block does not name the next epoch's validator set hash")]
+    EndOfEpochValidatorSetMissing,
+    #[error(
+        "End-of-epoch next-epoch validator set hash cannot be ratified: this node has not assigned the next epoch's \
+         committees"
+    )]
+    EndOfEpochValidatorSetNotKnown,
+    #[error("End-of-epoch next-epoch validator set hash mismatch. Local: {local}, proposed: {proposed}")]
+    EndOfEpochValidatorSetMismatch {
+        local: ValidatorSetHash,
+        proposed: ValidatorSetHash,
+    },
     #[error("The state Merkle root does not match")]
     StateMerkleRootMismatch,
-    #[error("The command Merkle root does not match")]
-    CommandMerkleRootMismatch,
     #[error("Not all foreign input pledges are present")]
     NotAllForeignInputPledges,
     #[error(
@@ -125,15 +156,27 @@ pub enum NoVoteReason {
         total_bytes: usize,
         max_bytes: usize,
     },
-    #[error("Transaction {transaction_id} has substate lock conflicts and must be deferred to a later block")]
-    DeferrableLockConflict { transaction_id: TransactionId },
     /// Locking succeeded but the transaction's state diff does not apply over the pending store. An honest proposer
-    /// skips such a transaction, so it is distinct from [NoVoteReason::DeferrableLockConflict]: the lock rules
-    /// classify the underlying failure as one that no later block can clear.
+    /// skips such a transaction: the lock rules classify the underlying failure as one that no later block can clear.
     #[error("The proposer proposed a conflicting transaction {transaction_id}: {details}")]
     ConflictingTransactionProposed {
         transaction_id: TransactionId,
         details: String,
+    },
+    #[error("The leader pinned transaction {transaction_id} to {proposed}, but this node pins it to {}", local.display())]
+    LockedEpochDisagreement {
+        transaction_id: TransactionId,
+        local: Option<LockedEpoch>,
+        proposed: LockedEpoch,
+    },
+    #[error(
+        "The leader sequenced transaction {transaction_id}, pinned to {locked_epoch}, in a block of the earlier \
+         {block_epoch}"
+    )]
+    LockedEpochAfterBlock {
+        transaction_id: TransactionId,
+        locked_epoch: Epoch,
+        block_epoch: Epoch,
     },
 }
 
@@ -153,12 +196,14 @@ impl NoVoteReason {
             Self::AlreadyVotedAtHeight => "ShouldNotVote",
             Self::StageDisagreement { .. } => "StageDisagreement",
             Self::StageTransitionNotApplicable { .. } => "StageTransitionNotApplicable",
-            Self::OutputOnlyDisagreement { .. } => "OutputOnlyDisagreement",
+            Self::CommandDisagreement { .. } => "CommandDisagreement",
             Self::TransactionNotInPool => "TransactionNotInPool",
             Self::DecisionDisagreement { .. } => "DecisionDisagreement",
             Self::SomeAcceptAtomMustBeAbort { .. } => "SomeAcceptAtomMustBeAbort",
             Self::AllAcceptMustBeCommit { .. } => "AllAcceptMustBeCommit",
             Self::FeeDisagreement => "FeeDisagreement",
+            Self::FeeIntentOnlyDisagreement { .. } => "FeeIntentOnlyDisagreement",
+            Self::FeeIntentExecutionMismatch { .. } => "FeeIntentExecutionMismatch",
             Self::LeaderFeeDisagreement => "LeaderFeeDisagreement",
             Self::TotalExhaustBurnDisagreement => "TotalExhaustBurnDisagreement",
             Self::NoLeaderFee => "NoLeaderFee",
@@ -172,13 +217,16 @@ impl NoVoteReason {
             Self::NotEndOfEpoch => "NotEndOfEpoch",
             Self::EndOfEpochWithOtherCommands => "EndOfEpochWithOtherCommands",
             Self::CommandsAfterEndOfEpoch => "CommandsAfterEndOfEpoch",
+            Self::EndOfEpochWithTransactionsInLocalPrepared => "EndOfEpochWithTransactionsInLocalPrepared",
             Self::EndOfEpochHashMismatch { .. } => "EndOfEpochHashMismatch",
             Self::EndOfEpochHashNotObserved => "EndOfEpochHashNotObserved",
             Self::EndOfEpochBurnRateMissing => "EndOfEpochBurnRateMissing",
             Self::EndOfEpochBurnRateMismatch { .. } => "EndOfEpochBurnRateMismatch",
+            Self::EndOfEpochValidatorSetMissing => "EndOfEpochValidatorSetMissing",
+            Self::EndOfEpochValidatorSetNotKnown => "EndOfEpochValidatorSetNotKnown",
+            Self::EndOfEpochValidatorSetMismatch { .. } => "EndOfEpochValidatorSetMismatch",
             Self::TotalLeaderFeeDisagreement => "TotalLeaderFeeDisagreement",
             Self::StateMerkleRootMismatch => "StateMerkleRootMismatch",
-            Self::CommandMerkleRootMismatch => "CommandMerkleRootMismatch",
             Self::NotAllForeignInputPledges => "NotAllForeignInputPledges",
             Self::ProposedBeforeShardGroupsReady { .. } => "ProposedBeforeShardGroupsReady",
             Self::InvalidEvidence { .. } => "InvalidEvidence",
@@ -187,8 +235,17 @@ impl NoVoteReason {
             Self::BlockShardOutputBytesExceeded { .. } => "BlockShardOutputBytesExceeded",
             Self::BlockPledgeBytesExceeded { .. } => "BlockPledgeBytesExceeded",
             Self::BlockForeignProposalBytesExceeded { .. } => "BlockForeignProposalBytesExceeded",
-            Self::DeferrableLockConflict { .. } => "DeferrableLockConflict",
             Self::ConflictingTransactionProposed { .. } => "ConflictingTransactionProposed",
+            Self::LockedEpochDisagreement { .. } => "LockedEpochDisagreement",
+            Self::LockedEpochAfterBlock { .. } => "LockedEpochAfterBlock",
         }
+    }
+}
+
+fn commit_scope(fee_intent_only: bool) -> &'static str {
+    if fee_intent_only {
+        "only its fee intent"
+    } else {
+        "in full"
     }
 }

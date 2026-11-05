@@ -24,7 +24,12 @@
 // (query_prefix_range_keys and friends) are the way to read a range here.
 #![deny(clippy::disallowed_methods)]
 
-use std::{collections::HashSet, iter, ops::Deref, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashSet},
+    iter,
+    ops::Deref,
+    sync::Arc,
+};
 
 use indexmap::IndexMap;
 use log::*;
@@ -51,8 +56,8 @@ use tari_ootle_common_types::{
     Epoch,
     NodeAddressable,
     NodeHeight,
-    NumPreshards,
     ShardGroup,
+    SubstateAddress,
     ToSubstateAddress,
     VersionedSubstateId,
     optional::Optional,
@@ -63,6 +68,7 @@ use tari_ootle_storage::{
     Ordering,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    StateTreeRetention,
     StateTreeTruncateStats,
     StorageError,
     SubstateRewindStats,
@@ -78,6 +84,7 @@ use tari_ootle_storage::{
         LockConflict,
         NoVoteReason,
         PendingShardStateTreeDiff,
+        ProposalOrigin,
         StateVersionProof,
         StateVersionProofSource,
         SubstateChange,
@@ -100,7 +107,16 @@ use tari_ootle_storage::{
     time,
 };
 use tari_ootle_transaction::TransactionId;
-use tari_state_tree::{Children, Node, NodeKey, NodeType, StaleTreeNode, StateTreePayload, Version};
+use tari_state_tree::{
+    Children,
+    Node,
+    NodeKey,
+    NodeType,
+    StaleTreeNode,
+    StateTreePayload,
+    TransitionAccumulator,
+    Version,
+};
 
 use crate::{
     block_diff_table::BlockDiffEntry,
@@ -144,9 +160,10 @@ use crate::{
         lock_conflict::LockConflictCf,
         missing_transactions,
         missing_transactions::MissingTransactionCf,
+        parked_block,
         parked_block::{ParkedBlockCf, ParkedBlockDataRef},
         pending_state_tree_diff::{PendingStateTreeDiffRecordCf, ShardStateTreeDiff, ShardStateTreeDiffRef},
-        state_sync_rewind_point::StateSyncRewindPointCf,
+        state_sync_rewind_point::{StateSyncMissingValueCf, StateSyncRewindPointCf},
         state_transition,
         state_transition::{
             StateTransitionCf,
@@ -155,7 +172,7 @@ use crate::{
             StateTransitionType,
         },
         state_tree,
-        state_tree::{StateTreeCf, StateTreeStaleNodesCf},
+        state_tree::{StateTreeCf, StateTreeDeferredStaleNodesCf, StateTreeStaleNodesCf},
         state_tree_shard_versions::StateTreeShardVersionCf,
         state_version_proof::{
             BlockCommitProofCf,
@@ -299,6 +316,7 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
         &mut self,
         block: &Block,
         foreign_proposals: &[ForeignProposal],
+        origin: ProposalOrigin,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "parked_blocks_insert";
         if self.blocks_exists(block.id())? {
@@ -311,8 +329,16 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
         }
 
         let cf = self.db().cf(ParkedBlockCf)?;
-        // Idempotent
+        // Idempotent, except that a catch-up delivery marks the parked block as a catch-up block whatever origin it
+        // was parked with: it shows the committee has certified the block, so it must not be voted on when unparked.
         if cf.exists(block.id(), OPERATION)? {
+            if origin.is_catch_up() {
+                let mut data = cf.get(block.id(), OPERATION)?;
+                if !data.origin.is_catch_up() {
+                    data.origin = origin;
+                    cf.put(block.id(), &data, OPERATION)?;
+                }
+            }
             return Ok(());
         }
 
@@ -322,20 +348,32 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
         let parked_block_data = ParkedBlockDataRef {
             block,
             foreign_proposals,
+            origin,
         };
         let data = codec.encode(&parked_block_data)?;
         cf.put_raw_value(block.id(), &data, OPERATION)?;
+        self.db().cf(parked_block::ParkedBlockEpochHeightIndex)?.put(
+            &parked_block::epoch_height_index_key(block),
+            &(),
+            OPERATION,
+        )?;
 
         Ok(())
     }
 
-    fn parked_blocks_remove(&mut self, block_id: &BlockId) -> Result<(Block, Vec<ForeignProposal>), StorageError> {
+    fn parked_blocks_remove(
+        &mut self,
+        block_id: &BlockId,
+    ) -> Result<(Block, Vec<ForeignProposal>, ProposalOrigin), StorageError> {
         const OPERATION: &str = "parked_blocks_remove";
         let cf = self.db().cf(ParkedBlockCf)?;
         let data = cf.get(block_id, OPERATION)?;
         cf.delete_or_not_found(block_id, OPERATION)?;
+        self.db()
+            .cf(parked_block::ParkedBlockEpochHeightIndex)?
+            .delete(&parked_block::epoch_height_index_key(&data.block), OPERATION)?;
 
-        Ok((data.block, data.foreign_proposals))
+        Ok((data.block, data.foreign_proposals, data.origin))
     }
 }
 
@@ -968,6 +1006,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             None,
             transaction_weight,
             0,
+            false,
         );
 
         self.db()
@@ -992,6 +1031,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             evidence: update.evidence().clone(),
             transaction_fee: update.transaction_fee(),
             exhaust_burn: update.exhaust_burn(),
+            fee_intent_only: update.is_fee_intent_only(),
             leader_fee: update.leader_fee().cloned(),
             stage: update.stage(),
             local_decision: update.decision(),
@@ -1061,6 +1101,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             pool.set_local_decision(update.local_decision);
             pool.set_transaction_fee(update.transaction_fee);
             pool.set_exhaust_burn(update.exhaust_burn);
+            pool.set_fee_intent_only(update.fee_intent_only);
             if let Some(leader_fee) = update.leader_fee {
                 pool.set_leader_fee(leader_fee);
             }
@@ -1098,6 +1139,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         &mut self,
         block: &Block,
         foreign_proposals: &[ForeignProposal],
+        origin: ProposalOrigin,
         missing_transaction_ids: IMissing,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "missing_transactions_insert";
@@ -1109,7 +1151,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             });
         }
 
-        self.parked_blocks_insert(block, foreign_proposals)?;
+        self.parked_blocks_insert(block, foreign_proposals, origin)?;
 
         let cf = self.db().cf(MissingTransactionCf)?;
         let index_cf = self.db().cf(missing_transactions::MissingTransactionBlockIdIndex)?;
@@ -1125,9 +1167,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn parked_block_remove_missing_transaction(
         &mut self,
-        _current_height: NodeHeight,
         transaction_id: &TransactionId,
-    ) -> Result<Option<(Block, Vec<ForeignProposal>)>, StorageError> {
+    ) -> Result<Option<(Block, Vec<ForeignProposal>, ProposalOrigin)>, StorageError> {
         const OPERATION: &str = "missing_transactions_insert";
 
         let query_cf = self.db().cf(missing_transactions::ByTransactionIdQuery)?;
@@ -1162,12 +1203,35 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             }
         }
 
-        // TODO: we do not clear older blocks (height < current block height). This could potentially leave stale
-        // entries.
-
         // None left, remove and return the block
-        let block_and_fp = self.parked_blocks_remove(&block_id)?;
-        Ok(Some(block_and_fp))
+        let parked = self.parked_blocks_remove(&block_id)?;
+        Ok(Some(parked))
+    }
+
+    fn parked_blocks_remove_up_to(&mut self, epoch: Epoch, height: NodeHeight) -> Result<usize, StorageError> {
+        const OPERATION: &str = "parked_blocks_remove_up_to";
+        let db = self.db();
+        let index_cf = db.cf(parked_block::ParkedBlockEpochHeightIndex)?;
+        let keys = db
+            .cf(parked_block::ByEpochHeightQuery)?
+            .query_end_range_key_iterator(Ordering::Ascending, &(epoch, height + NodeHeight(1)))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let parked_cf = db.cf(ParkedBlockCf)?;
+        let missing_cf = db.cf(MissingTransactionCf)?;
+        let missing_index_cf = db.cf(missing_transactions::MissingTransactionBlockIdIndex)?;
+        let missing_by_block = db.cf(missing_transactions::ByBlockIdQuery)?;
+        for key in &keys {
+            let (_, _, _, block_id) = key;
+            for (block_id, transaction_id) in missing_by_block.query_prefix_range_keys(Ordering::default(), block_id)? {
+                missing_cf.delete(&(transaction_id, block_id), OPERATION)?;
+                missing_index_cf.delete(&(block_id, transaction_id), OPERATION)?;
+            }
+            parked_cf.delete(block_id, OPERATION)?;
+            index_cf.delete(key, OPERATION)?;
+        }
+
+        Ok(keys.len())
     }
 
     fn foreign_parked_blocks_insert(&mut self, park_block: &ForeignParkedProposal) -> Result<(), StorageError> {
@@ -1289,9 +1353,26 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let cf = db.cf(SubstateCf)?;
         let head_cf = db.cf(substate::HeadIndex)?;
         let unpruned_cf = db.cf(substate::UnprunedDownedValuesIndex)?;
+        let records_transitions = update_batch.records_transitions();
 
         for (shard, updates) in update_batch.updates {
             for (state_version, updates) in updates {
+                // The record of a version with no transition is never written, so the accumulator below this version
+                // is that of the shard's last transition record, whatever version it is at.
+                let previous_acc = match state_version.checked_sub(1) {
+                    Some(below) => self.state_transitions_get_accumulator(shard, below)?,
+                    None => TransitionAccumulator::zero(),
+                };
+                let tree_changes = updates
+                    .iter()
+                    .map(|transition| transition.to_tree_change(update_batch.network, update_batch.epoch))
+                    .collect::<Vec<_>>();
+                let transition_acc = previous_acc
+                    .extend(update_batch.epoch, state_version, &tree_changes)
+                    .map_err(|e| StorageError::DataInconsistency {
+                        details: format!("substates_commit_batch: {shard} at v{state_version}: {e}"),
+                    })?;
+
                 let mut transitions = Vec::with_capacity(updates.len());
                 let mut downed_substate_addresses = vec![];
 
@@ -1359,10 +1440,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                     )?;
                 }
 
+                if !records_transitions {
+                    continue;
+                }
                 let transition = StateTransitionModelDataV1 {
                     epoch: update_batch.epoch,
                     state_version,
                     transitions,
+                    transition_acc,
                 };
 
                 db.cf(StateTransitionCf)?
@@ -1422,6 +1507,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let unpruned_cf = db.cf(substate::UnprunedDownedValuesIndex)?;
         let down_proofs_cf = db.cf(SubstateDownProofCf)?;
         let down_proofs_epoch_index = db.cf(SubstateDownProofEpochIndex)?;
+        let missing_values_cf = db.cf(StateSyncMissingValueCf)?;
 
         let start_version = target_state_version.saturating_add(1);
         let mut touched: HashSet<SubstateId> = HashSet::new();
@@ -1446,6 +1532,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                         let substate = substates_cf.get(address, OPERATION)?;
                         touched.insert(substate.substate_id.clone());
                         substates_cf.delete(address, OPERATION)?;
+                        missing_values_cf.delete(&(shard, *address), OPERATION)?;
                         stats.substates_created_deleted += 1;
                     },
                     StateTransitionType::Down => {
@@ -1453,6 +1540,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                         touched.insert(substate.substate_id.clone());
                         substate.destroyed = None;
                         substates_cf.put(address, &substate, OPERATION)?;
+                        if substate.substate_value.is_none() {
+                            missing_values_cf.put(&(shard, *address), &substate.created.at_state_version, OPERATION)?;
+                        }
                         down_proofs_cf.delete(&(shard, *address), OPERATION)?;
                         down_proofs_epoch_index.delete(&(record.epoch, shard, *address), OPERATION)?;
                         stats.substates_destroyed_restored += 1;
@@ -1647,26 +1737,50 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn state_tree_nodes_clear_stale(
         &mut self,
-        num_preshards: NumPreshards,
-        max_deletes: usize,
+        retention: &StateTreeRetention,
+        max_writes: usize,
     ) -> Result<usize, StorageError> {
         const OPERATION: &str = "state_tree_nodes_clear_stale";
 
         let db = self.db();
         let cf = self.db().cf(StateTreeCf)?;
-        let versions_cf = self.db().cf(StateTreeShardVersionCf)?;
         let stale_cf = self.db().cf(state_tree::ByStateTreeStaleShardVersionQuery)?;
         let stale_nodes_cf = self.db().cf(StateTreeStaleNodesCf)?;
+        let deferred_cf = self.db().cf(StateTreeDeferredStaleNodesCf)?;
+        let deferred_by_pin = self.db().cf(state_tree::ByDeferredStaleShardPinQuery)?;
 
-        let mut num_deleted = 0usize;
-        let shards = iter::once(Shard::global()).chain(ShardGroup::all_shards(num_preshards).shard_iter());
-        for shard in shards {
-            if num_deleted >= max_deletes {
+        let mut num_written = 0usize;
+        for (shard, shard_retention) in retention.iter() {
+            if num_written >= max_writes {
                 break;
             }
-            let max_version = versions_cf.get(&shard, OPERATION).optional()?.unwrap_or(0);
-            let Some(to_version) = max_version.checked_sub(self.options.state_history_length) else {
-                trace!(target: LOG_TARGET, "Shard {shard} is at version {max_version}, skipping stale node deletion due to history length {}", self.options.state_history_length);
+            // Pins are released oldest first, so the nodes kept for a pin below the lowest are needed by no tree kept
+            let released_below = shard_retention.lowest_pin().unwrap_or(Version::MAX);
+            let released = deferred_by_pin.query_range_keys_limited(
+                Ordering::Ascending,
+                (shard, 0)..(shard, released_below),
+                max_writes - num_written,
+            )?;
+            for key in released {
+                if num_written >= max_writes {
+                    break;
+                }
+                let nodes = deferred_cf.get(&key, OPERATION)?;
+                for node in &nodes {
+                    cf.delete(&(shard, node.as_node_key().clone()), OPERATION)?;
+                }
+                deferred_cf.delete(&key, OPERATION)?;
+                num_written += nodes.len() + 1;
+            }
+            if num_written >= max_writes {
+                break;
+            }
+
+            let Some(to_version) = shard_retention
+                .latest_version
+                .checked_sub(self.options.state_history_length)
+            else {
+                trace!(target: LOG_TARGET, "Shard {shard} is at version {}, skipping stale node deletion due to history length {}", shard_retention.latest_version, self.options.state_history_length);
                 continue;
             };
             // Only the keys are taken up front: this loop deletes the stale-node record it is reading, and a write
@@ -1675,66 +1789,46 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             let stale_keys = stale_cf.query_range_keys_limited(
                 Ordering::Ascending,
                 (shard, 0)..(shard, to_version.saturating_add(1)),
-                max_deletes - num_deleted,
+                max_writes - num_written,
             )?;
             for (shard, version) in stale_keys {
-                if num_deleted >= max_deletes {
+                if num_written >= max_writes {
                     break;
                 }
                 let nodes = stale_nodes_cf.get(&(shard, version), OPERATION)?;
+                let stale_keys = gather_stale_node_keys(&cf, shard, nodes)?;
 
-                // A version's nodes are gathered before any is deleted, because the subtree walk reads the nodes it
-                // descends through.
-                let mut delete_buffer = Vec::new();
-                for node in nodes {
-                    match node {
-                        StaleTreeNode::Node(key) => {
-                            trace!(target: LOG_TARGET, "Deleting stale node {key} from shard {shard}", );
-                            delete_buffer.push((shard, key));
-                        },
-                        StaleTreeNode::Subtree(parent_key) => {
-                            trace!(target: LOG_TARGET, "Deleting stale substree {parent_key} from shard {shard}", );
-                            // A subtree already deleted along with an earlier version is skipped.
-                            let Some(parent_node) = cf.get(&(shard, parent_key.clone()), OPERATION).optional()? else {
-                                continue;
-                            };
-
-                            match parent_node {
-                                Node::Internal(node) => {
-                                    delete_buffer.extend(recurse_subtree_depth_first_post_order(
-                                        &cf,
-                                        shard,
-                                        parent_key,
-                                        node.into_children(),
-                                    ));
-                                },
-                                Node::Leaf(_) => {
-                                    trace!(target: LOG_TARGET, "Deleting stale leaf node {parent_key} from shard {shard}", );
-                                    delete_buffer.push((shard, parent_key));
-                                },
-                                Node::Null => {},
-                            }
+                let mut num_deleted = 0usize;
+                let mut deferred = BTreeMap::<Version, Vec<StaleTreeNode>>::new();
+                for key in stale_keys {
+                    match shard_retention.pin_holding(key.version(), version) {
+                        Some(pin) => deferred.entry(pin).or_default().push(StaleTreeNode::Node(key)),
+                        None => {
+                            trace!(target: LOG_TARGET, "Deleting stale node {key} from shard {shard}");
+                            cf.delete(&(shard, key), OPERATION)?;
+                            num_deleted += 1;
                         },
                     }
                 }
-
-                for key in &delete_buffer {
-                    cf.delete(key, OPERATION)?;
+                for (pin, nodes) in &deferred {
+                    trace!(target: LOG_TARGET, "Keeping {} stale nodes of shard {shard} for the tree at pinned version {pin}", nodes.len());
+                    deferred_cf.put(&(shard, *pin, version), nodes, OPERATION)?;
+                    num_written += nodes.len();
                 }
                 // The record goes in the same transaction as its nodes, so a version is never left half-cleared.
                 stale_nodes_cf.delete(&(shard, version), OPERATION)?;
-                num_deleted += delete_buffer.len() + 1;
+                num_written += num_deleted + 1;
                 // Every committed version records its stale nodes, and the nodes made stale at `version` are the last
                 // of the tree at the version below it, so that version can no longer be proved up in.
                 if let Some(below) = version.checked_sub(1) &&
                     state_version_proofs::prune_out_of_window(&db, (shard, below))?
                 {
-                    num_deleted += 1;
+                    num_written += 1;
                 }
             }
         }
 
-        Ok(num_deleted)
+        Ok(num_written)
     }
 
     fn state_tree_shard_versions_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError> {
@@ -1778,6 +1872,17 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         for key in &stale_keys {
             debug_assert_eq!(key.0, shard, "range iterator leaked across shard boundary");
             stale_cf.delete(key, OPERATION)?;
+        }
+        // The nodes kept for a pinned tree that went stale at versions > target are live again.
+        let deferred_cf = db.cf(StateTreeDeferredStaleNodesCf)?;
+        for key in db
+            .cf(state_tree::ByDeferredStaleShardQuery)?
+            .query_prefix_range_keys(Ordering::Ascending, &shard)?
+        {
+            let (_, _, stale_at) = key;
+            if stale_at >= start_version {
+                deferred_cf.delete(&key, OPERATION)?;
+            }
         }
 
         // 3. Delete the proofs of versions > target for this shard: they prove state that no longer exists.
@@ -1875,6 +1980,27 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     fn state_sync_rewind_point_remove(&mut self, shard: Shard) -> Result<(), StorageError> {
         const OPERATION: &str = "state_sync_rewind_point_remove";
         self.db().cf(StateSyncRewindPointCf)?.delete(&shard, OPERATION)?;
+        Ok(())
+    }
+
+    fn state_sync_missing_value_insert(
+        &mut self,
+        shard: Shard,
+        address: &SubstateAddress,
+        created_at: Version,
+    ) -> Result<(), StorageError> {
+        const OPERATION: &str = "state_sync_missing_value_insert";
+        self.db()
+            .cf(StateSyncMissingValueCf)?
+            .put(&(shard, *address), &created_at, OPERATION)?;
+        Ok(())
+    }
+
+    fn state_sync_missing_value_remove(&mut self, shard: Shard, address: &SubstateAddress) -> Result<(), StorageError> {
+        const OPERATION: &str = "state_sync_missing_value_remove";
+        self.db()
+            .cf(StateSyncMissingValueCf)?
+            .delete(&(shard, *address), OPERATION)?;
         Ok(())
     }
 
@@ -1996,6 +2122,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             EpochCleanupStep::SubstateDownProofs | EpochCleanupStep::StateVersionProofs => {
                 self.options.down_proof_history_length
             },
+            // A pinned tree is read with the values of the substates it holds, which those destroyed since it was
+            // pinned still need
+            EpochCleanupStep::DownedSubstateValues => self
+                .options
+                .epoch_history_length
+                .max(self.options.pinned_checkpoint_epochs),
             _ => self.options.epoch_history_length,
         };
         let Some(prune_epoch) = epoch.checked_sub(history_length) else {
@@ -2089,6 +2221,37 @@ impl<TAddr> Drop for RocksDbStateStoreWriteTransaction<'_, TAddr> {
             }
         }
     }
+}
+
+/// The keys of every node in `nodes`, a version's stale list, with each subtree expanded node by node, since a pinned
+/// tree may hold some of its nodes. They are gathered before any is deleted, because the subtree walk reads the nodes
+/// it descends through. A subtree already deleted along with an earlier version is skipped.
+fn gather_stale_node_keys(
+    cf: &CfContext<Transaction<TransactionDB>, StateTreeCf>,
+    shard: Shard,
+    nodes: Vec<StaleTreeNode>,
+) -> Result<Vec<NodeKey>, StorageError> {
+    const OPERATION: &str = "gather_stale_node_keys";
+    let mut keys = Vec::new();
+    for node in nodes {
+        match node {
+            StaleTreeNode::Node(key) => keys.push(key),
+            StaleTreeNode::Subtree(parent_key) => {
+                let Some(parent_node) = cf.get(&(shard, parent_key.clone()), OPERATION).optional()? else {
+                    continue;
+                };
+                match parent_node {
+                    Node::Internal(node) => keys.extend(
+                        recurse_subtree_depth_first_post_order(cf, shard, parent_key, node.into_children())
+                            .map(|(_, key)| key),
+                    ),
+                    Node::Leaf(_) => keys.push(parent_key),
+                    Node::Null => {},
+                }
+            },
+        }
+    }
+    Ok(keys)
 }
 
 fn recurse_subtree_depth_first_post_order<'a>(

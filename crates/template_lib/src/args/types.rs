@@ -38,7 +38,7 @@ use tari_template_lib_types::{
     ResourceType,
     UtxoId,
     VaultId,
-    access_rules::{AccessRule, ComponentAccessRules, ResourceAccessRules, ResourceAuthAction},
+    access_rules::{AccessRule, ComponentAccessRules, ResourceAccessRules, ResourceAuthAction, UpdateRule},
     bytes::Bytes,
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     crypto::CommitmentValueProof,
@@ -95,8 +95,8 @@ pub enum ComponentAction {
     SetAccessRules,
     #[n(4)]
     GetTemplateAddress,
-    #[n(5)]
-    GetOwnerProof,
+    // Tag 5 is retired and must not be reused: a template built against it must fail to decode rather than run
+    // another action.
     #[n(6)]
     SetOwnerRule,
 }
@@ -141,6 +141,8 @@ pub struct CreateComponentArg {
     pub access_rules: ComponentAccessRules,
     #[n(3)]
     pub address_allocation: Option<ComponentAddressAllocation>,
+    #[n(4)]
+    pub upgrade_rule: UpdateRule,
 }
 
 // -------------------------------- Events -------------------------------- //
@@ -661,6 +663,8 @@ pub enum WorkspaceAction {
     DropAllProofs,
     Assert,
     DropAll,
+    AuthorizeProof,
+    DropProofAuthorization,
 }
 
 // -------------------------------- NonFungible -------------------------------- //
@@ -738,8 +742,12 @@ pub enum CallerContextAction {
     GetCallerPublicKey,
     #[n(1)]
     GetComponentAddress,
-    #[n(2)]
-    GetSignerProof,
+    // Tag 2 is retired and must not be reused: a template built against it must fail to decode rather than run
+    // another action.
+    /// Fails unless the current frame satisfies `rule!(non_fungible(badge))` for the badge given as the single
+    /// argument: a signer badge stamped into it, the badge of its direct caller, or a proof it holds.
+    #[n(3)]
+    AssertBadgeInScope,
 }
 
 /// A caller context operation argument

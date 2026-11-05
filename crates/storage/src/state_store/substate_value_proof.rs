@@ -4,7 +4,6 @@
 use std::collections::{HashMap, hash_map::Entry};
 
 use ootle_network::Network;
-use tari_common_types::types::FixedHash;
 use tari_engine_types::{
     ProtocolVersion,
     SubstateVersion,
@@ -12,6 +11,7 @@ use tari_engine_types::{
     substate::{SubstateId, SubstateValue, hash_substate},
 };
 use tari_ootle_common_types::{Epoch, NodeHeight, NumPreshards, ShardGroup, VersionedSubstateId, shard::Shard};
+use tari_sidechain::FixedHash;
 use tari_state_tree::{
     SPARSE_MERKLE_PLACEHOLDER_HASH,
     ShardGroupRootTree,
@@ -20,6 +20,7 @@ use tari_state_tree::{
     SubstateDownProof,
     SubstateValueProof,
     SubstateValueProofError,
+    TransitionAccumulator,
     TreeHash,
     Version,
     jmt_hash_scheme,
@@ -28,7 +29,7 @@ use tari_state_tree::{
 use crate::{
     StateStoreReadTransaction,
     StorageError,
-    consensus_models::{CommittedBlockProof, VerifiedBlockTip},
+    consensus_models::{CommittedBlockProof, ShardStateLeaf, VerifiedBlockTip},
     state_store::ShardScopedTreeStoreReader,
 };
 
@@ -53,23 +54,12 @@ use crate::{
 pub struct SubstateProofGenerator<'a, TTx> {
     tx: &'a TTx,
     num_preshards: NumPreshards,
-    /// The tree over the shard group's per-shard states, global shard included (see
-    /// [`ShardGroupRootTree`]). Every level-2 proof is a leaf of this one tree, so it is built once
-    /// however many substates are proved - which is what keeps the cost of a batch independent of the
-    /// size of the shard group.
-    root_tree: ShardGroupRootTree,
-    /// The committed state of each shard in the root tree, keyed by shard.
-    shards: HashMap<Shard, CommittedShardState>,
-    /// Level-2 proofs, extracted from `root_tree` on first use of each shard.
+    /// The shard group's committed shard states and the root tree over them. Every level-2 proof is a leaf of this
+    /// one tree, so it is built once however many substates are proved - which is what keeps the cost of a batch
+    /// independent of the size of the shard group.
+    shard_group_state: CommittedShardGroupState,
+    /// Level-2 proofs, extracted from `shard_group_state` on first use of each shard.
     shard_root_proofs: HashMap<Shard, SparseMerkleProofExt>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct CommittedShardState {
-    root: TreeHash,
-    /// `None` if the shard has no committed state yet, in which case `root` is the empty-tree
-    /// placeholder and no substate in the shard can be proved.
-    version: Option<Version>,
 }
 
 impl<'a, TTx: StateStoreReadTransaction> SubstateProofGenerator<'a, TTx> {
@@ -81,23 +71,10 @@ impl<'a, TTx: StateStoreReadTransaction> SubstateProofGenerator<'a, TTx> {
         num_preshards: NumPreshards,
         protocol_version: ProtocolVersion,
     ) -> Result<Self, StorageError> {
-        let mut shard_states = Vec::with_capacity(shard_group.len() + 1);
-        let mut shards = HashMap::with_capacity(shard_group.len() + 1);
-        for shard in shard_group.shard_iter_with_global() {
-            let state = committed_shard_state(tx, shard)?;
-            shard_states.push((shard, state.root, state.version.unwrap_or_default()));
-            shards.insert(shard, state);
-        }
-
         Ok(Self {
             tx,
             num_preshards,
-            root_tree: ShardGroupRootTree::build(protocol_version, shard_states).map_err(|e| {
-                StorageError::QueryError {
-                    reason: format!("SubstateProofGenerator shard group root tree: {e}"),
-                }
-            })?,
-            shards,
+            shard_group_state: CommittedShardGroupState::read(tx, shard_group, protocol_version)?,
             shard_root_proofs: HashMap::new(),
         })
     }
@@ -110,7 +87,7 @@ impl<'a, TTx: StateStoreReadTransaction> SubstateProofGenerator<'a, TTx> {
     /// itself failed and nothing it produced can be trusted.
     pub fn generate(&mut self, versioned_id: &VersionedSubstateId) -> Result<Option<SubstateValueProof>, StorageError> {
         let shard = versioned_id.to_shard(self.num_preshards);
-        let Some(state) = self.shards.get(&shard).copied() else {
+        let Some(state) = self.shard_group_state.shards.get(&shard).copied() else {
             return Ok(None);
         };
         let Some(version) = state.version else {
@@ -129,21 +106,94 @@ impl<'a, TTx: StateStoreReadTransaction> SubstateProofGenerator<'a, TTx> {
         // Level 2: prove the shard root is committed in the shard-group root.
         let shard_root_proof = match self.shard_root_proofs.entry(shard) {
             Entry::Occupied(entry) => entry.get().clone(),
-            Entry::Vacant(entry) => {
-                let (_, proof) = self.root_tree.get_proof(shard).map_err(|e| StorageError::QueryError {
-                    reason: format!("SubstateProofGenerator shard root proof: {e}"),
-                })?;
-                entry.insert(proof).clone()
-            },
+            Entry::Vacant(entry) => entry.insert(self.shard_group_state.shard_root_proof(shard)?).clone(),
         };
 
         Ok(Some(SubstateValueProof::new(
             state.root,
             version,
+            state.transition_acc,
             shard_root_proof,
             leaf_proof,
         )))
     }
+}
+
+/// The committed state of every shard in a shard group, global shard included, and the shard-group root tree
+/// over them (see [`ShardGroupRootTree`]).
+///
+/// Read in the same transaction as the commit proof of the node's latest committed block, its root is that block's
+/// `state_merkle_root`, so each [`ShardStateLeaf`] it proves verifies against that commit proof.
+pub struct CommittedShardGroupState {
+    root_tree: ShardGroupRootTree,
+    shards: HashMap<Shard, CommittedShardState>,
+}
+
+impl CommittedShardGroupState {
+    /// Reads the committed root, version and accumulator of every shard in `shard_group`, plus the global shard, and
+    /// builds the root tree over them under `protocol_version`, the version of the block whose `state_merkle_root`
+    /// the tree is compared with.
+    pub fn read<TTx: StateStoreReadTransaction>(
+        tx: &TTx,
+        shard_group: ShardGroup,
+        protocol_version: ProtocolVersion,
+    ) -> Result<Self, StorageError> {
+        let mut shard_states = Vec::with_capacity(shard_group.len() + 1);
+        let mut shards = HashMap::with_capacity(shard_group.len() + 1);
+        for shard in shard_group.shard_iter_with_global() {
+            let state = committed_shard_state(tx, shard)?;
+            shard_states.push((
+                shard,
+                state.root,
+                state.version.unwrap_or_default(),
+                state.transition_acc,
+            ));
+            shards.insert(shard, state);
+        }
+
+        let root_tree =
+            ShardGroupRootTree::build(protocol_version, shard_states).map_err(|e| StorageError::QueryError {
+                reason: format!("shard group root tree: {e}"),
+            })?;
+        Ok(Self { root_tree, shards })
+    }
+
+    /// The shard-group state merkle root.
+    pub fn root(&self) -> TreeHash {
+        self.root_tree.root()
+    }
+
+    /// The committed leaf of `shard` with its proof in [`Self::root`], or `None` if `shard` is neither in the shard
+    /// group nor the global shard. A shard with no committed state has the empty leaf at version 0, proved by its
+    /// absence from the tree.
+    pub fn prove_leaf(&self, shard: Shard) -> Result<Option<ShardStateLeaf>, StorageError> {
+        let Some(state) = self.shards.get(&shard) else {
+            return Ok(None);
+        };
+        Ok(Some(ShardStateLeaf {
+            shard,
+            state_version: state.version.unwrap_or_default(),
+            shard_root: state.root,
+            transition_acc: state.transition_acc,
+            shard_root_proof: self.shard_root_proof(shard)?,
+        }))
+    }
+
+    fn shard_root_proof(&self, shard: Shard) -> Result<SparseMerkleProofExt, StorageError> {
+        let (_, proof) = self.root_tree.get_proof(shard).map_err(|e| StorageError::QueryError {
+            reason: format!("shard root proof of {shard}: {e}"),
+        })?;
+        Ok(proof)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CommittedShardState {
+    root: TreeHash,
+    /// `None` if the shard has no committed state yet, in which case `root` is the empty-tree
+    /// placeholder and no substate in the shard can be proved.
+    version: Option<Version>,
+    transition_acc: TransitionAccumulator,
 }
 
 /// A shard-group state merkle root a quorum committed, with the block that committed it.
@@ -293,12 +343,9 @@ pub fn decode_substate_down_proof(proof_bytes: &[u8]) -> Result<SubstateDownProo
 /// shard-group roots: `up_root`, which the proof's `up_commit_proof` commits, and `down_root`, the root of the commit
 /// proof the proof was served with.
 ///
-/// The proof holds when `down_root` was committed under V2 or later, both roots' shard groups contain the
-/// substate's shard, `up_root` is strictly earlier than `down_root`, the substate is included at `up_root` and
-/// excluded at `down_root`. Each root is verified under the protocol version of its own epoch. Exclusion against an
-/// earlier root is not bound to the substate's shard (see [`exclusion_is_shard_bound`]), so such a proof is reported
-/// as [`SubstateProofVerifyError::DownProofExclusionNotShardBound`]: it does not prove the Down, nor show the proof
-/// dishonest.
+/// The proof holds when both roots' shard groups contain the substate's shard, `up_root` is strictly earlier than
+/// `down_root`, the substate is included at `up_root` and excluded at `down_root`. Each root is verified under the
+/// protocol version of its own epoch.
 #[allow(clippy::too_many_arguments)]
 pub fn verify_substate_down_proof_against_roots(
     proof_bytes: &[u8],
@@ -309,14 +356,6 @@ pub fn verify_substate_down_proof_against_roots(
     up_root: &DownProofAnchor,
     down_root: &DownProofAnchor,
 ) -> Result<(), SubstateProofVerifyError> {
-    // Whatever else the proof holds, an exclusion against such a root cannot show the substate went down.
-    let down_protocol_version = ProtocolVersion::at(network, down_root.epoch());
-    if !exclusion_is_shard_bound(down_protocol_version) {
-        return Err(SubstateProofVerifyError::DownProofExclusionNotShardBound {
-            protocol_version: down_protocol_version,
-        });
-    }
-
     let proof = decode_substate_down_proof(proof_bytes)?;
 
     // `up_root` must be the root of the commit proof the proof carries, not one the caller established for another
@@ -364,6 +403,7 @@ pub fn verify_substate_down_proof_against_roots(
     }
 
     let up_protocol_version = ProtocolVersion::at(network, up_root.epoch());
+    let down_protocol_version = ProtocolVersion::at(network, down_root.epoch());
     proof
         .up
         .verify_inclusion(
@@ -388,19 +428,6 @@ pub fn verify_substate_down_proof_against_roots(
         .map_err(SubstateProofVerifyError::DownProofNotDown)?;
 
     Ok(())
-}
-
-/// Whether an exclusion proof against a root committed under `protocol_version` can only cite the substate's own
-/// shard.
-///
-/// From V2 the shard-group tree keys each leaf by its shard, so a proof's level-2 path pins the shard it speaks for.
-/// Before that a leaf is keyed by its value alone, and any shard's genuine root and state version prove the absence
-/// of a substate that is live in another shard. Inclusion is unaffected: a substate's leaf key is unique to its shard.
-pub fn exclusion_is_shard_bound(protocol_version: ProtocolVersion) -> bool {
-    match protocol_version {
-        ProtocolVersion::V0 | ProtocolVersion::V1 => false,
-        ProtocolVersion::V2 => true,
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -442,11 +469,6 @@ pub enum SubstateProofVerifyError {
         up_shard_group: ShardGroup,
         down_shard_group: ShardGroup,
     },
-    #[error(
-        "down proof's exclusion root was committed under {protocol_version}, whose shard-group leaves do not name \
-         their shard"
-    )]
-    DownProofExclusionNotShardBound { protocol_version: ProtocolVersion },
     #[error("down proof's inclusion root is not the root of the commit proof it carries")]
     DownProofAnchorMismatch,
     #[error("down proof does not show the substate was committed: {0}")]
@@ -465,16 +487,18 @@ fn committed_shard_state<TTx: StateStoreReadTransaction>(
         return Ok(CommittedShardState {
             root: SPARSE_MERKLE_PLACEHOLDER_HASH,
             version: None,
+            transition_acc: TransitionAccumulator::zero(),
         });
     };
     let mut scoped = ShardScopedTreeStoreReader::new(tx, shard);
     let tree = SpreadPrefixStateTree::new(&mut scoped);
     let root = tree.get_root_hash(version).map_err(|e| StorageError::QueryError {
-        reason: format!("SubstateProofGenerator shard {shard} root: {e}"),
+        reason: format!("shard {shard} root: {e}"),
     })?;
     Ok(CommittedShardState {
         root,
         version: Some(version),
+        transition_acc: tx.state_transitions_get_accumulator(shard, version)?,
     })
 }
 
@@ -486,6 +510,7 @@ mod tests {
     use super::*;
 
     const NUM_PRESHARDS: NumPreshards = NumPreshards::P4;
+    const ZERO_ACC: TransitionAccumulator = TransitionAccumulator::zero();
 
     /// A shard group's root commits to the shards in the group and nothing else, so a substate in a
     /// shard outside the group has no leaf there, the same as a substate in an empty shard. An
@@ -500,17 +525,17 @@ mod tests {
         let other_group = ShardGroup::new(other_shard, other_shard);
 
         let other_group_states = [
-            (Shard::global(), SPARSE_MERKLE_PLACEHOLDER_HASH, 0),
-            (other_shard, TreeHash::new([7; 32]), 1),
+            (Shard::global(), SPARSE_MERKLE_PLACEHOLDER_HASH, 0, ZERO_ACC),
+            (other_shard, TreeHash::new([7; 32]), 1, ZERO_ACC),
         ];
-        let other_group_root = compute_shard_group_root(ProtocolVersion::V2, other_group_states).unwrap();
+        let other_group_root = compute_shard_group_root(ProtocolVersion::V0, other_group_states).unwrap();
         // The substate's shard has no leaf in the other group's root, so the proof that its key is
         // absent - the proof an empty shard gets - verifies against that root.
         let with_own_shard_empty = ShardGroupRootTree::build(
-            ProtocolVersion::V2,
+            ProtocolVersion::V0,
             other_group_states
                 .into_iter()
-                .chain([(own_shard, SPARSE_MERKLE_PLACEHOLDER_HASH, 0)]),
+                .chain([(own_shard, SPARSE_MERKLE_PLACEHOLDER_HASH, 0, ZERO_ACC)]),
         )
         .unwrap();
         assert_eq!(with_own_shard_empty.root(), other_group_root);
@@ -522,11 +547,17 @@ mod tests {
         let (_, _, leaf_proof) = SpreadPrefixStateTree::new(&mut empty)
             .get_proof(1, &versioned_id)
             .unwrap();
-        let proof = SubstateValueProof::new(SPARSE_MERKLE_PLACEHOLDER_HASH, 0, shard_root_proof, leaf_proof);
+        let proof = SubstateValueProof::new(
+            SPARSE_MERKLE_PLACEHOLDER_HASH,
+            0,
+            ZERO_ACC,
+            shard_root_proof,
+            leaf_proof,
+        );
         proof
             .verify_exclusion(
                 JmtHashScheme::V1,
-                ProtocolVersion::V2,
+                ProtocolVersion::V0,
                 &other_group_root,
                 NUM_PRESHARDS,
                 &versioned_id,
@@ -579,7 +610,6 @@ mod tests {
 
         use super::*;
 
-        /// V2 on every epoch.
         const NETWORK: Network = Network::LocalNet;
         const EPOCH: Epoch = Epoch(1);
 
@@ -639,7 +669,7 @@ mod tests {
                 proposed_by: Default::default(),
                 state_merkle_root: FixedHash::new(root.into_array()),
                 command_merkle_root: FixedHash::zero(),
-                transaction_merkle_root: None,
+                transaction_merkle_root: FixedHash::zero(),
                 signature: Default::default(),
                 accumulated_data: Default::default(),
                 metadata_hash: FixedHash::zero(),
@@ -702,9 +732,9 @@ mod tests {
 
                 let group_tree = |shard_root, shard_version| {
                     ShardGroupRootTree::build(ProtocolVersion::at(NETWORK, EPOCH), [
-                        (Shard::global(), SPARSE_MERKLE_PLACEHOLDER_HASH, 0),
-                        (shard, shard_root, shard_version),
-                        (sibling, sibling_root, 1),
+                        (Shard::global(), SPARSE_MERKLE_PLACEHOLDER_HASH, 0, ZERO_ACC),
+                        (shard, shard_root, shard_version, ZERO_ACC),
+                        (sibling, sibling_root, 1, ZERO_ACC),
                     ])
                     .unwrap()
                 };
@@ -751,7 +781,7 @@ mod tests {
                 let (_, value, leaf_proof) = SpreadPrefixStateTree::new(&mut self.own).get_proof(1, id).unwrap();
                 let (_, shard_root_proof) = self.r1_tree.get_proof(self.shard).unwrap();
                 (
-                    SubstateValueProof::new(self.r1_shard_root, 1, shard_root_proof, leaf_proof),
+                    SubstateValueProof::new(self.r1_shard_root, 1, ZERO_ACC, shard_root_proof, leaf_proof),
                     value.map(|(hash, _, _)| hash),
                 )
             }
@@ -760,7 +790,7 @@ mod tests {
             fn down_proof(&mut self, id: &VersionedSubstateId) -> SubstateValueProof {
                 let (_, _, leaf_proof) = SpreadPrefixStateTree::new(&mut self.own).get_proof(2, id).unwrap();
                 let (_, shard_root_proof) = self.r2_tree.get_proof(self.shard).unwrap();
-                SubstateValueProof::new(self.r2_shard_root, 2, shard_root_proof, leaf_proof)
+                SubstateValueProof::new(self.r2_shard_root, 2, ZERO_ACC, shard_root_proof, leaf_proof)
             }
 
             fn honest(&mut self, id: &VersionedSubstateId) -> SubstateDownProof {
@@ -810,7 +840,7 @@ mod tests {
         }
 
         /// A live substate is absent from every shard but its own, so a sibling shard's genuine tree "proves" its
-        /// absence. Under V2 that tree's leaf names the sibling, so the proof fails.
+        /// absence. That tree's leaf names the sibling, so the proof fails.
         #[test]
         fn an_exclusion_lifted_from_another_shard_is_rejected() {
             let mut scenario = Scenario::new(false, |_| vec![]);
@@ -823,8 +853,13 @@ mod tests {
                 scenario.r2_tree.get_proof(scenario.sibling).unwrap().1,
                 scenario.r2_tree.get_proof(scenario.shard).unwrap().1,
             ] {
-                proof.down =
-                    SubstateValueProof::new(scenario.sibling_root, 1, shard_root_proof, sibling_leaf_proof.clone());
+                proof.down = SubstateValueProof::new(
+                    scenario.sibling_root,
+                    1,
+                    ZERO_ACC,
+                    shard_root_proof,
+                    sibling_leaf_proof.clone(),
+                );
                 let result = scenario.verify(&proof, &target, scenario.r1(2));
                 assert!(
                     matches!(result, Err(SubstateProofVerifyError::DownProofNotDown(_))),
@@ -892,8 +927,8 @@ mod tests {
             );
         }
 
-        /// Destroying the only substate of a shard leaves the shard at the empty-tree root, which its V2 leaf binds to
-        /// the shard and its state version.
+        /// Destroying the only substate of a shard leaves the shard at the empty-tree root, which its leaf binds to the
+        /// shard and its state version.
         #[test]
         fn a_shard_emptied_by_the_destruction_proves_it_down() {
             let mut scenario = Scenario::new(true, |target| vec![down(target)]);
@@ -932,6 +967,7 @@ mod tests {
                     Shard::global(),
                     shard_root,
                     version,
+                    ZERO_ACC,
                 )])
                 .unwrap()
             };
@@ -944,6 +980,7 @@ mod tests {
                     up: SubstateValueProof::new(
                         r1_global_root,
                         1,
+                        ZERO_ACC,
                         r1_tree.get_proof(Shard::global()).unwrap().1,
                         up_leaf.clone(),
                     ),
@@ -952,6 +989,7 @@ mod tests {
                     down: SubstateValueProof::new(
                         r2_global_root,
                         2,
+                        ZERO_ACC,
                         r2_tree.get_proof(Shard::global()).unwrap().1,
                         down_leaf.clone(),
                     ),
@@ -984,47 +1022,6 @@ mod tests {
                 );
                 verify(group_a, epoch).unwrap();
             }
-        }
-
-        /// Before V2 another shard's genuine root proves any substate absent, so a down proof whose exclusion root
-        /// precedes V2 shows nothing. Esmeralda runs V0 then V1 and has not scheduled V2.
-        #[test]
-        fn an_exclusion_root_before_v2_does_not_prove_a_down() {
-            let mut scenario = Scenario::new(false, destroyed_and_replaced);
-            let target = scenario.target.clone();
-            let proof = tari_bor::serde_codec::to_vec(scenario.honest(&target)).unwrap();
-            for epoch in [Epoch(1), Epoch(11925)] {
-                let protocol_version = ProtocolVersion::at(Network::Esmeralda, epoch);
-                assert!(matches!(protocol_version, ProtocolVersion::V0 | ProtocolVersion::V1));
-                let mut up_tip = scenario.r1_tip(2);
-                let mut down_tip = scenario.r2_tip();
-                up_tip.epoch = epoch;
-                down_tip.epoch = epoch;
-                let (up_root, down_root) = (DownProofAnchor::from(up_tip), DownProofAnchor::from(down_tip));
-                let result = verify_substate_down_proof_against_roots(
-                    &proof,
-                    target.substate_id(),
-                    target.version(),
-                    Network::Esmeralda,
-                    NUM_PRESHARDS,
-                    &up_root,
-                    &down_root,
-                );
-                assert!(
-                    matches!(
-                        result,
-                        Err(SubstateProofVerifyError::DownProofExclusionNotShardBound { .. })
-                    ),
-                    "{epoch}: {result:?}"
-                );
-            }
-        }
-
-        #[test]
-        fn shard_bound_exclusion_starts_at_v2() {
-            assert!(!exclusion_is_shard_bound(ProtocolVersion::V0));
-            assert!(!exclusion_is_shard_bound(ProtocolVersion::V1));
-            assert!(exclusion_is_shard_bound(ProtocolVersion::V2));
         }
 
         /// Groups of one epoch do not overlap, so no honest pair of roots of one epoch holds the substate's shard in

@@ -24,8 +24,6 @@
 //! tari_template_lib::prelude::*;`
 
 pub use tari_bor;
-#[expect(deprecated)]
-pub use tari_template_lib_types::constants::XTR;
 #[cfg(feature = "extra-maps")]
 pub use tari_template_lib_types::fast_hash::{FastMap, PrehashedMap, indexmap_codec};
 pub use tari_template_lib_types::{
@@ -75,6 +73,8 @@ pub use tari_template_lib_types::{
         Signature,
         SignatureDomain,
         SignaturePayload,
+        SignatureScope,
+        Sr25519SignatureBytes,
     },
     custom_signature_domain,
     metadata,

@@ -2,8 +2,9 @@
 import type { ResourceAddress } from "../ResourceAddress";
 
 /**
- * Net value movement for a stealth or confidential transfer, computed by the
- * wallet from the request's locks.
+ * Net value of one resource that the transaction's stealth transfers move out
+ * of this wallet, computed by the wallet from the transaction's own
+ * statements.
  *
  * A stealth transfer's instructions are commitments and range proofs, so a
  * human cannot read the amount out of them. The wallet owns the masks and is
@@ -12,11 +13,12 @@ import type { ResourceAddress } from "../ResourceAddress";
 export type TransactionRequestValueSummary = {
   resource_address: ResourceAddress;
   /**
-   * Total value of the inputs this request spends.
+   * Total value of this wallet's stealth outputs that the transaction spends.
    */
   inputs_total: bigint;
   /**
-   * Total value returning to this wallet as change.
+   * Total value of the outputs the transaction creates that return to this
+   * wallet as change.
    */
   change_total: bigint;
   /**

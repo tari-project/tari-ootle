@@ -24,11 +24,11 @@ import CodeBlockExpand from "@components/CodeBlock";
 import { AccordionIconButton, DataTableCell } from "@components/StyledComponents";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import { Box, Collapse, Table, TableBody, TableContainer, TableRow, Typography } from "@mui/material";
+import { Box, Collapse, Table, TableBody, TableCell, TableContainer, TableRow, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
-import type { Instruction, InstructionArg, WorkspaceOffsetId } from "@tari-project/ootle-ts-bindings";
+import type { Blobs, Instruction, InstructionArg, WorkspaceOffsetId } from "@tari-project/ootle-ts-bindings";
 import { TariTypeTag } from "@tari-project/ootle-ts-bindings";
-import { toHexString } from "@utils/helpers";
+import { blobBytes, toHexString } from "@utils/helpers";
 import { decode } from "cbor2";
 import { useState } from "react";
 
@@ -76,7 +76,42 @@ function workspaceId(id: WorkspaceOffsetId): string {
   return id.offset != null ? `$${id.id}.${id.offset}` : `$${id.id}`;
 }
 
-function formatArg(arg: InstructionArg): string {
+export function formatBlobSize(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MiB`;
+}
+
+/// The value a blob holds, decoded the way a literal argument is, or its raw
+/// bytes when it is not CBOR. The engine decodes a blob argument exactly like
+/// a literal, so this is the value the call receives.
+function decodeBlob(bytes: Uint8Array): unknown {
+  try {
+    return decode(bytes, { tags: literalDecodeTags() });
+  } catch {
+    return bytes;
+  }
+}
+
+const MAX_INLINE_BLOB_CHARS = 200;
+const MAX_LISTED_BLOB_CHARS = 4096;
+
+function describeBlob(bytes: Uint8Array, maxChars: number = MAX_INLINE_BLOB_CHARS): string {
+  const value = compactValue(decodeBlob(bytes));
+  return value.length > maxChars ? `${value.slice(0, maxChars)}… (${formatBlobSize(bytes.length)})` : value;
+}
+
+/// `blobs` is `undefined` for a view that does not carry blob contents (a
+/// pruned transaction), in which case only the index is shown.
+function formatBlobRef(index: number, blobs: Blobs | undefined): string {
+  if (blobs === undefined) {
+    return `Blob(#${index})`;
+  }
+  const bytes = blobBytes(blobs, index);
+  return bytes == null ? `Blob(#${index}: missing)` : `Blob(#${index}: ${describeBlob(bytes)})`;
+}
+
+function formatArg(arg: InstructionArg, blobs: Blobs | undefined): string {
   if (typeof arg === "object" && "Literal" in arg) {
     try {
       return `Lit(${compactValue(decode(arg.Literal, { encoding: "hex", tags: literalDecodeTags() }))})`;
@@ -88,7 +123,7 @@ function formatArg(arg: InstructionArg): string {
     return `Workspace(${workspaceId(arg.Workspace)})`;
   }
   if (typeof arg === "object" && "Blob" in arg) {
-    return `Blob(#${arg.Blob})`;
+    return formatBlobRef(arg.Blob, blobs);
   }
   return compactValue(arg);
 }
@@ -96,7 +131,9 @@ function formatArg(arg: InstructionArg): string {
 /// One-line call-style rendering of an instruction, e.g.
 /// `Call(component_21f1…, "pay_fee", Lit(956))`. The expandable JSON
 /// below the row remains the full-fidelity view.
-function summarize(instruction: Instruction): string {
+function summarize(instruction: Instruction, blobs: Blobs | undefined): string {
+  const formatArgs = (args: Array<InstructionArg>) =>
+    args.length ? ", " + args.map((arg) => formatArg(arg, blobs)).join(", ") : "";
   if (typeof instruction === "string") {
     return instruction;
   }
@@ -107,12 +144,12 @@ function summarize(instruction: Instruction): string {
   }
   if ("CallFunction" in instruction) {
     const { address, function: fn, args } = instruction.CallFunction;
-    return `Call(template_${address}, "${fn}"${args.length ? ", " + args.map(formatArg).join(", ") : ""})`;
+    return `Call(template_${address}, "${fn}"${formatArgs(args)})`;
   }
   if ("CallMethod" in instruction) {
     const { call, method, args } = instruction.CallMethod;
     const target = "Address" in call ? call.Address : `$${call.Workspace}`;
-    return `Call(${target}, "${method}"${args.length ? ", " + args.map(formatArg).join(", ") : ""})`;
+    return `Call(${target}, "${method}"${formatArgs(args)})`;
   }
   if ("PutLastInstructionOutputOnWorkspace" in instruction) {
     return `PutLastInstructionOutputOnWorkspace($${instruction.PutLastInstructionOutputOnWorkspace.key})`;
@@ -133,7 +170,12 @@ function summarize(instruction: Instruction): string {
     return `TakeFromBucket(${workspaceId(input_bucket)}, ${amount} -> $${output_bucket})`;
   }
   if ("PublishTemplate" in instruction) {
-    return `PublishTemplate(Blob(#${instruction.PublishTemplate.binary}))`;
+    const index = instruction.PublishTemplate.binary;
+    if (blobs === undefined) {
+      return `PublishTemplate(Blob(#${index}))`;
+    }
+    const bytes = blobBytes(blobs, index);
+    return `PublishTemplate(Blob(#${index}: ${bytes == null ? "missing" : formatBlobSize(bytes.length)}))`;
   }
   if ("AllocateAddress" in instruction) {
     const { allocatable_type, workspace_id } = instruction.AllocateAddress;
@@ -159,6 +201,12 @@ function summarize(instruction: Instruction): string {
     const { src, dest } = instruction.PutIntoBucket;
     return `PutIntoBucket(${workspaceId(src)} -> ${workspaceId(dest)})`;
   }
+  if ("AuthorizeProof" in instruction) {
+    return `AuthorizeProof(${workspaceId(instruction.AuthorizeProof.proof)})`;
+  }
+  if ("DropProofAuthorization" in instruction) {
+    return `DropProofAuthorization(${workspaceId(instruction.DropProofAuthorization.proof)})`;
+  }
   return Object.keys(instruction)[0];
 }
 
@@ -170,8 +218,9 @@ interface RowDataProps {
   title: string;
   data: Instruction;
   index: number;
+  blobs: Blobs | undefined;
 }
-function RowData({ title, data, index }: RowDataProps) {
+function RowData({ title, data, index, blobs }: RowDataProps) {
   const [open, setOpen] = useState(false);
   const theme = useTheme();
   return (
@@ -214,7 +263,7 @@ function RowData({ title, data, index }: RowDataProps) {
           colSpan={2}
         >
           <Collapse in={open} timeout="auto" unmountOnExit>
-            <CodeBlockExpand title={instructionName(data)} content={inspectify(data)} />
+            <CodeBlockExpand title={instructionName(data)} content={inspectify(data, blobs)} />
           </Collapse>
         </DataTableCell>
       </TableRow>
@@ -222,7 +271,7 @@ function RowData({ title, data, index }: RowDataProps) {
   );
 }
 
-function inspectify(instruction: Instruction) {
+function inspectify(instruction: Instruction, blobs: Blobs | undefined) {
   let method;
   if (typeof instruction !== "object" || instruction === null) {
     return instruction;
@@ -238,9 +287,15 @@ function inspectify(instruction: Instruction) {
 
   const tags = literalDecodeTags();
   const contents = instruction[method] as any;
-  const args = contents.args.map((arg: { Literal: string }) => {
+  const args = contents.args.map((arg: InstructionArg) => {
     if ("Literal" in arg) {
       return { Literal: decode(arg.Literal, { encoding: "hex", tags }) };
+    }
+    if ("Blob" in arg) {
+      const bytes = blobBytes(blobs, arg.Blob);
+      if (bytes != null) {
+        return { Blob: { index: arg.Blob, value: decodeBlob(bytes) } };
+      }
     }
     return arg;
   });
@@ -252,14 +307,57 @@ function inspectify(instruction: Instruction) {
   };
 }
 
-export default function Instructions({ data }: { data: Array<Instruction> }) {
+/// The contents of every blob a transaction carries, so that nothing an
+/// instruction passes to the engine is left off the screen.
+export function BlobContents({ blobs }: { blobs: Blobs }) {
+  if (blobs.length === 0) {
+    return (
+      <Box sx={{ p: 3, textAlign: "center" }}>
+        <Typography variant="body2" color="text.secondary">
+          This transaction has no blobs.
+        </Typography>
+      </Box>
+    );
+  }
+  return (
+    <TableContainer>
+      <Table size="small">
+        <TableBody>
+          <TableRow>
+            <TableCell sx={{ fontWeight: 600 }}>Index</TableCell>
+            <TableCell sx={{ fontWeight: 600 }}>Size</TableCell>
+            <TableCell sx={{ fontWeight: 600 }}>Contents</TableCell>
+          </TableRow>
+          {blobs.map((_, index) => {
+            const bytes = blobBytes(blobs, index);
+            return (
+              <TableRow key={index}>
+                <DataTableCell sx={{ width: "10%" }}>{index}</DataTableCell>
+                <DataTableCell sx={{ width: "15%" }}>
+                  {bytes != null ? formatBlobSize(bytes.length) : "—"}
+                </DataTableCell>
+                <DataTableCell sx={{ fontFamily: "monospace", fontSize: "0.8rem", wordBreak: "break-all" }}>
+                  {bytes != null ? describeBlob(bytes, MAX_LISTED_BLOB_CHARS) : "undecodable"}
+                </DataTableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+}
+
+/// `blobs` is the transaction's blob contents when the caller has them; a
+/// blob argument is then shown with the value it holds.
+export default function Instructions({ data, blobs }: { data: Array<Instruction>; blobs?: Blobs }) {
   return (
     <TableContainer>
       <Table>
         <TableBody>
           {data?.length ? (
             data.map((item: Instruction, index) => {
-              return <RowData key={index} index={index} title={summarize(item)} data={item} />;
+              return <RowData key={index} index={index} title={summarize(item, blobs)} data={item} blobs={blobs} />;
             })
           ) : (
             <Box sx={{ p: 3, textAlign: "center" }}>

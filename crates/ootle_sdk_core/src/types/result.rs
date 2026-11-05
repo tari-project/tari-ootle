@@ -16,7 +16,7 @@ use crate::types::bytes::TransactionIdBytes;
 /// The stable, SCREAMING_SNAKE code for a canonical [`AbortReason`] variant.
 ///
 /// This is the **stable code set** for `AbortReason`. The strings are part of the public contract:
-/// hosts branch on them, so **never rename a code; only add**. Covers all 11 variants in
+/// hosts branch on them, so **never rename a code; only add**. Covers all 12 variants in
 /// `tari_engine_types::commit_result::AbortReason`.
 pub fn abort_code(reason: &AbortReason) -> &'static str {
     match reason {
@@ -31,6 +31,7 @@ pub fn abort_code(reason: &AbortReason) -> &'static str {
         AbortReason::EpochExpired => "EPOCH_EXPIRED",
         AbortReason::ValidityWindowTooLong => "VALIDITY_WINDOW_TOO_LONG",
         AbortReason::InputPledgeTooLarge => "INPUT_PLEDGE_TOO_LARGE",
+        AbortReason::GovernanceCallAfterPinnedEpoch => "GOVERNANCE_CALL_AFTER_PINNED_EPOCH",
     }
 }
 
@@ -53,6 +54,7 @@ pub fn execution_failure_code(code: &ExecutionFailureCode) -> &'static str {
         ExecutionFailureCode::InvalidProof => "INVALID_PROOF",
         ExecutionFailureCode::EngineInvariant => "ENGINE_INVARIANT",
         ExecutionFailureCode::NotYetValid => "NOT_YET_VALID",
+        ExecutionFailureCode::Conflict => "CONFLICT",
         ExecutionFailureCode::Unclassified => "UNCLASSIFIED",
     }
 }
@@ -287,7 +289,7 @@ pub struct FinalizedResult {
 mod tests {
     use super::*;
 
-    /// Every canonical [`AbortReason`] variant — exhaustively listed so adding a 12th variant upstream
+    /// Every canonical [`AbortReason`] variant — exhaustively listed so adding a 13th variant upstream
     /// forces this test (and the canonical code set) to be updated, not silently dropped.
     const ALL_ABORT_REASONS: &[AbortReason] = &[
         AbortReason::ForeignPledgeInputConflict,
@@ -301,6 +303,7 @@ mod tests {
         AbortReason::EpochExpired,
         AbortReason::ValidityWindowTooLong,
         AbortReason::InputPledgeTooLarge,
+        AbortReason::GovernanceCallAfterPinnedEpoch,
     ];
 
     /// Every [`ExecutionFailureCode`] variant, exhaustively listed on the same contract as
@@ -319,6 +322,7 @@ mod tests {
         ExecutionFailureCode::InvalidProof,
         ExecutionFailureCode::EngineInvariant,
         ExecutionFailureCode::NotYetValid,
+        ExecutionFailureCode::Conflict,
         ExecutionFailureCode::Unclassified,
     ];
 
@@ -409,7 +413,7 @@ mod tests {
         }
     }
 
-    /// Each of the 11 canonical `AbortReason` variants surfaces a non-empty, unique stable code.
+    /// Each of the 12 canonical `AbortReason` variants surfaces a non-empty, unique stable code.
     #[test]
     fn abort_codes_are_non_empty_and_unique() {
         let mut seen = std::collections::HashSet::new();
@@ -418,7 +422,7 @@ mod tests {
             assert!(!code.is_empty(), "abort code for {reason:?} is empty");
             assert!(seen.insert(code), "duplicate abort code {code} for {reason:?}");
         }
-        assert_eq!(seen.len(), 11, "expected exactly 11 canonical abort codes");
+        assert_eq!(seen.len(), 12, "expected exactly 12 canonical abort codes");
         assert_eq!(abort_code(&AbortReason::EpochExpired), "EPOCH_EXPIRED");
         assert_eq!(
             abort_code(&AbortReason::ValidityWindowTooLong),
@@ -435,7 +439,7 @@ mod tests {
             assert!(!s.is_empty(), "failure code for {code:?} is empty");
             assert!(seen.insert(s), "duplicate failure code {s} for {code:?}");
         }
-        assert_eq!(seen.len(), 14, "expected exactly 14 canonical failure codes");
+        assert_eq!(seen.len(), 15, "expected exactly 15 canonical failure codes");
     }
 
     /// The failure code set is frozen for the same reason the top-level codes are: a host branching on
@@ -456,6 +460,7 @@ mod tests {
             (ExecutionFailureCode::InvalidProof, "INVALID_PROOF"),
             (ExecutionFailureCode::EngineInvariant, "ENGINE_INVARIANT"),
             (ExecutionFailureCode::NotYetValid, "NOT_YET_VALID"),
+            (ExecutionFailureCode::Conflict, "CONFLICT"),
             (ExecutionFailureCode::Unclassified, "UNCLASSIFIED"),
         ];
         for (code, expected) in cases {

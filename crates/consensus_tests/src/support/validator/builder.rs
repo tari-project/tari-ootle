@@ -38,7 +38,7 @@ use tempfile::TempDir;
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::support::{
-    RoundRobinLeaderStrategy,
+    SmoothWeightedRoundRobin,
     TEST_NUM_PRESHARDS,
     TestBlockTransactionProcessor,
     TestConsensusSpec,
@@ -50,7 +50,7 @@ use crate::support::{
     executions_store::TestExecutionSpecStore,
     messaging_impls::{NetworkSendObserver, SendObserver, TestInboundMessaging, TestOutboundMessaging},
     signing_service::TestVoteSignatureService,
-    sync::AlwaysSyncedSyncManager,
+    sync::TestSyncManager,
 };
 
 pub struct ValidatorBuilder {
@@ -62,7 +62,7 @@ pub struct ValidatorBuilder {
     pub shard_group: ShardGroup,
     pub rocks_tmp_path: TempDir,
     pub rocks_override_path: Option<PathBuf>,
-    pub leader_strategy: RoundRobinLeaderStrategy,
+    pub leader_strategy: SmoothWeightedRoundRobin,
     pub num_committees: u32,
     pub epoch_manager: Option<TestEpochManager>,
     pub transaction_executions: TestExecutionSpecStore,
@@ -82,7 +82,7 @@ impl ValidatorBuilder {
             shard_group: ShardGroup::all_shards(TEST_NUM_PRESHARDS),
             rocks_override_path: None,
             rocks_tmp_path: tempfile::tempdir().unwrap(),
-            leader_strategy: RoundRobinLeaderStrategy::new(),
+            leader_strategy: SmoothWeightedRoundRobin::new(),
             epoch_manager: None,
             transaction_executions: TestExecutionSpecStore::new(),
             config: None,
@@ -127,7 +127,7 @@ impl ValidatorBuilder {
         self
     }
 
-    pub fn with_leader_strategy(&mut self, leader_strategy: RoundRobinLeaderStrategy) -> &mut Self {
+    pub fn with_leader_strategy(&mut self, leader_strategy: SmoothWeightedRoundRobin) -> &mut Self {
         self.leader_strategy = leader_strategy;
         self
     }
@@ -144,16 +144,17 @@ impl ValidatorBuilder {
 
     /// The store keeps the state history that consensus's down proof lookback reaches into.
     fn database_options(&self) -> DatabaseOptions {
-        let state_history_length = self
+        let config = self
             .config
             .as_ref()
-            .expect("No config given (use ValidatorBuilder::with_config)")
-            .state_history_length;
+            .expect("No config given (use ValidatorBuilder::with_config)");
         DatabaseOptions::default()
             .with_debugging_data(true)
-            .with_state_history_length(state_history_length)
+            .with_state_history_length(config.state_history_length)
+            .with_pinned_checkpoint_epochs(config.pinned_checkpoint_epochs)
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn spawn(&self, shutdown_signal: ShutdownSignal) -> (ValidatorChannels, Validator) {
         log::info!(
             "Spawning validator with address {} and public key {}",
@@ -202,8 +203,11 @@ impl ValidatorBuilder {
         let transaction_pool = TransactionPool::new();
         let (tx_events, _) = broadcast::channel(100);
 
-        let transaction_executor =
-            TestBlockTransactionProcessor::new(self.address.clone(), self.transaction_executions.clone());
+        let transaction_executor = TestBlockTransactionProcessor::new(
+            self.address.clone(),
+            self.transaction_executions.clone(),
+            store.clone(),
+        );
 
         let worker = HotstuffWorker::<TestConsensusSpec>::new(
             self.config
@@ -228,10 +232,11 @@ impl ValidatorBuilder {
         let current_view = worker.pacemaker().current_view().clone();
 
         let (tx_current_state, rx_current_state) = watch::channel(ConsensusCurrentState::default());
+        let sync_manager = TestSyncManager::default();
         let context = ConsensusWorkerContext {
             epoch_manager: epoch_manager.clone(),
             hotstuff: worker,
-            state_sync: AlwaysSyncedSyncManager,
+            state_sync: sync_manager.clone(),
             tx_current_state: tx_current_state.clone(),
         };
 
@@ -253,7 +258,7 @@ impl ValidatorBuilder {
         let validator = Validator {
             address: self.address.clone(),
 
-            _shard_address: self.shard_address,
+            shard_address: self.shard_address,
             shard_group: self.shard_group,
             num_committees: self.num_committees,
             transaction_executor,
@@ -262,6 +267,7 @@ impl ValidatorBuilder {
             epoch_manager,
             events: tx_events.subscribe(),
             current_state_machine_state: rx_current_state,
+            sync_manager,
             tx_inbound_message,
             tx_malformed_message,
             handle,
@@ -280,7 +286,7 @@ where
 {
     let substate_id = substate_id.into();
     let shard = VersionedSubstateIdRef::new(&substate_id, SubstateVersion::ZERO).to_shard(TEST_NUM_PRESHARDS);
-    let mut batch = SubstateUpdateBatch::new(Network::LocalNet, Epoch::zero());
+    let mut batch = SubstateUpdateBatch::new_unrecorded(Network::LocalNet, Epoch::zero());
     batch.with_transition(shard, 0).push(SubstateTransition::Up {
         id: substate_id,
         version: SubstateVersion::ZERO,

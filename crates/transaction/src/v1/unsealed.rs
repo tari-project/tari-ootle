@@ -90,6 +90,7 @@ impl UnsealedTransactionV1 {
         &self.signatures
     }
 
+    #[must_use]
     pub fn verify_all_signatures(&self, seal_signer: &RistrettoPublicKeyBytes) -> bool {
         self.verify_all_signatures_with_blob_hashes(seal_signer, &self.transaction.blobs.hashes())
     }
@@ -99,6 +100,7 @@ impl UnsealedTransactionV1 {
     ///
     /// Deriving them hashes every blob payload, so a caller that also verifies the seal should
     /// derive [`Blobs::hashes`] once and use this for both.
+    #[must_use]
     pub fn verify_all_signatures_with_blob_hashes(
         &self,
         seal_signer: &RistrettoPublicKeyBytes,
@@ -152,19 +154,17 @@ impl UnsealedTransactionV1 {
 }
 
 impl Signable for UnsealedTransactionV1 {
-    type MessageOutput = [u8; 64];
     type Signature = TransactionSealSignature;
 
-    fn to_signing_message(&self, _context: ()) -> Self::MessageOutput {
+    fn to_signing_message(&self, _context: ()) -> crate::TransactionMessage {
         TransactionSealSignature::create_message_v1(self)
     }
 }
 
 impl Signable<&RistrettoPublicKeyBytes> for UnsealedTransactionV1 {
-    type MessageOutput = [u8; 64];
     type Signature = TransactionSignature;
 
-    fn to_signing_message(&self, context: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
+    fn to_signing_message(&self, context: &RistrettoPublicKeyBytes) -> crate::TransactionMessage {
         TransactionSignature::create_message_v1(context, &self.transaction)
     }
 }

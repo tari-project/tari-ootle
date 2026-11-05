@@ -12,7 +12,6 @@ use indexmap::IndexMap;
 use log::*;
 use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::FixedHash;
 use tari_consensus_types::{
     BlockId,
     HighestSeenBlock,
@@ -26,7 +25,7 @@ use tari_consensus_types::{
     ShardGroupAccumulatedData,
     TimeoutCertificate,
 };
-use tari_engine_types::fees::ExhaustBurnRate;
+use tari_engine_types::fees::{ExhaustBurnRate, FeeScale};
 use tari_ootle_common_types::{
     Epoch,
     ExtraData,
@@ -35,15 +34,16 @@ use tari_ootle_common_types::{
     NumPreshards,
     ProtocolVersion,
     ShardGroup,
+    ValidatorSetHash,
     VersionedSubstateId,
     VersionedSubstateIdRef,
-    committee::CommitteeInfo,
     displayable::Displayable,
     optional::Optional,
     shard::Shard,
 };
 use tari_ootle_transaction::{Network, TransactionId};
-use tari_state_tree::{SparseMerkleProofExt, StateTreeError, TreeHash, Version, compute_proof_for_hashes};
+use tari_sidechain::FixedHash;
+use tari_state_tree::{SparseMerkleProofExt, StateTreeError, TreeHash, compute_proof_for_hashes};
 use tari_template_lib_types::{
     TransactionReceiptAddress,
     crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes},
@@ -78,6 +78,7 @@ use crate::{
         SubstateUpdateProof,
         TransactionRecord,
         block_header::BlockHeader,
+        state_tree_diff::CommittedShardVersion,
         substate_update_batch::{DownedSubstate, SubstateUpdateBatch},
     },
 };
@@ -93,11 +94,13 @@ pub enum BlockError {
     #[error("Merke proof generation command index out of bounds: {index}/{len}")]
     MerkleProofGenerationCommandIndexOutOfBounds { index: usize, len: usize },
     #[error(
-        "Block {block_id} was produced under protocol version {protocol_version}, which has no transaction merkle root"
+        "Block {block_id} header commits to transaction merkle root {header_root}, but its commands build \
+         {computed_root}"
     )]
-    NoTransactionMerkleRoot {
+    TransactionMerkleRootMismatch {
         block_id: BlockId,
-        protocol_version: ProtocolVersion,
+        header_root: FixedHash,
+        computed_root: FixedHash,
     },
 }
 
@@ -272,22 +275,6 @@ impl Block {
 
     pub fn all_transaction_ids(&self) -> impl Iterator<Item = &TransactionId> + '_ {
         self.commands.iter().filter_map(|d| d.transaction().map(|t| t.id()))
-    }
-
-    pub fn all_transaction_ids_in_committee<'a>(
-        &'a self,
-        committee_info: &'a CommitteeInfo,
-    ) -> impl Iterator<Item = &'a TransactionId> + Clone + 'a {
-        self.commands
-            .iter()
-            .filter_map(|cmd| cmd.transaction())
-            .filter(|t| {
-                t.evidence()
-                    .map_or(self.shard_group() == committee_info.shard_group(), |evidence| {
-                        evidence.has_and_not_empty(&committee_info.shard_group())
-                    })
-            })
-            .map(|t| t.id())
     }
 
     pub fn all_committing_transactions_ids(&self) -> impl Iterator<Item = &TransactionId> + '_ {
@@ -491,12 +478,22 @@ impl Block {
         self.header.next_epoch_exhaust_burn_rate()
     }
 
+    /// The fee scale the next epoch charges at, which only an end-of-epoch block names.
+    pub fn next_epoch_fee_scale(&self) -> Option<FeeScale> {
+        self.header.next_epoch_fee_scale()
+    }
+
+    /// The [`ValidatorSetHash`] of the next epoch's committees, which only an end-of-epoch block names.
+    pub fn next_epoch_validator_set_hash(&self) -> Option<ValidatorSetHash> {
+        self.header.next_epoch_validator_set_hash()
+    }
+
     pub fn compute_command_inclusion_proof(&self, command_index: usize) -> Result<SparseMerkleProofExt, BlockError> {
         let protocol_version = self.header.protocol_version();
         let hashes = self
             .commands
             .iter()
-            .map(|cmd| TreeHash::from(cmd.hash(protocol_version).into_array()));
+            .map(|cmd| TreeHash::from(cmd.merkle_leaf(protocol_version).into_array()));
         let hash =
             hashes
                 .clone()
@@ -514,14 +511,21 @@ impl Block {
 
     /// Proves against [`BlockHeader::transaction_merkle_root`] the decision this block reached for `transaction_id`,
     /// or that this block did not finalize it. Returns the leaf, if the block finalized the transaction, and the proof.
+    ///
+    /// Fails if the header's root is not the root of the tree this block's commands build, so a proof is only ever
+    /// issued against a root that matches what the block finalized.
     pub fn compute_transaction_proof(
         &self,
         transaction_id: &TransactionId,
     ) -> Result<(Option<FinalizedTransactionLeaf<'_>>, SparseMerkleProofExt), BlockError> {
-        if self.header.transaction_merkle_root().is_none() {
-            return Err(BlockError::NoTransactionMerkleRoot {
+        let header_root = self.header.transaction_merkle_root();
+        let tree = build_finalized_transaction_tree(&self.commands)?;
+        let computed_root = FixedHash::from(tree.root().into_array());
+        if computed_root != *header_root {
+            return Err(BlockError::TransactionMerkleRootMismatch {
                 block_id: *self.id(),
-                protocol_version: self.header.protocol_version(),
+                header_root: *header_root,
+                computed_root,
             });
         }
         let leaf = self
@@ -533,7 +537,6 @@ impl Block {
                 transaction_id: atom.id(),
                 decision: atom.decision(),
             });
-        let tree = build_finalized_transaction_tree(&self.commands)?;
         let (_, proof) = tree.get_proof(&transaction_leaf_key(transaction_id))?;
         Ok((leaf, proof))
     }
@@ -695,11 +698,15 @@ impl Block {
         Ok(())
     }
 
+    /// Commits the block's substate changes at the state versions `version_updates` says its tree diffs moved each
+    /// shard to. The transitions written must extend each shard's [`TransitionAccumulator`] to the value the block's
+    /// state merkle root commits, which `version_updates` carries: the hashed and the stored history are the same
+    /// record, so a divergence between them is an invariant failure, never something to commit.
     pub fn commit_block<TTx>(
         &self,
         tx: &mut TTx,
         commit_qc_id: &PcId,
-        version_updates: &HashMap<Shard, Version>,
+        version_updates: &HashMap<Shard, CommittedShardVersion>,
     ) -> Result<Vec<DownedSubstate>, StorageError>
     where
         TTx: StateStoreWriteTransaction + Deref,
@@ -722,7 +729,7 @@ impl Block {
                 "🌳 COMMIT block {} with no substate change(s)", self
             );
 
-            // No diff to commit
+            self.check_transition_accumulators(&**tx, version_updates)?;
             return Ok(vec![]);
         };
 
@@ -758,7 +765,7 @@ impl Block {
                 let Some(state_version) =
                     version_updates
                         .get(&change.shard())
-                        .copied() else {
+                        .map(|committed| committed.version) else {
                     // A panic may be more appropriate here, this should never happen
                     return Err(StorageError::DataInconsistency {
                         details: format!(
@@ -777,8 +784,34 @@ impl Block {
 
         let downed = batch.downed_iter().collect();
         SubstateRecord::commit_batch(tx, batch)?;
+        self.check_transition_accumulators(&**tx, version_updates)?;
 
         Ok(downed)
+    }
+
+    /// Checks that every shard the block's tree diffs moved holds, in its committed transitions, the accumulator its
+    /// state merkle root commits. The leaf of a shard whose transitions did not all reach the store would commit an
+    /// accumulator no record holds, and every later block would extend from the stored one.
+    fn check_transition_accumulators<TTx: StateStoreReadTransaction>(
+        &self,
+        tx: &TTx,
+        version_updates: &HashMap<Shard, CommittedShardVersion>,
+    ) -> Result<(), StorageError> {
+        for (shard, committed) in version_updates {
+            let stored = tx.state_transitions_get_accumulator(*shard, committed.version)?;
+            if stored != committed.transition_acc {
+                return Err(StorageError::DataInconsistency {
+                    details: format!(
+                        "The transitions of {shard} at v{} committed by block {} extend the transition accumulator to \
+                         {stored}, but its state merkle root commits {}",
+                        committed.version,
+                        self.id(),
+                        committed.transition_acc
+                    ),
+                });
+            }
+        }
+        Ok(())
     }
 
     pub fn get_diff<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<BlockDiff, StorageError> {

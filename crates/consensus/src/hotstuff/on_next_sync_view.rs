@@ -13,7 +13,7 @@ use tari_consensus_types::{
     ValidatorSignatureBytes,
 };
 use tari_ootle_common_types::{Epoch, NodeHeight, committee::Committee, displayable::Displayable, optional::Optional};
-use tari_ootle_storage::{StateStore, consensus_models::BookkeepingModel};
+use tari_ootle_storage::{StateStore, StateStoreReadTransaction, StorageError, consensus_models::BookkeepingModel};
 
 use crate::{
     hotstuff::{HotStuffError, HotstuffConfig, LeaderSkipSet},
@@ -29,7 +29,6 @@ pub struct OnNextSyncViewHandler<TConsensusSpec: ConsensusSpec> {
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     leader_strategy: TConsensusSpec::LeaderStrategy,
     signer_service: TConsensusSpec::SignerService,
-    last_sent_new_view: Option<(Epoch, NodeHeight)>,
 }
 
 impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
@@ -46,7 +45,6 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
             outbound_messaging,
             leader_strategy,
             signer_service,
-            last_sent_new_view: None,
         }
     }
 
@@ -57,17 +55,7 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
         local_committee: &Committee<TConsensusSpec::Addr>,
     ) -> Result<(), HotStuffError> {
         let (next_leader, high_pc, last_sent_vote, timeout_height) = self.store.with_read_tx(|tx| {
-            // The leader, that is supposed to propose the next block, timed out. Current height is the highest seen
-            // view, +1 is the next leader that failed, +2 is the next leader that should propose
-            let mut timeout_height = current_height + NodeHeight(2);
-
-            // If we leader failure more than once in a row, propose the next higher view
-            if let Some((nv_epoch, last_sent_new_view)) = self.last_sent_new_view &&
-                nv_epoch == epoch &&
-                last_sent_new_view >= timeout_height
-            {
-                timeout_height = last_sent_new_view + NodeHeight(1);
-            }
+            let timeout_height = next_timeout_height(tx, epoch, current_height)?;
             let high_pc = HighPc::get(tx, epoch)?;
             let high_pc = ProposalCertificate::get(tx, epoch, high_pc.id())?;
             // Skipping the next height since the leader failed to propose. The certificate we report
@@ -107,11 +95,7 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
         );
 
         let high_pc_height = high_pc.height();
-        let msg = TimeoutVoteMessage {
-            epoch,
-            height: timeout_height,
-            high_pc_height,
-        };
+        let msg = TimeoutVoteMessage::new(self.config.network, epoch, timeout_height, high_pc_height);
 
         let signature = self.signer_service.sign(&msg);
         let signature = ValidatorSignatureBytes::new(
@@ -134,7 +118,6 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
             .send(next_leader.clone(), HotstuffMessage::new_newview(message))
             .await?;
 
-        self.last_sent_new_view = Some((epoch, timeout_height));
         self.store.with_write_tx(|tx| {
             LastSentNewView {
                 epoch,
@@ -144,5 +127,65 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
         })?;
 
         Ok(())
+    }
+}
+
+/// The view a NEWVIEW sent from `current_height` names. Current height is the highest seen view, +1 is the leader that
+/// failed and +2 is the next leader that should propose. After consecutive leader failures each NEWVIEW names a view
+/// above the last one sent in this epoch, which is read from the store so that it holds across a restart.
+fn next_timeout_height<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    epoch: Epoch,
+    current_height: NodeHeight,
+) -> Result<NodeHeight, StorageError> {
+    let timeout_height = current_height + NodeHeight(2);
+    let last_sent = LastSentNewView::get(tx, epoch).optional()?;
+    Ok(last_sent
+        .filter(|last_sent| last_sent.height >= timeout_height)
+        .map_or(timeout_height, |last_sent| last_sent.height + NodeHeight(1)))
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+
+    use super::*;
+
+    const EPOCH: Epoch = Epoch(1);
+
+    type TestStore = RocksDbStateStore<String>;
+
+    fn timeout_height_after_reopen(path: &std::path::Path, current_height: NodeHeight) -> NodeHeight {
+        let store = TestStore::open(path.join("db"), DatabaseOptions::default()).unwrap();
+        store
+            .with_read_tx(|tx| next_timeout_height(tx, EPOCH, current_height))
+            .unwrap()
+    }
+
+    fn persist_last_sent(path: &std::path::Path, epoch: Epoch, height: NodeHeight) {
+        let store = TestStore::open(path.join("db"), DatabaseOptions::default()).unwrap();
+        store
+            .with_write_tx(|tx| LastSentNewView { epoch, height }.set(tx))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_first_newview_skips_the_failed_leader() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(timeout_height_after_reopen(dir.path(), NodeHeight(10)), NodeHeight(12));
+    }
+
+    #[test]
+    fn a_newview_after_a_restart_names_a_view_above_the_last_one_sent() {
+        let dir = tempfile::tempdir().unwrap();
+        persist_last_sent(dir.path(), EPOCH, NodeHeight(13));
+        assert_eq!(timeout_height_after_reopen(dir.path(), NodeHeight(10)), NodeHeight(14));
+    }
+
+    #[test]
+    fn a_newview_sent_in_another_epoch_does_not_raise_the_view() {
+        let dir = tempfile::tempdir().unwrap();
+        persist_last_sent(dir.path(), Epoch(0), NodeHeight(13));
+        assert_eq!(timeout_height_after_reopen(dir.path(), NodeHeight(10)), NodeHeight(12));
     }
 }

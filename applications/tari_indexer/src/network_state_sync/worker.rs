@@ -2,19 +2,21 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
     convert::Infallible,
+    fmt::Display,
     pin::pin,
-    sync::Arc,
-    time::Duration,
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    time::{Duration, SystemTime},
 };
 
 use futures::{StreamExt, future::Either, stream::FuturesUnordered};
 use log::*;
-#[cfg(feature = "metrics")]
 use ootle_network::Network;
 use prost::Message;
 use tari_engine_types::{
+    SubstateVersion,
+    limits::ENGINE_LIMITS,
     published_template::PublishedTemplateMetadata,
     substate::{SubstateId, SubstateValue},
     transaction_receipt::TransactionReceipt,
@@ -26,12 +28,13 @@ use tari_epoch_manager::{
 };
 use tari_indexer_client::event::{IndexerEvent, NewEpochEvent, TransactionEvent, TransactionFinalizedEvent};
 use tari_networking::NetworkingHandle;
-use tari_ootle_common_types::{Epoch, ShardGroup, StateVersion, VotePower, optional::Optional, shard::Shard};
+use tari_ootle_common_types::{Epoch, ShardGroup, StateVersion, ValidatorSetHash, optional::Optional, shard::Shard};
 use tari_ootle_p2p::{PeerAddress, TariMessagingSpec, proto::rpc};
 use tari_ootle_storage::{
     StorageError,
     consensus_models::{
         EpochCheckpoint,
+        SubstateCreate,
         SubstateData,
         SubstateUpdateProof,
         SubstateValueFilterFlags,
@@ -40,9 +43,10 @@ use tari_ootle_storage::{
 };
 use tari_rpc_framework::RpcRequestOptions;
 use tari_shutdown::ShutdownSignal;
+use tari_state_tree::SubstateTreeChange;
 use tari_template_lib_types::{Amount, TemplateAddress, TransactionReceiptAddress, UtxoAddress};
 use tokio::{
-    sync::{broadcast, watch},
+    sync::{self as tokio_sync, broadcast, mpsc, watch},
     time,
 };
 use tokio_util::sync::CancellationToken;
@@ -62,17 +66,41 @@ use crate::{
         config::NetworkWideStateSyncConfig,
         consensus_epoch::ConsensusEpoch,
         error::NetworkStateSyncError,
+        shard_snapshot::{ShardSnapshot, SnapshotError},
         shard_watermarks::ShardWatermarks,
         stats::SyncStats,
         sync_plan::SyncPlan,
-        sync_progress::{SharedSyncProgress, SyncProgress},
-        validator_status::ValidatorStatusMonitor,
+        sync_progress::{SharedSyncProgress, SyncProgress, VerifiedShardVersion},
+        sync_status::{GroupPhase, SnapshotProgress, SyncStatusMonitor, key_fraction},
+        validator_status::{ProvedShardLeaf, ValidatorStatusMonitor, VerifiedProbe},
+        verified_stage::{
+            AccumulatedVersion,
+            MAX_ACCUMULATOR_HISTORY,
+            StageError,
+            Staged,
+            StreamedTransitionError,
+            Verdict,
+            VerifiedShardLeaf,
+            VerifiedStage,
+            follows,
+            streamed_tree_change,
+        },
     },
     notify::Notify,
     storage_sqlite::{
         SqliteIndexerStore,
         SqliteStoreWriteTransaction,
-        models::{Key, SubstateCacheInvalidation, UtxoSpent, UtxoUnspent, UtxoUpdateRecord, VerifiedStateRoot},
+        models::{
+            CheckpointShardLeaf,
+            Key,
+            StagedAccumulator,
+            StagedVersion,
+            SubstateCacheInvalidation,
+            UtxoSpent,
+            UtxoUnspent,
+            UtxoUpdateRecord,
+            VerifiedStateRoot,
+        },
     },
     store::{
         IndexerStore,
@@ -99,6 +127,60 @@ const MAX_BUFFERED_VERSION_BYTES: usize = 256 * 1024 * 1024;
 // buffer leaves twice that.
 const _: () =
     assert!(MAX_BUFFERED_VERSION_BYTES >= 2 * tari_ootle_common_types::MAX_BLOCK_VALIDATION_SHARD_OUTPUT_BYTES);
+/// How long a verified leaf may stay ahead of a shard its stream claims is level, or a staged version stay above every
+/// verified leaf of its shard, before the stream peer is blamed. An honest peer streams a version within moments of its
+/// committee committing it, and every probe asks for the leaf of each shard with versions staged above its last
+/// verified one, so this leaves a few probes to fail.
+const VERIFICATION_GRACE: Duration = COMMITTED_TIP_PROBE_INTERVAL.saturating_mul(3);
+/// How often a stream checks for a peer to blame under [`VERIFICATION_GRACE`].
+const VERIFICATION_CHECK_INTERVAL: Duration = Duration::from_secs(5);
+/// The soonest a shard group's tip is probed again after the last probe, when its stream closes off a burst of
+/// versions. A burst's versions are promoted on the next leaf, so this bounds how far promotion trails the stream at
+/// one probe per group a second.
+const BURST_PROBE_MIN_INTERVAL: Duration = Duration::from_secs(1);
+/// The soonest a shard group syncs a missing checkpoint again once its stream shows the committee has entered the
+/// epoch after it. Committee members commit the checkpoint within moments of each other, and one that has not yet costs
+/// a reopen, so this bounds the reopens to one a period. See [`CheckpointRetryBackoff`] for how it grows.
+const CHECKPOINT_RETRY_MIN_INTERVAL: Duration = Duration::from_secs(2);
+/// The most probes' leaves queued for a shard group's stream.
+const PROBED_LEAVES_CAPACITY: usize = 4;
+/// The most encoded bytes a stream stages above every verified leaf of its shards before it stops reading until a leaf
+/// covers them. A single version may reach [`MAX_BUFFERED_VERSION_BYTES`], so this always admits one.
+const MAX_UNCOVERED_BYTES: usize = 2 * MAX_BUFFERED_VERSION_BYTES;
+/// The most versions a stream stages above every verified leaf of its shards before it stops reading until a leaf
+/// covers them.
+const MAX_UNCOVERED_VERSIONS: usize = 200_000;
+/// The most stored checkpoint leaves of a shard checked at once above its verified version.
+const CHECKPOINT_LEAVES_AHEAD: usize = 4;
+/// The most staged versions promoted in one write transaction.
+const MAX_PROMOTED_VERSIONS: usize = 1024;
+/// The most encoded bytes of staged versions promoted in one write transaction, which bounds what it decodes and
+/// announces at once.
+const MAX_PROMOTED_BYTES: usize = 64 * 1024 * 1024;
+/// The most staged snapshot substates a promotion reads and commits at a time: as many as [`MAX_PROMOTED_BYTES`] holds
+/// of the largest substate the engine commits.
+const MAX_PROMOTED_SNAPSHOT_SUBSTATES: usize = MAX_PROMOTED_BYTES / ENGINE_LIMITS.max_substate_size;
+/// The most substates one snapshot page asks for. The responder caps it too.
+const SNAPSHOT_PAGE_SUBSTATES: u32 = 1000;
+/// The longest a shard snapshot is paged in for before it is abandoned. Each page is checked as it arrives, so this
+/// bounds only how long a slow peer holds the shard group's round.
+const MAX_SNAPSHOT_DURATION: Duration = Duration::from_secs(30 * 60);
+/// How many of the most recent epoch checkpoints a snapshot may be taken at: the fewest validators keep the trees of.
+const SNAPSHOT_CHECKPOINT_EPOCHS: u64 = 2;
+/// How many snapshots of a new shard may be abandoned in a row before the shard replays its history instead.
+const MAX_ABANDONED_SNAPSHOTS: usize = 3;
+
+/// The substate values a followed stream carries. The rest arrive as an id and a value hash, which with the values is
+/// every transition: what the accumulator needs, and what lets the substate cache tell a superseded or destroyed entry
+/// from a current one.
+fn stream_value_filters() -> SubstateValueFilterFlags {
+    SubstateValueFilterFlags::UTXO |
+        SubstateValueFilterFlags::VALIDATOR_FEE_POOL |
+        SubstateValueFilterFlags::CLAIMED_OUTPUT_TOMBSTONE |
+        SubstateValueFilterFlags::TRANSACTION_RECEIPT |
+        SubstateValueFilterFlags::TEMPLATE_METADATA |
+        SubstateValueFilterFlags::ALL_HASHES
+}
 
 #[derive(Clone)]
 pub struct NetworkWideStateSync {
@@ -110,16 +192,23 @@ pub struct NetworkWideStateSync {
     notify: Notify<IndexerEvent>,
     transaction_event_notify: Notify<TransactionEvent>,
     validator_status: ValidatorStatusMonitor,
+    sync_status: SyncStatusMonitor,
     shard_watermarks: Arc<ShardWatermarks>,
     consensus_epoch: ConsensusEpoch,
+    network: Network,
+    /// Each streamed shard's transition accumulator, from its last verified version through the versions staged above
+    /// it, checked against verified leaves. A shard's stage is restored from the store at the start of every round of
+    /// its group.
+    verified_stage: Arc<Mutex<VerifiedStage<PeerAddress>>>,
+    /// The snapshots of each new shard abandoned in a row this run. A shard reaching [`MAX_ABANDONED_SNAPSHOTS`]
+    /// replays its history.
+    abandoned_snapshots: Arc<Mutex<HashMap<Shard, usize>>>,
     #[cfg(feature = "metrics")]
     metrics: NetworkStateMetrics,
     #[cfg(feature = "metrics")]
     substate_cache_metrics: SubstateCacheMetrics,
     #[cfg(feature = "metrics")]
     substate_manager: SubstateManager,
-    #[cfg(feature = "metrics")]
-    network: Network,
 }
 
 impl NetworkWideStateSync {
@@ -131,12 +220,13 @@ impl NetworkWideStateSync {
         notify: Notify<IndexerEvent>,
         transaction_event_notify: Notify<TransactionEvent>,
         validator_status: ValidatorStatusMonitor,
+        sync_status: SyncStatusMonitor,
         shard_watermarks: Arc<ShardWatermarks>,
         consensus_epoch: ConsensusEpoch,
+        network: Network,
         #[cfg(feature = "metrics")] metrics: NetworkStateMetrics,
         #[cfg(feature = "metrics")] substate_cache_metrics: SubstateCacheMetrics,
         #[cfg(feature = "metrics")] substate_manager: SubstateManager,
-        #[cfg(feature = "metrics")] network: Network,
     ) -> Self {
         Self {
             epoch_manager,
@@ -147,21 +237,24 @@ impl NetworkWideStateSync {
             notify,
             transaction_event_notify,
             validator_status,
+            sync_status,
             shard_watermarks,
             consensus_epoch,
+            network,
+            verified_stage: Arc::default(),
+            abandoned_snapshots: Arc::default(),
             #[cfg(feature = "metrics")]
             metrics,
             #[cfg(feature = "metrics")]
             substate_cache_metrics,
             #[cfg(feature = "metrics")]
             substate_manager,
-            #[cfg(feature = "metrics")]
-            network,
         }
     }
 
     pub fn spawn(mut self, shutdown_signal: ShutdownSignal) -> tokio::task::JoinHandle<()> {
         let mut epoch_events = self.epoch_manager.subscribe();
+        tokio::spawn(self.clone().report(shutdown_signal.clone()));
         tokio::spawn(async move {
             loop {
                 let config = self.config.clone();
@@ -191,15 +284,6 @@ impl NetworkWideStateSync {
     ) -> Result<(), NetworkStateSyncError> {
         self.epoch_manager.wait_for_initial_scanning_to_complete().await?;
 
-        // Publish last-known totals immediately so a freshly restarted indexer reports them before its
-        // first sync round completes.
-        #[cfg(feature = "metrics")]
-        self.update_metrics().await;
-
-        let mut report_interval = time::interval(self.config.work_interval);
-        report_interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
-        report_interval.reset();
-
         loop {
             let sync_plan = self.initialize_sync_plan().await?;
             let plan_epoch = sync_plan.network_description().epoch();
@@ -225,6 +309,10 @@ impl NetworkWideStateSync {
             let cancel = CancellationToken::new();
             let mut sync = pin!(self.clone().sync_plan(sync_plan, cancel.clone(), epoch_rx));
             loop {
+                // While `sync` is pending, a branch body awaits only `sync` itself or work that is
+                // independent of the indexer store. `sync` goes unpolled while a body runs, so a write
+                // lock handed to it then is never taken, and every writer queues behind it. The epoch
+                // manager keeps its state outside the indexer store.
                 tokio::select! {
                     event = epoch_events.recv() => {
                         // Every way out of here winds the plan down first, for the reason above.
@@ -272,19 +360,46 @@ impl NetworkWideStateSync {
                         time::sleep(self.config.work_interval).await;
                         break;
                     },
-                    _ = report_interval.tick() => {
-                        self.stats.log_stats();
-                        self.stats.reset();
-                        #[cfg(feature = "metrics")]
-                        self.update_metrics().await;
-                    },
                 }
             }
         }
     }
 
+    /// Logs and resets the sync stats, and publishes the metrics, every work interval until shutdown.
+    ///
+    /// Reporting runs on a task of its own: a metrics refresh can write the substate cache, which
+    /// queues on the store's write lock behind the sync's own commits.
+    async fn report(self, mut shutdown_signal: ShutdownSignal) {
+        let reporting = async {
+            if let Err(err) = self.epoch_manager.wait_for_initial_scanning_to_complete().await {
+                warn!(target: LOG_TARGET, "⚠️ State sync stats are not reported: the epoch manager failed its initial scan: {err}");
+                return;
+            }
+
+            // Publish last-known totals immediately so a freshly restarted indexer reports them before
+            // its first sync round completes.
+            #[cfg(feature = "metrics")]
+            self.update_metrics().await;
+
+            let mut report_interval = time::interval(self.config.work_interval);
+            report_interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
+            report_interval.reset();
+            loop {
+                report_interval.tick().await;
+                self.stats.log_stats();
+                self.stats.reset();
+                #[cfg(feature = "metrics")]
+                self.update_metrics().await;
+            }
+        };
+        tokio::select! {
+            _ = shutdown_signal.wait() => {},
+            _ = reporting => {},
+        }
+    }
+
     /// Reads the persisted economic totals and publishes them to the Prometheus gauges. Metrics are
-    /// observability only, so a read failure is logged rather than propagated into the sync loop.
+    /// observability only, so a read failure is logged and the next report tries again.
     #[cfg(feature = "metrics")]
     async fn update_metrics(&self) {
         match ReadOnlyStore::new(self.store.clone()).get_tari_economics().await {
@@ -343,33 +458,126 @@ impl NetworkWideStateSync {
         self.follow_state(&sync_plan, &cancel, &epoch).await
     }
 
-    /// Syncs `shard_group`'s checkpoints up to the epoch before `epoch`, from wherever it left off.
-    /// Nothing to do once they are recorded, so this is run before every stream the group opens.
-    #[expect(clippy::too_many_lines)]
+    /// Syncs `shard_group`'s checkpoints up to the epoch before `epoch`, from wherever it left off, checking the shard
+    /// leaves of each quorum-signed one against the staged versions of `shards`. Nothing to do once they are
+    /// recorded, so this is run before every stream the group opens.
+    ///
+    /// Returns whether the group's checkpoints reach the epoch before `epoch`. They fall short when
+    /// the committee has not yet completed that epoch: consensus ends an epoch some time after the
+    /// base layer moves past it. They fall short for all of `epoch` when the epoch before it has no
+    /// checkpoint at all, as in a network's first epoch or after an epoch consensus never ran. They
+    /// also fall short when `cancel` stops the backfill between pages.
     async fn sync_group_checkpoints(
         &self,
         shard_group: ShardGroup,
+        shards: &[Shard],
         pool: &mut ValidatorCommitteeRpcPool,
         epoch: Epoch,
         progress: &SharedSyncProgress,
-    ) -> Result<(), NetworkStateSyncError> {
+        cancel: &CancellationToken,
+    ) -> Result<bool, NetworkStateSyncError> {
         let Some(prev_epoch) = epoch.checked_sub(Epoch(1)) else {
-            return Ok(());
+            return Ok(true);
         };
-        let from_epoch = progress
-            .lock()
-            .await
-            .checkpoint_epoch(shard_group)
-            .unwrap_or_else(Epoch::zero);
+        let checkpoint_epoch = || async { progress.lock().await.checkpoint_epoch(shard_group) };
+        let mut from_epoch = checkpoint_epoch().await.unwrap_or_else(Epoch::zero);
         if from_epoch >= prev_epoch {
             debug!(target: LOG_TARGET, "🌍️ No checkpoints to sync for shard group {shard_group} from epoch {from_epoch}");
+            return Ok(true);
+        }
+        if is_backfill(from_epoch, prev_epoch) {
+            match self
+                .sync_head_checkpoint(shard_group, shards, pool, prev_epoch, progress)
+                .await
+            {
+                Ok(()) => {},
+                Err(err) if err.is_peer_fault() && !err.is_unverified_history() => {
+                    warn!(target: LOG_TARGET, "⚠️ Syncing the checkpoint of {prev_epoch} for shard group {shard_group} ahead of the backfill failed: {err}");
+                },
+                Err(err) => return Err(err),
+            }
+        }
+        // Each page is fetched as soon as the one before it is stored, so a wallet walking from an older set waits
+        // only as long as the pages take to verify. A cancelled plan stops between pages; progress is recorded per
+        // checkpoint, so the next plan resumes where this one stopped.
+        loop {
+            info!(target: LOG_TARGET, "🌍️ Syncing checkpoints from {from_epoch} for shard group {shard_group}");
+            let checkpoints = self
+                .fetch_group_checkpoints(shard_group, pool, from_epoch, prev_epoch)
+                .await?;
+
+            let level = if checkpoints.is_empty() {
+                Level::Debug
+            } else {
+                Level::Info
+            };
+            log!(target: LOG_TARGET, level, "🌍️ Found {} checkpoints for shard group {shard_group} from epoch {from_epoch} (prev_epoch {prev_epoch})", checkpoints.len());
+
+            for checkpoint in checkpoints {
+                let checkpoint_epoch = checkpoint.epoch();
+                let leaves = self
+                    .store_checkpoint(shard_group, checkpoint, prev_epoch, Some(progress))
+                    .await?;
+                self.apply_checkpoint_leaves(shards, leaves, checkpoint_epoch, progress)
+                    .await?;
+            }
+            let reached = checkpoint_epoch().await;
+            match reached {
+                Some(reached) if reached >= prev_epoch => return Ok(true),
+                Some(reached) if reached > from_epoch && !cancel.is_cancelled() => from_epoch = reached,
+                _ => return Ok(false),
+            }
+        }
+    }
+
+    /// Syncs `shard_group`'s checkpoint of `prev_epoch` ahead of the backfill that leads up to it.
+    ///
+    /// A wallet verifies the indexer's reads at the current epoch only through this checkpoint, which hands over to the
+    /// current epoch's validator set, so serving it first makes reads verifiable while older epochs are still being
+    /// backfilled. The backfill's progress stays where it is.
+    async fn sync_head_checkpoint(
+        &self,
+        shard_group: ShardGroup,
+        shards: &[Shard],
+        pool: &mut ValidatorCommitteeRpcPool,
+        prev_epoch: Epoch,
+        progress: &SharedSyncProgress,
+    ) -> Result<(), NetworkStateSyncError> {
+        // The checkpoint of `prev_epoch` is of that epoch's shard groups, which differ from `shard_group` when the
+        // number of committees changed, so it is found by the shard the group starts at.
+        let stored = self
+            .store
+            .with_read_tx(move |tx| tx.epoch_checkpoint_get_all(prev_epoch, Some(shard_group.start()), 1))
+            .await?
+            .first()
+            .is_some_and(|checkpoint| checkpoint.epoch() == prev_epoch);
+        if stored {
             return Ok(());
         }
-        info!(target: LOG_TARGET, "🌍️ Syncing checkpoints from {from_epoch} for shard group {shard_group}");
-        // Perform sync operations using the pool and checkpoint
+        info!(target: LOG_TARGET, "🌍️ Syncing the checkpoint of {prev_epoch} for shard group {shard_group} ahead of the backfill");
+        let checkpoints = self
+            .fetch_group_checkpoints(shard_group, pool, prev_epoch, prev_epoch)
+            .await?;
+        for checkpoint in checkpoints {
+            let leaves = self.store_checkpoint(shard_group, checkpoint, prev_epoch, None).await?;
+            self.apply_checkpoint_leaves(shards, leaves, prev_epoch, progress)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// `shard_group`'s checkpoints from `from_epoch` to `prev_epoch`, from a committee member whose committed tip
+    /// verifies.
+    async fn fetch_group_checkpoints(
+        &self,
+        shard_group: ShardGroup,
+        pool: &mut ValidatorCommitteeRpcPool,
+        from_epoch: Epoch,
+        prev_epoch: Epoch,
+    ) -> Result<Vec<EpochCheckpoint>, NetworkStateSyncError> {
         let validator_status = self.validator_status.clone();
         let consensus_epoch = self.consensus_epoch.clone();
-        let mut checkpoints: Vec<_> = pool
+        let mut checkpoints = pool
             .try_with_random_members(|mut session| {
                 let validator_status = validator_status.clone();
                 let consensus_epoch = consensus_epoch.clone();
@@ -378,8 +586,11 @@ impl NetworkWideStateSync {
                     // `probe` only returns Err for a forged/malformed proof (other failures are
                     // logged internally and return Ok(None)), which disqualifies the peer so
                     // another committee member is tried.
-                    match validator_status.probe(&mut session, shard_group).await {
-                        Ok(Some(tip)) => consensus_epoch.observe(tip.shard_group, tip.epoch),
+                    match validator_status
+                        .probe(&mut session, shard_group, &BTreeSet::new())
+                        .await
+                    {
+                        Ok(Some(probe)) => consensus_epoch.observe(probe.tip.shard_group, probe.tip.epoch),
                         Ok(None) => {},
                         Err(e) => {
                             return Err(NetworkStateSyncError::InvalidCommitProof {
@@ -387,109 +598,96 @@ impl NetworkWideStateSync {
                             });
                         },
                     }
-                    let resp = session
-                        .get_checkpoints(rpc::GetCheckpointsRequest {
-                            from_epoch: Some(from_epoch.into()),
-                            num_to_return: 100,
-                            shard_group: None,
-                        })
-                        .await?;
-
-                    debug!(target: LOG_TARGET, "🌍️ Received {} checkpoints for shard group {} from peer {}", resp.checkpoints.len(), shard_group, session.peer_address());
-
-                    resp.checkpoints
-                        .into_iter()
-                        .map(|cp| {
-                            EpochCheckpoint::try_from(cp).map_err(|e| {
-                                NetworkStateSyncError::InvalidCheckpoint {
-                                    details: format!(
-                                        "Failed to convert checkpoint for shard group {}: {}",
-                                        shard_group, e
-                                    ),
-                                }
-                            })
-                        })
-                        .collect()
+                    fetch_checkpoints(&mut session, shard_group, from_epoch).await
                 }
             })
             .await?;
         retain_checkpoints_in_sync_range(&mut checkpoints, from_epoch, prev_epoch);
+        Ok(checkpoints)
+    }
 
-        if checkpoints.is_empty() {
-            info!(target: LOG_TARGET, "🌍️ No checkpoints found for shard group {shard_group} from epoch {from_epoch} (prev_epoch {prev_epoch})");
-            let mut progress = progress.lock().await;
-            progress.record_checkpoint(shard_group, prev_epoch);
-            let sync_progress_snapshot = progress.clone();
-            self.store
-                .with_write_tx(move |tx| tx.key_value_set(Key::SyncProgress, sync_progress_snapshot))
-                .await?;
-            return Ok(());
-        }
+    /// Verifies `checkpoint` and stores it, advancing `shard_group`'s checkpoint progress to its epoch when `progress`
+    /// is given. Returns the shard leaves of a quorum-signed checkpoint; one checked for form only carries shard
+    /// states its sender chose, and has none.
+    async fn store_checkpoint(
+        &self,
+        shard_group: ShardGroup,
+        checkpoint: EpochCheckpoint,
+        prev_epoch: Epoch,
+        progress: Option<&SharedSyncProgress>,
+    ) -> Result<Vec<VerifiedShardLeaf>, NetworkStateSyncError> {
+        info!(target: LOG_TARGET, "🌍️ Validating checkpoint for shard group {shard_group}: {}", checkpoint.header().calculate_hash());
 
-        info!(target: LOG_TARGET, "🌍️ Found {} checkpoints for shard group {shard_group} from epoch {from_epoch}", checkpoints.len());
+        let checkpoint_shard_group =
+            checkpoint
+                .checked_shard_group()
+                .map_err(|e| NetworkStateSyncError::InvalidCheckpoint {
+                    details: format!("Checkpoint for shard group {} is not valid: {}", shard_group, e),
+                })?;
 
-        for checkpoint in checkpoints {
-            info!(target: LOG_TARGET, "🌍️ Validating checkpoint for shard group {shard_group}: {}", checkpoint.header().calculate_hash());
+        let checked = verify_checkpoint(
+            self.network,
+            &self.epoch_manager,
+            &checkpoint,
+            checkpoint_shard_group,
+            prev_epoch,
+        )
+        .await?;
 
-            let checkpoint_shard_group =
-                checkpoint
-                    .checked_shard_group()
-                    .map_err(|e| NetworkStateSyncError::InvalidCheckpoint {
-                        details: format!("Checkpoint for shard group {} is not valid: {}", shard_group, e),
-                    })?;
+        info!(target: LOG_TARGET, "🌍️ Inserting checkpoint for {}, shard group {}", checkpoint.epoch(), checkpoint_shard_group);
 
-            // TODO: we require historical committees to validate older checkpoints. Figure out the best way to
-            //       avoid needing the full historical validator data (e.g. VN merkle inclusion proof + historic L1
-            // block MR), or,       decide it is ok to require this data to be locally stored by all
-            // indexers. For now, to avoid       complexity that may be removed later, we'll skip
-            // validating them and only validate prev_epochs       checkpoint.
-            if checkpoint.epoch() == prev_epoch {
-                // Use the checkpoint's own shard group, not the iterator's: the network may have
-                // had a different shard-group structure at prev_epoch than the current epoch we
-                // are iterating, so the QC is signed by the committee for `checkpoint_shard_group`,
-                // not `shard_group`.
-                let committee = self
-                    .epoch_manager
-                    .get_committee_by_shard_group(checkpoint.epoch(), checkpoint_shard_group)
-                    .await?;
-                checkpoint
-                    .validate(checkpoint.epoch(), committee.quorum_threshold(), |pk| {
-                        Ok(committee.get_power_by_public_key(pk).unwrap_or_else(VotePower::zero))
-                    })
-                    .map_err(|e| NetworkStateSyncError::InvalidCheckpoint {
-                        details: format!(
-                            "Failed to validate checkpoint for shard group {}: {}",
-                            checkpoint_shard_group, e
-                        ),
-                    })?;
-            } else {
-                checkpoint
-                    .validate_well_formed()
-                    .map_err(|e| NetworkStateSyncError::InvalidCheckpoint {
-                        details: format!(
-                            "Failed to validate well-formedness of checkpoint for shard group {}: {}",
-                            checkpoint_shard_group, e
-                        ),
-                    })?;
-                debug!(target: LOG_TARGET, "🌍️ Skipping checkpoint for shard group {shard_group} with epoch {} (expected {})", checkpoint.epoch(), prev_epoch);
-            }
-
-            info!(target: LOG_TARGET, "🌍️ Inserting checkpoint for {}, shard group {}", checkpoint.epoch(), checkpoint_shard_group);
-
-            let xtr_exhausted = checkpoint_exhaust_burn(&checkpoint)?;
-            self.stats.increment_checkpoints();
-            let checkpoint_epoch = checkpoint.epoch();
-            let mut progress = progress.lock().await;
+        let xtr_exhausted = checkpoint_exhaust_burn(&checkpoint)?;
+        let leaves = if checked == CheckpointCheck::QuorumSigned {
+            VerifiedShardLeaf::from_checkpoint(&checkpoint).collect()
+        } else {
+            Vec::new()
+        };
+        self.stats.increment_checkpoints();
+        let checkpoint_epoch = checkpoint.epoch();
+        // The progress lock is held until the snapshot is written, as `SharedSyncProgress` requires.
+        let mut progress = match progress {
+            Some(progress) => Some(progress.lock().await),
+            None => None,
+        };
+        let sync_progress_snapshot = progress.as_deref_mut().map(|progress| {
             progress.record_checkpoint(shard_group, checkpoint_epoch);
-            let sync_progress_snapshot = progress.clone();
-            self.store
-                .with_write_tx(move |tx| {
-                    if !tx.epoch_checkpoint_exists(checkpoint_shard_group, checkpoint_epoch)? {
-                        tx.insert_or_ignore_epoch_checkpoint(&checkpoint)?;
-                        add_to_total(tx, Key::TariAccumulatedExhaustBurn, xtr_exhausted)?;
-                    }
-                    tx.key_value_set(Key::SyncProgress, sync_progress_snapshot)
-                })
+            progress.clone()
+        });
+        let stored_leaves = leaves
+            .iter()
+            .map(|leaf| CheckpointShardLeaf {
+                shard: leaf.shard,
+                state_version: leaf.state_version,
+                transition_acc: leaf.transition_acc,
+            })
+            .collect::<Vec<_>>();
+        self.store
+            .with_write_tx(move |tx| {
+                write_checkpoint(
+                    tx,
+                    &checkpoint,
+                    checkpoint_shard_group,
+                    xtr_exhausted,
+                    &stored_leaves,
+                    sync_progress_snapshot,
+                )
+            })
+            .await?;
+        self.sync_status
+            .record_checkpoint(checkpoint_shard_group, checkpoint_epoch);
+        Ok(leaves)
+    }
+
+    /// Checks the checkpoint leaves of `shards` against their staged versions.
+    async fn apply_checkpoint_leaves(
+        &self,
+        shards: &[Shard],
+        leaves: Vec<VerifiedShardLeaf>,
+        epoch: Epoch,
+        progress: &SharedSyncProgress,
+    ) -> Result<(), NetworkStateSyncError> {
+        for leaf in leaves.into_iter().filter(|leaf| shards.contains(&leaf.shard)) {
+            self.apply_leaf(leaf, format!("the checkpoint of {epoch}"), progress)
                 .await?;
         }
         Ok(())
@@ -508,20 +706,25 @@ impl NetworkWideStateSync {
         committee_pools.sort_by_key(|(shard_group, _)| **shard_group);
 
         // Every committee holds the global shard, so it is claimed by exactly one group: the lowest.
-        let mut groups = committee_pools
-            .into_iter()
-            .enumerate()
-            .map(|(i, (shard_group, pool))| {
-                self.clone().follow_shard_group(
-                    *shard_group,
-                    pool.clone(),
-                    i == 0,
-                    sync_plan.sync_progress().clone(),
-                    cancel.clone(),
-                    epoch.clone(),
-                )
-            })
-            .collect::<FuturesUnordered<_>>();
+        let mut probes = FuturesUnordered::new();
+        let mut groups = FuturesUnordered::new();
+        for (i, (shard_group, pool)) in committee_pools.into_iter().enumerate() {
+            let (leaves_tx, leaves_rx) = mpsc::channel(PROBED_LEAVES_CAPACITY);
+            let burst = Arc::new(tokio_sync::Notify::new());
+            probes.push(self.probe_group_tips(*shard_group, pool.clone(), i == 0, leaves_tx, burst.clone()));
+            groups.push(self.clone().follow_shard_group(
+                *shard_group,
+                pool.clone(),
+                i == 0,
+                sync_plan.sync_progress().clone(),
+                cancel.clone(),
+                epoch.clone(),
+                GroupLeaves {
+                    probed: leaves_rx,
+                    burst,
+                },
+            ));
+        }
 
         let followed = async {
             while let Some(result) = groups.next().await {
@@ -529,60 +732,112 @@ impl NetworkWideStateSync {
             }
             Ok(())
         };
-        // The groups wind down on `cancel`; the probe loop is dropped once they have.
+        let probing = async {
+            match probes.next().await {
+                Some(never) => match never {},
+                None => std::future::pending().await,
+            }
+        };
+        // The groups wind down on `cancel`; the probe loops are dropped once they have.
         tokio::select! {
             result = followed => result,
-            never = self.track_committed_tips(sync_plan) => match never {},
+            never = probing => match never {},
         }
     }
 
-    /// Probes every shard group's committed tip each [`COMMITTED_TIP_PROBE_INTERVAL`], records it in
-    /// the verified-root store, and observes its epoch.
+    /// Probes `shard_group`'s committed tip each [`COMMITTED_TIP_PROBE_INTERVAL`], and again when `burst` signals that
+    /// the group's stream closed off a burst of versions, no sooner than [`BURST_PROBE_MIN_INTERVAL`] after the last
+    /// probe. Records each verified tip in the verified-root store, observes its epoch, and hands its shard leaves to
+    /// the group's stream through `leaves`.
+    ///
+    /// A burst probe asks for the leaves of the shards with versions staged above their last verified one, which it
+    /// promotes. A periodic probe asks for every shard's leaf, so that a shard the stream claims is level but whose
+    /// committee has moved on is found waiting for a leaf, which blames the stream peer for withholding it.
     ///
     /// A followed stream only probes when it reopens, which on a quiet network is up to a stream
     /// deadline away and on a busy one may be never. Probing here keeps [`ConsensusEpoch`] following a
-    /// committee into a new epoch soon after its end-of-epoch block, and keeps the latest recorded
-    /// tip, which a verified read's anchor must be recent against, near the chain's.
-    async fn track_committed_tips(&self, sync_plan: &SyncPlan) -> Infallible {
-        let mut pools = sync_plan.committee_pools().clone();
+    /// committee into a new epoch soon after its end-of-epoch block, keeps the latest recorded
+    /// tip, which a verified read's anchor must be recent against, near the chain's, and supplies the
+    /// leaves the stream's staged versions are promoted on.
+    async fn probe_group_tips(
+        &self,
+        shard_group: ShardGroup,
+        mut pool: ValidatorCommitteeRpcPool,
+        syncs_global_shard: bool,
+        leaves: mpsc::Sender<Vec<VerifiedShardLeaf>>,
+        burst: Arc<tokio_sync::Notify>,
+    ) -> Infallible {
         let mut interval = time::interval(COMMITTED_TIP_PROBE_INTERVAL);
         interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
+        let mut last_probe = None::<time::Instant>;
+        let all_shards = syncs_global_shard
+            .then_some(Shard::global())
+            .into_iter()
+            .chain(shard_group.shard_iter())
+            .collect::<BTreeSet<_>>();
         loop {
-            interval.tick().await;
-            for (shard_group, pool) in &mut pools {
-                let shard_group = *shard_group;
-                let mut session = match pool.new_session().await {
-                    Ok(session) => session,
-                    Err(e) => {
-                        debug!(target: LOG_TARGET, "No session to probe the committed tip of shard group {shard_group}: {e}");
-                        continue;
-                    },
-                };
-                match self.validator_status.probe(&mut session, shard_group).await {
-                    Ok(Some(tip)) => {
-                        self.consensus_epoch.observe(tip.shard_group, tip.epoch);
-                        if let Err(e) = self.persist_verified_tip(tip).await {
-                            warn!(target: LOG_TARGET, "⚠️ Failed to record verified state root for shard group {shard_group}: {e}");
-                        }
-                    },
-                    Ok(None) => {},
-                    Err(e) => {
-                        warn!(target: LOG_TARGET, "⚠️ Validator {} for shard group {} served an INVALID commit proof: {}", session.peer_address(), shard_group, e);
-                    },
-                }
+            let periodic = tokio::select! {
+                _ = interval.tick() => true,
+                () = burst.notified() => {
+                    if let Some(last_probe) = last_probe {
+                        time::sleep_until(last_probe + BURST_PROBE_MIN_INTERVAL).await;
+                    }
+                    false
+                },
+            };
+            last_probe = Some(time::Instant::now());
+            let mut session = match pool.new_session().await {
+                Ok(session) => session,
+                Err(e) => {
+                    debug!(target: LOG_TARGET, "No session to probe the committed tip of shard group {shard_group}: {e}");
+                    continue;
+                },
+            };
+            let leaf_shards = if periodic {
+                all_shards.clone()
+            } else {
+                self.leaf_shards(shard_group, syncs_global_shard)
+            };
+            match self
+                .validator_status
+                .probe(&mut session, shard_group, &leaf_shards)
+                .await
+            {
+                Ok(Some(probe)) => {
+                    self.consensus_epoch.observe(probe.tip.shard_group, probe.tip.epoch);
+                    self.observe_tip(&probe);
+                    // A full queue drops these leaves: the stream has yet to take the ones queued before them, and
+                    // the next probe asks again.
+                    let probed = probe.leaves.iter().map(|proved| proved.leaf).collect::<Vec<_>>();
+                    if !probed.is_empty() && leaves.try_send(probed).is_err() {
+                        debug!(target: LOG_TARGET, "The stream of shard group {shard_group} has not taken the leaves of earlier probes. Dropped this probe's");
+                    }
+                    if let Err(e) = self.persist_verified_tip(probe.tip).await {
+                        warn!(target: LOG_TARGET, "⚠️ Failed to record verified state root for shard group {shard_group}: {e}");
+                    }
+                },
+                Ok(None) => {},
+                Err(e) => {
+                    warn!(target: LOG_TARGET, "⚠️ Validator {} for shard group {} served an INVALID commit proof: {}", session.peer_address(), shard_group, e);
+                },
             }
         }
     }
 
-    /// Keeps one shard group synced: syncs its checkpoints, opens a stream from a committee member,
-    /// follows it until it ends, and goes round again, until cancelled.
+    /// Keeps one shard group synced: restores its shards' verified stage, syncs its checkpoints,
+    /// opens a stream from a committee member, follows it until it ends, and goes round again,
+    /// until cancelled.
     ///
     /// A stream that ends because the validator had nothing to send for the deadline is reopened at
     /// once - that is the ordinary end of a followed stream, and the reopen refreshes each shard's
     /// watermark. So is one wound down because the epoch moved: the next round syncs the new
     /// checkpoints and resolves the committee at the new epoch. One closed by a validator that does
     /// not follow, or failed by the peer, waits the work interval first: the former is polling, the
-    /// latter wants a different peer.
+    /// latter wants a different peer. A peer whose history no verified leaf covers is excluded for
+    /// the rest of the epoch, and the next round reopens at once with another member. Once every
+    /// member's history has mismatched from the same verified version, the group halts until the
+    /// epoch moves.
+    #[expect(clippy::too_many_arguments)]
     async fn follow_shard_group(
         mut self,
         shard_group: ShardGroup,
@@ -591,87 +846,200 @@ impl NetworkWideStateSync {
         progress: SharedSyncProgress,
         cancel: CancellationToken,
         mut epoch: watch::Receiver<Epoch>,
+        mut leaves: GroupLeaves,
     ) -> Result<(), NetworkStateSyncError> {
+        // Shard 0 sorts before every preshard, which keeps the cursor list ascending as the
+        // responder requires.
+        let shards = syncs_global_shard
+            .then_some(Shard::global())
+            .into_iter()
+            .chain(shard_group.shard_iter())
+            .collect::<Vec<_>>();
+        let mut breaker = MismatchBreaker::default();
+        let mut checkpoint_backoff = CheckpointRetryBackoff::new(self.config.work_interval);
         while !cancel.is_cancelled() {
-            let current_epoch = *epoch.borrow_and_update();
-            if let Err(err) = self
-                .sync_group_checkpoints(shard_group, &mut pool, current_epoch, &progress)
-                .await
-            {
-                if !err.is_peer_fault() {
-                    return Err(err);
-                }
-                warn!(target: LOG_TARGET, "⚠️ Checkpoint sync for shard group {} failed: {}", shard_group, err);
-                self.pause(shard_group, "checkpoint sync failed", &cancel, &mut epoch)
-                    .await;
-                continue;
-            }
-            let mut session = match pool.new_session().await {
-                Ok(s) => s,
-                Err(e) => {
-                    warn!(target: LOG_TARGET, "⚠️ Failed to create session for shard group {}: {}", shard_group, e);
-                    self.pause(shard_group, "no session", &cancel, &mut epoch).await;
-                    continue;
-                },
-            };
-            match self.validator_status.probe(&mut session, shard_group).await {
-                Ok(Some(verified_tip)) => {
-                    self.consensus_epoch
-                        .observe(verified_tip.shard_group, verified_tip.epoch);
-                    // Record the quorum-signed state root so the read path can skip re-validating
-                    // commit proofs for this tip. A failure here must not abort the state sync.
-                    if let Err(e) = self.persist_verified_tip(verified_tip).await {
-                        warn!(target: LOG_TARGET, "⚠️ Failed to record verified state root for shard group {}: {}", shard_group, e);
-                    }
-                },
-                Ok(None) => {},
-                // probe only returns Err for an invalid (forged) commit proof.
-                Err(e) => {
-                    warn!(target: LOG_TARGET, "⚠️ Validator {} for shard group {} served an INVALID commit proof: {}", session.peer_address(), shard_group, e);
-                    self.pause(shard_group, "invalid commit proof", &cancel, &mut epoch)
-                        .await;
-                    continue;
-                },
-            }
-
-            // Shard 0 sorts before every preshard, which keeps the cursor list ascending as the
-            // responder requires.
-            let shards = syncs_global_shard
-                .then_some(Shard::global())
-                .into_iter()
-                .chain(shard_group.shard_iter());
-
-            // A responder that cannot serve these shards - it left the committee, or the epoch this
-            // indexer resolved its committees at has moved on - costs this shard group a retry and
-            // no more.
-            match self
-                .sync_shard_group_state(shards, &progress, shard_group, &mut session, &cancel, &mut epoch)
-                .await
-            {
-                Ok(StreamEnd::Cancelled) => return Ok(()),
-                Ok(StreamEnd::TimedOut) => {
-                    debug!(target: LOG_TARGET, "🌍️ State sync stream for shard group {shard_group} from {} had nothing to send for the deadline. Reopening", session.peer_address());
-                },
-                Ok(StreamEnd::EpochAdvanced) => {
-                    info!(target: LOG_TARGET, "🌍️ Epoch advanced to {}. Reopening state sync for shard group {shard_group}", *epoch.borrow());
-                },
-                Ok(StreamEnd::Final) => {
-                    self.pause(
+            let round = self
+                .follow_round(
+                    shard_group,
+                    &shards,
+                    &mut pool,
+                    &progress,
+                    &cancel,
+                    &mut epoch,
+                    &mut leaves,
+                    &mut checkpoint_backoff,
+                )
+                .await;
+            match round {
+                Ok(RoundEnd::Cancelled) => return Ok(()),
+                Ok(RoundEnd::Reopen) => {},
+                Ok(RoundEnd::Pause(reason)) => self.pause(shard_group, reason, &cancel, &mut epoch).await,
+                Err(NetworkStateSyncError::UnverifiedHistory {
+                    details,
+                    blamed,
+                    diverged_from,
+                }) => {
+                    warn!(target: LOG_TARGET, "⚠️ Shard group {shard_group}: {details}. Excluding {} for the rest of the epoch", display_peers(&blamed));
+                    // The pool excludes a blamed peer for the epoch manager's current epoch, so the blame is
+                    // recorded under the same one
+                    self.sync_status.record_blame(
                         shard_group,
-                        "the validator closed the stream at its tip and does not follow",
-                        &cancel,
-                        &mut epoch,
-                    )
-                    .await;
-                },
-                Err(err) if err.is_peer_fault() => {
-                    warn!(target: LOG_TARGET, "⚠️ State sync for shard group {} from {} failed: {}", shard_group, session.peer_address(), err);
-                    self.pause(shard_group, "the peer failed", &cancel, &mut epoch).await;
+                        self.epoch_manager.get_current_epoch(),
+                        blamed.clone(),
+                        &details,
+                        diverged_from.map(|(shard, _)| shard),
+                    );
+                    for peer in &blamed {
+                        pool.mark_failed(*peer);
+                    }
+                    let Some((shard, from)) = diverged_from else {
+                        continue;
+                    };
+                    let committee_size = match pool.committee_size().await {
+                        Ok(committee_size) => committee_size,
+                        Err(e) => {
+                            warn!(target: LOG_TARGET, "⚠️ Shard group {shard_group}'s committee size is unknown, so its divergent history is not counted towards halting it: {e}");
+                            continue;
+                        },
+                    };
+                    if breaker.record(shard, from, &blamed, committee_size) {
+                        error!(target: LOG_TARGET, "⚠️ Every one of the {committee_size} members of shard group {shard_group} streamed history of shard {shard} {} that mismatches a verified leaf or cannot be accumulated. This indexer's own accumulator recomputation is suspect, so it stops following the shard group until the epoch moves. Report this with the errors above", after(from));
+                        #[cfg(feature = "metrics")]
+                        self.metrics.record_leaf_check("circuit_breaker");
+                        breaker = MismatchBreaker::default();
+                        self.sync_status
+                            .set_phase(shard_group, GroupPhase::Halted { shard, from });
+                        tokio::select! {
+                            _ = cancel.cancelled() => {},
+                            Ok(()) = epoch.changed() => {},
+                        }
+                    }
                 },
                 Err(err) => return Err(err),
             }
         }
         Ok(())
+    }
+
+    /// One round of [`Self::follow_shard_group`]: restores the stage, syncs checkpoints, probes, and follows a stream
+    /// until it ends. A failure the peer is at fault for ends the round in a pause, except one that blames the peer for
+    /// unverified history, which is returned.
+    #[expect(clippy::too_many_arguments)]
+    async fn follow_round(
+        &mut self,
+        shard_group: ShardGroup,
+        shards: &[Shard],
+        pool: &mut ValidatorCommitteeRpcPool,
+        progress: &SharedSyncProgress,
+        cancel: &CancellationToken,
+        epoch: &mut watch::Receiver<Epoch>,
+        leaves: &mut GroupLeaves,
+        checkpoint_backoff: &mut CheckpointRetryBackoff,
+    ) -> Result<RoundEnd, NetworkStateSyncError> {
+        let current_epoch = *epoch.borrow_and_update();
+        self.restore_stage(shards, progress).await?;
+        self.sync_status.set_phase(shard_group, GroupPhase::SyncingCheckpoints);
+        let checkpoints_reached_epoch = match self
+            .sync_group_checkpoints(shard_group, shards, pool, current_epoch, progress, cancel)
+            .await
+        {
+            Ok(reached) => reached,
+            Err(err) if err.is_peer_fault() && !err.is_unverified_history() => {
+                warn!(target: LOG_TARGET, "⚠️ Checkpoint sync for shard group {} failed: {}", shard_group, err);
+                return Ok(RoundEnd::Pause("checkpoint sync failed"));
+            },
+            Err(err) => return Err(err),
+        };
+        if cancel.is_cancelled() {
+            return Ok(RoundEnd::Cancelled);
+        }
+        // Wallets verify the validator set of an epoch through the checkpoint that ends the epoch
+        // before it, so a missing checkpoint is fetched again soon after the stream shows it exists.
+        let checkpoints_due = checkpoint_backoff.checkpoints_due(checkpoints_reached_epoch, current_epoch);
+        let mut session = match pool.new_stream_session().await {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(target: LOG_TARGET, "⚠️ Failed to create session for shard group {}: {}", shard_group, e);
+                return Ok(RoundEnd::Pause("no session"));
+            },
+        };
+        self.sync_status.set_stream_peer(shard_group, *session.peer_address());
+        let leaf_shards = self.leaf_shards(shard_group, shards.contains(&Shard::global()));
+        match self
+            .validator_status
+            .probe(&mut session, shard_group, &leaf_shards)
+            .await
+        {
+            Ok(Some(probe)) => {
+                self.consensus_epoch.observe(probe.tip.shard_group, probe.tip.epoch);
+                self.observe_tip(&probe);
+                // Record the quorum-signed state root so the read path can skip re-validating
+                // commit proofs for this tip. A failure here must not abort the state sync.
+                if let Err(e) = self.persist_verified_tip(probe.tip).await {
+                    warn!(target: LOG_TARGET, "⚠️ Failed to record verified state root for shard group {}: {}", shard_group, e);
+                }
+                let peer = *session.peer_address();
+                for proved in probe.leaves {
+                    self.apply_leaf(proved.leaf, format!("the tip leaf from {peer}"), progress)
+                        .await?;
+                }
+            },
+            Ok(None) => {},
+            // probe only returns Err for an invalid (forged) commit proof.
+            Err(e) => {
+                warn!(target: LOG_TARGET, "⚠️ Validator {} for shard group {} served an INVALID commit proof: {}", session.peer_address(), shard_group, e);
+                return Ok(RoundEnd::Pause("invalid commit proof"));
+            },
+        }
+
+        let new_shards = self.shards_to_snapshot(shards, progress).await;
+        if let Some(end) = self
+            .snapshot_new_shards(shard_group, new_shards, current_epoch, &mut session, progress, cancel)
+            .await?
+        {
+            return Ok(end);
+        }
+
+        self.sync_status.set_phase(shard_group, GroupPhase::Streaming);
+        // A responder that cannot serve these shards - it left the committee, or the epoch this
+        // indexer resolved its committees at has moved on - costs this shard group a retry and
+        // no more.
+        let end = match self
+            .sync_shard_group_state(
+                shards,
+                progress,
+                shard_group,
+                &mut session,
+                cancel,
+                epoch,
+                checkpoints_due,
+                leaves,
+            )
+            .await
+        {
+            Ok(end) => end,
+            Err(err) if err.is_peer_fault() && !err.is_unverified_history() => {
+                warn!(target: LOG_TARGET, "⚠️ State sync for shard group {} from {} failed: {}", shard_group, session.peer_address(), err);
+                return Ok(RoundEnd::Pause("the peer failed"));
+            },
+            Err(err) => return Err(err),
+        };
+        Ok(match end {
+            StreamEnd::Cancelled => RoundEnd::Cancelled,
+            StreamEnd::TimedOut => {
+                debug!(target: LOG_TARGET, "🌍️ State sync stream for shard group {shard_group} from {} had nothing to send for the deadline. Reopening", session.peer_address());
+                RoundEnd::Reopen
+            },
+            StreamEnd::EpochAdvanced => {
+                info!(target: LOG_TARGET, "🌍️ Epoch advanced to {}. Reopening state sync for shard group {shard_group}", *epoch.borrow());
+                RoundEnd::Reopen
+            },
+            StreamEnd::CheckpointsDue => {
+                info!(target: LOG_TARGET, "🌍️ Shard group {shard_group} has no checkpoint for the epoch before {current_epoch} yet. Syncing checkpoints again");
+                RoundEnd::Reopen
+            },
+            StreamEnd::Final => RoundEnd::Pause("the validator closed the stream at its tip and does not follow"),
+        })
     }
 
     /// Waits the work interval before a shard group tries again, or less if the plan is wound down
@@ -680,12 +1048,16 @@ impl NetworkWideStateSync {
     async fn pause(
         &self,
         shard_group: ShardGroup,
-        reason: &str,
+        reason: &'static str,
         cancel: &CancellationToken,
         epoch: &mut watch::Receiver<Epoch>,
     ) {
         let interval = self.config.work_interval;
         debug!(target: LOG_TARGET, "🌍️ Shard group {shard_group}: {reason}. Retrying in {interval:.0?}");
+        self.sync_status.set_phase(shard_group, GroupPhase::Paused {
+            reason,
+            until: SystemTime::now() + interval,
+        });
         tokio::select! {
             _ = cancel.cancelled() => {},
             Ok(()) = epoch.changed() => {},
@@ -693,80 +1065,664 @@ impl NetworkWideStateSync {
         }
     }
 
-    /// Syncs every given shard from `session`, which serves them all over a single stream.
-    ///
-    /// A shard that has never been synced wants only the current head state rather than its full
-    /// history, which is expressed by the `UP_ONLY` filter. Filters apply to the whole request, so
-    /// such shards are streamed separately, on a stream that runs to its tip and closes. Every shard
-    /// then joins the followed stream: one the head fetch found nothing for follows from version one,
-    /// since its first transition is its head state, and it has to arrive while the stream is open
-    /// rather than on the reopen after the deadline. The head fetch advances a shard only to the
-    /// latest version it delivered, so the followed stream picks up the versions after it, which
-    /// hold only substates since destroyed. A shard whose live substates all fall outside the value
-    /// filter delivers nothing to the head fetch, so its first sync replays its whole history as ids
-    /// and hashes.
+    /// Follows every given shard from `session`, which serves them all over a single stream, from the version after
+    /// the last one staged. A shard never synced follows from v0.
+    #[expect(clippy::too_many_arguments)]
     async fn sync_shard_group_state(
         &mut self,
-        shards: impl Iterator<Item = Shard>,
+        shards: &[Shard],
         progress: &SharedSyncProgress,
         shard_group: ShardGroup,
         session: &mut ValidatorRpcSession,
         cancel: &CancellationToken,
         epoch: &mut watch::Receiver<Epoch>,
+        checkpoints_due: Option<CheckpointsDue>,
+        leaves: &mut GroupLeaves,
     ) -> Result<StreamEnd, NetworkStateSyncError> {
-        let value_filters = SubstateValueFilterFlags::UTXO |
-            SubstateValueFilterFlags::VALIDATOR_FEE_POOL |
-            SubstateValueFilterFlags::CLAIMED_OUTPUT_TOMBSTONE |
-            SubstateValueFilterFlags::TRANSACTION_RECEIPT |
-            SubstateValueFilterFlags::TEMPLATE_METADATA;
-
-        let shards = shards.collect::<Vec<_>>();
-        let from_scratch = cursors_for(&shards, &*progress.lock().await)
-            .into_iter()
-            .filter(|cursor| cursor.start_state_version == 1)
-            .collect::<Vec<_>>();
-        if !from_scratch.is_empty() {
-            info!(
-                target: LOG_TARGET,
-                "🌍️ Syncing {} shard(s) in shard group {shard_group} from scratch. Only fetching the head state.",
-                from_scratch.len()
-            );
-            let end = self
-                .stream_shard_state(
-                    from_scratch,
-                    value_filters | SubstateValueFilterFlags::UP_ONLY,
-                    false,
-                    progress,
-                    shard_group,
-                    session,
-                    cancel,
-                    epoch,
-                )
-                .await?;
-            if matches!(end, StreamEnd::Cancelled | StreamEnd::EpochAdvanced) {
-                return Ok(end);
-            }
-        }
-
-        let cursors = cursors_for(&shards, &*progress.lock().await);
+        let cursors = cursors_for(shards, &*progress.lock().await);
         if cursors.is_empty() {
             warn!(target: LOG_TARGET, "⚠️ Every shard in shard group {shard_group} is recorded at the last representable state version. Nothing to follow");
             return Ok(StreamEnd::Final);
         }
-        // ALL_HASHES adds an id and a version for every substate outside the value filter, which is
-        // what lets the substate cache tell a superseded or destroyed entry from a current one. It
-        // is pointless on the from-scratch stream: those shards have no cached entries to retire.
         self.stream_shard_state(
             cursors,
-            value_filters | SubstateValueFilterFlags::ALL_HASHES,
-            true,
             progress,
             shard_group,
             session,
             cancel,
             epoch,
+            checkpoints_due,
+            leaves,
         )
         .await
+    }
+
+    /// The new shards of `shards` to take a snapshot of: those whose snapshots were not abandoned too often this run.
+    async fn shards_to_snapshot(&self, shards: &[Shard], progress: &SharedSyncProgress) -> BTreeSet<Shard> {
+        let new_shards = new_shards(shards, &*progress.lock().await);
+        let abandoned = self.abandoned_snapshots();
+        new_shards
+            .into_iter()
+            .filter(|shard| abandoned.get(shard).is_none_or(|n| *n < MAX_ABANDONED_SNAPSHOTS))
+            .collect()
+    }
+
+    /// Takes a snapshot of each of `new_shards` of `shard_group` from `session`, and promotes it. Returns how the round
+    /// ends if one cannot be taken. A shard whose leaf is at v0 takes no snapshot and is followed from v0.
+    ///
+    /// Each snapshot is taken at the shard's leaf in the latest checkpoint of `shard_group` stored, if it ends one of
+    /// the last [`SNAPSHOT_CHECKPOINT_EPOCHS`] epochs before `current_epoch`: validators keep the trees of those. Just
+    /// after an epoch change, the checkpoint of the epoch that ended may not be stored yet, and the one before it
+    /// serves. Without either, the snapshot is taken at a leaf probed just before it, whose tree the peer keeps only
+    /// for the shard's next few versions.
+    async fn snapshot_new_shards(
+        &self,
+        shard_group: ShardGroup,
+        new_shards: BTreeSet<Shard>,
+        current_epoch: Epoch,
+        session: &mut ValidatorRpcSession,
+        progress: &SharedSyncProgress,
+        cancel: &CancellationToken,
+    ) -> Result<Option<RoundEnd>, NetworkStateSyncError> {
+        let checkpoint = self.pinned_checkpoint(shard_group, current_epoch).await?;
+        if !new_shards.is_empty() {
+            match &checkpoint {
+                Some(checkpoint) => {
+                    info!(target: LOG_TARGET, "🌍️ Taking snapshots of {} new shards of shard group {shard_group} at the checkpoint of {}", new_shards.len(), checkpoint.epoch());
+                },
+                None => {
+                    info!(target: LOG_TARGET, "🌍️ Taking snapshots of {} new shards of shard group {shard_group} at probed tip leaves: no checkpoint of the {SNAPSHOT_CHECKPOINT_EPOCHS} epochs before {current_epoch} is stored", new_shards.len());
+                },
+            }
+        }
+        for shard in new_shards {
+            if let Some((proved, epoch)) = checkpoint
+                .as_ref()
+                .and_then(|checkpoint| checkpoint_leaf(checkpoint, shard))
+            {
+                if let Some(end) = self
+                    .snapshot_new_shard(shard_group, proved, epoch, session, progress, cancel)
+                    .await?
+                {
+                    return Ok(Some(end));
+                }
+                continue;
+            }
+            let probe = match self
+                .validator_status
+                .probe(session, shard_group, &BTreeSet::from([shard]))
+                .await
+            {
+                Ok(probe) => probe,
+                Err(e) => {
+                    warn!(target: LOG_TARGET, "⚠️ Validator {} for shard group {} served an INVALID commit proof: {}", session.peer_address(), shard_group, e);
+                    return Ok(Some(RoundEnd::Pause("invalid commit proof")));
+                },
+            };
+            // A peer proves no tip before the network's first commit, which says nothing of the snapshot
+            let Some(probe) = probe else {
+                return Ok(Some(RoundEnd::Pause("the peer proved no committed tip")));
+            };
+            self.observe_tip(&probe);
+            let tip_epoch = probe.tip.epoch;
+            let Some(proved) = probe.leaves.into_iter().find(|proved| proved.leaf.shard == shard) else {
+                return Ok(Some(self.abandon_snapshot(
+                    shard,
+                    "the peer proved no leaf of the shard",
+                    session.peer_address(),
+                )));
+            };
+            if let Some(end) = self
+                .snapshot_new_shard(shard_group, proved, tip_epoch, session, progress, cancel)
+                .await?
+            {
+                return Ok(Some(end));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The latest checkpoint of `shard_group` stored, if it ends one of the last [`SNAPSHOT_CHECKPOINT_EPOCHS`] epochs
+    /// before `current_epoch`.
+    async fn pinned_checkpoint(
+        &self,
+        shard_group: ShardGroup,
+        current_epoch: Epoch,
+    ) -> Result<Option<EpochCheckpoint>, NetworkStateSyncError> {
+        let Some(checkpoint) = self
+            .store
+            .with_read_tx(move |tx| tx.epoch_checkpoint_get_latest(Some(shard_group.start())).optional())
+            .await?
+        else {
+            return Ok(None);
+        };
+        Ok(is_snapshot_checkpoint(&checkpoint, shard_group, current_epoch).then_some(checkpoint))
+    }
+
+    /// Takes a snapshot of new shard `proved.leaf.shard` from `session` at `proved`, a leaf of `epoch`, and promotes
+    /// it. Returns how the round ends if it cannot be taken. A shard whose leaf is at v0 takes no snapshot and is
+    /// followed from v0, whose genesis transitions are all its history.
+    async fn snapshot_new_shard(
+        &self,
+        shard_group: ShardGroup,
+        proved: ProvedShardLeaf,
+        epoch: Epoch,
+        session: &mut ValidatorRpcSession,
+        progress: &SharedSyncProgress,
+        cancel: &CancellationToken,
+    ) -> Result<Option<RoundEnd>, NetworkStateSyncError> {
+        let shard = proved.leaf.shard;
+        if proved.leaf.state_version.as_u64() == 0 {
+            return Ok(None);
+        }
+        self.sync_status
+            .set_phase(shard_group, GroupPhase::Snapshotting { shard });
+        let end = self.snapshot_shard(proved, epoch, session, progress, cancel).await;
+        self.sync_status.set_snapshot(shard, None);
+        if !matches!(end, Ok(SnapshotEnd::Promoted)) {
+            // A shard whose snapshots are abandoned too often replays its history, and takes no snapshot that
+            // would clear these rows
+            self.store
+                .with_write_tx(move |tx| tx.snapshot_substates_delete(shard))
+                .await?;
+        }
+        match end {
+            Ok(SnapshotEnd::Promoted) => {
+                self.abandoned_snapshots().remove(&shard);
+                Ok(None)
+            },
+            Ok(SnapshotEnd::Cancelled) => Ok(Some(RoundEnd::Cancelled)),
+            Ok(SnapshotEnd::Abandoned(reason)) => {
+                Ok(Some(self.abandon_snapshot(shard, reason, session.peer_address())))
+            },
+            Err(err) if err.is_peer_fault() && !err.is_unverified_history() => {
+                warn!(target: LOG_TARGET, "⚠️ Snapshot of shard {shard} from {} failed: {}", session.peer_address(), err);
+                Ok(Some(RoundEnd::Pause("the peer failed")))
+            },
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Counts an abandoned snapshot of `shard` towards [`MAX_ABANDONED_SNAPSHOTS`], and pauses the round so that the
+    /// next takes it at a fresh leaf, or replays the shard once too many were.
+    fn abandon_snapshot(&self, shard: Shard, reason: &str, peer: &PeerAddress) -> RoundEnd {
+        let abandoned = {
+            let mut abandoned = self.abandoned_snapshots();
+            let count = abandoned.entry(shard).or_default();
+            *count += 1;
+            *count
+        };
+        if abandoned >= MAX_ABANDONED_SNAPSHOTS {
+            warn!(target: LOG_TARGET, "⚠️ {abandoned} snapshots of new shard {shard} in a row were abandoned, the last from {peer} because {reason}. Replaying the shard's history from v0 instead");
+        } else {
+            info!(target: LOG_TARGET, "🌍️ Abandoned the snapshot of new shard {shard} from {peer} because {reason}. Taking it again next round");
+        }
+        RoundEnd::Pause("a new shard's snapshot was abandoned")
+    }
+
+    /// Takes a snapshot of new shard `proved.leaf.shard` from `session` at the leaf's version, checks each page
+    /// against the shard root the leaf commits as it arrives, and promotes it, so that the shard's stream follows from
+    /// that version rather than replaying its history. `epoch` is the epoch of the block the leaf was proved in.
+    ///
+    /// A page that does not match the root blames the peer. Each page builds on genuine substates of the shard, so
+    /// what is staged is bounded by the shard's live state, and [`MAX_SNAPSHOT_DURATION`] bounds how long the peer
+    /// holds the round. The snapshot reads one quorum-proved version, which an epoch change leaves as valid, so the
+    /// round sees the change only once the snapshot ends.
+    async fn snapshot_shard(
+        &self,
+        proved: ProvedShardLeaf,
+        epoch: Epoch,
+        session: &mut ValidatorRpcSession,
+        progress: &SharedSyncProgress,
+        cancel: &CancellationToken,
+    ) -> Result<SnapshotEnd, NetworkStateSyncError> {
+        let VerifiedShardLeaf {
+            shard,
+            state_version,
+            transition_acc,
+        } = proved.leaf;
+        let peer = *session.peer_address();
+        info!(target: LOG_TARGET, "🌍️ Taking a snapshot of new shard {shard} at v{state_version} from {peer}");
+        let started_at = SystemTime::now();
+        self.sync_status.set_snapshot(
+            shard,
+            Some(SnapshotProgress {
+                state_version,
+                substates: 0,
+                key_fraction: 0.0,
+                started_at,
+            }),
+        );
+        // A snapshot interrupted by a restart is started again
+        self.store
+            .with_write_tx(move |tx| tx.snapshot_substates_delete(shard))
+            .await?;
+        let faulty = |details: String| NetworkStateSyncError::UnverifiedHistory {
+            details: format!("Peer {peer} served a snapshot of shard {shard} at v{state_version} that {details}"),
+            blamed: vec![peer],
+            diverged_from: Some((shard, None)),
+        };
+
+        let value_filters = stream_value_filters();
+        let mut snapshot = ShardSnapshot::new(self.network, proved, value_filters);
+        let deadline = time::Instant::now() + MAX_SNAPSHOT_DURATION;
+        loop {
+            let request = rpc::GetShardSnapshotRequest {
+                shard: shard.as_u32(),
+                state_version: state_version.as_u64(),
+                after_leaf_key: snapshot.last_key().map(|key| key.bytes.to_vec()).unwrap_or_default(),
+                limit: SNAPSHOT_PAGE_SUBSTATES,
+                value_filters: value_filters.bits(),
+            };
+            let page = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return Ok(SnapshotEnd::Cancelled),
+                () = time::sleep_until(deadline) => {
+                    return Ok(SnapshotEnd::Abandoned("it outlasted its time budget"));
+                },
+                page = session.get_shard_snapshot(request) => page?,
+            };
+            if page.version_unavailable {
+                return Ok(SnapshotEnd::Abandoned(
+                    "the peer does not hold the shard's tree at the leaf",
+                ));
+            }
+            if page.substates.is_empty() && !page.is_last {
+                return Err(faulty("returns an empty page before its last".to_string()));
+            }
+            let staged = match snapshot.add_page(page.substates, &page.last_leaf_proof) {
+                Ok(staged) => staged,
+                Err(SnapshotError::ValueWithheld { substate_id }) => {
+                    warn!(target: LOG_TARGET, "⚠️ {peer} sent {substate_id} of shard {shard} as its hash alone in a snapshot that indexes its value");
+                    return Ok(SnapshotEnd::Abandoned("the peer withheld a value the snapshot indexes"));
+                },
+                Err(e) => {
+                    self.record_leaf_check("snapshot_mismatch");
+                    return Err(faulty(format!("is invalid: {e}")));
+                },
+            };
+            if !staged.is_empty() {
+                self.store
+                    .with_write_tx(move |tx| tx.snapshot_substates_insert(shard, &staged))
+                    .await?;
+            }
+            self.sync_status.set_snapshot(
+                shard,
+                Some(SnapshotProgress {
+                    state_version,
+                    substates: snapshot.num_substates(),
+                    key_fraction: if page.is_last {
+                        1.0
+                    } else {
+                        snapshot.last_key().map(key_fraction).unwrap_or_default()
+                    },
+                    started_at,
+                }),
+            );
+            if page.is_last {
+                break;
+            }
+        }
+        let num_substates = snapshot.num_substates();
+        if let Err(e) = snapshot.finish() {
+            self.record_leaf_check("snapshot_mismatch");
+            return Err(faulty(format!("does not match its verified leaf: {e}")));
+        }
+        let verified = VerifiedShardVersion {
+            state_version,
+            epoch,
+            transition_acc,
+        };
+        self.promote_shard_snapshot(shard, verified, progress).await?;
+        info!(target: LOG_TARGET, "🌍️ Indexed new shard {shard} from a verified snapshot of {num_substates} substates at v{state_version}");
+        Ok(SnapshotEnd::Promoted)
+    }
+
+    /// Promotes `shard`'s staged snapshot, which matched its leaf at `verified`, and restores the shard's stage to it.
+    async fn promote_shard_snapshot(
+        &self,
+        shard: Shard,
+        verified: VerifiedShardVersion,
+        progress: &SharedSyncProgress,
+    ) -> Result<(), NetworkStateSyncError> {
+        let promoted = {
+            // The progress lock is held until the snapshot is written, as `SharedSyncProgress` requires.
+            let mut progress = progress.lock().await;
+            let snapshot = progress.clone();
+            let event_filters = self.config.event_filters.clone();
+            let watched_templates = self.config.watched_templates.clone();
+            let promoted = self
+                .store
+                .with_write_tx(move |tx| {
+                    promote_snapshot(tx, shard, verified, snapshot, &event_filters, &watched_templates)
+                })
+                .await?;
+            progress.record_verified(shard, verified);
+            progress.record_state_version(shard, verified.state_version, verified.epoch);
+            promoted
+        };
+        self.announce(shard, promoted);
+        self.record_leaf_check("snapshot");
+
+        let verdict = self
+            .verified_stage()
+            .restore(
+                shard,
+                Some(AccumulatedVersion {
+                    version: verified.state_version,
+                    acc: verified.transition_acc,
+                }),
+                Vec::new(),
+            )
+            .map_err(|e| NetworkStateSyncError::InvariantError {
+                details: format!("shard {shard}'s stage does not restore to its snapshot: {e}"),
+            })?;
+        if let Some(verdict) = verdict {
+            self.act_on_verdict(shard, verdict, "the leaf it was waiting for", progress)
+                .await?;
+        }
+        if let Some(verdict) = self.check_stored_leaves(shard, progress).await? {
+            self.act_on_verdict(shard, verdict, "a stored checkpoint leaf", progress)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// The shards of `shard_group` whose leaf the next probe asks for: those a leaf would verify.
+    fn leaf_shards(&self, shard_group: ShardGroup, syncs_global_shard: bool) -> BTreeSet<Shard> {
+        let stage = self.verified_stage();
+        syncs_global_shard
+            .then_some(Shard::global())
+            .into_iter()
+            .chain(shard_group.shard_iter())
+            .filter(|shard| stage.wants_leaf(*shard))
+            .collect()
+    }
+
+    /// Resets the verified stage of `shards` to their last verified versions and the versions staged above them, as
+    /// the store holds them, and acts on the verdict of a leaf a shard was waiting for.
+    async fn restore_stage(
+        &self,
+        shards: &[Shard],
+        progress: &SharedSyncProgress,
+    ) -> Result<(), NetworkStateSyncError> {
+        let recorded = {
+            let progress = progress.lock().await;
+            shards
+                .iter()
+                .map(|&shard| (shard, progress.verified(shard), progress.last_state_version(shard)))
+                .collect::<Vec<_>>()
+        };
+        let tail_shards = shards.to_vec();
+        let tails = self
+            .store
+            .with_read_tx(move |tx| {
+                tail_shards
+                    .into_iter()
+                    .map(|shard| tx.staged_accumulators_tail(shard, MAX_ACCUMULATOR_HISTORY))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .await?;
+        for ((shard, verified, cursor), tail) in recorded.into_iter().zip(tails) {
+            let head = tail
+                .last()
+                .map(|staged| staged.state_version)
+                .or(verified.map(|verified| verified.version));
+            if cursor != head {
+                return Err(NetworkStateSyncError::InvariantError {
+                    details: format!(
+                        "shard {shard}'s stream resumes {}, but it continues {} of its last verified or staged version",
+                        after(cursor),
+                        after(head)
+                    ),
+                });
+            }
+            let staged = tail
+                .into_iter()
+                .map(|staged| {
+                    Ok(Staged {
+                        version: staged.state_version,
+                        epoch: staged.epoch,
+                        acc: staged.transition_acc,
+                        streamed_by: decode_peer(&staged.streamed_by)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, NetworkStateSyncError>>()?;
+            let verdict = self.verified_stage().restore(shard, verified, staged).map_err(|e| {
+                NetworkStateSyncError::InvariantError {
+                    details: format!("the staged versions of shard {shard} do not restore: {e}"),
+                }
+            })?;
+            let (verdict, checked_on) = match verdict {
+                Some(verdict) => (Some(verdict), "the leaf it was waiting for"),
+                None => (
+                    self.check_stored_leaves(shard, progress).await?,
+                    "a stored checkpoint leaf",
+                ),
+            };
+            if let Some(verdict) = verdict {
+                self.act_on_verdict(shard, verdict, checked_on, progress).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Checks `leaf` against its shard's staged versions and acts on the verdict. Returns the version promoted to.
+    async fn apply_leaf(
+        &self,
+        leaf: VerifiedShardLeaf,
+        checked_on: impl Display,
+        progress: &SharedSyncProgress,
+    ) -> Result<Option<StateVersion>, NetworkStateSyncError> {
+        let verdict = self.verified_stage().on_leaf(leaf);
+        self.act_on_verdict(leaf.shard, verdict, checked_on, progress).await
+    }
+
+    /// Logs and counts `verdict` on `shard`, then promotes the staged versions it authenticates, or discards those
+    /// staged above the shard's last verified version when it mismatches. A mismatch is returned as an error that
+    /// blames every peer whose staged version was discarded. Returns the version promoted to.
+    ///
+    /// Each promotion moves the verified version past the stored checkpoint leaves checked so far, so the next ones
+    /// above it are checked in turn.
+    async fn act_on_verdict(
+        &self,
+        shard: Shard,
+        verdict: Verdict<PeerAddress>,
+        checked_on: impl Display,
+        progress: &SharedSyncProgress,
+    ) -> Result<Option<StateVersion>, NetworkStateSyncError> {
+        let mut verdict = verdict;
+        let mut checked_on = checked_on.to_string();
+        let mut promoted = None;
+        loop {
+            match verdict {
+                Verdict::Promote(version) => {
+                    debug!(target: LOG_TARGET, "🌍️ Shard {shard} verified to v{version} by {checked_on}");
+                    self.record_leaf_check("promote");
+                    self.promote(shard, version, progress).await?;
+                    promoted = Some(version);
+                    match self.check_stored_leaves(shard, progress).await? {
+                        Some(next) => {
+                            verdict = next;
+                            checked_on = "a stored checkpoint leaf".to_string();
+                        },
+                        None => return Ok(promoted),
+                    }
+                },
+                Verdict::Mismatch {
+                    version,
+                    epoch,
+                    computed,
+                    verified,
+                    streamed_by,
+                } => {
+                    self.record_leaf_check("mismatch");
+                    let (rewound_to, blamed) = self.discard_staged(shard, progress).await?;
+                    return Err(NetworkStateSyncError::UnverifiedHistory {
+                        details: format!(
+                            "Transition accumulator mismatch: shard {shard} v{version} at {epoch} streamed by \
+                             {streamed_by} computes {computed}, but the verified leaf has {verified} (checked on \
+                             {checked_on}). Discarded every version staged {}",
+                            after(rewound_to)
+                        ),
+                        blamed,
+                        diverged_from: Some((shard, rewound_to)),
+                    });
+                },
+                Verdict::Conflict {
+                    version,
+                    held,
+                    verified,
+                } => {
+                    error!(target: LOG_TARGET, "⚠️ Verified leaves conflict: shard {shard} v{version} was verified at transition accumulator {held}, but {checked_on} has {verified}");
+                    self.record_leaf_check("conflict");
+                    return Ok(promoted);
+                },
+                Verdict::Wait | Verdict::Stale => return Ok(promoted),
+            }
+        }
+    }
+
+    /// Checks the first [`CHECKPOINT_LEAVES_AHEAD`] stored checkpoint leaves above `shard`'s verified version,
+    /// returning the verdict of the last that checks anything, or of the first that mismatches. Those ahead of the
+    /// stream wait for it.
+    async fn check_stored_leaves(
+        &self,
+        shard: Shard,
+        progress: &SharedSyncProgress,
+    ) -> Result<Option<Verdict<PeerAddress>>, NetworkStateSyncError> {
+        let verified = progress.lock().await.verified_version(shard);
+        let leaves = self
+            .store
+            .with_read_tx(move |tx| tx.checkpoint_shard_leaves_above(shard, verified, CHECKPOINT_LEAVES_AHEAD))
+            .await?;
+        let mut stage = self.verified_stage();
+        let mut checked = None;
+        for leaf in leaves {
+            let verdict = stage.on_leaf(VerifiedShardLeaf {
+                shard: leaf.shard,
+                state_version: leaf.state_version,
+                transition_acc: leaf.transition_acc,
+            });
+            match verdict {
+                mismatch @ Verdict::Mismatch { .. } => return Ok(Some(mismatch)),
+                Verdict::Wait | Verdict::Stale => {},
+                verdict => checked = Some(verdict),
+            }
+        }
+        Ok(checked)
+    }
+
+    fn record_leaf_check(&self, outcome: &'static str) {
+        #[cfg(feature = "metrics")]
+        self.metrics.record_leaf_check(outcome);
+        #[cfg(not(feature = "metrics"))]
+        let _ = outcome;
+    }
+
+    /// Promotes `shard`'s staged versions up to `through` to the indexed tables, a write transaction at a time, and
+    /// announces what each wrote once it commits.
+    async fn promote(
+        &self,
+        shard: Shard,
+        through: StateVersion,
+        progress: &SharedSyncProgress,
+    ) -> Result<(), NetworkStateSyncError> {
+        loop {
+            // The progress lock is held until the snapshot is written, as `SharedSyncProgress` requires.
+            let mut progress = progress.lock().await;
+            let from = progress.verified_version(shard);
+            if from >= Some(through) {
+                return Ok(());
+            }
+            let snapshot = progress.clone();
+            let event_filters = self.config.event_filters.clone();
+            let watched_templates = self.config.watched_templates.clone();
+            let (verified, promoted) = self
+                .store
+                .with_write_tx(move |tx| {
+                    promote_staged(tx, shard, from, through, snapshot, &event_filters, &watched_templates)
+                })
+                .await?;
+            progress.record_verified(shard, verified);
+            drop(progress);
+            self.sync_status
+                .record_promoted(shard, promoted.num_versions, promoted.finalized.len() as u64);
+            self.announce(shard, promoted);
+        }
+    }
+
+    /// Discards every version of `shard` staged above its last verified one, moving its stream cursor back to it.
+    /// Returns the verified version, `None` when nothing is, and the peers that streamed what was discarded.
+    async fn discard_staged(
+        &self,
+        shard: Shard,
+        progress: &SharedSyncProgress,
+    ) -> Result<(Option<StateVersion>, Vec<PeerAddress>), NetworkStateSyncError> {
+        // The progress lock is held until the snapshot is written, as `SharedSyncProgress` requires.
+        let mut progress = progress.lock().await;
+        let verified = progress.verified_version(shard);
+        progress.rewind_to_verified(shard);
+        let snapshot = progress.clone();
+        let peers = self
+            .store
+            .with_write_tx(move |tx| {
+                let peers = tx.staged_versions_discard_above(shard, verified)?;
+                tx.key_value_set(Key::SyncProgress, snapshot)?;
+                Ok::<_, StorageError>(peers)
+            })
+            .await?;
+        drop(progress);
+        let peers = peers
+            .iter()
+            .map(|peer| decode_peer(peer))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((verified, peers))
+    }
+
+    /// Announces what promoting a shard's versions wrote, once its write transaction has committed.
+    fn announce(&self, shard: Shard, promoted: PromotedVersions) {
+        self.stats.increase_events(promoted.num_receipt_events);
+        if promoted.retired_cache_entries > 0 {
+            debug!(target: LOG_TARGET, "Retired {} cached substates for shard {shard}", promoted.retired_cache_entries);
+            #[cfg(feature = "metrics")]
+            self.substate_cache_metrics
+                .add_invalidations(promoted.retired_cache_entries);
+        }
+        for (state_version, address) in &promoted.skipped_utxos {
+            warn!(target: LOG_TARGET, "⚠️ Unspent output {address} at v{state_version} of shard {shard} is already indexed. Kept the indexed row");
+        }
+        for finalized in promoted.finalized {
+            self.notify.notify(finalized);
+        }
+        for inserted in promoted.inserted_events {
+            self.transaction_event_notify.notify(TransactionEvent {
+                id: inserted.id,
+                transaction_id: inserted.transaction_id,
+                event: inserted.event,
+                encoded: inserted.encoded,
+            });
+        }
+    }
+
+    fn observe_tip(&self, probe: &VerifiedProbe) {
+        self.sync_status.record_tip(
+            probe.tip.shard_group,
+            probe.tip.epoch,
+            probe.tip.height,
+            probe
+                .leaves
+                .iter()
+                .map(|proved| (proved.leaf.shard, proved.leaf.state_version)),
+        );
+    }
+
+    fn verified_stage(&self) -> MutexGuard<'_, VerifiedStage<PeerAddress>> {
+        self.verified_stage.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn abandoned_snapshots(&self) -> MutexGuard<'_, HashMap<Shard, usize>> {
+        self.abandoned_snapshots.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Records a committee-validated tip into the verified-root store, after a fail-open epoch
@@ -797,40 +1753,45 @@ impl NetworkWideStateSync {
         Ok(())
     }
 
-    /// Consumes a single `sync_state` stream covering `cursors`, following the responder's tip if
-    /// `follow` is set.
+    /// Consumes a followed `sync_state` stream covering `cursors`, staging each version it streams and promoting the
+    /// staged versions each verified leaf authenticates.
     ///
     /// The responder streams each shard's updates contiguously and closes it off with a completion
-    /// marker, so progress is recorded per shard as the stream advances - an interrupted stream keeps
-    /// everything already committed and simply resumes from the recorded cursors when reopened. A
-    /// followed stream keeps going past the tip, closing off each burst of a shard's new versions
-    /// with a further marker; it ends when the responder has had nothing to send for the deadline,
-    /// or can no longer serve it.
+    /// marker. Each version is staged with the transition accumulator computed through it as it
+    /// completes, so an interrupted stream keeps everything already staged and simply resumes from
+    /// the recorded cursors when reopened. A followed stream keeps going past the tip, closing off
+    /// each burst of a shard's new versions with a further marker and asking for a probe of the
+    /// group's tip; it ends when the responder has had nothing to send for the deadline, or can no
+    /// longer serve it.
     ///
-    /// Cancellation and an epoch change are honoured between messages, so a version being committed
-    /// when either arrives is committed in full and the recorded progress reflects it.
+    /// The stream peer is blamed, ending the stream, when its history mismatches a verified leaf,
+    /// when a verified leaf stays ahead of a shard it claims is level for [`VERIFICATION_GRACE`],
+    /// or when a version it staged stays above every verified leaf of its shard for as long. The
+    /// stream stops being read while what it staged above every verified leaf reaches
+    /// [`MAX_UNCOVERED_BYTES`] or [`MAX_UNCOVERED_VERSIONS`].
+    ///
+    /// Cancellation and an epoch change are honoured between messages, so a version being staged
+    /// or promoted when either arrives is written in full and the recorded progress reflects it.
     #[expect(clippy::too_many_lines, clippy::too_many_arguments)]
     async fn stream_shard_state(
         &mut self,
         cursors: Vec<rpc::ShardCursor>,
-        value_filters: SubstateValueFilterFlags,
-        follow: bool,
         progress: &SharedSyncProgress,
         shard_group: ShardGroup,
         session: &mut ValidatorRpcSession,
         cancel: &CancellationToken,
         epoch: &mut watch::Receiver<Epoch>,
+        mut checkpoints_due: Option<CheckpointsDue>,
+        leaves: &mut GroupLeaves,
     ) -> Result<StreamEnd, NetworkStateSyncError> {
-        let mut order = StreamOrder::new(
-            &cursors,
-            value_filters.include_filtered_hashes() && !value_filters.is_up_only(),
-        );
+        let value_filters = stream_value_filters();
+        let mut order = StreamOrder::new(&cursors);
+        let peer = *session.peer_address();
 
         info!(
             target: LOG_TARGET,
-            "🌍️ Starting state sync for {} shard(s) in shard group {shard_group} from peer {} (follow: {follow})",
+            "🌍️ Following {} shard(s) in shard group {shard_group} from peer {peer}",
             cursors.len(),
-            session.peer_address()
         );
 
         let options = RpcRequestOptions::new()
@@ -843,7 +1804,7 @@ impl NetworkWideStateSync {
                     // Sync to latest epoch
                     until_epoch: None,
                     value_filters: value_filters.bits(),
-                    follow,
+                    follow: true,
                     include_version_proofs: false,
                 },
                 options,
@@ -852,31 +1813,57 @@ impl NetworkWideStateSync {
 
         // A keepalive says the responder is there and has nothing to send: for every shard it has
         // closed off on this stream, that is the claim a further marker would make, so each one
-        // re-stamps those shards' watermarks. A shard not yet closed off is still being caught up
-        // and is not level, keepalive or not.
+        // re-stamps those shards' watermarks. A shard not yet closed off, or streamed since its last
+        // marker, is still being caught up and is not level, keepalive or not.
         let mut keepalives = stream.keepalives();
         let mut keepalives_open = true;
-        let mut level_shards = HashSet::new();
+        let mut level = HashMap::<Shard, StateVersion>::new();
+        let mut checks = StreamChecks::default();
+        let mut check_interval = time::interval(VERIFICATION_CHECK_INTERVAL);
+        check_interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
+        check_interval.reset();
 
         // Buffers accumulate a single (shard, state version) at a time: the responder splits an
         // oversized version into chunks flagged `has_more`, and the last chunk flushes them.
         let mut num_updates = 0usize;
-        let mut version_buf = VersionBuf::default();
+        let mut encoded_batches = Vec::new();
+        let mut tree_changes = Ok(Vec::new());
 
         loop {
             let result = tokio::select! {
                 biased;
                 _ = cancel.cancelled() => return Ok(StreamEnd::Cancelled),
                 Ok(()) = epoch.changed() => return Ok(StreamEnd::EpochAdvanced),
-                next = stream.next() => match next {
+                () = time::sleep_until(checkpoints_due.map_or_else(time::Instant::now, |due| due.at())), if checkpoints_due.is_some() => {
+                    return Ok(StreamEnd::CheckpointsDue);
+                },
+                Some(probed) = leaves.probed.recv() => {
+                    for leaf in probed {
+                        checks.cover(leaf.shard, leaf.state_version);
+                        let promoted = self
+                            .apply_leaf(leaf, format!("the tip leaf at v{}", leaf.state_version), progress)
+                            .await?;
+                        self.confirm_promoted(leaf.shard, promoted, &level);
+                    }
+                    self.check_stream_peer(&mut checks, &level, &peer, progress).await?;
+                    continue;
+                },
+                _ = check_interval.tick() => {
+                    self.check_stream_peer(&mut checks, &level, &peer, progress).await?;
+                    continue;
+                },
+                next = stream.next(), if !checks.is_full() => match next {
                     Some(result) => result,
                     None => break,
                 },
                 changed = keepalives.changed(), if keepalives_open => {
                     match changed {
                         Ok(()) => {
-                            for shard in &level_shards {
-                                self.shard_watermarks.refresh(*shard);
+                            let stage = self.verified_stage();
+                            for (shard, level_at) in &level {
+                                if stage.verified_version(*shard) >= Some(*level_at) {
+                                    self.shard_watermarks.refresh(*shard);
+                                }
                             }
                         },
                         Err(_) => keepalives_open = false,
@@ -888,7 +1875,7 @@ impl NetworkWideStateSync {
                 Ok(msg) => msg,
                 // A followed stream with nothing to send for the deadline is simply abandoned by the
                 // responder, which the client reports as a timeout.
-                Err(status) if follow && status.as_status_code().is_timeout() => {
+                Err(status) if status.as_status_code().is_timeout() => {
                     debug!(target: LOG_TARGET, "🌍️ State sync stream for shard group {shard_group} timed out: {status}");
                     return Ok(StreamEnd::TimedOut);
                 },
@@ -911,10 +1898,10 @@ impl NetworkWideStateSync {
                             .ok_or_else(|| NetworkStateSyncError::InvalidStateUpdate {
                                 details: "Received sync completion without epoch".to_string(),
                             })?;
-                    // Recorded progress only ever advances with a committed batch, never to the
+                    // Recorded progress only ever advances with a staged version, never to the
                     // version a marker claims: a claim past what was streamed would skip every
                     // version in between for good.
-                    let level_at = order
+                    let (level_at, burst) = order
                         .accept_marker(shard, synced_to)
                         .map_err(|details| NetworkStateSyncError::InvalidStateUpdate { details })?;
                     // The completion marker is the only point at which this shard is known to be
@@ -922,11 +1909,15 @@ impl NetworkWideStateSync {
                     // the indexer holds every transition up to some version while the chain is
                     // arbitrarily far ahead of it. Confirmed even when the watermark did not move -
                     // a quiet shard is still one this indexer is keeping up with.
-                    if let Some(level_at) = level_at {
-                        self.shard_watermarks.confirm(shard, level_at);
-                        level_shards.insert(shard);
+                    level.insert(shard, level_at);
+                    self.confirm_level(shard, level_at);
+                    if burst {
+                        leaves.burst.notify_one();
                     }
                     debug!(target: LOG_TARGET, "🌍️ Completed state sync for shard {shard} in shard group {shard_group} at epoch {msg_epoch} (peer synced to v{synced_to})");
+                    if let Some(due) = &mut checkpoints_due {
+                        due.observe(msg_epoch);
+                    }
                     if complete.is_final {
                         return Ok(StreamEnd::Final);
                     }
@@ -947,24 +1938,28 @@ impl NetworkWideStateSync {
                 .ok_or_else(|| NetworkStateSyncError::InvalidStateUpdate {
                     details: "Received state update without epoch".to_string(),
                 })?;
+            if let Some(due) = &mut checkpoints_due {
+                due.observe(msg_epoch);
+            }
+            let encoded_len = batch.encoded_len();
             order
-                .accept_batch(
-                    shard,
-                    state_version,
-                    batch.has_more,
-                    batch.updates.len(),
-                    batch.encoded_len(),
-                )
+                .accept_batch(shard, state_version, batch.has_more, batch.updates.len(), encoded_len)
                 .map_err(|details| NetworkStateSyncError::InvalidStateUpdate { details })?;
+            level.remove(&shard);
 
             num_updates += batch.updates.len();
+            encoded_batches.extend(batch.encode_length_delimited_to_vec());
             for update in batch.updates {
                 let update =
                     SubstateUpdateProof::try_from(update).map_err(|e| NetworkStateSyncError::InvalidStateUpdate {
                         details: format!("Failed to convert substate update: {}", e),
                     })?;
-
-                version_buf.extend_from_substate_update(shard, state_version, update, value_filters);
+                if let Ok(changes) = &mut tree_changes {
+                    match streamed_tree_change(self.network, msg_epoch, &update) {
+                        Ok(change) => changes.push(change),
+                        Err(e) => tree_changes = Err(e),
+                    }
+                }
             }
             if batch.has_more {
                 debug!(target: LOG_TARGET, "🌍️ more updates for shard {shard} (epoch: {msg_epoch}, state version: {state_version})");
@@ -972,73 +1967,153 @@ impl NetworkWideStateSync {
             }
 
             debug!(target: LOG_TARGET, "🌍️ Received {num_updates} updates for shard {shard} (epoch: {msg_epoch}, state version: {state_version})");
-
             self.stats.increase_state_updates(std::mem::take(&mut num_updates));
-            // The stream flushes (has_more == false) once per state version, so each commit must fold
-            // only that version's delta.
-            let version = std::mem::take(&mut version_buf);
 
-            let mut progress = progress.lock().await;
-            progress.record_state_version(shard, state_version, msg_epoch);
-            let sync_progress_snapshot = progress.clone();
-
-            let event_filters = self.config.event_filters.clone();
-            let watched_templates = self.config.watched_templates.clone();
-
-            let committed = self
-                .store
-                .clone()
+            let staged = self.stage_version(
+                shard,
+                state_version,
+                msg_epoch,
+                std::mem::replace(&mut tree_changes, Ok(Vec::new())),
+                std::mem::take(&mut encoded_batches),
+                &peer,
+            )?;
+            let staged_bytes = staged.batch.len();
+            let (verdict, staged) = staged.into_parts();
+            // The progress lock is held until the snapshot is written, as `SharedSyncProgress` requires.
+            let mut progress_guard = progress.lock().await;
+            progress_guard.record_state_version(shard, state_version, msg_epoch);
+            let sync_progress_snapshot = progress_guard.clone();
+            self.store
                 .with_write_tx(move |tx| {
-                    version.commit(
-                        tx,
-                        shard,
-                        state_version,
-                        msg_epoch,
-                        sync_progress_snapshot,
-                        &event_filters,
-                        &watched_templates,
-                    )
+                    tx.staged_version_insert(shard, &staged)?;
+                    tx.key_value_set(Key::SyncProgress, sync_progress_snapshot)
                 })
                 .await?;
-            drop(progress);
-            self.stats.increase_events(committed.num_receipt_events);
-            if committed.retired_cache_entries > 0 {
-                debug!(target: LOG_TARGET, "Retired {} cached substates for shard {shard} at state version {state_version}", committed.retired_cache_entries);
-                #[cfg(feature = "metrics")]
-                self.substate_cache_metrics
-                    .add_invalidations(committed.retired_cache_entries);
+            drop(progress_guard);
+            if self
+                .verified_stage()
+                .highest_leaf(shard)
+                .is_none_or(|leaf| leaf < state_version)
+            {
+                checks.stage(shard, state_version, staged_bytes, time::Instant::now());
             }
-            for address in &committed.skipped_receipts {
-                warn!(target: LOG_TARGET, "⚠️ Peer {} streamed receipt {address} at v{state_version} of shard {shard}, which is already indexed. Kept the indexed receipt", session.peer_address());
-            }
-            for address in &committed.skipped_utxos {
-                warn!(target: LOG_TARGET, "⚠️ Peer {} streamed unspent output {address} at v{state_version} of shard {shard}, whose nonce and tag an indexed unspent output already holds. Kept the indexed output", session.peer_address());
-            }
-            for address in &committed.skipped_templates {
-                warn!(target: LOG_TARGET, "⚠️ Peer {} streamed template {address} at v{state_version} of shard {shard}, which is already catalogued. Kept the catalogued entry", session.peer_address());
-            }
-
-            for finalized in committed.finalized {
-                self.notify.notify(finalized);
-            }
-            for inserted in committed.inserted_events {
-                self.transaction_event_notify.notify(TransactionEvent {
-                    id: inserted.id,
-                    transaction_id: inserted.transaction_id,
-                    event: inserted.event,
-                });
+            if let Some(verdict) = verdict {
+                let promoted = self
+                    .act_on_verdict(shard, verdict, format!("v{state_version} streamed by {peer}"), progress)
+                    .await?;
+                self.confirm_promoted(shard, promoted, &level);
             }
         }
 
         // A followed stream is only ever ended by the responder for want of its warrant, which it
         // reports, or of consensus. Ending silently is the peer's failing either way.
         Err(NetworkStateSyncError::InvalidStateUpdate {
-            details: if follow {
-                format!("Followed state sync stream for shard group {shard_group} was closed by the responder")
-            } else {
-                format!("State sync stream for shard group {shard_group} ended without a final completion marker")
+            details: format!("Followed state sync stream for shard group {shard_group} was closed by the responder"),
+        })
+    }
+
+    /// Extends `shard`'s accumulator with the streamed `state_version`, whose transitions are `changes` and whose
+    /// encoded chunks are `batch`, returning what to stage for it with the verdict on a leaf that was waiting for it.
+    fn stage_version(
+        &self,
+        shard: Shard,
+        state_version: StateVersion,
+        epoch: Epoch,
+        changes: Result<Vec<SubstateTreeChange>, StreamedTransitionError>,
+        batch: Vec<u8>,
+        peer: &PeerAddress,
+    ) -> Result<StagedWithVerdict, NetworkStateSyncError> {
+        // A version this indexer cannot accumulate counts towards the circuit breaker as a mismatch does: if every
+        // member streams one, the recomputation is the likelier fault.
+        let verified = self.verified_stage().verified_version(shard);
+        let invalid = |details: String| {
+            self.record_leaf_check("invalid_version");
+            NetworkStateSyncError::UnverifiedHistory {
+                details: format!("Peer {peer} streamed v{state_version} of shard {shard} at {epoch}, {details}"),
+                blamed: vec![*peer],
+                diverged_from: Some((shard, verified)),
+            }
+        };
+        let changes = changes.map_err(|e| invalid(format!("which no committed version could hold: {e}")))?;
+        let (transition_acc, verdict) = self
+            .verified_stage()
+            .on_version(shard, state_version, epoch, &changes, *peer)
+            .map_err(|e| match e {
+                e @ StageError::NotNext { .. } => NetworkStateSyncError::InvariantError {
+                    details: format!("shard {shard}'s stream and its verified stage disagree: {e}"),
+                },
+                e @ StageError::Uncomputable { .. } => invalid(e.to_string()),
+            })?;
+        Ok(StagedWithVerdict {
+            verdict,
+            batch,
+            accumulator: StagedAccumulator {
+                state_version,
+                epoch,
+                transition_acc,
+                streamed_by: peer.to_bytes(),
             },
         })
+    }
+
+    /// Confirms `shard`'s watermark at `level_at`, the version the stream found it level at, once every version up to
+    /// it is promoted.
+    ///
+    /// The substate cache retires an entry only when the version that supersedes it is promoted, and serves on a
+    /// confirmation's freshness alone, so a shard with versions still staged below its level is left to age.
+    fn confirm_level(&self, shard: Shard, level_at: StateVersion) {
+        if self.verified_stage().verified_version(shard) >= Some(level_at) {
+            self.shard_watermarks.confirm(shard, level_at);
+        }
+    }
+
+    /// Confirms `shard`'s watermark once a promotion reaches the version the stream last found it level at.
+    fn confirm_promoted(&self, shard: Shard, promoted: Option<StateVersion>, level: &HashMap<Shard, StateVersion>) {
+        if let (Some(_), Some(level_at)) = (promoted, level.get(&shard)) {
+            self.confirm_level(shard, *level_at);
+        }
+    }
+
+    /// Blames the stream peer for a verified leaf it withholds, or for a version it staged that no verified leaf has
+    /// reached, for longer than [`VERIFICATION_GRACE`]. What was staged above the last verified version of a shard
+    /// with an unreached version is discarded.
+    async fn check_stream_peer(
+        &self,
+        checks: &mut StreamChecks,
+        level: &HashMap<Shard, StateVersion>,
+        peer: &PeerAddress,
+        progress: &SharedSyncProgress,
+    ) -> Result<(), NetworkStateSyncError> {
+        let now = time::Instant::now();
+        let withheld = {
+            let stage = self.verified_stage();
+            checks.withheld(level, |shard| stage.waiting_for(shard), now)
+        };
+        if let Some((shard, level_at, leaf_version)) = withheld {
+            self.record_leaf_check("withheld");
+            return Err(NetworkStateSyncError::UnverifiedHistory {
+                details: format!(
+                    "Peer {peer} claims shard {shard} is level at v{level_at}, but a verified leaf at v{leaf_version} \
+                     has been ahead of it for {VERIFICATION_GRACE:?}"
+                ),
+                blamed: vec![*peer],
+                diverged_from: None,
+            });
+        }
+        if let Some((shard, version)) = checks.overdue(now) {
+            self.record_leaf_check("unverified");
+            let (rewound_to, _) = self.discard_staged(shard, progress).await?;
+            return Err(NetworkStateSyncError::UnverifiedHistory {
+                details: format!(
+                    "Peer {peer} staged v{version} of shard {shard}, which no verified leaf has reached in \
+                     {VERIFICATION_GRACE:?}. Discarded every version staged {}",
+                    after(rewound_to)
+                ),
+                blamed: vec![*peer],
+                diverged_from: None,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -1065,8 +2140,113 @@ enum StreamEnd {
     /// The epoch moved while the stream was open. The group syncs the new checkpoints and reopens
     /// from a committee member at the new epoch.
     EpochAdvanced,
+    /// The group's checkpoint for the epoch before the current one was missing when the stream
+    /// opened, and is now due (see [`CheckpointsDue`]). The group syncs checkpoints again and reopens.
+    CheckpointsDue,
     /// The plan is being wound down.
     Cancelled,
+}
+
+/// When a shard group whose checkpoint for the epoch before `epoch` was missing syncs its checkpoints again.
+///
+/// Consensus that moves into an epoch from the one before does so only once it has committed the checkpoint that ends
+/// it, so a streamed version committed in `epoch` or later, or a completion marker its responder makes as of `epoch` or
+/// later, shows the checkpoint exists unless consensus started in `epoch` (see [`CheckpointRetryBackoff`]). The sync is
+/// due `soonest_after` the round started then, and otherwise after the work interval.
+#[derive(Debug, Clone, Copy)]
+struct CheckpointsDue {
+    epoch: Epoch,
+    at: time::Instant,
+    soonest: time::Instant,
+}
+
+impl CheckpointsDue {
+    fn new(epoch: Epoch, now: time::Instant, soonest_after: Duration, work_interval: Duration) -> Self {
+        Self {
+            epoch,
+            at: now + work_interval,
+            soonest: now + soonest_after.min(work_interval),
+        }
+    }
+
+    fn at(&self) -> time::Instant {
+        self.at
+    }
+
+    /// Brings the sync forward when a message stamped `msg_epoch` shows the committee has entered `self.epoch`.
+    fn observe(&mut self, msg_epoch: Epoch) {
+        if msg_epoch >= self.epoch {
+            self.at = self.at.min(self.soonest);
+        }
+    }
+}
+
+/// How soon after a round starts a shard group's stream may bring forward the sync of a checkpoint the round found
+/// missing (see [`CheckpointsDue`]).
+///
+/// A committee can enter an epoch with no checkpoint ending the one before, as in the first epoch consensus runs or
+/// after an epoch it never ran, and its stream then shows the epoch on every round while the sync keeps falling short.
+/// So the interval starts at [`CHECKPOINT_RETRY_MIN_INTERVAL`] and doubles with each round of the same epoch that finds
+/// the checkpoint missing, up to the work interval.
+#[derive(Debug)]
+struct CheckpointRetryBackoff {
+    work_interval: Duration,
+    last: Option<(Epoch, Duration)>,
+}
+
+impl CheckpointRetryBackoff {
+    fn new(work_interval: Duration) -> Self {
+        Self {
+            work_interval,
+            last: None,
+        }
+    }
+
+    /// The interval for a round of `epoch` that found the checkpoint ending the epoch before it missing.
+    fn next(&mut self, epoch: Epoch) -> Duration {
+        let interval = match self.last {
+            Some((last_epoch, last_interval)) if last_epoch == epoch => last_interval.saturating_mul(2),
+            _ => CHECKPOINT_RETRY_MIN_INTERVAL,
+        }
+        .min(self.work_interval);
+        self.last = Some((epoch, interval));
+        interval
+    }
+
+    /// When a round of `epoch` starting now syncs its checkpoints again: never once they `reached` the epoch before
+    /// it, which starts the backoff over.
+    fn checkpoints_due(&mut self, reached: bool, epoch: Epoch) -> Option<CheckpointsDue> {
+        if reached {
+            self.last = None;
+            return None;
+        }
+        let soonest_after = self.next(epoch);
+        Some(CheckpointsDue::new(
+            epoch,
+            time::Instant::now(),
+            soonest_after,
+            self.work_interval,
+        ))
+    }
+}
+
+/// How a round of following a shard group ended without failing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RoundEnd {
+    /// The next round starts at once.
+    Reopen,
+    /// The next round waits the work interval first, for the given reason.
+    Pause(&'static str),
+    /// The plan is being wound down.
+    Cancelled,
+}
+
+/// What a shard group's stream receives from the loop probing its tip.
+struct GroupLeaves {
+    /// The verified shard leaves of each probe.
+    probed: mpsc::Receiver<Vec<VerifiedShardLeaf>>,
+    /// Asks for a probe once the stream closes off a burst of versions.
+    burst: Arc<tokio_sync::Notify>,
 }
 
 /// A cursor per shard resuming after the version recorded for it, in the order of `shards`. A shard
@@ -1084,7 +2264,7 @@ fn cursors_for(shards: &[Shard], progress: &SyncProgress) -> Vec<rpc::ShardCurso
                     };
                     next
                 },
-                None => 1,
+                None => 0,
             };
             Some(rpc::ShardCursor {
                 shard: shard.as_u32(),
@@ -1094,45 +2274,89 @@ fn cursors_for(shards: &[Shard], progress: &SyncProgress) -> Vec<rpc::ShardCurso
         .collect()
 }
 
-/// Enforces the ordering a `sync_state` stream promises across the shards it carries: a shard's
-/// versions strictly advance, and a version split across chunks is delivered whole before anything
-/// else.
+/// The shards of `shards` nothing was staged or verified of. Each is indexed from a snapshot at a verified leaf.
+fn new_shards(shards: &[Shard], progress: &SyncProgress) -> BTreeSet<Shard> {
+    shards
+        .iter()
+        .copied()
+        .filter(|&shard| progress.last_state_version(shard).is_none() && progress.verified.get(&shard).is_none())
+        .collect()
+}
+
+/// Whether a snapshot of a shard of `shard_group` may be taken at `checkpoint` in `current_epoch`: it is a checkpoint
+/// of `shard_group` that ends one of the last [`SNAPSHOT_CHECKPOINT_EPOCHS`] epochs.
+fn is_snapshot_checkpoint(checkpoint: &EpochCheckpoint, shard_group: ShardGroup, current_epoch: Epoch) -> bool {
+    let oldest_pinned = current_epoch.saturating_sub(Epoch(SNAPSHOT_CHECKPOINT_EPOCHS));
+    checkpoint
+        .checked_shard_group()
+        .is_ok_and(|checkpoint_group| checkpoint_group == shard_group) &&
+        (oldest_pinned..current_epoch).contains(&checkpoint.epoch())
+}
+
+/// The leaf of `shard` that `checkpoint` proves, and the checkpoint's epoch.
+fn checkpoint_leaf(checkpoint: &EpochCheckpoint, shard: Shard) -> Option<(ProvedShardLeaf, Epoch)> {
+    let summary = checkpoint.shard_tree_summary().get(&shard)?;
+    let proved = ProvedShardLeaf {
+        leaf: VerifiedShardLeaf {
+            shard,
+            state_version: StateVersion::new(summary.state_version),
+            transition_acc: summary.transition_acc,
+        },
+        shard_root: summary.root_hash,
+    };
+    Some((proved, checkpoint.epoch()))
+}
+
+/// How a shard snapshot ended.
+enum SnapshotEnd {
+    /// The snapshot matched its leaf and was promoted.
+    Promoted,
+    /// The plan is being wound down.
+    Cancelled,
+    /// The peer could not serve the whole snapshot, for the reason given. Every page it served matched the leaf.
+    Abandoned(&'static str),
+}
+
+/// Enforces the ordering a followed `sync_state` stream promises across the shards it carries: a
+/// shard's versions follow one another from its cursor, and a version split across chunks is
+/// delivered whole before anything else.
 ///
 /// The consumer relies on both. Its buffers hold one `(shard, state version)` at a time, so a shard
-/// interleaved mid-version would mix two shards' updates into one commit; and because the running
-/// economic totals are read-modify-write, re-applying a version already committed would double-count
-/// it. A completion marker closes off what was streamed so far for a shard and a followed stream
-/// carries more for it after, so a marker does not end a shard.
+/// interleaved mid-version would mix two shards' updates into one staged version; and each staged
+/// version extends the accumulator of the one before it. A shard's history starts at v0, which holds its
+/// genesis state and is streamed empty for a shard with none; every later committed state version holds
+/// at least one transition. The stream carries every transition as a value or a hash, so a marker
+/// claims no version beyond the last one delivered. A completion marker closes off what
+/// was streamed so far for a shard and a followed stream carries more for it after, so a marker
+/// does not end a shard.
 ///
 /// A version split across chunks is also held to [`MAX_BUFFERED_VERSION_BYTES`], since it is
 /// buffered whole until the chunk that flushes it.
 struct StreamOrder {
-    /// Highest version committed per requested shard, seeded from the cursor so a responder cannot
-    /// replay versions the caller already holds.
-    committed_versions: HashMap<Shard, StateVersion>,
+    /// Highest version delivered per requested shard, seeded from the cursor so a responder cannot
+    /// replay versions the caller already holds. `None` until v0 of a shard streamed from it is.
+    delivered_versions: HashMap<Shard, Option<StateVersion>>,
     /// Set while a version is split across chunks, with the encoded bytes buffered for it, until the
     /// chunk that flushes it.
     pending_chunk: Option<(Shard, StateVersion, usize)>,
-    /// Whether the stream carries every transition of its shards. Every committed state version of
-    /// a shard holds at least one transition, so such a stream delivers each shard's versions
-    /// contiguously from its cursor, and a marker claims no version beyond the last one delivered.
-    complete: bool,
+    /// The shards delivered a version since their last marker.
+    bursting: HashSet<Shard>,
 }
 
 impl StreamOrder {
-    fn new(cursors: &[rpc::ShardCursor], complete: bool) -> Self {
+    fn new(cursors: &[rpc::ShardCursor]) -> Self {
         Self {
-            complete,
-            committed_versions: cursors
+            delivered_versions: cursors
                 .iter()
                 .map(|c| {
                     (
                         Shard::from(c.shard),
-                        StateVersion::new(c.start_state_version.saturating_sub(1)),
+                        c.start_state_version.checked_sub(1).map(StateVersion::new),
                     )
                 })
                 .collect(),
             pending_chunk: None,
+            bursting: HashSet::new(),
         }
     }
 
@@ -1144,16 +2368,19 @@ impl StreamOrder {
         num_updates: usize,
         encoded_bytes: usize,
     ) -> Result<(), String> {
-        let Some(committed_version) = self.committed_versions.get(&shard).copied() else {
+        let Some(delivered_version) = self.delivered_versions.get(&shard).copied() else {
             return Err(format!("Received batch for unrequested shard {shard}"));
         };
-        // A responder splits a version into chunks of its updates, so every chunk carries one.
-        if num_updates == 0 {
+        // A responder splits a version into chunks of its updates, so every chunk carries one, but the empty v0 of a
+        // shard with no genesis state.
+        if num_updates == 0 && state_version.as_u64() != 0 {
             return Err(format!("Received v{state_version} for shard {shard} with no updates"));
         }
-        if state_version <= committed_version {
+        if let Some(delivered_version) = delivered_version &&
+            state_version <= delivered_version
+        {
             return Err(format!(
-                "Received v{state_version} for shard {shard}, which is not ahead of the committed v{committed_version}"
+                "Received v{state_version} for shard {shard}, which is not ahead of the delivered v{delivered_version}"
             ));
         }
         let buffered_bytes = match self.pending_chunk {
@@ -1169,10 +2396,10 @@ impl StreamOrder {
                 ));
             },
             None => {
-                if self.complete && committed_version.as_u64().checked_add(1) != Some(state_version.as_u64()) {
+                if !follows(delivered_version, state_version) {
                     return Err(format!(
-                        "Received v{state_version} for shard {shard}, skipping the versions after the committed \
-                         v{committed_version}"
+                        "Received v{state_version} for shard {shard}, skipping the versions {} delivered",
+                        after(delivered_version)
                     ));
                 }
                 0
@@ -1190,16 +2417,16 @@ impl StreamOrder {
             self.pending_chunk = Some((shard, state_version, buffered_bytes));
         } else {
             self.pending_chunk = None;
-            self.committed_versions.insert(shard, state_version);
+            self.delivered_versions.insert(shard, Some(state_version));
+            self.bursting.insert(shard);
         }
         Ok(())
     }
 
     /// Accepts a completion marker, returning the version the shard is now level with the committee
-    /// at: the last version delivered for it. A stream that leaves out transitions establishes no
-    /// such version.
-    fn accept_marker(&mut self, shard: Shard, synced_to: StateVersion) -> Result<Option<StateVersion>, String> {
-        let Some(committed_version) = self.committed_versions.get(&shard).copied() else {
+    /// at - the last version delivered for it - and whether any was delivered since its last marker.
+    fn accept_marker(&mut self, shard: Shard, synced_to: StateVersion) -> Result<(StateVersion, bool), String> {
+        let Some(delivered_version) = self.delivered_versions.get(&shard).copied() else {
             return Err(format!("Received completion marker for unrequested shard {shard}"));
         };
         if let Some((pending_shard, pending_version, _)) = self.pending_chunk {
@@ -1208,17 +2435,168 @@ impl StreamOrder {
                  still incomplete"
             ));
         }
-        if !self.complete {
-            return Ok(None);
-        }
-        if synced_to > committed_version {
+        let Some(delivered_version) = delivered_version else {
+            return Err(format!(
+                "Received completion marker for shard {shard} at v{synced_to} before its v0"
+            ));
+        };
+        if synced_to > delivered_version {
             return Err(format!(
                 "Received completion marker for shard {shard} at v{synced_to}, past the last version streamed, \
-                 v{committed_version}"
+                 v{delivered_version}"
             ));
         }
-        Ok(Some(committed_version))
+        Ok((delivered_version, self.bursting.remove(&shard)))
     }
+}
+
+/// What a stream has staged above every verified leaf of its shards, and how long a verified leaf has been ahead of a
+/// shard the stream claims is level. Both bound what a stream peer can do that no leaf has checked.
+#[derive(Debug, Default)]
+struct StreamChecks {
+    /// Per shard, each version staged above every verified leaf: its version, encoded bytes and when it was staged,
+    /// oldest first.
+    uncovered: HashMap<Shard, VecDeque<(StateVersion, usize, time::Instant)>>,
+    uncovered_bytes: usize,
+    uncovered_versions: usize,
+    /// When a verified leaf was first seen ahead of each shard the stream claims is level.
+    behind_since: HashMap<Shard, time::Instant>,
+}
+
+impl StreamChecks {
+    /// Records `version` of `shard`, staged at `now` with `bytes` encoded and above every verified leaf of the shard.
+    fn stage(&mut self, shard: Shard, version: StateVersion, bytes: usize, now: time::Instant) {
+        self.uncovered
+            .entry(shard)
+            .or_default()
+            .push_back((version, bytes, now));
+        self.uncovered_bytes = self.uncovered_bytes.saturating_add(bytes);
+        self.uncovered_versions += 1;
+    }
+
+    /// Records a verified leaf of `shard` at `leaf_version`, which covers every version staged up to it.
+    fn cover(&mut self, shard: Shard, leaf_version: StateVersion) {
+        let Some(uncovered) = self.uncovered.get_mut(&shard) else {
+            return;
+        };
+        while let Some(&(version, bytes, _)) = uncovered.front() &&
+            version <= leaf_version
+        {
+            uncovered.pop_front();
+            self.uncovered_bytes -= bytes;
+            self.uncovered_versions -= 1;
+        }
+        if uncovered.is_empty() {
+            self.uncovered.remove(&shard);
+        }
+    }
+
+    /// Whether the stream has staged as much above every verified leaf as it may before a leaf covers some of it.
+    fn is_full(&self) -> bool {
+        self.uncovered_bytes >= MAX_UNCOVERED_BYTES || self.uncovered_versions >= MAX_UNCOVERED_VERSIONS
+    }
+
+    /// The oldest version no verified leaf has reached in [`VERIFICATION_GRACE`] since it was staged.
+    fn overdue(&self, now: time::Instant) -> Option<(Shard, StateVersion)> {
+        self.uncovered
+            .iter()
+            .filter_map(|(shard, uncovered)| {
+                uncovered
+                    .front()
+                    .map(|&(version, _, staged_at)| (*shard, version, staged_at))
+            })
+            .filter(|&(_, _, staged_at)| now.duration_since(staged_at) > VERIFICATION_GRACE)
+            .min_by_key(|&(_, _, staged_at)| staged_at)
+            .map(|(shard, version, _)| (shard, version))
+    }
+
+    /// A shard of `level`, each level at the version given, that a verified leaf has been ahead of for longer than
+    /// [`VERIFICATION_GRACE`], with its level version and the leaf's. `waiting_for` names the version of the leaf a
+    /// shard is waiting for the stream to reach.
+    fn withheld(
+        &mut self,
+        level: &HashMap<Shard, StateVersion>,
+        waiting_for: impl Fn(Shard) -> Option<StateVersion>,
+        now: time::Instant,
+    ) -> Option<(Shard, StateVersion, StateVersion)> {
+        self.behind_since.retain(|shard, _| level.contains_key(shard));
+        let mut withheld = None;
+        for (&shard, &level_at) in level {
+            match waiting_for(shard) {
+                Some(leaf_version) => {
+                    let since = *self.behind_since.entry(shard).or_insert(now);
+                    if now.duration_since(since) > VERIFICATION_GRACE {
+                        withheld = Some((shard, level_at, leaf_version));
+                    }
+                },
+                None => {
+                    self.behind_since.remove(&shard);
+                },
+            }
+        }
+        withheld
+    }
+}
+
+/// The peers whose history of a shard after a verified version mismatched a verified leaf or could not be
+/// accumulated, by the shard and that version. Once every member of a committee has diverged from the same version,
+/// the fault is this indexer's own: its recomputation of the accumulator disagrees with the committee's.
+#[derive(Debug, Default)]
+struct MismatchBreaker {
+    mismatched: HashMap<(Shard, Option<StateVersion>), HashSet<PeerAddress>>,
+}
+
+impl MismatchBreaker {
+    /// Records that `peers` diverged after `from` of `shard`, or from its v0 when `from` is `None`, returning whether
+    /// every one of the committee's `committee_size` members has.
+    fn record(
+        &mut self,
+        shard: Shard,
+        from: Option<StateVersion>,
+        peers: &[PeerAddress],
+        committee_size: usize,
+    ) -> bool {
+        let mismatched = self.mismatched.entry((shard, from)).or_default();
+        mismatched.extend(peers.iter().copied());
+        mismatched.len() >= committee_size
+    }
+}
+
+/// A version staged with the verdict on a leaf that was waiting for it.
+struct StagedWithVerdict {
+    verdict: Option<Verdict<PeerAddress>>,
+    accumulator: StagedAccumulator,
+    batch: Vec<u8>,
+}
+
+impl StagedWithVerdict {
+    fn into_parts(self) -> (Option<Verdict<PeerAddress>>, StagedVersion) {
+        (self.verdict, StagedVersion {
+            accumulator: self.accumulator,
+            batch: self.batch,
+        })
+    }
+}
+
+fn decode_peer(bytes: &[u8]) -> Result<PeerAddress, NetworkStateSyncError> {
+    libp2p::PeerId::from_bytes(bytes)
+        .map(PeerAddress::from)
+        .map_err(|e| NetworkStateSyncError::InvariantError {
+            details: format!("a staged version records an invalid peer id: {e}"),
+        })
+}
+
+/// Where a shard's history continues past `version`, its last verified or staged version, or `None` for a shard with
+/// none: "after v{n}", or "from v0".
+fn after(version: Option<StateVersion>) -> String {
+    match version {
+        Some(version) => format!("after v{version}"),
+        None => "from v0".to_string(),
+    }
+}
+
+fn display_peers(peers: &[PeerAddress]) -> String {
+    peers.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
 }
 
 /// Adds `amount` to the running total persisted under `key`.
@@ -1255,6 +2633,140 @@ fn checkpoint_exhaust_burn(checkpoint: &EpochCheckpoint) -> Result<Amount, Netwo
                 checkpoint.epoch()
             ),
         })
+}
+
+/// Requests `shard_group`'s checkpoints from `from_epoch` on from `session`'s committee member.
+async fn fetch_checkpoints(
+    session: &mut ValidatorRpcSession,
+    shard_group: ShardGroup,
+    from_epoch: Epoch,
+) -> Result<Vec<EpochCheckpoint>, NetworkStateSyncError> {
+    let resp = session
+        .get_checkpoints(rpc::GetCheckpointsRequest {
+            from_epoch: Some(from_epoch.into()),
+            num_to_return: 100,
+            shard_group: None,
+        })
+        .await?;
+
+    debug!(target: LOG_TARGET, "🌍️ Received {} checkpoints for shard group {} from peer {}", resp.checkpoints.len(), shard_group, session.peer_address());
+
+    resp.checkpoints
+        .into_iter()
+        .map(|cp| {
+            EpochCheckpoint::try_from(cp).map_err(|e| NetworkStateSyncError::InvalidCheckpoint {
+                details: format!("Failed to convert checkpoint for shard group {}: {}", shard_group, e),
+            })
+        })
+        .collect()
+}
+
+/// How far [`verify_checkpoint`] could check a checkpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CheckpointCheck {
+    /// Its committee's quorum signed it.
+    QuorumSigned,
+    /// Its epoch is before this indexer's records, so it was checked for internal consistency only.
+    FormOnly,
+}
+
+/// Verifies `checkpoint` against `epoch_manager`'s record of its epoch, before it is stored and served.
+///
+/// In an epoch the epoch manager has a record of, the checkpoint must be of one of that epoch's shard groups, and its
+/// quorum certificate is checked against that shard group's committee. `shard_group` is the checkpoint's own, which
+/// can differ from the shard group being synced because shard groups change with the number of committees. Only a
+/// checkpoint of an epoch before the epoch manager's records is checked for form alone. `prev_epoch` is always
+/// recorded.
+///
+/// The next epoch's validator set the checkpoint names, which the committee ratified, must be the one this indexer
+/// assigned: an indexer that disagrees would serve committees the network does not run.
+async fn verify_checkpoint<TEpochManager: EpochManagerReader>(
+    network: Network,
+    epoch_manager: &TEpochManager,
+    checkpoint: &EpochCheckpoint,
+    shard_group: ShardGroup,
+    prev_epoch: Epoch,
+) -> Result<CheckpointCheck, NetworkStateSyncError> {
+    let epoch = checkpoint.epoch();
+    let recorded = epoch == prev_epoch || epoch_manager.get_epoch_hash(epoch).await.optional()?.is_some();
+    if !recorded {
+        debug!(target: LOG_TARGET, "🌍️ {epoch} is before this indexer's records: checking its checkpoint for form only");
+        checkpoint
+            .validate_well_formed()
+            .map_err(|e| NetworkStateSyncError::InvalidCheckpoint {
+                details: format!("Checkpoint for {epoch}, shard group {shard_group} is not well formed: {e}"),
+            })?;
+        return Ok(CheckpointCheck::FormOnly);
+    }
+    let Some(committee) = epoch_manager
+        .get_committee_by_shard_group(epoch, shard_group)
+        .await
+        .optional()?
+    else {
+        return Err(NetworkStateSyncError::InvalidCheckpoint {
+            details: format!(
+                "Checkpoint for {epoch} names shard group {shard_group}, which is not one of that epoch's shard \
+                 groups as this indexer assigned them. If every committee member is refused this way, this indexer's \
+                 committee assignment for {epoch} differs from the network's; check its epoch oracle and committee \
+                 configuration."
+            ),
+        });
+    };
+    checkpoint
+        .validate(network, epoch, committee.quorum_threshold(), &*committee)
+        .map_err(|e| NetworkStateSyncError::InvalidCheckpoint {
+            details: format!("Checkpoint for {epoch}, shard group {shard_group} is not valid: {e}"),
+        })?;
+
+    let Some(committed) = checkpoint.next_epoch_validator_set_hash() else {
+        return Ok(CheckpointCheck::QuorumSigned);
+    };
+    let next_epoch = epoch + Epoch(1);
+    let local = epoch_manager.get_validator_set_hash(next_epoch).await?;
+    check_validator_set(next_epoch, local, committed)?;
+    Ok(CheckpointCheck::QuorumSigned)
+}
+
+fn check_validator_set(
+    epoch: Epoch,
+    local: ValidatorSetHash,
+    committed: ValidatorSetHash,
+) -> Result<(), NetworkStateSyncError> {
+    if local != committed {
+        return Err(NetworkStateSyncError::ValidatorSetDiverged {
+            epoch,
+            local,
+            committed,
+        });
+    }
+    Ok(())
+}
+
+/// Stores `checkpoint` of `shard_group` with its verified `leaves`, adding `xtr_exhausted` to the accumulated exhaust
+/// burn the first time it is stored, and `progress` when given.
+fn write_checkpoint(
+    tx: &mut SqliteStoreWriteTransaction<'_>,
+    checkpoint: &EpochCheckpoint,
+    shard_group: ShardGroup,
+    xtr_exhausted: Amount,
+    leaves: &[CheckpointShardLeaf],
+    progress: Option<SyncProgress>,
+) -> Result<(), StorageError> {
+    if !tx.epoch_checkpoint_exists(shard_group, checkpoint.epoch())? {
+        tx.insert_or_ignore_epoch_checkpoint(checkpoint)?;
+        add_to_total(tx, Key::TariAccumulatedExhaustBurn, xtr_exhausted)?;
+    }
+    tx.checkpoint_shard_leaves_insert(leaves)?;
+    if let Some(progress) = progress {
+        tx.key_value_set(Key::SyncProgress, progress)?;
+    }
+    Ok(())
+}
+
+/// Whether a checkpoint sync from `from_epoch` backfills epochs before `prev_epoch`, whose checkpoint is then synced
+/// first.
+fn is_backfill(from_epoch: Epoch, prev_epoch: Epoch) -> bool {
+    from_epoch.as_u64() + 1 < prev_epoch.as_u64()
 }
 
 /// Keeps the checkpoints a sync from `from_epoch` can use: those from `from_epoch` up to `prev_epoch`.
@@ -1324,8 +2836,7 @@ fn process_watched_substate_events(
     Ok(())
 }
 
-/// One streamed state version, buffered whole until the chunk that completes it and then committed
-/// in a single write transaction.
+/// One staged state version, decoded and sorted into the buffers it is committed to the indexed tables from.
 #[derive(Default)]
 struct VersionBuf {
     invalidations: Vec<SubstateCacheInvalidation>,
@@ -1334,6 +2845,8 @@ struct VersionBuf {
     validator_fee_pools: Vec<SubstateData>,
     template_catalogue: Vec<(TemplateAddress, PublishedTemplateMetadata)>,
     xtr_claimed: Amount,
+    /// The UTXO versions this version burns: each is taken down as the next version comes up with no output.
+    burnt_utxos: HashSet<(UtxoAddress, SubstateVersion)>,
 }
 
 /// What committing a [`VersionBuf`] wrote, for the caller to announce once the write transaction
@@ -1345,28 +2858,200 @@ struct CommittedVersion {
     /// One per receipt the commit inserted.
     finalized: Vec<TransactionFinalizedEvent>,
     inserted_events: Vec<InsertedEvent>,
-    /// Receipts left out because their address already held one.
-    skipped_receipts: Vec<TransactionReceiptAddress>,
-    /// Unspent outputs left out because an unspent output with their nonce and tag is indexed.
+    /// Unspent outputs left out because their version is indexed already.
     skipped_utxos: Vec<UtxoAddress>,
-    /// Templates left out because the catalogue already held them.
-    skipped_templates: Vec<TemplateAddress>,
+}
+
+/// What promoting a run of a shard's staged versions wrote, for the caller to announce once the write transaction has
+/// committed.
+#[derive(Default)]
+struct PromotedVersions {
+    num_versions: u64,
+    retired_cache_entries: usize,
+    num_receipt_events: usize,
+    finalized: Vec<TransactionFinalizedEvent>,
+    inserted_events: Vec<InsertedEvent>,
+    skipped_utxos: Vec<(StateVersion, UtxoAddress)>,
+}
+
+impl PromotedVersions {
+    fn add(&mut self, state_version: StateVersion, committed: CommittedVersion) {
+        self.num_versions += 1;
+        self.retired_cache_entries += committed.retired_cache_entries;
+        self.num_receipt_events += committed.num_receipt_events;
+        self.finalized.extend(committed.finalized);
+        self.inserted_events.extend(committed.inserted_events);
+        self.skipped_utxos.extend(
+            committed
+                .skipped_utxos
+                .into_iter()
+                .map(|address| (state_version, address)),
+        );
+    }
+}
+
+/// Promotes the versions of `shard` staged above `from`, up to `through`, to the indexed tables in order, as many as
+/// [`MAX_PROMOTED_VERSIONS`] and [`MAX_PROMOTED_BYTES`] allow, and deletes them from the stage. The last one promoted
+/// is recorded as verified in `progress`, which is written with them.
+///
+/// A leaf that matches the accumulator at `through` authenticates every version below it too, so each promoted version
+/// is verified whether or not the run reaches `through`.
+fn promote_staged(
+    tx: &mut SqliteStoreWriteTransaction<'_>,
+    shard: Shard,
+    from: Option<StateVersion>,
+    through: StateVersion,
+    mut progress: SyncProgress,
+    event_filters: &[EventFilter],
+    watched_templates: &HashSet<TemplateAddress>,
+) -> Result<(VerifiedShardVersion, PromotedVersions), StorageError> {
+    let mut promoted = PromotedVersions::default();
+    let mut last = None;
+    let mut num_versions = 0;
+    let mut num_bytes = 0usize;
+    let mut next = from.map_or(0, |from| from.as_u64() + 1);
+    while next <= through.as_u64() && num_versions < MAX_PROMOTED_VERSIONS && num_bytes < MAX_PROMOTED_BYTES {
+        let version = StateVersion::new(next);
+        next += 1;
+        let staged = tx
+            .staged_version_get(shard, version)?
+            .ok_or_else(|| StorageError::DataInconsistency {
+                details: format!(
+                    "v{version} of shard {shard} is verified, but it is not staged and was not promoted before"
+                ),
+            })?;
+        let epoch = staged.accumulator.epoch;
+        let committed = VersionBuf::decode_staged(shard, version, &staged.batch)?.commit(
+            tx,
+            shard,
+            version,
+            epoch,
+            event_filters,
+            watched_templates,
+        )?;
+        promoted.add(version, committed);
+        num_versions += 1;
+        num_bytes = num_bytes.saturating_add(staged.batch.len());
+        last = Some(staged.accumulator);
+    }
+    let last = last.ok_or_else(|| StorageError::DataInconsistency {
+        details: format!(
+            "promoting shard {shard} {} through v{through} promotes nothing",
+            after(from)
+        ),
+    })?;
+    tx.staged_versions_delete_through(shard, last.state_version)?;
+    tx.checkpoint_shard_leaves_delete_through(shard, last.state_version)?;
+    let verified = VerifiedShardVersion {
+        state_version: last.state_version,
+        epoch: last.epoch,
+        transition_acc: last.transition_acc,
+    };
+    progress.record_verified(shard, verified);
+    tx.key_value_set(Key::SyncProgress, progress)?;
+    Ok((verified, promoted))
+}
+
+/// Promotes the staged snapshot of `shard` at `verified`'s version to the indexed tables, and records `verified` as the
+/// shard's verified version and stream cursor in `progress`, which is written with them.
+///
+/// Every substate is committed at the snapshot's version, in one commit per creation epoch, which the indexed UTXOs
+/// record. The snapshot is read [`MAX_PROMOTED_SNAPSHOT_SUBSTATES`] at a time, so it is never held in memory whole.
+/// The receipts and events it indexes are history rather than news, so they are counted but not announced: a
+/// subscriber reads them from the store. The snapshot holds no tombstone of a UTXO spent at or below its version, so
+/// the shard's UTXO tombstone horizon is raised to that version.
+fn promote_snapshot(
+    tx: &mut SqliteStoreWriteTransaction<'_>,
+    shard: Shard,
+    verified: VerifiedShardVersion,
+    mut progress: SyncProgress,
+    event_filters: &[EventFilter],
+    watched_templates: &HashSet<TemplateAddress>,
+) -> Result<PromotedVersions, StorageError> {
+    let state_version = verified.state_version;
+    let value_filters = stream_value_filters();
+    let invalid = |details: String| StorageError::DataInconsistency {
+        details: format!("a staged snapshot substate of shard {shard} does not decode: {details}"),
+    };
+    let mut promoted = PromotedVersions::default();
+    let mut after = None;
+    loop {
+        let page = tx.snapshot_substates_page(shard, after, MAX_PROMOTED_SNAPSHOT_SUBSTATES)?;
+        let Some(last) = page.last() else {
+            break;
+        };
+        after = Some((last.epoch, last.leaf_key));
+        for epoch_substates in page.chunk_by(|a, b| a.epoch == b.epoch) {
+            let epoch = epoch_substates[0].epoch;
+            let mut buf = VersionBuf::default();
+            for staged in epoch_substates {
+                let data = rpc::SubstateData::decode(staged.substate.as_slice()).map_err(|e| invalid(e.to_string()))?;
+                let substate = SubstateData::try_from(data).map_err(|e| invalid(e.to_string()))?;
+                let update = SubstateUpdateProof::Create(Box::new(SubstateCreate { substate }));
+                buf.extend_from_substate_update(shard, state_version, update, value_filters);
+            }
+            let committed = buf.commit(tx, shard, state_version, epoch, event_filters, watched_templates)?;
+            promoted.add(state_version, CommittedVersion {
+                finalized: Vec::new(),
+                inserted_events: Vec::new(),
+                ..committed
+            });
+        }
+    }
+    tx.snapshot_substates_delete(shard)?;
+    tx.checkpoint_shard_leaves_delete_through(shard, state_version)?;
+    tx.raise_utxo_tombstone_horizon(shard, state_version)?;
+    progress.record_verified(shard, verified);
+    progress.record_state_version(shard, state_version, verified.epoch);
+    tx.key_value_set(Key::SyncProgress, progress)?;
+    Ok(promoted)
 }
 
 impl VersionBuf {
-    /// Writes the version, with `sync_progress` recording it, and folds what it inserted into the
-    /// running totals.
+    /// Decodes a staged version from its encoded `SubstateBatch` chunks.
+    fn decode_staged(shard: Shard, state_version: StateVersion, mut batch: &[u8]) -> Result<Self, StorageError> {
+        let invalid = |details: String| StorageError::DataInconsistency {
+            details: format!("staged v{state_version} of shard {shard} does not decode: {details}"),
+        };
+        let value_filters = stream_value_filters();
+        let mut buf = Self::default();
+        while !batch.is_empty() {
+            let chunk = rpc::SubstateBatch::decode_length_delimited(&mut batch).map_err(|e| invalid(e.to_string()))?;
+            for update in chunk.updates {
+                let update = SubstateUpdateProof::try_from(update).map_err(|e| invalid(e.to_string()))?;
+                buf.extend_from_substate_update(shard, state_version, update, value_filters);
+            }
+        }
+        buf.mark_burns();
+        Ok(buf)
+    }
+
+    /// Marks each spend of a UTXO version whose next version this version brings up with no output as a burn. A burn
+    /// takes a version down and brings the next one up in the same transaction, and a UTXO's versions share its shard,
+    /// so both are in this version.
+    fn mark_burns(&mut self) {
+        if self.burnt_utxos.is_empty() {
+            return;
+        }
+        for update in &mut self.utxos {
+            if let UtxoUpdateRecord::Spent(spent) = update &&
+                self.burnt_utxos.contains(&(spent.address.clone(), spent.version))
+            {
+                *update = UtxoUpdateRecord::Burnt(spent.clone());
+            }
+        }
+    }
+
+    /// Writes the version to the indexed tables and folds what it inserted into the running totals.
     ///
-    /// The receipt-sourced totals are taken from the receipts actually inserted, so a receipt whose
-    /// address is already indexed is neither counted again nor announced.
-    #[expect(clippy::too_many_arguments)]
+    /// Every version committed is verified, and a receipt or template is created once on the network, so one already
+    /// indexed is a fault in this indexer's store or its verification, and fails the commit.
     fn commit(
         self,
         tx: &mut SqliteStoreWriteTransaction<'_>,
         shard: Shard,
         state_version: StateVersion,
         epoch: Epoch,
-        sync_progress: SyncProgress,
         event_filters: &[EventFilter],
         watched_templates: &HashSet<TemplateAddress>,
     ) -> Result<CommittedVersion, StorageError> {
@@ -1381,16 +3066,27 @@ impl VersionBuf {
         }
         debug!(target: LOG_TARGET, "✅ Committing {} transactions for shard {shard} (epoch: {epoch})", self.transactions.len());
         let inserted = tx.batch_insert_transaction_receipts(self.transactions, event_filters)?;
+        if let Some(address) = inserted.skipped.first() {
+            return Err(StorageError::DataInconsistency {
+                details: format!(
+                    "verified v{state_version} of shard {shard} creates receipt {address}, which is already indexed"
+                ),
+            });
+        }
         if !watched_templates.is_empty() {
             process_watched_substate_events(tx, &inserted.events, watched_templates)?;
         }
 
-        let mut skipped_templates = Vec::new();
         if !self.template_catalogue.is_empty() {
             debug!(target: LOG_TARGET, "✅ Inserting {} template catalogue entries for shard {shard} (epoch: {epoch})", self.template_catalogue.len());
             for (template_addr, metadata) in self.template_catalogue {
                 if !tx.insert_or_ignore_template_catalogue(&template_addr, &metadata)? {
-                    skipped_templates.push(template_addr);
+                    return Err(StorageError::DataInconsistency {
+                        details: format!(
+                            "verified v{state_version} of shard {shard} publishes template {template_addr}, which is \
+                             already catalogued"
+                        ),
+                    });
                 }
             }
         }
@@ -1404,7 +3100,6 @@ impl VersionBuf {
             xtr_receipt_burn += Amount::from(receipt.fee_receipt.exhaust_burn());
         }
 
-        tx.key_value_set(Key::SyncProgress, sync_progress)?;
         add_to_total(tx, Key::TariAccumulatedClaimed, self.xtr_claimed)?;
         add_to_total(tx, Key::TariAccumulatedFees, xtr_fees)?;
         add_to_total(tx, Key::TariAccumulatedReceiptExhaustBurn, xtr_receipt_burn)?;
@@ -1421,9 +3116,7 @@ impl VersionBuf {
                 })
                 .collect(),
             inserted_events: inserted.events,
-            skipped_receipts: inserted.skipped,
             skipped_utxos,
-            skipped_templates,
         })
     }
 
@@ -1470,15 +3163,22 @@ impl VersionBuf {
                     Some(SubstateValue::Utxo(utxo)) => {
                         if let Some(address) = create.substate.substate_id().as_utxo_address() {
                             let is_frozen = utxo.is_frozen();
-                            if let Some(ref output) = utxo.output {
-                                self.utxos.push(UtxoUpdateRecord::Unspent(Box::new(UtxoUnspent {
-                                    address,
-                                    version: update.version(),
-                                    shard,
-                                    state_version,
-                                    utxo_output: output.clone(),
-                                    is_frozen,
-                                })));
+                            match utxo.output {
+                                Some(ref output) => {
+                                    self.utxos.push(UtxoUpdateRecord::Unspent(Box::new(UtxoUnspent {
+                                        address,
+                                        version: update.version(),
+                                        shard,
+                                        state_version,
+                                        utxo_output: output.clone(),
+                                        is_frozen,
+                                    })));
+                                },
+                                None => {
+                                    if let Some(burnt) = update.version().previous() {
+                                        self.burnt_utxos.insert((address, burnt));
+                                    }
+                                },
                             }
                         } else {
                             warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received UTXO substate with invalid address: {}", create.substate.substate_id());
@@ -1539,6 +3239,97 @@ impl VersionBuf {
 mod tests {
     use super::*;
 
+    mod checkpoints_due {
+        use super::*;
+
+        const WORK_INTERVAL: Duration = Duration::from_secs(60);
+        const SOONEST_AFTER: Duration = Duration::from_secs(2);
+
+        #[test]
+        fn it_waits_the_work_interval_until_the_stream_shows_the_epoch() {
+            let now = time::Instant::now();
+            let mut due = CheckpointsDue::new(Epoch(5), now, SOONEST_AFTER, WORK_INTERVAL);
+            due.observe(Epoch(4));
+            assert_eq!(due.at(), now + WORK_INTERVAL);
+        }
+
+        #[test]
+        fn it_is_due_soon_once_the_stream_shows_the_epoch_or_later() {
+            for msg_epoch in [Epoch(5), Epoch(6)] {
+                let now = time::Instant::now();
+                let mut due = CheckpointsDue::new(Epoch(5), now, SOONEST_AFTER, WORK_INTERVAL);
+                due.observe(msg_epoch);
+                assert_eq!(due.at(), now + SOONEST_AFTER);
+                due.observe(Epoch(4));
+                assert_eq!(due.at(), now + SOONEST_AFTER);
+            }
+        }
+
+        #[test]
+        fn it_is_never_later_than_the_work_interval() {
+            let now = time::Instant::now();
+            let work_interval = Duration::from_secs(1);
+            let mut due = CheckpointsDue::new(Epoch(5), now, SOONEST_AFTER, work_interval);
+            due.observe(Epoch(5));
+            assert_eq!(due.at(), now + work_interval);
+        }
+    }
+
+    mod checkpoint_retry_backoff {
+        use super::*;
+
+        const WORK_INTERVAL: Duration = Duration::from_secs(60);
+
+        fn secs(n: u64) -> Duration {
+            Duration::from_secs(n)
+        }
+
+        #[test]
+        fn it_doubles_with_each_round_of_an_epoch_that_falls_short_up_to_the_work_interval() {
+            let mut backoff = CheckpointRetryBackoff::new(WORK_INTERVAL);
+            let intervals = (0..7).map(|_| backoff.next(Epoch(5))).collect::<Vec<_>>();
+            assert_eq!(intervals, [
+                CHECKPOINT_RETRY_MIN_INTERVAL,
+                secs(4),
+                secs(8),
+                secs(16),
+                secs(32),
+                WORK_INTERVAL,
+                WORK_INTERVAL
+            ]);
+        }
+
+        #[test]
+        fn it_starts_over_in_a_new_epoch() {
+            let mut backoff = CheckpointRetryBackoff::new(WORK_INTERVAL);
+            backoff.next(Epoch(5));
+            backoff.next(Epoch(5));
+            assert_eq!(backoff.next(Epoch(6)), CHECKPOINT_RETRY_MIN_INTERVAL);
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn a_round_that_falls_short_brings_the_sync_forward_by_the_grown_interval() {
+            let mut backoff = CheckpointRetryBackoff::new(WORK_INTERVAL);
+            backoff.next(Epoch(5));
+            let now = time::Instant::now();
+            let mut due = backoff
+                .checkpoints_due(false, Epoch(5))
+                .expect("a round that falls short is due again");
+            assert_eq!(due.at(), now + WORK_INTERVAL);
+            due.observe(Epoch(5));
+            assert_eq!(due.at(), now + secs(4));
+        }
+
+        #[test]
+        fn it_starts_over_once_a_round_finds_the_checkpoint() {
+            let mut backoff = CheckpointRetryBackoff::new(WORK_INTERVAL);
+            backoff.next(Epoch(5));
+            backoff.next(Epoch(5));
+            assert!(backoff.checkpoints_due(true, Epoch(5)).is_none());
+            assert_eq!(backoff.next(Epoch(5)), CHECKPOINT_RETRY_MIN_INTERVAL);
+        }
+    }
+
     mod running_totals {
         use super::*;
         use crate::store::{IndexerStore, IndexerStoreWriteTransaction};
@@ -1588,18 +3379,135 @@ mod tests {
         }
     }
 
-    mod version_commit {
-        use tari_engine_types::{fees::FeeReceiptBuilder, transaction_receipt::FinalizeOutcome};
-        use tari_ootle_transaction::TransactionId;
-        use tari_template_lib_types::{Hash32, crypto::RistrettoPublicKeyBytes};
+    mod burns {
+        use tari_engine_types::{Utxo, UtxoOutput};
+        use tari_ootle_storage::consensus_models::{SubstateCreate, SubstateDestroy, SubstateValueOrHash};
 
         use super::*;
-        use crate::store::IndexerStore;
+        use crate::storage_sqlite::unspent_at;
 
         const SHARD: Shard = Shard::from_u32(1);
 
-        fn receipt_address(n: u8) -> TransactionReceiptAddress {
-            TransactionId::new([n; 32]).into_receipt_address()
+        fn output() -> (UtxoAddress, UtxoOutput) {
+            let UtxoUpdateRecord::Unspent(unspent) = unspent_at(1, 1) else {
+                unreachable!()
+            };
+            (unspent.address, unspent.utxo_output)
+        }
+
+        fn down(address: &UtxoAddress, version: u64) -> SubstateUpdateProof {
+            SubstateUpdateProof::Destroy(SubstateDestroy {
+                substate_id: SubstateId::Utxo(address.clone()),
+                version: SubstateVersion::new(version),
+            })
+        }
+
+        fn up(address: &UtxoAddress, version: u64, output: Option<UtxoOutput>) -> SubstateUpdateProof {
+            SubstateUpdateProof::from(SubstateCreate {
+                substate: SubstateData {
+                    substate_id: SubstateId::Utxo(address.clone()),
+                    version: SubstateVersion::new(version),
+                    value: SubstateValueOrHash::Value(Box::new(SubstateValue::Utxo(Utxo {
+                        output,
+                        is_frozen: false,
+                    }))),
+                    template_metadata: None,
+                },
+            })
+        }
+
+        fn sorted(updates: Vec<SubstateUpdateProof>) -> VersionBuf {
+            let mut buf = VersionBuf::default();
+            for update in updates {
+                buf.extend_from_substate_update(SHARD, StateVersion::new(5), update, stream_value_filters());
+            }
+            buf.mark_burns();
+            buf
+        }
+
+        /// A burn takes the output's version down and brings the next one up with no output, in either order.
+        #[test]
+        fn a_burn_marks_the_version_it_takes_down_burnt() {
+            let (address, _) = output();
+            for updates in [vec![down(&address, 0), up(&address, 1, None)], vec![
+                up(&address, 1, None),
+                down(&address, 0),
+            ]] {
+                let buf = sorted(updates);
+
+                assert_eq!(buf.utxos.len(), 1);
+                assert!(
+                    matches!(&buf.utxos[0], UtxoUpdateRecord::Burnt(burnt)
+                        if burnt.address == address && burnt.version == SubstateVersion::ZERO),
+                    "{:?}",
+                    buf.utxos[0]
+                );
+            }
+        }
+
+        /// Only the version taken down by the burn is burnt when an unfreeze and a burn share a state version.
+        #[test]
+        fn a_burn_marks_only_the_version_it_takes_down() {
+            let (address, output) = output();
+
+            let buf = sorted(vec![
+                down(&address, 0),
+                up(&address, 1, Some(output)),
+                down(&address, 1),
+                up(&address, 2, None),
+            ]);
+
+            let downs = buf
+                .utxos
+                .iter()
+                .filter_map(|update| match update {
+                    UtxoUpdateRecord::Spent(spent) => Some((false, spent.version)),
+                    UtxoUpdateRecord::Burnt(burnt) => Some((true, burnt.version)),
+                    UtxoUpdateRecord::Unspent(_) => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(downs, [(false, SubstateVersion::ZERO), (true, SubstateVersion::new(1))]);
+        }
+
+        /// A freeze takes the output's version down and brings the next one up with the output.
+        #[test]
+        fn a_re_versioning_with_the_output_is_a_spend() {
+            let (address, output) = output();
+
+            let buf = sorted(vec![down(&address, 0), up(&address, 1, Some(output))]);
+
+            assert_eq!(buf.utxos.len(), 2);
+            assert!(matches!(&buf.utxos[0], UtxoUpdateRecord::Spent(spent) if spent.version == SubstateVersion::ZERO));
+            assert!(
+                matches!(&buf.utxos[1], UtxoUpdateRecord::Unspent(unspent) if unspent.version == SubstateVersion::new(1))
+            );
+        }
+    }
+
+    mod version_commit {
+        use tari_engine_types::{fees::FeeReceiptBuilder, transaction_receipt::FinalizeOutcome};
+        use tari_ootle_storage::consensus_models::{SubstateCreate, SubstateValueOrHash};
+        use tari_ootle_transaction::TransactionId;
+        use tari_state_tree::TransitionAccumulator;
+        use tari_template_lib_types::{Hash32, crypto::RistrettoPublicKeyBytes};
+
+        use super::*;
+        use crate::{storage_sqlite::models::SnapshotSubstate, store::IndexerStore};
+
+        const SHARD: Shard = Shard::from_u32(1);
+
+        fn v(n: u64) -> StateVersion {
+            StateVersion::new(n)
+        }
+
+        fn transaction_id(n: u64) -> TransactionId {
+            let mut id = [0; 32];
+            id[..8].copy_from_slice(&n.to_le_bytes());
+            TransactionId::new(id)
+        }
+
+        fn receipt_address(n: u64) -> TransactionReceiptAddress {
+            transaction_id(n).into_receipt_address()
         }
 
         fn receipt(outcome: FinalizeOutcome, total_fees_paid: u64) -> TransactionReceipt {
@@ -1626,98 +3534,502 @@ mod tests {
             }
         }
 
-        async fn commit(store: &SqliteIndexerStore, version: u64, buf: VersionBuf) -> CommittedVersion {
+        async fn store() -> (tempfile::TempDir, SqliteIndexerStore) {
+            let dir = tempfile::tempdir().unwrap();
+            let store = SqliteIndexerStore::try_create(dir.path().join("indexer.db")).unwrap();
+            (dir, store)
+        }
+
+        async fn commit(
+            store: &SqliteIndexerStore,
+            version: u64,
+            buf: VersionBuf,
+        ) -> Result<CommittedVersion, StorageError> {
             store
-                .with_write_tx(move |tx| {
-                    buf.commit(
-                        tx,
-                        SHARD,
-                        StateVersion::new(version),
-                        Epoch(1),
-                        SyncProgress::default(),
-                        &[],
-                        &HashSet::new(),
-                    )
-                })
+                .with_write_tx(move |tx| buf.commit(tx, SHARD, v(version), Epoch(1), &[], &HashSet::new()))
                 .await
-                .unwrap()
         }
 
         async fn total_fees(store: &SqliteIndexerStore) -> Amount {
             store
                 .with_read_tx(|tx| tx.key_value_get_value::<_, Amount>(Key::TariAccumulatedFees))
                 .await
+                .optional()
                 .unwrap()
+                .unwrap_or_else(Amount::zero)
         }
 
-        /// A receipt address is written once on the network, so a conflict at one means some sync peer
-        /// was faulty. The incoming receipt is kept out of the totals and the finalize events, and does
-        /// not fail the commit: every peer would resend it from the same cursor, stalling the shard for
-        /// good.
+        /// A receipt is created once on the network and every committed version is verified, so a second receipt at an
+        /// indexed address is a fault of this indexer's, and nothing of its version is written.
         #[tokio::test]
-        async fn a_receipt_already_indexed_is_neither_counted_nor_announced_again() {
-            let dir = tempfile::tempdir().unwrap();
-            let store = SqliteIndexerStore::try_create(dir.path().join("indexer.db")).unwrap();
-
-            let committed = commit(&store, 1, VersionBuf {
+        async fn a_receipt_already_indexed_fails_the_commit() {
+            let (_dir, store) = store().await;
+            commit(&store, 1, VersionBuf {
                 transactions: vec![(receipt_address(1), receipt(FinalizeOutcome::FeeIntentCommit, 100))],
                 ..Default::default()
             })
-            .await;
-            assert_eq!(committed.finalized.len(), 1);
-            assert_eq!(total_fees(&store).await, Amount::from(100u64));
+            .await
+            .unwrap();
 
-            let committed = commit(&store, 2, VersionBuf {
+            let result = commit(&store, 2, VersionBuf {
                 transactions: vec![
-                    (receipt_address(1), receipt(FinalizeOutcome::Commit, 999)),
                     (receipt_address(2), receipt(FinalizeOutcome::Commit, 5)),
+                    (receipt_address(1), receipt(FinalizeOutcome::Commit, 999)),
                 ],
                 ..Default::default()
             })
             .await;
 
-            let finalized = committed.finalized.iter().map(|f| f.transaction_id).collect::<Vec<_>>();
-            assert_eq!(finalized, [TransactionId::new([2; 32])]);
-            assert_eq!(committed.skipped_receipts, [receipt_address(1)]);
-            assert_eq!(total_fees(&store).await, Amount::from(105u64));
-            let stored = store
-                .with_read_tx(|tx| tx.get_transaction_receipt(&receipt_address(1)))
+            assert!(
+                matches!(result, Err(StorageError::DataInconsistency { .. })),
+                "{:?}",
+                result.err()
+            );
+            assert_eq!(total_fees(&store).await, Amount::from(100u64));
+            let second = store
+                .with_read_tx(|tx| tx.get_transaction_receipt(&receipt_address(2)))
                 .await
+                .optional()
                 .unwrap();
-            assert!(stored.outcome.is_fee_intent_commit());
+            assert!(second.is_none());
         }
 
         #[tokio::test]
-        async fn a_catalogued_template_is_not_rewritten() {
-            let dir = tempfile::tempdir().unwrap();
-            let store = SqliteIndexerStore::try_create(dir.path().join("indexer.db")).unwrap();
+        async fn a_catalogued_template_fails_the_commit() {
+            let (_dir, store) = store().await;
             let address = TemplateAddress::from_array([7; 32]);
 
             commit(&store, 1, VersionBuf {
                 template_catalogue: vec![(address, template_metadata("original"))],
                 ..Default::default()
             })
-            .await;
-            let committed = commit(&store, 2, VersionBuf {
+            .await
+            .unwrap();
+            let result = commit(&store, 2, VersionBuf {
                 template_catalogue: vec![(address, template_metadata("rewritten"))],
                 ..Default::default()
             })
             .await;
 
-            assert_eq!(committed.skipped_templates, [address]);
+            assert!(
+                matches!(result, Err(StorageError::DataInconsistency { .. })),
+                "{:?}",
+                result.err()
+            );
             let entry = store
                 .with_read_tx(move |tx| tx.get_template_catalogue_entry(&address))
                 .await
                 .unwrap();
             assert_eq!(entry.template_name, "original");
         }
+
+        /// The encoded chunks of a version that creates the receipt of transaction `n`, paying `fees`, and that of
+        /// transaction `n + 10_000`, paying nothing, each in a chunk of its own.
+        fn encoded_receipt_version(version: u64, n: u64, fees: u64) -> Vec<u8> {
+            let create = |n: u64, fees: u64| -> rpc::SubstateUpdate {
+                SubstateUpdateProof::from(SubstateCreate {
+                    substate: SubstateData {
+                        substate_id: SubstateId::TransactionReceipt(receipt_address(n)),
+                        version: tari_engine_types::SubstateVersion::ZERO,
+                        value: SubstateValueOrHash::Value(Box::new(SubstateValue::TransactionReceipt(receipt(
+                            FinalizeOutcome::Commit,
+                            fees,
+                        )))),
+                        template_metadata: None,
+                    },
+                })
+                .into()
+            };
+            let chunk = |updates, has_more| rpc::SubstateBatch {
+                state_version: version,
+                updates,
+                has_more,
+                epoch: Some(Epoch(1).into()),
+                shard: SHARD.as_u32(),
+            };
+            let mut encoded = chunk(vec![create(n, fees)], true).encode_length_delimited_to_vec();
+            encoded.extend(chunk(vec![create(n + 10_000, 0)], false).encode_length_delimited_to_vec());
+            encoded
+        }
+
+        fn acc(n: u64) -> TransitionAccumulator {
+            let mut acc = [0; 32];
+            acc[..8].copy_from_slice(&n.to_le_bytes());
+            TransitionAccumulator::new(acc)
+        }
+
+        /// Stages v1..=`num_versions` of [`SHARD`], whose empty v0 is verified, each creating the receipt of
+        /// transaction `n` with `n` in fees, as a stream would, and records the cursor at the last.
+        async fn stage(store: &SqliteIndexerStore, num_versions: u64) -> SyncProgress {
+            let mut progress = SyncProgress::default();
+            progress.record_verified(SHARD, VerifiedShardVersion {
+                state_version: v(0),
+                epoch: Epoch(0),
+                transition_acc: TransitionAccumulator::zero(),
+            });
+            progress.record_state_version(SHARD, v(num_versions), Epoch(1));
+            let snapshot = progress.clone();
+            store
+                .with_write_tx(move |tx| {
+                    for n in 1..=num_versions {
+                        tx.staged_version_insert(SHARD, &StagedVersion {
+                            accumulator: StagedAccumulator {
+                                state_version: v(n),
+                                epoch: Epoch(1),
+                                transition_acc: acc(n),
+                                streamed_by: vec![u8::try_from(n % 2).unwrap()],
+                            },
+                            batch: encoded_receipt_version(n, n, n),
+                        })?;
+                    }
+                    tx.key_value_set(Key::SyncProgress, snapshot)
+                })
+                .await
+                .unwrap();
+            progress
+        }
+
+        async fn promote(
+            store: &SqliteIndexerStore,
+            progress: &SyncProgress,
+            through: u64,
+        ) -> Result<(VerifiedShardVersion, PromotedVersions), StorageError> {
+            let progress = progress.clone();
+            store
+                .with_write_tx(move |tx| {
+                    let from = progress.verified_version(SHARD);
+                    promote_staged(tx, SHARD, from, v(through), progress, &[], &HashSet::new())
+                })
+                .await
+        }
+
+        async fn stored_progress(store: &SqliteIndexerStore) -> SyncProgress {
+            store
+                .with_read_tx(|tx| tx.key_value_get_value::<_, SyncProgress>(Key::SyncProgress))
+                .await
+                .unwrap()
+        }
+
+        async fn staged_versions(store: &SqliteIndexerStore) -> Vec<u64> {
+            store
+                .with_read_tx(|tx| tx.staged_accumulators_tail(SHARD, usize::MAX))
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|staged| staged.state_version.as_u64())
+                .collect()
+        }
+
+        #[tokio::test]
+        async fn promotion_indexes_the_staged_versions_through_the_leaf_and_records_the_last_as_verified() {
+            let (_dir, store) = store().await;
+            let mut progress = stage(&store, 4).await;
+
+            let (verified, promoted) = promote(&store, &progress, 3).await.unwrap();
+
+            assert_eq!(verified, VerifiedShardVersion {
+                state_version: v(3),
+                epoch: Epoch(1),
+                transition_acc: acc(3),
+            });
+            let finalized = promoted
+                .finalized
+                .iter()
+                .map(|f| f.transaction_id)
+                .collect::<HashSet<_>>();
+            assert_eq!(finalized.len(), 6);
+            assert!(finalized.contains(&transaction_id(3)));
+            assert!(!finalized.contains(&transaction_id(4)));
+            assert_eq!(total_fees(&store).await, Amount::from(1u64 + 2 + 3));
+            assert_eq!(staged_versions(&store).await, [4]);
+            let stored = stored_progress(&store).await;
+            assert_eq!(stored.verified.get(&SHARD), Some(&verified));
+            assert_eq!(stored.last_state_version(SHARD), Some(v(4)));
+
+            progress.record_verified(SHARD, verified);
+            promote(&store, &progress, 4).await.unwrap();
+            assert!(staged_versions(&store).await.is_empty());
+            assert_eq!(total_fees(&store).await, Amount::from(1u64 + 2 + 3 + 4));
+        }
+
+        #[tokio::test]
+        async fn promotion_of_a_long_run_stops_at_the_transaction_cap_with_the_last_version_promoted_verified() {
+            let (_dir, store) = store().await;
+            let num_versions = MAX_PROMOTED_VERSIONS as u64 + 2;
+            let progress = stage(&store, num_versions).await;
+
+            let (verified, _) = promote(&store, &progress, num_versions).await.unwrap();
+
+            assert_eq!(verified.state_version, v(MAX_PROMOTED_VERSIONS as u64));
+            assert_eq!(staged_versions(&store).await, [num_versions - 1, num_versions]);
+        }
+
+        /// A version that is verified must be staged; a gap in the stage means the store lost it.
+        #[tokio::test]
+        async fn promotion_through_a_version_that_is_not_staged_fails() {
+            let (_dir, store) = store().await;
+            let progress = stage(&store, 2).await;
+
+            let result = promote(&store, &progress, 3).await;
+
+            assert!(
+                matches!(result, Err(StorageError::DataInconsistency { .. })),
+                "{:?}",
+                result.err()
+            );
+            assert_eq!(staged_versions(&store).await, [1, 2]);
+            assert_eq!(total_fees(&store).await, Amount::zero());
+        }
+
+        #[tokio::test]
+        async fn discarding_above_the_verified_version_leaves_the_indexed_tables_and_totals_as_they_were() {
+            let (_dir, store) = store().await;
+            let mut progress = stage(&store, 4).await;
+            let (verified, _) = promote(&store, &progress, 1).await.unwrap();
+            progress.record_verified(SHARD, verified);
+
+            progress.rewind_to_verified(SHARD);
+            let snapshot = progress.clone();
+            let peers = store
+                .with_write_tx(move |tx| {
+                    let peers = tx.staged_versions_discard_above(SHARD, Some(v(1)))?;
+                    tx.key_value_set(Key::SyncProgress, snapshot)?;
+                    Ok::<_, StorageError>(peers)
+                })
+                .await
+                .unwrap();
+
+            assert_eq!(
+                peers.into_iter().collect::<HashSet<_>>(),
+                HashSet::from([vec![0], vec![1]])
+            );
+            assert!(staged_versions(&store).await.is_empty());
+            assert_eq!(total_fees(&store).await, Amount::from(1u64));
+            assert_eq!(stored_progress(&store).await.last_state_version(SHARD), Some(v(1)));
+            for n in 2..=4 {
+                let receipt = store
+                    .with_read_tx(move |tx| tx.get_transaction_receipt(&receipt_address(n)))
+                    .await
+                    .optional()
+                    .unwrap();
+                assert!(receipt.is_none(), "v{n}'s receipt is indexed");
+            }
+        }
+
+        fn checkpoint_leaf(n: u64) -> CheckpointShardLeaf {
+            CheckpointShardLeaf {
+                shard: SHARD,
+                state_version: v(n),
+                transition_acc: acc(n),
+            }
+        }
+
+        async fn checkpoint_leaves_above(store: &SqliteIndexerStore, n: Option<u64>, limit: usize) -> Vec<u64> {
+            store
+                .with_read_tx(move |tx| tx.checkpoint_shard_leaves_above(SHARD, n.map(v), limit))
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|leaf| leaf.state_version.as_u64())
+                .collect()
+        }
+
+        /// A catch-up checks its staged versions against every stored checkpoint leaf in turn, the next few above the
+        /// verified version at a time, and promotion drops those it has passed.
+        #[tokio::test]
+        async fn stored_checkpoint_leaves_are_read_in_order_above_the_verified_version_and_dropped_once_promoted() {
+            let (_dir, store) = store().await;
+            let progress = stage(&store, 6).await;
+            store
+                .with_write_tx(|tx| {
+                    tx.checkpoint_shard_leaves_insert(&[0, 2, 4, 6, 9].map(checkpoint_leaf))?;
+                    tx.checkpoint_shard_leaves_insert(&[checkpoint_leaf(4)])
+                })
+                .await
+                .unwrap();
+
+            assert_eq!(checkpoint_leaves_above(&store, None, 3).await, [0, 2, 4]);
+            assert_eq!(checkpoint_leaves_above(&store, Some(0), 3).await, [2, 4, 6]);
+            assert_eq!(checkpoint_leaves_above(&store, Some(4), 3).await, [6, 9]);
+
+            promote(&store, &progress, 4).await.unwrap();
+            assert_eq!(checkpoint_leaves_above(&store, None, 10).await, [6, 9]);
+        }
+
+        #[test]
+        fn rewinding_a_shard_nothing_is_verified_of_restarts_it_from_its_genesis_version() {
+            let mut progress = SyncProgress::default();
+            progress.record_state_version(SHARD, v(7), Epoch(1));
+            progress.rewind_to_verified(SHARD);
+            assert_eq!(cursors_for(&[SHARD], &progress)[0].start_state_version, 0);
+        }
+
+        #[tokio::test]
+        async fn promotion_of_a_shard_nothing_is_verified_of_starts_at_its_genesis_version() {
+            let (_dir, store) = store().await;
+            let mut progress = SyncProgress::default();
+            progress.record_state_version(SHARD, v(1), Epoch(1));
+            store
+                .with_write_tx(|tx| {
+                    tx.staged_version_insert(SHARD, &StagedVersion {
+                        accumulator: StagedAccumulator {
+                            state_version: v(0),
+                            epoch: Epoch(0),
+                            transition_acc: TransitionAccumulator::zero(),
+                            streamed_by: vec![0],
+                        },
+                        batch: Vec::new(),
+                    })?;
+                    tx.staged_version_insert(SHARD, &StagedVersion {
+                        accumulator: StagedAccumulator {
+                            state_version: v(1),
+                            epoch: Epoch(1),
+                            transition_acc: acc(1),
+                            streamed_by: vec![0],
+                        },
+                        batch: encoded_receipt_version(1, 1, 1),
+                    })
+                })
+                .await
+                .unwrap();
+
+            let (verified, _) = promote(&store, &progress, 0).await.unwrap();
+            assert_eq!(verified.state_version, v(0));
+            assert_eq!(staged_versions(&store).await, [1]);
+            progress.record_verified(SHARD, verified);
+            let (verified, _) = promote(&store, &progress, 1).await.unwrap();
+            assert_eq!(verified.state_version, v(1));
+            assert_eq!(total_fees(&store).await, Amount::from(1u64));
+        }
+
+        #[test]
+        fn a_staged_version_decodes_to_the_updates_of_every_chunk() {
+            let buf = VersionBuf::decode_staged(SHARD, v(1), &encoded_receipt_version(1, 1, 10)).unwrap();
+            assert_eq!(buf.transactions.len(), 2);
+            assert!(VersionBuf::decode_staged(SHARD, v(1), &[0xff, 0xff]).is_err());
+        }
+
+        /// A staged snapshot substate creating the receipt of transaction `n`, paying `n` in fees, at `epoch`.
+        fn snapshot_receipt(n: u64, epoch: u64) -> SnapshotSubstate {
+            let mut leaf_key = [0; 32];
+            leaf_key[..8].copy_from_slice(&n.to_be_bytes());
+            SnapshotSubstate {
+                epoch: Epoch(epoch),
+                leaf_key: tari_state_tree::LeafKey::new(tari_state_tree::TreeHash::new(leaf_key)),
+                substate: rpc::SubstateData::from(SubstateData {
+                    substate_id: SubstateId::TransactionReceipt(receipt_address(n)),
+                    version: tari_engine_types::SubstateVersion::ZERO,
+                    value: SubstateValueOrHash::Value(Box::new(SubstateValue::TransactionReceipt(receipt(
+                        FinalizeOutcome::Commit,
+                        n,
+                    )))),
+                    template_metadata: None,
+                })
+                .encode_to_vec(),
+            }
+        }
+
+        #[tokio::test]
+        async fn a_promoted_snapshot_is_indexed_and_verified_at_its_version() {
+            let (_dir, store) = store().await;
+            let num_substates = MAX_PROMOTED_SNAPSHOT_SUBSTATES as u64 + 5;
+            store
+                .with_write_tx(move |tx| {
+                    let substates = (1..=num_substates)
+                        .map(|n| snapshot_receipt(n, n % 3 + 1))
+                        .collect::<Vec<_>>();
+                    tx.snapshot_substates_insert(SHARD, &substates)?;
+                    tx.checkpoint_shard_leaves_insert(&[checkpoint_leaf(40), checkpoint_leaf(60)])?;
+                    // Another shard's snapshot is left alone
+                    tx.snapshot_substates_insert(Shard::from_u32(2), &[snapshot_receipt(9999, 1)])
+                })
+                .await
+                .unwrap();
+
+            let verified = VerifiedShardVersion {
+                state_version: v(50),
+                epoch: Epoch(4),
+                transition_acc: acc(50),
+            };
+            let promoted = store
+                .with_write_tx(move |tx| {
+                    promote_snapshot(tx, SHARD, verified, SyncProgress::default(), &[], &HashSet::new())
+                })
+                .await
+                .unwrap();
+
+            assert!(promoted.finalized.is_empty() && promoted.inserted_events.is_empty());
+            assert_eq!(total_fees(&store).await, Amount::from((1..=num_substates).sum::<u64>()));
+            for n in [1, num_substates] {
+                store
+                    .with_read_tx(move |tx| tx.get_transaction_receipt(&receipt_address(n)))
+                    .await
+                    .unwrap();
+            }
+            let stored = stored_progress(&store).await;
+            assert_eq!(stored.verified.get(&SHARD), Some(&verified));
+            assert_eq!(stored.last_state_version(SHARD), Some(v(50)));
+            assert_eq!(cursors_for(&[SHARD], &stored)[0].start_state_version, 51);
+            assert!(
+                store
+                    .with_read_tx(|tx| tx.snapshot_substates_page(SHARD, None, 10))
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+            assert_eq!(
+                store
+                    .with_read_tx(|tx| tx.snapshot_substates_page(Shard::from_u32(2), None, 10))
+                    .await
+                    .unwrap()
+                    .len(),
+                1
+            );
+            assert_eq!(checkpoint_leaves_above(&store, None, 10).await, [60]);
+            assert_eq!(
+                store.with_read_tx(|tx| tx.utxo_tombstone_horizon(SHARD)).await.unwrap(),
+                Some(v(50))
+            );
+        }
+
+        #[tokio::test]
+        async fn snapshot_substates_are_paged_by_epoch_then_leaf_key() {
+            let (_dir, store) = store().await;
+            store
+                .with_write_tx(|tx| {
+                    tx.snapshot_substates_insert(SHARD, &[
+                        snapshot_receipt(3, 1),
+                        snapshot_receipt(1, 2),
+                        snapshot_receipt(2, 1),
+                        snapshot_receipt(4, 2),
+                    ])
+                })
+                .await
+                .unwrap();
+            let mut seen = Vec::new();
+            let mut after = None;
+            loop {
+                let page = store
+                    .with_read_tx(move |tx| tx.snapshot_substates_page(SHARD, after, 3))
+                    .await
+                    .unwrap();
+                let Some(last) = page.last() else {
+                    break;
+                };
+                after = Some((last.epoch, last.leaf_key));
+                seen.extend(
+                    page.iter()
+                        .map(|substate| (substate.epoch.as_u64(), substate.leaf_key.bytes[7])),
+                );
+            }
+            assert_eq!(seen, [(1, 2), (1, 3), (2, 1), (2, 4)]);
+        }
     }
 
     mod served_checkpoints {
         use indexmap::IndexMap;
-        use tari_common_types::types::FixedHash;
         use tari_ootle_storage::consensus_models::EndOfEpochCommand;
-        use tari_sidechain::{CommandCommitProof, SidechainBlockCommitProof, SidechainBlockHeader};
+        use tari_sidechain::{CommandCommitProof, FixedHash, SidechainBlockCommitProof, SidechainBlockHeader};
         use tari_state_tree::{TreeHash, compute_proof_for_hashes};
 
         use super::*;
@@ -1741,7 +4053,7 @@ mod tests {
                     proposed_by: Default::default(),
                     state_merkle_root: FixedHash::zero(),
                     command_merkle_root: FixedHash::zero(),
-                    transaction_merkle_root: None,
+                    transaction_merkle_root: FixedHash::zero(),
                     signature: Default::default(),
                     accumulated_data: tari_sidechain::ShardGroupAccumulatedData { total_exhaust_burn },
                     metadata_hash: FixedHash::zero(),
@@ -1751,6 +4063,13 @@ mod tests {
             EpochCheckpoint::new(
                 CommandCommitProof::new(EndOfEpochCommand::new(FixedHash::zero()), commit_proof, inclusion_proof),
                 IndexMap::new(),
+                tari_ootle_storage::consensus_models::BlockHeaderMetadata {
+                    total_leader_fee: 0,
+                    timestamp: 0,
+                    extra_data: Default::default(),
+                    timeout_certificate_id: None,
+                    is_dummy: false,
+                },
             )
         }
 
@@ -1767,6 +4086,56 @@ mod tests {
                 matches!(result, Err(NetworkStateSyncError::InvalidCheckpoint { .. })),
                 "{result:?}"
             );
+        }
+
+        /// The head checkpoint is stored ahead of the backfill without moving its progress, and the backfill that
+        /// reaches it later records its progress without counting its exhaust burn a second time.
+        #[tokio::test]
+        async fn a_head_checkpoint_stored_ahead_of_the_backfill_is_counted_once() {
+            use crate::store::IndexerStore;
+
+            let dir = tempfile::tempdir().unwrap();
+            let store = SqliteIndexerStore::try_create(dir.path().join("indexer.db")).unwrap();
+            let head = checkpoint(250, 7);
+            let shard_group = head.checked_shard_group().unwrap();
+            let burn = checkpoint_exhaust_burn(&head).unwrap();
+
+            let ahead = head.clone();
+            store
+                .with_write_tx(move |tx| write_checkpoint(tx, &ahead, shard_group, burn, &[], None))
+                .await
+                .unwrap();
+            let progress = store
+                .with_read_tx(|tx| tx.key_value_get_value::<_, SyncProgress>(Key::SyncProgress))
+                .await
+                .optional()
+                .unwrap();
+            assert!(progress.is_none());
+
+            let mut backfilled = SyncProgress::default();
+            backfilled.record_checkpoint(shard_group, Epoch(250));
+            store
+                .with_write_tx(move |tx| write_checkpoint(tx, &head, shard_group, burn, &[], Some(backfilled)))
+                .await
+                .unwrap();
+            let progress = store
+                .with_read_tx(|tx| tx.key_value_get_value::<_, SyncProgress>(Key::SyncProgress))
+                .await
+                .unwrap();
+            assert_eq!(progress.checkpoint_epoch(shard_group), Some(Epoch(250)));
+            let total = store
+                .with_read_tx(|tx| tx.key_value_get_value::<_, Amount>(Key::TariAccumulatedExhaustBurn))
+                .await
+                .unwrap();
+            assert_eq!(total, Amount::from(7u64));
+        }
+
+        #[test]
+        fn the_previous_epochs_checkpoint_is_synced_first_only_when_earlier_ones_are_missing() {
+            assert!(is_backfill(Epoch(0), Epoch(250)));
+            assert!(is_backfill(Epoch(248), Epoch(250)));
+            assert!(!is_backfill(Epoch(249), Epoch(250)));
+            assert!(!is_backfill(Epoch(250), Epoch(250)));
         }
 
         #[test]
@@ -1838,24 +4207,16 @@ mod tests {
         const S1: Shard = Shard::from_u32(1);
         const S2: Shard = Shard::from_u32(2);
 
-        fn cursors(cursors: &[(u32, u64)]) -> Vec<rpc::ShardCursor> {
-            cursors
-                .iter()
-                .map(|&(shard, start_state_version)| rpc::ShardCursor {
-                    shard,
-                    start_state_version,
-                })
-                .collect()
-        }
-
-        /// A followed stream, which carries every transition.
-        fn order(c: &[(u32, u64)]) -> StreamOrder {
-            StreamOrder::new(&cursors(c), true)
-        }
-
-        /// A head fetch, which leaves out transitions of substates since destroyed.
-        fn head_order(c: &[(u32, u64)]) -> StreamOrder {
-            StreamOrder::new(&cursors(c), false)
+        fn order(cursors: &[(u32, u64)]) -> StreamOrder {
+            StreamOrder::new(
+                &cursors
+                    .iter()
+                    .map(|&(shard, start_state_version)| rpc::ShardCursor {
+                        shard,
+                        start_state_version,
+                    })
+                    .collect::<Vec<_>>(),
+            )
         }
 
         fn v(n: u64) -> StateVersion {
@@ -1863,13 +4224,28 @@ mod tests {
         }
 
         #[test]
+        fn a_shard_streamed_from_v0_starts_at_v0_which_alone_may_be_empty() {
+            let mut o = order(&[(1, 0), (2, 0)]);
+            assert!(o.accept_marker(S1, v(0)).is_err());
+            assert!(o.accept_batch(S1, v(1), false, 1, 0).is_err());
+            o.accept_batch(S1, v(0), false, 0, 0).unwrap();
+            assert!(o.accept_batch(S1, v(1), false, 0, 0).is_err());
+            o.accept_batch(S1, v(1), false, 1, 0).unwrap();
+            assert_eq!(o.accept_marker(S1, v(1)).unwrap(), (v(1), true));
+
+            o.accept_batch(S2, v(0), false, 2, 0).unwrap();
+            assert_eq!(o.accept_marker(S2, v(0)).unwrap(), (v(0), true));
+            assert!(o.accept_batch(S2, v(0), false, 0, 0).is_err());
+        }
+
+        #[test]
         fn it_accepts_shards_streamed_one_after_another() {
             let mut o = order(&[(1, 1), (2, 5)]);
             o.accept_batch(S1, v(1), false, 1, 0).unwrap();
             o.accept_batch(S1, v(2), false, 1, 0).unwrap();
-            assert_eq!(o.accept_marker(S1, v(2)).unwrap(), Some(v(2)));
+            assert_eq!(o.accept_marker(S1, v(2)).unwrap(), (v(2), true));
             o.accept_batch(S2, v(5), false, 1, 0).unwrap();
-            assert_eq!(o.accept_marker(S2, v(5)).unwrap(), Some(v(5)));
+            assert_eq!(o.accept_marker(S2, v(5)).unwrap(), (v(5), true));
         }
 
         #[test]
@@ -1878,7 +4254,7 @@ mod tests {
             o.accept_batch(S1, v(3), true, 1, 0).unwrap();
             o.accept_batch(S1, v(3), true, 1, 0).unwrap();
             o.accept_batch(S1, v(3), false, 1, 0).unwrap();
-            assert_eq!(o.accept_marker(S1, v(3)).unwrap(), Some(v(3)));
+            assert_eq!(o.accept_marker(S1, v(3)).unwrap(), (v(3), true));
         }
 
         #[test]
@@ -1890,21 +4266,16 @@ mod tests {
         }
 
         #[test]
-        fn it_rejects_a_replayed_version() {
+        fn it_rejects_a_replayed_or_regressing_version() {
             let mut o = order(&[(1, 9)]);
             o.accept_batch(S1, v(9), false, 1, 0).unwrap();
+            o.accept_batch(S1, v(10), false, 1, 0).unwrap();
+            assert!(o.accept_batch(S1, v(10), false, 1, 0).is_err());
             assert!(o.accept_batch(S1, v(9), false, 1, 0).is_err());
         }
 
         #[test]
-        fn it_rejects_a_regressing_version() {
-            let mut o = head_order(&[(1, 1)]);
-            o.accept_batch(S1, v(9), false, 1, 0).unwrap();
-            assert!(o.accept_batch(S1, v(8), false, 1, 0).is_err());
-        }
-
-        #[test]
-        fn a_followed_stream_rejects_a_skipped_version() {
+        fn it_rejects_a_skipped_version() {
             assert!(order(&[(1, 1)]).accept_batch(S1, v(2), false, 1, 0).is_err());
             assert!(order(&[(1, 1)]).accept_batch(S1, v(2), true, 1, 0).is_err());
             let mut o = order(&[(1, 1)]);
@@ -1913,33 +4284,25 @@ mod tests {
         }
 
         #[test]
-        fn a_followed_stream_rejects_a_marker_past_the_last_version_streamed() {
+        fn it_rejects_a_marker_past_the_last_version_streamed() {
             let mut o = order(&[(1, 101)]);
             assert!(o.accept_marker(S1, v(100_000)).is_err());
             assert!(o.accept_marker(S1, v(101)).is_err());
             o.accept_batch(S1, v(101), false, 1, 0).unwrap();
             assert!(o.accept_marker(S1, v(102)).is_err());
-            assert_eq!(o.accept_marker(S1, v(101)).unwrap(), Some(v(101)));
+            assert_eq!(o.accept_marker(S1, v(101)).unwrap(), (v(101), true));
         }
 
         #[test]
-        fn a_head_fetch_skips_versions_and_establishes_no_level() {
-            let mut o = head_order(&[(1, 1)]);
-            o.accept_batch(S1, v(4), false, 1, 0).unwrap();
-            o.accept_batch(S1, v(9), false, 1, 0).unwrap();
-            assert_eq!(o.accept_marker(S1, v(100_000)).unwrap(), None);
-        }
-
-        #[test]
-        fn it_accepts_a_followed_shard_streamed_again_after_its_marker() {
+        fn it_accepts_a_shard_streamed_again_after_its_marker() {
             let mut o = order(&[(1, 2), (2, 1)]);
             o.accept_batch(S1, v(2), false, 1, 0).unwrap();
-            assert_eq!(o.accept_marker(S1, v(2)).unwrap(), Some(v(2)));
-            assert_eq!(o.accept_marker(S2, v(0)).unwrap(), Some(v(0)));
+            assert_eq!(o.accept_marker(S1, v(2)).unwrap(), (v(2), true));
+            assert_eq!(o.accept_marker(S2, v(0)).unwrap(), (v(0), false));
             o.accept_batch(S1, v(3), false, 1, 0).unwrap();
-            o.accept_marker(S1, v(3)).unwrap();
+            assert_eq!(o.accept_marker(S1, v(3)).unwrap(), (v(3), true));
             // A forced marker on an epoch change closes off nothing new.
-            assert_eq!(o.accept_marker(S1, v(3)).unwrap(), Some(v(3)));
+            assert_eq!(o.accept_marker(S1, v(3)).unwrap(), (v(3), false));
             assert!(o.accept_batch(S1, v(3), false, 1, 0).is_err());
         }
 
@@ -1967,25 +4330,19 @@ mod tests {
         fn it_rejects_a_batch_with_no_updates() {
             assert!(order(&[(1, 1)]).accept_batch(S1, v(1), false, 0, 0).is_err());
             assert!(order(&[(1, 1)]).accept_batch(S1, v(1), true, 0, 0).is_err());
-            assert!(head_order(&[(1, 1)]).accept_batch(S1, v(9), false, 0, 0).is_err());
-            // Empty versions cannot walk a followed stream's cursor forward ahead of a marker.
+            // Empty versions cannot walk a stream's cursor forward ahead of a marker.
             let mut o = order(&[(1, 1)]);
             o.accept_batch(S1, v(1), false, 1, 0).unwrap();
             assert!(o.accept_batch(S1, v(2), false, 0, 0).is_err());
-            assert_eq!(o.accept_marker(S1, v(1)).unwrap(), Some(v(1)));
+            assert_eq!(o.accept_marker(S1, v(1)).unwrap(), (v(1), true));
             assert!(o.accept_marker(S1, v(2)).is_err());
         }
 
         #[test]
-        fn it_accepts_versions_across_the_whole_range() {
-            let mut o = head_order(&[(1, 1)]);
-            o.accept_batch(S1, v(i64::MAX as u64 + 1), false, 1, 0).unwrap();
-            o.accept_batch(S1, v(u64::MAX), false, 1, 0).unwrap();
-            assert!(o.accept_batch(S1, v(u64::MAX), false, 1, 0).is_err());
-
+        fn it_accepts_the_last_representable_version() {
             let mut o = order(&[(1, u64::MAX)]);
             o.accept_batch(S1, v(u64::MAX), false, 1, 0).unwrap();
-            assert_eq!(o.accept_marker(S1, v(u64::MAX)).unwrap(), Some(v(u64::MAX)));
+            assert_eq!(o.accept_marker(S1, v(u64::MAX)).unwrap(), (v(u64::MAX), true));
             assert!(o.accept_batch(S1, v(u64::MAX), false, 1, 0).is_err());
         }
 
@@ -2011,6 +4368,122 @@ mod tests {
         }
     }
 
+    mod stream_checks {
+        use super::*;
+
+        const S1: Shard = Shard::from_u32(1);
+        const S2: Shard = Shard::from_u32(2);
+
+        fn v(n: u64) -> StateVersion {
+            StateVersion::new(n)
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn a_version_no_leaf_reaches_within_the_grace_is_overdue() {
+            let mut checks = StreamChecks::default();
+            checks.stage(S1, v(5), 10, time::Instant::now());
+            time::advance(Duration::from_secs(1)).await;
+            checks.stage(S2, v(1), 10, time::Instant::now());
+
+            time::advance(VERIFICATION_GRACE).await;
+            assert_eq!(checks.overdue(time::Instant::now()), Some((S1, v(5))));
+
+            checks.cover(S1, v(5));
+            assert_eq!(checks.overdue(time::Instant::now()), None);
+            time::advance(Duration::from_secs(1)).await;
+            assert_eq!(checks.overdue(time::Instant::now()), Some((S2, v(1))));
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn a_leaf_below_the_staged_versions_covers_only_those_up_to_it() {
+            let mut checks = StreamChecks::default();
+            for n in 1..=3 {
+                checks.stage(S1, v(n), 100, time::Instant::now());
+            }
+            checks.cover(S1, v(2));
+            assert_eq!((checks.uncovered_versions, checks.uncovered_bytes), (1, 100));
+
+            time::advance(VERIFICATION_GRACE + Duration::from_secs(1)).await;
+            assert_eq!(checks.overdue(time::Instant::now()), Some((S1, v(3))));
+        }
+
+        #[test]
+        fn the_stream_is_full_at_either_cap() {
+            let now = time::Instant::now();
+            let mut checks = StreamChecks::default();
+            checks.stage(S1, v(1), MAX_UNCOVERED_BYTES - 1, now);
+            assert!(!checks.is_full());
+            checks.stage(S1, v(2), 1, now);
+            assert!(checks.is_full());
+            checks.cover(S1, v(2));
+            assert!(!checks.is_full());
+
+            for n in 0..MAX_UNCOVERED_VERSIONS as u64 {
+                checks.stage(S2, v(n + 1), 0, now);
+            }
+            assert!(checks.is_full());
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn a_leaf_ahead_of_a_level_shard_for_the_grace_is_withheld() {
+            let mut checks = StreamChecks::default();
+            let level = HashMap::from([(S1, v(4)), (S2, v(9))]);
+            let waiting = |shard| (shard == S1).then_some(v(6));
+
+            assert_eq!(checks.withheld(&level, waiting, time::Instant::now()), None);
+            time::advance(VERIFICATION_GRACE).await;
+            assert_eq!(checks.withheld(&level, waiting, time::Instant::now()), None);
+            time::advance(Duration::from_secs(1)).await;
+            assert_eq!(
+                checks.withheld(&level, waiting, time::Instant::now()),
+                Some((S1, v(4), v(6)))
+            );
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn a_shard_that_streams_again_restarts_its_grace() {
+            let mut checks = StreamChecks::default();
+            let waiting = |shard| (shard == S1).then_some(v(6));
+            checks.withheld(&HashMap::from([(S1, v(4))]), waiting, time::Instant::now());
+            time::advance(VERIFICATION_GRACE).await;
+
+            // Not level while it streams the versions up to the leaf.
+            checks.withheld(&HashMap::new(), waiting, time::Instant::now());
+            time::advance(Duration::from_secs(1)).await;
+            let level = HashMap::from([(S1, v(5))]);
+            assert_eq!(checks.withheld(&level, waiting, time::Instant::now()), None);
+            assert_eq!(
+                checks.withheld(&level, |_| None, time::Instant::now() + VERIFICATION_GRACE * 2),
+                None
+            );
+        }
+    }
+
+    mod mismatch_breaker {
+        use tari_crypto::{
+            keys::PublicKey,
+            ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+        };
+
+        use super::*;
+
+        const SHARD: Shard = Shard::from_u32(1);
+
+        fn peer(n: u64) -> PeerAddress {
+            RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(n)).into()
+        }
+
+        #[test]
+        fn it_trips_once_every_member_mismatched_from_the_same_version() {
+            let mut breaker = MismatchBreaker::default();
+            assert!(!breaker.record(SHARD, Some(StateVersion::new(4)), &[peer(1)], 3));
+            assert!(!breaker.record(SHARD, Some(StateVersion::new(4)), &[peer(1)], 3));
+            assert!(!breaker.record(SHARD, Some(StateVersion::new(5)), &[peer(2)], 3));
+            assert!(!breaker.record(Shard::from_u32(2), Some(StateVersion::new(4)), &[peer(2)], 3));
+            assert!(breaker.record(SHARD, Some(StateVersion::new(4)), &[peer(2), peer(3)], 3));
+        }
+    }
+
     mod cursors_for {
         use super::*;
 
@@ -2023,9 +4496,9 @@ mod tests {
         }
 
         #[test]
-        fn it_resumes_after_the_recorded_version() {
+        fn it_resumes_after_the_recorded_version_and_starts_a_new_shard_at_its_genesis_version() {
             assert_eq!(cursors_for(&[S1], &progress_at(12_345))[0].start_state_version, 12_346);
-            assert_eq!(cursors_for(&[S1], &SyncProgress::default())[0].start_state_version, 1);
+            assert_eq!(cursors_for(&[S1], &SyncProgress::default())[0].start_state_version, 0);
         }
 
         #[test]
@@ -2036,6 +4509,349 @@ mod tests {
             assert_eq!(cursors.len(), 1);
             assert_eq!(cursors[0].shard, 2);
             assert_eq!(cursors[0].start_state_version, u64::MAX);
+        }
+    }
+
+    mod checkpoint_verification {
+        use std::{
+            collections::{HashMap, HashSet},
+            sync::Arc,
+        };
+
+        use tari_epoch_manager::EpochManagerError;
+        use tari_ootle_common_types::{
+            SubstateAddress,
+            VotePower,
+            committee::{Committee, CommitteeInfo, CommitteeMember},
+        };
+        use tari_ootle_storage::{
+            consensus_models::{BlockHeaderMetadata, EndOfEpochCommand},
+            global::models::ValidatorNode,
+        };
+        use tari_sidechain::{CommandCommitProof, FixedHash, SidechainBlockCommitProof, SidechainBlockHeader};
+        use tari_state_tree::{TreeHash, compute_proof_for_hashes};
+        use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+        use tokio::sync::broadcast;
+
+        use super::*;
+
+        type Addr = String;
+
+        fn low() -> ShardGroup {
+            ShardGroup::new(1u32, 127u32)
+        }
+
+        fn high() -> ShardGroup {
+            ShardGroup::new(128u32, 255u32)
+        }
+
+        /// A well-formed checkpoint that no committee signed.
+        fn checkpoint(epoch: u64, shard_group: ShardGroup) -> EpochCheckpoint {
+            let state_root = checkpoint_with_state_root(epoch, shard_group, FixedHash::zero())
+                .compute_state_merkle_root()
+                .unwrap();
+            checkpoint_with_state_root(epoch, shard_group, FixedHash::from(state_root.into_array()))
+        }
+
+        fn checkpoint_with_state_root(
+            epoch: u64,
+            shard_group: ShardGroup,
+            state_merkle_root: FixedHash,
+        ) -> EpochCheckpoint {
+            let header_metadata = BlockHeaderMetadata {
+                total_leader_fee: 0,
+                timestamp: epoch,
+                extra_data: Default::default(),
+                timeout_certificate_id: None,
+                is_dummy: false,
+            };
+            let key = TreeHash::new([1; 32]);
+            let (_, inclusion_proof) = compute_proof_for_hashes([key].into_iter(), key).unwrap();
+            let commit_proof = SidechainBlockCommitProof {
+                header: SidechainBlockHeader {
+                    network: 0,
+                    protocol_version: 0,
+                    parent_id: FixedHash::zero(),
+                    justify_id: FixedHash::zero(),
+                    height: 0,
+                    epoch,
+                    epoch_hash: FixedHash::zero(),
+                    shard_group: tari_sidechain::ShardGroup {
+                        start: shard_group.start().as_u32(),
+                        end_inclusive: shard_group.end().as_u32(),
+                    },
+                    proposed_by: Default::default(),
+                    state_merkle_root,
+                    command_merkle_root: FixedHash::zero(),
+                    transaction_merkle_root: FixedHash::zero(),
+                    signature: Default::default(),
+                    accumulated_data: Default::default(),
+                    metadata_hash: header_metadata.calculate_hash(),
+                },
+                proof_elements: vec![],
+            };
+            EpochCheckpoint::new(
+                CommandCommitProof::new(EndOfEpochCommand::new(FixedHash::zero()), commit_proof, inclusion_proof),
+                Default::default(),
+                header_metadata,
+            )
+        }
+
+        #[test]
+        fn a_snapshot_is_taken_at_either_of_the_last_two_checkpoints_of_its_shard_group() {
+            assert!(is_snapshot_checkpoint(&checkpoint(9, low()), low(), Epoch(10)));
+            // The checkpoint of the epoch that just ended is not stored yet
+            assert!(is_snapshot_checkpoint(&checkpoint(8, low()), low(), Epoch(10)));
+            assert!(!is_snapshot_checkpoint(&checkpoint(7, low()), low(), Epoch(10)));
+            assert!(!is_snapshot_checkpoint(&checkpoint(10, low()), low(), Epoch(10)));
+            assert!(!is_snapshot_checkpoint(&checkpoint(9, high()), low(), Epoch(10)));
+        }
+
+        fn committee() -> Arc<Committee<Addr>> {
+            Arc::new(Committee::new(vec![CommitteeMember {
+                address: "member".to_string(),
+                public_key: RistrettoPublicKeyBytes::default(),
+                vote_power: VotePower::of(1),
+            }]))
+        }
+
+        /// The epochs an epoch manager has a record of, each with the committees of its shard groups.
+        #[derive(Default)]
+        struct EpochRecords {
+            committees: HashMap<Epoch, Vec<ShardGroup>>,
+            validator_set_hash: Option<ValidatorSetHash>,
+        }
+
+        impl EpochRecords {
+            fn with(mut self, epoch: u64, shard_groups: &[ShardGroup]) -> Self {
+                self.committees.insert(Epoch(epoch), shard_groups.to_vec());
+                self
+            }
+        }
+
+        impl EpochManagerReader for EpochRecords {
+            type Addr = Addr;
+
+            fn subscribe(&self) -> broadcast::Receiver<EpochManagerEvent> {
+                unimplemented!()
+            }
+
+            async fn wait_for_initial_scanning_to_complete(&self) -> Result<(), EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_all_validator_nodes(&self, _: Epoch) -> Result<Vec<ValidatorNode<Addr>>, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_committee_info_by_validator_address(
+                &self,
+                _: Epoch,
+                _: &Addr,
+            ) -> Result<CommitteeInfo, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_committee_for_substate(
+                &self,
+                _: Epoch,
+                _: SubstateAddress,
+            ) -> Result<Arc<Committee<Addr>>, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_validator_node_by_public_key(
+                &self,
+                _: Epoch,
+                _: RistrettoPublicKeyBytes,
+            ) -> Result<ValidatorNode<Addr>, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_our_validator_node(&self, _: Epoch) -> Result<ValidatorNode<Addr>, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_local_committee_info(&self, _: Epoch) -> Result<CommitteeInfo, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_committee_info(&self, _: Epoch, _: ShardGroup) -> Result<CommitteeInfo, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_committee_info_for_substate(
+                &self,
+                _: Epoch,
+                _: SubstateAddress,
+            ) -> Result<CommitteeInfo, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn current_epoch(&self) -> Result<Epoch, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_current_epoch_hash(&self) -> Result<FixedHash, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_epoch_hash(&self, epoch: Epoch) -> Result<FixedHash, EpochManagerError> {
+                if self.committees.contains_key(&epoch) {
+                    Ok(FixedHash::zero())
+                } else {
+                    Err(EpochManagerError::NoEpochFound(epoch))
+                }
+            }
+
+            async fn get_validator_set_hash(&self, epoch: Epoch) -> Result<ValidatorSetHash, EpochManagerError> {
+                self.validator_set_hash
+                    .ok_or(EpochManagerError::NoValidatorSet { epoch })
+            }
+
+            async fn get_validator_set_committee_proof(
+                &self,
+                _: Epoch,
+                _: ShardGroup,
+            ) -> Result<tari_state_tree::ValidatorSetCommitteeProof, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_num_committees(&self, _: Epoch) -> Result<u32, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_committee_by_shard_group(
+                &self,
+                epoch: Epoch,
+                shard_group: ShardGroup,
+            ) -> Result<Arc<Committee<Addr>>, EpochManagerError> {
+                match self.committees.get(&epoch) {
+                    Some(shard_groups) if shard_groups.contains(&shard_group) => Ok(committee()),
+                    _ => Err(EpochManagerError::NoEpochFound(epoch)),
+                }
+            }
+
+            async fn get_committees_overlapping_shard_group(
+                &self,
+                _: Epoch,
+                _: ShardGroup,
+            ) -> Result<HashMap<ShardGroup, Committee<Addr>>, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_random_committee_member(
+                &self,
+                _: Epoch,
+                _: Option<ShardGroup>,
+                _: HashSet<Addr>,
+            ) -> Result<ValidatorNode<Addr>, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn lock_epoch(&self, _: Epoch) -> Result<(), EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_observed_epoch_hash(&self, _: Epoch) -> Result<Option<FixedHash>, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_birthday_epoch(&self) -> Result<Option<Epoch>, EpochManagerError> {
+                unimplemented!()
+            }
+        }
+
+        fn is_invalid_checkpoint(result: &Result<CheckpointCheck, NetworkStateSyncError>) -> bool {
+            matches!(result, Err(NetworkStateSyncError::InvalidCheckpoint { .. }))
+        }
+
+        #[tokio::test]
+        async fn a_checkpoint_before_the_records_is_checked_for_form_only() {
+            let records = EpochRecords::default().with(5, &[low(), high()]);
+
+            let result = verify_checkpoint(Network::MainNet, &records, &checkpoint(2, low()), low(), Epoch(5)).await;
+
+            assert_eq!(result.unwrap(), CheckpointCheck::FormOnly);
+        }
+
+        #[tokio::test]
+        async fn an_older_recorded_checkpoint_is_checked_against_its_committee() {
+            let records = EpochRecords::default()
+                .with(3, &[low(), high()])
+                .with(5, &[low(), high()]);
+
+            let result = verify_checkpoint(Network::MainNet, &records, &checkpoint(3, low()), low(), Epoch(5)).await;
+
+            assert!(is_invalid_checkpoint(&result), "{result:?}");
+        }
+
+        /// A shard group is one the peer names, so naming one the epoch did not have must not skip the committee check.
+        #[tokio::test]
+        async fn a_shard_group_outside_a_recorded_epoch_is_rejected() {
+            let records = EpochRecords::default()
+                .with(3, &[low(), high()])
+                .with(5, &[low(), high()]);
+            let all = ShardGroup::new(1u32, 255u32);
+
+            for epoch in [3, 5] {
+                let result =
+                    verify_checkpoint(Network::MainNet, &records, &checkpoint(epoch, all), all, Epoch(5)).await;
+                assert!(is_invalid_checkpoint(&result), "{epoch}: {result:?}");
+                assert!(result.unwrap_err().is_peer_fault());
+            }
+        }
+
+        #[test]
+        fn a_next_epoch_set_other_than_the_local_one_diverges() {
+            let local = ValidatorSetHash::from_array([1; 32]);
+            let committed = ValidatorSetHash::from_array([2; 32]);
+
+            assert!(check_validator_set(Epoch(4), local, local).is_ok());
+            assert!(matches!(
+                check_validator_set(Epoch(4), local, committed),
+                Err(NetworkStateSyncError::ValidatorSetDiverged { epoch, .. }) if epoch == Epoch(4)
+            ));
+        }
+    }
+
+    mod sync_loop {
+        use super::*;
+        use crate::{storage_sqlite::temp_store, store::IndexerStoreWriteTransaction};
+
+        async fn write(store: &SqliteIndexerStore, value: u64) -> Result<(), StorageError> {
+            store
+                .with_write_tx(move |tx| tx.key_value_set(Key::TariAccumulatedFees, value))
+                .await
+        }
+
+        /// The shape the sync loop's `select!` keeps out: `sync` queued on the store's write lock while a
+        /// branch body awaits a write of its own. The lock is handed to `sync`, which goes unpolled until the
+        /// body ends, so the body's write waits on a lock nothing takes and only the write lock timeout
+        /// ends the wait.
+        #[tokio::test(start_paused = true)]
+        async fn a_branch_writing_while_the_pinned_sync_is_queued_waits_out_the_write_lock_timeout() {
+            let (_dir, store) = temp_store().await;
+            let held = store.hold_write_lock().await;
+            let sync_store = store.clone();
+            let mut sync = pin!(async move { write(&sync_store, 1).await });
+            assert!(futures::poll!(sync.as_mut()).is_pending());
+            drop(held);
+
+            let started = time::Instant::now();
+            let mut branch_write = pin!(write(&store, 2));
+            assert!(
+                time::timeout(Duration::from_secs(10), &mut branch_write).await.is_err(),
+                "the branch's write completed though the lock was handed to an unpolled waiter"
+            );
+            let err = branch_write.await.unwrap_err();
+            assert_eq!(started.elapsed(), Duration::from_secs(30));
+            assert!(
+                err.to_string().contains("waiting for the indexer store's write lock"),
+                "{err}"
+            );
+
+            sync.await.unwrap();
         }
     }
 }

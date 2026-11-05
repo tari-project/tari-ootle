@@ -1,22 +1,21 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, fmt::Display, num::NonZeroU64, time::Instant};
+use std::{collections::HashMap, fmt::Display, num::NonZeroU64, ops::Deref, time::Instant};
 
 use log::*;
 use ootle_byte_type::ToByteType;
-use tari_common_types::types::FixedHash;
 use tari_consensus_types::{
     BlockId,
-    Decision,
     HighPc,
     HighestSeenBlock,
+    LastProposed,
     LeafBlock,
     ProposalCertificate,
     TimeoutCertificate,
 };
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
-use tari_engine_types::commit_result::RejectReason;
+use tari_engine_types::{commit_result::RejectReason, fees::FeeScaleSchedule};
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     Epoch,
@@ -24,6 +23,7 @@ use tari_ootle_common_types::{
     ExtraFieldKey,
     NodeHeight,
     ProtocolVersion,
+    ValidatorSetHash,
     committee::CommitteeInfo,
     displayable::Displayable,
     optional::Optional,
@@ -31,6 +31,8 @@ use tari_ootle_common_types::{
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
+    StateStoreWriteTransaction,
+    StorageError,
     consensus_models::{
         Block,
         BlockCommands,
@@ -45,6 +47,7 @@ use tari_ootle_storage::{
         LockedEpoch,
         MultiShardAtom,
         PendingShardStateTreeDiff,
+        ProposalFilter,
         TransactionExecution,
         TransactionPool,
         TransactionPoolRecord,
@@ -53,15 +56,25 @@ use tari_ootle_storage::{
     },
 };
 use tari_ootle_transaction::TransactionId;
+use tari_sidechain::FixedHash;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::task;
 
 use crate::{
     hotstuff::{
+        EpochEndDrain,
         HotstuffConfig,
+        abort_if_local_prepared_expired,
+        abort_local_prepared_for_epoch_end,
         apply_leader_fee_to_substate_store,
         block_change_set::ProposedBlockChangeSet,
         calculate_state_merkle_root,
+        command_derivation::{
+            DerivedCommand,
+            derive_local_only_command,
+            derive_new_multishard_command,
+            pin_new_transaction,
+        },
         epoch_state::EpochState,
         error::HotStuffError,
         exceeds_block_foreign_proposal_bytes,
@@ -73,11 +86,11 @@ use crate::{
         substate_store::{InputPledge, PendingSubstateStore},
         transaction_manager::{
             ConsensusTransactionManager,
-            EvidenceOrExecution,
-            LocalPreparedTransaction,
+            MultishardLockScope,
             PledgedTransaction,
             PreparedTransaction,
             TransactionLockConflicts,
+            lock_multishard_execution,
         },
     },
     messages::{HotstuffMessage, ProposalMessage},
@@ -92,6 +105,24 @@ const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_propose";
 /// alone, even when lighter ready transactions are waiting. This caps the share of blocks oversized transactions can
 /// take from transactions that fit.
 const HEAVY_TRANSACTION_TURN_INTERVAL: u64 = 10;
+
+/// The leader samples at most this many ready pool records per transaction slot when choosing a block's
+/// transactions. A window several times the batch size keeps the choice random, and the window moves to a random
+/// point of the pool on every proposal.
+const PROPOSAL_CANDIDATES_PER_TRANSACTION: usize = 8;
+
+/// The leader reads at most this many pool records, ready or not, per candidate it samples. Together with
+/// [`PROPOSAL_CANDIDATES_PER_TRANSACTION`] this bounds the cost of choosing a batch however large the pool grows.
+/// Records that are not ready, such as those waiting on other shard groups, count as reads, so when they fill the
+/// window a proposal samples fewer candidates.
+const PROPOSAL_READS_PER_CANDIDATE: usize = 4;
+
+/// What an end-of-epoch block commits the next epoch to.
+#[derive(Debug, Clone, Copy)]
+struct NextEpochCommitment {
+    epoch_hash: FixedHash,
+    validator_set_hash: ValidatorSetHash,
+}
 
 struct NextBlock {
     block: Block,
@@ -150,29 +181,19 @@ where TConsensusSpec: ConsensusSpec
         dummy_block: Option<LeafBlock>,
         propose_high_tc: Option<TimeoutCertificate>,
         propose_epoch_end: bool,
+        epoch_end_drain: EpochEndDrain,
     ) -> Result<(), HotStuffError> {
         let epoch = epoch_state.epoch();
         let local_committee_info = *epoch_state.local_committee_info();
         let local_committee = epoch_state.local_committee();
         let _timer = TraceTimer::info(LOG_TARGET, "OnPropose");
 
-        // The EndEpoch command commits the committee to the *next* epoch's boundary hash. Only propose
-        // it once our (lagged, reorg-stable) oracle has actually observed that epoch — otherwise we have
-        // no hash to commit to and would be locking a value the committee hasn't ratified. If the oracle
-        // hasn't crossed the boundary yet, defer the EOE proposal; a later round proposes it once the
-        // boundary block is scanned.
-        let next_epoch_hash = if propose_epoch_end {
-            let next_epoch = epoch + Epoch(1);
-            match self.epoch_manager.get_epoch_hash(next_epoch).await.optional()? {
-                Some(hash) => Some(hash),
-                None => {
-                    info!(
-                        target: LOG_TARGET,
-                        "⏳ Not proposing EndEpoch for {epoch}: oracle has not yet observed the boundary block for {next_epoch}"
-                    );
-                    None
-                },
-            }
+        // The EndEpoch block commits the committee to the *next* epoch's boundary hash and validator set. Only
+        // propose it once our (lagged, reorg-stable) oracle has observed that epoch and our epoch manager has
+        // assigned its committees — otherwise we have nothing to commit to and would be locking values the
+        // committee hasn't ratified. A later round proposes it once both are known.
+        let next_epoch_commitment = if propose_epoch_end {
+            self.resolve_next_epoch_commitment(epoch).await?
         } else {
             None
         };
@@ -195,7 +216,8 @@ where TConsensusSpec: ConsensusSpec
                     &local_committee_info,
                     &local_claim_public_key,
                     propose_high_tc,
-                    next_epoch_hash,
+                    next_epoch_commitment,
+                    epoch_end_drain,
                 )?;
 
                 let NextBlock {
@@ -218,6 +240,8 @@ where TConsensusSpec: ConsensusSpec
                     );
                     ForeignProposalRecord::set_status_by_id(tx, &block_id, ForeignProposalStatus::Invalid, None)?;
                 }
+
+                drop_executions_of_uninserted_proposal(tx, epoch)?;
 
                 // Add executions for this block
                 if !executed_transactions.is_empty() {
@@ -343,9 +367,13 @@ where TConsensusSpec: ConsensusSpec
 
             // Leader thinks that all foreign ACCEPT pledges have been received and, we are ready to accept the result
             // (COMMIT/ABORT)
-            TransactionPoolStage::LocalAccepted => {
-                self.accept_transaction(state_anchor, &pool_tx, local_committee_info, substate_store)
-            },
+            TransactionPoolStage::LocalAccepted => self.accept_transaction(
+                state_anchor,
+                &pool_tx,
+                local_committee_info,
+                substate_store,
+                executed_transactions,
+            ),
             // Not reachable as there is nothing to propose for these stages. To confirm that all local nodes
             // agreed with the Accept, more (possibly empty) blocks with QCs will be
             // proposed and accepted, otherwise the Accept block will not be committed.
@@ -360,6 +388,30 @@ where TConsensusSpec: ConsensusSpec
         }
     }
 
+    /// What an end-of-epoch block for `epoch` commits the next epoch to, or `None` while this node does not yet
+    /// know the next epoch's boundary hash or committees.
+    async fn resolve_next_epoch_commitment(&self, epoch: Epoch) -> Result<Option<NextEpochCommitment>, HotStuffError> {
+        let next_epoch = epoch + Epoch(1);
+        let Some(epoch_hash) = self.epoch_manager.get_epoch_hash(next_epoch).await.optional()? else {
+            info!(
+                target: LOG_TARGET,
+                "⏳ Not proposing EndEpoch for {epoch}: oracle has not yet observed the boundary block for {next_epoch}"
+            );
+            return Ok(None);
+        };
+        let Some(validator_set_hash) = self.epoch_manager.get_validator_set_hash(next_epoch).await.optional()? else {
+            info!(
+                target: LOG_TARGET,
+                "⏳ Not proposing EndEpoch for {epoch}: this node has not assigned the committees for {next_epoch}"
+            );
+            return Ok(None);
+        };
+        Ok(Some(NextEpochCommitment {
+            epoch_hash,
+            validator_set_hash,
+        }))
+    }
+
     #[allow(clippy::too_many_lines)]
     fn build_next_block<TTx: StateStoreReadTransaction>(
         &self,
@@ -372,11 +424,30 @@ where TConsensusSpec: ConsensusSpec
         local_committee_info: &CommitteeInfo,
         local_claim_public_key_bytes: &RistrettoPublicKeyBytes,
         propose_high_tc: Option<TimeoutCertificate>,
-        // `Some(hash)` if we are proposing an end-of-epoch block; carries the next epoch's boundary hash.
-        end_epoch_hash: Option<FixedHash>,
+        // `Some` if we are proposing an end-of-epoch block; carries what it commits the next epoch to.
+        end_epoch: Option<NextEpochCommitment>,
+        epoch_end_drain: EpochEndDrain,
     ) -> Result<NextBlock, HotStuffError> {
         let high_qc_id = high_qc_certificate.calculate_id();
         let justify_block = Block::get_justified_block(tx, &high_qc_certificate, epoch)?;
+        let end_epoch = match end_epoch {
+            Some(commitment) if epoch_end_drain.is_active() => {
+                let is_draining = self.transaction_pool.any_in_chain(tx, justify_block.id(), |rec| {
+                    epoch_end_drain.holds_epoch_end_for(rec.current_stage())
+                })?;
+                if is_draining {
+                    info!(
+                        target: LOG_TARGET,
+                        "🌊 Not proposing EndEpoch for {epoch}: cross-shard transactions are still in flight \
+                         ({epoch_end_drain:?})",
+                    );
+                    None
+                } else {
+                    Some(commitment)
+                }
+            },
+            end_epoch => end_epoch,
+        };
         let parent_block = dummy_block.unwrap_or_else(|| justify_block.as_leaf());
         let highest_seen_block = Block::get(tx, highest_seen_block.block_id())?;
         // The epoch end is read on the chain the candidate extends, which is the justify block's. A block that
@@ -384,7 +455,7 @@ where TConsensusSpec: ConsensusSpec
         // EndEpoch there binds nothing.
         let is_end_of_epoch_in_chain = justify_block.is_epoch_end_proposed_in_chain(tx)?;
 
-        let should_not_propose_commands = is_end_of_epoch_in_chain || end_epoch_hash.is_some();
+        let should_not_propose_commands = is_end_of_epoch_in_chain || end_epoch.is_some();
 
         let mut total_leader_fee = 0u64;
         // The block the candidate extends from, and the point at which every speculative state and pool read for
@@ -408,17 +479,18 @@ where TConsensusSpec: ConsensusSpec
 
         let mut executed_transactions = HashMap::new();
 
+        let proposal_filter = epoch_end_drain.proposal_filter(epoch, local_committee_info.shard_group());
         let batch = if should_not_propose_commands {
             ProposalBatch::default()
         } else {
-            self.fetch_next_proposal_batch(tx, state_anchor_leaf, next_height)?
+            self.fetch_next_proposal_batch(tx, state_anchor_leaf, next_height, &proposal_filter)?
         };
         debug!(target: LOG_TARGET, "🌿 PROPOSE: {} (justify: {}) {batch}", highest_seen_block.height(), justify_block.height());
 
         let mut commands = if is_end_of_epoch_in_chain {
             vec![]
-        } else if let Some(next_epoch_hash) = end_epoch_hash {
-            vec![Command::EndEpoch(EndEpochAtom::new(next_epoch_hash))]
+        } else if let Some(end_epoch) = end_epoch {
+            vec![Command::EndEpoch(EndEpochAtom::new(end_epoch.epoch_hash))]
         } else {
             batch
                 .foreign_proposals
@@ -453,14 +525,9 @@ where TConsensusSpec: ConsensusSpec
                 // the justify block under a dummy chain, the extended leaf otherwise. A replica's store is
                 // built on the block it is evaluating, whose parent chain runs back through any dummies to
                 // the justify block.
-                if let Err(err) = process_foreign_block(
-                    tx,
-                    self.config.network,
-                    fp,
-                    local_committee_info,
-                    &mut substate_store,
-                    &mut change_set,
-                ) {
+                if let Err(err) =
+                    process_foreign_block(tx, fp, local_committee_info, &mut substate_store, &mut change_set)
+                {
                     // Dropping the proposals is safe for every error class and is what keeps a block whose
                     // commands no replica can reproduce off the wire. Propagating instead would take the
                     // whole consensus loop down over a remote committee's proposal.
@@ -552,6 +619,21 @@ where TConsensusSpec: ConsensusSpec
             // justified block, and to propose a transaction that a foreign proposal in this block has just
             // moved to ABORT with the decision that move implies.
             change_set.apply_transaction_update(&mut transaction);
+            if proposal_filter.holds_back(&transaction) {
+                debug!(
+                    target: LOG_TARGET,
+                    "🌊 PROPOSE: holding back cross-shard transaction {} until the next epoch",
+                    transaction.id(),
+                );
+                continue;
+            }
+            let expired_abort = abort_if_local_prepared_expired(&mut transaction, epoch).or_else(|| {
+                let is_waiting = proposal_filter.aborts_waiting_prepared() &&
+                    !transaction.is_ready_for_pending_stage(local_committee_info.shard_group());
+                is_waiting
+                    .then(|| abort_local_prepared_for_epoch_end(&mut transaction))
+                    .flatten()
+            });
             // Replicas withhold their vote unless the updated record is ready to leave its stage, so readiness is
             // judged on the same record here.
             if !transaction.is_ready_for_pending_stage(local_committee_info.shard_group()) {
@@ -568,6 +650,9 @@ where TConsensusSpec: ConsensusSpec
             executed_weight += transaction.proposal_weight();
             num_executed += 1;
             let tx_id = *transaction.id();
+            if let Some(execution) = expired_abort {
+                executed_transactions.insert(tx_id, execution);
+            }
             // Entries already present (e.g. foreign-proposal aborts from the change set) were not executed
             // for this block, so only count executions newly produced by the command conversion below.
             let had_execution = executed_transactions.contains_key(&tx_id);
@@ -681,15 +766,26 @@ where TConsensusSpec: ConsensusSpec
         // Every block names the rate its epoch runs at, carried forward from the block it extends, so a
         // transaction settles at a rate the block that sequenced it commits to. An end-of-epoch block
         // additionally names the rate the next epoch opens at: that is the value the quorum committing it
-        // ratifies, and the next epoch's genesis block carries it forward from there.
+        // ratifies, and the next epoch's genesis block carries it forward from there. It also names the next
+        // epoch's validator set hash, which the same quorum ratifies, so that each end-of-epoch block hands the
+        // chain over from one epoch's committees to the next, and the fee scale the next epoch charges at.
         let mut extra_data = ExtraData::new();
         extra_data.insert_bps(
             ExtraFieldKey::ExhaustBurnRate,
             highest_seen_block.exhaust_burn_rate().as_bps(),
         );
-        if end_epoch_hash.is_some() {
-            let next_epoch_rate = resolve_epoch_exhaust_burn_rate(tx, self.config.network, epoch + Epoch(1))?;
-            extra_data.insert_bps(ExtraFieldKey::NextEpochExhaustBurnRate, next_epoch_rate.as_bps());
+        // Only the block carrying the `EndEpoch` command names the next epoch. The blocks that extend it before the
+        // epoch changes still hold the commitment, but carry no commands.
+        if let Some(end_epoch) = end_epoch.filter(|_| !is_end_of_epoch_in_chain) {
+            let next_epoch = epoch + Epoch(1);
+            let next_epoch_rate = resolve_epoch_exhaust_burn_rate(tx, self.config.network, next_epoch)?;
+            extra_data
+                .insert_bps(ExtraFieldKey::NextEpochExhaustBurnRate, next_epoch_rate.as_bps())
+                .insert_validator_set_hash(ExtraFieldKey::NextEpochValidatorSetHash, &end_epoch.validator_set_hash)
+                .insert_bps(
+                    ExtraFieldKey::NextEpochFeeScale,
+                    FeeScaleSchedule::at(self.config.network, next_epoch).as_bps(),
+                );
         }
 
         let mut header = BlockHeader::create_unsigned(
@@ -738,6 +834,7 @@ where TConsensusSpec: ConsensusSpec
         tx: &TTx,
         state_anchor_leaf: LeafBlock,
         next_height: NodeHeight,
+        proposal_filter: &ProposalFilter,
     ) -> Result<ProposalBatch, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "fetch_next_proposal_batch");
         // A block is budgeted by total command weight (`max_block_weight`), not a flat command count.
@@ -751,7 +848,7 @@ where TConsensusSpec: ConsensusSpec
         let max_block_weight = self.config.consensus_constants.max_block_weight;
         let max_commands = self.config.consensus_constants.max_commands_in_block;
 
-        let mut foreign_proposals =
+        let foreign_proposals =
             ForeignProposalRecord::get_all_new(tx, state_anchor_leaf.block_id(), MAX_FOREIGN_PROPOSALS_PER_BLOCK)?;
 
         if !foreign_proposals.is_empty() {
@@ -762,31 +859,10 @@ where TConsensusSpec: ConsensusSpec
             );
         }
 
-        // The block travels with every foreign proposal it includes, so they are taken in order for as long as they
-        // fit the byte budget. The rest stay new for a later block.
-        let max_foreign_proposal_bytes = self.config.consensus_constants.max_block_foreign_proposal_bytes;
-        let mut foreign_proposal_bytes = 0usize;
-        let num_fitting = foreign_proposals
-            .iter()
-            .enumerate()
-            .take_while(|(idx, fp)| {
-                let total_bytes = foreign_proposal_bytes.saturating_add(tari_bor::encoded_len(fp.proposal()));
-                if exceeds_block_foreign_proposal_bytes(total_bytes, idx + 1, max_foreign_proposal_bytes) {
-                    return false;
-                }
-                foreign_proposal_bytes = total_bytes;
-                true
-            })
-            .count();
-        if num_fitting < foreign_proposals.len() {
-            info!(
-                target: LOG_TARGET,
-                "📦 PROPOSE: foreign proposal budget ({max_foreign_proposal_bytes} bytes) reached after {num_fitting} \
-                 of {} foreign proposal(s); deferring the rest to a later block",
-                foreign_proposals.len(),
-            );
-            foreign_proposals.truncate(num_fitting);
-        }
+        let foreign_proposals = select_foreign_proposals(
+            foreign_proposals,
+            self.config.consensus_constants.max_block_foreign_proposal_bytes,
+        );
 
         let foreign_proposal_weight: u64 = foreign_proposals
             .iter()
@@ -799,6 +875,7 @@ where TConsensusSpec: ConsensusSpec
         // stays under the hard command cap regardless of how light the transactions are.
         let max_tx_count = max_commands.saturating_sub(foreign_proposals.len());
         let heavy_turn = next_height.as_u64().is_multiple_of(HEAVY_TRANSACTION_TURN_INTERVAL);
+        let max_candidates = max_tx_count.saturating_mul(PROPOSAL_CANDIDATES_PER_TRANSACTION);
 
         let transactions = remaining_weight
             .filter(|_| max_tx_count > 0)
@@ -807,8 +884,11 @@ where TConsensusSpec: ConsensusSpec
                     tx,
                     weight_budget,
                     max_tx_count,
+                    max_candidates,
+                    max_candidates.saturating_mul(PROPOSAL_READS_PER_CANDIDATE),
                     heavy_turn,
                     state_anchor_leaf.block_id(),
+                    proposal_filter,
                 )
             })
             .transpose()?
@@ -821,8 +901,39 @@ where TConsensusSpec: ConsensusSpec
         })
     }
 
-    #[allow(clippy::too_many_lines)]
+    /// Prepares a New transaction for the block being proposed, or leaves it out. A transaction left out holds no locks
+    /// in the block, as on every replica, which never prepares it: later transactions read a local-only lock as held by
+    /// a transaction the block commits.
     fn prepare_transaction<TTx: StateStoreReadTransaction>(
+        &self,
+        state_anchor: &LeafBlock,
+        locked_epoch: &LockedEpoch,
+        pool_tx: TransactionPoolRecord,
+        local_committee_info: &CommitteeInfo,
+        change_set: &ProposedBlockChangeSet,
+        substate_store: &mut PendingSubstateStore<TTx>,
+        executed_transactions: &mut HashMap<TransactionId, TransactionExecution>,
+        lock_conflicts: &mut TransactionLockConflicts,
+    ) -> Result<Option<Command>, HotStuffError> {
+        let transaction_id = *pool_tx.id();
+        let command = self.derive_prepare_command(
+            state_anchor,
+            locked_epoch,
+            pool_tx,
+            local_committee_info,
+            change_set,
+            substate_store,
+            executed_transactions,
+            lock_conflicts,
+        )?;
+        if command.is_none() {
+            substate_store.release_new_locks(&transaction_id);
+        }
+        Ok(command)
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn derive_prepare_command<TTx: StateStoreReadTransaction>(
         &self,
         state_anchor: &LeafBlock,
         locked_epoch: &LockedEpoch,
@@ -839,12 +950,21 @@ where TConsensusSpec: ConsensusSpec
             pool_tx.id(),
         );
 
-        // Update locked epoch if needed
-        pool_tx.update_locked_epoch(locked_epoch.clone());
+        if let Err(pinned_after) = pin_new_transaction(&mut pool_tx, locked_epoch, local_committee_info.shard_group()) {
+            info!(
+                target: LOG_TARGET,
+                "📌 PROPOSE: transaction {} is pinned to {}, after this block's {}. Deferring it until this shard \
+                 group reaches that epoch",
+                pool_tx.id(),
+                pinned_after.locked_epoch,
+                pinned_after.block_epoch,
+            );
+            return Ok(None);
+        }
 
         let prepared = self
             .transaction_manager
-            .prepare(
+            .prepare_for_proposal(
                 substate_store,
                 local_committee_info,
                 &pool_tx,
@@ -874,167 +994,70 @@ where TConsensusSpec: ConsensusSpec
                 );
                 Ok(None)
             },
-            PreparedTransaction::LocalOnly(local) => match *local {
-                LocalPreparedTransaction::Accept { execution, .. } => {
-                    pool_tx
-                        .set_local_decision(execution.decision())
-                        .set_transaction_fee(execution.transaction_fee())
-                        .set_exhaust_burn(execution.exhaust_burn())
-                        .set_evidence(execution.to_evidence(
-                            local_committee_info.num_preshards(),
-                            local_committee_info.num_committees(),
-                        ));
+            PreparedTransaction::InputsLocked { .. } => Err(HotStuffError::InvariantError(format!(
+                "Transaction {} was prepared as having its inputs locked without a deferrable lock conflict",
+                pool_tx.id(),
+            ))),
+            PreparedTransaction::LocalOnly(local) => {
+                let pool_tx_id = *pool_tx.id();
+                let derived = derive_local_only_command(pool_tx, *local, local_committee_info).map_err(|refusal| {
+                    HotStuffError::InvariantError(format!(
+                        "PROPOSE: LocalOnly transaction {} cannot be sequenced: {refusal}",
+                        pool_tx_id,
+                    ))
+                })?;
+                info!(
+                    target: LOG_TARGET,
+                    "🏠️ Transaction {} is local only, proposing {}",
+                    pool_tx_id,
+                    derived.command,
+                );
 
-                    info!(
-                        target: LOG_TARGET,
-                        "🏠️ Transaction {} is local only, proposing LocalOnly",
-                        pool_tx.id(),
-                    );
-
-                    if pool_tx.current_decision().is_commit() {
-                        // STRICT INVARIANT: a LocalOnly transaction involves exactly the local shard group, so its
-                        // leader fee is calculated with one involved shard group and it accounts for the entire
-                        // exhaust burn.
-                        if pool_tx.evidence().num_shard_groups() != 1 {
-                            return Err(HotStuffError::InvariantError(format!(
-                                "PROPOSE: LocalOnly transaction {} has evidence for {} shard groups",
-                                pool_tx.id(),
-                                pool_tx.evidence().num_shard_groups(),
-                            )));
-                        }
-                        let involved = NonZeroU64::new(1).expect("1 > 0");
-                        let leader_fee = pool_tx.calculate_leader_fee(involved);
-                        pool_tx.set_leader_fee(leader_fee);
-                        let diff = execution.result().finalize.any_accept().ok_or_else(|| {
-                            HotStuffError::InvariantError(format!(
-                                "prepare_transaction: Transaction {} has COMMIT decision but execution failed when \
-                                 proposing",
-                                pool_tx.id(),
-                            ))
-                        })?;
-
-                        if substate_store.diff_exceeds_shard_output_bytes(
-                            diff,
-                            self.config.consensus_constants.max_block_shard_output_bytes,
-                        ) {
-                            info!(
-                                target: LOG_TARGET,
-                                "📦 PROPOSE: shard output budget reached, deferring LocalOnly transaction {} to a later block",
-                                pool_tx.id(),
-                            );
-                            return Ok(None);
-                        }
-                        if let Err(err) = substate_store.put_diff(diff) {
-                            // A lock failure or DOWN input is an expected conflict under contention - skip the
-                            // transaction this round. Any other store error is fatal and must be propagated.
-                            let lock_err = err.ok_lock_failed()?;
-                            warn!(
-                                target: LOG_TARGET,
-                                "🔒 Skipping LocalOnly transaction {} while proposing due to input conflict: {}",
-                                pool_tx.id(),
-                                lock_err,
-                            );
-                            return Ok(None);
-                        }
+                if let Some(diff) = derived.committed_diff() {
+                    if substate_store.diff_exceeds_shard_output_bytes(
+                        diff,
+                        self.config.consensus_constants.max_block_shard_output_bytes,
+                    ) {
+                        info!(
+                            target: LOG_TARGET,
+                            "📦 PROPOSE: shard output budget reached, deferring LocalOnly transaction {} to a later block",
+                            pool_tx_id,
+                        );
+                        return Ok(None);
                     }
+                    if let Err(err) = substate_store.put_diff(diff) {
+                        // A lock failure or DOWN input is an expected conflict under contention - skip the
+                        // transaction this round. Any other store error is fatal and must be propagated.
+                        let lock_err = err.ok_lock_failed()?;
+                        warn!(
+                            target: LOG_TARGET,
+                            "🔒 Skipping LocalOnly transaction {} while proposing due to input conflict: {}",
+                            pool_tx_id,
+                            lock_err,
+                        );
+                        return Ok(None);
+                    }
+                }
 
-                    executed_transactions.insert(*pool_tx.id(), execution);
-
-                    Ok(Some(Command::LocalOnly(pool_tx.get_local_only_atom())))
-                },
-                LocalPreparedTransaction::EarlyAbort { execution } => {
-                    info!(
-                        target: LOG_TARGET,
-                        "⚠️ Transaction is LOCAL-ONLY EARLY ABORT, proposing LocalOnly({}, ABORT)",
-                        pool_tx.id()
-                    );
-                    pool_tx
-                        .set_local_decision(execution.decision())
-                        .set_transaction_fee(execution.transaction_fee())
-                        .set_exhaust_burn(execution.exhaust_burn())
-                        .no_leader_fee()
-                        .merge_evidence(execution.to_evidence(
-                            local_committee_info.num_preshards(),
-                            local_committee_info.num_committees(),
-                        ));
-
-                    executed_transactions.insert(*pool_tx.id(), execution);
-                    Ok(Some(Command::LocalOnly(pool_tx.get_local_only_atom())))
-                },
+                let DerivedCommand { command, execution, .. } = derived;
+                if let Some(execution) = execution {
+                    executed_transactions.insert(pool_tx_id, execution);
+                }
+                Ok(Some(command))
             },
 
             PreparedTransaction::MultiShard(multishard) => {
-                match multishard.into_evidence_or_execution() {
-                    EvidenceOrExecution::Execution { execution } => {
-                        // CASE: All inputs are local and outputs are foreign (i.e. the transaction is
-                        // executed), or all inputs are foreign and this shard
-                        // group is output only and, we've already received all pledges.
-                        pool_tx.update_from_execution(
-                            local_committee_info.num_preshards(),
-                            local_committee_info.num_committees(),
-                            &execution,
-                        );
-
-                        // TODO: this is kinda hacky - we may not be involved in the transaction after ABORT execution,
-                        // but this would be invalid so we ensure that we are added to evidence. Ideally, we wouldn't
-                        // sequence this transaction at all - investigate.
-                        pool_tx
-                            .evidence_mut()
-                            .add_shard_group(local_committee_info.shard_group());
-
-                        if execution.decision().is_commit() {
-                            let involves_inputs = pool_tx.evidence().has_inputs(local_committee_info.shard_group());
-                            if !involves_inputs {
-                                let num_involved_shard_groups = pool_tx.evidence().num_shard_groups();
-                                let involved = NonZeroU64::new(num_involved_shard_groups as u64).ok_or_else(|| {
-                                    HotStuffError::InvariantError("Number of involved shard groups is 0".to_string())
-                                })?;
-                                let leader_fee = pool_tx.calculate_leader_fee(involved);
-                                pool_tx.set_leader_fee(leader_fee);
-                            }
-                        }
-
-                        executed_transactions.insert(*pool_tx.id(), *execution);
-                    },
-                    EvidenceOrExecution::Evidence { evidence, .. } => {
-                        // CASE: All local inputs were resolved. We need to continue with consensus to get the
-                        // foreign inputs/outputs.
-                        pool_tx.set_local_decision(Decision::Commit)
-                            // Set partial evidence using local inputs and known outputs.
-                            // NOTE: we could have evidence for initial sequence from foreign proposals, so we must not overwrite it
-                            .merge_evidence(evidence);
-                    },
-                }
-
+                let pool_tx_id = *pool_tx.id();
+                let DerivedCommand { command, execution, .. } =
+                    derive_new_multishard_command(pool_tx, multishard, local_committee_info)?;
                 info!(
                     target: LOG_TARGET,
-                    "🌍 Transaction involves foreign shard groups, proposing Prepare({}, {})",
-                    pool_tx.id(),
-                    pool_tx.current_decision(),
+                    "🌍 Transaction involves foreign shard groups, proposing {command}",
                 );
-
-                if pool_tx.current_decision().is_abort() {
-                    let atom = pool_tx.get_current_multi_shard_atom();
-                    return Ok(Some(Command::LocalAccept(atom)));
+                if let Some(execution) = execution {
+                    executed_transactions.insert(pool_tx_id, execution);
                 }
-                if pool_tx
-                    .evidence()
-                    .is_committee_output_only(local_committee_info.shard_group())
-                {
-                    // No prepare phase needed for output-only transactions. All foreign shards have prepared inputs
-                    // and the output shard groups need to execute and accept outputs.
-                    debug!(
-                        target: LOG_TARGET,
-                        "ℹ️ Transaction {} is output-only for {}, proposing LocalAccept",
-                        pool_tx.id(),
-                        local_committee_info.shard_group()
-                    );
-                    let atom = pool_tx.get_current_multi_shard_atom();
-                    Ok(Some(Command::LocalAccept(atom)))
-                } else {
-                    let atom = pool_tx.get_current_multi_shard_atom();
-                    Ok(Some(Command::LocalPrepare(atom)))
-                }
+                Ok(Some(command.into_command()))
             },
         }
     }
@@ -1050,7 +1073,7 @@ where TConsensusSpec: ConsensusSpec
     ) -> Result<Option<Command>, HotStuffError> {
         // Only set to abort if either the local or one or more foreign shards decided to ABORT
         if tx_rec.current_decision().is_abort() {
-            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom())));
+            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom()?)));
         }
 
         let locked_epoch = tx_rec.locked_epoch().ok_or_else(|| {
@@ -1062,32 +1085,28 @@ where TConsensusSpec: ConsensusSpec
 
         let tx = substate_store.read_transaction();
         let transaction = tx_rec.get_transaction(tx)?;
-        let execution = self.execute_transaction(tx, state_anchor, transaction, change_set, locked_epoch.clone())?;
+        let execution = self.execute_transaction(
+            substate_store,
+            local_committee_info,
+            state_anchor,
+            transaction,
+            change_set,
+            locked_epoch.clone(),
+        )?;
 
-        if execution.decision().is_commit() {
-            // Preparing the transaction bounded what its inputs alone may pledge, so only the block budget applies
-            let pledge = substate_store.pledge_inputs(
-                local_pledged_inputs(&tx_rec, local_committee_info.shard_group()),
-                usize::MAX,
-            )?;
-            if let InputPledge::BlockBudgetReached { total_bytes, max_bytes } = pledge {
-                info!(
-                    target: LOG_TARGET,
-                    "📦 PROPOSE: LocalAccept of transaction {} would take the block's pledge to {total_bytes} bytes, \
-                     past the {max_bytes} budget. Deferring it to a later block",
-                    tx_rec.id(),
-                );
-                return Ok(None);
-            }
-        }
+        let is_commit = execution.decision().is_commit();
 
         // Try to lock all local outputs
-        let local_outputs = execution
-            .resulting_outputs()
-            .iter()
-            .filter(|o| local_committee_info.includes_substate_id(o.substate_id()));
-        let lock_status = substate_store.try_lock_all(*tx_rec.id(), local_outputs, false)?;
-        if let Some(err) = lock_status.failures().first() {
+        let locked = lock_multishard_execution(
+            substate_store,
+            local_committee_info,
+            *tx_rec.id(),
+            execution,
+            MultishardLockScope::LocalOutputs,
+            tx_rec.is_fee_intent_only(),
+        )
+        .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
+        if let Some(err) = locked.lock_status.failures().first() {
             warn!(
                 target: LOG_TARGET,
                 "⚠️ Failed to lock outputs for transaction {}: {}",
@@ -1104,15 +1123,36 @@ where TConsensusSpec: ConsensusSpec
             );
 
             executed_transactions.insert(*tx_rec.id(), execution);
-            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom())));
+            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom()?)));
+        }
+
+        if is_commit {
+            // Preparing the transaction bounded what its inputs alone may pledge, so only the block budget applies
+            let pledge = substate_store.pledge_inputs(
+                local_pledged_inputs(&tx_rec, local_committee_info.shard_group()),
+                usize::MAX,
+            )?;
+            if let InputPledge::BlockBudgetReached { total_bytes, max_bytes } = pledge {
+                info!(
+                    target: LOG_TARGET,
+                    "📦 PROPOSE: LocalAccept of transaction {} would take the block's pledge to {total_bytes} bytes, \
+                     past the {max_bytes} budget. Deferring it to a later block",
+                    tx_rec.id(),
+                );
+                substate_store.release_new_locks(tx_rec.id());
+                return Ok(None);
+            }
         }
 
         tx_rec.update_from_execution(
             local_committee_info.num_preshards(),
             local_committee_info.num_committees(),
-            &execution,
+            &locked.execution,
         );
-        executed_transactions.insert(*tx_rec.id(), execution);
+        if locked.fee_intent_only {
+            tx_rec.set_fee_intent_only(true);
+        }
+        executed_transactions.insert(*tx_rec.id(), locked.execution);
         // If we locally decided to ABORT, we are still saying that we think all prepared and, after execution decide to
         // ABORT. When we enter the acceptance phase, we will propose SomeAccept for this case.
         let atom = self.get_multi_shard_atom_with_leader_fee(&tx_rec)?;
@@ -1125,21 +1165,30 @@ where TConsensusSpec: ConsensusSpec
         tx_rec: &TransactionPoolRecord,
         local_committee_info: &CommitteeInfo,
         substate_store: &mut PendingSubstateStore<TTx>,
+        executed_transactions: &HashMap<TransactionId, TransactionExecution>,
     ) -> Result<Option<Command>, HotStuffError> {
         if tx_rec.current_decision().is_abort() {
-            return Ok(Some(Command::SomeAccept(tx_rec.get_current_multi_shard_atom())));
+            return Ok(Some(Command::SomeAccept(tx_rec.get_current_multi_shard_atom()?)));
         }
 
-        let tx = substate_store.read_transaction();
-        let execution = tx_rec
-            .get_pending_execution_for_block(tx, state_anchor)
-            .optional()?
-            .ok_or_else(|| {
-                HotStuffError::InvariantError(format!(
-                    "accept_transaction: Transaction {} has COMMIT decision but execution is missing",
-                    tx_rec.id(),
-                ))
-            })?;
+        // A foreign proposal in this block may have replaced the stored execution with its fee-intent commit
+        let stored_execution;
+        let execution = match executed_transactions.get(tx_rec.id()) {
+            Some(execution) => execution,
+            None => {
+                let tx = substate_store.read_transaction();
+                stored_execution = tx_rec
+                    .get_pending_execution_for_block(tx, state_anchor)
+                    .optional()?
+                    .ok_or_else(|| {
+                        HotStuffError::InvariantError(format!(
+                            "accept_transaction: Transaction {} has COMMIT decision but execution is missing",
+                            tx_rec.id(),
+                        ))
+                    })?;
+                stored_execution.transaction_execution()
+            },
+        };
         let diff = execution.result().finalize.any_accept().ok_or_else(|| {
             HotStuffError::InvariantError(format!(
                 "local_accept_transaction: Transaction {} has COMMIT decision but execution failed when proposing",
@@ -1178,7 +1227,7 @@ where TConsensusSpec: ConsensusSpec
         &self,
         tx_rec: &TransactionPoolRecord,
     ) -> Result<MultiShardAtom, HotStuffError> {
-        let mut atom = tx_rec.get_current_multi_shard_atom();
+        let mut atom = tx_rec.get_current_multi_shard_atom()?;
         if tx_rec.current_decision().is_commit() {
             let num_involved_shard_groups = tx_rec.evidence().num_shard_groups();
             let involved = NonZeroU64::new(num_involved_shard_groups as u64).ok_or_else(|| {
@@ -1195,12 +1244,14 @@ where TConsensusSpec: ConsensusSpec
 
     fn execute_transaction<TTx: StateStoreReadTransaction>(
         &self,
-        tx: &TTx,
+        substate_store: &PendingSubstateStore<TTx>,
+        local_committee_info: &CommitteeInfo,
         state_anchor: &LeafBlock,
         transaction: TransactionRecord,
         change_set: &ProposedBlockChangeSet,
         locked_epoch: LockedEpoch,
     ) -> Result<TransactionExecution, HotStuffError> {
+        let tx = substate_store.read_transaction();
         // Should have been executed already if all inputs are local
         if let Some(execution) =
             BlockTransactionExecution::get_pending_for_block(tx, transaction.id(), state_anchor).optional()?
@@ -1226,7 +1277,13 @@ where TConsensusSpec: ConsensusSpec
         );
 
         self.transaction_manager
-            .execute(locked_epoch, pledged)
+            .execute(
+                substate_store,
+                local_committee_info,
+                locked_epoch,
+                state_anchor.epoch,
+                pledged,
+            )
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))
     }
 }
@@ -1250,6 +1307,46 @@ impl Display for ProposalBatch {
     }
 }
 
+/// Selects the foreign proposals for the next block from `foreign_proposals`, which are in the order they are stored,
+/// and returns them in the order a replica applies them.
+///
+/// The block travels with every foreign proposal it includes, so they are taken in stored order for as long as they
+/// fit `max_bytes`. The rest stay new for a later block.
+///
+/// Applying foreign proposals is order-dependent (e.g. the first abort recorded for a transaction is the one it keeps),
+/// and the proposer derives the block's transaction commands from the state they leave behind. Replicas apply them in
+/// block command order, so the proposer must too, or it commits to atoms no replica reproduces.
+fn select_foreign_proposals(
+    mut foreign_proposals: Vec<ForeignProposalRecord>,
+    max_bytes: usize,
+) -> Vec<ForeignProposalRecord> {
+    let mut foreign_proposal_bytes = 0usize;
+    let num_fitting = foreign_proposals
+        .iter()
+        .enumerate()
+        .take_while(|(idx, fp)| {
+            let total_bytes = foreign_proposal_bytes.saturating_add(tari_bor::encoded_len(fp.proposal()));
+            if exceeds_block_foreign_proposal_bytes(total_bytes, idx + 1, max_bytes) {
+                return false;
+            }
+            foreign_proposal_bytes = total_bytes;
+            true
+        })
+        .count();
+    if num_fitting < foreign_proposals.len() {
+        info!(
+            target: LOG_TARGET,
+            "📦 PROPOSE: foreign proposal budget ({max_bytes} bytes) reached after {num_fitting} of {} foreign \
+             proposal(s); deferring the rest to a later block",
+            foreign_proposals.len(),
+        );
+        foreign_proposals.truncate(num_fitting);
+    }
+
+    foreign_proposals.sort_by(|a, b| a.to_atom().block_order_key().cmp(&b.to_atom().block_order_key()));
+    foreign_proposals
+}
+
 /// Subtract `by` from the remaining block weight budget, returning `None` once the budget is
 /// exhausted (i.e. drops to zero or would underflow). Mirrors the previous count-based helper but
 /// operates on the weight budget.
@@ -1257,9 +1354,121 @@ fn subtract_weight_checked(remaining_weight: Option<u64>, by: u64) -> Option<u64
     remaining_weight.and_then(|w| w.checked_sub(by)).filter(|w| *w > 0)
 }
 
+/// Drops the executions of this node's last proposal in `epoch` if that proposal was never inserted.
+///
+/// `OnPropose` records a proposal's executions before its block is inserted, so a proposal that is never inserted
+/// leaves executions with no block. Execution reuse rejects them within the epoch because the block is absent, but not
+/// in a later epoch, where epoch GC has pruned committed blocks too. This runs before each proposal and in the
+/// transaction that ends the epoch, which precedes any pruning of the epoch's blocks, so they do not outlive it.
+pub(crate) fn drop_executions_of_uninserted_proposal<TTx>(tx: &mut TTx, epoch: Epoch) -> Result<(), StorageError>
+where
+    TTx: StateStoreWriteTransaction + Deref,
+    TTx::Target: StateStoreReadTransaction,
+{
+    if let Some(previous) = LastProposed::get(&**tx, epoch).optional()? &&
+        !Block::record_exists(&**tx, &previous.block_id)?
+    {
+        tx.block_transaction_executions_remove_any_by_block_id(&previous.block_id)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod select_foreign_proposals {
+        use tari_ootle_common_types::{ExtraData, ShardGroup};
+        use tari_ootle_storage::consensus_models::{
+            BlockCommands,
+            BlockHeaderMetadata,
+            BlockPledge,
+            CommandsCommitProof,
+            ForeignProposalAtom,
+        };
+        use tari_ootle_transaction::Network;
+        use tari_sidechain::{SidechainBlockCommitProof, SidechainBlockHeader};
+
+        use super::*;
+
+        /// A stored `New` foreign proposal from `shard_group`'s block `block_id` in epoch 1.
+        fn stored_proposal(shard_group: ShardGroup, block_id: BlockId) -> ForeignProposalRecord {
+            let metadata = BlockHeaderMetadata {
+                total_leader_fee: 0,
+                timestamp: 0,
+                extra_data: ExtraData::new(),
+                timeout_certificate_id: None,
+                is_dummy: false,
+            };
+            let header = SidechainBlockHeader {
+                network: Network::MainNet.as_byte(),
+                protocol_version: 0,
+                parent_id: Default::default(),
+                justify_id: Default::default(),
+                height: 1,
+                epoch: 1,
+                epoch_hash: Default::default(),
+                shard_group: tari_sidechain::ShardGroup {
+                    start: shard_group.start().as_u32(),
+                    end_inclusive: shard_group.end().as_u32(),
+                },
+                proposed_by: Default::default(),
+                state_merkle_root: Default::default(),
+                command_merkle_root: Default::default(),
+                transaction_merkle_root: Default::default(),
+                signature: Default::default(),
+                accumulated_data: Default::default(),
+                metadata_hash: metadata.calculate_hash(),
+            };
+            let commit_proof = CommandsCommitProof::new_latest(vec![], SidechainBlockCommitProof {
+                header,
+                proof_elements: vec![],
+            });
+            ForeignProposalRecord::load(
+                block_id,
+                ForeignProposal::new(commit_proof, BlockPledge::default(), metadata),
+                None,
+                ForeignProposalStatus::New,
+            )
+        }
+
+        fn atoms(proposals: &[ForeignProposalRecord]) -> Vec<ForeignProposalAtom> {
+            proposals.iter().map(|fp| fp.to_atom()).collect()
+        }
+
+        /// Two same-epoch proposals whose stored order (block id) is the reverse of their shard group order.
+        fn stored_out_of_block_order() -> Vec<ForeignProposalRecord> {
+            vec![
+                stored_proposal(ShardGroup::new(32u32, 63u32), BlockId::from([0xaa; 32])),
+                stored_proposal(ShardGroup::new(0u32, 31u32), BlockId::from([0xbb; 32])),
+            ]
+        }
+
+        #[test]
+        fn it_returns_the_selection_in_the_order_replicas_apply_it() {
+            let stored = stored_out_of_block_order();
+            let selected = select_foreign_proposals(stored.clone(), usize::MAX);
+
+            let block_order = BlockCommands::init(selected.iter().map(|fp| Command::ForeignProposal(fp.to_atom())))
+                .unwrap()
+                .iter()
+                .filter_map(|cmd| cmd.foreign_proposal().cloned())
+                .collect::<Vec<_>>();
+
+            assert_ne!(atoms(&stored), block_order, "fixture must be stored out of block order");
+            assert_eq!(atoms(&selected), block_order);
+        }
+
+        #[test]
+        fn it_selects_in_stored_order_within_the_byte_budget() {
+            let stored = stored_out_of_block_order();
+            let max_bytes = tari_bor::encoded_len(stored[0].proposal());
+
+            let selected = select_foreign_proposals(stored.clone(), max_bytes);
+
+            assert_eq!(atoms(&selected), atoms(&stored[..1]));
+        }
+    }
 
     mod subtract_weight_checked {
         use super::*;

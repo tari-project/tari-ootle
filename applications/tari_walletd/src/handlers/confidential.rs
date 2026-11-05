@@ -9,10 +9,17 @@ use log::*;
 use ootle_byte_type::{FromByteType, ToByteType};
 use serde_json::json;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey as _, ristretto::RistrettoPublicKey};
-use tari_engine_types::{crypto::get_commitment_factory, substate::SubstateId};
+use tari_engine_types::{
+    confidential::MIN_CONFIDENTIAL_OUTPUT_VALUE_PROMISE,
+    crypto::get_commitment_factory,
+    substate::SubstateId,
+};
 use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
 use tari_ootle_wallet_crypto::OutputWitness;
-use tari_ootle_wallet_sdk::models::{ConfidentialOutputModel, KeyBranch, OutputStatus};
+use tari_ootle_wallet_sdk::{
+    models::{ConfidentialOutputModel, KeyBranch, OutputStatus},
+    storage::{WalletStoreWriter, WriteableWalletStore},
+};
 use tari_ootle_walletd_client::{
     permissions::{Crud, Permission},
     types::{
@@ -38,6 +45,7 @@ use crate::handlers::{
     HandlerContext,
     auth::jwt::enforce_scopes,
     helpers::{get_account_or_default, invalid_params, invalid_request},
+    transaction_requests::ensure_free_locks_of,
     value_lookup::{AbortQueuedOnDropGuard, ValueRangeRequest},
 };
 
@@ -59,7 +67,8 @@ pub async fn handle_create_transfer_proof(
     token: Option<&Bearer>,
     req: ProofsGenerateRequest,
 ) -> Result<ProofsGenerateResponse, anyhow::Error> {
-    let granted = context.check_auth(token)?;
+    let auth = context.check_auth_with_identity(token)?;
+    let granted = &auth.permissions;
     let sdk = context.wallet_sdk();
 
     if req.reveal_amount.is_negative() {
@@ -70,7 +79,7 @@ pub async fn handle_create_transfer_proof(
     }
 
     let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
-    enforce_scopes(&granted, &[Permission::Confidential(
+    enforce_scopes(granted, &[Permission::Confidential(
         Crud::Create,
         Some(*account.component_address()),
     )])?;
@@ -80,7 +89,9 @@ pub async fn handle_create_transfer_proof(
     let vault = sdk
         .accounts_api()
         .get_vault_by_resource(account.component_address(), &req.resource_address)?;
-    let lock = sdk.locks_api().create_lock_with_timeout(Duration::from_secs(5 * 60))?;
+    let lock = sdk
+        .locks_api()
+        .create_owned_lock_with_timeout(Duration::from_secs(5 * 60), auth.lock_owner())?;
 
     let amount_to_transfer = req.confidential_amount.checked_add(req.reveal_amount).ok_or_else(|| {
         invalid_request(format!(
@@ -155,7 +166,7 @@ pub async fn handle_create_transfer_proof(
         amount: confidential_amount,
         mask: output_mask.key,
         sender_public_nonce: public_nonce,
-        minimum_value_promise: 0,
+        minimum_value_promise: MIN_CONFIDENTIAL_OUTPUT_VALUE_PROMISE,
         encrypted_data,
         resource_view_key: resource_view_key.clone(),
     };
@@ -197,7 +208,7 @@ pub async fn handle_create_transfer_proof(
             mask: change_mask.key,
             sender_public_nonce: public_nonce,
             encrypted_data,
-            minimum_value_promise: 0,
+            minimum_value_promise: MIN_CONFIDENTIAL_OUTPUT_VALUE_PROMISE,
             resource_view_key,
         })
     } else {
@@ -241,11 +252,8 @@ pub async fn handle_finalize_transfer(
                 Some("No such transaction in wallet to finalize proof for"),
             )
         })?;
-    let lock_id = sdk
-        .locks_api()
-        .get_lock_by_transaction_id(req.transaction_id)
-        .optional()?;
-    if lock_id != Some(req.lock_id) {
+    let lock_ids = sdk.locks_api().get_locks_by_transaction_id(req.transaction_id)?;
+    if !lock_ids.contains(&req.lock_id) {
         return Err(invalid_params(
             "lock_id",
             Some("Lock not associated with this transaction"),
@@ -283,8 +291,12 @@ pub async fn handle_cancel_transfer(
     req: ProofsCancelRequest,
 ) -> Result<ProofsCancelResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.authorize(token, &[Permission::Confidential(Crud::Delete, None)])?;
-    sdk.locks_api().release_lock(req.proof_id)?;
+    let auth = context.authorize_with_identity(token, &[Permission::Confidential(Crud::Delete, None)])?;
+    sdk.store().with_write_tx(|tx| {
+        ensure_free_locks_of(&mut **tx, auth.lock_owner(), &[req.proof_id], "proof_id")?;
+        tx.locks_release(req.proof_id)?;
+        Ok::<_, anyhow::Error>(())
+    })?;
     Ok(ProofsCancelResponse {})
 }
 
@@ -296,25 +308,33 @@ pub async fn handle_create_output_proof(
     let sdk = context.wallet_sdk();
     context.authorize(token, &[Permission::Confidential(Crud::Create, None)])?;
 
+    let destination_view_key: RistrettoPublicKey = req
+        .destination_address
+        .view_only_key()
+        .try_from_byte_type()
+        .map_err(|e| invalid_params("destination_address", Some(format!("Invalid view key: {e}"))))?;
+    let resource = sdk.substate_api().fetch_resource(req.resource_address).await?;
+    let resource_view_key = resource
+        .to_view_key_public_key()
+        .map_err(|e| invalid_params("resource_address", Some(format!("Invalid resource view key: {e}"))))?;
+
     let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
-    let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+    let (nonce_secret, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
     let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
         req.amount,
         &output_mask.key,
-        &public_nonce,
-        &output_mask.key,
-        // TODO: Support memos
-        None,
+        &destination_view_key,
+        &nonce_secret,
+        req.output_memo.as_ref(),
     )?;
 
     let statement = OutputWitness {
         amount: req.amount,
         mask: output_mask.key,
         sender_public_nonce: public_nonce,
-        minimum_value_promise: 0,
+        minimum_value_promise: MIN_CONFIDENTIAL_OUTPUT_VALUE_PROMISE,
         encrypted_data,
-        // TODO: the request must include the resource address so that we can fetch the view key
-        resource_view_key: None,
+        resource_view_key,
     };
     let proof = sdk
         .confidential_crypto_api()
@@ -390,7 +410,7 @@ pub async fn handle_view_vault_balance(
         .iter()
         .map(|commitment| SubstateId::ConfidentialOutput(ConfidentialOutputAddress::new(resource_address, *commitment)))
         .collect::<Vec<_>>();
-    let mut substates = sdk.substate_api().get_substates_from_network(addresses).await?;
+    let mut substates = sdk.substate_api().get_substates_from_network(&addresses).await?;
 
     let mut viewable = Vec::new();
     for commitment in commitments {
@@ -442,4 +462,153 @@ pub async fn handle_view_vault_balance(
             .collect(),
         searched: recovery.searched,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_engine_types::resource::Resource;
+    use tari_ootle_address::{Network, OotleAddress};
+    use tari_ootle_common_types::{Epoch, optional::IsNotFoundError};
+    use tari_ootle_transaction::UnsignedTransaction;
+    use tari_ootle_wallet_sdk::{
+        crypto::memo::Memo,
+        models::{KeyId, LockOwner, WalletLockId},
+        storage::{ReadableWalletStore, WalletStoreReader},
+    };
+    use tari_ootle_walletd_client::types::TransactionRequestCreateRequest;
+    use tari_template_lib_types::{
+        Metadata,
+        ResourceAddress,
+        ResourceType,
+        SubstateOwnerRule,
+        access_rules::ResourceAccessRules,
+    };
+
+    use super::*;
+    use crate::handlers::test_support::TestDaemon;
+
+    fn lock_for(daemon: &TestDaemon, owner: LockOwner) -> WalletLockId {
+        daemon
+            .context
+            .wallet_sdk()
+            .locks_api()
+            .create_owned_lock_with_timeout(Duration::from_secs(5 * 60), owner)
+            .unwrap()
+            .keep_locked()
+    }
+
+    fn lock_exists(daemon: &TestDaemon, lock_id: WalletLockId) -> bool {
+        match daemon
+            .context
+            .wallet_sdk()
+            .store()
+            .with_read_tx(|tx| tx.locks_get(lock_id))
+        {
+            Ok(_) => true,
+            Err(e) if e.is_not_found_error() => false,
+            Err(e) => panic!("{e}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_proof_can_only_be_cancelled_by_its_creator_while_nothing_holds_it() {
+        let daemon = TestDaemon::start().await;
+        let tool = daemon.api_key("proof-tool", "confidential:delete,transaction_requests:create");
+        let other_tool = daemon.api_key("other-tool", "confidential:delete");
+        let owner = |bearer| {
+            daemon
+                .context
+                .check_auth_with_identity(Some(bearer))
+                .unwrap()
+                .lock_owner()
+        };
+        let cancel =
+            |bearer, proof_id| handle_cancel_transfer(&daemon.context, Some(bearer), ProofsCancelRequest { proof_id });
+
+        let wallets = lock_for(&daemon, LockOwner::Wallet);
+        let others = lock_for(&daemon, owner(&other_tool));
+        for lock_id in [wallets, others, 9999] {
+            let err = cancel(&tool, lock_id).await.unwrap_err();
+            assert!(err.to_string().contains("proof_id"), "{err}");
+        }
+        assert!(lock_exists(&daemon, wallets) && lock_exists(&daemon, others));
+
+        let requested = lock_for(&daemon, owner(&tool));
+        crate::handlers::transaction_requests::handle_create(
+            &daemon.context,
+            Some(&tool),
+            TransactionRequestCreateRequest {
+                transaction: UnsignedTransaction::new(Network::LocalNet.as_byte(), Epoch(100)),
+                seal_signer: KeyId::derived(KeyBranch::Account, 0),
+                other_signers: vec![],
+                signatures: vec![],
+                lock_ids: vec![requested],
+                ttl_secs: Some(60 * 60),
+            },
+        )
+        .await
+        .unwrap();
+        cancel(&tool, requested).await.unwrap_err();
+        assert!(lock_exists(&daemon, requested), "a live request's lock was released");
+
+        let own = lock_for(&daemon, owner(&tool));
+        cancel(&tool, own).await.unwrap();
+        assert!(!lock_exists(&daemon, own));
+    }
+
+    #[tokio::test]
+    async fn an_output_proof_is_recoverable_by_the_destination_view_key() {
+        let daemon = TestDaemon::start().await;
+        let sdk = daemon.context.wallet_sdk();
+        let view_key = sdk.key_manager_api().next_key(KeyBranch::ViewOnlyKey).unwrap();
+        let account_key = sdk.key_manager_api().next_key(KeyBranch::Account).unwrap();
+        let (_, resource_view_key) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let resource_address: ResourceAddress =
+            "resource_0000000000000000000000000000000000000000000000000000000000000001"
+                .parse()
+                .unwrap();
+        sdk.resources_api()
+            .upsert_resource(
+                &resource_address,
+                &Resource::new(
+                    ResourceType::Confidential,
+                    SubstateOwnerRule::None,
+                    ResourceAccessRules::new(),
+                    Metadata::new(),
+                    Some(resource_view_key.to_byte_type()),
+                    None,
+                    6,
+                    false,
+                ),
+            )
+            .unwrap();
+        let memo = Memo::new_message("for you").unwrap();
+
+        let resp = handle_create_output_proof(
+            &daemon.context,
+            Some(&daemon.session),
+            ConfidentialCreateOutputProofRequest {
+                amount: 1_000,
+                resource_address,
+                destination_address: OotleAddress::new(
+                    Network::LocalNet,
+                    view_key.to_public_key().to_byte_type(),
+                    account_key.to_public_key().to_byte_type(),
+                ),
+                output_memo: Some(memo.clone()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let output = resp.proof.output.unwrap();
+        assert!(output.viewable_balance_proof.is_some());
+        let nonce: RistrettoPublicKey = output.sender_public_nonce.try_from_byte_type().unwrap();
+        let decrypted = sdk
+            .confidential_crypto_api()
+            .unblind_output(&output.commitment, &output.encrypted_data, &view_key.key, &nonce, false)
+            .unwrap();
+        assert_eq!(decrypted.value(), 1_000);
+        assert_eq!(decrypted.memo, Some(memo));
+    }
 }

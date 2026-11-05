@@ -15,7 +15,7 @@ mod template {
 
     impl XtrFaucet {
         /// Mints a claim-receipt NFT keyed to the caller's public key, then immediately burns it.
-        /// The burned substate key persists on-chain, so a second attempt panics with DuplicateNonFungibleId.
+        /// The burned substate key persists on-chain, so a second attempt fails with a `Conflict` on the receipt.
         fn record_claim(&self, address: ComponentAddress) {
             let receipt = ResourceManager::get(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS).mint_non_fungible(
                 NonFungibleId::from_u256(address.as_object_key().into_array()),
@@ -31,17 +31,6 @@ mod template {
             emit_event("take", metadata!["amount" => FAUCET_AMOUNT]);
             let bucket = self.vault.withdraw(FAUCET_AMOUNT);
             component.invoke("deposit", args!(bucket));
-        }
-
-        /// Gives exactly 1,000 TARI to the caller using a proof to authorize the deposit. Can only be called once per
-        /// component.
-        pub fn take_with_proof(&self, proof: Proof, component: ComponentManager) {
-            self.record_claim(component.component_address());
-            emit_event("take", metadata!["amount" => FAUCET_AMOUNT]);
-            let bucket = self.vault.withdraw(FAUCET_AMOUNT);
-            proof.authorize_with(|| {
-                component.invoke("deposit", args!(bucket));
-            })
         }
 
         /// Tops up the faucet vault. Permissionless: any caller may return or add funds. A bucket of any

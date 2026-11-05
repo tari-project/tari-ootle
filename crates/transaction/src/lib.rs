@@ -26,6 +26,7 @@ pub mod builder;
 mod envelope;
 mod hashing;
 mod signable;
+mod signing;
 mod transaction;
 mod transaction_id;
 mod unsealed;
@@ -38,9 +39,10 @@ pub use builder::TransactionBuilder;
 pub use envelope::*;
 pub use ootle_network::Network;
 pub use signable::*;
+pub use signing::*;
 // Re-exported because `max_epoch` is a mandatory public field of the unsigned transaction, so any
 // caller constructing one needs the type.
-pub use tari_ootle_common_types::Epoch;
+pub use tari_ootle_common_types::{Epoch, signature::Sr25519SignatureBytes};
 pub use transaction::*;
 pub use transaction_id::*;
 pub use unsealed::*;

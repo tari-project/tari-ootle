@@ -138,11 +138,17 @@ import type {
   TransactionWaitResultResponse,
   TransferNftRequest,
   TransferNftResponse,
+  ValidatorSetGetStatusResponse,
   WalletGetInfoResponse,
   WebauthnAlreadyRegisteredResponse,
   WebauthnFinishRegisterRequest,
   WebauthnFinishRegisterResponse,
-  WebauthnStartAuthRequest,
+  WebauthnListPasskeysRequest,
+  WebauthnListPasskeysResponse,
+  WebauthnRemovePasskeyRequest,
+  WebauthnRemovePasskeyResponse,
+  WebauthnRenamePasskeyRequest,
+  WebauthnRenamePasskeyResponse,
   WebauthnStartAuthResponse,
   WebauthnStartRegisterRequest,
   WebauthnStartRegisterResponse,
@@ -202,8 +208,18 @@ export const webauthnFinishRegistration = (
   request: WebauthnFinishRegisterRequest,
 ): Promise<WebauthnFinishRegisterResponse> => client().then((c) => c.webauthnFinishRegistration(request));
 
-export const webauthnStartAuth = (request: WebauthnStartAuthRequest): Promise<WebauthnStartAuthResponse> =>
-  client().then((c) => c.webauthnAuthStart(request));
+export const webauthnStartAuth = (): Promise<WebauthnStartAuthResponse> =>
+  client().then((c) => c.webauthnAuthStart({}));
+
+export const webauthnListPasskeys = (
+  request: WebauthnListPasskeysRequest = {},
+): Promise<WebauthnListPasskeysResponse> => client().then((c) => c.webauthnListPasskeys(request));
+
+export const webauthnRenamePasskey = (request: WebauthnRenamePasskeyRequest): Promise<WebauthnRenamePasskeyResponse> =>
+  client().then((c) => c.webauthnRenamePasskey(request));
+
+export const webauthnRemovePasskey = (request: WebauthnRemovePasskeyRequest): Promise<WebauthnRemovePasskeyResponse> =>
+  client().then((c) => c.webauthnRemovePasskey(request));
 
 export const authRevoke = (request: AuthRevokeTokenRequest): Promise<AuthRevokeTokenResponse> =>
   client().then((c) => c.authRevoke(request));
@@ -372,6 +388,9 @@ export const templatesListAuthored = (request: TemplatesListAuthoredRequest): Pr
 
 // info
 export const walletGetInfo = (): Promise<WalletGetInfoResponse> => client().then((c) => c.walletGetInfo());
+
+export const validatorSetGetStatus = (): Promise<ValidatorSetGetStatusResponse> =>
+  client().then((c) => c.validatorSetGetStatus());
 
 // utxos
 export const stealthUtxosList = (request: StealthUtxosListRequest): Promise<StealthUtxosListResponse> =>

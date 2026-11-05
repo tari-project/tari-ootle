@@ -31,13 +31,24 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      # The web UI builds the workspace's ootle-wasm-bor crate to decode the values the indexer serves.
+      - name: Setup Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2.88.1
+        with:
+          tool: wasm-pack@0.15.0
+
       # `...` builds the web UI together with the bindings/clients it depends on.
       # Without VITE_INDEXER_API_ADDRESS the UI asks the indexer serving it for its API
       # address; there is no indexer behind this deployment, so bake the address in.
       # Override it with the INDEXER_API_ADDRESS repository variable.
       - name: Build
         env:
-          VITE_INDEXER_API_ADDRESS: ${{ vars.INDEXER_API_ADDRESS || 'https://ootle-indexer-a.tari.com' }}
+          VITE_INDEXER_API_ADDRESS: ${{ vars.INDEXER_API_ADDRESS || 'https://esme-indexer-a.ootle.tari.com' }}
         run: pnpm --filter "tari_indexer_web_ui..." run build
 
       # wrangler-action is not used here: it installs wrangler into the working directory,

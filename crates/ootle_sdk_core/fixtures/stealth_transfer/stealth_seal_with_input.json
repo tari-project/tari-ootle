@@ -2,8 +2,8 @@
   "name": "stealth_transfer/stealth_seal_with_input",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.41.2",
-    "git_rev": "f1de8633ae83fa2801be7c31c8a53a46cc0cb921",
+    "core_version": "0.47.0",
+    "git_rev": "712409abd0ae8aa7ebd1e3d92829581b7ffc9084",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "build_and_encode_stealth_transfer",
@@ -14,23 +14,7 @@
       {
         "substate_id": "utxo_0101010101010101010101010101010101010101010101010101010101010101_52a870b38bce1ca5254dfef4ea498b57c1327bc651a0f1afd280f54fed937a60",
         "version": 0,
-        "substate_value": {
-          "Utxo": {
-            "is_frozen": false,
-            "output": {
-              "auth": {
-                "Script": "aa5779a908eb9e0f4a1f1f83634c0917594bd67e408f1aca6f32d352d1974fa1"
-              },
-              "output": {
-                "encrypted_data": "4a570beacf475a2e9aeefa60249eabcaa46f1d5b51961b59729c9f956a2c80b840318bb6c4ee6c1b594f092ea29c53ac931d709f0dbc3124b9200231a5b73cd9c9434f091d7fa24c74d280b05a556e68",
-                "minimum_value_promise": 0,
-                "public_nonce": "f2cce6415ff090eea8d0f041e356f28f3be3aa53ccc69867288e7432028fca23",
-                "viewable_balance": null
-              },
-              "tag": 0
-            }
-          }
-        }
+        "substate_value": "ggiBgoODWCDyzOZBX/CQ7qjQ8EHjVvKPO+OqU8zGmGcojnQyAo/KI1hQsVkPTZLpX1RLpqTQbkJj2Qh+oteU0O6aydSxQB6rSbLTLYXOlf5AJo0EmxCEQvf2mz+rj3xs3/Km3ztXkbyvX67KWDJzkCppYRfJq/Bt3LoAggGBWCCA+Z+J4j1zLuPfFZcDcs/QIa9la8rY71GIf1y055a5qwD0"
       }
     ],
     "stealth_intent": {
@@ -66,6 +50,7 @@
     },
     "stealth_keys": {
       "account_secret": "0b00000000000000000000000000000000000000000000000000000000000000",
+      "view_secret": "a200000000000000000000000000000000000000000000000000000000000000",
       "seed": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
     },
     "spend_secrets": [
@@ -126,7 +111,7 @@
                       "outputs": [
                         {
                           "auth": {
-                            "Key": "e461b029fa778a1fabfcfd1f4945bb1ee7543c14bb679d58c16ae6056c0af376"
+                            "Key": "90c2dad63cf53f57349b2563ac3cc81312d7f69e667079dbda35959444b1c41a"
                           },
                           "output": {
                             "commitment": "a422410dd4430276a8b3ac9e2352b2787db57548187895157914eb621dbe4c59",
@@ -144,7 +129,7 @@
                 }
               }
             ],
-            "is_seal_signer_authorized": true,
+            "main_signer": "SealSigner",
             "max_epoch": 1,
             "min_epoch": null,
             "network": 38,
@@ -152,7 +137,7 @@
           }
         },
         "seal_signature": {
-          "public_key": "8e7d51d6426c66815606efad91f3bcf78efa0bf678af35bffec65b993b33280f",
+          "public_key": "b6a3a6e1ae6444574f65060c6bfe37c73cb613c6dbb3840188a101e060d23959",
           "signature": null
         }
       }

@@ -4,7 +4,6 @@
 mod support;
 
 use std::{
-    collections::HashMap,
     sync::{
         Arc,
         Mutex,
@@ -16,12 +15,8 @@ use std::{
 use futures::StreamExt;
 use ootle_byte_type::ToByteType;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_engine_types::{
-    Epoch,
-    Utxo,
-    substate::{Substate, SubstateId},
-};
-use tari_indexer_client::types::WatchedSubstateItem;
+use tari_engine_types::{Epoch, substate::SubstateId};
+use tari_indexer_client::types::{EpochCheckpointEntry, ValidatorSetCommittee, WatchedSubstateItem};
 use tari_ootle_common_types::{
     StateVersion,
     SubstateVersion,
@@ -32,15 +27,17 @@ use tari_ootle_common_types::{
 use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
 use tari_ootle_wallet_sdk::{
     apis::config::ConfigKey,
-    models::{KeyBranch, KeyId, StartOfShard, UtxoUnspent, UtxoUpdatePayload, WalletUtxoUpdate},
+    models::{EndOfShard, KeyBranch, KeyId, StartOfShard, UtxoUnspent, UtxoUpdatePayload, WalletUtxoUpdate},
     network::{
+        FetchedSubstates,
+        FetchedUtxos,
+        PlacedTagAndNoncePair,
         SubstateQueryResult,
         TransactionFinalizedStream,
         TransactionQueryResult,
         UtxoUpdateStream,
         WalletNetworkInterface,
     },
-    storage::TagAndPublicNoncePair,
 };
 use tari_ootle_wallet_sdk_services::{
     account_monitor::AccountMonitor,
@@ -54,7 +51,6 @@ use tari_template_lib::types::{
     ComponentAddress,
     ResourceAddress,
     TemplateAddress,
-    UtxoId,
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
     crypto::UtxoTag,
 };
@@ -113,6 +109,7 @@ impl WalletNetworkInterface for OneUtxoNetwork {
         _address: &SubstateId,
         _version: Option<SubstateVersion>,
         _local_search_only: bool,
+        _include_proof: bool,
     ) -> Result<SubstateQueryResult, Self::Error> {
         let failed = self
             .failing_substate_queries
@@ -124,7 +121,7 @@ impl WalletNetworkInterface for OneUtxoNetwork {
         Err(FakeError::NotFound)
     }
 
-    async fn get_substates(&self, _: Vec<SubstateId>) -> Result<HashMap<SubstateId, Substate>, Self::Error> {
+    async fn get_substates(&self, _: &[SubstateId], _: bool) -> Result<FetchedSubstates, Self::Error> {
         panic!("OneUtxoNetwork::get_substates called")
     }
 
@@ -140,7 +137,7 @@ impl WalletNetworkInterface for OneUtxoNetwork {
         panic!("OneUtxoNetwork::submit_dry_run_transaction called")
     }
 
-    async fn query_transaction_result(&self, _: TransactionId) -> Result<TransactionQueryResult, Self::Error> {
+    async fn query_transaction_result(&self, _: TransactionId, _: bool) -> Result<TransactionQueryResult, Self::Error> {
         panic!("OneUtxoNetwork::query_transaction_result called")
     }
 
@@ -171,9 +168,12 @@ impl WalletNetworkInterface for OneUtxoNetwork {
                 shard,
                 max_state_version: StateVersion::from(1),
                 has_more: false,
+                spends_incomplete: false,
             }),
             update: Some(WalletUtxoUpdate::Unspent(utxo)),
-            eos: None,
+            eos: Some(EndOfShard {
+                max_state_version: StateVersion::from(1),
+            }),
         };
         Ok(futures::stream::iter([Ok(payload)]).boxed())
     }
@@ -187,16 +187,41 @@ impl WalletNetworkInterface for OneUtxoNetwork {
         panic!("OneUtxoNetwork::list_watched_substates called")
     }
 
-    async fn get_unspent_utxos(
+    async fn fetch_utxos(
         &self,
         _: ResourceAddress,
-        _: Vec<TagAndPublicNoncePair>,
-    ) -> Result<Vec<(UtxoId, Utxo)>, Self::Error> {
-        panic!("OneUtxoNetwork::get_unspent_utxos called")
+        _: Vec<PlacedTagAndNoncePair>,
+    ) -> Result<FetchedUtxos, Self::Error> {
+        panic!("OneUtxoNetwork::fetch_utxos called")
+    }
+
+    async fn get_latest_epoch_checkpoint(&self, _shard: Shard) -> Result<EpochCheckpointEntry, Self::Error> {
+        panic!("OneUtxoNetwork called")
+    }
+
+    async fn get_latest_shard_group_checkpoints(&self) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        panic!("OneUtxoNetwork called")
+    }
+
+    async fn list_epoch_checkpoints(
+        &self,
+        _from_epoch: Epoch,
+        _limit: u32,
+        _shard: Shard,
+    ) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        panic!("OneUtxoNetwork called")
+    }
+
+    async fn get_committee(&self, _epoch: Epoch, _shard: Shard) -> Result<ValidatorSetCommittee, Self::Error> {
+        panic!("OneUtxoNetwork called")
     }
 
     async fn get_current_epoch(&self) -> Result<Epoch, Self::Error> {
         panic!("OneUtxoNetwork::get_current_epoch called")
+    }
+
+    async fn get_consensus_epoch(&self) -> Result<Option<Epoch>, Self::Error> {
+        panic!("OneUtxoNetwork::get_consensus_epoch called")
     }
 
     async fn wait_until_ready(&self) -> Result<(), Self::Error> {

@@ -15,7 +15,7 @@ use tari_crypto::{
     keys::PublicKey,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_indexer_client::types::{GetSubstateRequest, ListUtxosRequest};
+use tari_indexer_client::types::GetSubstateRequest;
 use tari_ootle_common_types::{
     displayable::Displayable,
     engine_types::published_template::PublishedTemplateAddress,
@@ -250,7 +250,7 @@ impl TrafficSim {
                     output_memo: Some(Memo::new_message(format!("Transfer {id}: {amount_to_send}")).unwrap()),
                     pay_to: PayTo::StealthPublicKey,
                     attach_sender_address: false,
-                    pay_ref: None,
+                    destination_tag: None,
                 }],
                 max_fee: crate::MAX_FEE,
                 dry_run: false,
@@ -639,8 +639,7 @@ impl TrafficSim {
         min_value: u64,
         max_value: u64,
         resource_address: ResourceAddress,
-        last_id: Option<UtxoId>,
-        specific_id: Option<UtxoId>,
+        utxo_ids: Vec<UtxoId>,
         csv_out: Option<P>,
         view_key: Option<RistrettoSecretKey>,
     ) -> anyhow::Result<()> {
@@ -653,8 +652,10 @@ impl TrafficSim {
                 include_proof: false,
             })
             .await?
-            .substate
-            .into_resource();
+            .into_substate_value()
+            .map(|value| value.decode())
+            .transpose()?
+            .and_then(|substate| substate.into_resource());
 
         let divisibility = resource.as_ref().map(|r| r.divisibility()).unwrap_or(6);
         let token_symbol = resource
@@ -674,52 +675,10 @@ impl TrafficSim {
             },
         };
 
-        if let Some(specific_id) = specific_id {
-            let resp = wallet
-                .client
-                .stealth_utxos_decrypt_value(StealthUtxosDecryptValueRequest {
-                    resource_address,
-                    ids: vec![specific_id],
-                    view_key_id,
-                    minimum_expected_value: Some(min_value),
-                    maximum_expected_value: Some(max_value),
-                })
-                .await?;
-
-            log::info!("Decrypted UTXO value:");
-            for (id, value) in resp.values {
-                let value = value
-                    .map(Amount::from)
-                    .map(|a| a.to_decimal_string(divisibility.into()));
-                log::info!("{}: {} {}", id, value.display(), token_symbol);
-            }
-
-            return Ok(());
-        }
-
-        let resp = indexer
-            .list_utxos(ListUtxosRequest {
-                resource_address,
-                limit: 1000,
-                from_id: last_id,
-            })
-            .await?;
-
         log::info!(
             "Attempting to decrypt {} UTXOs within range {min_value}-{max_value}",
-            resp.utxos.len()
+            utxo_ids.len()
         );
-        if resp.utxos.is_empty() {
-            return Ok(());
-        }
-
-        let utxo_ids = resp
-            .utxos
-            .iter()
-            .filter(|(_, o)| !o.is_burnt())
-            .map(|(id, _)| id)
-            .copied()
-            .collect::<Vec<_>>();
 
         let mut csv = csv_out.map(csv::Writer::from_path).transpose()?;
         csv.as_mut()

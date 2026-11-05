@@ -48,12 +48,10 @@ Being a stealth resource, TARI does not live in vaults — it exists as UTXOs wi
 one-time addresses, which is why network fees are paid via a revealed output (see
 <a href={basePath("/concepts/privacy/")}>Privacy</a>).
 
-<Aside type="caution">
-`XTR` and `ONE_XTR` are **deprecated aliases** (`#[deprecated(since = "0.24.5", note = "Use
-TARI_TOKEN instead")]`). They still resolve, but new code should use **`TARI_TOKEN`** for the resource
-and **`TARI`** for the unit, and refer to the token as **TARI**. The faucet constants
-(`XTR_FAUCET_*`) and the built-in template name `XtrFaucet` are *not* deprecated — they retain their
-historical spelling.
+<Aside type="note">
+Use **`TARI_TOKEN`** for the resource and **`TARI`** for the unit, and refer to the token as **TARI**.
+The faucet constants (`XTR_FAUCET_*`) and the built-in template name `XtrFaucet` keep their historical
+spelling.
 </Aside>
 
 ---
@@ -173,13 +171,16 @@ Every transaction pays a fee for the metered work it performs (see
 <a href={basePath("/concepts/state-and-execution/")}>State and Execution</a>). The fee is then split
 between a **burn** and the **validator**.
 
-The split is governed by `exhaust_burn_rate`, a per-network constant expressed in basis points:
+The split is governed by the epoch's exhaust burn rate, in basis points. It is resolved once per
+epoch from the burn rate governance component, falling back to the per-network
+`ExhaustBurnRateSchedule` while the council has scheduled nothing, and carried in every block header
+of that epoch:
 
 ```rust
-// crates/consensus/src/consensus_constants.rs
-pub exhaust_burn_rate: ExhaustBurnRate,           // 500 bps on every network here
+// crates/engine_types/src/fees/burn_rate_schedule.rs
+const MAINNET: &[(Epoch, ExhaustBurnRate)] = &[(Epoch(0), ExhaustBurnRate::new(10_000))]; // 100%
 // ...
-exhaust_burn_rate: ExhaustBurnRate::new(500), // 5%
+const ESMERALDA: &[(Epoch, ExhaustBurnRate)] = &[(Epoch(0), ExhaustBurnRate::new(500))]; // 5%
 ```
 
 The burn is a **floor share of everything collected** — overcharge included — and the validator
@@ -193,7 +194,7 @@ fn exhaust_burn_share(paid: u64, rate: ExhaustBurnRate) -> u64 {
 }
 ```
 
-With the network rate of 500 bps:
+With the testnet rate of 500 bps:
 
 $$\text{burn} = \left\lfloor \frac{\text{fee} \times 500}{10{,}000} \right\rfloor$$
 
@@ -202,11 +203,14 @@ produced the block receives `fee - burn`, which can therefore be slightly more t
 smaller than 20 base units the burn rounds to zero. The validator's share is held in a
 `ValidatorFeePool` substate and withdrawn later via `ClaimValidatorFees`.
 
+Mainnet's genesis rate of 100% burns the whole fee, so validators receive nothing until the burn
+rate governance council schedules a lower rate.
+
 <svg viewBox="0 0 900 256" xmlns="http://www.w3.org/2000/svg" style="max-width:900px;width:100%;font-family:system-ui,sans-serif">
   <defs><marker id="tk-fee-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#484f58"/></marker></defs>
   <rect width="900" height="256" rx="12" fill="#0d1117"/>
   <text x="450" y="34" text-anchor="middle" fill="#e6edf3" font-size="16" font-weight="bold">Where a fee goes</text>
-  <text x="450" y="56" text-anchor="middle" fill="#8b949e" font-size="11">A fixed 500 bps is destroyed; the remainder funds whoever produced the block.</text>
+  <text x="450" y="56" text-anchor="middle" fill="#8b949e" font-size="11">The epoch's burn rate (s bps) is destroyed; the remainder funds whoever produced the block.</text>
 
   {/* Fee */}
   <rect x="50" y="96" width="190" height="72" rx="8" fill="#161b22" stroke="#388bfd" stroke-width="1"/>
@@ -222,7 +226,7 @@ smaller than 20 base units the burn rounds to zero. The validator's share is hel
 
   {/* Burn */}
   <rect x="410" y="54" width="200" height="64" rx="8" fill="#161b22" stroke="#f0883e" stroke-width="1"/>
-  <text x="510" y="80" text-anchor="middle" fill="#f0883e" font-size="12" font-weight="bold">5% rate, rounded down</text>
+  <text x="510" y="80" text-anchor="middle" fill="#f0883e" font-size="12" font-weight="bold">s bps, rounded down</text>
   <text x="510" y="100" text-anchor="middle" fill="#6e7681" font-size="9">removed from L2 supply</text>
 
   {/* Validator */}
@@ -233,12 +237,12 @@ smaller than 20 base units the burn rounds to zero. The validator's share is hel
   {/* Notes */}
   <rect x="640" y="54" width="230" height="156" rx="8" fill="#12171f" stroke="#30363d" stroke-width="1"/>
   <text x="656" y="80" fill="#8b949e" font-size="11" font-weight="bold">The rule</text>
-  <text x="656" y="104" fill="#8b949e" font-size="10">burn = floor(paid &#215; 500 / 10,000)</text>
+  <text x="656" y="104" fill="#8b949e" font-size="10">burn = floor(paid &#215; s / 10,000)</text>
   <text x="656" y="122" fill="#8b949e" font-size="10">paid = everything collected,</text>
   <text x="656" y="140" fill="#8b949e" font-size="10">overcharge included.</text>
-  <text x="656" y="164" fill="#8b949e" font-size="10">The rate is a per-network</text>
-  <text x="656" y="182" fill="#8b949e" font-size="10">constant &#8212; 500 bps on every</text>
-  <text x="656" y="200" fill="#8b949e" font-size="10">network in this repository.</text>
+  <text x="656" y="164" fill="#8b949e" font-size="10">s: governance, else the schedule</text>
+  <text x="656" y="182" fill="#8b949e" font-size="10">(10 000 bps mainnet genesis,</text>
+  <text x="656" y="200" fill="#8b949e" font-size="10">500 bps on the testnets).</text>
 
   <text x="450" y="238" text-anchor="middle" fill="#8b949e" font-size="11">There is no priority or throttle layer: a fee is a function of work done, never of a bid for ordering.</text>
 </svg>
@@ -261,14 +265,14 @@ the only rate limiting present is an unrelated wallet API-key limit.
 ## Summary
 
 - The L2 native token is **TARI**, a **stealth** resource addressed by `TARI_TOKEN` /
-  `STEALTH_TARI_RESOURCE_ADDRESS`; `XTR`/`ONE_XTR` are deprecated aliases.
+  `STEALTH_TARI_RESOURCE_ADDRESS`.
 - Divisibility is 6; `1 TARI = 1_000_000` microtari.
 - Value enters by **burning a base-layer coin and claiming an L2 UTXO** — a strictly **one-way**
   bridge with no peg-out.
 - A claim verifies a burn proof, writes a **commitment-derived tombstone** (double-claim proof), and
   mints a stealth UTXO — atomically.
-- Fees use a **500 bps burn rate rounded down to a whole base unit**; the remainder accrues to the
-  validator.
+- Mainnet starts at a **10 000 bps (100%) burn rate**; the testnets run at **500 bps rounded down to a
+  whole base unit**, the remainder accruing to the validator.
 - There is **no fee priority/throttle** concept; fees are deterministic metering.
 
 **Next:** the A–Z of terms used across this section —

@@ -1,8 +1,11 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_bor::{ByteCounter, encode_into_writer};
-use tari_engine_types::{fees::FeeSource, substate::SubstateValue};
+use tari_bor::encoded_len;
+use tari_engine_types::{
+    fees::{FeeScale, FeeSource},
+    substate::SubstateValue,
+};
 use tari_template_lib::types::TemplateAddress;
 
 use super::FeeTable;
@@ -56,7 +59,7 @@ impl FeeModule {
         &self,
         state: &mut ChargeableState<'_, TStore>,
     ) -> Result<(), RuntimeModuleError> {
-        let mut counter = ByteCounter::new();
+        let mut substate_bytes = 0usize;
         let mut template_base_bytes = 0u64;
         let mut template_charge = 0u64;
         for substate in state.substates_to_persist().values() {
@@ -73,7 +76,9 @@ impl FeeModule {
                 })?;
                 continue;
             }
-            encode_into_writer(substate, &mut counter)?;
+            substate_bytes = substate_bytes
+                .checked_add(encoded_len(substate))
+                .ok_or_else(|| RuntimeModuleError::Overflow("Overflow accumulating storage bytes".to_string()))?;
         }
 
         // Finalization persists the transaction receipt on top of the mutated substates. It carries
@@ -83,8 +88,7 @@ impl FeeModule {
         let receipt_bytes = state
             .transaction_receipt_size()
             .map_err(|e| RuntimeModuleError::Runtime(e.to_string()))?;
-        let total_storage = counter
-            .get()
+        let total_storage = substate_bytes
             .checked_add(receipt_bytes)
             .ok_or_else(|| RuntimeModuleError::Overflow("Overflow accumulating storage bytes".to_string()))?;
 
@@ -187,6 +191,17 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
             .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating transaction weight cost".to_string()))?;
         track.add_fee_charge(FeeSource::TransactionWeight, transaction_weight_cost);
 
+        // Charged before the fee intent runs, so a transaction pays for loading and pledging its
+        // inputs even when its main intent is rejected: the pledges have been made either way.
+        let input_load = track.declared_input_load();
+        // Charges are recorded in fee-table terms and the fee state applies the scale when they are read.
+        let rates = self.fee_table.to_rates(FeeScale::ONE);
+        track.add_fee_charge(FeeSource::InputLoad, rates.input_load_cost(input_load.bytes));
+        track.add_fee_charge(
+            FeeSource::InputFanout,
+            rates.input_fanout_cost(input_load.bytes, input_load.fanout),
+        );
+
         Ok(())
     }
 
@@ -228,9 +243,11 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
     }
 
     fn on_fee_checkpoint(&self, state: &mut ChargeableState<'_, TStore>) -> Result<(), RuntimeModuleError> {
-        // Only the state-derived charges. Execution metering is charged once at finalization, over
-        // the whole transaction's accumulated points, so pricing it here would be replaced anyway.
-        self.charge_state_fees(state)
+        // Priced exactly as `on_before_persist` prices the fee-intent fallback, the fee intent's
+        // execution included: this is the gate that decides whether that fallback can be afforded.
+        // Finalization assigns the execution charges again over the whole transaction's points, so
+        // pricing them here does not count them twice.
+        self.charge_finalization_fees(state)
     }
 
     fn on_before_persist(&self, state: &mut ChargeableState<'_, TStore>) -> Result<(), RuntimeModuleError> {

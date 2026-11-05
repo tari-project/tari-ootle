@@ -65,7 +65,7 @@ use tari_networking::{
 use tari_ootle_app_utilities::{
     claim_burn_proof_verifier::TariClaimBurnProofVerifier,
     configuration::convert_network_to_l1_network,
-    epoch_oracle_config::{BaseLayerOracleConfig, EpochOracleType},
+    epoch_oracle_config::{BaseLayerOracleConfig, EpochOracleConfig, EpochOracleType},
     fee_tables::get_fee_table_by_network,
     genesis_governance::resolve_genesis_council,
     identity_management,
@@ -84,7 +84,7 @@ use tari_ootle_transaction_validation::{
     BlobReferenceValidator,
     EpochRangeValidator,
     InputLimitValidator,
-    InputsAreNotVirtualValidator,
+    InputsAreDeclarableValidator,
     InstructionLimitValidator,
     PublishTemplateLimitValidator,
     SignatureLimitValidator,
@@ -115,10 +115,12 @@ use crate::metrics::{
     MeteredEpochOracle,
     PrometheusConsensusMetrics,
     PrometheusEpochOracleMetrics,
+    PrometheusExecutionMetrics,
     StateStoreMemoryCollector,
 };
 use crate::{
     ApplicationConfig,
+    MIN_PINNED_CHECKPOINT_EPOCHS,
     ValidatorNodeEpochManagerSpec,
     ValidatorNodeStateStore,
     base_layer::verify_correct_network,
@@ -264,6 +266,14 @@ pub async fn spawn_services(
 
     // TODO: just enable it always for now, later make it configurable and default to true for testnets
     let db_options = config.validator_node.state_store_options();
+    if config.validator_node.pinned_checkpoint_epochs < MIN_PINNED_CHECKPOINT_EPOCHS {
+        warn!(
+            target: LOG_TARGET,
+            "⚠️ validator_node.pinned_checkpoint_epochs = {} is below the minimum of {MIN_PINNED_CHECKPOINT_EPOCHS}, which \
+             indexers rely on to snapshot new shards. Keeping the trees of {MIN_PINNED_CHECKPOINT_EPOCHS} checkpoints",
+            config.validator_node.pinned_checkpoint_epochs
+        );
+    }
 
     memory_budget::check_against_available_memory(&memory_budget::MemoryBudget::from_config(
         &config.validator_node,
@@ -272,6 +282,8 @@ pub async fn spawn_services(
     ));
 
     let state_history_length = db_options.state_history_length;
+    let pinned_checkpoint_epochs = db_options.pinned_checkpoint_epochs;
+    let epoch_history_length = db_options.epoch_history_length;
     let state_store = ValidatorNodeStateStore::open(&config.validator_node.state_db_path, db_options)?;
 
     #[cfg(feature = "metrics")]
@@ -299,6 +311,7 @@ pub async fn spawn_services(
 
     info!(target: LOG_TARGET, "Epoch manager initializing");
     let epoch_manager_config = EpochManagerConfig {
+        network: config.network,
         base_layer_confirmations: consensus_constants.base_layer_confirmations,
         committee_size: consensus_constants
             .committee_size_per_shard_group
@@ -405,7 +418,6 @@ pub async fn spawn_services(
     let fee_table = get_fee_table_by_network(config.network);
     let transaction_processor = TariTransactionProcessor::new(
         config.network,
-        template_provider.clone(),
         fee_table.clone(),
         false,
         Arc::new(TariClaimBurnProofVerifier::new(
@@ -415,7 +427,12 @@ pub async fn spawn_services(
         )),
     );
     // The executor resolves the exhaust burn rate for each transaction's execution epoch.
-    let transaction_executor = TariBlockTransactionExecutor::new(transaction_processor);
+    let transaction_executor = TariBlockTransactionExecutor::new(
+        transaction_processor,
+        template_provider.clone(),
+        #[cfg(feature = "metrics")]
+        PrometheusExecutionMetrics::register(tari_metrics_registry),
+    );
 
     let transaction_validator = TariBlockTransactionValidator::new(
         create_node_transaction_validator(config.network, template_provider.clone(), &consensus_constants).boxed(),
@@ -453,6 +470,7 @@ pub async fn spawn_services(
         tx_hotstuff_events,
         consensus_constants.clone(),
         state_history_length,
+        pinned_checkpoint_epochs,
     )
     .await;
     handles.push(consensus_join_handle);
@@ -478,6 +496,7 @@ pub async fn spawn_services(
         mempool.clone(),
         consensus_handle.clone(),
         consensus_constants.max_transaction_size_bytes,
+        epoch_history_length,
     )
     .await?;
     handles.push(join_handle);
@@ -562,6 +581,7 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     mempool: MempoolHandle,
     consensus: ConsensusHandle,
     max_transaction_size_bytes: usize,
+    epoch_history_length: u64,
 ) -> anyhow::Result<JoinHandle<Result<(), anyhow::Error>>> {
     let rpc_server = RpcServer::builder()
         .with_maximum_simultaneous_sessions(config.validator_node.rpc.max_simultaneous_sessions)
@@ -573,6 +593,7 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
             mempool,
             consensus,
             max_transaction_size_bytes,
+            epoch_history_length,
         ));
 
     let (notify_tx, notify_rx) = mpsc::unbounded_channel();
@@ -623,11 +644,11 @@ pub fn create_node_transaction_validator<TProvider: TemplateProvider>(
 /// Builds the validations applied when a transaction is admitted to this node's mempool: the node-local chain
 /// plus the two epoch-window rules and the ingress-only input check.
 ///
-/// [`InputsAreNotVirtualValidator`] is deliberately here rather than in [`create_node_transaction_validator`], which
+/// [`InputsAreDeclarableValidator`] is deliberately here rather than in [`create_node_transaction_validator`], which
 /// also backs `TariBlockTransactionValidator`. A rejection rule in block validation is a consensus rule: an
 /// upgraded validator would refuse a block that a non-upgraded one accepts. Refusing at ingress costs the
-/// sender and nothing else, and a transaction that slips past an un-upgraded node's mempool still aborts at
-/// input resolution as it does today.
+/// sender and nothing else, and a block carrying such a transaction is still sound to execute: a virtual input
+/// aborts at input resolution, and an output-only one is locked and pledged without changing.
 pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
     network: Network,
     template_manager: TProvider,
@@ -637,7 +658,7 @@ pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
         .map_context(
             |_| (),
             create_node_transaction_validator(network, template_manager, constants)
-                .and_then(InputsAreNotVirtualValidator::new()),
+                .and_then(InputsAreDeclarableValidator::new()),
         )
         .and_then(EpochRangeValidator::new())
         .and_then(TransactionValidityWindowValidator::new(
@@ -676,21 +697,23 @@ async fn create_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStor
     store: TStore,
     consensus_constants: &ConsensusConstants,
 ) -> anyhow::Result<EpochOracle<TStore>> {
-    match config.epoch_oracle.oracle_type {
+    let oracle_config = config.epoch_oracle.for_network(config.network);
+    match oracle_config.oracle_type {
         EpochOracleType::BaseLayer => {
             let features = BaseLayerEpochOracleFeatures {
                 sync_headers: true,
                 sync_validator_node_changes: true,
             };
-            let oracle = create_base_layer_epoch_oracle(config, store, consensus_constants, features).await?;
+            let oracle =
+                create_base_layer_epoch_oracle(config, &oracle_config, store, consensus_constants, features).await?;
             Ok(EpochOracle::BaseLayer(oracle))
         },
         EpochOracleType::Configured => {
-            let oracle = create_configured_epoch_oracle(config, store).await?;
+            let oracle = create_configured_epoch_oracle(&oracle_config, store).await?;
             Ok(EpochOracle::Configured(oracle))
         },
         EpochOracleType::Hybrid => {
-            let oracle = create_hybrid_epoch_oracle(config, store, consensus_constants).await?;
+            let oracle = create_hybrid_epoch_oracle(config, &oracle_config, store, consensus_constants).await?;
             Ok(EpochOracle::Hybrid(oracle))
         },
     }
@@ -698,20 +721,21 @@ async fn create_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStor
 
 async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Clone + 'static>(
     config: &ApplicationConfig,
+    oracle_config: &EpochOracleConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
     features: BaseLayerEpochOracleFeatures,
 ) -> anyhow::Result<BaseLayerOracle<TStore>> {
-    info!(target: LOG_TARGET, "🔮Base layer epoch oracle: {}", config.epoch_oracle.base_layer);
-    let mut base_node_client = create_base_layer_client(config.network, &config.epoch_oracle.base_layer).await?;
+    info!(target: LOG_TARGET, "🔮Base layer epoch oracle: {}", oracle_config.base_layer);
+    let mut base_node_client = create_base_layer_client(config.network, &oracle_config.base_layer).await?;
     verify_correct_network(&mut base_node_client, config.network).await?;
     Ok(BaseLayerOracle::new(
         store,
         base_node_client,
         BaseLayerEpochOracleConfig {
-            start_height: config.epoch_oracle.base_layer.start_height,
+            start_height: oracle_config.base_layer.start_height,
             height_lag: consensus_constants.base_layer_confirmations,
-            scanning_interval: config.epoch_oracle.base_layer.scanning_interval,
+            scanning_interval: oracle_config.base_layer.scanning_interval,
             sidechain_id: config.validator_node.sidechain_id.as_ref().map(|p| p.to_byte_type()),
             features,
         },
@@ -720,10 +744,10 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBloc
 }
 
 async fn create_configured_epoch_oracle<TStore: EpochOracleStore + Send>(
-    config: &ApplicationConfig,
+    oracle_config: &EpochOracleConfig,
     store: TStore,
 ) -> anyhow::Result<ConfiguredEpochOracle<TStore, RealTimeEpochTicker>> {
-    let oracle_config = config.epoch_oracle.configured.load().await?;
+    let oracle_config = oracle_config.configured.load().await?;
     info!(target: LOG_TARGET, "🔮Configured epoch oracle: {}", oracle_config);
     let oracle = ConfiguredEpochOracle::create(oracle_config, store)?;
     Ok(oracle)
@@ -731,6 +755,7 @@ async fn create_configured_epoch_oracle<TStore: EpochOracleStore + Send>(
 
 async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Clone + Send + 'static>(
     config: &ApplicationConfig,
+    oracle_config: &EpochOracleConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
 ) -> anyhow::Result<HybridEpochOracle<TStore>> {
@@ -740,8 +765,8 @@ async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHea
         sync_validator_node_changes: false,
     };
     let base_layer_oracle =
-        create_base_layer_epoch_oracle(config, store.clone(), consensus_constants, features).await?;
-    let oracle_config = config.epoch_oracle.configured.load().await?;
+        create_base_layer_epoch_oracle(config, oracle_config, store.clone(), consensus_constants, features).await?;
+    let oracle_config = oracle_config.configured.load().await?;
 
     info!(target: LOG_TARGET, "🔮Hybrid epoch oracle initializing: {}", oracle_config);
     let (ticker, trigger) = mpsc_ticker();

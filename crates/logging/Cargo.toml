@@ -1,0 +1,31 @@
+[package]
+name = "tari_logging"
+publish = false
+description = "Process logging through tracing, with a background writer per sink"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+prometheus-client = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "time"] }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["json"] }
+
+[dev-dependencies]
+log = { workspace = true, features = ["std"] }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tracing-log = { workspace = true }
+
+[features]
+# A Prometheus collector for the lines each sink dropped.
+# `prometheus-client` stays an implicit feature: cargo-auditable runs `cargo metadata` across the workspace with the
+# features of the binary it is building, and the validator node and indexer enable a feature of that name, which
+# cargo rejects for a member whose optional dependency is only reachable through `dep:`.
+metrics = ["prometheus-client"]

@@ -154,9 +154,9 @@ pub const OP_DERIVE_VIEW_KEY_FROM_SEED: &str = "derive_view_key_from_seed";
 pub const OP_DERIVE_ACCOUNT_ADDRESS: &str = "derive_account_address";
 
 /// The canonical operation id for **identity-address formatting**: encode an
-/// `{network, account_key, view_only_key, pay_ref?}` record into its canonical `otl_…` bech32m
+/// `{network, account_key, view_only_key, destination_tag?}` record into its canonical `otl_…` bech32m
 /// string. Its `input` carries `network` + `account_key` + `view_only_key` (lowercase hex) + an
-/// optional `pay_ref` (lowercase hex); `expected.bech32m` carries the encoded string.
+/// optional `destination_tag` (lowercase hex); `expected.bech32m` carries the encoded string.
 ///
 /// **Default `"bytes"` comparison mode.** bech32m encoding is RNG-free and deterministic, so the
 /// produced string is byte-stable and compared exactly. The HRP is network-qualified, so the
@@ -174,9 +174,9 @@ pub const OP_FORMAT_IDENTITY_ADDRESS: &str = "format_identity_address";
 /// uses), so a parse vector cross-checks a wallet-shaped `otl_…` string round-trips its fields.
 pub const OP_PARSE_ADDRESS: &str = "parse_address";
 
-/// The canonical operation id for **typed substate decode**: turn a fetched [`SubstateValue`] JSON
-/// into the kind-tagged [`ootle_sdk_core::DecodedSubstate`]. Its `input.substate_value` carries the
-/// indexer's substate JSON verbatim; `expected.decoded_substate` carries the decoded record.
+/// The canonical operation id for **typed substate decode**: turn a fetched substate value into the
+/// kind-tagged [`ootle_sdk_core::DecodedSubstate`]. Its `input.substate_value` carries the indexer's
+/// base64 CBOR substate value verbatim; `expected.decoded_substate` carries the decoded record.
 ///
 /// **Default `"bytes"` comparison mode.** The decode is a pure parse + field map (no RNG), so the
 /// produced record is byte-stable; the embedded `u64` balances are native JSON numbers.
@@ -209,7 +209,7 @@ pub const OP_ENCODE_ARG: &str = "encode_arg";
 ///
 /// **`"semantic"` comparison mode.** Matches the stealth-send precedent: the runner re-seals, verifies
 /// every signature via [`ootle_sdk_core::decode_and_canonicalize_sealed_transfer`], and compares the
-/// deterministic decoded fields (the signer public keys + `is_seal_signer_authorized` survive, locking
+/// deterministic decoded fields (the signer public keys + `main_signer` survive, locking
 /// the seal-signer-authorized contract; the Schnorr scalars are nulled).
 pub const OP_COSIGN_SEAL_WITH_AUTH: &str = "cosign_seal_with_auth";
 
@@ -337,10 +337,10 @@ pub struct VectorInput {
     /// for `format_identity_address` vectors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view_only_key: Option<String>,
-    /// The optional lowercase-hex payment reference feeding `format_identity_address`. Present (and
-    /// non-null) only for the `format_identity_address` vectors that carry a pay_ref.
+    /// The optional lowercase-hex destination tag feeding `format_identity_address`. Present (and
+    /// non-null) only for the `format_identity_address` vectors that carry a destination_tag.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pay_ref: Option<String>,
+    pub destination_tag: Option<String>,
     /// The address string feeding `parse_address` (a `component_/resource_<hex>` id or an `otl_…`
     /// identity). Present only for `parse_address` vectors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -349,7 +349,7 @@ pub struct VectorInput {
     /// Present only for `decode_stealth_utxo` vectors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub substate_id: Option<String>,
-    /// The fetched `SubstateValue` JSON, committed verbatim (the indexer's shape). Feeds
+    /// The fetched substate value, committed verbatim as the indexer serves it (base64 CBOR). Feeds
     /// `decode_stealth_utxo` (the UTXO), `decode_substate` (any substate), and `account_balances` (the
     /// account component).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -390,10 +390,8 @@ pub struct StealthScanInput {
     pub network: Network,
     /// The recipient's view-only secret (re-derives the AEAD key with the sender's public nonce).
     pub view_secret: SecretKeyBytes,
-    /// The recipient's account secret, for the ownership (tag + spend-key) checks. `None` selects
-    /// view-key-only mode (those checks are skipped).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub account_secret: Option<SecretKeyBytes>,
+    /// The recipient's account public key, for the spend-key ownership check.
+    pub account_public_key: PublicKeyBytes,
     /// The inbound stealth UTXO to scan.
     pub output: ootle_sdk_core::types::stealth::InboundStealthOutput,
     /// When `true`, the memo region is not decoded (the result's `memo` is `None`).
@@ -408,6 +406,8 @@ pub struct StealthScanInput {
 pub struct VectorStealthKeys {
     /// The account secret key.
     pub account_secret: SecretKeyBytes,
+    /// The account's view secret key.
+    pub view_secret: SecretKeyBytes,
     /// The build seed expanded into the per-output construction entropy (commitments/AEAD/proofs).
     pub seed: BuildSeed,
 }
@@ -415,7 +415,7 @@ pub struct VectorStealthKeys {
 impl VectorStealthKeys {
     /// Reconstitutes the core stealth seal-key bundle.
     pub fn to_core(&self) -> StealthKeys {
-        StealthKeys::new(self.account_secret.clone())
+        StealthKeys::new(self.account_secret.clone(), self.view_secret.clone())
     }
 }
 
@@ -758,7 +758,7 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
             let result = ootle_sdk_core::scan_stealth_output(
                 scan.network,
                 &scan.view_secret,
-                scan.account_secret.as_ref(),
+                &scan.account_public_key,
                 &scan.output,
                 scan.skip_memo,
             )
@@ -832,7 +832,7 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
                 .unwrap_or_else(|e| panic!("fixture `{}`: bad account_public_key hex: {e}", fixture.name));
             let view = PublicKeyBytes::from_hex(view_pk)
                 .unwrap_or_else(|e| panic!("fixture `{}`: bad view_only_key hex: {e}", fixture.name));
-            let bech32m = format_identity_address(network, &account, &view, input.pay_ref.as_deref())
+            let bech32m = format_identity_address(network, &account, &view, input.destination_tag.as_deref())
                 .unwrap_or_else(|e| panic!("fixture `{}`: format_identity_address failed: {e}", fixture.name));
             ExpectedOutput {
                 bech32m: Some(bech32m),
@@ -866,7 +866,7 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
                     fixture.name
                 )
             });
-            // The host hands the core the indexer's SubstateValue JSON verbatim; mirror that exactly.
+            // The host hands the core the indexer's substate value verbatim; mirror that exactly.
             let inbound = decode_stealth_utxo(substate_id, substate_value)
                 .unwrap_or_else(|e| panic!("fixture `{}`: decode_stealth_utxo failed: {e}", fixture.name));
             let json = serde_json::to_value(&inbound).expect("InboundStealthOutput serializes");
@@ -953,6 +953,7 @@ pub fn run_operation(fixture: &Fixture) -> ExpectedOutput {
                 cosign_resolved_partial(fixture),
                 &keys.to_core(),
                 std::slice::from_ref(&auth),
+                None,
             )
             .unwrap_or_else(|e| {
                 panic!(
@@ -1007,7 +1008,7 @@ fn cosign_authorize_inputs(
     PublicKeyBytes,
     SecretKeyBytes,
 ) {
-    let record = ootle_sdk_core::unsigned_record_for_cosign(&cosign_resolved_partial(fixture))
+    let record = ootle_sdk_core::unsigned_record_for_cosign(&cosign_resolved_partial(fixture), None)
         .unwrap_or_else(|e| panic!("fixture `{}`: unsigned_record_for_cosign failed: {e}", fixture.name));
     let seal_pk_hex = fixture
         .input

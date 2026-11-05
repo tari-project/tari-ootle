@@ -35,7 +35,13 @@ use crate::{
     NUM_PRESHARDS,
     handlers::{
         HandlerContext,
-        helpers::{get_account_or_default, get_account_with_inputs, invalid_params, wait_for_result},
+        helpers::{
+            ensure_signing_key,
+            get_account_or_default,
+            get_account_with_inputs,
+            invalid_params,
+            wait_for_result,
+        },
     },
 };
 
@@ -57,7 +63,10 @@ pub async fn handle_get_validator_fees(
             })?;
             sdk.key_manager_api().get_public_key(account_key_id)?
         },
-        AccountOrKeyId::KeyId(key_id) => sdk.key_manager_api().get_public_key(key_id)?,
+        AccountOrKeyId::KeyId(key_id) => {
+            ensure_signing_key(&sdk, "account_or_key", &key_id)?;
+            sdk.key_manager_api().get_public_key(key_id)?
+        },
     };
     let claim_public_key = claim_key.public_key().to_byte_type();
 
@@ -81,7 +90,7 @@ pub async fn handle_get_validator_fees(
         let substates = context
             .wallet_sdk()
             .substate_api()
-            .get_substates_from_network(id_chunk.to_vec())
+            .get_substates_from_network(id_chunk)
             .await?;
 
         info!(target: LOG_TARGET, "🔍️ Found {}/{} fee pool substates for claim key {}", substates.len(), CHUNK_SIZE, claim_public_key);
@@ -230,10 +239,7 @@ pub async fn handle_claim_validator_fees(
 
     // send the transaction
     if req.dry_run {
-        let transaction = sdk
-            .transaction_api()
-            .submit_dry_run_transaction(transaction, None)
-            .await?;
+        let transaction = sdk.transaction_api().submit_dry_run_transaction(transaction).await?;
         return Ok(ClaimValidatorFeesResponse {
             transaction_id: transaction.id,
             // Dry-run forces a minimal max_fee so the call doesn't require funded vaults, which clamps
@@ -303,7 +309,7 @@ async fn build_self_stealth_statement(
     let mut amounts: HashMap<ValidatorFeePoolAddress, u64> = HashMap::with_capacity(substate_ids.len());
     const CHUNK_SIZE: usize = 20;
     for chunk in substate_ids.chunks(CHUNK_SIZE) {
-        let substates = sdk.substate_api().get_substates_from_network(chunk.to_vec()).await?;
+        let substates = sdk.substate_api().get_substates_from_network(chunk).await?;
         for (id, substate) in substates {
             let Some(addr) = id.as_validator_fee_pool_address() else {
                 continue;
@@ -362,9 +368,12 @@ async fn build_self_stealth_statement(
         &STEALTH_TARI_RESOURCE_ADDRESS,
     );
 
-    let stealth_owner_public_key =
-        sdk.stealth_crypto_api()
-            .derive_stealth_owner_public_key(network, account_owner.public_key(), &nonce);
+    let stealth_owner_public_key = sdk.stealth_crypto_api().derive_stealth_owner_public_key(
+        network,
+        account_owner.public_key(),
+        view_only.public_key(),
+        &nonce,
+    );
 
     let output_witness = StealthOutputWitness {
         witness: OutputWitness {
@@ -387,4 +396,31 @@ async fn build_self_stealth_statement(
     )?;
 
     Ok((statement, pool_amounts))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handlers::test_support::TestDaemon;
+
+    #[tokio::test]
+    async fn fees_are_looked_up_only_for_a_signing_key() {
+        let daemon = TestDaemon::start().await;
+        let reader = daemon.api_key("reader", "validators:read");
+
+        for branch in [
+            KeyBranch::ConfidentialMask,
+            KeyBranch::StealthMask,
+            KeyBranch::ViewOnlyKey,
+            KeyBranch::ElgamalEncryptionViewKey,
+        ] {
+            let err = handle_get_validator_fees(&daemon.context, Some(&reader), GetValidatorFeesRequest {
+                account_or_key: AccountOrKeyId::KeyId(KeyId::derived(branch, 0)),
+                shard_group: None,
+            })
+            .await
+            .unwrap_err();
+            assert!(err.to_string().contains("account_or_key"), "{err}");
+        }
+    }
 }

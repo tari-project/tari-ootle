@@ -27,9 +27,15 @@ pub use substate_proof::*;
 mod traits;
 pub use traits::*;
 
+mod transition_accumulator;
+pub use transition_accumulator::*;
+
 mod tree;
 
 pub use tree::*;
+
+mod validator_set_tree;
+pub use validator_set_tree::*;
 
 /// The payload type used in the state tree. This is a reference to a particular substate (i.e. SubstateAddress).
 pub type StateTreePayload = tari_ootle_common_types::SubstateAddress;

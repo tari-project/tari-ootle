@@ -29,20 +29,30 @@ use std::{
 
 use log::*;
 use ootle_byte_type::FromByteType;
-use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
     DerivableFromPublicKey,
     Epoch,
     NodeAddressable,
+    ProtocolVersion,
     ShardGroup,
     SubstateAddress,
+    ValidatorSetHash,
     VotePower,
     committee::{Committee, CommitteeInfo},
     optional::Optional,
 };
-use tari_ootle_storage::global::{GlobalDb, MetadataKey, models::ValidatorNode};
+use tari_ootle_storage::{
+    AtomicDb,
+    global::{
+        GlobalDb,
+        MetadataKey,
+        models::{ShardGroupSize, ValidatorNode},
+    },
+};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+use tari_sidechain::FixedHash;
+use tari_state_tree::{ValidatorSetCommitteeProof, ValidatorSetTree};
+use tari_template_lib_types::{Hash32, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
     error::EpochManagerError,
@@ -109,10 +119,10 @@ where TSpec: EpochManagerSpec
         Ok(())
     }
 
-    /// Makes `epoch` current and assigns its committees from the validators registered for it. Both commit
-    /// together, so an epoch is never current without its committees. The assignment replaces every row a
-    /// previous run left for the epoch, including those of a validator that has since re-registered under a
-    /// new row or exited.
+    /// Makes `epoch` current and assigns its committees from the validators registered for it, then commits the
+    /// assignment to the epoch's [`ValidatorSetHash`]. All of it commits together, so an epoch is never current without
+    /// its committees and their hash. The assignment replaces every row a previous run left for the epoch, including
+    /// those of a validator that has since re-registered under a new row or exited.
     pub fn advance_to_epoch(&mut self, epoch: Epoch, epoch_hash: FixedHash) -> Result<(), EpochManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         self.global_db.epochs(&mut tx).insert_epoch(epoch, epoch_hash)?;
@@ -132,10 +142,45 @@ where TSpec: EpochManagerSpec
             )?;
         }
 
+        self.commit_validator_set(&mut tx, epoch, num_committees)?;
+
         tx.commit()?;
         self.set_current_epoch(epoch);
         self.current_epoch_hash = epoch_hash;
         Ok(())
+    }
+
+    /// Hashes `epoch`'s assigned committees into its [`ValidatorSetHash`] and stores it with the per-shard-group leaf
+    /// hashes. One committee is loaded at a time and only its leaf hash is kept.
+    fn commit_validator_set<'a>(
+        &'a self,
+        tx: &mut <SqliteGlobalDbAdapter<TSpec::Addr> as AtomicDb>::DbTransaction<'a>,
+        epoch: Epoch,
+        num_committees: u32,
+    ) -> Result<ValidatorSetHash, EpochManagerError> {
+        let mut validator_nodes = self.global_db.validator_nodes(tx);
+        let version = ProtocolVersion::at(self.config.network, epoch);
+        let leaves = self
+            .config
+            .num_preshards
+            .all_shard_groups_iter(num_committees)
+            .map(|shard_group| {
+                let committee = validator_nodes.get_committee_for_shard_group(epoch, shard_group, usize::MAX)?;
+                let leaf_hash = committee
+                    .calculate_validator_set_leaf_hash(version, &shard_group)
+                    .map_err(|source| EpochManagerError::InvalidValidatorSetCommittee {
+                        epoch,
+                        shard_group,
+                        source,
+                    })?;
+                Ok((shard_group, leaf_hash))
+            })
+            .collect::<Result<Vec<_>, EpochManagerError>>()?;
+        let validator_set_hash = self.build_validator_set_tree(epoch, leaves.iter().copied())?.hash();
+        self.global_db
+            .epochs(tx)
+            .set_validator_set(epoch, &validator_set_hash, &leaves)?;
+        Ok(validator_set_hash)
     }
 
     pub fn add_validator_node_registration(
@@ -246,6 +291,56 @@ where TSpec: EpochManagerSpec
             .get_epoch_data(epoch)?
             .ok_or(EpochManagerError::NoEpochFound(epoch))?;
         Ok(data.epoch_hash)
+    }
+
+    /// Returns the [`ValidatorSetHash`] of `epoch`'s committees.
+    pub fn get_validator_set_hash(&self, epoch: Epoch) -> Result<ValidatorSetHash, EpochManagerError> {
+        let mut tx = self.global_db.create_transaction()?;
+        self.global_db
+            .epochs(&mut tx)
+            .get_epoch_data(epoch)?
+            .ok_or(EpochManagerError::NoEpochFound(epoch))?
+            .validator_set_hash
+            .ok_or(EpochManagerError::NoValidatorSet { epoch })
+    }
+
+    /// Proves `shard_group`'s committee in `epoch` against the epoch's [`ValidatorSetHash`]. The tree is rebuilt from
+    /// the stored leaf hashes, so only the one committee is loaded.
+    pub fn get_validator_set_committee_proof(
+        &self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<ValidatorSetCommitteeProof, EpochManagerError> {
+        let mut tx = self.global_db.create_transaction()?;
+        let mut epochs = self.global_db.epochs(&mut tx);
+        let stored = epochs
+            .get_epoch_data(epoch)?
+            .ok_or(EpochManagerError::NoEpochFound(epoch))?
+            .validator_set_hash
+            .ok_or(EpochManagerError::NoValidatorSet { epoch })?;
+        let tree = self.build_validator_set_tree(epoch, epochs.get_validator_set_leaves(epoch)?)?;
+        if tree.hash() != stored {
+            return Err(EpochManagerError::ValidatorSetLeavesMismatch {
+                epoch,
+                stored,
+                rebuilt: tree.hash(),
+            });
+        }
+        let committee =
+            self.global_db
+                .validator_nodes(&mut tx)
+                .get_committee_for_shard_group(epoch, shard_group, usize::MAX)?;
+        tree.committee_proof(&shard_group, &committee)
+            .map_err(|source| EpochManagerError::ValidatorSetTree { epoch, source })
+    }
+
+    fn build_validator_set_tree<I: IntoIterator<Item = (ShardGroup, Hash32)>>(
+        &self,
+        epoch: Epoch,
+        leaves: I,
+    ) -> Result<ValidatorSetTree, EpochManagerError> {
+        ValidatorSetTree::build(self.config.network, epoch, self.config.num_preshards, leaves)
+            .map_err(|source| EpochManagerError::ValidatorSetTree { epoch, source })
     }
 
     pub fn get_validator_node_by_public_key(
@@ -381,11 +476,11 @@ where TSpec: EpochManagerSpec
         let num_committees = self.get_number_of_committees(epoch)?;
         let mut tx = self.global_db.create_transaction()?;
         let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
-        let num_validators = validator_node_db.count_in_shard_group(epoch, shard_group)?;
-        // NOTE: currently each validator has a vote power of 1, so the total vote power is equal to the number of
-        // validators. This may change in the future if e.g. we introduce staking.
-        let total_vote_power = VotePower::of(num_validators);
-        let num_validators = u32::try_from(num_validators).map_err(|_| EpochManagerError::IntegerOverflow {
+        let ShardGroupSize {
+            num_members,
+            total_power,
+        } = validator_node_db.size_of_shard_group(epoch, shard_group)?;
+        let num_validators = u32::try_from(num_members).map_err(|_| EpochManagerError::IntegerOverflow {
             func: "get_committee_info",
         })?;
         Ok(CommitteeInfo::new(
@@ -394,7 +489,7 @@ where TSpec: EpochManagerSpec
             num_committees,
             shard_group,
             epoch,
-            total_vote_power,
+            total_power,
         ))
     }
 
@@ -514,7 +609,8 @@ fn calculate_num_committees(num_vns: u64, committee_size: NonZeroU32) -> u32 {
 #[cfg(test)]
 mod tests {
     use diesel::{Connection, SqliteConnection};
-    use tari_ootle_common_types::{NumPreshards, VotePower};
+    use ootle_network::Network;
+    use tari_ootle_common_types::{NumPreshards, VotePower, optional::IsNotFoundError};
 
     use super::*;
     use crate::epoch_event_oracle::{EpochEvent, EpochEventOracle};
@@ -540,6 +636,7 @@ mod tests {
         ));
         global_db.adapter().migrate().unwrap();
         let config = EpochManagerConfig {
+            network: Network::LocalNet,
             base_layer_confirmations: 0,
             committee_size: NonZeroU32::new(10).unwrap(),
             validator_node_sidechain_id: None,
@@ -559,6 +656,10 @@ mod tests {
     }
 
     fn register(manager: &EpochManager<TestSpec>, byte: u8, start_epoch: Epoch) {
+        register_with_power(manager, byte, start_epoch, VotePower::of(1));
+    }
+
+    fn register_with_power(manager: &EpochManager<TestSpec>, byte: u8, start_epoch: Epoch, power: VotePower) {
         let mut tx = manager.global_db.create_transaction().unwrap();
         manager
             .global_db
@@ -569,10 +670,50 @@ mod tests {
                 SubstateAddress::from_array([byte; SubstateAddress::LENGTH]),
                 start_epoch,
                 public_key(byte),
-                VotePower::of(1),
+                power,
             )
             .unwrap();
         tx.commit().unwrap();
+    }
+
+    #[test]
+    fn committee_total_power_is_the_member_count_when_every_power_is_one() {
+        let mut manager = create_epoch_manager();
+        for byte in 1..=7 {
+            register(&manager, byte, Epoch(1));
+        }
+        manager.advance_to_epoch(Epoch(2), FixedHash::zero()).unwrap();
+
+        let info = manager
+            .get_committee_info(Epoch(2), ShardGroup::all_shards(NumPreshards::P256))
+            .unwrap();
+        assert_eq!(info.num_shard_group_members(), 7);
+        assert_eq!(info.total_power(), VotePower::of(7));
+        assert_eq!(info.max_failures(), VotePower::of(2));
+        assert_eq!(info.quorum_threshold(), VotePower::of(5));
+    }
+
+    #[test]
+    fn committee_total_power_sums_member_power() {
+        let mut manager = create_epoch_manager();
+        for (byte, power) in [(1, 1), (2, 2), (3, 3), (4, 5)] {
+            register_with_power(&manager, byte, Epoch(1), VotePower::of(power));
+        }
+        manager.advance_to_epoch(Epoch(2), FixedHash::zero()).unwrap();
+
+        let all_shards = ShardGroup::all_shards(NumPreshards::P256);
+        let info = manager.get_committee_info(Epoch(2), all_shards).unwrap();
+        assert_eq!(info.num_shard_group_members(), 4);
+        assert_eq!(info.total_power(), VotePower::of(11));
+        // n - (n - 1) / 3 over power: 11 - 3
+        assert_eq!(info.max_failures(), VotePower::of(3));
+        assert_eq!(info.quorum_threshold(), VotePower::of(8));
+
+        let committee = manager
+            .get_committee_for_shard_group(Epoch(2), all_shards, None)
+            .unwrap();
+        assert_eq!(committee.total_power(), info.total_power());
+        assert_eq!(committee.quorum_threshold(), info.quorum_threshold());
     }
 
     /// A second assignment for an epoch must leave exactly the validators registered for it at that point: a
@@ -596,5 +737,111 @@ mod tests {
             .get_committee_for_shard_group(Epoch(2), all_shards, 100)
             .unwrap();
         assert_eq!(committee.into_public_keys().collect::<Vec<_>>(), vec![public_key(1)]);
+    }
+
+    fn committees(
+        manager: &EpochManager<TestSpec>,
+        epoch: Epoch,
+        num_committees: u32,
+    ) -> Vec<(ShardGroup, Committee<RistrettoPublicKeyBytes>)> {
+        NumPreshards::P256
+            .all_shard_groups_iter(num_committees)
+            .map(|shard_group| {
+                (
+                    shard_group,
+                    manager.get_committee_for_shard_group(epoch, shard_group, None).unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn advancing_to_an_epoch_commits_its_committees_to_the_validator_set_hash() {
+        let mut manager = create_epoch_manager();
+        for byte in 1..=25 {
+            register(&manager, byte * 10, Epoch(1));
+        }
+        manager.advance_to_epoch(Epoch(2), FixedHash::zero()).unwrap();
+
+        let committees = committees(&manager, Epoch(2), 2);
+        assert_eq!(committees.iter().map(|(_, c)| c.len()).sum::<usize>(), 25);
+        let expected = ValidatorSetTree::build(
+            Network::LocalNet,
+            Epoch(2),
+            NumPreshards::P256,
+            committees.iter().map(|(shard_group, committee)| {
+                (
+                    *shard_group,
+                    committee
+                        .calculate_validator_set_leaf_hash(
+                            ProtocolVersion::at(Network::LocalNet, Epoch(2)),
+                            shard_group,
+                        )
+                        .unwrap(),
+                )
+            }),
+        )
+        .unwrap()
+        .hash();
+        let stored = manager.get_validator_set_hash(Epoch(2)).unwrap();
+        assert_eq!(stored, expected);
+
+        for (shard_group, committee) in &committees {
+            let proof = manager
+                .get_validator_set_committee_proof(Epoch(2), *shard_group)
+                .unwrap();
+            let members = proof.verify(&stored).unwrap();
+            assert_eq!(
+                members.iter().map(|m| m.public_key).collect::<Vec<_>>(),
+                committee.public_keys().copied().collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn reassigning_an_epoch_recomputes_its_validator_set_hash() {
+        let mut manager = create_epoch_manager();
+        register(&manager, 1, Epoch(1));
+        register(&manager, 2, Epoch(1));
+        manager.advance_to_epoch(Epoch(2), FixedHash::zero()).unwrap();
+        let first = manager.get_validator_set_hash(Epoch(2)).unwrap();
+
+        manager.deactivate_validator_node(public_key(2), Epoch(2)).unwrap();
+        manager.advance_to_epoch(Epoch(2), FixedHash::zero()).unwrap();
+        let second = manager.get_validator_set_hash(Epoch(2)).unwrap();
+
+        assert_ne!(first, second);
+        let all_shards = ShardGroup::all_shards(NumPreshards::P256);
+        let proof = manager.get_validator_set_committee_proof(Epoch(2), all_shards).unwrap();
+        assert_eq!(
+            proof
+                .verify(&second)
+                .unwrap()
+                .iter()
+                .map(|m| m.public_key)
+                .collect::<Vec<_>>(),
+            vec![public_key(1)]
+        );
+    }
+
+    #[test]
+    fn an_epoch_not_yet_reached_has_no_validator_set() {
+        let manager = create_epoch_manager();
+        assert!(matches!(
+            manager.get_validator_set_hash(Epoch(3)),
+            Err(EpochManagerError::NoEpochFound(epoch)) if epoch == Epoch(3)
+        ));
+    }
+
+    #[test]
+    fn a_shard_group_outside_the_epoch_is_not_found() {
+        let mut manager = create_epoch_manager();
+        register(&manager, 1, Epoch(1));
+        manager.advance_to_epoch(Epoch(2), FixedHash::zero()).unwrap();
+
+        let err = manager
+            .get_validator_set_committee_proof(Epoch(2), ShardGroup::new(0u32, 127u32))
+            .unwrap_err();
+        assert!(err.is_not_found_error(), "{err}");
     }
 }

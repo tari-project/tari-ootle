@@ -30,8 +30,14 @@ use std::{
 use borsh::{BorshDeserialize, BorshSerialize};
 use ootle_network::Network;
 use serde::{Deserialize, Serialize};
-use tari_bor::{BorError, decode_exact_with_max_depth, encode};
+use tari_bor::{decode_exact_with_max_depth, encode, BorError};
 use tari_template_lib::types::{
+    address_prefixes,
+    constants::{
+        BURN_RATE_GOVERNANCE_COMPONENT_ADDRESS,
+        PUBLIC_IDENTITY_RESOURCE_ADDRESS,
+        STEALTH_TARI_RESOURCE_ADDRESS,
+    },
     ClaimedOutputTombstoneAddress,
     ComponentAddress,
     ConfidentialOutputAddress,
@@ -44,32 +50,27 @@ use tari_template_lib::types::{
     UtxoAddress,
     ValidatorFeePoolAddress,
     VaultId,
-    address_prefixes,
-    constants::{
-        BURN_RATE_GOVERNANCE_COMPONENT_ADDRESS,
-        PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-        STEALTH_TARI_RESOURCE_ADDRESS,
-    },
 };
 
 use crate::{
-    Epoch,
-    ProtocolVersion,
-    SubstateVersion,
-    ValidatorFeePool,
-    ValidatorFeeWithdrawal,
     component::Component,
     confidential::ClaimedOutputTombstone,
     confidential_output::ConfidentialOutput,
-    hashing::{EngineHashDomainLabel, hasher32, substate_value_hasher32},
+    encoded::Encoded,
+    hashing::{hasher32, substate_value_hasher32, EngineHashDomainLabel},
     limits,
     non_fungible::NonFungibleContainer,
-    published_template::{PublishedTemplate, PublishedTemplateAddress},
+    published_template::{PublishedTemplate, PublishedTemplateAddress, PublishedTemplateMetadata},
     resource::Resource,
     substate_hasher::SubstateHashMessage,
     transaction_receipt::TransactionReceipt,
     utxo::Utxo,
     vault::Vault,
+    Epoch,
+    ProtocolVersion,
+    SubstateVersion,
+    ValidatorFeePool,
+    ValidatorFeeWithdrawal,
 };
 
 #[derive(Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize)]
@@ -122,13 +123,79 @@ impl Substate {
     }
 }
 
+/// A substate version with its value held in its CBOR encoding. See [`Encoded`].
+#[derive(
+    Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize,
+)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct EncodedSubstate {
+    #[n(0)]
+    version: SubstateVersion,
+    /// The CBOR-encoded `SubstateValue`, base64 in JSON.
+    #[n(1)]
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    value: Encoded<SubstateValue>,
+}
+
+impl EncodedSubstate {
+    pub fn new<V: Into<SubstateVersion>>(version: V, value: Encoded<SubstateValue>) -> Self {
+        Self {
+            version: version.into(),
+            value,
+        }
+    }
+
+    pub fn encode(substate: &Substate) -> Result<Self, BorError> {
+        Ok(Self::new(
+            substate.version(),
+            Encoded::encode(substate.substate_value())?,
+        ))
+    }
+
+    pub fn version(&self) -> SubstateVersion {
+        self.version
+    }
+
+    pub fn value(&self) -> &Encoded<SubstateValue> {
+        &self.value
+    }
+
+    pub fn into_value(self) -> Encoded<SubstateValue> {
+        self.value
+    }
+
+    pub fn decode(&self) -> Result<Substate, BorError> {
+        Ok(Substate::new(self.version, self.value.decode()?))
+    }
+}
+
 /// Hashes a substate into its canonical value hash. The `epoch` argument binds the schema version
 /// (derived from `network` and epoch via `ProtocolVersion::at`) into the hash preimage, so substates
 /// produced under different schema versions can never collide in the JMT.
 pub fn hash_substate(network: Network, substate: &SubstateValue, version: SubstateVersion, epoch: Epoch) -> Hash32 {
     let proto_version = ProtocolVersion::at(network, epoch);
+    hash_substate_message(substate.as_hash_message(proto_version), version, epoch)
+}
+
+/// Hashes a published template from its metadata alone, giving the same hash as [`hash_substate`] of the full
+/// template substate.
+pub fn hash_published_template_metadata(
+    network: Network,
+    metadata: &PublishedTemplateMetadata,
+    version: SubstateVersion,
+    epoch: Epoch,
+) -> Hash32 {
+    let proto_version = ProtocolVersion::at(network, epoch);
+    hash_substate_message(
+        SubstateHashMessage::template_metadata(proto_version, metadata),
+        version,
+        epoch,
+    )
+}
+
+fn hash_substate_message(message: SubstateHashMessage<'_>, version: SubstateVersion, epoch: Epoch) -> Hash32 {
     substate_value_hasher32()
-        .chain(&substate.as_hash_message(proto_version))
+        .chain(&message)
         .chain(&version)
         .chain(&epoch)
         .result()
@@ -322,19 +389,36 @@ impl SubstateId {
         matches!(self, Self::NonFungible(addr) if *addr.resource_address() == PUBLIC_IDENTITY_RESOURCE_ADDRESS)
     }
 
+    /// Returns `true` for a badge the engine issues rather than stores: a public-key identity or a caller badge.
+    /// Every such badge exists by construction, so a value may name one (for example, to grant it an approval)
+    /// although nothing can be resolved or locked at it.
+    pub fn is_virtual_badge(&self) -> bool {
+        matches!(self, Self::NonFungible(addr) if {
+            let resource = addr.resource_address();
+            resource.is_caller_badge() || *resource == PUBLIC_IDENTITY_RESOURCE_ADDRESS
+        })
+    }
+
     /// Returns `true` for substate ids the engine reserves and never stores: public-key identities, the caller
     /// badges stamped into an authorization scope at frame push, and the two resources those badges are namespaced
     /// by. Nothing can ever be resolved or locked at one of these, so they are neither derived as transaction
     /// inputs nor brought into a call scope, and a transaction naming one as an input is rejected at validation.
     pub fn is_virtual(&self) -> bool {
-        match self {
-            Self::NonFungible(addr) => {
-                let resource = addr.resource_address();
-                resource.is_caller_badge() || *resource == PUBLIC_IDENTITY_RESOURCE_ADDRESS
-            },
-            Self::Resource(addr) => addr.is_caller_badge(),
-            _ => false,
-        }
+        self.is_virtual_badge() || matches!(self, Self::Resource(addr) if addr.is_caller_badge())
+    }
+
+    /// Returns `true` for substate ids that only exist as the output of the transaction that creates them: a
+    /// transaction's receipt and the tombstone a burn claim leaves. The engine creates each once and no instruction
+    /// reads or writes one afterwards, so declaring one as an input would lock and pledge it for nothing, and a
+    /// transaction naming one as an input is rejected at validation.
+    pub const fn is_output_only(&self) -> bool {
+        matches!(self, Self::TransactionReceipt(_) | Self::ClaimedOutputTombstone(_))
+    }
+
+    /// Returns `true` for substate ids a transaction may declare as an input: anything neither
+    /// [virtual](Self::is_virtual) nor [output-only](Self::is_output_only).
+    pub fn is_declarable_input(&self) -> bool {
+        !self.is_virtual() && !self.is_output_only()
     }
 
     pub const fn is_vault(&self) -> bool {
@@ -1174,6 +1258,87 @@ mod tests {
                 hash_substate(NETWORK, &v, SubstateVersion::ZERO, Epoch::zero()),
                 hash_substate(NETWORK, &v, SubstateVersion::new(1), Epoch::zero())
             );
+        }
+    }
+
+    mod encoded_len {
+        use tari_template_lib::types::{
+            crypto::{RistrettoPublicKeyBytes, UtxoTag},
+            stealth::SpendAuthorization,
+            EncryptedData,
+            TemplateMetadataHash,
+        };
+
+        use super::*;
+        use crate::{
+            crypto::{ElgamalVerifiableBalanceBytes, OutputBody},
+            validator_fee::ValidatorFeePool,
+            UtxoOutput,
+        };
+
+        fn output_body(memo_len: usize, viewable: bool) -> OutputBody {
+            OutputBody {
+                public_nonce: RistrettoPublicKeyBytes::zero(),
+                encrypted_data: EncryptedData::try_from(vec![7u8; EncryptedData::min_size() + memo_len]).unwrap(),
+                minimum_value_promise: u64::MAX,
+                viewable_balance: viewable.then(|| ElgamalVerifiableBalanceBytes {
+                    encrypted: RistrettoPublicKeyBytes::zero(),
+                    public_nonce: RistrettoPublicKeyBytes::zero(),
+                }),
+            }
+        }
+
+        /// The storage charge sizes each persisted substate by its `CborLen`, so that length must equal
+        /// the bytes the substate actually encodes to. Component, resource, vault, NFT and receipt
+        /// substates are checked against real executions in `tari_engine`'s `fees.rs`.
+        #[test]
+        fn it_matches_the_encoding_of_every_leaf_substate() {
+            let mut frozen_utxo = Utxo::new(UtxoOutput {
+                output: output_body(EncryptedData::MAX_MEMO_SIZE, true),
+                auth: SpendAuthorization::KeyAndScript {
+                    spend_key: RistrettoPublicKeyBytes::zero(),
+                    condition_root: [3u8; 32].into(),
+                },
+                tag: UtxoTag::new(u32::MAX),
+            });
+            frozen_utxo.freeze();
+            let mut burnt_utxo = frozen_utxo.clone();
+            burnt_utxo.burn();
+            let mut frozen_output = ConfidentialOutput::new(output_body(EncryptedData::MAX_MEMO_SIZE, true));
+            frozen_output.freeze();
+
+            let values = [
+                SubstateValue::Utxo(Utxo::new(UtxoOutput {
+                    output: output_body(0, false),
+                    auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::zero()),
+                    tag: UtxoTag::new(0),
+                })),
+                SubstateValue::Utxo(frozen_utxo),
+                SubstateValue::Utxo(burnt_utxo),
+                SubstateValue::ConfidentialOutput(ConfidentialOutput::new(output_body(0, false))),
+                SubstateValue::ConfidentialOutput(frozen_output),
+                SubstateValue::ClaimedOutputTombstone(ClaimedOutputTombstone { value: 0 }),
+                SubstateValue::ClaimedOutputTombstone(ClaimedOutputTombstone { value: u64::MAX }),
+                SubstateValue::ValidatorFeePool(ValidatorFeePool::new(RistrettoPublicKeyBytes::zero(), u64::MAX)),
+                SubstateValue::Template(PublishedTemplate {
+                    template_name: "Template".try_into().unwrap(),
+                    author: RistrettoPublicKeyBytes::zero(),
+                    binary: vec![0u8; 70_000].try_into().unwrap(),
+                    at_epoch: u64::MAX,
+                    metadata_hash: TemplateMetadataHash::from_bytes(vec![0xff; TemplateMetadataHash::MAX_LEN]),
+                }),
+                SubstateValue::Template(PublishedTemplate {
+                    template_name: Default::default(),
+                    author: RistrettoPublicKeyBytes::zero(),
+                    binary: vec![0u8; 10].try_into().unwrap(),
+                    at_epoch: 0,
+                    metadata_hash: None,
+                }),
+            ];
+
+            for value in &values {
+                assert_eq!(tari_bor::encoded_len(value), encode(value).unwrap().len(), "{value:?}");
+            }
         }
     }
 

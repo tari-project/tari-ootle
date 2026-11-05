@@ -4,6 +4,10 @@ import type { Memo } from "../Memo";
 import type { OotleAddress } from "../OotleAddress";
 import type { PayTo } from "./PayTo";
 
+/**
+ * Unknown fields are rejected, so that a request naming the destination tag by an unrecognised field fails instead
+ * of using the destination address's tag.
+ */
 export type StealthTransfer = {
   destination_address: OotleAddress;
   blinded_output_amount: number | bigint | string;
@@ -13,14 +17,14 @@ export type StealthTransfer = {
   /**
    * If set, the sender's Ootle address is attached as the output memo so the recipient can identify and save
    * the sender as a contact. Replaces `output_memo` (the sender address takes precedence). Composes with
-   * `pay_ref`, which is embedded inside the SenderAddress memo when set.
+   * `destination_tag`, which is embedded inside the SenderAddress memo when set.
    */
   attach_sender_address: boolean;
   /**
-   * Optional pay reference (UTF-8, max 64 bytes). When `attach_sender_address` is true it is embedded inside
-   * the SenderAddress memo; otherwise it builds a `PayRefAndBytes` memo combined with any `output_memo`. If
-   * unset, the destination address's bech32-embedded pay reference (if any) is used as a fallback for
+   * Optional destination tag (UTF-8, max 64 bytes). When `attach_sender_address` is true it is embedded inside
+   * the SenderAddress memo; otherwise it builds a `DestinationTagAndBytes` memo combined with any `output_memo`. If
+   * unset, the destination address's bech32-embedded destination tag (if any) is used as a fallback for
    * backward compatibility.
    */
-  pay_ref?: string | null;
+  destination_tag?: string | null;
 };

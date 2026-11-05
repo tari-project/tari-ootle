@@ -3,10 +3,12 @@ import type { ComponentAccessRules } from "./ComponentAccessRules";
 import type { EntityId } from "./EntityId";
 import type { Hash32 } from "./Hash32";
 import type { SubstateOwnerRule } from "./SubstateOwnerRule";
+import type { UpdateRule } from "./UpdateRule";
 
 export type ComponentHeader = {
   template_address: Hash32;
   owner_rule: SubstateOwnerRule;
   access_rules: ComponentAccessRules;
   entity_id: EntityId;
+  upgrade_rule: UpdateRule;
 };

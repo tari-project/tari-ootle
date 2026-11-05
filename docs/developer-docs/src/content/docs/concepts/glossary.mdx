@@ -32,7 +32,7 @@ explained in full. Use your browser's find to jump to a term.
 | **Epoch** | A fixed number of base-layer blocks. Ootle's membership and timing rotate on epoch boundaries. | <a href={basePath("/concepts/architecture/")}>Architecture</a> |
 | **Epoch checkpoint** | A committee's end-of-epoch commit proof plus state roots for its shard group and the global shard. | <a href={basePath("/concepts/state-and-execution/")}>State and Execution</a> |
 | **Epoch oracle** | The seam that reads base-layer validator registrations and epoch length, turning them into Ootle committee membership. | <a href={basePath("/concepts/architecture/")}>Architecture</a> |
-| **Exhaust burn rate** | `exhaust_burn_rate` — the per-network share of each fee that is burned: 500 bps (5%) on every network in this repository. | <a href={basePath("/concepts/tokenomics/")}>Tokenomics</a> |
+| **Exhaust burn rate** | `exhaust_burn_rate` — the per-network share of each fee that is burned: 10 000 bps (100%) at mainnet genesis, 500 bps (5%) on every other network. | <a href={basePath("/concepts/tokenomics/")}>Tokenomics</a> |
 | **Finality** | Irreversibility. On Ootle a block is final when its chain reaches the three-chain rule inside its committee — not on the base layer. | <a href={basePath("/concepts/consensus/")}>Consensus</a> |
 | **Global shard** | Shard 0, reserved for global substates such as published templates. All other shards are numbered 1–256. | <a href={basePath("/concepts/state-and-execution/")}>State and Execution</a> |
 | **HotStuff** | The chained, leader-based BFT protocol Ootle runs per shard group. (The name "Cerberus" from older design docs does not appear in the code.) | <a href={basePath("/concepts/consensus/")}>Consensus</a> |
@@ -40,7 +40,7 @@ explained in full. Use your browser's find to jump to a term.
 | **Indexer** | A non-voting node that indexes blocks, transactions, substates, and events, and serves queries. | <a href={basePath("/concepts/architecture/")}>Architecture</a> |
 | **Jellyfish Merkle Tree** | The per-shard authenticated data structure over substate addresses; its root is the shard's state commitment. | <a href={basePath("/concepts/state-and-execution/")}>State and Execution</a> |
 | **Justified** | A block a quorum has voted for, certified by a `ProposalCertificate`. Weaker than locked, and much weaker than committed. | <a href={basePath("/concepts/consensus/")}>Consensus</a> |
-| **Leader** | The validator chosen to propose a block for a view. Selected **round-robin** by `height % committee.len()`. | <a href={basePath("/concepts/consensus/")}>Consensus</a> |
+| **Leader** | The validator chosen to propose a block for a view. Selected by **smooth weighted round-robin**: each member leads `vote_power` of every `total_power` heights, which is `height % committee.len()` at equal power. | <a href={basePath("/concepts/consensus/")}>Consensus</a> |
 | **Liveness** | The property that the chain keeps advancing. Maintained by the pacemaker; a stalled committee is re-formed at the next epoch from the base layer's registrations. | <a href={basePath("/concepts/consensus/")}>Consensus</a> |
 | **Lock (locked block)** | The block a validator must not contradict. Advanced when a justified child appears; it is what keeps honest votes consistent across views. | <a href={basePath("/concepts/consensus/")}>Consensus</a> |
 | **Microtari** | The base unit of TARI: `1 TARI = 1_000_000` microtari (divisibility 6). Amounts in code and manifests are microtari. | <a href={basePath("/concepts/tokenomics/")}>Tokenomics</a> |
@@ -61,7 +61,7 @@ explained in full. Use your browser's find to jump to a term.
 | **Substate** | A versioned state value: `Substate{substate, version}`. One of ten variants. | <a href={basePath("/concepts/state-and-execution/")}>State and Execution</a> |
 | **Substate address** | `ObjectKey(32 bytes) ‖ version(u32 BE)` — the address of a specific substate version. | <a href={basePath("/concepts/state-and-execution/")}>State and Execution</a> |
 | **Supply tracking** | Whether a resource keeps a total-supply figure in its resource substate. Enabled, mints and burns reveal value; disabled, burns can stay hidden. | <a href={basePath("/concepts/stablecoin/")}>Stablecoins</a> |
-| **TARI** | The L2 native token — a stealth resource (`TARI_TOKEN`). `XTR` is a deprecated alias. | <a href={basePath("/concepts/tokenomics/")}>Tokenomics</a> |
+| **TARI** | The L2 native token — a stealth resource (`TARI_TOKEN`). | <a href={basePath("/concepts/tokenomics/")}>Tokenomics</a> |
 | **Template** | Ootle's smart contract: Rust compiled to WASM and published as a **global** substate. | <a href={basePath("/concepts/state-and-execution/")}>State and Execution</a> |
 | **Three-chain rule** | The commit rule: a block is final once three justified blocks build on it (`b ← b' ← b''`). | <a href={basePath("/concepts/consensus/")}>Consensus</a> |
 | **TimeoutCertificate (TC)** | A quorum's aggregate timeout for a view, letting the next leader start a fresh view. | <a href={basePath("/concepts/consensus/")}>Consensus</a> |

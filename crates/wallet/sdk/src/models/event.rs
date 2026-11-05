@@ -4,6 +4,7 @@
 use std::fmt::Display;
 
 use tari_engine_types::{SubstateVersion, commit_result::FinalizeResult};
+use tari_ootle_common_types::{Epoch, ValidatorSetHash};
 use tari_ootle_transaction::TransactionId;
 use tari_template_lib::types::{ComponentAddress, UtxoAddress};
 
@@ -21,7 +22,9 @@ pub enum WalletEvent {
     UtxoRecovered(UtxoRecoveredEvent),
     UtxoRecoveryCompleted(UtxoRecoveryCompletedEvent),
     UtxoSpent(UtxoSpentEvent),
+    UtxoBurnt(UtxoBurntEvent),
     TransactionRequestCreated(TransactionRequestCreatedEvent),
+    ValidatorSetReanchored(ValidatorSetReanchoredEvent),
 }
 
 impl WalletEvent {
@@ -87,6 +90,12 @@ impl From<UtxoRecoveryCompletedEvent> for WalletEvent {
 impl From<UtxoSpentEvent> for WalletEvent {
     fn from(value: UtxoSpentEvent) -> Self {
         Self::UtxoSpent(value)
+    }
+}
+
+impl From<UtxoBurntEvent> for WalletEvent {
+    fn from(value: UtxoBurntEvent) -> Self {
+        Self::UtxoBurnt(value)
     }
 }
 
@@ -156,6 +165,13 @@ pub struct UtxoSpentEvent {
     pub address: UtxoAddress,
 }
 
+/// The resource issuer burnt a stealth output the wallet held.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UtxoBurntEvent {
+    pub account_address: ComponentAddress,
+    pub address: UtxoAddress,
+}
+
 /// A transaction request is waiting for a person to approve it.
 ///
 /// Carries only the id: an approver must fetch the request to see what it does,
@@ -165,9 +181,20 @@ pub struct UtxoSpentEvent {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct TransactionRequestCreatedEvent {
     pub request_id: TransactionRequestId,
-    /// Admin-assigned name of the API key that asked, or `None` for a wallet
-    /// session. Display only.
+    /// Admin-assigned name of the API key that asked, `"local-cookie"` for a
+    /// local `.cookie` bearer, or `None` for a wallet session. Display only.
     pub requested_by: Option<String>,
+}
+
+/// The wallet re-anchored: it now trusts a validator set that no handover from the set it trusted before vouches for.
+/// It trusts the indexer for that set as it did on first use.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ValidatorSetReanchoredEvent {
+    /// The epoch of the latest validator set the wallet trusted before.
+    pub previous_epoch: Option<Epoch>,
+    /// The epoch of the validator set the wallet anchored on.
+    pub epoch: Epoch,
+    pub validator_set_hash: ValidatorSetHash,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -183,6 +210,8 @@ pub enum WalletEventType {
     UtxoRecovered,
     UtxoRecoveryCompleted,
     UtxoSpent,
+    UtxoBurnt,
+    ValidatorSetReanchored,
 }
 
 impl Display for WalletEventType {
@@ -198,7 +227,9 @@ impl Display for WalletEventType {
             WalletEventType::UtxoRecovered => "UtxoRecovered",
             WalletEventType::UtxoRecoveryCompleted => "UtxoRecoveryCompleted",
             WalletEventType::UtxoSpent => "UtxoSpent",
+            WalletEventType::UtxoBurnt => "UtxoBurnt",
             WalletEventType::TransactionRequestCreated => "TransactionRequestCreated",
+            WalletEventType::ValidatorSetReanchored => "ValidatorSetReanchored",
         };
         write!(f, "{}", s)
     }
@@ -217,7 +248,9 @@ impl From<&WalletEvent> for WalletEventType {
             WalletEvent::UtxoRecovered(_) => Self::UtxoRecovered,
             WalletEvent::UtxoRecoveryCompleted(_) => Self::UtxoRecoveryCompleted,
             WalletEvent::UtxoSpent(_) => Self::UtxoSpent,
+            WalletEvent::UtxoBurnt(_) => Self::UtxoBurnt,
             WalletEvent::TransactionRequestCreated(_) => Self::TransactionRequestCreated,
+            WalletEvent::ValidatorSetReanchored(_) => Self::ValidatorSetReanchored,
         }
     }
 }

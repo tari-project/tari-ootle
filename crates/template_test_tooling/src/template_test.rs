@@ -35,8 +35,9 @@ use tari_engine::{
     wasm::LoadedWasmTemplate,
 };
 use tari_engine_types::{
-    commit_result::{ExecuteResult, RejectReason},
-    fees::ExhaustBurnRate,
+    commit_result::{ExecuteResult, FeeIntentFallback, RejectReason},
+    creation_check::CreationCheck,
+    fees::{ExhaustBurnRate, FeeScale},
     indexed_value::IndexedValue,
     substate::{Substate, SubstateDiff, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId},
@@ -126,6 +127,8 @@ pub struct TemplateTest {
     claim_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync>,
     fee_table: FeeTable,
     burn_rate: ExhaustBurnRate,
+    input_fanout: u32,
+    fee_scale: FeeScale,
     virtual_substates: HashMap<VirtualSubstateId, VirtualSubstate>,
     key_seed: u8,
     auto_add_proofs_from_signers: bool,
@@ -290,12 +293,16 @@ impl TemplateTest {
                 template_load_bytes_cost_divisor: 3000,
                 wasm_points_cost_divisor: 1000,
                 log_bytes_cost_divisor: 64,
+                input_load_bytes_cost_divisor: 64,
+                input_fanout_bytes_cost_divisor: 4,
                 template_size_premium_free_bytes: 96 * 1024,
                 template_size_premium_unit_bytes: 1024,
                 per_template_size_premium_unit_cost: 100,
                 per_template_publish_cost: 250_000,
             },
             burn_rate: ExhaustBurnRate::new(0),
+            input_fanout: 0,
+            fee_scale: FeeScale::ONE,
             key_seed: 1,
             auto_add_proofs_from_signers: true,
         }
@@ -413,6 +420,19 @@ impl TemplateTest {
         self
     }
 
+    /// Sets how many other shard groups a transaction's declared inputs are taken to be pledged to.
+    /// Defaults to zero, as though every substate sat in one shard group.
+    pub fn set_input_fanout(&mut self, input_fanout: u32) -> &mut Self {
+        self.input_fanout = input_fanout;
+        self
+    }
+
+    /// Sets the fee scale every charge is taken at. Defaults to 10 000 bps, the fee table as written.
+    pub fn set_fee_scale_bps(&mut self, scale_bps: u16) -> &mut Self {
+        self.fee_scale = FeeScale::new(scale_bps);
+        self
+    }
+
     /// Sets a virtual substate (e.g. `CurrentEpoch`) that is available to transactions during execution.
     pub fn set_virtual_substate(&mut self, address: VirtualSubstateId, value: VirtualSubstate) -> &mut Self {
         self.virtual_substates.insert(address, value);
@@ -427,6 +447,25 @@ impl TemplateTest {
     pub fn remove_virtual_substate(&mut self, address: VirtualSubstateId) -> &mut Self {
         self.virtual_substates.remove(&address);
         self
+    }
+
+    /// The encoded bytes of `transaction`'s own declared inputs as this harness holds them: what the
+    /// engine charges the transaction for loading and pledging its inputs, and what a wallet
+    /// measures to estimate that charge.
+    pub fn declared_input_bytes(&self, transaction: &Transaction) -> u64 {
+        transaction
+            .all_inputs_iter()
+            .map(|input| input.substate_id().clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .map(|id| {
+                let substate = self
+                    .state_store
+                    .get_state(&id)
+                    .unwrap_or_else(|err| panic!("declared input {id} is not in the state store: {err}"));
+                tari_engine_types::stealth::declared_input_bytes(substate.substate_value())
+            })
+            .sum()
     }
 
     /// Returns a read-only view of the current state store, useful for inspecting component state
@@ -825,8 +864,31 @@ impl TemplateTest {
     pub fn try_execute(
         &mut self,
         transaction: Transaction,
-        mut proofs: Vec<NonFungibleAddress>,
+        proofs: Vec<NonFungibleAddress>,
     ) -> Result<ExecuteResult, TransactionError> {
+        self.try_execute_inner(transaction, proofs, None)
+            .map(|(result, _)| result)
+    }
+
+    /// [`Self::try_execute`] as consensus executes it, with `creation_check` answering for the substates the
+    /// transaction creates. Also returns what committing only the fee intent would persist.
+    #[track_caller]
+    pub fn try_execute_with_fee_intent_fallback(
+        &mut self,
+        transaction: Transaction,
+        proofs: Vec<NonFungibleAddress>,
+        creation_check: &dyn CreationCheck,
+    ) -> Result<(ExecuteResult, Option<FeeIntentFallback>), TransactionError> {
+        self.try_execute_inner(transaction, proofs, Some(creation_check))
+    }
+
+    #[track_caller]
+    fn try_execute_inner(
+        &mut self,
+        transaction: Transaction,
+        mut proofs: Vec<NonFungibleAddress>,
+        creation_check: Option<&dyn CreationCheck>,
+    ) -> Result<(ExecuteResult, Option<FeeIntentFallback>), TransactionError> {
         let mut modules: Vec<Box<dyn RuntimeModule<ReadOnlyMemoryStateStore>>> = Vec::with_capacity(3);
 
         modules.push(Box::new(self.track_calls.clone()));
@@ -863,6 +925,8 @@ impl TemplateTest {
             self.claim_proof_verifier.clone(),
             wasm_metering_rate,
             self.burn_rate,
+            self.input_fanout,
+            self.fee_scale,
             Network::LocalNet,
             self.dry_run,
         );
@@ -879,7 +943,11 @@ impl TemplateTest {
         let tx_id = wrapped_transaction.to_id();
         eprintln!("START Transaction id = \"{}\"", tx_id);
 
-        let result = processor.execute(wrapped_transaction).inspect_err(|_| {
+        let execution = match creation_check {
+            Some(creation_check) => processor.execute_with_fee_intent_fallback(wrapped_transaction, creation_check),
+            None => processor.execute(wrapped_transaction).map(|result| (result, None)),
+        };
+        let (result, fee_intent_fallback) = execution.inspect_err(|_| {
             self.last_execution_points = ExecutionPoints::default();
             self.last_return_values.clear();
         })?;
@@ -906,7 +974,7 @@ impl TemplateTest {
         eprintln!("Finished Transaction \"{}\" in {:.2?}", tx_id, timer.elapsed());
         eprintln!();
 
-        Ok(result)
+        Ok((result, fee_intent_fallback))
     }
 
     /// Captures an immutable, `Send + Sync` snapshot of this harness that can execute
@@ -928,6 +996,8 @@ impl TemplateTest {
             fee_table: self.enable_fees.then(|| self.fee_table.clone()),
             virtual_substates: self.virtual_substates.clone(),
             burn_rate: self.burn_rate,
+            input_fanout: self.input_fanout,
+            fee_scale: self.fee_scale,
             dry_run: self.dry_run,
             claim_proof_verifier: self.claim_proof_verifier.clone(),
             auto_add_proofs_from_signers: self.auto_add_proofs_from_signers,
@@ -1090,6 +1160,20 @@ impl TemplateTest {
         self.execute_and_commit(instructions.instructions, proofs)
     }
 
+    /// Asserts that every substate in the state store has a `CborLen` equal to the bytes it encodes to. The storage
+    /// fee sizes persisted substates by `CborLen`, so a mismatch misprices them.
+    #[track_caller]
+    pub fn assert_substate_lengths_match_encoding(&self) {
+        for (id, substate) in self.state_store.iter() {
+            let value = substate.substate_value();
+            assert_eq!(
+                tari_bor::encoded_len(value),
+                tari_bor::encode(value).unwrap().len(),
+                "CborLen disagrees with the encoding of {id}"
+            );
+        }
+    }
+
     /// Prints all substates in the current state store to stderr for debugging.
     pub fn print_state(&self) {
         for (k, v) in self.state_store.iter() {
@@ -1113,6 +1197,8 @@ pub struct SnapshotExecutor {
     fee_table: Option<FeeTable>,
     virtual_substates: HashMap<VirtualSubstateId, VirtualSubstate>,
     burn_rate: ExhaustBurnRate,
+    input_fanout: u32,
+    fee_scale: FeeScale,
     dry_run: bool,
     claim_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync>,
     auto_add_proofs_from_signers: bool,
@@ -1158,6 +1244,8 @@ impl SnapshotExecutor {
             self.claim_proof_verifier.clone(),
             wasm_metering_rate,
             self.burn_rate,
+            self.input_fanout,
+            self.fee_scale,
             Network::LocalNet,
             self.dry_run,
         );

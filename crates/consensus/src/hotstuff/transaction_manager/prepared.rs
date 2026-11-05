@@ -1,10 +1,9 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_consensus_types::Decision;
 use tari_ootle_storage::consensus_models::{Evidence, TransactionExecution};
 
-use crate::hotstuff::substate_store::LockStatus;
+use crate::hotstuff::{substate_store::LockStatus, transaction_manager::LockedMultishardExecution};
 
 #[derive(Debug)]
 pub enum PreparedTransaction {
@@ -15,6 +14,12 @@ pub enum PreparedTransaction {
     PledgeBudgetReached {
         total_bytes: usize,
         max_bytes: usize,
+    },
+    /// One or more of the transaction's declared local inputs are locked by another transaction in a way that no
+    /// execution of it could lock alongside, and none of those inputs names a version. The lock status is always a
+    /// deferrable conflict. The transaction was not executed and nothing was locked for it.
+    InputsLocked {
+        lock_status: LockStatus,
     },
 }
 
@@ -39,6 +44,7 @@ impl PreparedTransaction {
             },
             Self::MultiShard(multishard) => &multishard.lock_status,
             Self::PledgeBudgetReached { .. } => &DEFAULT_LOCK_STATUS,
+            Self::InputsLocked { lock_status } => lock_status,
         }
     }
 
@@ -50,15 +56,25 @@ impl PreparedTransaction {
             },
             Self::MultiShard(multishard) => multishard.lock_status,
             Self::PledgeBudgetReached { .. } => LockStatus::new(),
+            Self::InputsLocked { lock_status } => lock_status,
         }
     }
 
     pub fn new_multishard_executed(execution: TransactionExecution, lock_status: LockStatus) -> Self {
+        Self::new_multishard_locked(LockedMultishardExecution {
+            execution,
+            lock_status,
+            fee_intent_only: false,
+        })
+    }
+
+    pub fn new_multishard_locked(locked: LockedMultishardExecution) -> Self {
         Self::MultiShard(MultiShardPreparedTransaction {
             execution_or_evidence: EvidenceOrExecution::Execution {
-                execution: Box::new(execution),
+                execution: Box::new(locked.execution),
+                fee_intent_only: locked.fee_intent_only,
             },
-            lock_status,
+            lock_status: locked.lock_status,
         })
     }
 
@@ -85,17 +101,15 @@ pub enum LocalPreparedTransaction {
 
 #[derive(Debug)]
 pub enum EvidenceOrExecution {
-    Evidence { evidence: Evidence },
-    Execution { execution: Box<TransactionExecution> },
-}
-
-impl EvidenceOrExecution {
-    pub fn execution(&self) -> Option<&TransactionExecution> {
-        match self {
-            Self::Evidence { .. } => None,
-            Self::Execution { execution, .. } => Some(execution),
-        }
-    }
+    Evidence {
+        evidence: Evidence,
+    },
+    Execution {
+        execution: Box<TransactionExecution>,
+        /// The execution commits only the transaction's fee intent. See
+        /// [`MultiShardAtom::fee_intent_only`](tari_ootle_storage::consensus_models::MultiShardAtom::fee_intent_only).
+        fee_intent_only: bool,
+    },
 }
 
 #[derive(Debug)]
@@ -105,13 +119,6 @@ pub struct MultiShardPreparedTransaction {
 }
 
 impl MultiShardPreparedTransaction {
-    pub fn current_decision(&self) -> Decision {
-        self.execution_or_evidence
-            .execution()
-            .map(|e| e.decision())
-            .unwrap_or(Decision::Commit)
-    }
-
     pub fn into_evidence_or_execution(self) -> EvidenceOrExecution {
         self.execution_or_evidence
     }

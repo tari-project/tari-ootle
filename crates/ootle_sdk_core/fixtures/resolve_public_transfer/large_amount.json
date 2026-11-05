@@ -2,8 +2,8 @@
   "name": "resolve_public_transfer/large_amount",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.41.2",
-    "git_rev": "397cfaae8ea3b09ff5a6dcd8be33d85db8c18235",
+    "core_version": "0.48.0",
+    "git_rev": "3460b2ff19640c5a3b758de9ec407eac8e372044",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "resolve_and_encode_public_transfer",
@@ -30,47 +30,12 @@
       {
         "substate_id": "component_3131313131313131313131313131313131313131313131313131313131313131",
         "version": 0,
-        "substate_value": {
-          "Component": {
-            "body": {
-              "state": [
-                {
-                  "@cbor": "tag",
-                  "tag": 132,
-                  "value": {
-                    "@cbor": "bytes",
-                    "hex": "3333333333333333333333333333333333333333333333333333333333333333"
-                  }
-                }
-              ]
-            },
-            "header": {
-              "access_rules": {
-                "default": "DenyAll",
-                "method_access": {}
-              },
-              "entity_id": "00",
-              "owner_rule": "None",
-              "template_address": "0000000000000000000000000000000000000000000000000000000000000000"
-            }
-          }
-        }
+        "substate_value": "ggCBgoVYIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAggCAgqCCAYBBAIIAgIGB2IRYIDMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMz"
       },
       {
         "substate_id": "vault_3333333333333333333333333333333333333333333333333333333333333333",
         "version": 0,
-        "substate_value": {
-          "Vault": {
-            "freeze_flags": 0,
-            "resource_container": {
-              "Fungible": {
-                "address": "resource_3232323232323232323232323232323232323232323232323232323232323232",
-                "amount": "1000000",
-                "locked_amount": "0"
-              }
-            }
-          }
-        }
+        "substate_value": "ggKBgoIAg9iDWCAyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMhoAD0JAAAA="
       }
     ]
   },
@@ -153,7 +118,7 @@
                 }
               }
             ],
-            "is_seal_signer_authorized": true,
+            "main_signer": "SealSigner",
             "max_epoch": 10,
             "min_epoch": 1,
             "network": 38,

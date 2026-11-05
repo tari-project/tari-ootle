@@ -22,6 +22,7 @@
 //! [`ClaimBurnShape::estimate_fee`] prices an L1 burn claim the same way, so a claimant has a figure
 //! of its own to bound the fee it reveals by. `claim_burn.rs` in the same suite holds it.
 
+use tari_bor::encoded_len;
 use tari_template_lib::types::{
     ClaimedOutputTombstoneAddress,
     ObjectKey,
@@ -75,9 +76,21 @@ pub struct MergedStealthTransferShape {
     /// The weight of the transaction this shape builds into. Weight is defined by
     /// `tari_ootle_transaction`, downstream of this crate, so the builder supplies it.
     pub transaction_weight: u64,
+    /// Encoded bytes of the values of the transaction's declared inputs, global ones excepted —
+    /// the spent UTXOs and the resource the transfer moves. The builder measures them from the
+    /// substates it declared.
+    pub input_bytes: u64,
+    /// The other shard groups the declared inputs are pledged to, as `Transaction::input_fanout`
+    /// computes it for the layout the builder expects the transaction to execute under.
+    pub input_fanout: u32,
 }
 
 impl MergedStealthTransferShape {
+    /// Native points the transfer spends authorizing its withdraw of TARI, once for the resource action and once
+    /// for the transfer itself. TARI's owner rule and `AllowAll` withdraw rule are fixed at genesis, so each
+    /// authorization visits exactly those two rule nodes. `the_native_points_match_the_shape` in `tari_engine`'s
+    /// stealth fee estimate tests holds it to what the engine charges.
+    pub const AUTHORIZATION_POINTS: u64 = 2 * 2 * NativeExecutionPoints::PER_ACCESS_RULE_NODE;
     /// Engine host calls this shape's instruction sequence makes: the stealth transfer, the
     /// workspace put that carries its revealed bucket, and the fee payment. Fixed rather than
     /// supplied, because a sequence that makes any other call is not this shape — a badge proof or a
@@ -86,21 +99,24 @@ impl MergedStealthTransferShape {
     /// counts.
     pub const RUNTIME_CALLS: u64 = 3;
 
+    /// The native execution points the engine charges a transaction of this shape: the transfer's verification and
+    /// its withdraw authorization.
+    pub fn native_points(&self) -> u64 {
+        transfer_native_points_for_shape(self.num_inputs, self.num_outputs, self.has_view_key)
+            .saturating_add(Self::AUTHORIZATION_POINTS)
+    }
+
     /// An upper bound, in microtari, on what the engine charges a transaction of this shape.
     ///
     /// Sums the charges the engine takes over a shape — transaction weight, host calls, native
-    /// verification, persisted storage and substate creation. The exhaust burn is a share of what
-    /// is paid, not a charge, so it does not enter the price.
+    /// verification, loading and pledging its inputs, persisted storage and substate creation. The
+    /// exhaust burn is a share of what is paid, not a charge, so it does not enter the price.
     pub fn estimate_fee(&self, rates: &FeeRates) -> u64 {
         let weight_cost = self
             .transaction_weight
             .saturating_mul(rates.per_transaction_weight_cost());
         let runtime_call_cost = Self::RUNTIME_CALLS.saturating_mul(rates.per_module_call_cost());
-        let native_cost = rates.execution_cost(transfer_native_points_for_shape(
-            self.num_inputs,
-            self.num_outputs,
-            self.has_view_key,
-        ));
+        let native_cost = rates.execution_cost(self.native_points());
         let storage_cost = rates.storage_cost(self.persisted_bytes_upper_bound() as u64);
         // The receipt occupies a created slot of its own, on top of one per stealth output. Spent
         // inputs already exist, so they allocate nothing.
@@ -108,11 +124,18 @@ impl MergedStealthTransferShape {
             .saturating_add(1)
             .saturating_mul(rates.per_substate_create_cost());
 
-        weight_cost
-            .saturating_add(runtime_call_cost)
-            .saturating_add(native_cost)
-            .saturating_add(storage_cost)
-            .saturating_add(create_cost)
+        let input_cost = rates
+            .input_load_cost(self.input_bytes)
+            .saturating_add(rates.input_fanout_cost(self.input_bytes, self.input_fanout));
+
+        rates.scale_total(
+            weight_cost
+                .saturating_add(runtime_call_cost)
+                .saturating_add(native_cost)
+                .saturating_add(input_cost)
+                .saturating_add(storage_cost)
+                .saturating_add(create_cost),
+        )
     }
 
     /// An upper bound on the bytes of permanent state this shape persists: the UTXOs it creates and
@@ -157,6 +180,13 @@ pub struct ClaimBurnShape {
     /// The weight of the transaction this shape builds into, which the builder supplies for the same
     /// reason [`MergedStealthTransferShape::transaction_weight`] does.
     pub transaction_weight: u64,
+    /// Encoded bytes of the values of the transaction's declared inputs, measured as for
+    /// [`MergedStealthTransferShape::input_bytes`]. A claim declares no input of its own, but every
+    /// transaction declares the TARI resource.
+    pub input_bytes: u64,
+    /// The other shard groups the declared inputs are pledged to, the tombstone's group among them,
+    /// as for [`MergedStealthTransferShape::input_fanout`].
+    pub input_fanout: u32,
 }
 
 impl ClaimBurnShape {
@@ -165,26 +195,37 @@ impl ClaimBurnShape {
     /// `tari_engine`'s claim-burn tests holds it to what the engine counts.
     pub const RUNTIME_CALLS: u64 = MergedStealthTransferShape::RUNTIME_CALLS;
 
+    /// The native execution points the engine charges a transaction of this shape: the claim's proof verification,
+    /// then a transfer spending the claimed UTXO into one output, with its withdraw authorization. TARI carries no
+    /// view key.
+    pub fn native_points() -> u64 {
+        NativeExecutionPoints::PER_CLAIM_BURN
+            .saturating_add(transfer_native_points_for_shape(1, 1, false))
+            .saturating_add(MergedStealthTransferShape::AUTHORIZATION_POINTS)
+    }
+
     /// An upper bound, in microtari, on what the engine charges a transaction of this shape.
     pub fn estimate_fee(&self, rates: &FeeRates) -> u64 {
         let weight_cost = self
             .transaction_weight
             .saturating_mul(rates.per_transaction_weight_cost());
         let runtime_call_cost = Self::RUNTIME_CALLS.saturating_mul(rates.per_module_call_cost());
-        // The claim's proof verification, then a transfer spending the claimed UTXO into one output.
-        // TARI carries no view key.
-        let native_cost = rates.execution_cost(
-            NativeExecutionPoints::PER_CLAIM_BURN.saturating_add(transfer_native_points_for_shape(1, 1, false)),
-        );
+        let native_cost = rates.execution_cost(Self::native_points());
         let storage_cost = rates.storage_cost(self.persisted_bytes_upper_bound() as u64);
         // The tombstone, the output and the receipt each occupy a created slot.
         let create_cost = 3u64.saturating_mul(rates.per_substate_create_cost());
+        let input_cost = rates
+            .input_load_cost(self.input_bytes)
+            .saturating_add(rates.input_fanout_cost(self.input_bytes, self.input_fanout));
 
-        weight_cost
-            .saturating_add(runtime_call_cost)
-            .saturating_add(native_cost)
-            .saturating_add(storage_cost)
-            .saturating_add(create_cost)
+        rates.scale_total(
+            weight_cost
+                .saturating_add(runtime_call_cost)
+                .saturating_add(native_cost)
+                .saturating_add(input_cost)
+                .saturating_add(storage_cost)
+                .saturating_add(create_cost),
+        )
     }
 
     /// An upper bound on the bytes of permanent state this shape persists: the stealth output, the
@@ -234,6 +275,12 @@ pub fn persisted_utxo_bytes(output: &StealthUnspentOutput) -> usize {
     encoded_len(&SubstateValue::Utxo(utxo))
 }
 
+/// The bytes the engine charges a declared input for loading and pledging, measured from its value
+/// the way the engine measures it.
+pub fn declared_input_bytes(value: &SubstateValue) -> u64 {
+    encoded_len(value) as u64
+}
+
 /// A UTXO address at the width every UTXO address takes — its parts are all fixed-size arrays, so
 /// the content is immaterial and only the shape of the encoding matters.
 fn widest_utxo_address() -> UtxoAddress {
@@ -243,15 +290,10 @@ fn widest_utxo_address() -> UtxoAddress {
     )
 }
 
-/// The bytes a value occupies in persisted state, measured the way the fee module tallies storage.
-fn encoded_len<T: minicbor::Encode<()>>(value: &T) -> usize {
-    tari_bor::encoded_len_via_writer(value).expect("encoding a canonical value into a byte counter cannot fail")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::limits::NativeExecutionPoints as P;
+    use crate::{fees::FeeScale, limits::NativeExecutionPoints as P};
 
     /// Priced like the shipped tables, so the terms are legible in microtari.
     fn rates() -> FeeRates {
@@ -259,10 +301,13 @@ mod tests {
             per_transaction_weight_cost: 1,
             per_module_call_cost: 1,
             per_byte_storage_cost: 1,
-            per_substate_create_cost: 25,
+            per_substate_create_cost: 250,
             per_wasm_point_cost: 1,
             storage_cost_divisor: 1,
             wasm_points_cost_divisor: 1000,
+            input_load_bytes_cost_divisor: 64,
+            input_fanout_bytes_cost_divisor: 4,
+            fee_scale: FeeScale::ONE,
         }
     }
 
@@ -276,6 +321,8 @@ mod tests {
             persisted_output_bytes: num_outputs * TYPICAL_OUTPUT_BYTES,
             has_view_key: false,
             transaction_weight: 150,
+            input_bytes: 0,
+            input_fanout: 0,
         }
     }
 
@@ -285,7 +332,7 @@ mod tests {
         let two = shape(1, 2).estimate_fee(&rates());
 
         let native = P::PER_OUTPUT / 1000;
-        let slot = 25;
+        let slot = 250;
         assert!(
             two - one > native + slot,
             "an added output must cost its verification, its slot and the bytes of both the UTXO and its receipt entry"
@@ -330,8 +377,55 @@ mod tests {
         assert_eq!(with_memo.estimate_fee(&rates()) - plain.estimate_fee(&rates()), 100);
     }
 
+    #[test]
+    fn inputs_are_paid_for_by_the_byte_and_by_each_further_group() {
+        let plain = shape(1, 1);
+        let loaded = MergedStealthTransferShape {
+            input_bytes: 6400,
+            ..plain
+        };
+        assert_eq!(loaded.estimate_fee(&rates()) - plain.estimate_fee(&rates()), 6400 / 64);
+
+        let pledged = MergedStealthTransferShape {
+            input_fanout: 2,
+            ..loaded
+        };
+        assert_eq!(
+            pledged.estimate_fee(&rates()) - loaded.estimate_fee(&rates()),
+            6400 * 2 / 4
+        );
+    }
+
     /// The estimate has to move with the shape monotonically, or a settling loop that raises its fee
     /// could select a wider shape that prices lower and oscillate.
+    #[test]
+    fn an_estimate_is_taken_at_the_fee_scale_rounded_up() {
+        let unscaled = shape(2, 2).estimate_fee(&rates());
+        for bps in [1, 5_000, 15_000, u16::MAX] {
+            let scale = FeeScale::new(bps);
+            let scaled = shape(2, 2).estimate_fee(&FeeRates {
+                fee_scale: scale,
+                ..rates()
+            });
+            assert_eq!(scaled, scale.apply_ceil(unscaled), "{bps}bps");
+        }
+
+        let claim = ClaimBurnShape {
+            persisted_output_bytes: TYPICAL_OUTPUT_BYTES,
+            transaction_weight: 1_000,
+            input_bytes: 500,
+            input_fanout: 1,
+        };
+        let scale = FeeScale::new(15_000);
+        assert_eq!(
+            claim.estimate_fee(&FeeRates {
+                fee_scale: scale,
+                ..rates()
+            }),
+            scale.apply_ceil(claim.estimate_fee(&rates()))
+        );
+    }
+
     #[test]
     fn a_larger_shape_never_prices_lower() {
         let mut previous = 0;

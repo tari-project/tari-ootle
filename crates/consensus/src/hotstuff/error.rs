@@ -1,7 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, LeafBlock, PcId, QcId, TcId};
 use tari_epoch_manager::EpochManagerError;
 use tari_ootle_common_types::{Epoch, NodeHeight, ProtocolVersion, ShardGroup, VersionedSubstateIdError, VotePower};
@@ -15,6 +14,7 @@ use tari_ootle_storage::{
     },
 };
 use tari_ootle_transaction::TransactionId;
+use tari_sidechain::{FixedHash, QcSignaturesError};
 use tari_state_tree::StateTreeError;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::task::JoinError;
@@ -242,10 +242,12 @@ pub enum ProposalValidationError {
     InvalidSignature { block_id: BlockId, height: NodeHeight },
     #[error("QC has invalid signature: {qc}")]
     QcInvalidSignature { qc: QcId },
-    #[error("QC has duplicate signature: {qc} by {validator}")]
-    QcDuplicateSignature {
+    #[error("QC {qc} carries malformed signatures: {source}")]
+    QcMalformedSignatures { qc: QcId, source: QcSignaturesError },
+    #[error("QC {qc} is signed under a scheme that protocol version {protocol_version} does not accept")]
+    QcSignatureSchemeNotAccepted {
         qc: QcId,
-        validator: RistrettoPublicKeyBytes,
+        protocol_version: ProtocolVersion,
     },
     #[error("Quorum was not reached on QC {qc}. {got} out of {required}")]
     QuorumWasNotReached {
@@ -308,11 +310,54 @@ pub enum ProposalValidationError {
         invalid_rate_bps: u16,
     },
 
+    #[error(
+        "End-of-epoch block {block_id} does not name the fee scale {next_epoch} charges at, which is \
+         {local_scale_bps}bps here"
+    )]
+    EndOfEpochBlockNamesNoFeeScale {
+        block_id: BlockId,
+        next_epoch: Epoch,
+        local_scale_bps: u16,
+    },
+    #[error(
+        "End-of-epoch block {block_id} names a fee scale of {proposed_scale_bps}bps for {next_epoch}, which this \
+         release schedules at {local_scale_bps}bps"
+    )]
+    InvalidNextEpochFeeScale {
+        block_id: BlockId,
+        next_epoch: Epoch,
+        local_scale_bps: u16,
+        proposed_scale_bps: u16,
+    },
+    #[error("Block {block_id} names a next-epoch fee scale but does not end its epoch")]
+    FeeScaleOutsideEndOfEpoch { block_id: BlockId },
+
     #[error("Foreign node in {shard_group} submitted invalid proposal for block {block_id}: {details}")]
     ForeignProposalInvalid {
         block_id: BlockId,
         shard_group: ShardGroup,
         details: anyhow::Error,
+    },
+
+    #[error(
+        "Foreign proposal for block {block_id} from {shard_group} carries block metadata that does not hash to the \
+         metadata hash its proven header commits to"
+    )]
+    ForeignBlockMetadataNotProven { block_id: BlockId, shard_group: ShardGroup },
+
+    #[error("Foreign proposal for block {block_id} from {shard_group} names no exhaust burn rate for its epoch")]
+    ForeignBlockNamesNoExhaustBurnRate { block_id: BlockId, shard_group: ShardGroup },
+
+    #[error(
+        "Foreign proposal for block {block_id} from {shard_group} in {block_epoch} pins transaction {transaction_id} \
+         to the later {locked_epoch}"
+    )]
+    ForeignTransactionPinnedAfterBlock {
+        block_id: BlockId,
+        shard_group: ShardGroup,
+        transaction_id: TransactionId,
+        locked_epoch: Epoch,
+        block_epoch: Epoch,
     },
 
     #[error("Foreign proposal commit proof error: {0}")]
@@ -326,6 +371,17 @@ pub enum ProposalValidationError {
         block_id: BlockId,
         shard_group: ShardGroup,
         transaction_id: TransactionId,
+    },
+
+    #[error(
+        "Foreign proposal for block {block_id} from {shard_group} carries command {command_hash} only by its hash, \
+         but its commit proof names {local_shard_group} as needing that command in full"
+    )]
+    ForeignProposalWithholdsCommand {
+        block_id: BlockId,
+        shard_group: ShardGroup,
+        local_shard_group: ShardGroup,
+        command_hash: FixedHash,
     },
 
     // TODO: remove some foreign proposal validation variants
@@ -384,4 +440,19 @@ pub enum ProposalValidationError {
         shard_group: ShardGroup,
         details: String,
     },
+}
+
+impl ProposalValidationError {
+    /// True for a foreign proposal error that rejects the message carrying a block and leaves the block id free.
+    ///
+    /// The signed header and the command root fix a foreign proposal's block id. The relayer chooses its pledges and
+    /// which commands it sends in full, so two messages carrying the same block can differ in them. An error in that
+    /// part says nothing about the block, so nothing is recorded against its block id and another delivery of the
+    /// block is still accepted.
+    pub fn rejects_message_not_block(&self) -> bool {
+        matches!(
+            self,
+            Self::ForeignPledgesNotCommitted { .. } | Self::ForeignProposalWithholdsCommand { .. }
+        )
+    }
 }

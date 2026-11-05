@@ -31,14 +31,17 @@ use crate::{
         AuthoredTemplateModel,
         BalanceChangeSnapshot,
         BalanceChangeSource,
+        ClaimedStateVersion,
         ConfidentialOutputModel,
         ImportedKeyId,
         KeyId,
         KeyType,
+        LockOwner,
         NewAccountData,
         NewSigningRequest,
         NonFungibleToken,
         OutputStatus,
+        ProvenUp,
         SigningRequestId,
         SigningRequestModel,
         StealthOutputModel,
@@ -46,13 +49,15 @@ use crate::{
         TransactionRequestId,
         TransactionRequestModel,
         TransactionRequestStatus,
+        TrustedValidatorSetHash,
         UtxoUnspent,
+        ValidatorSetAnchor,
         VaultModel,
         WalletEvent,
         WalletLockId,
         WalletTransactionUpdate,
     },
-    storage::{CommittableStore, WalletStorageError},
+    storage::{CommittableStore, QueuedUtxo, WalletStorageError},
 };
 
 pub trait WalletStoreWriter: CommittableStore {
@@ -206,11 +211,17 @@ pub trait WalletStoreWriter: CommittableStore {
         lock_id: WalletLockId,
     ) -> Result<(), WalletStorageError>;
     fn stealth_outputs_insert(&mut self, output: &StealthOutputModel) -> Result<(), WalletStorageError>;
+    /// Marks the output spent, as a spend of `version` takes it down, and records `version` as
+    /// [`stealth_outputs_record_spent_version`](Self::stealth_outputs_record_spent_version) does.
     fn stealth_outputs_mark_as_spent(
         &mut self,
         resource_address: &ResourceAddress,
         id: &UtxoId,
+        version: SubstateVersion,
     ) -> Result<(), WalletStorageError>;
+    /// Marks the output at `address` burnt and releases it from any lock, unless it is spent or burnt already. A burn
+    /// is final, so a spent or burnt output keeps its status. Returns whether the output was marked.
+    fn stealth_outputs_mark_as_burnt(&mut self, address: &UtxoAddress) -> Result<bool, WalletStorageError>;
     fn stealth_outputs_update(
         &mut self,
         address: &UtxoAddress,
@@ -218,6 +229,20 @@ pub trait WalletStoreWriter: CommittableStore {
         status: Option<OutputStatus>,
         is_frozen: Option<bool>,
     ) -> Result<(), WalletStorageError>;
+    /// Records that a spend took down `version` of the output at `address`, unless it holds the same or a later spent
+    /// version.
+    fn stealth_outputs_record_spent_version(
+        &mut self,
+        address: &UtxoAddress,
+        version: SubstateVersion,
+    ) -> Result<(), WalletStorageError>;
+    /// Records `proven_up` for the output at `address` unless it holds one of the same or a later version. Returns
+    /// whether it was recorded. An output the wallet does not hold is `NotFound`.
+    fn stealth_outputs_record_proven_up(
+        &mut self,
+        address: &UtxoAddress,
+        proven_up: ProvenUp,
+    ) -> Result<bool, WalletStorageError>;
 
     // Transaction requests
     /// Persist a frozen request. The stored transaction is immutable: the
@@ -294,18 +319,32 @@ pub trait WalletStoreWriter: CommittableStore {
     fn signing_requests_delete_expired(&mut self) -> Result<usize, WalletStorageError>;
 
     // Locks
-    fn locks_create(&mut self, timeout: Option<Duration>) -> Result<WalletLockId, WalletStorageError>;
+    fn locks_create(&mut self, timeout: Option<Duration>, owner: LockOwner)
+    -> Result<WalletLockId, WalletStorageError>;
 
     fn locks_delete(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
 
-    /// Set the lock's deadline to `timeout` from now, or `None` to make it
-    /// exempt from [`Self::locks_release_stale`] entirely. Used to hold inputs
-    /// across an approval window that outlives the deadline the
-    /// transfer-selection handler chose.
-    fn locks_set_timeout(&mut self, lock_id: WalletLockId, timeout: Option<Duration>)
-    -> Result<(), WalletStorageError>;
+    /// Push the deadline of a lock not yet linked to a transaction out to at
+    /// least `timeout` from now. A later deadline stands, and a lock with no
+    /// deadline keeps none: this only ever delays
+    /// [`Self::locks_release_stale`]. Used to hold inputs across an approval
+    /// window that outlives the deadline the transfer-selection handler chose.
+    ///
+    /// Returns `NotFound` when no unlinked lock has this id.
+    fn locks_extend_timeout(&mut self, lock_id: WalletLockId, timeout: Duration) -> Result<(), WalletStorageError>;
 
+    /// Links the lock to `transaction_id`, which then resolves it. A transaction may hold several locks, but a lock
+    /// belongs to one transaction: linking it again to the same transaction is a no-op.
+    ///
+    /// Returns `NotFound` when no lock has this id or the lock is linked to another transaction.
     fn locks_link_transaction(
+        &mut self,
+        lock_id: WalletLockId,
+        transaction_id: TransactionId,
+    ) -> Result<(), WalletStorageError>;
+
+    /// Clears the lock's link if it is linked to `transaction_id`, leaving a lock linked elsewhere as it is.
+    fn locks_unlink_transaction(
         &mut self,
         lock_id: WalletLockId,
         transaction_id: TransactionId,
@@ -330,7 +369,21 @@ pub trait WalletStoreWriter: CommittableStore {
     ) -> Result<(), WalletStorageError>;
 
     // Webauthn registrations
-    fn webauthn_reg_insert(&mut self, username: String, passkey: Passkey) -> Result<(), WalletStorageError>;
+    /// Insert a passkey under `username` with an explicit human-readable `label`, returning its row id.
+    fn webauthn_reg_insert(
+        &mut self,
+        username: String,
+        label: String,
+        passkey: Passkey,
+    ) -> Result<u32, WalletStorageError>;
+    /// Replaces the stored passkey with the same credential ID as `passkey` and updates its `last_used_at` timestamp.
+    fn webauthn_reg_update_passkey(&mut self, passkey: &Passkey) -> Result<(), WalletStorageError>;
+    /// Rename an existing passkey by id. Returns `NotFound` if `id` does not exist.
+    fn webauthn_reg_rename_passkey(&mut self, id: u32, label: &str) -> Result<(), WalletStorageError>;
+    /// Delete a passkey by id. Returns `NotFound` if `id` does not exist.
+    fn webauthn_reg_delete_passkey(&mut self, id: u32) -> Result<(), WalletStorageError>;
+    /// Removes all stored WebAuthn passkeys and registration rows, returning how many passkeys were deleted.
+    fn webauthn_reg_clear_all(&mut self) -> Result<usize, WalletStorageError>;
 
     // Authored templates
     fn authored_templates_insert(&mut self, model: AuthoredTemplateModel) -> Result<(), WalletStorageError>;
@@ -340,8 +393,22 @@ pub trait WalletStoreWriter: CommittableStore {
         resource_address: &ResourceAddress,
         shard_state_versions: I,
     ) -> Result<(), WalletStorageError>;
+    fn shard_state_version_claims_set_many<I: IntoIterator<Item = (Shard, ClaimedStateVersion)>>(
+        &mut self,
+        account: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        claims: I,
+    ) -> Result<(), WalletStorageError>;
+    fn shard_state_version_claims_remove<I: IntoIterator<Item = Shard>>(
+        &mut self,
+        account: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        shards: I,
+    ) -> Result<(), WalletStorageError>;
 
-    fn utxo_process_queue_extend<I: IntoIterator<Item = (ComponentAddress, UtxoUnspent)>>(
+    /// Queues each UTXO for recovery. A UTXO already queued for the account keeps one entry, unspent where
+    /// [`QueuedUtxo::merge_unspent_at`] places both.
+    fn utxo_process_queue_extend<I: IntoIterator<Item = (UtxoUnspent, QueuedUtxo)>>(
         &mut self,
         resource_address: &ResourceAddress,
         items: I,
@@ -394,6 +461,17 @@ pub trait WalletStoreWriter: CommittableStore {
     /// the admin UI can still show the historical `last_used_at` for
     /// already-revoked credentials.
     fn api_key_revoke(&mut self, id: i32) -> Result<(), WalletStorageError>;
+
+    // Trusted validator sets
+    /// Records that the wallet trusts `validator_set` for its epoch, through `anchor` or, when `None`, a handover. A
+    /// set already recorded for that epoch stays as it is.
+    fn trusted_validator_sets_insert(
+        &mut self,
+        validator_set: &TrustedValidatorSetHash,
+        anchor: Option<ValidatorSetAnchor>,
+    ) -> Result<(), WalletStorageError>;
+    /// Forgets every trusted validator set, ahead of anchoring anew.
+    fn trusted_validator_sets_clear(&mut self) -> Result<(), WalletStorageError>;
 }
 
 pub trait WalletEventStoreWriter {

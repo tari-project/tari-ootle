@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import type { Amount, NonFungibleId, SubstateId } from "@tari-project/ootle-ts-bindings";
+import type { Amount, Blobs, NonFungibleId, SubstateId } from "@tari-project/ootle-ts-bindings";
 import { Currency } from "@utils/currency";
 import { ChangeEvent } from "react";
 
@@ -94,6 +94,20 @@ export function fromHexString(hexString: string) {
     res.push(Number("0x" + hexString.substring(i, i + 2)));
   }
   return res;
+}
+
+/// The bytes of a transaction's blob `index`, or `undefined` when the
+/// transaction does not carry it.
+export function blobBytes(blobs: Blobs | undefined, index: number): Uint8Array | undefined {
+  const encoded = blobs?.[index];
+  if (encoded == null) {
+    return undefined;
+  }
+  try {
+    return Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
+  } catch {
+    return undefined;
+  }
 }
 
 export function substateIdToString(substateId: SubstateId | string | null | undefined) {

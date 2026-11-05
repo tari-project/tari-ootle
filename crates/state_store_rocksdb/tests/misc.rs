@@ -5,7 +5,6 @@ pub mod helpers;
 
 use helpers::{assert_eq_debug, create_rocksdb};
 use indexmap::IndexMap;
-use tari_common_types::types::FixedHash;
 use tari_consensus_types::{
     BlockId,
     HighPc,
@@ -26,9 +25,9 @@ use tari_ootle_storage::{
     consensus_models::{Block, EndOfEpochCommand, EpochCheckpoint, TreeRootSummary},
 };
 use tari_ootle_transaction::Network;
-use tari_sidechain::{CommandCommitProof, QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
+use tari_sidechain::{CommandCommitProof, FixedHash, QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
-use tari_state_tree::{TreeHash, compute_proof_for_hashes};
+use tari_state_tree::{TransitionAccumulator, TreeHash, compute_proof_for_hashes};
 use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
 use crate::helpers::num_preshards;
@@ -169,6 +168,7 @@ fn miscellaneous_rocksdb() {
     shard_summary.insert(shard_group.start(), TreeRootSummary {
         root_hash: TreeHash::zero(),
         state_version: 0,
+        transition_acc: TransitionAccumulator::zero(),
     });
     let key = TreeHash::new([1; 32]);
     let (_, inclusion_proof) = compute_proof_for_hashes([key].into_iter(), key).unwrap();
@@ -188,7 +188,7 @@ fn miscellaneous_rocksdb() {
             proposed_by: Default::default(),
             state_merkle_root: Default::default(),
             command_merkle_root: Default::default(),
-            transaction_merkle_root: None,
+            transaction_merkle_root: Default::default(),
             signature: Default::default(),
             accumulated_data: Default::default(),
             metadata_hash: Default::default(),
@@ -204,6 +204,7 @@ fn miscellaneous_rocksdb() {
             inclusion_proof.clone(),
         ),
         shard_summary.clone(),
+        block.header().metadata(),
     );
     let mut max_commit_proof = commit_proof.clone();
     max_commit_proof.header.epoch = u64::MAX;
@@ -214,13 +215,14 @@ fn miscellaneous_rocksdb() {
             inclusion_proof.clone(),
         ),
         shard_summary.clone(),
+        block.header().metadata(),
     );
     let proof = CommandCommitProof::new(
         EndOfEpochCommand::new(FixedHash::default()),
         commit_proof,
         inclusion_proof,
     );
-    let epoch_checkpoint = EpochCheckpoint::new(proof, shard_summary);
+    let epoch_checkpoint = EpochCheckpoint::new(proof, shard_summary, block.header().metadata());
 
     tx.epoch_checkpoint_save(&epoch_checkpoint).unwrap();
     tx.epoch_checkpoint_save(&next_epoch_checkpoint).unwrap();

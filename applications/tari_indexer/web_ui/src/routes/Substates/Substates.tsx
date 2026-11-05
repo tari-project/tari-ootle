@@ -51,6 +51,7 @@ import CopyToClipboard from "../../Components/CopyToClipboard";
 import PageHeading from "../../Components/PageHeading";
 import { CodeBlock, StyledPaper } from "../../Components/StyledComponents";
 import { useGetSubstate } from "../../api/hooks/useSubstates";
+import { encodedByteLength, useDecoder } from "../../utils/encoded";
 import { renderJson } from "../../utils/helpers";
 
 const SUBSTATE_PREFIXES = [
@@ -100,6 +101,37 @@ function VerifiedChip({ verified }: { verified: boolean }) {
         size="small"
       />
     </Tooltip>
+  );
+}
+
+function EncodedSubstateDetails({
+  encoded,
+  version,
+  verified,
+}: {
+  encoded: string;
+  version: number;
+  verified: boolean;
+}) {
+  const { decodeSubstateValue } = useDecoder();
+  const substate = decodeSubstateValue(encoded);
+  if (substate) {
+    return <SubstateDetails substate={substate} version={version} verified={verified} />;
+  }
+  return (
+    <Stack spacing={2}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+        <Chip label="CBOR" color="primary" />
+        <Typography variant="body2" color="text.secondary">
+          Version {version}, {encodedByteLength(encoded)} bytes
+        </Typography>
+        <Box sx={{ flexGrow: 1 }} />
+        <VerifiedChip verified={verified} />
+        <CopyToClipboard copy={encoded} />
+      </Box>
+      <Divider />
+      <CodeBlock>{encoded}</CodeBlock>
+    </Stack>
   );
 }
 
@@ -188,6 +220,7 @@ function ComponentView({ data }: { data: Component }) {
           { label: "Entity ID", value: String(data.header.entity_id) },
           { label: "Owner Rule", value: <CodeBlock>{renderJson(data.header.owner_rule)}</CodeBlock> },
           { label: "Access Rules", value: <CodeBlock>{renderJson(data.header.access_rules)}</CodeBlock> },
+          { label: "Upgrade Rule", value: <CodeBlock>{renderJson(data.header.upgrade_rule)}</CodeBlock> },
         ]}
       />
       <Typography variant="subtitle2">State</Typography>
@@ -419,10 +452,14 @@ function SubstatesLayout() {
               </Alert>
             )}
 
-            {data && (
+            {data && "up" in data.state && (
               <>
                 <Divider />
-                <SubstateDetails substate={data.substate} version={data.version} verified={data.verified} />
+                <EncodedSubstateDetails
+                  encoded={data.state.up.substate}
+                  version={data.version}
+                  verified={data.verified}
+                />
               </>
             )}
           </Stack>

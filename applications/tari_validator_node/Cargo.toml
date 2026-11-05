@@ -10,7 +10,7 @@ license.workspace = true
 
 [features]
 default = ["metrics", "web_ui"]
-metrics = ["prometheus-client", "tari_networking/metrics"]
+metrics = ["prometheus-client", "tari_logging/metrics", "tari_networking/metrics"]
 # Note: must be compiled with RUSTFLAGS='--cfg rust_unstable' to use
 tokio_debug = ["console-subscriber"]
 web_ui = []
@@ -18,11 +18,13 @@ web_ui = []
 [dependencies]
 tari_common = { workspace = true }
 tari_common_types = { workspace = true }
+tari_sidechain = { workspace = true }
 tari_transaction_components = { workspace = true }
 tari_crypto = { workspace = true }
 tari_epoch_oracles = { workspace = true, features = ["base_layer"] }
 tari_validator_node_rpc = { workspace = true }
-tari_ootle_app_utilities = { workspace = true, features = ["consensus_constants", "epoch_oracle", "execution", "p2p"] }
+tari_ootle_app_utilities = { workspace = true, features = ["allowed_hosts", "consensus_constants", "epoch_oracle", "execution", "p2p"] }
+tari_logging = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_ootle_p2p = { workspace = true }
 tari_engine = { workspace = true, features = ["wasm-cache"] }
@@ -65,12 +67,6 @@ serde_json5 = { workspace = true }
 libsqlite3-sys = { workspace = true, features = ["bundled"] }
 log = { workspace = true, features = ["std"] }
 prost = { workspace = true }
-log4rs = { workspace = true, features = [
-    "rolling_file_appender",
-    "compound_policy",
-    "size_trigger",
-    "fixed_window_roller",
-] }
 mime_guess = { workspace = true }
 prometheus-client = { workspace = true, optional = true }
 rand = { workspace = true }
@@ -87,14 +83,13 @@ console-subscriber = { version = "0.4.1", optional = true }
 tari_common = { workspace = true, features = ["build"] }
 
 [dev-dependencies]
-tari_sidechain = { workspace = true }
 tempfile = { workspace = true }
 tari_template_lib_types = { workspace = true }
+tower = { workspace = true, features = ["util"] }
+tracing = { workspace = true }
 
 [package.metadata.cargo-machete]
 ignored = [
     # We want to bundle this lib
     "libsqlite3-sys",
-    # Want to enable some log4rs features
-    "log4rs",
 ]

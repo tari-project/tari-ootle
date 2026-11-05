@@ -5,8 +5,8 @@ use std::{collections::HashSet, time::Duration};
 
 use log::*;
 use ootle_byte_type::ToByteType;
-use tari_common_types::types::FixedHash;
 use tari_consensus_types::{
+    BlockId,
     Decision,
     HighPc,
     LastSentVote,
@@ -19,6 +19,7 @@ use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     Epoch,
     ProtocolVersion,
+    ValidatorSetHash,
     committee::{Committee, CommitteeInfo},
     optional::Optional,
 };
@@ -32,11 +33,12 @@ use tari_ootle_storage::{
         ForeignProposalRecord,
         ForeignProposalStatus,
         NoVoteReason,
+        ProposalOrigin,
         TransactionPool,
         ValidBlock,
     },
 };
-use tari_sidechain::{ProposalVoteMessage, QuorumDecision};
+use tari_sidechain::{FixedHash, ProposalVoteMessage, QuorumDecision};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::{sync::broadcast, task};
 
@@ -51,7 +53,8 @@ use crate::{
         epoch_state::EpochState,
         error::HotStuffError,
         generate_epoch_checkpoint,
-        on_ready_to_vote_on_local_block::OnReadyToVoteOnLocalBlock,
+        on_propose::drop_executions_of_uninserted_proposal,
+        on_ready_to_vote_on_local_block::{LocalNextEpochView, OnReadyToVoteOnLocalBlock},
         on_receive_foreign_proposal::OnReceiveForeignProposalHandler,
         pacemaker_handle::PaceMakerHandle,
         transaction_manager::ConsensusTransactionManager,
@@ -81,12 +84,31 @@ pub struct OnReceiveLocalProposalHandler<TConsensusSpec: ConsensusSpec> {
     /// We commit the EOE on disk (peers attest with 2f+1) but defer next-genesis creation
     /// until the local oracle observes the new epoch.
     pending_end_of_epoch: Option<PendingEndOfEpoch>,
+    reported_divergence: ReportedDivergence,
 }
 
 #[derive(Debug, Clone)]
 struct PendingEndOfEpoch {
     eoe_block: Block,
     commit_qc: ProposalCertificate,
+}
+
+/// The validator set divergence last logged at error level. A diverged node retries its pending end-of-epoch on a
+/// periodic tick, so each divergence is reported once and its retries log at debug.
+#[derive(Debug, Default)]
+struct ReportedDivergence(Option<(BlockId, ValidatorSetHash)>);
+
+impl ReportedDivergence {
+    /// Records that EOE block `eoe_block` committed a set other than `local`. True unless this is the divergence
+    /// last recorded.
+    fn record(&mut self, eoe_block: BlockId, local: ValidatorSetHash) -> bool {
+        let divergence = Some((eoe_block, local));
+        if self.0 == divergence {
+            return false;
+        }
+        self.0 = divergence;
+        true
+    }
 }
 
 impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec> {
@@ -133,6 +155,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             ),
             change_set: None,
             pending_end_of_epoch: None,
+            reported_divergence: ReportedDivergence::default(),
         }
     }
 
@@ -141,6 +164,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         &mut self,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         msg: ProposalMessage,
+        origin: ProposalOrigin,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "OnReceiveLocalProposalHandler");
 
@@ -214,19 +238,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         // First validate and save the attached foreign proposals
         let is_all_foreign_proposals_valid = self.store.with_write_tx(|tx| {
-            // TODO: Implement guaranteed finality in the face of a non-cooperating remote shard group.
-            // Suggested strategy:
-            // Given a transaction that is awaiting a foreign proposal for REQUEST_FOREIGN_PROPOSAL_TIMEOUT (e.g. 50)
-            // blocks
-            // - Load pending transactions that are awaiting foreign proposal for >= REQUEST_FOREIGN_PROPOSAL_TIMEOUT
-            // - Request foreign proposal from remote shard group [END]
-            //
-            // Given a transaction that is awaiting a foreign proposal for MISSING_FOREIGN_PROPOSAL_TIMEOUT (e.g. 100)
-            // blocks
-            // - Load pending transactions that are awaiting foreign proposal for >= MISSING_FOREIGN_PROPOSAL_TIMEOUT
-            // - Set abort and ready = true
-            // self.update_foreign_proposal_transactions(tx, valid_block.block())?;
-
             for foreign_proposal in foreign_proposals {
                 let mut foreign_proposal = ForeignProposalRecord::new(foreign_proposal);
                 if foreign_proposal.exists(&**tx)? {
@@ -245,11 +256,8 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     &foreign_proposal,
                     epoch_state.local_committee_info(),
                 ) {
-                    if let Some(err @ ProposalValidationError::ForeignPledgesNotCommitted { .. }) =
-                        err.validation_error()
-                    {
-                        // The pledges travel beside the commit proof, so the block id is left unmarked for the genuine
-                        // proposal to arrive
+                    if let Some(err) = err.validation_error().filter(|err| err.rejects_message_not_block()) {
+                        // The block id is left unmarked for another delivery of the block
                         warn!(target: LOG_TARGET, "⚠️❌ Rejecting block {}: {}", valid_block, err);
                         return Ok(false);
                     }
@@ -282,7 +290,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         // If a leader failure occurs while we are processing the block, ignore it
         self.pacemaker.suspend_leader_timeout().await?;
 
-        let result = self.process_valid_block(epoch_state, valid_block).await;
+        let result = self.process_valid_block(epoch_state, valid_block, origin).await;
 
         // Ensure leader failure is resumed
         // If the result was successful, the leader timeout was reset, and no leader failure will occur. Otherwise,
@@ -333,6 +341,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         &mut self,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         valid_block: ValidBlock,
+        origin: ProposalOrigin,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "process_valid_block");
 
@@ -347,6 +356,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             epoch_state.local_committee(),
             proposer_vn.fee_claim_public_key,
             valid_block,
+            origin,
         )
         .await
     }
@@ -358,31 +368,51 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         local_committee: &Committee<TConsensusSpec::Addr>,
         proposer_claim_public_key_bytes: RistrettoPublicKeyBytes,
         valid_block: ValidBlock,
+        origin: ProposalOrigin,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         debug!(target: LOG_TARGET, "process_block: [{}] processing block: {}", current_epoch, valid_block);
 
         let em_epoch = self.epoch_manager.current_epoch().await?;
         let is_epoch_end = valid_block.block().is_epoch_end();
 
-        // Our own view of the next epoch's boundary hash, used by the voter to ratify the hash carried
-        // in an EndEpoch command. `None` if we have not observed that boundary — in which case the
-        // voter abstains rather than lending quorum to an unratified hash. Having observed the boundary
-        // is what qualifies a node to ratify, not having activated the epoch: the scanner stores headers
-        // before the resulting `EpochChanged` event is applied, and during a catch-up that event can sit
-        // behind several epoch activations.
-        let expected_next_epoch_hash = if is_epoch_end {
-            self.epoch_manager
-                .get_observed_epoch_hash(current_epoch + Epoch(1))
-                .await?
+        // Our own view of the next epoch, used by the voter to ratify what an EndEpoch block commits it to. The
+        // boundary hash is `None` if we have not observed that boundary, and the validator set hash is `None` until
+        // we have assigned the next epoch's committees; in either case the voter abstains rather than lending
+        // quorum to a value it cannot check. Committees are assigned when the epoch activates, so a node votes for
+        // an EndEpoch only once it has activated the next epoch. The scanner stores the boundary header before the
+        // resulting `EpochChanged` is applied, and during a catch-up that event can sit behind several epoch
+        // activations: a node in that window has observed the boundary but abstains with
+        // `EndOfEpochValidatorSetNotKnown`, and the EndEpoch commits once a quorum has activated the epoch.
+        let local_next_epoch = if is_epoch_end {
+            let next_epoch = current_epoch + Epoch(1);
+            LocalNextEpochView {
+                epoch_hash: self.epoch_manager.get_observed_epoch_hash(next_epoch).await?,
+                validator_set_hash: self.epoch_manager.get_validator_set_hash(next_epoch).await.optional()?,
+            }
         } else {
-            None
+            LocalNextEpochView::default()
         };
 
-        // Accept an EndEpoch proposal when our oracle has advanced past `current_epoch`, or when we
-        // have scanned the boundary block that ends it. The second branch rescues the case where a
-        // short base-layer reorg near the lag horizon leaves our scanner behind the leader's — without
-        // it, such splits can wedge consensus because every node requires the strict inequality.
-        let can_propose_epoch_end = em_epoch > current_epoch || expected_next_epoch_hash.is_some();
+        // The epoch has ended once our oracle has advanced past `current_epoch` or we have scanned the boundary block
+        // that ends it. A node that has only scanned the boundary passes this gate and abstains on the validator set
+        // instead, which names the value it is missing.
+        let can_propose_epoch_end = em_epoch > current_epoch || local_next_epoch.epoch_hash.is_some();
+
+        // Before an end of epoch that changes the number of committees, a leader aborts transactions still waiting in
+        // LocalPrepared, and the end-of-epoch block may not leave any there. Only looked up for a block that carries
+        // such an abort or ends the epoch. A node that knows the next epoch's validator set has assigned its
+        // committees, so it can tell their number; that covers every node able to vote for an EndEpoch, including one
+        // whose oracle has not yet advanced past `current_epoch`.
+        let has_local_accept_abort = valid_block
+            .block()
+            .commands()
+            .iter()
+            .any(|cmd| cmd.local_accept().is_some_and(|atom| atom.decision.is_abort()));
+        let knows_next_epoch_committees = em_epoch > current_epoch || local_next_epoch.validator_set_hash.is_some();
+        let next_epoch_changes_layout = (has_local_accept_abort || is_epoch_end) &&
+            knows_next_epoch_committees &&
+            self.epoch_manager.get_num_committees(current_epoch + Epoch(1)).await? !=
+                local_committee_info.num_committees();
 
         let mut on_ready_to_vote_on_local_block = self.on_ready_to_vote_on_local_block.clone();
 
@@ -397,6 +427,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             .unwrap_or_else(|| ProposedBlockChangeSet::new(valid_block.block().as_leaf()));
 
         let store = self.store.clone();
+        let committee = local_committee.clone();
 
         let (process_result, mut change_set) = task::spawn_blocking(move || {
             store.with_write_tx(|tx| {
@@ -404,9 +435,11 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     tx,
                     &valid_block,
                     &local_committee_info,
+                    &committee,
                     &proposer_claim_public_key_bytes,
                     can_propose_epoch_end,
-                    expected_next_epoch_hash,
+                    local_next_epoch,
+                    next_epoch_changes_layout,
                     &mut change_set,
                 )?;
 
@@ -421,6 +454,18 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         })
         .await??;
 
+        // The write transaction has committed, so the committed blocks' templates are in durable state.
+        if let Some(committed) = process_result
+            .block_decision
+            .commit_blocks
+            .iter()
+            .max_by_key(|b| (b.epoch(), b.height()))
+        {
+            self.on_ready_to_vote_on_local_block
+                .uncommitted_templates()
+                .prune_to(committed.epoch(), committed.height());
+        }
+
         // If accepted, the changeset is already saved, otherwise we log everything here for debugging
         if !process_result.block_decision.is_accept() {
             change_set.log_everything_dropped();
@@ -430,7 +475,13 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         self.change_set = Some(change_set);
 
         let no_vote = self
-            .process_block_decision(local_committee_info, local_committee, process_result, is_epoch_end)
+            .process_block_decision(
+                local_committee_info,
+                local_committee,
+                process_result,
+                is_epoch_end,
+                origin,
+            )
             .await?;
 
         Ok(no_vote)
@@ -442,6 +493,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         local_committee: &Committee<TConsensusSpec::Addr>,
         process_block_result: ProcessBlockResult,
         is_epoch_end: bool,
+        origin: ProposalOrigin,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "process-block-decision")
             .with_excessive_threshold(Duration::from_millis(200));
@@ -466,35 +518,14 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 )
                 .await?;
 
-            // Get the leader that will collect votes for this block to justify moving onto the next view.
-            // That leader's proposal carries a certificate for this block, so its liveness anchor is
-            // this block's height.
-            let skip_set = self.store.with_read_tx(|tx| {
-                LeaderSkipSet::load_for_justify(
-                    tx,
-                    valid_block.epoch(),
-                    valid_block.height(),
-                    local_committee,
-                    &self.config.consensus_constants.liveness_thresholds(),
-                )
-            })?;
-            let (next_leader, _) =
-                skip_set.effective_leader(&self.leader_strategy, local_committee, valid_block.height());
-
-            // And vote to move onto the next view, unless this node has caught the proposer
-            // equivocating. Withholding the signature is all it does: the block is processed, locked
-            // and committed as usual, and leader selection is untouched. Evidence is what this node
-            // happened to see - only the leader of a view receives the votes for it, and nothing
-            // shares what it found - so it may not decide anything the committee has to agree on.
-            if self.holds_equivocation_evidence_against(valid_block.block())? {
-                warn!(
+            if origin.is_catch_up() {
+                debug!(
                     target: LOG_TARGET,
-                    "🚨 Withholding our vote on {}: its proposer {} equivocated in this epoch",
+                    "🌐 Not voting on {}: it arrived through catch-up, so the committee has already certified it",
                     valid_block.block(),
-                    valid_block.block().proposed_by(),
                 );
             } else {
-                self.send_vote_to_leader(next_leader, valid_block.block(), decision)
+                self.vote_on_block(local_committee, valid_block.block(), decision)
                     .await?;
             }
         }
@@ -593,6 +624,42 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             return Ok(());
         }
 
+        // The committed block names the next epoch's validator set, which a quorum ratified against their own
+        // committee assignment. A node whose own assignment differs would open the next epoch on committees the
+        // rest of the network does not run, so it does not open it: the EOE stays pending, and the retry opens the
+        // epoch if an oracle correction brings this node's assignment into line. This check precedes
+        // `lock_epoch(next_epoch)`, which would end such corrections. An EOE that names no set leaves nothing to
+        // check.
+        if let Some(committed) = eoe_block.next_epoch_validator_set_hash() {
+            let local = self.epoch_manager.get_validator_set_hash(next_epoch).await.optional()?;
+            if local != Some(committed) {
+                match local {
+                    Some(local) if self.reported_divergence.record(*eoe_block.id(), local) => error!(
+                        target: LOG_TARGET,
+                        "🚨 Validator set divergence at {next_epoch}: the committee committed validator set {committed} \
+                         in EOE block {} but this node assigned {local}. This node will not take part in \
+                         {next_epoch}. It disagrees with the network on the validators registered for {next_epoch} \
+                         or on how they form committees; check its epoch oracle and committee configuration.",
+                        eoe_block.id()
+                    ),
+                    Some(local) => debug!(
+                        target: LOG_TARGET,
+                        "🚨 Validator set still diverges at {next_epoch}: EOE block {} committed {committed}, this node \
+                         assigned {local}",
+                        eoe_block.id()
+                    ),
+                    None => warn!(
+                        target: LOG_TARGET,
+                        "⏳ EOE block {} committed but this node has not assigned the committees for {next_epoch}. \
+                         Deferring next-epoch genesis until it has.",
+                        eoe_block.id()
+                    ),
+                }
+                self.pending_end_of_epoch = Some(PendingEndOfEpoch { eoe_block, commit_qc });
+                return Ok(());
+            }
+        }
+
         // We're registered for the next epoch. Checkpoint and create a new genesis block.
         let num_committees = self.epoch_manager.get_num_committees(next_epoch).await?;
         // Now that EndEpoch has committed and we're about to stamp `epoch_hash` into the genesis
@@ -633,6 +700,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     )));
                 }
                 checkpoint.save(tx)?;
+                drop_executions_of_uninserted_proposal(tx, prev_epoch)?;
 
                 if let Some(next_shard_group) = next_shard_group.filter(|_| !shard_group_changed) {
                     let next_protocol_version = ProtocolVersion::at(network, next_epoch);
@@ -737,6 +805,43 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         if let Some(sender) = self.tx_events.upgrade() {
             let _ignore = sender.send(event);
         }
+    }
+
+    async fn vote_on_block(
+        &mut self,
+        local_committee: &Committee<TConsensusSpec::Addr>,
+        block: &Block,
+        decision: QuorumDecision,
+    ) -> Result<(), HotStuffError> {
+        // Get the leader that will collect votes for this block to justify moving onto the next view.
+        // That leader's proposal carries a certificate for this block, so its liveness anchor is
+        // this block's height.
+        let skip_set = self.store.with_read_tx(|tx| {
+            LeaderSkipSet::load_for_justify(
+                tx,
+                block.epoch(),
+                block.height(),
+                local_committee,
+                &self.config.consensus_constants.liveness_thresholds(),
+            )
+        })?;
+        let (next_leader, _) = skip_set.effective_leader(&self.leader_strategy, local_committee, block.height());
+
+        // And vote to move onto the next view, unless this node has caught the proposer
+        // equivocating. Withholding the signature is all it does: the block is processed, locked
+        // and committed as usual, and leader selection is untouched. Evidence is what this node
+        // happened to see - only the leader of a view receives the votes for it, and nothing
+        // shares what it found - so it may not decide anything the committee has to agree on.
+        if self.holds_equivocation_evidence_against(block)? {
+            warn!(
+                target: LOG_TARGET,
+                "🚨 Withholding our vote on {}: its proposer {} equivocated in this epoch",
+                block,
+                block.proposed_by(),
+            );
+            return Ok(());
+        }
+        self.send_vote_to_leader(next_leader, block, decision).await
     }
 
     async fn send_vote_to_leader(
@@ -1108,6 +1213,7 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
             ForeignProposalNotificationMessage {
                 block_id: *block.id(),
                 epoch: block.epoch(),
+                shard_group: block.shard_group(),
                 shard_groups,
             },
         ))
@@ -1127,4 +1233,22 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
 struct ProcessBlockResult {
     pub block_decision: BlockDecision,
     pub valid_block: ValidBlock,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_divergence_is_reported_once_until_it_changes() {
+        let eoe_block = BlockId::from([1; 32]);
+        let local = ValidatorSetHash::from_array([2; 32]);
+        let corrected = ValidatorSetHash::from_array([3; 32]);
+        let mut reported = ReportedDivergence::default();
+
+        assert!(reported.record(eoe_block, local));
+        assert!(!reported.record(eoe_block, local));
+        assert!(reported.record(eoe_block, corrected));
+        assert!(reported.record(BlockId::from([4; 32]), corrected));
+    }
 }

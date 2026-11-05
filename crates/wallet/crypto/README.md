@@ -16,7 +16,7 @@ the full engine.
 | `stealth`                | Builds `StealthTransferStatement`s: generates output witnesses, extended Bulletproofs, and viewable balance proofs |
 | `confidential`           | Creates `ConfidentialWithdrawProof`s for pulling funds out of confidential vaults                                  |
 | `encrypted_data`         | XChaCha20-Poly1305 encryption/decryption of UTXO amount and mask (`EncryptedData`)                                 |
-| `memo`                   | Structured memo field encoding (U256 value, text message, raw bytes, pay-ref+bytes)                                |
+| `memo`                   | Structured memo field encoding (U256 value, text message, raw bytes, destination tag+bytes)                        |
 | `pay_to`                 | `PayTo` enum — pay to a stealth public key or an explicit access rule                                              |
 | `balance_proof`          | Generates Schnorr balance proof signatures for stealth and confidential transfers                                  |
 | `viewable_balance_proof` | ElGamal viewable balance proofs so view-only keys can verify output amounts                                        |

@@ -142,7 +142,7 @@ pub async fn transfer_stealth(
                 output_memo: None,
                 pay_to: PayTo::StealthPublicKey,
                 attach_sender_address: false,
-                pay_ref: None,
+                destination_tag: None,
             }],
             // Stealth transfers now carry the NativeExecution charge (~8k µT per blinded output +
             // ~2.1k per statement), so the ceiling leaves generous headroom; the excess refunds.
@@ -442,6 +442,7 @@ pub async fn submit_manifest_with_signing_keys(
                 .get(s.trim())
                 .unwrap_or_else(|| panic!("No outputs named {}", s.trim()))
         })
+        .filter(|(_, addr)| addr.substate_id().is_declarable_input())
         .map(|(_, addr)| addr.clone())
         .collect::<Vec<_>>();
 
@@ -537,6 +538,7 @@ pub async fn submit_manifest(
                 .get(s.trim())
                 .unwrap_or_else(|| panic!("No outputs named {}", s.trim()))
         })
+        .filter(|(_, addr)| addr.substate_id().is_declarable_input())
         .map(|(_, addr)| InputDeclaration::write(addr.substate_id().clone()))
         .collect::<Vec<_>>();
 

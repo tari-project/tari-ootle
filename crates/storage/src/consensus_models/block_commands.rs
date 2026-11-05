@@ -136,10 +136,10 @@ pub enum BlockCommandsError {
 mod tests {
     use std::collections::BTreeSet;
 
-    use tari_common_types::types::FixedHash;
     use tari_consensus_types::{BlockId, Decision};
     use tari_ootle_common_types::{ProtocolVersion, ShardGroup};
     use tari_ootle_transaction::TransactionId;
+    use tari_sidechain::FixedHash;
 
     use super::*;
     use crate::consensus_models::{
@@ -158,6 +158,8 @@ mod tests {
             evidence: Evidence::default(),
             transaction_fee: 0,
             leader_fee: None,
+            fee_intent_only: false,
+            locked_epoch: crate::consensus_models::LockedEpoch::zero(),
         }
     }
 
@@ -308,20 +310,19 @@ mod tests {
         let decoded = minicbor::decode::<BlockCommands>(&minicbor::to_vec(&set).unwrap()).unwrap();
         assert_eq!(decoded, commands);
 
-        for protocol_version in [ProtocolVersion::V0, ProtocolVersion::V1, ProtocolVersion::V2] {
-            let set_root = tari_state_tree::compute_merkle_root_for_hashes(
-                set_commands
-                    .iter()
-                    .map(|cmd| tari_state_tree::TreeHash::from(cmd.hash(protocol_version).into_array())),
-            )
-            .unwrap();
-            assert_eq!(
-                BlockHeader::compute_command_merkle_root(protocol_version, &commands)
-                    .unwrap()
-                    .into_array(),
-                set_root.into_array(),
-                "command merkle root differs under {protocol_version}"
-            );
-        }
+        let protocol_version = ProtocolVersion::V0;
+        let set_root = tari_state_tree::compute_merkle_root_for_hashes(
+            set_commands
+                .iter()
+                .map(|cmd| tari_state_tree::TreeHash::from(cmd.merkle_leaf(protocol_version).into_array())),
+        )
+        .unwrap();
+        assert_eq!(
+            BlockHeader::compute_command_merkle_root(protocol_version, &commands)
+                .unwrap()
+                .into_array(),
+            set_root.into_array(),
+            "command merkle root differs under {protocol_version}"
+        );
     }
 }

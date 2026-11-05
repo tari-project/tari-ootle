@@ -101,7 +101,9 @@ impl InstructionLimitTracker {
             Instruction::PublishTemplate { .. } |
             Instruction::AllocateAddress { .. } |
             Instruction::PayFeeFromBucket { .. } |
-            Instruction::PutIntoBucket { .. } => Ok(()),
+            Instruction::PutIntoBucket { .. } |
+            Instruction::AuthorizeProof { .. } |
+            Instruction::DropProofAuthorization { .. } => Ok(()),
         }
     }
 

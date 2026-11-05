@@ -89,44 +89,39 @@ impl QueryCf for ByStateTreeStaleShardVersionQuery {
     type KeyCodec = (ShardCodec, NumberCodec<Version>);
 }
 
-/// The state tree's tables as stored up to schema version 2, with values in the serde-bridged encoding. Only the
-/// migration to version 3 reads them, rewriting each value in the native encoding.
-pub mod legacy {
-    use tari_ootle_common_types::shard::Shard;
-    use tari_state_tree::{Node, NodeKey, StaleTreeNode, StateTreePayload, Version};
+prefixed!(
+    StateTreeDeferredStaleNodesPrefix,
+    KeyPrefix::StateTreeDeferredStaleNodes
+);
 
-    use super::{StateTreePrefix, StateTreeStaleNodesPrefix};
-    use crate::{
-        codecs::{NodeKeyCodec, NumberCodec, SerdeBridgeCodec, ShardCodec},
-        column_families::cf_names,
-        traits::Cf,
-    };
+/// Stale nodes the tree at a pinned version holds, keyed by `(shard, pinned version, version they went stale at)`.
+/// They are deleted once that version is no longer pinned.
+pub struct StateTreeDeferredStaleNodesCf;
 
-    pub struct StateTreeCf;
+impl Cf for StateTreeDeferredStaleNodesCf {
+    type Key = (Shard, Version, Version);
+    type KeyCodec = (ShardCodec, NumberCodec<Version>, NumberCodec<Version>);
+    type Prefix = StateTreeDeferredStaleNodesPrefix;
+    type Value = Vec<StaleTreeNode>;
+    type ValueCodec = StaleTreeNodesCodec;
 
-    impl Cf for StateTreeCf {
-        type Key = (Shard, NodeKey);
-        type KeyCodec = (ShardCodec, NodeKeyCodec);
-        type Prefix = StateTreePrefix;
-        type Value = Node<StateTreePayload>;
-        type ValueCodec = SerdeBridgeCodec<Self::Value>;
-
-        fn name() -> &'static str {
-            cf_names::STATE_TREE
-        }
+    fn name() -> &'static str {
+        cf_names::STATE_TREE
     }
+}
 
-    pub struct StateTreeStaleNodesCf;
+pub struct ByDeferredStaleShardQuery;
 
-    impl Cf for StateTreeStaleNodesCf {
-        type Key = (Shard, Version);
-        type KeyCodec = (ShardCodec, NumberCodec<Version>);
-        type Prefix = StateTreeStaleNodesPrefix;
-        type Value = Vec<StaleTreeNode>;
-        type ValueCodec = SerdeBridgeCodec<Self::Value>;
+impl QueryCf for ByDeferredStaleShardQuery {
+    type Cf = StateTreeDeferredStaleNodesCf;
+    type Key = Shard;
+    type KeyCodec = ShardCodec;
+}
 
-        fn name() -> &'static str {
-            cf_names::STATE_TREE
-        }
-    }
+pub struct ByDeferredStaleShardPinQuery;
+
+impl QueryCf for ByDeferredStaleShardPinQuery {
+    type Cf = StateTreeDeferredStaleNodesCf;
+    type Key = (Shard, Version);
+    type KeyCodec = (ShardCodec, NumberCodec<Version>);
 }

@@ -2,7 +2,6 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use ootle_byte_type::ToByteType;
-use tari_common_types::types::FixedHash;
 use tari_consensus::hotstuff::{
     LeaderSkipSet,
     calculate_dummy_blocks,
@@ -27,8 +26,9 @@ use tari_ootle_common_types::{
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::consensus_models::{Block, BlockCommands, BlockHeader};
 use tari_ootle_transaction::Network;
+use tari_sidechain::FixedHash;
 
-use crate::support::{RoundRobinLeaderStrategy, load_json_fixture};
+use crate::support::{SmoothWeightedRoundRobin, load_json_fixture};
 
 #[test]
 fn dummy_blocks() {
@@ -62,7 +62,7 @@ fn dummy_blocks() {
         genesis.justify(),
         genesis.id(),
         FixedHash::zero(),
-        &RoundRobinLeaderStrategy,
+        &SmoothWeightedRoundRobin,
         &committee,
         &LeaderSkipSet::none(),
         genesis.timestamp(),
@@ -79,7 +79,7 @@ fn dummy_blocks() {
         *genesis.id(),
         genesis.justify(),
         FixedHash::zero(),
-        &RoundRobinLeaderStrategy,
+        &SmoothWeightedRoundRobin,
         &committee,
         &LeaderSkipSet::none(),
         genesis.timestamp(),
@@ -118,7 +118,7 @@ fn last_matches_generated_using_real_data() {
     let dummy = calculate_dummy_blocks_from_justify(
         &candidate,
         &justify,
-        &RoundRobinLeaderStrategy,
+        &SmoothWeightedRoundRobin,
         &committee,
         &LeaderSkipSet::none(),
     );
@@ -132,7 +132,7 @@ fn last_matches_generated_using_real_data() {
         *justify.id(),
         justify.justify(),
         *justify.state_merkle_root(),
-        &RoundRobinLeaderStrategy,
+        &SmoothWeightedRoundRobin,
         &committee,
         &LeaderSkipSet::none(),
         justify.timestamp(),
@@ -195,7 +195,7 @@ fn dummy_blocks_from_epoch_genesis_vs_zero_block() {
         qc,
         &BlockId::zero(), // unused expected_parent - we'll check the last dummy directly
         *epoch_genesis.state_merkle_root(),
-        &RoundRobinLeaderStrategy,
+        &SmoothWeightedRoundRobin,
         &committee,
         &LeaderSkipSet::none(),
         epoch_genesis.timestamp(),
@@ -214,7 +214,7 @@ fn dummy_blocks_from_epoch_genesis_vs_zero_block() {
         *zero_block.id(),
         qc,
         *zero_block.state_merkle_root(),
-        &RoundRobinLeaderStrategy,
+        &SmoothWeightedRoundRobin,
         &committee,
         &LeaderSkipSet::none(),
         zero_block.timestamp(),
@@ -242,7 +242,7 @@ fn dummy_blocks_from_epoch_genesis_vs_zero_block() {
         *epoch_genesis.id(),
         qc,
         *epoch_genesis.state_merkle_root(),
-        &RoundRobinLeaderStrategy,
+        &SmoothWeightedRoundRobin,
         &committee,
         &LeaderSkipSet::none(),
         epoch_genesis.timestamp(),
@@ -361,7 +361,7 @@ fn proposer_accumulated_data_must_come_from_justify_on_timeout_recovery() {
         // the full chain so pass a placeholder that won't be matched.
         &BlockId::zero(),
         *justify_block.state_merkle_root(),
-        &RoundRobinLeaderStrategy,
+        &SmoothWeightedRoundRobin,
         &committee,
         &LeaderSkipSet::none(),
         justify_block.timestamp(),
@@ -470,7 +470,7 @@ fn proposer_must_anchor_recovery_on_justify_not_uncertified_leaf() {
         justify_block.justify(),
         &BlockId::zero(), // no early short-circuit; we want the full chain
         *justify_block.state_merkle_root(),
-        &RoundRobinLeaderStrategy,
+        &SmoothWeightedRoundRobin,
         &committee,
         &LeaderSkipSet::none(),
         justify_block.timestamp(),
@@ -492,7 +492,7 @@ fn proposer_must_anchor_recovery_on_justify_not_uncertified_leaf() {
         *justify_block.id(),
         justify_block.justify(),
         *justify_block.state_merkle_root(),
-        &RoundRobinLeaderStrategy,
+        &SmoothWeightedRoundRobin,
         &committee,
         &LeaderSkipSet::none(),
         justify_block.timestamp(),

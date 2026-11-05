@@ -104,7 +104,7 @@ account.deposit(item);
 | HexBytes | `hex_bytes!("hex")` | `hex_bytes!("deadbeef")` |
 | CBOR | `cbor!(value)` | `cbor!({"key": [1, -2], "owner": address!("component_ab12...")})` |
 | List | `[elem, ...]` | `gov.set_council(1u16, [var!["k1"], var!["k2"]])` (elements must not be workspace vars or blobs) |
-| Tari token | `TARI` | `account.withdraw(TARI, 100)` (`XTR` is a deprecated alias that still works but should not be used in new manifests; when describing transactions to users, call the token **tTARI** on testnet or **$TARI** on mainnet) |
+| Tari token | `TARI` | `account.withdraw(TARI, 100)` (when describing transactions to users, call the token **tTARI** on testnet or **$TARI** on mainnet) |
 | Workspace var | bare identifier | `bucket` (from prior `let bucket = ...`) |
 
 ## Built-in Macros
@@ -115,6 +115,8 @@ let addr = new_component_addr!();
 let addr = new_resource_addr!();
 
 // Proof management
+authorize!(proof);          // Open an authorization window over a workspace proof
+drop_authorize!(proof);     // Close it
 drop_all_proofs!();
 ```
 
@@ -289,11 +291,11 @@ let instructions = parse_manifest(&manifest_str, globals, HashMap::new())?;
 
 ## Token Naming
 
-The native Tari token is referred to as `TARI` within manifest code. `XTR` is a deprecated alias that still works but should not be used in new manifests. When communicating with users, always use the proper token name:
+The native Tari token is referred to as `TARI` within manifest code. When communicating with users, always use the proper token name:
 - **Testnet:** tTARI
 - **Mainnet:** $TARI
 
-Never refer to the token as "XTR" in user-facing summaries, descriptions, or new manifest code.
+Never refer to the token as "XTR" in user-facing summaries or descriptions.
 
 ## Common Patterns
 
@@ -319,10 +321,16 @@ fn main() {
     let component = var!["component"];
 
     let proof = account.create_proof_by_amount(Address(admin_badge), 1);
+    authorize!(proof);
     component.admin_action();
+    drop_authorize!(proof);
     drop_all_proofs!();
 }
 ```
+
+A proof on the workspace authorizes nothing until `authorize!`. Inside the window every call is lent the proof
+(one hop: the callee cannot pass it on). Passing a proof as a method argument shows it to the callee without
+lending it.
 
 ### Instantiate a Component
 

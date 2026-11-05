@@ -23,13 +23,15 @@
 use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::BlockId;
-use tari_ootle_storage::consensus_models::{Block, ForeignProposal};
+use tari_ootle_common_types::{Epoch, NodeHeight};
+use tari_ootle_storage::consensus_models::{Block, ForeignProposal, ProposalOrigin};
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
-    codecs::{BlockIdCodec, DefaultCodec, KeyPrefix},
+    codecs::{BlockIdCodec, DefaultCodec, EpochCodec, KeyPrefix, NodeHeightCodec, PublicKeyCodec, UnitCodec},
     column_families::cf_names,
     prefixed,
-    traits::Cf,
+    traits::{Cf, QueryCf},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
@@ -38,6 +40,11 @@ pub struct ParkedBlockData {
     pub block: Block,
     #[n(1)]
     pub foreign_proposals: Vec<ForeignProposal>,
+    /// A record without an origin decodes as a live proposal.
+    #[n(2)]
+    #[cbor(default)]
+    #[serde(default)]
+    pub origin: ProposalOrigin,
 }
 
 prefixed!(ParkedBlockPrefix, KeyPrefix::ParkedBlocks);
@@ -56,10 +63,50 @@ impl Cf for ParkedBlockCf {
     }
 }
 
+prefixed!(ParkedBlockEpochHeightPrefix, KeyPrefix::ParkedBlockEpochHeightIndex);
+
+/// Every parked block, ordered by the view it was proposed for and then by its proposer. Written and deleted together
+/// with the [`ParkedBlockCf`] row.
+pub struct ParkedBlockEpochHeightIndex;
+
+impl Cf for ParkedBlockEpochHeightIndex {
+    type Key = (Epoch, NodeHeight, RistrettoPublicKeyBytes, BlockId);
+    type KeyCodec = (EpochCodec, NodeHeightCodec, PublicKeyCodec, BlockIdCodec);
+    type Prefix = ParkedBlockEpochHeightPrefix;
+    type Value = ();
+    type ValueCodec = UnitCodec;
+
+    fn name() -> &'static str {
+        cf_names::BLOCK
+    }
+}
+
+pub struct ByEpochHeightQuery;
+
+impl QueryCf for ByEpochHeightQuery {
+    type Cf = ParkedBlockEpochHeightIndex;
+    type Key = (Epoch, NodeHeight);
+    type KeyCodec = (EpochCodec, NodeHeightCodec);
+}
+
+pub struct ByProposerQuery;
+
+impl QueryCf for ByProposerQuery {
+    type Cf = ParkedBlockEpochHeightIndex;
+    type Key = (Epoch, NodeHeight, RistrettoPublicKeyBytes);
+    type KeyCodec = (EpochCodec, NodeHeightCodec, PublicKeyCodec);
+}
+
+pub fn epoch_height_index_key(block: &Block) -> (Epoch, NodeHeight, RistrettoPublicKeyBytes, BlockId) {
+    (block.epoch(), block.height(), *block.proposed_by(), *block.id())
+}
+
 #[derive(Debug, Clone, Serialize, Encode, CborLen)]
 pub struct ParkedBlockDataRef<'a> {
     #[b(0)]
     pub block: &'a Block,
     #[b(1)]
     pub foreign_proposals: &'a [ForeignProposal],
+    #[n(2)]
+    pub origin: ProposalOrigin,
 }

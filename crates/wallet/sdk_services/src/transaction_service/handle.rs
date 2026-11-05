@@ -20,7 +20,6 @@ pub(super) enum TransactionServiceRequest {
 
     SubmitDryRunTransaction {
         transaction: Transaction,
-        settled_fee: Option<u64>,
         reply: Reply<Result<ExecuteResult, TransactionServiceError>>,
     },
 }
@@ -45,22 +44,10 @@ impl TransactionServiceHandle {
         &self,
         transaction: Transaction,
     ) -> Result<ExecuteResult, TransactionServiceError> {
-        self.submit_dry_run_transaction_settled_at(transaction, None).await
-    }
-
-    /// A dry run whose result records `settled_fee` as the fee to submit with, rather than the
-    /// figure the run itself reports. For a caller that chose a fee and is having the run confirm
-    /// it — see `TransactionApi::submit_dry_run_transaction`.
-    pub async fn submit_dry_run_transaction_settled_at(
-        &self,
-        transaction: Transaction,
-        settled_fee: Option<u64>,
-    ) -> Result<ExecuteResult, TransactionServiceError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.sender
             .send(TransactionServiceRequest::SubmitDryRunTransaction {
                 transaction,
-                settled_fee,
                 reply: reply_tx,
             })
             .await

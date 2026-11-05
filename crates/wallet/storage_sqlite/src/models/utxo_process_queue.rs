@@ -5,10 +5,12 @@ use diesel::Queryable;
 
 #[derive(Debug, Clone, Queryable)]
 pub struct UtxoProcessQueue {
-    pub _id: i32,
+    pub id: i32,
     pub _account_id: i32,
     pub resource_address: String,
     pub utxo_tag: i32,
     pub public_nonce: String,
+    pub _shard: Option<i32>,
+    pub _state_version: Option<i64>,
     pub _created_at: time::PrimitiveDateTime,
 }

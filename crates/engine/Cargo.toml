@@ -11,7 +11,6 @@ license.workspace = true
 tari_bor = { workspace = true, default-features = true, features = ["std"] }
 tari_crypto = { workspace = true, features = ["serde", "borsh"] }
 tari_ootle_common_types = { workspace = true }
-tari_ootle_template_metadata = { workspace = true }
 ootle-network = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_template_abi = { workspace = true, features = ["std", "func-hasher"] }
@@ -60,6 +59,7 @@ tari_bor = { workspace = true, default-features = true, features = ["std"] }
 tari_transaction_manifest = { workspace = true }
 tari_ootle_transaction = { workspace = true, features = ["serde"] }
 tari_template_builtin = { workspace = true, features = ["templates", "state"] }
+tari_ootle_sr25519 = { workspace = true }
 
 # Default features stay off: arkworks' `std` feature links tracing-subscriber 0.2 through
 # `ark-relations`, a line that no longer receives security fixes.

@@ -3,13 +3,17 @@
 
 use std::{cmp, fmt::Display, ops::RangeInclusive};
 
-use rand::seq::{IndexedRandom, SliceRandom};
+use rand::seq::IndexedRandom;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{SubstateVersion, substate::SubstateId};
+use tari_sidechain::SigningCommittee;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{Epoch, NumPreshards, ShardGroup, SubstateAddress, VersionedSubstateIdRef, VotePower};
 
+/// A committee's members in ascending public key order, each public key at most once. Positions are protocol-visible:
+/// leader rotation indexes into them, and the validator set commits to committees in this order. Committee assignment
+/// keeps one registration per public key, and `hash_validator_set_committee` rejects a committee that repeats one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default, Hash)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Committee<TAddr> {
@@ -40,31 +44,20 @@ impl<TAddr: PartialEq> Committee<TAddr> {
         Self::new(vec![])
     }
 
-    pub fn with_capacity(cap: usize) -> Self {
-        Self::new(Vec::with_capacity(cap))
-    }
-
-    pub fn new(members: Vec<CommitteeMember<TAddr>>) -> Self {
+    /// Orders `members` by public key. `members` must not repeat a public key.
+    pub fn new(mut members: Vec<CommitteeMember<TAddr>>) -> Self {
+        members.sort_by_key(|member| member.public_key);
         Self { members }
     }
 
-    // TODO: remove this - rather create committees from iterators than mutating directly
-    pub fn members_mut(&mut self) -> &mut Vec<CommitteeMember<TAddr>> {
-        &mut self.members
-    }
-
     pub fn max_failures(&self) -> VotePower {
-        let power = self.total_power();
-        if power.is_zero() {
-            return VotePower::of(0);
-        }
-        (power - VotePower::of(1)) / VotePower::of(3)
+        max_failures_of(self.total_power())
     }
 
     /// Returns the quorum threshold $n - f$, where $n$ is the committee's total vote power and $f$ is the
     /// tolerated faulty power. This equals $2f + 1$ exactly when $n = 3f + 1$.
     pub fn quorum_threshold(&self) -> VotePower {
-        self.total_power() - self.max_failures()
+        quorum_threshold_of(self.total_power())
     }
 
     pub fn total_power(&self) -> VotePower {
@@ -78,7 +71,7 @@ impl<TAddr: PartialEq> Committee<TAddr> {
         if self.is_empty() {
             return 0;
         }
-        (self.len() + 1) / 3
+        (self.len() - 1) / 3
     }
 
     pub fn is_empty(&self) -> bool {
@@ -95,24 +88,23 @@ impl<TAddr: PartialEq> Committee<TAddr> {
     }
 
     pub fn contains_public_key(&self, public_key: &RistrettoPublicKeyBytes) -> bool {
-        // TODO(perf); O(n) lookup
-        self.members.iter().any(|member| *public_key == member.public_key)
+        self.index_of_public_key(public_key).is_some()
     }
 
     pub fn get_power_by_public_key(&self, public_key: &RistrettoPublicKeyBytes) -> Option<VotePower> {
-        // TODO(perf); O(n) lookup
+        self.index_of_public_key(public_key)
+            .map(|index| self.members[index].vote_power)
+    }
+
+    /// The position of the member with `public_key`, which is unique because a committee lists each public key once.
+    pub fn index_of_public_key(&self, public_key: &RistrettoPublicKeyBytes) -> Option<usize> {
         self.members
-            .iter()
-            .find(|m| m.public_key == *public_key)
-            .map(|m| m.vote_power)
+            .binary_search_by(|member| member.public_key.cmp(public_key))
+            .ok()
     }
 
     pub fn get(&self, index: usize) -> Option<&CommitteeMember<TAddr>> {
         self.members.get(index)
-    }
-
-    pub fn shuffle(&mut self) {
-        self.members.shuffle(&mut rand::rng());
     }
 
     pub fn shuffled(&self) -> impl Iterator<Item = &CommitteeMember<TAddr>> + '_ {
@@ -172,6 +164,18 @@ impl<TAddr: PartialEq> Committee<TAddr> {
 
     pub fn into_public_keys(self) -> impl Iterator<Item = RistrettoPublicKeyBytes> {
         self.members.into_iter().map(|m| m.public_key)
+    }
+}
+
+impl<TAddr: PartialEq> SigningCommittee for Committee<TAddr> {
+    fn len(&self) -> usize {
+        self.members.len()
+    }
+
+    fn member(&self, index: usize) -> Option<(&[u8], u64)> {
+        self.members
+            .get(index)
+            .map(|member| (member.public_key.as_bytes(), member.vote_power.value()))
     }
 }
 
@@ -250,15 +254,12 @@ impl CommitteeInfo {
     /// Returns the quorum threshold $n - f$, where $n$ is the committee's total vote power and $f$ is the
     /// tolerated faulty power. This equals $2f + 1$ exactly when $n = 3f + 1$.
     pub fn quorum_threshold(&self) -> VotePower {
-        self.total_power() - self.max_failures()
+        quorum_threshold_of(self.total_power())
     }
 
     /// Returns the maximum faulty vote power $f$ that this committee tolerates.
     pub fn max_failures(&self) -> VotePower {
-        if self.total_power().is_zero() {
-            return VotePower::zero();
-        }
-        (self.total_power() - VotePower::of(1)) / VotePower::of(3)
+        max_failures_of(self.total_power())
     }
 
     /// Returns the total voting power of the committee.
@@ -273,7 +274,7 @@ impl CommitteeInfo {
     pub fn max_failure_shard_group_members(&self) -> u32 {
         // max failures is < 1/3 of the total members
         // NOTE: this is not to be used as a threshold for quorum.
-        (self.num_shard_group_members + 1) / 3
+        self.num_shard_group_members.saturating_sub(1) / 3
     }
 
     pub fn num_preshards(&self) -> NumPreshards {
@@ -322,20 +323,59 @@ impl CommitteeInfo {
     }
 }
 
+/// $f = \lfloor (n - 1) / 3 \rfloor$, the faulty power a committee of total power $n$ tolerates.
+pub fn max_failures_of(total_power: VotePower) -> VotePower {
+    VotePower::of(total_power.value().saturating_sub(1) / 3)
+}
+
+/// $n - f$. $f \le n$, so the subtraction never saturates.
+pub fn quorum_threshold_of(total_power: VotePower) -> VotePower {
+    total_power.saturating_sub(max_failures_of(total_power))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn create_committee(size: usize) -> Committee<u32> {
         Committee::new(
-            (0..size as u32)
+            (0..size as u8)
                 .map(|c| CommitteeMember {
-                    address: c,
-                    public_key: RistrettoPublicKeyBytes::default(),
+                    address: u32::from(c),
+                    public_key: RistrettoPublicKeyBytes::from_bytes(&[c; 32]).unwrap(),
                     vote_power: VotePower::of(1),
                 })
                 .collect(),
         )
+    }
+
+    fn member(address: u32, key_byte: u8) -> CommitteeMember<u32> {
+        CommitteeMember {
+            address,
+            public_key: RistrettoPublicKeyBytes::from_bytes(&[key_byte; 32]).unwrap(),
+            vote_power: VotePower::of(u64::from(address)),
+        }
+    }
+
+    #[test]
+    fn it_orders_members_by_public_key() {
+        let committee = Committee::new(vec![member(1, 3), member(2, 1), member(3, 2)]);
+        assert_eq!(committee.address_iter().copied().collect::<Vec<_>>(), vec![2, 3, 1]);
+
+        let merged = [Committee::new(vec![member(1, 3)]), Committee::new(vec![member(2, 1)])]
+            .into_iter()
+            .collect::<Committee<_>>();
+        assert_eq!(merged.address_iter().copied().collect::<Vec<_>>(), vec![2, 1]);
+    }
+
+    #[test]
+    fn it_finds_members_by_public_key() {
+        let committee = Committee::new(vec![member(1, 3), member(2, 1), member(3, 2)]);
+        let key = |byte| RistrettoPublicKeyBytes::from_bytes(&[byte; 32]).unwrap();
+        assert_eq!(committee.index_of_public_key(&key(3)), Some(2));
+        assert_eq!(committee.get_power_by_public_key(&key(2)), Some(VotePower::of(3)));
+        assert!(committee.contains_public_key(&key(1)));
+        assert_eq!(committee.index_of_public_key(&key(4)), None);
     }
 
     mod select_n_starting_from {
@@ -381,6 +421,34 @@ mod tests {
                 .copied()
                 .collect::<Vec<_>>();
             assert!(selected.is_empty());
+        }
+    }
+
+    #[test]
+    fn it_computes_strict_one_third_max_node_failures() {
+        for (size, expected_failures) in [(0usize, 0usize), (1, 0), (2, 0), (3, 0), (4, 1), (5, 1), (6, 1), (7, 2)] {
+            let committee = create_committee(size);
+            assert_eq!(committee.max_node_failures(), expected_failures, "size={size}");
+            assert_eq!(
+                committee.max_failures().value() as usize,
+                expected_failures,
+                "size={size}"
+            );
+
+            let info = CommitteeInfo::new(
+                NumPreshards::P256,
+                size as u32,
+                1,
+                ShardGroup::new(1, 256),
+                Epoch(0),
+                VotePower::of(size as u64),
+            );
+            assert_eq!(
+                info.max_failure_shard_group_members() as usize,
+                expected_failures,
+                "size={size}"
+            );
+            assert_eq!(info.max_failures().value() as usize, expected_failures, "size={size}");
         }
     }
 }

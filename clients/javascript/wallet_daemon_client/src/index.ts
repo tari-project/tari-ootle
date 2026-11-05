@@ -20,12 +20,16 @@ import type {
   AccountsCreateStealthTransferStatementResponse,
   AccountSetDefaultRequest,
   AccountSetDefaultResponse,
+  AccountsExportViewKeyRequest,
+  AccountsExportViewKeyResponse,
   AccountsGetBalanceChangesRequest,
   AccountsGetBalanceChangesResponse,
   AccountsGetBalancesRequest,
   AccountsGetBalancesResponse,
   AccountsGetFaucetBalanceRequest,
   AccountsGetFaucetBalanceResponse,
+  AccountsImportViewOnlyRequest,
+  AccountsImportViewOnlyResponse,
   AccountsListRequest,
   AccountsListResponse,
   AccountsRenameRequest,
@@ -165,12 +169,20 @@ import type {
   TransactionWaitResultResponse,
   TransferNftRequest,
   TransferNftResponse,
+  ValidatorSetGetStatusRequest,
+  ValidatorSetGetStatusResponse,
   WalletGetInfoRequest,
   WalletGetInfoResponse,
   WebauthnAlreadyRegisteredRequest,
   WebauthnAlreadyRegisteredResponse,
   WebauthnFinishRegisterRequest,
   WebauthnFinishRegisterResponse,
+  WebauthnListPasskeysRequest,
+  WebauthnListPasskeysResponse,
+  WebauthnRemovePasskeyRequest,
+  WebauthnRemovePasskeyResponse,
+  WebauthnRenamePasskeyRequest,
+  WebauthnRenamePasskeyResponse,
   WebauthnStartAuthRequest,
   WebauthnStartAuthResponse,
   WebauthnStartRegisterRequest,
@@ -398,8 +410,20 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
     return this.sendRequest("wallet.get_info", {} as WalletGetInfoRequest);
   }
 
+  public validatorSetGetStatus(): Promise<ValidatorSetGetStatusResponse> {
+    return this.sendRequest("validator_set.get_status", {} as ValidatorSetGetStatusRequest);
+  }
+
   public accountsCreate(params: AccountsCreateRequest): Promise<AccountsCreateResponse> {
     return this.sendRequest("accounts.create", params);
+  }
+
+  public accountsImportViewOnly(params: AccountsImportViewOnlyRequest): Promise<AccountsImportViewOnlyResponse> {
+    return this.sendRequest("accounts.import_view_only", params);
+  }
+
+  public accountsExportViewKey(params: AccountsExportViewKeyRequest): Promise<AccountsExportViewKeyResponse> {
+    return this.sendRequest("accounts.export_view_key", params);
   }
 
   public accountsRename(params: AccountsRenameRequest): Promise<AccountsRenameResponse> {
@@ -644,6 +668,18 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public webauthnAuthStart(params: WebauthnStartAuthRequest): Promise<WebauthnStartAuthResponse> {
     return this.sendRequest("webauthn.auth_start", params);
+  }
+
+  public webauthnListPasskeys(params: WebauthnListPasskeysRequest = {}): Promise<WebauthnListPasskeysResponse> {
+    return this.sendRequest("webauthn.list_passkeys", params);
+  }
+
+  public webauthnRenamePasskey(params: WebauthnRenamePasskeyRequest): Promise<WebauthnRenamePasskeyResponse> {
+    return this.sendRequest("webauthn.rename_passkey", params);
+  }
+
+  public webauthnRemovePasskey(params: WebauthnRemovePasskeyRequest): Promise<WebauthnRemovePasskeyResponse> {
+    return this.sendRequest("webauthn.remove_passkey", params);
   }
 
   public stealthUtxosList(params: StealthUtxosListRequest): Promise<StealthUtxosListResponse> {

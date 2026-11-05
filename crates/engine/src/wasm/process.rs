@@ -61,7 +61,7 @@ use crate::{
     wasm::{
         InstanceResetError,
         LoadedWasmTemplate,
-        environment::{AllocPtr, MeteredInvocation, WasmEnv},
+        environment::{AllocPtr, MeteredInvocation, TemplatePanic, WasmEnv},
         error::WasmExecutionError,
         mem_writer::MemWriter,
         module::MainFunction,
@@ -69,7 +69,7 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::ootle::engine::wasm::process";
-/// Log target for everything a template itself writes: its `tari_debug` output and its panics.
+/// Log target for the panics a template reports.
 const WASM_DEBUG_LOG_TARGET: &str = "tari::ootle::wasm";
 
 pub struct WasmProcess {
@@ -88,7 +88,6 @@ impl WasmProcess {
         let imports = imports! {
             "env" => {
                 "tari_engine" => tari_engine,
-                "tari_debug" => Function::new_typed_with_env(store, &fn_env, debug_handler),
                 "on_panic" => Function::new_typed_with_env(store,&fn_env, on_panic_handler),
             }
         };
@@ -381,7 +380,7 @@ impl WasmProcess {
             }
         }
 
-        log::debug!(target: LOG_TARGET, "Engine call: {:?}", op);
+        log::trace!(target: LOG_TARGET, "Engine call: {:?}", op);
 
         let result = match op {
             EngineOp::EmitLog => Self::handle(&mut env, op, arg_ptr, arg_len, |state, arg: EmitLogArg| {
@@ -511,9 +510,10 @@ impl WasmProcess {
         let span = abi_metrics::Span::start();
         let decoded = {
             let (env_mut, mut store) = env.data_and_store_mut();
+            let interface = env_mut.state()?.interface();
+            interface.charge_engine_call()?;
             // An engine op's payload is whatever the guest wrote into its memory, decoded here on the
             // validator's own stack and outside the Wasmer meter, so it is charged for first.
-            let interface = env_mut.state()?.interface();
             // SAFETY: WasmProcess is not used concurrently and templates are not able to spawn threads
             unsafe {
                 env_mut.with_memory_slice(&mut store, arg_ptr, arg_len, |arg| {
@@ -532,19 +532,23 @@ impl WasmProcess {
         sample.handler_ns = span.finish();
 
         let span = abi_metrics::Span::start();
-        let len = encoded_len(&resp);
+        let mut response = Vec::with_capacity(encoded_len(&resp));
+        encode_into_writer(&resp, &mut response)?;
         sample.encode_ns = span.finish();
-        sample.resp_bytes = len;
+        sample.resp_bytes = response.len();
+
+        // The handler built the response outside the Wasmer meter, and a template pays the same for a
+        // call whatever it is answered with, so the response is charged for before it is handed over.
+        env.data().state()?.interface().charge_engine_response(&response)?;
 
         let span = abi_metrics::Span::start();
-        let ptr = Self::alloc_response(env, len)?;
+        let ptr = Self::alloc_response(env, response.len())?;
         sample.alloc_ns = span.finish();
 
-        // Encode response directly into the WASM memory. The WASM code is responsible for freeing it.
+        // The WASM code is responsible for freeing the response.
         let span = abi_metrics::Span::start();
         let (env_mut, mut store) = env.data_and_store_mut();
-        let mut writer = env_mut.memory_writer(&mut store, ptr)?;
-        encode_into_writer(&resp, &mut writer)?;
+        env_mut.memory_writer(&mut store, ptr)?.write_all_to_mem(&response)?;
         sample.encode_ns += span.finish();
 
         abi_metrics::record_engine_op(op, sample);
@@ -609,10 +613,10 @@ impl WasmProcess {
     ) -> Result<IndexedValue, WasmExecutionError> {
         let main_name = format!("{}_main", self.module.template_name());
         let func: MainFunction = self.instance.exports.get_typed_function(store, &main_name)?;
-        if func_def.arguments.len() != args.len() {
+        if func_def.num_call_args() != args.len() {
             return Err(WasmExecutionError::InvalidArgumentCount {
                 name: func_def.name.clone(),
-                expected: func_def.arguments.len(),
+                expected: func_def.num_call_args(),
                 actual: args.len(),
             });
         }
@@ -686,7 +690,8 @@ impl WasmProcess {
                 Ok(value)
             },
             InvocationOutcome::Trapped(err) => {
-                if let Some(message) = self.env_mut(store).take_last_panic_message() {
+                if let Some(TemplatePanic { message, line, col }) = self.env_mut(store).take_last_panic() {
+                    log::debug!(target: WASM_DEBUG_LOG_TARGET, "📣 PANIC: ({}:{}) {}", line, col, message);
                     return Err(WasmExecutionError::Panic {
                         message: expand_panic_message(func_def, message),
                         runtime_error: err,
@@ -809,30 +814,6 @@ fn take_refused_engine_call<T>(env: &mut WasmEnv<T>) -> Result<(), WasmExecution
     }
 }
 
-/// `tari_debug` is a template's only way to write to the validator's log. What it writes goes
-/// through `log` rather than straight to stderr, is bounded in size and in count, and — like an
-/// engine call — is answered only while a template function invocation is in flight.
-fn debug_handler<T: Send + 'static>(mut env: FunctionEnvMut<WasmEnv<T>>, arg_ptr: WasmPtr<u8>, arg_len: u32) {
-    let (state, mut store) = env.data_and_store_mut();
-    if !state.is_in_template_invocation() ||
-        !log::log_enabled!(target: WASM_DEBUG_LOG_TARGET, log::Level::Debug) ||
-        !state.allow_debug_message()
-    {
-        return;
-    }
-
-    let len = arg_len.min(limits::ENGINE_LIMITS.max_log_size_bytes as u32);
-
-    // SAFETY: WasmProcess is not used concurrently
-    unsafe {
-        if let Err(err) = state.with_memory_slice(&mut store, arg_ptr, len, |msg| {
-            log::debug!(target: WASM_DEBUG_LOG_TARGET, "{}", String::from_utf8_lossy(msg));
-        }) {
-            log::error!(target: WASM_DEBUG_LOG_TARGET, "Failed to read from memory: {}", err);
-        }
-    }
-}
-
 /// Records the panic a template reports through `on_panic`, which `WasmProcess::invoke` uses to
 /// report the trap that follows it. Only a template function invocation may record one: the
 /// `tari_alloc`/`tari_free` the engine drives around a call are template code too, and a panic
@@ -843,10 +824,10 @@ fn debug_handler<T: Send + 'static>(mut env: FunctionEnvMut<WasmEnv<T>>, arg_ptr
 /// a plain runtime error with no message attached.
 ///
 /// `on_panic` is a host call, not a trap, so a template may make it any number of times in one
-/// invocation. Only the first report is kept, it is read no further than
-/// `max_panic_message_size`, and it is logged at debug level only: the message reaches the
-/// transaction as its reject reason, and anything more would be validator work the template gets
-/// for the price of a host call.
+/// invocation, and may go on to return normally. Only the first report is kept and it is read no
+/// further than `max_panic_message_size`. It is logged, at debug level, only by the trap that ends
+/// the call: the message reaches the transaction as its reject reason, and anything more would be
+/// validator work the template gets for the price of a host call.
 fn on_panic_handler<T: Send + 'static>(
     mut env: FunctionEnvMut<WasmEnv<T>>,
     msg_ptr: WasmPtr<u8>,
@@ -881,6 +862,5 @@ fn on_panic_handler<T: Send + 'static>(
         )
     });
 
-    log::debug!(target: WASM_DEBUG_LOG_TARGET, "📣 PANIC: ({}:{}) {}", line, col, message);
-    state.set_last_panic(message);
+    state.set_last_panic(TemplatePanic { message, line, col });
 }

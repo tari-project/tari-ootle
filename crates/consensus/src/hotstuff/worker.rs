@@ -2,17 +2,19 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    collections::HashSet,
     fmt::{Debug, Formatter},
     iter,
     time::{Duration, Instant},
 };
 
 use log::*;
-use tari_common_types::types::FixedHash;
 use tari_consensus_types::{
+    BlockId,
     HighPc,
     HighTc,
     HighestSeenBlock,
+    LastExecuted,
     LastProposed,
     LastSentVote,
     LeafBlock,
@@ -40,6 +42,7 @@ use tari_ootle_storage::{
         EpochCheckpoint,
         ForeignProposalRecord,
         NoVoteReason,
+        ProposalOrigin,
         SubstateRecord,
         TransactionPool,
         TransactionRecord,
@@ -47,6 +50,7 @@ use tari_ootle_storage::{
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_shutdown::ShutdownSignal;
+use tari_sidechain::FixedHash;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::{
     sync::{broadcast, mpsc},
@@ -63,6 +67,7 @@ use super::{
 };
 use crate::{
     hotstuff::{
+        epoch_end_drain::EpochEndDrain,
         epoch_gc::EpochGc,
         epoch_state::EpochState,
         error::HotStuffError,
@@ -84,7 +89,7 @@ use crate::{
         pacemaker_handle::PaceMakerHandle,
         state_tree_gc::StateTreeGc,
         substate_store::ShardedStateTree,
-        transaction_manager::ConsensusTransactionManager,
+        transaction_manager::{ConsensusTransactionManager, UncommittedTemplateStore},
         vote_collector::{ProposalVoteCollector, TimeoutVoteCollector},
     },
     messages::{HotstuffMessage, ProposalMessage},
@@ -93,6 +98,19 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::worker";
+
+/// See [`HotstuffWorker::new_transactions_at_epoch_end`].
+#[derive(Debug, Clone)]
+pub struct NewTransactionsAtEpochEnd {
+    epoch: Epoch,
+    transaction_ids: Vec<TransactionId>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ClearedTransactionPool {
+    pub num_removed: usize,
+    pub num_resequenced: usize,
+}
 
 /// Reason the hotstuff worker loop exited cleanly (i.e. returned Ok).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,11 +143,14 @@ pub struct HotstuffWorker<TConsensusSpec: ConsensusSpec> {
     worker_state: WorkerState<TConsensusSpec::Addr>,
 
     state_store: TConsensusSpec::StateStore,
+    uncommitted_templates: UncommittedTemplateStore,
     leader_strategy: TConsensusSpec::LeaderStrategy,
     transaction_pool: TransactionPool<TConsensusSpec::StateStore>,
 
     /// Epoch to switch to (Epoch, activated_at)
     next_epoch: Option<(Epoch, Instant)>,
+    /// Whether the end of the given epoch changes the number of committees. Cached for the epoch being ended.
+    next_epoch_changes_layout: Option<(Epoch, bool)>,
     epoch_manager: TConsensusSpec::EpochManager,
     pacemaker_worker: Option<PaceMaker>,
     pacemaker: PaceMakerHandle,
@@ -164,13 +185,18 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             signing_service.clone(),
             hooks.clone(),
         );
-        let timeout_vote_collector =
-            TimeoutVoteCollector::new(state_store.clone(), epoch_manager.clone(), signing_service.clone());
+        let timeout_vote_collector = TimeoutVoteCollector::new(
+            config.network,
+            state_store.clone(),
+            epoch_manager.clone(),
+            signing_service.clone(),
+        );
         let transaction_manager = ConsensusTransactionManager::new(
             transaction_executor.clone(),
             config.consensus_constants.max_transaction_validity_epochs,
             config.consensus_constants.max_block_pledge_bytes,
         );
+        let uncommitted_templates = transaction_manager.uncommitted_templates().clone();
 
         Self {
             local_validator_addr: local_validator_addr.clone(),
@@ -264,11 +290,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             worker_state: WorkerState::default(),
 
             state_store,
+            uncommitted_templates,
             leader_strategy,
             epoch_manager,
             transaction_pool,
 
             next_epoch: None,
+            next_epoch_changes_layout: None,
             pacemaker: pacemaker.clone_handle(),
             pacemaker_worker: Some(pacemaker),
             hooks,
@@ -346,6 +374,14 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let local_committee_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
 
         self.create_genesis_block_if_required(current_epoch, current_epoch_hash, local_committee_info.shard_group())?;
+        // Blocks saved before a restart are still uncommitted, and their templates are in no durable state.
+        self.state_store.with_read_tx(|tx| {
+            if let Some(committed) = LastExecuted::get(tx, current_epoch).optional()? {
+                self.uncommitted_templates.prune_to(committed.epoch, committed.height);
+                self.uncommitted_templates.rebuild(tx, &committed.block_id)?;
+            }
+            Ok::<_, HotStuffError>(())
+        })?;
         // Resume pacemaker from the last epoch/height
         let (current_height, leaf_height) = self.state_store.with_read_tx(|tx| {
             let height = get_highest_seen_justified_view(tx, current_epoch)?;
@@ -387,6 +423,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let _cancel_state_tree_gc_task_on_drop = StateTreeGc::new(
             self.state_store.clone(),
             epoch_state.local_committee_info.num_preshards(),
+            self.config.pinned_checkpoint_epochs,
         )
         .do_work_periodically(self.config.state_tree_cleanup_interval);
 
@@ -577,6 +614,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 from.clone(),
                 msg,
                 &self.on_receive_new_transaction,
+                &mut self.on_receive_foreign_proposal,
             )
             .await?
         {
@@ -592,17 +630,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             MessageValidationResult::RequestedTransactions {
                 from,
                 block_id,
+                epoch,
                 transactions,
+                remaining,
             } => {
                 let result = self
-                    .on_receive_new_transaction
-                    .process_requested(
-                        epoch_state.epoch(),
-                        from,
-                        block_id,
-                        transactions,
-                        epoch_state.local_committee_info(),
-                    )
+                    .on_requested_transactions(epoch_state, from, block_id, epoch, transactions, remaining)
                     .await;
                 if let Err(e) = log_err("on_receive_new_transaction", result) {
                     return self.handle_hotstuff_error(current_height, epoch_state, None, e).await;
@@ -662,6 +695,36 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         }
     }
 
+    /// Processes the transactions a peer returned for a missing-transactions request and asks the same peer for the
+    /// rest. A response is bounded in bytes, so the peer may hold more of the request than it sent. Each follow-up
+    /// asks for strictly fewer transactions, and a response that returns nothing ends the exchange.
+    async fn on_requested_transactions(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        from: TConsensusSpec::Addr,
+        block_id: BlockId,
+        epoch: Epoch,
+        transactions: Vec<Transaction>,
+        remaining: HashSet<TransactionId>,
+    ) -> Result<(), HotStuffError> {
+        let made_progress = !transactions.is_empty();
+        self.on_receive_new_transaction
+            .process_requested(
+                epoch_state.epoch(),
+                from.clone(),
+                block_id,
+                transactions,
+                epoch_state.local_committee_info(),
+            )
+            .await?;
+        if made_progress && !remaining.is_empty() {
+            self.on_message_validate
+                .request_missing_transactions(from, block_id, epoch, remaining)
+                .await?;
+        }
+        Ok(())
+    }
+
     async fn on_new_transaction(
         &mut self,
         transaction: Transaction,
@@ -716,9 +779,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         current_height: NodeHeight,
         transaction_ids: I,
     ) -> Result<bool, HotStuffError> {
-        let (local_proposals, foreign_proposals) = self
-            .on_message_validate
-            .update_parked_blocks(current_height, transaction_ids)?;
+        let (local_proposals, foreign_proposals) = self.on_message_validate.update_parked_blocks(transaction_ids)?;
 
         let is_any_block_unparked = !local_proposals.is_empty() || !foreign_proposals.is_empty();
 
@@ -734,8 +795,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             }
         }
 
-        for msg in local_proposals {
-            if let Err(e) = self.on_proposal_message(epoch_state, current_height, msg).await {
+        for (msg, origin) in local_proposals {
+            if let Err(e) = self.on_proposal_message(epoch_state, current_height, msg, origin).await {
                 self.on_failure("check_if_block_can_be_unparked -> on_proposal_message", &e)
                     .await;
                 return Err(e);
@@ -1078,17 +1139,27 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             epoch_state.local_committee_info().shard_group()
         );
 
-        let propose_now = self.state_store.with_read_tx(|tx| {
+        let epoch_end_drain = self.epoch_end_drain(epoch_state).await?;
+        let (propose_now, is_epoch_end_held) = self.state_store.with_read_tx(|tx| {
             let highest_block = HighestSeenBlock::get(tx, epoch_state.epoch())?;
             // Propose quickly if there are UTXOs to mint or transactions to propose
             let propose_now = ForeignProposalRecord::has_unconfirmed(tx, epoch_state.epoch())? ||
+                self.transaction_pool.has_ready_or_pending_transaction_updates(
+                    tx,
+                    highest_block.block_id(),
+                    &epoch_end_drain
+                        .proposal_filter(epoch_state.epoch(), epoch_state.local_committee_info().shard_group()),
+                )?;
+            let is_epoch_end_held = epoch_end_drain.is_active() &&
                 self.transaction_pool
-                    .has_ready_or_pending_transaction_updates(tx, highest_block.block_id())?;
+                    .any_in_chain(tx, highest_block.block_id(), |rec| {
+                        epoch_end_drain.holds_epoch_end_for(rec.current_stage())
+                    })?;
 
-            Ok::<_, HotStuffError>(propose_now)
+            Ok::<_, HotStuffError>((propose_now, is_epoch_end_held))
         })?;
 
-        let propose_epoch_end = self.can_propose_epoch_end(epoch_state);
+        let propose_epoch_end = self.can_propose_epoch_end(epoch_state) && !is_epoch_end_held;
         // Propose quickly if we should end the epoch (i.e base layer epoch > pacemaker epoch)
         if !propose_now && !propose_epoch_end {
             info!(target: LOG_TARGET, "[on_beat] No transactions to propose. Waiting for a timeout.");
@@ -1210,7 +1281,40 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         Ok(())
     }
 
-    /// Remove all records from the transaction pool, returning the number removed.
+    /// The transactions in the `New` stage of the pool that no shard group has prepared, if this node has committed the
+    /// end of its leaf's epoch and has not opened the next epoch.
+    ///
+    /// A validator whose shard group moves at an epoch boundary stops there and state-syncs its new shard group, and
+    /// [`Self::clear_transaction_pool`] then drops its pool. A transaction still `New` at that point has taken no locks
+    /// and has not been prepared by this node's shard group. This includes the cross-shard transactions that the
+    /// [`EpochEndDrain`] held back. Nothing else holds them for the new shard group, so they are sequenced again once
+    /// the sync completes.
+    ///
+    /// A transaction whose evidence shows a foreign shard group has prepared it is left out. That group still has it
+    /// in `LocalPrepared`, and its own drain aborts it, because this shard group never sends the LocalPrepare it is
+    /// waiting for. Sequenced again, the transaction would start over with no record of that, and the shard group
+    /// taking over the foreign shards, which holds it as finalized, would ignore its LocalPrepare.
+    pub fn new_transactions_at_epoch_end(&self) -> Result<Option<NewTransactionsAtEpochEnd>, HotStuffError> {
+        self.state_store.with_read_tx(|tx| {
+            let checkpoint_epoch = EpochCheckpoint::get_last_checkpoint(tx)
+                .optional()?
+                .map(|checkpoint| checkpoint.epoch());
+            let leaf_epoch = LeafBlock::get_any(tx).optional()?.map(|leaf| leaf.epoch());
+            let Some(epoch) = checkpoint_epoch.filter(|epoch| Some(*epoch) == leaf_epoch) else {
+                return Ok(None);
+            };
+            let transaction_ids = self
+                .transaction_pool
+                .get_all(tx, usize::MAX)?
+                .into_iter()
+                .filter(|rec| rec.committed_stage().is_new() && !rec.evidence().some_shard_groups_prepared())
+                .map(|rec| *rec.id())
+                .collect();
+            Ok::<_, HotStuffError>(Some(NewTransactionsAtEpochEnd { epoch, transaction_ids }))
+        })
+    }
+
+    /// Remove all records from the transaction pool, then sequence `at_epoch_end` again for the epoch after it.
     ///
     /// Called after a state sync. State sync only rewrites the state store, not the (persisted)
     /// consensus transaction pool, so the pool can be left holding transactions the freshly-synced
@@ -1218,14 +1322,50 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     /// committee finalised and removed it, so it can never gather a QC again and every block carrying
     /// it is rejected (`TransactionNotInPool`). Clearing lets the node rebuild its pool from fresh
     /// mempool/consensus activity against the synced state.
+    ///
+    /// `at_epoch_end` (see [`Self::new_transactions_at_epoch_end`]) is sequenced again only if the synced state is the
+    /// end of the same epoch. A sync that skipped past it may have skipped their finalization too. Each is validated
+    /// as if it had just arrived, against this node's shard group in the next epoch.
     // TODO: the transaction pool only holds pending (derived) state and should not be persisted at
     //       all — that would remove this whole class of pool-vs-state-store divergence.
-    pub fn clear_transaction_pool(&self) -> Result<usize, HotStuffError> {
+    pub async fn clear_transaction_pool(
+        &self,
+        at_epoch_end: Option<NewTransactionsAtEpochEnd>,
+    ) -> Result<ClearedTransactionPool, HotStuffError> {
+        let mut resequence = None;
+        if let Some(at_epoch_end) = at_epoch_end {
+            let synced_epoch = self
+                .state_store
+                .with_read_tx(|tx| EpochCheckpoint::get_last_checkpoint(tx).optional())?
+                .map(|checkpoint| checkpoint.epoch());
+            if synced_epoch == Some(at_epoch_end.epoch) {
+                let next_epoch = at_epoch_end.epoch + Epoch(1);
+                if let Some(committee_info) = self
+                    .epoch_manager
+                    .get_local_committee_info(next_epoch)
+                    .await
+                    .optional()?
+                {
+                    resequence = Some((next_epoch, committee_info, at_epoch_end.transaction_ids));
+                }
+            }
+        }
+
         self.state_store.with_write_tx(|tx| {
             let recs = self.transaction_pool.get_all(&**tx, usize::MAX)?;
             let ids = recs.iter().map(|rec| rec.id());
             let removed = self.transaction_pool.remove_all(tx, ids)?;
-            Ok::<_, HotStuffError>(removed.len())
+            let num_resequenced = match resequence {
+                Some((epoch, committee_info, ids)) => {
+                    self.on_receive_new_transaction
+                        .resequence_known_transactions(tx, epoch, ids, &committee_info)?
+                },
+                None => 0,
+            };
+            Ok::<_, HotStuffError>(ClearedTransactionPool {
+                num_removed: removed.len(),
+                num_resequenced,
+            })
         })
     }
 
@@ -1391,6 +1531,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             );
         }
 
+        let epoch_end_drain = self.epoch_end_drain(epoch_state).await?;
+
         self.on_propose
             .handle(
                 epoch_state,
@@ -1400,10 +1542,49 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 dummy_block,
                 propose_high_tc,
                 propose_epoch_end,
+                epoch_end_drain,
             )
             .await?;
 
         Ok(())
+    }
+
+    /// The drain of cross-shard transactions this node applies when proposing in `epoch_state`'s epoch. See
+    /// [`EpochEndDrain`].
+    async fn epoch_end_drain(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+    ) -> Result<EpochEndDrain, HotStuffError> {
+        let epoch = epoch_state.epoch();
+        let Some((_, known_at)) = self.next_epoch.filter(|(e, _)| *e > epoch) else {
+            return Ok(EpochEndDrain::Inactive);
+        };
+
+        let changes_layout = match self.next_epoch_changes_layout {
+            Some((ending, changes_layout)) if ending == epoch => changes_layout,
+            _ => {
+                let next_num_committees = self.epoch_manager.get_num_committees(epoch + Epoch(1)).await?;
+                let changes_layout = next_num_committees != epoch_state.local_committee_info().num_committees();
+                if changes_layout {
+                    info!(
+                        target: LOG_TARGET,
+                        "🌊 The number of committees changes from {} to {next_num_committees} at the end of {epoch}. \
+                         Draining cross-shard transactions before proposing EndEpoch.",
+                        epoch_state.local_committee_info().num_committees(),
+                    );
+                }
+                self.next_epoch_changes_layout = Some((epoch, changes_layout));
+                changes_layout
+            },
+        };
+
+        if !changes_layout {
+            return Ok(EpochEndDrain::Inactive);
+        }
+        Ok(EpochEndDrain::after(
+            Instant::now().saturating_duration_since(known_at),
+            self.config.epoch_end_drain_period,
+        ))
     }
 
     async fn dispatch_hotstuff_message(
@@ -1422,7 +1603,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             ),
             HotstuffMessage::Proposal(msg) => log_err(
                 "on_receive_local_proposal",
-                self.on_proposal_message(epoch_state, current_height, *msg).await,
+                self.on_proposal_message(epoch_state, current_height, *msg, ProposalOrigin::Live)
+                    .await,
             ),
             HotstuffMessage::ForeignProposal(msg) => log_err(
                 "on_receive_foreign_proposal (received)",
@@ -1433,7 +1615,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             HotstuffMessage::ForeignProposalNotification(msg) => log_err(
                 "on_receive_foreign_proposal (notification)",
                 self.on_receive_foreign_proposal
-                    .handle_notification_received(from, epoch_state.epoch(), msg, epoch_state.local_committee_info())
+                    .handle_notification_received(from, msg, epoch_state.local_committee_info())
                     .await,
             ),
             HotstuffMessage::ForeignProposalRequest(msg) => log_err(
@@ -1446,10 +1628,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     .handle(from, current_height, epoch_state, msg)
                     .await,
             ),
-            HotstuffMessage::MissingTransactionsRequest(msg) => log_err(
-                "on_receive_request_missing_transactions",
-                self.on_receive_request_missing_txs.handle(from, msg).await,
-            ),
+            HotstuffMessage::MissingTransactionsRequest(msg) => {
+                self.on_receive_request_missing_txs.handle(from, msg);
+                Ok(())
+            },
             // Validation decodes a response and hands its transactions over as `RequestedTransactions`, so a
             // response is never dispatched as a message.
             HotstuffMessage::MissingTransactionsResponse(msg) => {
@@ -1465,11 +1647,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 Ok(())
             },
             // Catch-up blocks reach here already past the view filter (see `msg_relative_view`) and
-            // are processed by the same block-import path as live proposals; `on_proposal_message`
-            // also drives the catch-up re-request loop.
+            // are processed by the same block-import path as live proposals, without a vote;
+            // `on_proposal_message` also drives the catch-up re-request loop.
             HotstuffMessage::CatchUpSyncResponse(msg) => log_err(
                 "on_receive_catch_up_sync_response",
-                self.on_proposal_message(epoch_state, current_height, *msg).await,
+                self.on_proposal_message(epoch_state, current_height, *msg, ProposalOrigin::CatchUp)
+                    .await,
             ),
         }
     }
@@ -1479,13 +1662,15 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         current_height: NodeHeight,
         msg: ProposalMessage,
+        origin: ProposalOrigin,
     ) -> Result<(), HotStuffError> {
         let proposed_by = *msg.block.proposed_by();
         match log_err(
             "on_receive_local_proposal",
-            self.on_receive_local_proposal.handle(epoch_state, msg).await,
+            self.on_receive_local_proposal.handle(epoch_state, msg, origin).await,
         ) {
             Ok(no_vote) => {
+                let current_height = self.pacemaker.current_view().get_height();
                 if let Some(mut catch_up) = self.worker_state.catch_up.take() {
                     if current_height >= catch_up.expected_batch_height {
                         if catch_up.set_next_batch(current_height, self.config.catch_up_request_timeout) {

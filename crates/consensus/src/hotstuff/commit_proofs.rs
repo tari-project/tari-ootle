@@ -17,9 +17,8 @@ use tari_sidechain::{
     SidechainBlockCommitProof,
     SidechainBlockHeader,
     ValidatorBlockSignature,
-    ValidatorQcSignature,
 };
-use tari_template_lib_types::crypto::SchnorrSignatureBytes;
+use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 
 use crate::hotstuff::HotStuffError;
 
@@ -223,7 +222,7 @@ pub fn convert_block_to_sidechain_block_header(header: &BlockHeader) -> Result<S
         })?,
         state_merkle_root: *header.state_merkle_root(),
         command_merkle_root: *header.command_merkle_root(),
-        transaction_merkle_root: header.transaction_merkle_root().copied(),
+        transaction_merkle_root: *header.transaction_merkle_root(),
         metadata_hash: header.calculate_metadata_hash(),
         signature,
         accumulated_data: (*header.accumulated_data()).into(),
@@ -243,30 +242,13 @@ fn convert_qc_to_proof_element(
             epoch: qc.epoch().as_u64(),
             height: qc.height().as_u64(),
             protocol_version: justified.header().protocol_version().as_u32(),
-            signatures: qc
-                .signatures()
-                .iter()
-                .map(|s| {
-                    Ok(ValidatorQcSignature {
-                        public_key: CompressedPublicKey::from_canonical_bytes(s.public_key.as_bytes()).map_err(
-                            |_| {
-                                HotStuffError::InvariantError(format!(
-                                    "RistrettoPublicKey non-canonical bytes for public key, in \
-                                     convert_qc_to_proof_element ({:?})",
-                                    s.public_key,
-                                ))
-                            },
-                        )?,
-                        signature: convert_validator_block_signature(&s.signature)?,
-                    })
-                })
-                .collect::<Result<_, HotStuffError>>()?,
+            signatures: qc.signatures().clone(),
             decision: qc.decision(),
         },
     ))
 }
 
-fn convert_validator_block_signature(
+pub(crate) fn convert_validator_block_signature(
     signature: &SchnorrSignatureBytes,
 ) -> Result<ValidatorBlockSignature, HotStuffError> {
     let public_nonce =
@@ -286,9 +268,15 @@ fn convert_validator_block_signature(
     Ok(ValidatorBlockSignature::new(public_nonce, signature))
 }
 
+/// The inverse of [`convert_validator_block_signature`].
+pub(crate) fn to_signature_bytes(signature: &ValidatorBlockSignature) -> Option<SchnorrSignatureBytes> {
+    let public_nonce = RistrettoPublicKeyBytes::from_bytes(signature.get_compressed_public_nonce().as_bytes()).ok()?;
+    let signature = Scalar32Bytes::from_bytes(signature.get_signature().as_bytes()).ok()?;
+    Some(SchnorrSignatureBytes::new(public_nonce, signature))
+}
+
 #[cfg(test)]
 mod tests {
-    use tari_common_types::types::FixedHash;
     use tari_consensus_types::{
         Decision,
         ProposalCertificate,
@@ -311,10 +299,10 @@ mod tests {
     use tari_ootle_storage::{
         StateStore,
         StateStoreWriteTransaction,
-        consensus_models::{BlockCommands, Command, LocalOnlyAtom, MultiShardAtom},
+        consensus_models::{BlockCommands, Command, LocalOnlyAtom, LockedEpoch, MultiShardAtom},
     };
     use tari_ootle_transaction::{Network, TransactionId};
-    use tari_sidechain::{ProposalVoteMessage, QuorumDecision, ValidatorQcSignature, check_proof_elements};
+    use tari_sidechain::{FixedHash, ProposalVoteMessage, QuorumDecision, check_proof_structure};
     use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 
     use super::*;
@@ -337,7 +325,7 @@ mod tests {
             block.height(),
             block.epoch(),
             shard_group(),
-            vec![],
+            ProposalCertificate::genesis_signatures(),
             QuorumDecision::Accept,
         )
     }
@@ -401,17 +389,9 @@ mod tests {
         (store, dir)
     }
 
-    /// Runs the proof through the sidechain verifier's structural checks. The certificates carry no signatures,
-    /// so a zero quorum threshold exercises everything but signature verification.
+    /// Runs the proof through the sidechain verifier's structural checks. The certificates carry no signatures.
     fn assert_verifies(proof: &SidechainBlockCommitProof) {
-        check_proof_elements(
-            &proof.header,
-            &proof.proof_elements,
-            &|_| Ok(true),
-            QuorumDecision::Accept,
-            0,
-        )
-        .unwrap();
+        check_proof_structure(&proof.header, &proof.proof_elements).unwrap();
     }
 
     fn qc_element_ids(proof: &SidechainBlockCommitProof) -> Vec<Vec<FixedHash>> {
@@ -515,14 +495,14 @@ mod tests {
                 evidence: Default::default(),
                 transaction_fee: 0,
                 leader_fee: None,
+                fee_intent_only: false,
+                locked_epoch: LockedEpoch::new(Epoch(1), Default::default(), Default::default()),
             }),
         ])
         .unwrap();
-        for protocol_version in [ProtocolVersion::V0, ProtocolVersion::V1, ProtocolVersion::V2] {
-            for timeout_certificate_id in [None, Some(TcId::from([4u8; 32]))] {
-                for commands in [BlockCommands::empty(), finalizing.clone()] {
-                    assert_hashes_identically_to_sidechain_header(protocol_version, timeout_certificate_id, &commands);
-                }
+        for timeout_certificate_id in [None, Some(TcId::from([4u8; 32]))] {
+            for commands in [BlockCommands::empty(), finalizing.clone()] {
+                assert_hashes_identically_to_sidechain_header(ProtocolVersion::V0, timeout_certificate_id, &commands);
             }
         }
     }
@@ -540,7 +520,7 @@ mod tests {
             NodeHeight(1),
             Epoch(1),
             shard_group,
-            vec![],
+            ProposalCertificate::genesis_signatures(),
             QuorumDecision::Accept,
         );
 
@@ -585,18 +565,20 @@ mod tests {
             ValidatorSchnorrSignature::sign_with_nonce_and_message(&secret, nonce, message.to_signature_message())
                 .expect("signing is infallible for a valid key");
 
-        let qc_signature = ValidatorQcSignature {
-            public_key: CompressedPublicKey::from_canonical_bytes(public.as_bytes()).unwrap(),
-            signature: ValidatorBlockSignature::new(
-                CompressedPublicKey::from_canonical_bytes(signature.get_public_nonce().as_bytes()).unwrap(),
-                signature.get_signature().clone(),
-            ),
+        let qc_signature = ValidatorBlockSignature::new(
+            CompressedPublicKey::from_canonical_bytes(signature.get_public_nonce().as_bytes()).unwrap(),
+            signature.get_signature().clone(),
+        )
+        .to_schnorr_signature()
+        .unwrap();
+        let verifies_under = |version: u32| {
+            let message = ProposalVoteMessage::new(version, &block_id, decision, epoch, height).calculate_hash();
+            qc_signature.verify(&public, message)
         };
 
-        assert!(qc_signature.verify(protocol_version.as_u32(), &block_id, decision, epoch, height));
+        assert!(verifies_under(protocol_version.as_u32()));
         // The version selects the message, so a certificate cannot claim a version its members did not sign under.
-        let other_version = protocol_version.as_u32() ^ 1;
-        assert!(!qc_signature.verify(other_version, &block_id, decision, epoch, height));
+        assert!(!verifies_under(protocol_version.as_u32() ^ 1));
     }
 
     fn assert_hashes_identically_to_sidechain_header(
@@ -620,7 +602,7 @@ mod tests {
             proposed_by: Default::default(),
             state_merkle_root: Default::default(),
             command_merkle_root: *block.command_merkle_root(),
-            transaction_merkle_root: block.transaction_merkle_root().copied(),
+            transaction_merkle_root: *block.transaction_merkle_root(),
             signature: ValidatorBlockSignature::new(
                 CompressedPublicKey::from_canonical_bytes(block.signature().unwrap().public_nonce().as_bytes())
                     .unwrap(),

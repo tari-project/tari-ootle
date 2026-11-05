@@ -6,7 +6,6 @@ use std::collections::HashSet;
 use axum::{
     Extension,
     Json,
-    extract::Query,
     http::{
         HeaderValue,
         header::{self, HeaderMap},
@@ -14,13 +13,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use log::*;
-use tari_indexer_client::types::{
-    GetUtxoUpdatesRequest,
-    GetUtxosRequest,
-    GetUtxosResponse,
-    ListUtxosRequest,
-    ListUtxosResponse,
-};
+use tari_indexer_client::types::{GetUtxoUpdatesRequest, GetUtxosRequest, GetUtxosResponse};
 use tari_ootle_common_types::NumPreshards;
 
 use crate::rest_api::{
@@ -31,6 +24,10 @@ use crate::rest_api::{
 };
 
 const LOG_TARGET: &str = "tari::ootle::indexer::rest_api::handlers::utxos";
+
+/// The most unspent UTXOs one `/utxos/fetch` response returns. Any number of UTXOs may share a tag and nonce pair, so
+/// a request for at most 1000 pairs may match more.
+const MAX_FETCHED_UTXOS: u32 = 1000;
 
 #[utoipa::path(post, path = "/utxos/stream", description = "Streams UTXO updates",
     request_body = GetUtxoUpdatesRequest,
@@ -105,7 +102,7 @@ pub async fn stream_utxo_updates(
         }
     }
 
-    let stream = UtxoUpdateStream::new(context.substate_manager().clone(), req, encoder);
+    let stream = UtxoUpdateStream::new(context.read_only_store().clone(), req, encoder);
     let mut response = stream.into_response();
     // The body encoding is negotiated from `Accept`, so a cache keyed on the URL alone would serve
     // protobuf bytes to a client that asked for JSON.
@@ -119,7 +116,7 @@ pub async fn stream_utxo_updates(
 #[utoipa::path(
     post,
     path = "/utxos/fetch",
-    description = "Gets full UTXO data for a list of UTXO IDs",
+    description = "Gets full UTXO data for a list of tag and nonce pairs, and which of the pairs are spent or burnt",
     request_body = GetUtxosRequest,
     responses(
         (status = 200, description = "UTXO details", body = GetUtxosResponse),
@@ -134,36 +131,26 @@ pub async fn fetch_utxos(
     if req.tag_and_nonce_pairs.len() > 1000 {
         return Err(ErrorResponse::bad_request("cannot query more than 1000 UTXOs"));
     }
-    let utxos = context
+    if !req.unspent_at.is_empty() && req.unspent_at.len() != req.tag_and_nonce_pairs.len() {
+        return Err(ErrorResponse::bad_request(
+            "unspent_at must be empty or hold one entry for each tag and nonce pair",
+        ));
+    }
+    let fetched = context
         .substate_manager()
-        .get_unspent_utxos(&req.resource_address, &req.tag_and_nonce_pairs)
+        .fetch_utxos(
+            &req.resource_address,
+            &req.tag_and_nonce_pairs,
+            &req.unspent_at,
+            req.cursor,
+            MAX_FETCHED_UTXOS,
+        )
         .await
         .map_err(ErrorResponse::anyhow)?;
 
-    Ok(Json(GetUtxosResponse { utxos }))
-}
-
-#[utoipa::path(get, path = "/utxos", description = "List full UTXO data",
-responses(
-    (status = 200, description = "List of UTXOs", body = ListUtxosResponse),
-    (status = BAD_REQUEST, description = "Invalid request parameters", body = ErrorResponse),
-    (status = INTERNAL_SERVER_ERROR, description = "Failed to list UTXOs", body = ErrorResponse),
-))]
-pub async fn list_utxos(
-    Extension(context): Extension<HandlerContext>,
-    Query(req): Query<ListUtxosRequest>,
-) -> HandlerResult<Json<ListUtxosResponse>> {
-    if req.limit == 0 {
-        return Err(ErrorResponse::bad_request("limit must be greater than 0"));
-    }
-    if req.limit > 1000 {
-        return Err(ErrorResponse::bad_request("cannot query more than 1000 UTXOs"));
-    }
-    let utxos = context
-        .substate_manager()
-        .list_utxos(&req.resource_address, req.from_id, req.limit)
-        .await
-        .map_err(ErrorResponse::anyhow)?;
-
-    Ok(Json(ListUtxosResponse { utxos }))
+    Ok(Json(GetUtxosResponse {
+        utxos: fetched.utxos,
+        spent: fetched.spent,
+        next_cursor: fetched.next_cursor,
+    }))
 }

@@ -23,7 +23,7 @@
 use std::{fmt, fmt::Formatter, sync::Arc};
 
 use tari_engine_types::limits::{self, ModuleShape};
-use tari_template_abi::{FunctionDef, TEMPLATE_DEF_CUSTOM_SECTION, TemplateDef, Type, WASM_PTR_SIZE};
+use tari_template_abi::{FunctionDef, FunctionKind, TEMPLATE_DEF_CUSTOM_SECTION, TemplateDef, Type, WASM_PTR_SIZE};
 use wasmer::{
     Engine,
     ExternType,
@@ -152,7 +152,6 @@ impl WasmModule {
         let imports = imports! {
             "env" => {
                 "tari_engine" => Function::new_typed(&mut store, |_op: i32, _arg_ptr: i32, _arg_len: i32| 0i32),
-                "tari_debug" => Function::new_typed(&mut store, |_arg_ptr: i32, _arg_len: i32| {  }),
                 "on_panic" => Function::new_typed(&mut store, |_msg_ptr: i32, _msg_len: i32, _line: i32, _col: i32| {  }),
             }
         };
@@ -239,6 +238,12 @@ impl LoadedWasmTemplate {
         &self.template_def
     }
 
+    /// A handle to the definition shared with every other clone of this template, for callers that must hold it past
+    /// a move of the template itself.
+    pub fn shared_template_def(&self) -> Arc<TemplateDef> {
+        self.template_def.clone()
+    }
+
     pub fn into_template_def(self) -> TemplateDef {
         Arc::try_unwrap(self.template_def).unwrap_or_else(|arc| (*arc).clone())
     }
@@ -308,7 +313,7 @@ fn load_template_def_from_custom_section(module: &wasmer::Module) -> Result<Temp
         .try_into()
         .expect("section.len() >= WASM_PTR_SIZE checked above");
     let full_len = u32::from_le_bytes(prefix) as usize;
-    if full_len < WASM_PTR_SIZE || full_len > section.len() {
+    if full_len != section.len() {
         return Err(WasmExecutionError::AbiTemplateDefSectionMalformed {
             reason: format!(
                 "declared length {} is inconsistent with section size {}",
@@ -317,7 +322,7 @@ fn load_template_def_from_custom_section(module: &wasmer::Module) -> Result<Temp
             ),
         });
     }
-    let template = tari_bor::decode_with_max_depth::<TemplateDef>(
+    let template = tari_bor::decode_exact_with_max_depth::<TemplateDef>(
         &section[WASM_PTR_SIZE..full_len],
         limits::MAX_CBOR_NESTING_DEPTH,
     )
@@ -422,7 +427,7 @@ fn validate_export_signature(
 
 fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionError> {
     match template_def {
-        TemplateDef::V1(def) => {
+        TemplateDef::V2(def) => {
             let function_count = def.functions.len();
             if function_count > limits::WASM_LIMITS.max_functions {
                 return Err(WasmValidationError::TooManyFunctions {
@@ -439,11 +444,11 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                     .into());
                 }
 
-                if func.arguments.len() > limits::WASM_LIMITS.max_function_arguments {
+                if func.num_call_args() > limits::WASM_LIMITS.max_function_arguments {
                     return Err(WasmValidationError::FunctionTooManyArguments {
                         name: func.name.clone(),
                         max_args: limits::WASM_LIMITS.max_function_arguments,
-                        num_args: func.arguments.len(),
+                        num_args: func.num_call_args(),
                     }
                     .into());
                 }
@@ -455,26 +460,10 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                         }
                         .into());
                     }
-                    match &arg.arg_type {
-                        Type::Tuple(tuple) if tuple.len() > limits::WASM_LIMITS.max_function_arguments => {
-                            return Err(WasmValidationError::FunctionTooManyTupleReturn {
-                                name: func.name.clone(),
-                                max_tuple_size: limits::WASM_LIMITS.max_function_arguments,
-                                tuple_size: tuple.len(),
-                            }
-                            .into());
-                        },
-                        Type::Other { name } if name.len() > limits::WASM_LIMITS.max_function_name_length => {
-                            return Err(WasmValidationError::FunctionNameTooLong {
-                                name: name.clone(),
-                                max_length: limits::WASM_LIMITS.max_function_name_length,
-                            }
-                            .into());
-                        },
-                        _ => {},
-                    }
+                    validate_arg_type(&func.name, &arg.arg_type)?;
                 }
-                if func.is_migration {
+                if let FunctionKind::Migration { from } = &func.kind {
+                    validate_arg_type(&func.name, from)?;
                     // Note that we are checking the TemplateDef, not the actual return type of the function in Wasm.
                     match &func.output {
                         Type::Other { name } => {
@@ -503,6 +492,27 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
         },
     }
     Ok(())
+}
+
+fn validate_arg_type(function_name: &str, arg_type: &Type) -> Result<(), WasmExecutionError> {
+    match arg_type {
+        Type::Tuple(tuple) if tuple.len() > limits::WASM_LIMITS.max_function_arguments => {
+            Err(WasmValidationError::FunctionTooManyTupleReturn {
+                name: function_name.to_string(),
+                max_tuple_size: limits::WASM_LIMITS.max_function_arguments,
+                tuple_size: tuple.len(),
+            }
+            .into())
+        },
+        Type::Other { name } if name.len() > limits::WASM_LIMITS.max_function_name_length => {
+            Err(WasmValidationError::FunctionNameTooLong {
+                name: name.clone(),
+                max_length: limits::WASM_LIMITS.max_function_name_length,
+            }
+            .into())
+        },
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]

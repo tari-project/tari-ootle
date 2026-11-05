@@ -3,6 +3,7 @@
 
 use std::{
     iter,
+    ops::Deref,
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -23,6 +24,7 @@ use tari_state_store_rocksdb::{
     codecs::ByteColumn,
     column_families::bookkeeping::{CURRENT_SCHEMA_VERSION, DatabaseMigrationVersion},
 };
+use tari_state_tree::Version;
 
 use crate::{
     audit::AuditWriter,
@@ -110,10 +112,8 @@ pub struct ApplyOutcome {
 
 /// Refuses to operate on a database whose schema version is not the one this build encodes.
 ///
-/// The rollback primitives write through the current key encodings. Against an older database those encodings do not
-/// match what is on disk, so a cascade silently misses the rows a pending migration has yet to rewrite - leaving
-/// orphans that the migration then promotes into live entries referring to rolled-back blocks. Against a newer
-/// database the encodings are simply unknown to this build.
+/// The rollback primitives write through the current key encodings, which match only a database at this version: a
+/// cascade through them silently misses rows stored under any other encoding.
 fn check_schema_version(store: &RocksDbStateStore<PeerAddress>) -> anyhow::Result<()> {
     let version = store.with_read_tx(|tx| -> anyhow::Result<_> {
         let version = tx
@@ -133,12 +133,14 @@ fn check_schema_version(store: &RocksDbStateStore<PeerAddress>) -> anyhow::Resul
     match version.cmp(&CURRENT_SCHEMA_VERSION) {
         std::cmp::Ordering::Equal => Ok(()),
         std::cmp::Ordering::Less => bail!(
-            "State db is at schema version {version} but this tool writes version {CURRENT_SCHEMA_VERSION}. Start the \
-             validator once to migrate the database, stop it again, then re-run the rollback."
+            "State db is at schema version {version}, which is older than the {CURRENT_SCHEMA_VERSION} this tool \
+             writes. A validator from this release refuses it too; delete the validator's data directory and resync \
+             instead of rolling back."
         ),
         std::cmp::Ordering::Greater => bail!(
             "State db is at schema version {version}, which is newer than the {CURRENT_SCHEMA_VERSION} this tool \
-             understands. Use a rollback tool built from the same release as the validator."
+             understands. Use a rollback tool built from the release that wrote it, or if that release is \
+             incompatible with this network, delete the validator's data directory and resync."
         ),
     }
 }
@@ -239,10 +241,7 @@ pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
         .to_string();
     store.with_write_tx(|tx| -> anyhow::Result<()> {
         for (shard, version) in &state_versions {
-            tx.state_tree_truncate_to_version(*shard, *version)
-                .with_context(|| format!("state_tree_truncate_to_version(shard={shard}, version={version})"))?;
-            tx.substates_rewind_to_state_version(*shard, *version)
-                .with_context(|| format!("substates_rewind_to_state_version(shard={shard}, version={version})"))?;
+            rewind_shard(tx, *shard, *version)?;
         }
         rollback_delete_after_epoch(tx, target_epoch).context("rollback_delete_after_epoch")?;
         rollback_history_insert(tx, &RollbackHistoryEntry {
@@ -258,6 +257,31 @@ pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
 
     println!("Rollback applied successfully.");
     Ok(outcome)
+}
+
+/// Rewinds `shard`'s state tree and substates to `version`.
+///
+/// A rewind across a destruction whose value epoch GC has pruned restores the substate without its value. Consensus
+/// cannot execute against it and state sync never reports the node up to date, so the rollback is refused.
+fn rewind_shard<TTx>(tx: &mut TTx, shard: Shard, version: Version) -> anyhow::Result<()>
+where
+    TTx: StateStoreWriteTransaction + Deref,
+    TTx::Target: StateStoreReadTransaction,
+{
+    tx.state_tree_truncate_to_version(shard, version)
+        .with_context(|| format!("state_tree_truncate_to_version(shard={shard}, version={version})"))?;
+    tx.substates_rewind_to_state_version(shard, version)
+        .with_context(|| format!("substates_rewind_to_state_version(shard={shard}, version={version})"))?;
+    if let Some((address, created_at)) = tx
+        .state_sync_missing_values_get_earliest(shard, 0)
+        .with_context(|| format!("state_sync_missing_values_get_earliest(shard={shard})"))?
+    {
+        bail!(
+            "rolling {shard} back to v{version} leaves the substate at {address} (created at v{created_at}) up \
+             without its value, which epoch GC has pruned; roll back to a later epoch"
+        );
+    }
+    Ok(())
 }
 
 fn locate_checkpoint(

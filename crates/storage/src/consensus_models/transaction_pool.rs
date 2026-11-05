@@ -37,6 +37,7 @@ use crate::{
     consensus_models::{
         BlockTransactionExecution,
         Evidence,
+        FOREIGN_PROPOSAL_EPOCH_WINDOW,
         LeaderFee,
         LocalOnlyAtom,
         LockedEpoch,
@@ -48,6 +49,11 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::ootle::storage::transaction_pool";
+
+/// Epochs after a transaction's `max_epoch` that a shard group holding it in `LocalPrepared` keeps waiting for the
+/// other involved shard groups. A foreign proposal made in `max_epoch` is accepted until the local epoch moves past
+/// [`FOREIGN_PROPOSAL_EPOCH_WINDOW`] epochs after it.
+pub const LOCAL_PREPARED_GRACE_EPOCHS: u64 = FOREIGN_PROPOSAL_EPOCH_WINDOW;
 
 #[derive(Debug, Clone, Default)]
 pub struct TransactionPool<TStateStore> {
@@ -122,29 +128,57 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         Ok(recs)
     }
 
-    /// Fetch ready transactions for the next block, bounded by a weight budget and a hard command
-    /// count cap. See [`select_proposal_batch`] for how records are chosen.
+    /// Fetch transactions that `filter` accepts, bounded by a weight budget and a hard command count cap. See
+    /// [`select_proposal_batch`] for how records are chosen.
+    ///
+    /// The candidates are the accepted records that follow a random transaction id, wrapping around. At most
+    /// `max_candidates` accepted records are sampled and at most `max_reads` pool records are read, accepted or not,
+    /// so the cost of a call is bounded however large the pool is. When the pool holds more than that window, each
+    /// call samples a different, uniformly placed part of it.
+    #[expect(clippy::too_many_arguments)]
     pub fn get_batch_for_next_block(
         &self,
         tx: &impl StateStoreReadTransaction,
         weight_budget: u64,
         max_count: usize,
+        max_candidates: usize,
+        max_reads: usize,
         heavy_turn: bool,
         block_id: &BlockId,
+        filter: &ProposalFilter,
     ) -> Result<Vec<TransactionPoolRecord>, TransactionPoolError> {
-        if weight_budget == 0 || max_count == 0 {
+        if weight_budget == 0 || max_count == 0 || max_candidates == 0 || max_reads == 0 {
             return Ok(Vec::new());
         }
         let mut rng = rand::rng();
+        let start_id = TransactionId::new(rng.random());
         let mut sample = ProposalSample::new(weight_budget, max_count, heavy_turn);
-        tx.transaction_pool_for_each_ready(block_id, |rec| sample.offer(rec, &mut rng))?;
+        tx.transaction_pool_for_each_ready(block_id, filter, &start_id, max_candidates, max_reads, |rec| {
+            sample.offer(rec, &mut rng)
+        })?;
         Ok(sample.into_batch(&mut rng))
+    }
+
+    /// True if any pool record, with the pending updates in the chain ending at `block_id` applied, satisfies
+    /// `predicate`.
+    pub fn any_in_chain<F>(
+        &self,
+        tx: &impl StateStoreReadTransaction,
+        block_id: &BlockId,
+        predicate: F,
+    ) -> Result<bool, TransactionPoolError>
+    where
+        F: FnMut(&TransactionPoolRecord) -> bool,
+    {
+        let found = tx.transaction_pool_any_in_chain(block_id, predicate)?;
+        Ok(found)
     }
 
     pub fn has_ready_or_pending_transaction_updates(
         &self,
         tx: &impl StateStoreReadTransaction,
         block_id: &BlockId,
+        filter: &ProposalFilter,
     ) -> Result<bool, TransactionPoolError> {
         // Check if any pending transactions have state updates that need to be applied
         if tx.transaction_pool_has_pending_state_updates(block_id)? {
@@ -163,8 +197,8 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         // needs further proposals until it is.
         let mut reason = None;
         let found = tx.transaction_pool_any(true, |rec| {
-            if rec.is_ready() {
-                reason = Some("marked as ready");
+            if filter.accepts(rec) {
+                reason = Some("ready to propose");
                 return true;
             }
             let needs_finalizing = matches!(
@@ -214,6 +248,63 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         tx_ids: I,
     ) -> Result<Vec<TransactionPoolRecord>, TransactionPoolError> {
         TransactionPoolRecord::remove_all(tx, tx_ids)
+    }
+}
+
+/// Which pool records a block may propose a command for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProposalFilter {
+    epoch: Epoch,
+    abort_waiting_prepared: bool,
+    hold_back_cross_shard_for: Option<ShardGroup>,
+}
+
+impl ProposalFilter {
+    /// Accepts, for a block in `epoch`, records that are ready and records that block must abort (see
+    /// [`TransactionPoolRecord::is_local_prepared_expired_at`]).
+    pub fn new(epoch: Epoch) -> Self {
+        Self {
+            epoch,
+            abort_waiting_prepared: false,
+            hold_back_cross_shard_for: None,
+        }
+    }
+
+    /// Also accepts transactions [waiting in `LocalPrepared`](TransactionPoolRecord::is_waiting_in_local_prepared),
+    /// for the proposer to abort them.
+    pub fn with_waiting_prepared_aborted(mut self) -> Self {
+        self.abort_waiting_prepared = true;
+        self
+    }
+
+    /// Withholds cross-shard transactions that `local_shard_group` has not prepared (see
+    /// [`TransactionPoolRecord::is_unprepared_cross_shard`]).
+    pub fn with_cross_shard_held_back(mut self, local_shard_group: ShardGroup) -> Self {
+        self.hold_back_cross_shard_for = Some(local_shard_group);
+        self
+    }
+
+    pub fn epoch(&self) -> Epoch {
+        self.epoch
+    }
+
+    pub fn aborts_waiting_prepared(&self) -> bool {
+        self.abort_waiting_prepared
+    }
+
+    pub fn holds_back(&self, rec: &TransactionPoolRecord) -> bool {
+        self.hold_back_cross_shard_for
+            .is_some_and(|local_shard_group| rec.is_unprepared_cross_shard(local_shard_group))
+    }
+
+    /// True if a block may propose `rec`'s next command.
+    pub fn accepts(&self, rec: &TransactionPoolRecord) -> bool {
+        if self.holds_back(rec) {
+            return false;
+        }
+        rec.is_ready() ||
+            rec.is_local_prepared_expired_at(self.epoch) ||
+            (self.abort_waiting_prepared && rec.is_waiting_in_local_prepared())
     }
 }
 
@@ -537,16 +628,15 @@ pub struct TransactionPoolRecord {
     /// Static transaction weight (`Transaction::calculate_transaction_weight`), cached here so block
     /// proposal can budget by weight without loading the full transaction body. Computed once when the
     /// record is created.
-    #[serde(default)]
-    #[cbor(default)]
     #[n(15)]
     transaction_weight: u64,
     /// The exhaust burn collected by the executor (`FeeReceipt::exhaust_burn`), set from local
     /// execution alongside `transaction_fee`.
-    #[serde(default)]
-    #[cbor(default)]
     #[n(16)]
     exhaust_burn: u64,
+    /// Whether the transaction commits only its fee intent. See [`MultiShardAtom::fee_intent_only`].
+    #[n(17)]
+    fee_intent_only: bool,
 }
 
 impl TransactionPoolRecord {
@@ -569,6 +659,7 @@ impl TransactionPoolRecord {
             last_updated_in_block: None,
             transaction_weight: transaction.calculate_transaction_weight().as_u64(),
             exhaust_burn: 0,
+            fee_intent_only: false,
         }
     }
 
@@ -591,6 +682,7 @@ impl TransactionPoolRecord {
         last_updated_in_block: Option<BlockId>,
         transaction_weight: u64,
         exhaust_burn: u64,
+        fee_intent_only: bool,
     ) -> Self {
         Self {
             transaction_id: id,
@@ -610,6 +702,7 @@ impl TransactionPoolRecord {
             last_updated_in_block,
             transaction_weight,
             exhaust_burn,
+            fee_intent_only,
         }
     }
 
@@ -640,6 +733,34 @@ impl TransactionPoolRecord {
 
     pub fn is_ready_for_pending_stage(&self, local_shard_group: ShardGroup) -> bool {
         self.can_continue_to(self.current_stage(), local_shard_group)
+    }
+
+    /// True if, in `epoch`, this transaction has waited in `LocalPrepared` with a COMMIT decision for longer than its
+    /// validity window plus [`LOCAL_PREPARED_GRACE_EPOCHS`], and the local shard group must abort it.
+    ///
+    /// CONSENSUS RULE: the leader proposes, and every replica requires, `LocalAccept(ABORT)` for such a transaction.
+    /// Aborting here is safe because the local shard group has not sent its LocalAccept yet, and no shard group can
+    /// finalize COMMIT without it. A transaction in `LocalAccepted` is never expired by this rule: a foreign shard
+    /// group may already have finalized COMMIT on the strength of the local LocalAccept.
+    pub fn is_local_prepared_expired_at(&self, epoch: Epoch) -> bool {
+        self.current_stage().is_local_prepared() &&
+            self.current_decision().is_commit() &&
+            epoch.as_u64() > self.max_epoch.as_u64().saturating_add(LOCAL_PREPARED_GRACE_EPOCHS)
+    }
+
+    /// True if this transaction is in `LocalPrepared` with a COMMIT decision and is not ready to send its LocalAccept,
+    /// i.e. it is waiting on other shard groups.
+    pub fn is_waiting_in_local_prepared(&self) -> bool {
+        self.current_stage().is_local_prepared() && self.current_decision().is_commit() && !self.is_ready
+    }
+
+    /// True if this is a cross-shard transaction with a COMMIT decision that `local_shard_group` holds inputs of and
+    /// has not prepared, i.e. proposing it would send `LocalPrepare`.
+    pub fn is_unprepared_cross_shard(&self, local_shard_group: ShardGroup) -> bool {
+        self.current_stage().is_new() &&
+            self.current_decision().is_commit() &&
+            self.evidence.num_shard_groups() > 1 &&
+            self.evidence.has_inputs(local_shard_group)
     }
 
     pub fn current_local_decision(&self) -> Decision {
@@ -730,14 +851,24 @@ impl TransactionPoolRecord {
         (*self.id()).into()
     }
 
-    pub fn get_current_multi_shard_atom(&self) -> MultiShardAtom {
-        MultiShardAtom {
+    /// The multi-shard atom for this transaction as it currently stands. It carries the transaction's pin, so a record
+    /// that is not pinned yet has no atom.
+    pub fn get_current_multi_shard_atom(&self) -> Result<MultiShardAtom, TransactionPoolError> {
+        let locked_epoch = self
+            .locked_epoch
+            .clone()
+            .ok_or(TransactionPoolError::MultiShardAtomWithoutLockedEpoch {
+                transaction_id: self.transaction_id,
+            })?;
+        Ok(MultiShardAtom {
             id: self.transaction_id,
             decision: self.current_decision(),
             evidence: self.evidence.clone(),
             transaction_fee: self.transaction_fee,
             leader_fee: self.leader_fee().cloned(),
-        }
+            fee_intent_only: self.is_fee_intent_only(),
+            locked_epoch,
+        })
     }
 
     pub fn get_local_only_atom(&self) -> LocalOnlyAtom {
@@ -746,26 +877,6 @@ impl TransactionPoolRecord {
             decision: self.current_decision(),
             transaction_fee: self.transaction_fee,
             leader_fee: self.leader_fee().cloned(),
-        }
-    }
-
-    pub fn get_local_multi_shard_atom(&self) -> MultiShardAtom {
-        MultiShardAtom {
-            id: self.transaction_id,
-            decision: self.current_local_decision(),
-            evidence: self.evidence.clone(),
-            transaction_fee: self.transaction_fee,
-            leader_fee: self.leader_fee().cloned(),
-        }
-    }
-
-    pub fn into_current_multi_shard_atom(self) -> MultiShardAtom {
-        MultiShardAtom {
-            id: self.transaction_id,
-            decision: self.current_decision(),
-            leader_fee: self.leader_fee().cloned(),
-            evidence: self.evidence,
-            transaction_fee: self.transaction_fee,
         }
     }
 
@@ -805,6 +916,16 @@ impl TransactionPoolRecord {
         self.exhaust_burn
     }
 
+    /// Whether the transaction commits only its fee intent. An aborting transaction commits nothing.
+    pub fn is_fee_intent_only(&self) -> bool {
+        self.fee_intent_only && self.current_decision().is_commit()
+    }
+
+    pub fn set_fee_intent_only(&mut self, fee_intent_only: bool) -> &mut Self {
+        self.fee_intent_only = fee_intent_only;
+        self
+    }
+
     pub fn set_exhaust_burn(&mut self, exhaust_burn: u64) -> &mut Self {
         self.exhaust_burn = exhaust_burn;
         self
@@ -836,10 +957,18 @@ impl TransactionPoolRecord {
         self
     }
 
-    /// Updates the locked epoch if the new epoch is less than the current locked epoch.
-    /// Returns true if the locked epoch was updated, otherwise false.
+    /// Pins the transaction to `new_epoch` if it precedes the current pin, and returns whether it did.
+    ///
+    /// Each shard group opens an epoch at the exhaust burn rate it resolved, so two pins in the same epoch can name
+    /// different rates. The lower rate wins the tie, which leaves every shard group holding the same pin whatever
+    /// order the proposals carrying them arrive in.
     pub fn update_locked_epoch(&mut self, new_epoch: LockedEpoch) -> bool {
-        if self.locked_epoch.as_ref().is_none_or(|e| e.epoch() > new_epoch.epoch()) {
+        let pin_order = |pin: &LockedEpoch| (pin.epoch(), pin.exhaust_burn_rate().as_bps());
+        if self
+            .locked_epoch
+            .as_ref()
+            .is_none_or(|current| pin_order(&new_epoch) < pin_order(current))
+        {
             self.locked_epoch = Some(new_epoch);
             return true;
         }
@@ -871,8 +1000,7 @@ impl TransactionPoolRecord {
         }
 
         if self.current_decision().is_commit() {
-            let involved_locks = execution.resolved_inputs().iter().chain(execution.resulting_outputs());
-            for lock in involved_locks {
+            for lock in execution.involved_locks() {
                 self.evidence_mut()
                     .insert_from_lock_intent(num_preshards, num_committees, lock);
             }
@@ -987,6 +1115,8 @@ impl TransactionPoolRecord {
 }
 
 impl TransactionPoolRecord {
+    /// Removes the pool records of `transaction_ids`, with their foreign pledges, lock conflicts and substate locks.
+    /// A substate lock is held only by a pooled transaction: once its record is gone, nothing else releases it.
     pub fn remove_all<'a, TTx, I>(
         tx: &mut TTx,
         transaction_ids: I,
@@ -1000,7 +1130,8 @@ impl TransactionPoolRecord {
         // Clear any related foreign pledges
         tx.foreign_substate_pledges_remove_many(iter.clone())?;
         // Clear any related lock_conflicts
-        tx.lock_conflicts_remove_by_transaction_ids(iter)?;
+        tx.lock_conflicts_remove_by_transaction_ids(iter.clone())?;
+        tx.substate_locks_remove_many_for_transactions(iter)?;
         Ok(recs)
     }
 
@@ -1154,6 +1285,8 @@ pub enum TransactionPoolError {
         transaction_id: TransactionId,
         block_id: BlockId,
     },
+    #[error("Transaction {transaction_id} was sequenced as a multi-shard command before it was pinned to an epoch")]
+    MultiShardAtomWithoutLockedEpoch { transaction_id: TransactionId },
 }
 
 impl IsNotFoundError for TransactionPoolError {
@@ -1206,6 +1339,7 @@ mod tests {
                 last_updated_in_block: None,
                 transaction_weight: weight,
                 exhaust_burn: 0,
+                fee_intent_only: false,
             }
         }
 
@@ -1241,10 +1375,109 @@ mod tests {
 
         #[test]
         fn proposal_weight_is_at_least_one() {
-            // A zero-weight (e.g. legacy/empty) record still consumes some budget so the count cap
+            // A zero-weight record still consumes some budget so the count cap
             // is the only thing bounding it, never an unbounded fill.
             let rec = record_with_weight_and_stage(0, TransactionPoolStage::New);
             assert_eq!(rec.proposal_weight(), 1);
+        }
+    }
+
+    mod is_local_prepared_expired_at {
+        use tari_engine_types::commit_result::AbortReason;
+
+        use super::{proposal_weight::record_with_weight_and_stage, *};
+
+        #[test]
+        fn it_expires_after_the_grace_epoch() {
+            let mut rec = record_with_weight_and_stage(1, TransactionPoolStage::LocalPrepared);
+            rec.is_ready = false;
+            assert_eq!(rec.max_epoch(), Epoch(1));
+
+            assert!(!rec.is_local_prepared_expired_at(Epoch(1)));
+            assert!(!rec.is_local_prepared_expired_at(Epoch(2)));
+            assert!(!ProposalFilter::new(Epoch(2)).accepts(&rec));
+            assert!(rec.is_local_prepared_expired_at(Epoch(3)));
+            assert!(ProposalFilter::new(Epoch(3)).accepts(&rec));
+        }
+
+        #[test]
+        fn a_waiting_prepared_transaction_is_proposable_for_abort_on_request() {
+            let mut rec = record_with_weight_and_stage(1, TransactionPoolStage::LocalPrepared);
+            rec.is_ready = false;
+            assert!(rec.is_waiting_in_local_prepared());
+            assert!(!ProposalFilter::new(Epoch(1)).accepts(&rec));
+            assert!(
+                ProposalFilter::new(Epoch(1))
+                    .with_waiting_prepared_aborted()
+                    .accepts(&rec)
+            );
+
+            rec.set_local_decision(Decision::Abort(AbortReason::ExecutionFailure));
+            assert!(!rec.is_waiting_in_local_prepared());
+
+            let mut rec = record_with_weight_and_stage(1, TransactionPoolStage::New);
+            rec.is_ready = false;
+            assert!(
+                !ProposalFilter::new(Epoch(1))
+                    .with_waiting_prepared_aborted()
+                    .accepts(&rec)
+            );
+        }
+
+        #[test]
+        fn an_unprepared_cross_shard_transaction_is_held_back_on_request() {
+            use tari_template_lib_types::ComponentAddress;
+
+            let input_group = ShardGroup::new(0, 127);
+            let output_group = ShardGroup::new(128, 255);
+            let mut rec = record_with_weight_and_stage(1, TransactionPoolStage::New);
+            rec.evidence_mut()
+                .add_shard_group(input_group)
+                .insert_unpledged_input(ComponentAddress::from_array([1; 32]).into());
+            rec.evidence_mut()
+                .add_shard_group(output_group)
+                .insert_output(ComponentAddress::from_array([2; 32]).into(), SubstateVersion::ZERO);
+
+            assert!(ProposalFilter::new(Epoch(1)).accepts(&rec));
+            assert!(
+                !ProposalFilter::new(Epoch(1))
+                    .with_cross_shard_held_back(input_group)
+                    .accepts(&rec)
+            );
+            // The output-only shard group accepts outputs, which does not prepare anything.
+            assert!(
+                ProposalFilter::new(Epoch(1))
+                    .with_cross_shard_held_back(output_group)
+                    .accepts(&rec)
+            );
+
+            rec.set_local_decision(Decision::Abort(AbortReason::ExecutionFailure));
+            assert!(
+                ProposalFilter::new(Epoch(1))
+                    .with_cross_shard_held_back(input_group)
+                    .accepts(&rec)
+            );
+        }
+
+        #[test]
+        fn it_never_expires_a_transaction_that_has_sent_its_local_accept() {
+            for stage in [
+                TransactionPoolStage::New,
+                TransactionPoolStage::LocalAccepted,
+                TransactionPoolStage::AllAccepted,
+                TransactionPoolStage::SomeAccepted,
+                TransactionPoolStage::LocalOnly,
+            ] {
+                let rec = record_with_weight_and_stage(1, stage);
+                assert!(!rec.is_local_prepared_expired_at(Epoch(100)), "{stage} must not expire");
+            }
+        }
+
+        #[test]
+        fn it_does_not_expire_a_transaction_already_aborting() {
+            let mut rec = record_with_weight_and_stage(1, TransactionPoolStage::LocalPrepared);
+            rec.set_local_decision(Decision::Abort(AbortReason::ExecutionFailure));
+            assert!(!rec.is_local_prepared_expired_at(Epoch(100)));
         }
     }
 
@@ -1413,6 +1646,7 @@ mod tests {
                 last_updated_in_block: None,
                 transaction_weight: 0,
                 exhaust_burn: 0,
+                fee_intent_only: false,
             }
         }
 
@@ -1490,6 +1724,7 @@ mod tests {
                 last_updated_in_block: None,
                 transaction_weight: 0,
                 exhaust_burn,
+                fee_intent_only: false,
             }
         }
 
@@ -1567,6 +1802,36 @@ mod tests {
                 // Approaches 5% (the burn is 1/20 of the fee plus sub-shard-count dust)
                 (total_burnt as f64 / total_fees as f64) * 100.0
             );
+        }
+    }
+
+    mod update_locked_epoch {
+        use tari_engine_types::fees::ExhaustBurnRate;
+
+        use super::{proposal_weight::record_with_weight_and_stage, *};
+
+        fn pin(epoch: u64, bps: u16) -> LockedEpoch {
+            LockedEpoch::new(Epoch(epoch), Default::default(), ExhaustBurnRate::new(bps))
+        }
+
+        fn pinned_after(pins: &[LockedEpoch]) -> Option<LockedEpoch> {
+            let mut record = record_with_weight_and_stage(0, TransactionPoolStage::New);
+            for pin in pins {
+                record.update_locked_epoch(pin.clone());
+            }
+            record.locked_epoch().cloned()
+        }
+
+        #[test]
+        fn the_earlier_epoch_wins() {
+            assert_eq!(pinned_after(&[pin(6, 100), pin(5, 900)]), Some(pin(5, 900)));
+            assert_eq!(pinned_after(&[pin(5, 900), pin(6, 100)]), Some(pin(5, 900)));
+        }
+
+        #[test]
+        fn pins_in_the_same_epoch_settle_at_one_rate_whatever_the_arrival_order() {
+            assert_eq!(pinned_after(&[pin(5, 700), pin(5, 500)]), Some(pin(5, 500)));
+            assert_eq!(pinned_after(&[pin(5, 500), pin(5, 700)]), Some(pin(5, 500)));
         }
     }
 }

@@ -13,7 +13,6 @@ use helpers::{
     num_preshards,
     substate_id_seed,
 };
-use tari_common_types::types::FixedHash;
 use tari_consensus_types::BlockId;
 use tari_engine_types::ProtocolVersion;
 use tari_ootle_common_types::{
@@ -33,6 +32,7 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    StateTreeRetention,
     SubstateProofGenerator,
     SubstateProofVerifyError,
     consensus_models::{
@@ -47,13 +47,14 @@ use tari_ootle_storage::{
     },
     verify_substate_down_proof_against_roots,
 };
-use tari_sidechain::{SidechainBlockCommitProof, SidechainBlockHeader};
+use tari_sidechain::{FixedHash, SidechainBlockCommitProof, SidechainBlockHeader};
 use tari_state_store_rocksdb::DatabaseOptions;
 use tari_state_tree::{
     SPARSE_MERKLE_PLACEHOLDER_HASH,
     ShardGroupRootTree,
     SpreadPrefixStateTree,
     SubstateTreeChange,
+    TransitionAccumulator,
     TreeHash,
     Version,
 };
@@ -80,11 +81,12 @@ fn protocol_version() -> ProtocolVersion {
 fn group_tree(tx: &impl StateStoreReadTransaction, shard_group: ShardGroup) -> ShardGroupRootTree {
     let states = shard_group.shard_iter_with_global().map(|shard| {
         let Some(version) = tx.state_tree_versions_get_latest(shard).unwrap() else {
-            return (shard, SPARSE_MERKLE_PLACEHOLDER_HASH, 0);
+            return (shard, SPARSE_MERKLE_PLACEHOLDER_HASH, 0, TransitionAccumulator::zero());
         };
         let mut store = ShardScopedTreeStoreReader::new(tx, shard);
         let root = SpreadPrefixStateTree::new(&mut store).get_root_hash(version).unwrap();
-        (shard, root, version)
+        let acc = tx.state_transitions_get_accumulator(shard, version).unwrap();
+        (shard, root, version, acc)
     });
     ShardGroupRootTree::build(protocol_version(), states.collect::<Vec<_>>()).unwrap()
 }
@@ -105,7 +107,7 @@ fn commit_proof(shard_group: ShardGroup, height: u64, root: TreeHash) -> Committ
         proposed_by: Default::default(),
         state_merkle_root: FixedHash::new(root.into_array()),
         command_merkle_root: FixedHash::zero(),
-        transaction_merkle_root: None,
+        transaction_merkle_root: FixedHash::zero(),
         signature: Default::default(),
         accumulated_data: Default::default(),
         metadata_hash: FixedHash::zero(),
@@ -299,7 +301,8 @@ fn a_destroyed_substate_stays_provably_down_after_its_state_is_pruned() {
     // Prune the tree nodes of v1 and the target's value.
     {
         let mut tx = db.create_write_tx().unwrap();
-        assert!(tx.state_tree_nodes_clear_stale(num_preshards(), usize::MAX).unwrap() > 0);
+        let retention = StateTreeRetention::read(&*tx, num_preshards(), 0).unwrap();
+        assert!(tx.state_tree_nodes_clear_stale(&retention, usize::MAX).unwrap() > 0);
         tx.substates_prune_downed_values(EPOCH, usize::MAX).unwrap();
         tx.commit().unwrap();
     }
@@ -633,8 +636,11 @@ fn a_substate_destroyed_after_its_shard_idles_past_the_retention_window_is_recor
 
     // The shard does not move while epoch GC passes far beyond the epoch of its latest proof, and its block is pruned.
     db.with_write_tx(|tx| tx.epoch_cleanup(EPOCH + Epoch(100))).unwrap();
-    db.with_write_tx(|tx| tx.state_tree_nodes_clear_stale(num_preshards(), usize::MAX))
-        .unwrap();
+    db.with_write_tx(|tx| {
+        let retention = StateTreeRetention::read(&**tx, num_preshards(), 0)?;
+        tx.state_tree_nodes_clear_stale(&retention, usize::MAX)
+    })
+    .unwrap();
 
     let mut tx = db.create_write_tx().unwrap();
     commit_version(

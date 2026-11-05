@@ -39,7 +39,39 @@ impl ValidatorCommitteeRpcPool {
         }
     }
 
+    /// A session with a random committee member, shared with every other caller of this pool that reaches the same
+    /// member. A session serves one request at a time, so a stream that stays open belongs on
+    /// [`Self::new_stream_session`].
     pub async fn new_session(&mut self) -> Result<ValidatorRpcSession, ValidatorCommitteeClientError> {
+        self.random_member_session(SessionKind::Pooled).await
+    }
+
+    /// A session with a random committee member that nothing else uses, for a stream that stays open for as long as
+    /// the member has more to send. Dropping it closes it, which ends the stream on the member's side.
+    pub async fn new_stream_session(&mut self) -> Result<ValidatorRpcSession, ValidatorCommitteeClientError> {
+        self.random_member_session(SessionKind::Dedicated).await
+    }
+
+    /// Excludes `peer` from the members this pool opens sessions with for the rest of the epoch.
+    pub fn mark_failed(&mut self, peer: PeerAddress) {
+        let epoch = self.epoch_manager.get_current_epoch();
+        self.failed_peers.at(epoch).insert(peer);
+    }
+
+    /// The number of members in this pool's shard group at the current epoch.
+    pub async fn committee_size(&self) -> Result<usize, ValidatorCommitteeClientError> {
+        let epoch = self.epoch_manager.get_current_epoch();
+        Ok(self
+            .epoch_manager
+            .get_committee_by_shard_group(epoch, self.shard_group)
+            .await?
+            .len())
+    }
+
+    async fn random_member_session(
+        &mut self,
+        kind: SessionKind,
+    ) -> Result<ValidatorRpcSession, ValidatorCommitteeClientError> {
         let epoch = self.epoch_manager.get_current_epoch();
         let mut last_error = None::<ValidatorCommitteeClientError>;
         loop {
@@ -59,7 +91,7 @@ impl ValidatorCommitteeRpcPool {
                     last_error: last_error.as_ref().map(|e| e.to_string()),
                 });
             };
-            let result = self.session_for_peer(member.address).await;
+            let result = self.session_for_peer(member.address, kind).await;
             match result {
                 Ok(session) => return Ok(session),
                 Err(err) => {
@@ -77,8 +109,13 @@ impl ValidatorCommitteeRpcPool {
     async fn session_for_peer(
         &self,
         address: PeerAddress,
+        kind: SessionKind,
     ) -> Result<ValidatorRpcSession, ValidatorCommitteeClientError> {
-        let client = self.pool.get_or_connect(&address.to_peer_id()).await?;
+        let peer_id = address.to_peer_id();
+        let client = match kind {
+            SessionKind::Pooled => self.pool.get_or_connect(&peer_id).await?,
+            SessionKind::Dedicated => self.pool.connect_unpooled(&peer_id).await?,
+        };
         Ok(ValidatorRpcSession {
             peer_address: address,
             client,
@@ -99,9 +136,9 @@ impl ValidatorCommitteeRpcPool {
         T: 'static,
         E: Display + 'static,
     {
+        let mut attempted = HashSet::new();
         let epoch = self.epoch_manager.get_current_epoch();
         let mut last_error = None;
-        let mut attempted = HashSet::new();
         loop {
             let Some(vn) = self
                 .epoch_manager
@@ -117,7 +154,7 @@ impl ValidatorCommitteeRpcPool {
                 break;
             };
 
-            let session = match self.session_for_peer(vn.address).await {
+            let session = match self.session_for_peer(vn.address, SessionKind::Pooled).await {
                 Ok(session) => session,
                 Err(err) => {
                     warn!(
@@ -152,6 +189,12 @@ impl ValidatorCommitteeRpcPool {
             last_error,
         })
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SessionKind {
+    Pooled,
+    Dedicated,
 }
 
 /// Committee members that failed to connect, excluded from selection for the rest of the epoch they

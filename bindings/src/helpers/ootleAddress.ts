@@ -5,15 +5,16 @@ import { bech32m, Decoded } from "bech32";
 import { Network } from "../types/Network";
 import { OotleAddress } from "../types/OotleAddress";
 
-const PAY_REF_MAX_LENGTH = 64;
+const DESTINATION_TAG_MAX_LENGTH = 64;
 
-const MAX_LENGTH_LIMIT = 118 + PAY_REF_MAX_LENGTH;
+// Longest HRP (8) + separator (1) + 64 key bytes and a full destination tag as 5-bit words + checksum (6).
+const MAX_LENGTH_LIMIT = 8 + 1 + Math.ceil(((64 + DESTINATION_TAG_MAX_LENGTH) * 8) / 5) + 6;
 
 export type DecodedOotleAddress = {
   network: Network;
   accountPublicKey: string;
   viewOnlyKey: string;
-  payRef: string | Uint8Array | null;
+  destinationTag: string | Uint8Array | null;
 };
 
 export enum NetworkHrp {
@@ -44,15 +45,15 @@ export function decodeOotleAddress(address: OotleAddress): DecodedOotleAddress {
 
   const accountPublicKey = buf2hex(data.slice(0, 32));
   const viewOnlyKey = buf2hex(data.slice(32, 64));
-  const payRefBytes = new Uint8Array(data.slice(64));
+  const destinationTagBytes = new Uint8Array(data.slice(64));
 
-  // If the payRefSlice is utf-8 decodable, use it as payRef, otherwise null
-  let payRef: string | Uint8Array | null = null;
-  if (payRefBytes.length > 0) {
+  // A destination tag that is valid UTF-8 is returned as a string, otherwise as raw bytes
+  let destinationTag: string | Uint8Array | null = null;
+  if (destinationTagBytes.length > 0) {
     try {
-      payRef = new TextDecoder().decode(payRefBytes);
+      destinationTag = new TextDecoder("utf-8", { fatal: true }).decode(destinationTagBytes);
     } catch (e) {
-      payRef = payRefBytes;
+      destinationTag = destinationTagBytes;
     }
   }
 
@@ -85,7 +86,7 @@ export function decodeOotleAddress(address: OotleAddress): DecodedOotleAddress {
     network,
     accountPublicKey,
     viewOnlyKey,
-    payRef,
+    destinationTag,
   };
 }
 
@@ -120,16 +121,16 @@ export function encodeOotleAddress(decoded: DecodedOotleAddress): OotleAddress {
 
   const accountPubKeyBytes = hex2buf(decoded.accountPublicKey);
   const viewOnlyKeyBytes = hex2buf(decoded.viewOnlyKey);
-  const payRefBytes = decoded.payRef
-    ? typeof decoded.payRef === "string"
-      ? new TextEncoder().encode(decoded.payRef)
-      : decoded.payRef
+  const destinationTagBytes = decoded.destinationTag
+    ? typeof decoded.destinationTag === "string"
+      ? new TextEncoder().encode(decoded.destinationTag)
+      : decoded.destinationTag
     : new Uint8Array();
 
-  const addressBytes = new Uint8Array(accountPubKeyBytes.length + viewOnlyKeyBytes.length + payRefBytes.length);
+  const addressBytes = new Uint8Array(accountPubKeyBytes.length + viewOnlyKeyBytes.length + destinationTagBytes.length);
   addressBytes.set(accountPubKeyBytes, 0);
   addressBytes.set(viewOnlyKeyBytes, accountPubKeyBytes.length);
-  addressBytes.set(payRefBytes, accountPubKeyBytes.length + viewOnlyKeyBytes.length);
+  addressBytes.set(destinationTagBytes, accountPubKeyBytes.length + viewOnlyKeyBytes.length);
   const words = bech32m.toWords(addressBytes);
   return bech32m.encode(networkHrp, words, MAX_LENGTH_LIMIT) as OotleAddress;
 }

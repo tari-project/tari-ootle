@@ -23,6 +23,7 @@
 use std::convert::{TryFrom, TryInto};
 
 use anyhow::{Context, anyhow};
+use tari_common_types::types::CompressedPublicKey;
 use tari_consensus::messages::{
     CatchUpRequestMessage,
     EncodedTransaction,
@@ -46,10 +47,14 @@ use tari_consensus_types::{
     ShardGroupAccumulatedData,
     SignedTimeout,
     TcId,
+    TcSignatures,
     TimeoutCertificate,
     TimeoutVote,
 };
-use tari_crypto::tari_utilities::{ByteArray, hex::to_hex};
+use tari_crypto::{
+    ristretto::RistrettoSecretKey,
+    tari_utilities::{ByteArray, hex::to_hex},
+};
 use tari_engine_types::{
     commit_result::AbortReason,
     fees::ExhaustBurnRate,
@@ -79,6 +84,7 @@ use tari_ootle_storage::{
         ForeignProposalAtom,
         LeaderFee,
         LocalOnlyAtom,
+        LockedEpoch,
         MultiShardAtom,
         SubstateCreated,
         SubstateDestroyed,
@@ -86,7 +92,8 @@ use tari_ootle_storage::{
     },
 };
 use tari_ootle_transaction::TransactionId;
-use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+use tari_sidechain::{QcSignatures, SignerBitmap, ValidatorBlockSignature};
+use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
     encoding::{decode_from_slice, encode_to_vec},
@@ -271,6 +278,7 @@ impl From<&ForeignProposal> for proto::consensus::ForeignProposal {
             // TODO: remove panics
             encoded_commit_proof: encode_to_vec(value.commit_proof()).expect("Failed to encode commit proof"),
             encoded_block_pledge: encode_to_vec(value.block_pledge()).expect("Failed to encode block pledge"),
+            encoded_block_metadata: encode_to_vec(value.block_metadata()).expect("Failed to encode block metadata"),
         }
     }
 }
@@ -282,6 +290,7 @@ impl TryFrom<proto::consensus::ForeignProposal> for ForeignProposal {
         Ok(Self::new(
             decode_from_slice(&value.encoded_commit_proof).context("Failed to decode commit proof")?,
             decode_from_slice(&value.encoded_block_pledge).context("Failed to decode block pledge")?,
+            decode_from_slice(&value.encoded_block_metadata).context("Failed to decode block metadata")?,
         ))
     }
 }
@@ -294,6 +303,7 @@ impl From<&ForeignProposalNotificationMessage> for proto::consensus::ForeignProp
             block_id: value.block_id.as_bytes().to_vec(),
             epoch: value.epoch.as_u64(),
             shard_groups: value.shard_groups.iter().map(|sg| sg.encode_as_u32()).collect(),
+            shard_group: value.shard_group.encode_as_u32(),
         }
     }
 }
@@ -305,6 +315,12 @@ impl TryFrom<proto::consensus::ForeignProposalNotification> for ForeignProposalN
         Ok(Self {
             block_id: BlockId::try_from(value.block_id)?,
             epoch: Epoch(value.epoch),
+            shard_group: ShardGroup::decode_from_u32(value.shard_group).ok_or_else(|| {
+                anyhow!(
+                    "Invalid source shard group in foreign proposal notification: {}",
+                    value.shard_group
+                )
+            })?,
             shard_groups: value
                 .shard_groups
                 .into_iter()
@@ -653,7 +669,7 @@ impl From<&TimeoutCertificate> for proto::consensus::TimeoutCertificate {
         Self {
             epoch: value.epoch().as_u64(),
             block_height: value.height().as_u64(),
-            timeouts: value.timeouts().iter().map(Into::into).collect(),
+            signatures: Some(value.signatures().into()),
         }
     }
 }
@@ -666,12 +682,45 @@ impl TryFrom<proto::consensus::TimeoutCertificate> for TimeoutCertificate {
             Epoch(value.epoch),
             NodeHeight(value.block_height),
             value
-                .timeouts
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<Vec<_>, _>>()
-                .context("invalid encoding of timeouts")?,
+                .signatures
+                .ok_or_else(|| anyhow!("TC signatures not provided"))?
+                .try_into()?,
         ))
+    }
+}
+
+impl From<&TcSignatures> for proto::consensus::TcSignatures {
+    fn from(source: &TcSignatures) -> Self {
+        let scheme = match source {
+            TcSignatures::Schnorr { signers, timeouts } => {
+                proto::consensus::tc_signatures::Scheme::Schnorr(proto::consensus::SchnorrTcSignatures {
+                    signers: signers.as_bytes().to_vec(),
+                    timeouts: timeouts.iter().map(Into::into).collect(),
+                })
+            },
+        };
+        Self { scheme: Some(scheme) }
+    }
+}
+
+impl TryFrom<proto::consensus::TcSignatures> for TcSignatures {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::TcSignatures) -> Result<Self, Self::Error> {
+        match value
+            .scheme
+            .ok_or_else(|| anyhow!("TC signature scheme not provided"))?
+        {
+            proto::consensus::tc_signatures::Scheme::Schnorr(schnorr) => Ok(Self::Schnorr {
+                signers: SignerBitmap::from_bytes(schnorr.signers),
+                timeouts: schnorr
+                    .timeouts
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .collect::<Result<_, _>>()
+                    .context("invalid encoding of timeouts")?,
+            }),
+        }
     }
 }
 
@@ -753,9 +802,6 @@ impl TryFrom<proto::consensus::Command> for Command {
             proto::consensus::command::Command::ForeignProposal(foreign_proposal) => {
                 Command::ForeignProposal(foreign_proposal.try_into()?)
             },
-            proto::consensus::command::Command::EvictNode(_) => {
-                return Err(anyhow!("EvictNode command is no longer supported"));
-            },
             proto::consensus::command::Command::EndEpoch(atom) => Command::EndEpoch(atom.try_into()?),
         })
     }
@@ -771,7 +817,35 @@ impl From<&MultiShardAtom> for proto::consensus::MultiShardAtom {
             evidence: Some((&value.evidence).into()),
             fee: value.transaction_fee,
             leader_fee: value.leader_fee.as_ref().map(|a| a.into()),
+            fee_intent_only: value.fee_intent_only,
+            locked_epoch: Some((&value.locked_epoch).into()),
         }
+    }
+}
+
+impl From<&LockedEpoch> for proto::consensus::LockedEpoch {
+    fn from(value: &LockedEpoch) -> Self {
+        Self {
+            epoch: value.epoch().as_u64(),
+            hash: value.hash().as_slice().to_vec(),
+            exhaust_burn_rate_bps: u32::from(value.exhaust_burn_rate().as_bps()),
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::LockedEpoch> for LockedEpoch {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::LockedEpoch) -> Result<Self, Self::Error> {
+        let exhaust_burn_rate = u16::try_from(value.exhaust_burn_rate_bps)
+            .ok()
+            .and_then(ExhaustBurnRate::try_new)
+            .ok_or_else(|| anyhow!("exhaust burn rate {} is above the ceiling", value.exhaust_burn_rate_bps))?;
+        Ok(LockedEpoch::new(
+            Epoch(value.epoch),
+            Hash32::try_from(value.hash).context("LockedEpoch::hash")?,
+            exhaust_burn_rate,
+        ))
     }
 }
 
@@ -789,6 +863,11 @@ impl TryFrom<proto::consensus::MultiShardAtom> for MultiShardAtom {
                 .try_into()?,
             transaction_fee: value.fee,
             leader_fee: value.leader_fee.map(TryInto::try_into).transpose()?,
+            fee_intent_only: value.fee_intent_only,
+            locked_epoch: value
+                .locked_epoch
+                .ok_or_else(|| anyhow!("locked epoch not provided"))?
+                .try_into()?,
         })
     }
 }
@@ -923,6 +1002,7 @@ impl From<AbortReason> for proto::consensus::AbortReason {
             AbortReason::EpochExpired => Self::EpochExpired,
             AbortReason::ValidityWindowTooLong => Self::ValidityWindowTooLong,
             AbortReason::InputPledgeTooLarge => Self::InputPledgeTooLarge,
+            AbortReason::GovernanceCallAfterPinnedEpoch => Self::GovernanceCallAfterPinnedEpoch,
         }
     }
 }
@@ -944,6 +1024,7 @@ impl TryFrom<proto::consensus::AbortReason> for AbortReason {
             proto::consensus::AbortReason::EpochExpired => Ok(Self::EpochExpired),
             proto::consensus::AbortReason::ValidityWindowTooLong => Ok(Self::ValidityWindowTooLong),
             proto::consensus::AbortReason::InputPledgeTooLarge => Ok(Self::InputPledgeTooLarge),
+            proto::consensus::AbortReason::GovernanceCallAfterPinnedEpoch => Ok(Self::GovernanceCallAfterPinnedEpoch),
         }
     }
 }
@@ -995,7 +1076,7 @@ impl From<&ProposalCertificate> for proto::consensus::QuorumCertificate {
             block_height: source.height().as_u64(),
             epoch: source.epoch().as_u64(),
             shard_group: source.shard_group().encode_as_u32(),
-            signatures: source.signatures().iter().map(Into::into).collect(),
+            signatures: Some(source.signatures().into()),
             decision: i32::from(source.decision().as_u8()),
         }
     }
@@ -1015,11 +1096,56 @@ impl TryFrom<proto::consensus::QuorumCertificate> for ProposalCertificate {
             shard_group,
             value
                 .signatures
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()?,
+                .ok_or_else(|| anyhow!("QC signatures not provided"))?
+                .try_into()?,
             u8::try_from(value.decision)?.try_into()?,
         ))
+    }
+}
+
+impl From<&QcSignatures> for proto::consensus::QcSignatures {
+    fn from(source: &QcSignatures) -> Self {
+        let scheme = match source {
+            QcSignatures::Schnorr { signers, signatures } => {
+                proto::consensus::qc_signatures::Scheme::Schnorr(proto::consensus::SchnorrQcSignatures {
+                    signers: signers.as_bytes().to_vec(),
+                    signatures: signatures
+                        .iter()
+                        .map(|signature| proto::common::Signature {
+                            public_nonce: signature.get_compressed_public_nonce().as_bytes().to_vec(),
+                            signature: signature.get_signature().as_bytes().to_vec(),
+                        })
+                        .collect(),
+                })
+            },
+        };
+        Self { scheme: Some(scheme) }
+    }
+}
+
+impl TryFrom<proto::consensus::QcSignatures> for QcSignatures {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::QcSignatures) -> Result<Self, Self::Error> {
+        match value
+            .scheme
+            .ok_or_else(|| anyhow!("QC signature scheme not provided"))?
+        {
+            proto::consensus::qc_signatures::Scheme::Schnorr(schnorr) => Ok(Self::Schnorr {
+                signers: SignerBitmap::from_bytes(schnorr.signers),
+                signatures: schnorr
+                    .signatures
+                    .into_iter()
+                    .map(|signature| {
+                        let public_nonce = CompressedPublicKey::from_canonical_bytes(&signature.public_nonce)
+                            .map_err(|e| anyhow!("QC signature public nonce: {e}"))?;
+                        let signature = RistrettoSecretKey::from_canonical_bytes(&signature.signature)
+                            .map_err(|e| anyhow!("QC signature scalar: {e}"))?;
+                        Ok(ValidatorBlockSignature::new(public_nonce, signature))
+                    })
+                    .collect::<Result<_, anyhow::Error>>()?,
+            }),
+        }
     }
 }
 
@@ -1269,6 +1395,58 @@ mod tests {
         assert!(err.to_string().contains("at most"), "{err}");
     }
 
+    #[test]
+    fn a_proposal_certificate_round_trips() {
+        let signature = |seed| {
+            let (secret, public) = tari_ootle_common_types::crypto::create_key_pair_from_seed(seed);
+            ValidatorBlockSignature::new(
+                CompressedPublicKey::from_canonical_bytes(public.as_bytes()).unwrap(),
+                secret,
+            )
+        };
+        let certificate = ProposalCertificate::new(
+            [1u8; 32].into(),
+            BlockId::from([2u8; 32]),
+            NodeHeight(3),
+            Epoch(4),
+            ShardGroup::new(1u32, 8u32),
+            QcSignatures::Schnorr {
+                signers: SignerBitmap::from_indices(10, [1, 9]).unwrap(),
+                signatures: vec![signature(1), signature(2)],
+            },
+            tari_sidechain::QuorumDecision::Accept,
+        );
+
+        let decoded = ProposalCertificate::try_from(proto::consensus::QuorumCertificate::from(&certificate)).unwrap();
+
+        assert_eq!(decoded.signatures(), certificate.signatures());
+        assert_eq!(decoded.calculate_id(), certificate.calculate_id());
+    }
+
+    #[test]
+    fn a_timeout_certificate_round_trips() {
+        let timeout = |seed: u8| {
+            let mut scalar = [0u8; 32];
+            scalar[0] = seed;
+            SignedTimeout {
+                high_pc_height: NodeHeight(u64::from(seed)),
+                signature: tari_template_lib::types::crypto::SchnorrSignatureBytes::new(
+                    RistrettoPublicKeyBytes::from_bytes(&[seed; 32]).unwrap(),
+                    tari_template_lib::types::crypto::Scalar32Bytes::from_bytes(&scalar).unwrap(),
+                ),
+            }
+        };
+        let certificate = TimeoutCertificate::new(Epoch(4), NodeHeight(5), TcSignatures::Schnorr {
+            signers: SignerBitmap::from_indices(10, [1, 9]).unwrap(),
+            timeouts: vec![timeout(1), timeout(2)],
+        });
+
+        let decoded = TimeoutCertificate::try_from(proto::consensus::TimeoutCertificate::from(&certificate)).unwrap();
+
+        assert_eq!(decoded.signatures(), certificate.signatures());
+        assert_eq!(decoded.calculate_id(), certificate.calculate_id());
+    }
+
     mod block_commands {
         use tari_ootle_common_types::NumPreshards;
         use tari_ootle_transaction::Network;
@@ -1283,6 +1461,12 @@ mod tests {
                 evidence: Evidence::default(),
                 transaction_fee: 0,
                 leader_fee: None,
+                fee_intent_only: false,
+                locked_epoch: LockedEpoch::new(
+                    Epoch(3),
+                    Hash32::from_array([seed; 32]),
+                    ExhaustBurnRate::try_new(500).unwrap(),
+                ),
             })
         }
 
@@ -1293,11 +1477,20 @@ mod tests {
             Command::LocalAccept(atom)
         }
 
-        fn proto_block() -> proto::consensus::Block {
+        fn local_only(seed: u8) -> Command {
+            Command::LocalOnly(LocalOnlyAtom {
+                id: TransactionId::new([seed; 32]),
+                decision: Decision::Commit,
+                transaction_fee: 0,
+                leader_fee: None,
+            })
+        }
+
+        fn block_with(commands: BlockCommands) -> consensus_models::Block {
             let shard_group = ShardGroup::all_shards(NumPreshards::P64);
-            let block = consensus_models::Block::create(
+            consensus_models::Block::create(
                 Network::LocalNet,
-                ProtocolVersion::V2,
+                ProtocolVersion::V0,
                 BlockId::zero(),
                 ProposalCertificate::genesis(Epoch(1), shard_group),
                 None,
@@ -1305,7 +1498,7 @@ mod tests {
                 Epoch(1),
                 shard_group,
                 Default::default(),
-                BlockCommands::init([local_prepare(1), local_prepare(2)]).unwrap(),
+                commands,
                 Default::default(),
                 0,
                 SchnorrSignatureBytes::zero(),
@@ -1314,8 +1507,31 @@ mod tests {
                 ShardGroupAccumulatedData::default(),
                 ExtraData::new(),
             )
-            .unwrap();
-            proto::consensus::Block::from(&block)
+            .unwrap()
+        }
+
+        fn proto_block() -> proto::consensus::Block {
+            proto::consensus::Block::from(&block_with(
+                BlockCommands::init([local_prepare(1), local_prepare(2)]).unwrap(),
+            ))
+        }
+
+        #[test]
+        fn a_decoded_header_takes_its_transaction_merkle_root_from_the_commands() {
+            let commands = BlockCommands::init([local_only(1), local_only(2)]).unwrap();
+            let honest = block_with(commands.clone());
+            let other = block_with(BlockCommands::init([local_only(99)]).unwrap());
+            let mismatched =
+                consensus_models::Block::new(other.header().clone(), honest.justify().clone(), commands, None);
+
+            let decoded = consensus_models::Block::try_from(proto::consensus::Block::from(&mismatched)).unwrap();
+
+            assert_eq!(
+                decoded.header().transaction_merkle_root(),
+                honest.header().transaction_merkle_root()
+            );
+            assert_eq!(decoded.id(), honest.id());
+            assert_ne!(decoded.id(), other.id());
         }
 
         #[test]

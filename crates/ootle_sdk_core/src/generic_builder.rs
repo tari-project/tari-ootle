@@ -31,11 +31,10 @@ use tari_ootle_transaction::{
     ComponentReference,
     Instruction,
     TransactionBuilder,
-    args,
     args::InstructionArg,
     builder::named_args::parse_workspace_key,
 };
-use tari_template_lib_types::{OwnerRule, TemplateAddress, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib_types::{OwnerRule, TemplateAddress, TemplateMetadataHash, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
     PartialTransaction,
@@ -151,36 +150,36 @@ fn lower_fee_phase(network: Network, intent: &GenericTransactionIntent) -> Resul
 
 /// Appends the fee-payment instruction to the fee phase per the intent's [`FeeSource`].
 ///
-/// `FromAccount`/`FromWorkspaceComponent` lower to a `CallMethod(.., "pay_fee", [fee])` (the builder
-/// routes a [`ComponentAddress`](tari_template_lib_types::ComponentAddress) to an address reference
-/// and a label string to a workspace reference); `FromBucket` lowers to `PayFeeFromBucket`. A
-/// workspace/bucket label must be bound by a prior fee-phase `PutLastInstructionOutputOnWorkspace`.
+/// `FromAccount`/`FromWorkspaceComponent` lower to a `CallMethod(.., "pay_fee", [fee])` (an address
+/// reference, or a workspace reference resolved like any [`ComponentRef::Workspace`]); `FromBucket`
+/// lowers to `PayFeeFromBucket`. A workspace/bucket label must be bound by a prior fee-phase
+/// `PutLastInstructionOutputOnWorkspace`.
 fn lower_fee_payment(
     builder: TransactionBuilder,
     intent: &GenericTransactionIntent,
     bound_labels: &HashSet<String>,
 ) -> Result<TransactionBuilder, OotleSdkError> {
-    let fee = intent.fee.to_internal();
-    match &intent.fee_payment {
-        FeeSource::FromAccount(account) => {
-            let account = account.to_internal()?;
-            Ok(builder.call_method(account, "pay_fee", args![fee]))
-        },
+    let call = match &intent.fee_payment {
+        FeeSource::FromAccount(account) => ComponentReference::from(account.to_internal()?),
         FeeSource::FromWorkspaceComponent { label } => {
-            ensure_label_bound(label, bound_labels)?;
-            Ok(builder.call_method(label.clone(), "pay_fee", args![fee]))
+            resolve_component_ref(&builder, &ComponentRef::Workspace(label.clone()), bound_labels)?
         },
         FeeSource::FromBucket { label } => {
             ensure_label_bound(label, bound_labels)?;
             let bucket = builder.get_workspace_offset_id_from_named_arg(label.clone());
-            Ok(builder.add_instruction(Instruction::PayFeeFromBucket { bucket }))
+            return Ok(builder.add_instruction(Instruction::PayFeeFromBucket { bucket }));
         },
-    }
+    };
+    Ok(builder.add_instruction(Instruction::CallMethod {
+        call,
+        method: parse_function_name("pay_fee")?,
+        args: vec![encode_arg(&ArgValue::Amount(intent.fee.as_u64()))?],
+    }))
 }
 
 /// Validates a workspace label is bound by a prior `PutLastInstructionOutputOnWorkspace` in the same
-/// phase, so the builder's panicking `get_workspace_offset_id_from_named_arg` / `resolve_call` are
-/// only ever handed a registered label.
+/// phase, so the builder's panicking `get_workspace_offset_id_from_named_arg` is only ever handed a
+/// registered label.
 fn ensure_label_bound(label: &str, bound_labels: &HashSet<String>) -> Result<(), OotleSdkError> {
     let parsed = parse_workspace_key(label.to_string())
         .map_err(|e| OotleSdkError::Validation(format!("invalid workspace label '{label}': {e}")))?;
@@ -313,7 +312,8 @@ fn resolve_workspace_arg(
 /// Resolves a boundary [`ComponentRef`] to the engine [`ComponentReference`] at the call point.
 ///
 /// `Address` parses the component address; `Workspace` validates the label is bound in this phase
-/// then resolves it to the numeric id the builder registered.
+/// then resolves it to the numeric id the builder registered. A component reference carries no offset,
+/// so a `name.offset` label is a [`OotleSdkError::Validation`].
 fn resolve_component_ref(
     builder: &TransactionBuilder,
     call: &ComponentRef,
@@ -323,8 +323,13 @@ fn resolve_component_ref(
         ComponentRef::Address(addr) => Ok(addr.to_internal()?.into()),
         ComponentRef::Workspace(label) => {
             ensure_label_bound(label, bound_labels)?;
-            let id = builder.get_workspace_offset_id_from_named_arg(label.clone()).id();
-            Ok(ComponentReference::Workspace(id))
+            let offset_id = builder.get_workspace_offset_id_from_named_arg(label.clone());
+            if offset_id.offset().is_some() {
+                return Err(OotleSdkError::Validation(format!(
+                    "workspace component label '{label}' must not carry a '.offset' suffix"
+                )));
+            }
+            Ok(ComponentReference::Workspace(offset_id.id()))
         },
     }
 }
@@ -338,10 +343,12 @@ fn lower_owner_rule(rule: &OwnerRuleSpec) -> OwnerRule {
     }
 }
 
-/// Parses a lowercase-hex metadata multihash into the engine `MetadataHash`.
-fn parse_metadata_hash(hex: &str) -> Result<tari_ootle_template_metadata::MetadataHash, OotleSdkError> {
+/// Parses a lowercase-hex metadata multihash into the protocol's opaque `TemplateMetadataHash`. The multihash check
+/// is the SDK's convention for what wallets publish.
+fn parse_metadata_hash(hex: &str) -> Result<TemplateMetadataHash, OotleSdkError> {
     let bytes = hex::decode(hex).map_err(|e| OotleSdkError::Parse(format!("invalid metadata_hash hex: {e}")))?;
     tari_ootle_template_metadata::MetadataHash::from_bytes(&bytes)
+        .map(Into::into)
         .ok_or_else(|| OotleSdkError::Parse("metadata_hash is not a valid multihash".to_string()))
 }
 
@@ -454,7 +461,7 @@ fn push_arg_substate_wants(args: &[ArgValue], wants: &mut Vec<WantItem>) {
         let Ok(indexed) = tari_engine_types::indexed_value::IndexedValue::from_raw(bytes) else {
             continue;
         };
-        for id in indexed.referenced_substates() {
+        for id in indexed.referenced_substates().filter(|id| id.is_declarable_input()) {
             wants.push(WantItem::SpecificSubstate {
                 substate_id: id.to_string(),
                 required: true,
@@ -595,15 +602,16 @@ mod tests {
                 owner_rule: SubstateOwnerRule::None,
                 access_rules: ComponentAccessRules::new(),
                 entity_id: EntityId::from_array([0u8; EntityId::LENGTH]),
+                upgrade_rule: Default::default(),
             },
             body: ComponentBody::from_cbor_value(state),
         };
-        serde_json::to_value(SubstateValue::Component(component)).unwrap()
+        crate::substate_decode::indexer_substate_json(&SubstateValue::Component(component))
     }
 
     fn vault_substate_json(res: ResourceAddress) -> serde_json::Value {
         let vault = Vault::new(ResourceContainer::public_fungible(res, Amount::new(1_000_000)));
-        serde_json::to_value(SubstateValue::Vault(vault)).unwrap()
+        crate::substate_decode::indexer_substate_json(&SubstateValue::Vault(vault))
     }
 
     fn fetched(id: impl ToString, value: serde_json::Value) -> FetchedSubstate {
@@ -1024,6 +1032,42 @@ mod tests {
         let intent = self_funding_intent(FeeSource::FromWorkspaceComponent {
             label: "never_bound".to_string(),
         });
+        let err = build_unsigned_instructions_with_wants(Network::Esmeralda, &intent).unwrap_err();
+        assert_eq!(err.code(), "VALIDATION");
+    }
+
+    /// A component reference has no offset slot, so a `.offset`-suffixed fee payer label is rejected.
+    #[test]
+    fn offset_suffixed_workspace_fee_label_is_a_validation_error() {
+        let intent = self_funding_intent(FeeSource::FromWorkspaceComponent {
+            label: "acct.0".to_string(),
+        });
+        let err = build_unsigned_instructions_with_wants(Network::Esmeralda, &intent).unwrap_err();
+        assert_eq!(err.code(), "VALIDATION");
+    }
+
+    #[test]
+    fn offset_suffixed_workspace_call_target_is_a_validation_error() {
+        let intent = GenericTransactionIntent {
+            fee: BoundaryAmount::new(2000),
+            fee_payment: fee_from(from_component()),
+            fee_instructions: vec![],
+            instructions: vec![
+                create_account(recipient_pk_bytes()),
+                InstructionSpec::PutLastInstructionOutputOnWorkspace { key: "new".to_string() },
+                InstructionSpec::CallMethod {
+                    call: ComponentRef::Workspace("new.0".to_string()),
+                    method: "deposit".to_string(),
+                    args: vec![],
+                },
+            ],
+            blobs: vec![],
+            inputs: vec![InputRef::versioned(from_component().to_string(), 0)],
+            extra_inputs: vec![],
+            min_epoch: None,
+            max_epoch: 1,
+            dry_run: false,
+        };
         let err = build_unsigned_instructions_with_wants(Network::Esmeralda, &intent).unwrap_err();
         assert_eq!(err.code(), "VALIDATION");
     }

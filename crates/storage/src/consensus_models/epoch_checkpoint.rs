@@ -7,16 +7,33 @@ use anyhow::anyhow;
 use borsh::{BorshDeserialize, BorshSerialize};
 use indexmap::IndexMap;
 use minicbor::{CborLen, Decode, Encode};
+use ootle_network::Network;
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::{CompressedPublicKey, FixedHash};
-use tari_crypto::tari_utilities::ByteArray;
-use tari_engine_types::ProtocolVersion;
-use tari_ootle_common_types::{Epoch, ShardGroup, VotePower, shard::Shard};
-use tari_sidechain::{CommandCommitProof, SidechainBlockHeader, SidechainProofValidationError, ToCommand};
-use tari_state_tree::{SPARSE_MERKLE_PLACEHOLDER_HASH, StateTreeError, TreeHash, Version, compute_shard_group_root};
-use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+use tari_engine_types::{ProtocolVersion, fees::FeeScale};
+use tari_ootle_common_types::{Epoch, ShardGroup, ValidatorSetHash, VotePower, shard::Shard};
+use tari_sidechain::{
+    CommandCommitProof,
+    FixedHash,
+    SidechainBlockHeader,
+    SidechainProofValidationError,
+    SigningCommittee,
+    ToCommand,
+};
+use tari_state_tree::{
+    SPARSE_MERKLE_PLACEHOLDER_HASH,
+    StateTreeError,
+    TransitionAccumulator,
+    TreeHash,
+    Version,
+    compute_shard_group_root,
+};
 
-use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
+use crate::{
+    StateStoreReadTransaction,
+    StateStoreWriteTransaction,
+    StorageError,
+    consensus_models::{BlockHeaderMetadata, CommittedBlockProof},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct EpochCheckpoint {
@@ -26,8 +43,15 @@ pub struct EpochCheckpoint {
     #[n(1)]
     #[cbor(with = "tari_bor::adapters::indexmap_codec")]
     shard_tree_summary: IndexMap<Shard, TreeRootSummary>,
+    /// The preimage of the end-of-epoch header's metadata hash, from which a holder of this checkpoint reads the
+    /// header's [`ExtraData`](tari_ootle_common_types::ExtraData). The quorum certificate does not cover it, so
+    /// [`Self::validate_well_formed`] checks it against the header's metadata hash.
+    #[n(2)]
+    header_metadata: BlockHeaderMetadata,
 }
 
+/// A shard's state as the end-of-epoch block's state merkle root commits it (see
+/// [`shard_state_leaf`](tari_state_tree::shard_state_leaf)).
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 pub struct TreeRootSummary {
     #[n(0)]
@@ -35,21 +59,62 @@ pub struct TreeRootSummary {
     pub root_hash: TreeHash,
     #[n(1)]
     pub state_version: Version,
+    #[n(2)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
+    pub transition_acc: TransitionAccumulator,
+}
+
+impl TreeRootSummary {
+    /// The summary of a shard that has no state.
+    pub fn empty() -> Self {
+        Self {
+            root_hash: SPARSE_MERKLE_PLACEHOLDER_HASH,
+            state_version: 0,
+            transition_acc: TransitionAccumulator::zero(),
+        }
+    }
 }
 
 impl EpochCheckpoint {
     pub fn new(
         proof: CommandCommitProof<EndOfEpochCommand>,
         shard_tree_summary: IndexMap<Shard, TreeRootSummary>,
+        header_metadata: BlockHeaderMetadata,
     ) -> Self {
         Self {
             proof,
             shard_tree_summary,
+            header_metadata,
         }
+    }
+
+    /// The preimage of the end-of-epoch header's metadata hash. [`Self::validate_well_formed`] checks it against the
+    /// header, so it is the committed preimage once the checkpoint validates.
+    pub fn header_metadata(&self) -> &BlockHeaderMetadata {
+        &self.header_metadata
+    }
+
+    /// The [`ValidatorSetHash`] the end-of-epoch block ratifies for the next epoch, read from
+    /// [`Self::header_metadata`]. It is the committed value only once the checkpoint validates.
+    pub fn next_epoch_validator_set_hash(&self) -> Option<ValidatorSetHash> {
+        self.header_metadata.next_epoch_validator_set_hash()
+    }
+
+    /// The fee scale the end-of-epoch block names for the next epoch, read from [`Self::header_metadata`]. It is the
+    /// committed value only once the checkpoint validates, and `None` proves nothing, for the reason
+    /// [`Self::next_epoch_validator_set_hash`] gives.
+    pub fn next_epoch_fee_scale(&self) -> Option<FeeScale> {
+        self.header_metadata.next_epoch_fee_scale()
     }
 
     pub fn proof(&self) -> &CommandCommitProof<EndOfEpochCommand> {
         &self.proof
+    }
+
+    /// The commit proof of the end-of-epoch block, which outlives the block once epoch GC prunes it.
+    pub fn block_commit_proof(&self) -> CommittedBlockProof {
+        let CommandCommitProof::V1(proof) = &self.proof;
+        CommittedBlockProof::new(proof.commit_proof().clone())
     }
 
     pub fn header(&self) -> &SidechainBlockHeader {
@@ -82,14 +147,20 @@ impl EpochCheckpoint {
             .unwrap_or_default()
     }
 
+    pub fn get_shard_transition_acc(&self, shard: Shard) -> TransitionAccumulator {
+        self.shard_tree_summary
+            .get(&shard)
+            .map(|summary| summary.transition_acc)
+            .unwrap_or_default()
+    }
+
     /// The protocol version of the end-of-epoch block, which selects how its state merkle root's leaves are formed.
     pub fn protocol_version(&self) -> Result<ProtocolVersion, EpochCheckpointValidationError> {
         ProtocolVersion::try_from(self.header().protocol_version)
             .map_err(|e| EpochCheckpointValidationError::InvalidEpochCheckpoint(e.into()))
     }
 
-    /// From [`ProtocolVersion::V1`] the root commits to each shard's state version as well as its root, so a
-    /// checkpoint that validates fixes both.
+    /// The root commits to each shard's state version as well as its root, so a checkpoint that validates fixes both.
     pub fn compute_state_merkle_root(&self) -> Result<TreeHash, EpochCheckpointValidationError> {
         self.compute_state_merkle_root_as(self.protocol_version()?)
     }
@@ -101,15 +172,21 @@ impl EpochCheckpoint {
         protocol_version: ProtocolVersion,
     ) -> Result<TreeHash, EpochCheckpointValidationError> {
         let shard_group = self.checked_shard_group()?;
-        let shard_states = shard_group
-            .shard_iter_with_global()
-            .map(|shard| (shard, self.get_shard_root(shard), self.get_shard_state_version(shard)));
+        let shard_states = shard_group.shard_iter_with_global().map(|shard| {
+            (
+                shard,
+                self.get_shard_root(shard),
+                self.get_shard_state_version(shard),
+                self.get_shard_transition_acc(shard),
+            )
+        });
         let root = compute_shard_group_root(protocol_version, shard_states)?;
         Ok(root)
     }
 
     /// Validates that this epoch checkpoint is valid.
     /// 1. The commit proof is valid
+    ///  - The block is on `network`
     ///  - The command is included in the original block
     ///  - The QCs are signed by a correct quorum of validator nodes
     ///  - The 3-chain rule is satisfied
@@ -118,9 +195,10 @@ impl EpochCheckpoint {
     ///    a sanity check.
     pub fn validate(
         &self,
+        network: Network,
         epoch: Epoch,
         quorum_threshold: VotePower,
-        check_vn: impl Fn(&RistrettoPublicKeyBytes) -> Result<VotePower, SidechainProofValidationError>,
+        committee: &dyn SigningCommittee,
     ) -> Result<(), EpochCheckpointValidationError> {
         if self.epoch() != epoch {
             return Err(EpochCheckpointValidationError::InvalidEpochCheckpoint(anyhow!(
@@ -134,15 +212,7 @@ impl EpochCheckpoint {
 
         // Validate the proof
         self.proof
-            .validate_committed(quorum_threshold.value() as usize, &|pk: &CompressedPublicKey| {
-                let pk_bytes = RistrettoPublicKeyBytes::from_bytes(pk.as_bytes())
-                    // Should not be possible - however, since CompressedPublicKey currently represented using a Vec<u8>
-                    // it is possible, in theory, to have a CompressedPublicKey that is any size.
-                    .map_err(SidechainProofValidationError::internal_error)?;
-                // TODO: change this to return and check the actual voting power of the VN. Even if it is always 1 for
-                // now.
-                check_vn(&pk_bytes).map(|power| !power.is_zero())
-            })?;
+            .validate_committed(network.as_byte(), quorum_threshold.value(), committee)?;
 
         Ok(())
     }
@@ -176,6 +246,14 @@ impl EpochCheckpoint {
         }
 
         // TODO: more basic checks?
+
+        let computed = self.header_metadata.calculate_hash();
+        if computed != self.header().metadata_hash {
+            return Err(EpochCheckpointValidationError::HeaderMetadataMismatch {
+                computed,
+                header_metadata_hash: self.header().metadata_hash,
+            });
+        }
 
         // Validate state root matches provided header
         let state_root = self.compute_state_merkle_root()?;
@@ -250,6 +328,13 @@ pub enum EpochCheckpointValidationError {
         num_shard_state_roots: usize,
         num_shards: usize,
     },
+    #[error(
+        "Checkpoint header metadata hashes to {computed} but the end-of-epoch header commits to {header_metadata_hash}"
+    )]
+    HeaderMetadataMismatch {
+        computed: FixedHash,
+        header_metadata_hash: FixedHash,
+    },
     #[error("Invalid epoch checkpoint: {0}")]
     InvalidEpochCheckpoint(#[from] anyhow::Error),
 }
@@ -290,5 +375,104 @@ impl ToCommand for EndOfEpochCommand {
         // Must match the dan-side `Command::EndEpoch(EndEpochAtom)` byte-for-byte so the command hash
         // (and thus the inclusion proof against the committed block's command merkle root) verifies.
         tari_sidechain::Command::EndEpoch(tari_sidechain::EndEpochAtom::new(self.next_epoch_hash))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_common_types::{ExtraData, ExtraFieldKey};
+    use tari_sidechain::SidechainBlockCommitProof;
+    use tari_state_tree::compute_proof_for_hashes;
+
+    use super::*;
+
+    fn metadata(set_hash: ValidatorSetHash) -> BlockHeaderMetadata {
+        let mut extra_data = ExtraData::new();
+        extra_data.insert_validator_set_hash(ExtraFieldKey::NextEpochValidatorSetHash, &set_hash);
+        BlockHeaderMetadata {
+            total_leader_fee: 5,
+            timestamp: 1234,
+            extra_data,
+            timeout_certificate_id: None,
+            is_dummy: false,
+        }
+    }
+
+    /// A checkpoint whose header commits to `committed` and whose state root matches its shard summary.
+    fn checkpoint(committed: &BlockHeaderMetadata, carried: BlockHeaderMetadata) -> EpochCheckpoint {
+        let key = TreeHash::new([1; 32]);
+        let (_, inclusion_proof) = compute_proof_for_hashes([key].into_iter(), key).unwrap();
+        let mut header = SidechainBlockHeader {
+            network: 0,
+            protocol_version: 0,
+            parent_id: Default::default(),
+            justify_id: Default::default(),
+            height: 0,
+            epoch: 3,
+            epoch_hash: Default::default(),
+            shard_group: tari_sidechain::ShardGroup {
+                start: 1,
+                end_inclusive: 2,
+            },
+            proposed_by: Default::default(),
+            state_merkle_root: Default::default(),
+            command_merkle_root: Default::default(),
+            transaction_merkle_root: Default::default(),
+            signature: Default::default(),
+            accumulated_data: Default::default(),
+            metadata_hash: committed.calculate_hash(),
+        };
+        let build = |header: SidechainBlockHeader| {
+            EpochCheckpoint::new(
+                CommandCommitProof::new(
+                    EndOfEpochCommand::new(FixedHash::default()),
+                    SidechainBlockCommitProof {
+                        header,
+                        proof_elements: vec![],
+                    },
+                    inclusion_proof.clone(),
+                ),
+                IndexMap::new(),
+                carried.clone(),
+            )
+        };
+        let state_root = build(header.clone()).compute_state_merkle_root().unwrap();
+        header.state_merkle_root = FixedHash::new(state_root.into_array());
+        build(header)
+    }
+
+    #[test]
+    fn a_checkpoint_carrying_the_committed_preimage_names_the_next_validator_set() {
+        let set_hash = ValidatorSetHash::from_array([9; 32]);
+        let committed = metadata(set_hash);
+        let checkpoint = checkpoint(&committed, committed.clone());
+        checkpoint.validate_well_formed().unwrap();
+        assert_eq!(checkpoint.next_epoch_validator_set_hash(), Some(set_hash));
+    }
+
+    #[test]
+    fn a_checkpoint_carrying_another_preimage_is_rejected() {
+        let committed = metadata(ValidatorSetHash::from_array([9; 32]));
+        let forged = metadata(ValidatorSetHash::from_array([8; 32]));
+        let err = checkpoint(&committed, forged).validate_well_formed().unwrap_err();
+        assert!(
+            matches!(err, EpochCheckpointValidationError::HeaderMetadataMismatch { .. }),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_checkpoint_round_trips_its_preimage() {
+        let set_hash = ValidatorSetHash::from_array([9; 32]);
+        let committed = metadata(set_hash);
+        let checkpoint = checkpoint(&committed, committed.clone());
+
+        let decoded: EpochCheckpoint = tari_bor::decode(&tari_bor::encode(&checkpoint).unwrap()).unwrap();
+        decoded.validate_well_formed().unwrap();
+        assert_eq!(decoded.next_epoch_validator_set_hash(), Some(set_hash));
+
+        let decoded: EpochCheckpoint = serde_json::from_str(&serde_json::to_string(&checkpoint).unwrap()).unwrap();
+        decoded.validate_well_formed().unwrap();
+        assert_eq!(decoded.next_epoch_validator_set_hash(), Some(set_hash));
     }
 }

@@ -57,7 +57,7 @@ import { useParams } from "react-router-dom";
 import Events from "./Events";
 import FeeReceipt from "./FeeReceipt";
 import Inputs from "./Inputs";
-import Instructions from "./Instructions";
+import Instructions, { formatBlobSize } from "./Instructions";
 import Logs from "./Logs";
 import Signers from "./Signers";
 import Substates from "./Substates";
@@ -367,12 +367,6 @@ export default function TransactionDetails() {
       </Grid>
     </>
   );
-}
-
-function formatBlobSize(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
-  return `${(n / (1024 * 1024)).toFixed(2)} MiB`;
 }
 
 /**

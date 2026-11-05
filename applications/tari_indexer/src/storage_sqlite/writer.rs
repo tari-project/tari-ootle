@@ -2,22 +2,25 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    collections::HashMap,
     ops::{Deref, DerefMut},
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
+use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection, dsl, sql_types};
 use log::{debug, info, warn};
 use serde::Serialize;
 use tari_engine_types::{
+    Utxo,
+    encoded::Encoded,
     published_template::PublishedTemplateMetadata,
     substate::SubstateId,
     transaction_receipt::TransactionReceipt,
 };
 use tari_indexer_client::types::TransactionSource;
 use tari_indexer_lib::substate_cache::{FetchWatermark, SubstateCacheEntryRef, caches_nonexistence};
-use tari_ootle_common_types::{Epoch, StateVersion, displayable::Displayable, optional::Optional};
+use tari_ootle_common_types::{Epoch, StateVersion, displayable::Displayable, optional::Optional, shard::Shard};
 use tari_ootle_storage::{
     StorageError,
     consensus_models::{EpochCheckpoint, SubstateData},
@@ -33,6 +36,7 @@ use crate::{
     network_state_sync::EventFilter,
     storage_sqlite::{
         models::{
+            CheckpointShardLeaf,
             Key,
             NewEvent,
             NewSubstate,
@@ -40,6 +44,8 @@ use crate::{
             NewTransaction,
             NewVerifiedStateRoot,
             NewWatchedSubstate,
+            SnapshotSubstate,
+            StagedVersion,
             SubstateCacheInvalidation,
             SubstateRecord,
             UtxoRecordInsert,
@@ -47,9 +53,10 @@ use crate::{
             UtxoUpdateRecord,
             VerifiedStateRoot,
             encode_retention_epoch,
+            first_above,
         },
         reader::SqliteStoreReadTransaction,
-        serialization::{serialize_cbor, serialize_hex, serialize_json},
+        serialization::{encode_committed, serialize_hex, serialize_json},
     },
     store::{
         IndexerStoreReadTransaction,
@@ -71,6 +78,27 @@ fn unix_timestamp() -> i64 {
 pub struct SqliteStoreWriteTransaction<'a> {
     /// None indicates if the transaction has been explicitly committed/rolled back
     transaction: Option<SqliteStoreReadTransaction<'a>>,
+}
+
+/// The id, shard and state version of up to `limit` spent UTXOs spent before `cutoff`, oldest first. The literal
+/// condition and the order by the filtered column let SQLite serve it from `utxos_spent_epoch_idx`.
+pub(super) fn spent_utxos_before_epoch_query(
+    cutoff: Epoch,
+    limit: usize,
+) -> crate::storage_sqlite::schema::utxos::BoxedQuery<
+    'static,
+    diesel::sqlite::Sqlite,
+    (sql_types::BigInt, sql_types::Integer, sql_types::BigInt),
+> {
+    use crate::storage_sqlite::schema::utxos;
+
+    utxos::table
+        .select((utxos::id, utxos::shard, utxos::state_version))
+        .filter(dsl::sql::<sql_types::Bool>(r#""utxos"."is_spent" = true"#))
+        .filter(utxos::epoch.lt(encode_retention_epoch(cutoff)))
+        .order_by(utxos::epoch.asc())
+        .limit(limit as i64)
+        .into_boxed()
 }
 
 impl<'a> SqliteStoreWriteTransaction<'a> {
@@ -122,6 +150,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
 
         let mut skipped = Vec::new();
         for update in updates {
+            let is_burnt = matches!(update, UtxoUpdateRecord::Burnt(_));
             match update {
                 UtxoUpdateRecord::Unspent(unspent) => {
                     let resource_address = unspent.address.resource_address().to_string();
@@ -129,17 +158,19 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
 
                     let insert = UtxoRecordInsert {
                         commitment,
-                        public_nonce: serialize_hex(unspent.utxo_output.output.public_nonce),
+                        public_nonce: Some(serialize_hex(unspent.utxo_output.output.public_nonce)),
                         version: unspent.version.as_u64() as i64,
-                        output: Some(serialize_cbor(&unspent.utxo_output)?),
+                        utxo: Some(encode_committed(&Utxo {
+                            output: Some(unspent.utxo_output.clone()),
+                            is_frozen: unspent.is_frozen,
+                        })?),
                         shard: unspent.shard.as_u32() as i32,
                         resource_address,
                         state_version: unspent.state_version.as_u64() as i64,
-                        utxo_tag: unspent.utxo_output.tag.value() as i32,
+                        utxo_tag: Some(unspent.utxo_output.tag.value() as i32),
                         epoch: epoch.as_u64() as i64,
                         is_spent: false,
                         is_burnt: false,
-                        is_frozen: unspent.is_frozen,
                     };
                     // batch insert results in "cannot start a transaction within a transaction" error
                     let num_inserted = diesel::insert_into(utxos::table)
@@ -151,30 +182,205 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                         skipped.push(unspent.address);
                     }
                 },
-                UtxoUpdateRecord::Spent(spent) => {
+                // A burnt output is spent as well, so it leaves the unspent set and is pruned as a spend is.
+                UtxoUpdateRecord::Spent(spent) | UtxoUpdateRecord::Burnt(spent) => {
                     let resource_address = spent.address.resource_address().to_string();
                     let commitment = spent.address.id().to_commitment_hex_string();
                     let update = UtxoRecordUpdate {
                         epoch: Some(epoch.as_u64() as i64),
-                        version: Some(spent.version.as_u64() as i64),
                         // Prune the UTXO data for spent outputs
-                        output: Some(None),
+                        utxo: Some(None),
                         // Update to deleted state version
                         state_version: Some(spent.state_version.as_u64() as i64),
                         is_spent: Some(true),
-                        ..Default::default()
+                        is_burnt: Some(is_burnt),
                     };
-                    diesel::update(utxos::table)
-                        .filter(utxos::resource_address.eq(resource_address))
-                        .filter(utxos::commitment.eq(commitment))
+                    // A re-versioned output (freeze, unfreeze) keeps its commitment, so each version has its own
+                    // row and only the version this transition takes down is marked spent.
+                    let num_updated = diesel::update(utxos::table)
+                        .filter(utxos::resource_address.eq(&resource_address))
+                        .filter(utxos::commitment.eq(&commitment))
+                        .filter(utxos::version.eq(spent.version.as_u64() as i64))
                         .set(update)
                         .execute(self.connection())
                         .map_err(|e| StorageError::general(OPERATION, format!("update error: {e}")))?;
+                    // The stream serves a spend as the id and version it took down, which a client holding the
+                    // output can act on whether or not this indexer ever held it unspent.
+                    if num_updated == 0 {
+                        let tombstone = UtxoRecordInsert {
+                            commitment,
+                            public_nonce: None,
+                            version: spent.version.as_u64() as i64,
+                            shard: spent.shard.as_u32() as i32,
+                            resource_address,
+                            state_version: spent.state_version.as_u64() as i64,
+                            utxo: None,
+                            utxo_tag: None,
+                            epoch: epoch.as_u64() as i64,
+                            is_spent: true,
+                            is_burnt,
+                        };
+                        diesel::insert_into(utxos::table)
+                            .values(tombstone)
+                            .execute(self.connection())
+                            .map_err(|e| StorageError::general(OPERATION, format!("insert error: {e}")))?;
+                    }
                 },
             }
         }
 
         Ok(skipped)
+    }
+
+    fn raise_utxo_tombstone_horizon(&mut self, shard: Shard, state_version: StateVersion) -> Result<(), StorageError> {
+        const OPERATION: &str = "raise_utxo_tombstone_horizon";
+        use crate::storage_sqlite::schema::utxo_tombstone_horizons;
+
+        // Versions from 2^63 up are stored negative, so the comparison is made on the decoded version rather than
+        // in SQL.
+        if self
+            .utxo_tombstone_horizon(shard)?
+            .is_some_and(|horizon| horizon >= state_version)
+        {
+            return Ok(());
+        }
+        let version = state_version.as_u64() as i64;
+        diesel::insert_into(utxo_tombstone_horizons::table)
+            .values((
+                utxo_tombstone_horizons::shard.eq(shard.as_u32() as i32),
+                utxo_tombstone_horizons::state_version.eq(version),
+            ))
+            .on_conflict(utxo_tombstone_horizons::shard)
+            .do_update()
+            .set(utxo_tombstone_horizons::state_version.eq(version))
+            .execute(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+        Ok(())
+    }
+
+    fn staged_version_insert(&mut self, shard: Shard, version: &StagedVersion) -> Result<(), StorageError> {
+        const OPERATION: &str = "staged_version_insert";
+        use crate::storage_sqlite::schema::staged_versions;
+
+        let accumulator = &version.accumulator;
+        diesel::insert_into(staged_versions::table)
+            .values((
+                staged_versions::shard.eq(shard.as_u32() as i32),
+                staged_versions::state_version.eq(accumulator.state_version.as_u64() as i64),
+                staged_versions::epoch.eq(accumulator.epoch.as_u64() as i64),
+                staged_versions::transition_acc.eq(accumulator.transition_acc.as_slice()),
+                staged_versions::streamed_by.eq(&accumulator.streamed_by),
+                staged_versions::batch.eq(&version.batch),
+            ))
+            .execute(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+        Ok(())
+    }
+
+    fn checkpoint_shard_leaves_insert(&mut self, leaves: &[CheckpointShardLeaf]) -> Result<(), StorageError> {
+        const OPERATION: &str = "checkpoint_shard_leaves_insert";
+        use crate::storage_sqlite::schema::checkpoint_shard_leaves;
+
+        for leaf in leaves {
+            diesel::insert_into(checkpoint_shard_leaves::table)
+                .values((
+                    checkpoint_shard_leaves::shard.eq(leaf.shard.as_u32() as i32),
+                    checkpoint_shard_leaves::state_version.eq(leaf.state_version.as_u64() as i64),
+                    checkpoint_shard_leaves::transition_acc.eq(leaf.transition_acc.as_slice()),
+                ))
+                .on_conflict_do_nothing()
+                .execute(self.connection())
+                .map_err(|e| StorageError::general(OPERATION, e))?;
+        }
+        Ok(())
+    }
+
+    fn checkpoint_shard_leaves_delete_through(
+        &mut self,
+        shard: Shard,
+        state_version: StateVersion,
+    ) -> Result<(), StorageError> {
+        const OPERATION: &str = "checkpoint_shard_leaves_delete_through";
+        use crate::storage_sqlite::schema::checkpoint_shard_leaves;
+
+        diesel::delete(
+            checkpoint_shard_leaves::table
+                .filter(checkpoint_shard_leaves::shard.eq(shard.as_u32() as i32))
+                .filter(checkpoint_shard_leaves::state_version.le(state_version.as_u64() as i64)),
+        )
+        .execute(self.connection())
+        .map_err(|e| StorageError::general(OPERATION, e))?;
+        Ok(())
+    }
+
+    // Staged versions run contiguously up from a shard's first version, so they stay far below 2^63 and compare
+    // correctly as `i64` here and in `staged_versions_discard_above`.
+    fn staged_versions_delete_through(
+        &mut self,
+        shard: Shard,
+        state_version: StateVersion,
+    ) -> Result<(), StorageError> {
+        const OPERATION: &str = "staged_versions_delete_through";
+        use crate::storage_sqlite::schema::staged_versions;
+
+        diesel::delete(
+            staged_versions::table
+                .filter(staged_versions::shard.eq(shard.as_u32() as i32))
+                .filter(staged_versions::state_version.le(state_version.as_u64() as i64)),
+        )
+        .execute(self.connection())
+        .map_err(|e| StorageError::general(OPERATION, e))?;
+        Ok(())
+    }
+
+    fn staged_versions_discard_above(
+        &mut self,
+        shard: Shard,
+        state_version: Option<StateVersion>,
+    ) -> Result<Vec<Vec<u8>>, StorageError> {
+        const OPERATION: &str = "staged_versions_discard_above";
+        use crate::storage_sqlite::schema::staged_versions;
+
+        let above = staged_versions::table
+            .filter(staged_versions::shard.eq(shard.as_u32() as i32))
+            .filter(staged_versions::state_version.ge(first_above(state_version)));
+        let peers = above
+            .select(staged_versions::streamed_by)
+            .distinct()
+            .get_results::<Vec<u8>>(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+        diesel::delete(above)
+            .execute(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+        Ok(peers)
+    }
+
+    fn snapshot_substates_insert(&mut self, shard: Shard, substates: &[SnapshotSubstate]) -> Result<(), StorageError> {
+        const OPERATION: &str = "snapshot_substates_insert";
+        use crate::storage_sqlite::schema::snapshot_substates;
+
+        for substate in substates {
+            diesel::insert_into(snapshot_substates::table)
+                .values((
+                    snapshot_substates::shard.eq(shard.as_u32() as i32),
+                    snapshot_substates::epoch.eq(substate.epoch.as_u64() as i64),
+                    snapshot_substates::leaf_key.eq(substate.leaf_key.bytes.as_slice()),
+                    snapshot_substates::substate.eq(&substate.substate),
+                ))
+                .execute(self.connection())
+                .map_err(|e| StorageError::general(OPERATION, e))?;
+        }
+        Ok(())
+    }
+
+    fn snapshot_substates_delete(&mut self, shard: Shard) -> Result<(), StorageError> {
+        const OPERATION: &str = "snapshot_substates_delete";
+        use crate::storage_sqlite::schema::snapshot_substates;
+
+        diesel::delete(snapshot_substates::table.filter(snapshot_substates::shard.eq(shard.as_u32() as i32)))
+            .execute(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+        Ok(())
     }
 
     fn upsert_substate(&mut self, substate: &SubstateData) -> Result<(), StorageError> {
@@ -191,7 +397,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             data: substate
                 .value
                 .value()
-                .map(serialize_json)
+                .map(encode_committed)
                 .transpose()?
                 .unwrap_or_default(),
             template_address,
@@ -256,7 +462,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             let num_inserted = diesel::insert_into(transaction_receipts::table)
                 .values((
                     transaction_receipts::address.eq(&receipt_addr_hex),
-                    transaction_receipts::data.eq(serialize_json(&receipt)?),
+                    transaction_receipts::data.eq(encode_committed(&receipt)?),
                     transaction_receipts::outcome.eq(receipt.outcome.to_string()),
                     transaction_receipts::total_fees_paid.eq(receipt.fee_receipt.total_fees_paid() as i64),
                     transaction_receipts::epoch.eq(encode_retention_epoch(receipt.epoch)),
@@ -287,11 +493,12 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                 .collect();
 
             for event in filtered_events {
+                let encoded = encode_committed(&event)?;
                 let new_event = NewEvent {
                     template_address: event.template_address().to_string(),
                     tx_hash: &receipt_addr_hex,
                     topic: event.topic(),
-                    payload: serialize_json(event.payload())?,
+                    event: encoded.clone(),
                     substate_id: event.substate_id().map(|s| s.to_string()),
                     resource_address: EventFilter::event_resource_address(&event).map(|r| r.to_string()),
                     epoch: encode_retention_epoch(receipt.epoch),
@@ -309,6 +516,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                     id,
                     transaction_id,
                     event: Arc::new(event),
+                    encoded: Encoded::from_bytes(encoded),
                 });
             }
 
@@ -429,7 +637,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             .filter(transactions::retention_epoch.lt(encode_retention_epoch(cutoff)))
             .order_by(transactions::retention_epoch.asc())
             .limit(limit as i64)
-            .load::<i32>(self.connection())
+            .load::<i64>(self.connection())
             .map_err(|e| StorageError::general(OPERATION, e))?;
 
         if ids.is_empty() {
@@ -454,7 +662,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             .filter(transaction_receipts::epoch.lt(encode_retention_epoch(cutoff)))
             .order_by(transaction_receipts::epoch.asc())
             .limit(limit as i64)
-            .load::<i32>(self.connection())
+            .load::<i64>(self.connection())
             .map_err(|e| StorageError::general(OPERATION, e))?;
 
         if ids.is_empty() {
@@ -480,26 +688,69 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             .load::<i64>(self.connection())
             .map_err(|e| StorageError::general(OPERATION, e))?;
 
-        if ids.is_empty() {
+        let Some(&batch_max_id) = ids.iter().max() else {
+            return Ok(0);
+        };
+
+        let num_deleted = diesel::delete(events::table.filter(events::id.eq_any(ids)))
+            .execute(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+
+        let pruned_through =
+            Optional::optional(self.key_value_get_value::<_, i64>(Key::EventsPrunedThroughId))?.unwrap_or(0);
+        if batch_max_id > pruned_through {
+            self.key_value_set(Key::EventsPrunedThroughId, batch_max_id)?;
+        }
+
+        Ok(num_deleted)
+    }
+
+    fn prune_utxo_tombstones_before_epoch(&mut self, cutoff: Epoch, limit: usize) -> Result<usize, StorageError> {
+        const OPERATION: &str = "prune_utxo_tombstones_before_epoch";
+        use crate::storage_sqlite::schema::utxos;
+
+        let rows = spent_utxos_before_epoch_query(cutoff, limit)
+            .load::<(i64, i32, i64)>(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+        if rows.is_empty() {
             return Ok(0);
         }
 
-        diesel::delete(events::table.filter(events::id.eq_any(ids)))
+        // Versions from 2^63 up are stored negative, so the highest version of each shard is found on the decoded
+        // versions rather than in SQL.
+        let mut horizons = HashMap::<Shard, StateVersion>::new();
+        for &(_, shard, state_version) in &rows {
+            let state_version = StateVersion::new(state_version as u64);
+            horizons
+                .entry(Shard::from(shard as u32))
+                .and_modify(|horizon| *horizon = (*horizon).max(state_version))
+                .or_insert(state_version);
+        }
+
+        let ids = rows.into_iter().map(|(id, _, _)| id).collect::<Vec<_>>();
+        let num_deleted = diesel::delete(utxos::table.filter(utxos::id.eq_any(ids)))
             .execute(self.connection())
-            .map_err(|e| StorageError::general(OPERATION, e))
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+        for (shard, state_version) in horizons {
+            self.raise_utxo_tombstone_horizon(shard, state_version)?;
+        }
+
+        Ok(num_deleted)
     }
 
     fn insert_or_ignore_epoch_checkpoint(&mut self, epoch_checkpoint: &EpochCheckpoint) -> Result<(), StorageError> {
         const OPERATION: &str = "insert_or_ignore_epoch_checkpoint";
         use crate::storage_sqlite::schema::epoch_checkpoints;
 
+        let shard_group = epoch_checkpoint
+            .checked_shard_group()
+            .expect("shard group should be valid");
         diesel::insert_into(epoch_checkpoints::table)
             .values((
                 epoch_checkpoints::epoch.eq(epoch_checkpoint.epoch().as_u64() as i64),
-                epoch_checkpoints::shard_group.eq(epoch_checkpoint
-                    .checked_shard_group()
-                    .expect("shard group should be valid")
-                    .to_parsable_string()),
+                epoch_checkpoints::shard_group.eq(shard_group.to_parsable_string()),
+                epoch_checkpoints::shard_start.eq(shard_group.start().as_u32() as i32),
+                epoch_checkpoints::shard_end.eq(shard_group.end().as_u32() as i32),
                 epoch_checkpoints::json_data.eq(serialize_json(epoch_checkpoint)?),
             ))
             .on_conflict((epoch_checkpoints::epoch, epoch_checkpoints::shard_group))
@@ -695,7 +946,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             }
         }
 
-        let encoded = serialize_cbor(entry.substate_result)?;
+        let encoded = encode_committed(entry.substate_result)?;
 
         diesel::insert_into(substate_cache::table)
             .values((

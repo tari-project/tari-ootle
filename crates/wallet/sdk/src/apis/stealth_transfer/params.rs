@@ -8,12 +8,15 @@ use tari_engine_types::crypto::MAX_LAZY_BP_AGG_FACTORS;
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::Epoch;
 use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo, stealth::validated_condition_root};
-use tari_template_lib::types::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress};
+use tari_template_lib::types::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress, UtxoAddress};
 
-use crate::apis::{
-    confidential_transfer::UtxoInputSelection,
-    stealth_outputs::StealthOutputsApiError,
-    stealth_transfer::{StealthOutputToCreate, StealthTransferApiError},
+use crate::{
+    apis::{
+        confidential_transfer::UtxoInputSelection,
+        stealth_outputs::StealthOutputsApiError,
+        stealth_transfer::{StealthOutputToCreate, StealthTransferApiError},
+    },
+    models::AccountWithAddress,
 };
 
 #[derive(Debug, Clone)]
@@ -98,6 +101,9 @@ impl StealthTransferParams {
                 })?;
         }
 
+        // A TARI transfer may select inputs covering the outputs and the fee together.
+        self.total_output_amount_with_fee(Amount::from(self.max_fee))?;
+
         if let Some(swap) = &self.fee_params.pay_fee_with_swap &&
             !swap.input_amount.is_positive()
         {
@@ -112,12 +118,30 @@ impl StealthTransferParams {
         Ok(())
     }
 
-    pub fn total_output_amount(&self) -> Amount {
-        self.outputs.iter().map(|o| o.total_output_amount()).sum()
+    /// The sum of every output's revealed and blinded amounts, or `None` if it exceeds [`Amount::MAX`].
+    pub fn total_output_amount(&self) -> Option<Amount> {
+        self.outputs
+            .iter()
+            .try_fold(Amount::zero(), |sum, o| sum.checked_add(o.total_output_amount()?))
     }
 
-    pub fn total_revealed_output_amount(&self) -> Amount {
-        self.outputs.iter().map(|o| o.revealed_amount).sum()
+    /// The total output amount plus `fee`: what a transfer that also reveals `fee` must select inputs to cover.
+    pub fn total_output_amount_with_fee(&self, fee: Amount) -> Result<Amount, StealthTransferApiError> {
+        self.total_output_amount()
+            .and_then(|total| total.checked_add(fee))
+            .ok_or_else(|| StealthTransferApiError::InvalidParameter {
+                param: "outputs",
+                reason: format!("Total output amount plus a fee of {fee} exceeds the maximum amount"),
+            })
+    }
+
+    /// The sum of every output's revealed amount, or `None` if it exceeds [`Amount::MAX`].
+    pub fn total_revealed_output_amount(&self) -> Option<Amount> {
+        Amount::sum_from_positive(self.outputs.iter().map(|o| o.revealed_amount))
+    }
+
+    pub fn has_revealed_outputs(&self) -> bool {
+        self.outputs.iter().any(|o| o.revealed_amount.is_positive())
     }
 }
 
@@ -139,8 +163,9 @@ pub struct TransferOutput {
 }
 
 impl TransferOutput {
-    pub fn total_output_amount(&self) -> Amount {
-        self.revealed_amount + Amount::from(self.blinded_amount)
+    /// The revealed plus blinded amount, or `None` if it exceeds [`Amount::MAX`].
+    pub fn total_output_amount(&self) -> Option<Amount> {
+        self.revealed_amount.checked_add(Amount::from(self.blinded_amount))
     }
 
     /// Checks that this output's `pay_to` intent will be honoured as written, returning the reason it will not.
@@ -149,8 +174,8 @@ impl TransferOutput {
     /// at all — statement construction filters it out — so a gating intent on one would be silently dropped and the
     /// funds deposited unguarded. Reject it rather than mislead the caller.
     ///
-    /// For a condition set, the tree is built here so a malformed set is reported against the field the caller
-    /// supplied, before any inputs are locked, rather than failing deep in output construction.
+    /// For any intent that commits a condition tree, the tree is built here so a malformed set is reported against the
+    /// field the caller supplied, before any inputs are locked, rather than failing deep in output construction.
     pub fn validate_pay_to(&self) -> Result<(), String> {
         if self.blinded_amount == 0 {
             if matches!(self.pay_to, PayTo::StealthPublicKey) {
@@ -161,11 +186,71 @@ impl TransferOutput {
             );
         }
 
-        if let PayTo::Conditions(conditions) = &self.pay_to {
-            validated_condition_root(conditions).map_err(|e| e.to_string())?;
+        if let Some(conditions) = self.pay_to.conditions() {
+            validated_condition_root(&conditions).map_err(|e| e.to_string())?;
         }
 
         Ok(())
+    }
+}
+
+/// Where a transfer statement's input value comes from.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub enum InputSelection {
+    FromBucket {
+        revealed_amount: Amount,
+    },
+    Selection(UtxoInputSelection),
+    /// Spend exactly the named wallet-owned stealth UTXOs, in the given order. The wallet resolves, validates and
+    /// locks precisely these outputs via `StealthOutputsApi::lock_specific_outputs`, rather than choosing inputs to
+    /// cover an amount.
+    Specific {
+        utxo_addresses: Vec<UtxoAddress>,
+    },
+}
+
+impl InputSelection {
+    pub fn as_selection(&self) -> Option<UtxoInputSelection> {
+        match self {
+            InputSelection::Selection(s) => Some(*s),
+            InputSelection::FromBucket { .. } | InputSelection::Specific { .. } => None,
+        }
+    }
+
+    pub fn as_from_bucket(&self) -> Option<Amount> {
+        match self {
+            InputSelection::FromBucket { revealed_amount } => Some(*revealed_amount),
+            InputSelection::Selection(_) | InputSelection::Specific { .. } => None,
+        }
+    }
+
+    /// The exact UTXOs to spend when this is an [`InputSelection::Specific`] selection.
+    pub fn as_specific(&self) -> Option<&[UtxoAddress]> {
+        match self {
+            InputSelection::Specific { utxo_addresses } => Some(utxo_addresses),
+            InputSelection::FromBucket { .. } | InputSelection::Selection(_) => None,
+        }
+    }
+}
+
+/// One stealth transfer statement for [`StealthTransferApi::create_transfer_statements`] to build.
+///
+/// [`StealthTransferApi::create_transfer_statements`]: super::StealthTransferApi::create_transfer_statements
+#[derive(Debug, Clone)]
+pub struct TransferStatementSpec {
+    pub sender: AccountWithAddress,
+    pub resource_address: ResourceAddress,
+    pub input_selection: InputSelection,
+    pub outputs: Vec<TransferOutput>,
+}
+
+impl TransferStatementSpec {
+    /// The sum of every output's revealed and blinded amounts, or `None` if it exceeds [`Amount::MAX`].
+    pub fn total_output_amount(&self) -> Option<Amount> {
+        self.outputs
+            .iter()
+            .try_fold(Amount::zero(), |sum, o| sum.checked_add(o.total_output_amount()?))
     }
 }
 
@@ -253,8 +338,9 @@ mod tests {
     use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
     use tari_engine_types::limits::STEALTH_LIMITS;
     use tari_template_lib::types::{
+        access_rules::MAX_ACCESS_RULE_NODES,
         constants::STEALTH_TARI_RESOURCE_ADDRESS,
-        stealth::{AtomicCondition, BuiltinPredicate, SpendCondition},
+        stealth::{AtomicCondition, BuiltinPredicate, SpendCondition, TemplateFunction},
     };
 
     use super::*;
@@ -332,6 +418,17 @@ mod tests {
         ])]));
     }
 
+    /// The single-leaf conveniences commit a leaf just as `Conditions` does, so they are held to the same rule: a leaf
+    /// that cannot decode at spend time is never revealed.
+    #[test]
+    fn rejects_a_single_leaf_pay_to_over_the_decode_node_limit() {
+        assert_rejects_pay_to(PayTo::TemplateFunction(TemplateFunction {
+            template: Default::default(),
+            function: "predicate".try_into().unwrap(),
+            args: vec![Default::default(); MAX_ACCESS_RULE_NODES],
+        }));
+    }
+
     /// `pay_to` gates the blinded output, which a revealed-only transfer never produces. Silently depositing the
     /// funds unguarded would give the caller the opposite of what they asked for.
     #[test]
@@ -378,6 +475,57 @@ mod tests {
         params_paying_fee_with_swap(2100)
             .validate(NETWORK)
             .expect("a fee swap with an explicit input amount is valid");
+    }
+
+    fn params_with_outputs(amounts: &[(Amount, u64)], max_fee: u64) -> StealthTransferParams {
+        StealthTransferParams {
+            outputs: amounts
+                .iter()
+                .map(|&(revealed_amount, blinded_amount)| TransferOutput {
+                    address: address(),
+                    revealed_amount,
+                    blinded_amount,
+                    memo: None,
+                    pay_to: PayTo::StealthPublicKey,
+                })
+                .collect(),
+            max_fee,
+            ..params_paying_to(100, 0, PayTo::StealthPublicKey)
+        }
+    }
+
+    fn assert_rejects_output_total(params: StealthTransferParams) {
+        let err = params
+            .validate(NETWORK)
+            .expect_err("outputs whose total exceeds the maximum amount must be rejected");
+        assert!(
+            matches!(err, StealthTransferApiError::InvalidParameter { param: "outputs", .. }),
+            "expected an InvalidParameter naming outputs, got: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_outputs_whose_total_exceeds_the_maximum_amount() {
+        assert_rejects_output_total(params_with_outputs(&[(Amount::MAX, 0), (Amount::ONE, 0)], 0));
+    }
+
+    #[test]
+    fn rejects_an_output_whose_revealed_and_blinded_amounts_exceed_the_maximum_amount() {
+        assert_rejects_output_total(params_with_outputs(&[(Amount::MAX, 1)], 0));
+    }
+
+    #[test]
+    fn rejects_outputs_whose_total_plus_the_fee_exceeds_the_maximum_amount() {
+        assert_rejects_output_total(params_with_outputs(&[(Amount::MAX, 0)], 1));
+    }
+
+    #[test]
+    fn accepts_outputs_totalling_the_maximum_amount() {
+        let params = params_with_outputs(&[(Amount::MAX - Amount::from(3u64), 1), (Amount::ONE, 1)], 0);
+        params
+            .validate(NETWORK)
+            .expect("a total of exactly the maximum amount is representable");
+        assert_eq!(params.total_output_amount(), Some(Amount::MAX));
     }
 
     #[test]

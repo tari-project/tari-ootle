@@ -7,6 +7,7 @@ import type { OutputStatus } from "@tari-project/ootle-ts-bindings";
 import { ReactNode } from "react";
 import {
   IoArrowForwardOutline,
+  IoFlameOutline,
   IoLockClosedOutline,
   IoTimeOutline,
   IoWalletOutline,
@@ -25,6 +26,7 @@ const colorList: Record<string, string> = {
   LockedForSpend: "#318EFA",
   LockedUnconfirmed: "#9D5CF9",
   Invalid: "#DB7E7E",
+  Burnt: "#C0504D",
 };
 
 export default function StatusChip({ status, showTitle = true, tooltip }: StatusChipProps) {
@@ -36,6 +38,7 @@ export default function StatusChip({ status, showTitle = true, tooltip }: Status
     LockedForSpend: <IoLockClosedOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
     LockedUnconfirmed: <IoTimeOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
     Invalid: <IoWarningOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
+    Burnt: <IoFlameOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
   };
 
   let bgColor = colorList[status];

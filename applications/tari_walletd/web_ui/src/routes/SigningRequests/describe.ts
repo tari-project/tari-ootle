@@ -5,8 +5,8 @@
 //! instructions a person can verify by reading them. Everything else falls back
 //! to the generic instruction list.
 
-import type { Instruction, InstructionArg } from "@tari-project/ootle-ts-bindings";
-import { toHexString } from "@utils/helpers";
+import type { Blobs, Instruction, InstructionArg } from "@tari-project/ootle-ts-bindings";
+import { blobBytes, toHexString } from "@utils/helpers";
 import { decode } from "cbor2";
 
 /// `BURN_RATE_GOVERNANCE_COMPONENT_ADDRESS`: the same fixed global component on every network.
@@ -39,11 +39,19 @@ export function fingerprint(messageHashHex: string): string {
   );
 }
 
-function literal(arg: InstructionArg | undefined): unknown {
-  if (!arg || typeof arg !== "object" || !("Literal" in arg)) {
-    throw new Error("argument is not a literal");
+/// The value an argument passes to the call. The engine decodes a blob
+/// argument exactly like a literal, so both are read here.
+function argValue(arg: InstructionArg | undefined, blobs: Blobs): unknown {
+  if (arg && typeof arg === "object" && "Literal" in arg) {
+    return decode(arg.Literal, { encoding: "hex" });
   }
-  return decode(arg.Literal, { encoding: "hex" });
+  if (arg && typeof arg === "object" && "Blob" in arg) {
+    const bytes = blobBytes(blobs, arg.Blob);
+    if (bytes != null) {
+      return decode(bytes);
+    }
+  }
+  throw new Error("argument is not a literal or a blob the transaction carries");
 }
 
 function integer(value: unknown): bigint {
@@ -80,7 +88,7 @@ export interface GovernanceDescription {
 
 /// Describes a call on the burn-rate governance component, or returns `null`
 /// for any other instruction.
-export function describeGovernanceCall(instruction: Instruction): GovernanceDescription | null {
+export function describeGovernanceCall(instruction: Instruction, blobs: Blobs): GovernanceDescription | null {
   const target = callTarget(instruction);
   if (!target || target.address !== BURN_RATE_GOVERNANCE_COMPONENT_ADDRESS) {
     return null;
@@ -89,16 +97,16 @@ export function describeGovernanceCall(instruction: Instruction): GovernanceDesc
   try {
     switch (method) {
       case "set_burn_rate": {
-        const rate = integer(literal(args[0]));
-        const epoch = integer(literal(args[1]));
+        const rate = integer(argValue(args[0], blobs));
+        const epoch = integer(argValue(args[1], blobs));
         return {
           headline: `Set the exhaust burn rate to ${formatBps(rate)} (${rate} bps) from epoch ${epoch}`,
           details: [],
         };
       }
       case "set_council": {
-        const threshold = integer(literal(args[0]));
-        const council = literal(args[1]);
+        const threshold = integer(argValue(args[0], blobs));
+        const council = argValue(args[1], blobs);
         if (!Array.isArray(council)) {
           throw new Error("council is not a list");
         }
@@ -123,15 +131,15 @@ export function describeGovernanceCall(instruction: Instruction): GovernanceDesc
   }
 }
 
-/// The fee an instruction commits to paying, when it is a `pay_fee` call with a
-/// literal amount.
-export function describeFee(instruction: Instruction): string | null {
+/// The fee an instruction commits to paying, when it is a `pay_fee` call whose
+/// amount is a literal or a blob.
+export function describeFee(instruction: Instruction, blobs: Blobs): string | null {
   const target = callTarget(instruction);
   if (!target || target.method !== "pay_fee") {
     return null;
   }
   try {
-    const amount = integer(literal(target.args[0]));
+    const amount = integer(argValue(target.args[0], blobs));
     return `Up to ${amount.toLocaleString()} µT, paid by ${target.address}`;
   } catch {
     return null;

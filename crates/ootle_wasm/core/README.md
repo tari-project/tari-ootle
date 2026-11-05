@@ -13,16 +13,28 @@ Encodes `Transaction` values using `tari_bor` and returns base64 strings matchin
 
 ### `hash` — Transaction hashing
 
-Produces the 64-byte signing message for an `UnsignedTransactionV1`. Delegates to `TransactionSignature::create_message_v1` to guarantee byte-identical output with the rest of the Tari codebase.
+Produces the 64-byte signing messages. Delegates to `TransactionSignature::create_message_v1` (authorization) and `TransactionSealSignature::create_message_v1` (seal) to guarantee byte-identical output with the rest of the Tari codebase.
 
 - `hash_unsigned_transaction(&UnsignedTransactionV1, seal_signer_hex: &str) → Result<Vec<u8>>`
-- `hash_unsigned_transaction_json(json: &str, seal_signer_hex: &str) → Result<Vec<u8>>`
+- `hash_unsigned_transaction_json(json: &str, seal_signer_hex: &str) → Result<Vec<u8>>`: accepts unsigned or unsealed JSON
+- `hash_unsealed_transaction(&UnsealedTransactionV1) → Vec<u8>`: seal message; covers every authorization signature, so attach them first
+- `hash_unsealed_transaction_json(json: &str) → Result<Vec<u8>>`: accepts unsigned or unsealed JSON
 
-### `sign` — Schnorr signing and key management
+### `transaction` — Sealing and authorization
 
-Ristretto255 Schnorr signatures and keypair operations.
+Each function accepts unsigned or unsealed transaction JSON.
 
-- `schnorr_sign(secret_key_hex: &str, message: &[u8]) → Result<SchnorrSignatureResult>`
+- `seal_transaction_json(json, seal_signer_secret_key) → Result<String>`
+- `add_transaction_signer_json(json, signer_secret_key, seal_signer_public_key) → Result<String>`
+- `attach_seal_signature_json(json, seal_signer_public_key, signature) → Result<String>`: seals with an externally produced 64-byte sr25519 signature over the seal message
+- `attach_transaction_signature_json(json, signer_public_key, signature, seal_signer_public_key) → Result<String>`: appends an externally produced authorization signature
+
+Externally produced signatures are standard sr25519 signatures under the `substrate` signing context; see `NPM_README.md`, including its key isolation requirements: the signing key signs Ootle transaction messages only. The `attach_*` functions verify the signature before returning, so a signature over the wrong message or by the wrong key fails at attach time.
+
+### `sign` — key management
+
+Ristretto255 keypair operations. Transaction signing lives in `transaction`, which hashes the transaction itself.
+
 - `public_key_from_secret_key(secret_key_hex: &str) → Result<String>`
 - `generate_keypair() → KeypairResult`
 

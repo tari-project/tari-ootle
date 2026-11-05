@@ -6,11 +6,15 @@ use std::collections::{HashMap, HashSet};
 use log::*;
 use tari_engine_types::{
     SubstateVersion,
+    encoded::Encoded,
     indexed_value::{IndexedValueError, IndexedWellKnownTypes},
     resource::Resource,
-    substate::{Substate, SubstateId, SubstateValue},
+    substate::{EncodedSubstate, Substate, SubstateId, SubstateValue},
 };
+use tari_indexer_client::types::{SubstateProof, SubstateState};
 use tari_ootle_common_types::{
+    Epoch,
+    ShardGroup,
     SubstateRequirement,
     VersionedSubstateId,
     VersionedSubstateIdRef,
@@ -18,19 +22,29 @@ use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     substate_type::SubstateType,
 };
+use tari_ootle_light_client::{LightClientError, VerifiedCommittee, down_proof_up_anchor, verify_down_proof};
 use tari_template_lib::types::{ResourceAddress, TemplateAddress, constants::TARI_TOKEN};
 
 use crate::{
-    models::SubstateModel,
-    network::WalletNetworkInterface,
+    apis::validator_set::{ValidatorSetApi, ValidatorSetApiError},
+    models::{ProvenUp, SubstateModel},
+    network::{FetchedSubstates, WalletNetworkInterface},
+    sdk::IndexerTrust,
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::substate";
 
+/// How many epochs before the latest validator set the wallet trusts a substate proof may be anchored. The indexer
+/// serves proofs anchored in the network's current epoch or the one before, and the wallet trusts the set of the
+/// current epoch once the checkpoint ending the one before is served.
+const MAX_PROOF_AGE_EPOCHS: u64 = 1;
+
 pub struct SubstatesApi<'a, TStore, TNetworkInterface> {
     store: &'a TStore,
     network_interface: &'a TNetworkInterface,
+    validator_set_api: ValidatorSetApi<'a, TStore, TNetworkInterface>,
+    indexer_trust: IndexerTrust,
 }
 
 impl<'a, TStore, TNetworkInterface> SubstatesApi<'a, TStore, TNetworkInterface>
@@ -39,10 +53,17 @@ where
     TNetworkInterface: WalletNetworkInterface,
     TNetworkInterface::Error: IsNotFoundError,
 {
-    pub fn new(store: &'a TStore, network_interface: &'a TNetworkInterface) -> Self {
+    pub fn new(
+        store: &'a TStore,
+        network_interface: &'a TNetworkInterface,
+        validator_set_api: ValidatorSetApi<'a, TStore, TNetworkInterface>,
+        indexer_trust: IndexerTrust,
+    ) -> Self {
         Self {
             store,
             network_interface,
+            validator_set_api,
+            indexer_trust,
         }
     }
 
@@ -64,23 +85,66 @@ where
     }
 
     pub async fn get_substate_from_network(&self, id: SubstateId) -> Result<Substate, SubstateApiError> {
-        let mut map = self.get_substates_from_network(vec![id.clone()]).await?;
+        let mut map = self.get_substates_from_network(std::slice::from_ref(&id)).await?;
         map.remove(&id)
             .ok_or_else(|| SubstateApiError::SubstateDoesNotExist { address: id })
     }
 
+    /// Fetches the latest version of each of `ids` that exists. Under [`IndexerTrust::Verify`] every substate returned
+    /// is proven, as [`Self::fetch_substate_from_network`] describes, or the fetch fails.
     pub async fn get_substates_from_network(
         &self,
-        ids: Vec<SubstateId>,
+        ids: &[SubstateId],
     ) -> Result<HashMap<SubstateId, Substate>, SubstateApiError> {
         if ids.is_empty() {
             return Ok(HashMap::new());
         }
 
-        self.network_interface
-            .get_substates(ids)
+        let verify = self.indexer_trust.is_verify();
+        let FetchedSubstates { substates, proofs } = self
+            .network_interface
+            .get_substates(ids, verify)
             .await
-            .map_err(|e| SubstateApiError::NetworkInterfaceError(e.into()))
+            .map_err(|e| SubstateApiError::NetworkInterfaceError(e.into()))?;
+        let mut read = HashMap::with_capacity(substates.len());
+        for (id, substate) in substates {
+            let read_substate = self.read_served(&id, &substate, verify, proofs.get(&id)).await?;
+            read.insert(id, read_substate.substate);
+        }
+        Ok(read)
+    }
+
+    /// Fetches the latest version of each of `ids` in one fetch, and returns each one's result on its own: a
+    /// substate the indexer does not serve is [`SubstateApiError::SubstateDoesNotExist`], and under
+    /// [`IndexerTrust::Verify`] each served substate must be proven as [`Self::fetch_substate_from_network`] describes.
+    /// Only a failed fetch fails every result.
+    pub async fn get_each_substate_from_network(
+        &self,
+        ids: &[SubstateId],
+    ) -> Result<Vec<(SubstateId, Result<ReadSubstate, SubstateApiError>)>, SubstateApiError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let verify = self.indexer_trust.is_verify();
+        let FetchedSubstates { mut substates, proofs } = self
+            .network_interface
+            .get_substates(ids, verify)
+            .await
+            .map_err(|e| SubstateApiError::NetworkInterfaceError(e.into()))?;
+        let mut results = Vec::with_capacity(ids.len());
+        for id in ids {
+            let Some(substate) = substates.remove(id) else {
+                results.push((
+                    id.clone(),
+                    Err(SubstateApiError::SubstateDoesNotExist { address: id.clone() }),
+                ));
+                continue;
+            };
+            let result = self.read_served(id, &substate, verify, proofs.get(id)).await;
+            results.push((id.clone(), result));
+        }
+        Ok(results)
     }
 
     pub fn load_dependent_substates(
@@ -256,9 +320,10 @@ where
         substate_ids: &mut HashSet<SubstateRequirement>,
     ) -> Result<(), SubstateApiError> {
         for addr in value.referenced_substates() {
-            // Component state legitimately holds engine-issued addresses — an `Account` approval is keyed on a
-            // spender badge, which is commonly a public-key identity — and those have no substate to fetch or lock.
-            if addr.is_virtual() {
+            // Component state legitimately holds addresses no transaction can declare: an `Account` approval is
+            // keyed on a spender badge, which is commonly a public-key identity, and a template may record a
+            // transaction receipt.
+            if !addr.is_declarable_input() {
                 continue;
             }
             self.insert_substate_if_absent(&addr, unversioned, substate_ids).await?;
@@ -299,6 +364,9 @@ where
         Ok(())
     }
 
+    /// Fetches `address` at `version_hint` or later, or its latest version. Under [`IndexerTrust::Verify`] the substate
+    /// must be proven by a committee of a validator set the wallet trusts, at a block no more than
+    /// [`MAX_PROOF_AGE_EPOCHS`] before the latest such set, or the fetch fails.
     pub async fn fetch_substate_from_network(
         &self,
         address: &SubstateId,
@@ -311,15 +379,40 @@ where
             version_hint.display()
         );
 
+        let verify = self.indexer_trust.is_verify();
         let resp = self
             .network_interface
-            .query_substate(address, version_hint, false)
+            .query_substate(address, version_hint, false, verify)
             .await
             .optional()
             .map_err(|e| SubstateApiError::NetworkInterfaceError(e.into()))?
             .ok_or_else(|| SubstateApiError::SubstateDoesNotExist {
                 address: address.clone(),
             })?;
+        if let Some(requested) = version_hint &&
+            resp.version < requested
+        {
+            return Err(SubstateApiError::SubstateOlderThanRequested {
+                substate_id: address.clone(),
+                requested,
+                served: resp.version,
+            });
+        }
+        let SubstateState::Up { substate } = resp.state else {
+            return Err(SubstateApiError::SubstateDoesNotExist {
+                address: address.clone(),
+            });
+        };
+        let substate = self
+            .read_served(
+                address,
+                &EncodedSubstate::new(resp.version, substate),
+                verify,
+                resp.proof.as_ref(),
+            )
+            .await?
+            .substate
+            .into_substate_value();
 
         debug!(
             target: LOG_TARGET,
@@ -327,8 +420,204 @@ where
         );
         Ok(ValidatorScanResult {
             id: VersionedSubstateId::new(address.clone(), resp.version),
-            substate: resp.substate,
+            substate,
         })
+    }
+
+    /// Verifies that `substate_id` at `version` has gone down: the indexer must prove that the version was committed
+    /// and that a later block's state no longer holds it, each against a committee of a validator set the wallet
+    /// trusts.
+    ///
+    /// Validators keep the proof that a version was committed for a limited time. Past it, the indexer serves only the
+    /// exclusion, which shows the version gone when `proven_up` is a proof the wallet verified of that same version at
+    /// a block of an earlier epoch than the exclusion's.
+    ///
+    /// A version that has gone down never comes back up, so the proof shows the version's current state however old
+    /// its blocks are. It says nothing about later versions of the substate.
+    pub async fn verify_down(
+        &self,
+        substate_id: &SubstateId,
+        version: SubstateVersion,
+        proven_up: Option<ProvenUp>,
+    ) -> Result<(), SubstateApiError> {
+        let resp = self
+            .network_interface
+            .query_substate(substate_id, Some(version), false, true)
+            .await
+            .optional()
+            .map_err(|e| SubstateApiError::NetworkInterfaceError(e.into()))?
+            .ok_or_else(|| SubstateApiError::SubstateDoesNotExist {
+                address: substate_id.clone(),
+            })?;
+        if let SubstateState::Up { .. } = resp.state {
+            return Err(SubstateApiError::SubstateNotDown {
+                substate_id: substate_id.clone(),
+                version: resp.version,
+            });
+        }
+        let unproven = || SubstateApiError::SubstateUnproven {
+            substate_id: substate_id.clone(),
+        };
+        let proof = resp.proof.ok_or_else(unproven)?;
+        let unverified = |source| SubstateApiError::SubstateUnverified {
+            substate_id: substate_id.clone(),
+            source,
+        };
+        let Some(down_proof) = proof.down_proof.as_deref() else {
+            let proven_up = proven_up
+                .filter(|proven_up| proven_up.version == version)
+                .ok_or_else(unproven)?;
+            if proof.anchor.epoch <= proven_up.epoch {
+                return Err(SubstateApiError::SubstateExcludedNoLaterThanProvenUp {
+                    substate_id: substate_id.clone(),
+                    version,
+                    anchor_epoch: proof.anchor.epoch,
+                    proven_up_epoch: proven_up.epoch,
+                });
+            }
+            let committee = self
+                .trusted_committee(substate_id, proof.anchor.epoch, proof.anchor.shard_group)
+                .await?;
+            committee
+                .verify_absent(substate_id, version, &proof)
+                .map_err(unverified)?;
+            return Ok(());
+        };
+
+        let (up_epoch, up_shard_group) = down_proof_up_anchor(down_proof).map_err(unverified)?;
+        let up_committee = self.trusted_committee(substate_id, up_epoch, up_shard_group).await?;
+        let down_committee = self
+            .trusted_committee(substate_id, proof.anchor.epoch, proof.anchor.shard_group)
+            .await?;
+        verify_down_proof(
+            substate_id,
+            version,
+            down_proof,
+            &up_committee,
+            &down_committee,
+            &proof.commit_proof,
+        )
+        .map_err(unverified)
+    }
+
+    /// The committee of `shard_group` in `epoch`, verified against a validator set the wallet trusts, to verify a proof
+    /// of `substate_id` anchored at a block of that committee.
+    async fn trusted_committee(
+        &self,
+        substate_id: &SubstateId,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<VerifiedCommittee, SubstateApiError> {
+        match self.validator_set_api.verify_committee(epoch, shard_group).await? {
+            Some(committee) => Ok(committee),
+            None => Err(self.untrusted_anchor_error(substate_id, epoch)?),
+        }
+    }
+
+    /// The substate the indexer served for `substate_id`: verified against `proof` as [`Self::verify_read`] describes
+    /// when `verify` is set, and otherwise decoded as served.
+    async fn read_served(
+        &self,
+        substate_id: &SubstateId,
+        served: &EncodedSubstate,
+        verify: bool,
+        proof: Option<&SubstateProof>,
+    ) -> Result<ReadSubstate, SubstateApiError> {
+        let (value, proven_up) = if verify {
+            let (epoch, value) = self
+                .verify_read(substate_id, served.version(), served.value(), proof)
+                .await?;
+            let proven_up = ProvenUp {
+                version: served.version(),
+                epoch,
+            };
+            (value, Some(proven_up))
+        } else {
+            let value = served
+                .value()
+                .decode()
+                .map_err(|e| SubstateApiError::UndecodableSubstate {
+                    substate_id: substate_id.clone(),
+                    details: e.to_string(),
+                })?;
+            (value, None)
+        };
+        Ok(ReadSubstate {
+            substate: Substate::new(served.version(), value),
+            proven_up,
+        })
+    }
+
+    /// Verifies that `substate_id` at `version` held `value` at the block `proof` is anchored at, and that the block is
+    /// recent: no more than [`MAX_PROOF_AGE_EPOCHS`] before the latest validator set the wallet trusts. Returns the
+    /// block's epoch and `value` decoded.
+    ///
+    /// The latest trusted set advances only as far as the checkpoints the indexer serves. An indexer that stops serving
+    /// newer checkpoints can therefore keep the wallet on state proven up to the last one it served; no proof shows its
+    /// age against the wall clock.
+    async fn verify_read(
+        &self,
+        substate_id: &SubstateId,
+        version: SubstateVersion,
+        value: &Encoded<SubstateValue>,
+        proof: Option<&SubstateProof>,
+    ) -> Result<(Epoch, SubstateValue), SubstateApiError> {
+        let proof = proof.ok_or_else(|| SubstateApiError::SubstateUnproven {
+            substate_id: substate_id.clone(),
+        })?;
+        let anchor_epoch = proof.anchor.epoch;
+        // A proof anchored before the latest trusted set walks nowhere, so it is judged before its committee is
+        // fetched.
+        self.check_fresh(substate_id, anchor_epoch)?;
+        let committee = self
+            .trusted_committee(substate_id, anchor_epoch, proof.anchor.shard_group)
+            .await?;
+        let (tip, value) = committee
+            .verify_substate(substate_id, version, value, proof)
+            .map_err(|source| SubstateApiError::SubstateUnverified {
+                substate_id: substate_id.clone(),
+                source,
+            })?;
+        // Verifying the committee walks to the set of the anchor's epoch when that is past the latest trusted set, and
+        // the walk can go further.
+        self.check_fresh(substate_id, anchor_epoch)?;
+        Ok((tip.epoch, value))
+    }
+
+    /// The error for a proof anchored at `anchor_epoch`, for which the wallet trusts no validator set even after
+    /// syncing.
+    fn untrusted_anchor_error(
+        &self,
+        substate_id: &SubstateId,
+        anchor_epoch: Epoch,
+    ) -> Result<SubstateApiError, SubstateApiError> {
+        if let Some(anchor) = self.validator_set_api.anchor()? &&
+            anchor_epoch < anchor.validator_set.epoch()
+        {
+            return Ok(SubstateApiError::SubstateProvenBeforeAnchor {
+                substate_id: substate_id.clone(),
+                epoch: anchor_epoch,
+                anchor_epoch: anchor.validator_set.epoch(),
+            });
+        }
+        Ok(SubstateApiError::SubstateProvenPastServedCheckpoints {
+            substate_id: substate_id.clone(),
+            epoch: anchor_epoch,
+        })
+    }
+
+    fn check_fresh(&self, substate_id: &SubstateId, anchor_epoch: Epoch) -> Result<(), SubstateApiError> {
+        let Some(latest) = self.validator_set_api.latest()? else {
+            return Ok(());
+        };
+        if anchor_epoch.as_u64() + MAX_PROOF_AGE_EPOCHS < latest.epoch().as_u64() {
+            return Err(SubstateApiError::SubstateProofStale {
+                substate_id: substate_id.clone(),
+                anchor_epoch,
+                latest_trusted_epoch: latest.epoch(),
+            });
+        }
+        Ok(())
     }
 
     pub async fn fetch_resource(&self, address: ResourceAddress) -> Result<Resource, SubstateApiError> {
@@ -388,6 +677,24 @@ where
     }
 }
 
+/// A substate read from the network, and the proof of it the wallet verified, if it was proven.
+#[derive(Debug, Clone)]
+pub struct ReadSubstate {
+    pub substate: Substate,
+    pub proven_up: Option<ProvenUp>,
+}
+
+impl ReadSubstate {
+    /// Whether the substate is a UTXO that a burn left without an output. A burn is final: every later version of the
+    /// UTXO is without one too.
+    pub fn is_burnt_utxo(&self) -> bool {
+        self.substate
+            .substate_value()
+            .as_utxo()
+            .is_some_and(|utxo| utxo.is_burnt())
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SubstateApiError {
     #[error("Store error: {0}")]
@@ -400,6 +707,61 @@ pub enum SubstateApiError {
     SubstateDoesNotExist { address: SubstateId },
     #[error("ValueVisitorError: {0}")]
     ValueVisitorError(#[from] IndexedValueError),
+    #[error("The indexer served substate {substate_id} as a value that does not decode: {details}")]
+    UndecodableSubstate { substate_id: SubstateId, details: String },
+    #[error("The indexer served substate {substate_id} without a proof. Retry, or use another indexer.")]
+    SubstateUnproven { substate_id: SubstateId },
+    #[error(
+        "The indexer proved substate {substate_id} v{version} absent at a block of {anchor_epoch}, no later than \
+         {proven_up_epoch} in which the wallet proved it live. Retry, or use another indexer."
+    )]
+    SubstateExcludedNoLaterThanProvenUp {
+        substate_id: SubstateId,
+        version: SubstateVersion,
+        anchor_epoch: Epoch,
+        proven_up_epoch: Epoch,
+    },
+    #[error("The indexer served substate {substate_id} as live at v{version}, not as gone down")]
+    SubstateNotDown {
+        substate_id: SubstateId,
+        version: SubstateVersion,
+    },
+    #[error(
+        "The indexer proved substate {substate_id} at a block of {epoch}, but has not yet served the checkpoint that \
+         hands over to that epoch's validator set. Retry shortly, once the indexer serves it."
+    )]
+    SubstateProvenPastServedCheckpoints { substate_id: SubstateId, epoch: Epoch },
+    #[error(
+        "The indexer proved substate {substate_id} at a block of {epoch}, before {anchor_epoch} whose validator set \
+         the wallet anchored on. Retry, or use another indexer."
+    )]
+    SubstateProvenBeforeAnchor {
+        substate_id: SubstateId,
+        epoch: Epoch,
+        anchor_epoch: Epoch,
+    },
+    #[error(
+        "The indexer proved substate {substate_id} at a block of {anchor_epoch}, too long before \
+         {latest_trusted_epoch} to show its current state. Retry, or use another indexer."
+    )]
+    SubstateProofStale {
+        substate_id: SubstateId,
+        anchor_epoch: Epoch,
+        latest_trusted_epoch: Epoch,
+    },
+    #[error("The indexer served substate {substate_id} at v{served}, older than the v{requested} asked for")]
+    SubstateOlderThanRequested {
+        substate_id: SubstateId,
+        requested: SubstateVersion,
+        served: SubstateVersion,
+    },
+    #[error("The indexer's proof of substate {substate_id} does not verify: {source}")]
+    SubstateUnverified {
+        substate_id: SubstateId,
+        source: LightClientError,
+    },
+    #[error("Validator set error: {0}")]
+    ValidatorSet(#[from] ValidatorSetApiError),
 }
 
 impl IsNotFoundError for SubstateApiError {
@@ -414,6 +776,9 @@ pub struct ValidatorScanResult {
     pub substate: SubstateValue,
 }
 
+/// Adds `parent` and the substates the wallet store records it depending on to `substate_ids`, keeping only those a
+/// transaction may declare as inputs: the store also records the receipts of the wallet's own transactions, which a
+/// component may reference.
 fn get_dependent_substates<TTx: WalletStoreReader>(
     tx: &mut TTx,
     parent: SubstateModel,
@@ -443,6 +808,7 @@ fn get_dependent_substates<TTx: WalletStoreReader>(
             get_dependent_substates_inner(tx, &child, substate_ids)?;
         }
     }
+    substate_ids.retain(|requirement| requirement.substate_id().is_declarable_input());
     Ok(())
 }
 fn get_dependent_substates_inner<TTx: WalletStoreReader>(

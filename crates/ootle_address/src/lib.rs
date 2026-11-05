@@ -4,9 +4,9 @@
 mod hrp;
 #[macro_use]
 mod macros;
+mod destination_tag;
 mod ootle_address;
-mod pay_ref;
 
+pub use destination_tag::*;
 pub use ootle_address::*;
 pub use ootle_network::Network;
-pub use pay_ref::*;

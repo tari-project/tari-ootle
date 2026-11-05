@@ -1,33 +1,58 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use log::*;
 use tari_engine_types::{
+    commit_result::ExecuteResult,
+    encoded::Encoded,
     indexed_value::{IndexedValueError, IndexedWellKnownTypes},
     substate::{SubstateDiff, SubstateId},
 };
+use tari_indexer_client::types::ProvenTransactionReceipt;
 use tari_ootle_common_types::{
+    Epoch,
     VersionedSubstateIdRef,
     optional::{IsNotFoundError, Optional},
     response_status::{ResponseErrorStatus, TransactionStatusResponseError},
     substate_type::check_diff_substate_types,
 };
-use tari_ootle_transaction::{Transaction, TransactionId};
+use tari_ootle_light_client::LightClientError;
+use tari_ootle_transaction::{PrunedTransaction, Transaction, TransactionId};
 use tari_template_lib::types::{ComponentAddress, constants::TARI_TOKEN};
+use time::{OffsetDateTime, PrimitiveDateTime};
 
 use crate::{
+    apis::validator_set::{ValidatorSetApi, ValidatorSetApiError},
     models::{NewAccountData, TransactionStatus, WalletLockId, WalletTransaction, WalletTransactionUpdate},
     network::{TransactionFinalizedResult, WalletNetworkInterface},
+    sdk::IndexerTrust,
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::transaction";
 
+/// Epochs past its `max_epoch` that the wallet keeps waiting for the outcome of a transaction the network reports no
+/// outcome for. No shard group starts a transaction after its `max_epoch`, but one that prepared it by then waits an
+/// epoch longer for the other shard groups, and accepts their proposals from the epoch before its own, so a shard group
+/// can finalize it as COMMIT up to two of its own epochs past its `max_epoch`. The third leaves the indexer time to
+/// serve that result. An ABORT can finalize an epoch later, and releases the inputs whenever it does.
+pub const TRANSACTION_EXPIRY_GRACE_EPOCHS: u64 = 3;
+
+fn now_utc() -> PrimitiveDateTime {
+    let now = OffsetDateTime::now_utc();
+    PrimitiveDateTime::new(now.date(), now.time())
+}
+
 pub struct TransactionApi<'a, TStore, TNetworkInterface> {
     store: &'a TStore,
     network_interface: &'a TNetworkInterface,
+    validator_set_api: ValidatorSetApi<'a, TStore, TNetworkInterface>,
+    indexer_trust: IndexerTrust,
 }
 
 impl<'a, TStore, TNetworkInterface> TransactionApi<'a, TStore, TNetworkInterface>
@@ -36,10 +61,17 @@ where
     TNetworkInterface: WalletNetworkInterface,
     TNetworkInterface::Error: IsNotFoundError + TransactionStatusResponseError,
 {
-    pub fn new(store: &'a TStore, network_interface: &'a TNetworkInterface) -> Self {
+    pub fn new(
+        store: &'a TStore,
+        network_interface: &'a TNetworkInterface,
+        validator_set_api: ValidatorSetApi<'a, TStore, TNetworkInterface>,
+        indexer_trust: IndexerTrust,
+    ) -> Self {
         Self {
             store,
             network_interface,
+            validator_set_api,
+            indexer_trust,
         }
     }
 
@@ -53,15 +85,21 @@ where
     ///
     /// `linked_accounts` are the wallet account(s) this transaction involves; they are persisted so the
     /// transaction list can be filtered per account. Accounts not known to this wallet are ignored.
+    ///
+    /// `lock_ids` are linked in the same write that stores the transaction, so a failed store leaves them unlinked.
     pub fn insert_new_transaction(
         &self,
         transaction: Transaction,
         new_account_info: Option<NewAccountData>,
         linked_accounts: &[ComponentAddress],
         is_dry_run: bool,
+        lock_ids: &[WalletLockId],
     ) -> Result<TransactionId, TransactionApiError> {
         let tx_id = transaction.calculate_id();
         self.store.with_write_tx(|tx| {
+            for lock_id in lock_ids {
+                tx.locks_link_transaction(*lock_id, tx_id)?;
+            }
             tx.transactions_insert(&transaction, new_account_info.as_ref(), linked_accounts, is_dry_run)
         })?;
 
@@ -70,10 +108,11 @@ where
 
     /// Submits a transaction to the network. The transaction must be in the `New` status.
     /// If the submission is successful, the transaction status is updated to `Pending`.
-    /// If the transaction is rejected, the status is updated to `InvalidTransaction` and the
-    /// rejection reason is stored.
-    /// Returns `Ok(true)` if the transaction was successfully submitted, `Ok(false)` if it was rejected
-    pub async fn submit_transaction(&self, transaction_id: TransactionId) -> Result<bool, TransactionApiError> {
+    /// If the transaction is rejected, the status is updated to `InvalidTransaction`, the
+    /// rejection reason is stored and the inputs locked for it are released.
+    /// A wallet that verifies its indexer but trusts no validator set yet, and cannot anchor on one now, returns
+    /// [`Submission::Deferred`] and leaves the transaction `New`. The caller submits it again later.
+    pub async fn submit_transaction(&self, transaction_id: TransactionId) -> Result<Submission, TransactionApiError> {
         let transaction = self.store.with_read_tx(|tx| tx.transactions_get(transaction_id))?;
         if transaction.is_dry_run {
             return Err(TransactionApiError::DryRunMismatchError {
@@ -88,6 +127,16 @@ where
             }));
         }
 
+        // A receipt proven in an epoch before the wallet's anchor never verifies, so a verifying wallet submits only
+        // once it has an anchor.
+        if self.indexer_trust.is_verify() &&
+            self.validator_set_api.latest()?.is_none() &&
+            let Err(err) = self.validator_set_api.sync().await
+        {
+            debug!(target: LOG_TARGET, "Transaction {transaction_id} waits to be submitted until the wallet trusts a validator set: {err}");
+            return Ok(Submission::Deferred);
+        }
+
         // Re-submission needs the full transaction (blob payloads); the WalletTransaction
         // returned above is the pruned API view.
         let full = self.store.with_read_tx(|tx| tx.transactions_get_full(transaction_id))?;
@@ -97,7 +146,9 @@ where
             Ok(_) => {
                 self.store.with_write_tx(|tx| {
                     tx.transactions_update(
-                        WalletTransactionUpdate::new(transaction_id).with_new_status(TransactionStatus::Pending),
+                        WalletTransactionUpdate::new(transaction_id)
+                            .with_new_status(TransactionStatus::Pending)
+                            .with_submitted_at(now_utc()),
                     )
                 })?;
             },
@@ -110,30 +161,26 @@ where
                                 WalletTransactionUpdate::new(transaction_id)
                                     .with_new_status(TransactionStatus::InvalidTransaction)
                                     .with_invalid_reason(&message),
-                            )
+                            )?;
+                            self.release_all_locks_for_transaction_internal(tx, transaction_id)
                         })?;
-                        Ok(false)
+                        Ok(Submission::Rejected)
                     },
                     _ => Err(err.into()),
                 };
             },
         }
 
-        Ok(true)
+        Ok(Submission::Submitted)
     }
 
-    /// Executes `transaction` as a dry run and records what it cost.
+    /// Executes `transaction` as a dry run and returns its result, with `required_fees` as its fee.
     ///
-    /// `settled_fee` is the fee to record as the one to submit with, for a caller that chose a
-    /// figure and is only having the run confirm it. `None` records `required_fees` — what the run
-    /// cost plus the allowance for the metering a wider `max_fee` causes — which is the right answer
-    /// wherever the fee does not feed back into the transaction. Where it does, it is not: stealth
-    /// input selection targets `amount + max_fee`, so submitting at any figure other than one a
-    /// build was made at selects different inputs and prices a different transaction.
+    /// A dry run is transient: the wallet does not store the transaction or its result, whatever the outcome, so the
+    /// returned transaction is the only record of it.
     pub async fn submit_dry_run_transaction(
         &self,
         transaction: Transaction,
-        settled_fee: Option<u64>,
     ) -> Result<WalletTransaction, TransactionApiError> {
         if !transaction.is_dry_run() {
             return Err(TransactionApiError::DryRunMismatchError {
@@ -141,71 +188,51 @@ where
             });
         }
 
-        self.store
-            .with_write_tx(|tx| tx.transactions_insert(&transaction, None, &[], true))?;
-
         let tx_id = transaction.calculate_id();
-        let result = self.network_interface.submit_dry_run_transaction(transaction).await;
+        let pruned = PrunedTransaction::from(transaction.clone());
+        let submitted_at = now_utc();
+        let query = self.network_interface.submit_dry_run_transaction(transaction).await?;
 
-        match result {
-            Ok(query) => match &query.result {
-                TransactionFinalizedResult::Pending => {
-                    return Err(TransactionApiError::InvalidTransactionQueryResponse {
-                        details: "Pending execution result returned from dry run".to_string(),
-                    });
-                },
-                TransactionFinalizedResult::Rejected { details, .. } => {
-                    self.store.with_write_tx(|tx| {
-                        tx.transactions_update(
-                            WalletTransactionUpdate::new(tx_id)
-                                .with_new_status(TransactionStatus::DryRunFailed)
-                                .with_invalid_reason(details),
-                        )
-                    })?;
-                    return Err(TransactionApiError::InvalidTransactionQueryResponse {
-                        details: format!("Transaction rejected by dry run: {details}"),
-                    });
-                },
-                TransactionFinalizedResult::Finalized {
-                    execution_result,
-                    finalized_time,
-                    execution_time,
-                    ..
-                } => {
-                    if query.transaction_id != tx_id {
-                        // This could indicate that there has been some breaking change that caused the indexer to
-                        // calculate a different transaction ID
-                        warn!(target: LOG_TARGET, "⚠️ Transaction ID mismatch in dry run response. Expected {}, got {}. Updating transaction status to DryRunFailed.", tx_id, query.transaction_id);
-                    }
-
-                    let final_fee =
-                        settled_fee.or_else(|| execution_result.as_ref().map(|e| e.finalize.required_fees()));
-
-                    self.store.with_write_tx(|tx| {
-                        tx.transactions_update(
-                            WalletTransactionUpdate::new(tx_id)
-                                .with_result(execution_result.as_ref().map(|e| &e.finalize))
-                                .with_final_fee(final_fee)
-                                .with_new_status(TransactionStatus::DryRun)
-                                .with_execution_time(*execution_time)
-                                .with_finalized_time(*finalized_time),
-                        )
-                    })?;
-                },
+        match query.result {
+            TransactionFinalizedResult::Pending => Err(TransactionApiError::InvalidTransactionQueryResponse {
+                details: "Pending execution result returned from dry run".to_string(),
+            }),
+            TransactionFinalizedResult::Rejected { details, .. } => {
+                Err(TransactionApiError::InvalidTransactionQueryResponse {
+                    details: format!("Transaction rejected by dry run: {details}"),
+                })
             },
-            Err(err) => {
-                self.store.with_write_tx(|tx| {
-                    tx.transactions_update(
-                        WalletTransactionUpdate::new(tx_id).with_new_status(TransactionStatus::DryRunFailed),
-                    )
-                })?;
-                return Err(err.into());
+            TransactionFinalizedResult::Finalized {
+                execution_result,
+                finalized_time,
+                execution_time,
+                ..
+            } => {
+                if query.transaction_id != tx_id {
+                    // This could indicate that there has been some breaking change that caused the indexer to
+                    // calculate a different transaction ID
+                    warn!(target: LOG_TARGET, "⚠️ Transaction ID mismatch in dry run response. Expected {}, got {}.", tx_id, query.transaction_id);
+                }
+
+                let final_fee = execution_result.as_ref().map(|e| e.finalize.required_fees());
+
+                Ok(WalletTransaction {
+                    id: tx_id,
+                    transaction: pruned,
+                    status: TransactionStatus::DryRun,
+                    finalize: execution_result.map(|e| e.finalize),
+                    final_fee,
+                    qcs: vec![],
+                    invalid_reason: None,
+                    execution_time: Some(execution_time),
+                    finalized_time: Some(Duration::try_from(finalized_time - submitted_at).unwrap_or(Duration::ZERO)),
+                    new_account_info: None,
+                    is_dry_run: true,
+                    submitted_at: None,
+                    last_update_time: now_utc(),
+                })
             },
         }
-
-        let transaction = self.store.with_read_tx(|tx| tx.transactions_get(tx_id))?;
-
-        Ok(transaction)
     }
 
     pub fn fetch_all(
@@ -218,6 +245,16 @@ where
         Ok(transactions)
     }
 
+    /// Stores the result of `transaction_id` once the network has finalized it, and commits its changes to the wallet.
+    /// Returns `None` while the transaction is pending.
+    ///
+    /// A transaction the network still reports no outcome for once it can no longer finalize is stored as invalid,
+    /// and the inputs locked for it are released (see [`TRANSACTION_EXPIRY_GRACE_EPOCHS`]).
+    ///
+    /// Under [`IndexerTrust::Verify`] a committed transaction stays pending until the indexer serves a proof of its
+    /// receipt that verifies against a validator set the wallet trusts, and its result must be the one that receipt
+    /// commits. A transaction submitted before the wallet's anchor, whose receipt is proven in an epoch before it, is
+    /// stored with the result the indexer serves, as [`Self::verify_committed_result`] describes.
     #[allow(clippy::too_many_lines)]
     pub async fn check_and_store_finalized_transaction(
         &self,
@@ -232,18 +269,17 @@ where
 
         let maybe_resp = self
             .network_interface
-            .query_transaction_result(transaction_id)
+            .query_transaction_result(transaction_id, self.indexer_trust.is_verify())
             .await
             .optional()?;
 
         let Some(resp) = maybe_resp else {
-            // TODO: if this happens forever we might want to resubmit or mark as invalid
             warn!( target: LOG_TARGET, "Transaction result not found for transaction with hash {}. Will check again later.", transaction_id);
-            return Ok(None);
+            return self.expire_if_past_validity(&transaction).await;
         };
 
         match resp.result {
-            TransactionFinalizedResult::Pending => Ok(None),
+            TransactionFinalizedResult::Pending => self.expire_if_past_validity(&transaction).await,
             TransactionFinalizedResult::Rejected { details, rejected_time } => {
                 let transaction = self.store.with_write_tx(|tx| {
                     tx.transactions_update(
@@ -266,6 +302,22 @@ where
                 finalized_time,
                 ..
             } => {
+                let mut execution_result = execution_result;
+                if self.indexer_trust.is_verify() && !transaction.is_dry_run && final_decision.is_commit() {
+                    match self
+                        .verify_committed_result(
+                            &transaction,
+                            resp.encoded_execution_result.as_ref(),
+                            resp.receipt.as_ref(),
+                        )
+                        .await?
+                    {
+                        CommittedResult::Verified(verified) => execution_result = Some(verified),
+                        CommittedResult::PredatesAnchor => {},
+                        CommittedResult::Unproven => return Ok(None),
+                    }
+                }
+
                 if let Some(diff) = execution_result.as_ref().and_then(|e| e.finalize.result.any_accept()) {
                     check_diff_substate_types(diff)
                         .map_err(|e| TransactionApiError::InvalidTransactionQueryResponse { details: e.to_string() })?;
@@ -285,11 +337,6 @@ where
                 } else {
                     TransactionStatus::Rejected
                 };
-
-                // let qc_resp = self.network_interface
-                //     .fetch_transaction_quorum_certificates(GetTransactionQcsRequest { hash })
-                //     .await
-                //     .map_err(TransactionApiError::ValidatorNodeClientError)?;
 
                 let transaction = self.store.with_write_tx(|tx| {
                     if !transaction.is_dry_run && final_decision.is_commit() {
@@ -321,16 +368,19 @@ where
 
 
                     // Make sure that any locked outputs are either set to spent or released, depending on if the
-                    // transaction was finalized or rejected. Always release for dry runs.
+                    // transaction was finalized or rejected. Always release for dry runs. The decision says whether
+                    // the transaction spent its inputs: an abort releases them even when the execution before it
+                    // accepted a diff.
                     if transaction.is_dry_run {
                         self.release_all_locks_for_transaction_internal(tx, transaction_id)?;
                     } else {
                         let maybe_diff = execution_result
                             .as_ref()
-                            .and_then(|e| e.finalize.result.any_accept());
+                            .and_then(|e| e.finalize.result.any_accept())
+                            .filter(|_| final_decision.is_commit());
                         match maybe_diff {
                             Some(diff) => {
-                                if let Some(lock_id) = tx.locks_get_by_transaction_id(transaction_id).optional()? {
+                                for lock_id in tx.locks_get_by_transaction_id(transaction_id)? {
                                     info!(target: LOG_TARGET, "Finalizing locked outputs for transaction {}: {}", transaction_id, lock_id);
                                     tx.locks_unlock_finalized(lock_id, diff)?;
                                 }
@@ -350,9 +400,142 @@ where
         }
     }
 
+    /// Stores `transaction`, which the network reports no outcome for, as invalid once the current epoch is more than
+    /// [`TRANSACTION_EXPIRY_GRACE_EPOCHS`] past its `max_epoch`, and releases the inputs locked for it. Returns `None`
+    /// while the network may still finalize it.
+    async fn expire_if_past_validity(
+        &self,
+        transaction: &WalletTransaction,
+    ) -> Result<Option<WalletTransaction>, TransactionApiError> {
+        let max_epoch = transaction.transaction.max_epoch();
+        let Some(current_epoch) = self.current_epoch().await? else {
+            return Ok(None);
+        };
+        if current_epoch.as_u64() <= max_epoch.as_u64().saturating_add(TRANSACTION_EXPIRY_GRACE_EPOCHS) {
+            return Ok(None);
+        }
+
+        let transaction_id = transaction.id;
+        let reason = format!(
+            "Expired: the network reported no outcome by epoch {}, more than {TRANSACTION_EXPIRY_GRACE_EPOCHS} epochs \
+             past the transaction's max_epoch {}",
+            current_epoch.as_u64(),
+            max_epoch.as_u64()
+        );
+        warn!(target: LOG_TARGET, "Transaction {transaction_id}: {reason}. Releasing its inputs.");
+        let transaction = self.store.with_write_tx(|tx| {
+            tx.transactions_update(
+                WalletTransactionUpdate::new(transaction_id)
+                    .with_new_status(TransactionStatus::InvalidTransaction)
+                    .with_invalid_reason(&reason),
+            )?;
+            self.release_all_locks_for_transaction_internal(tx, transaction_id)?;
+            let transaction = tx.transactions_get(transaction_id)?;
+            Ok::<_, TransactionApiError>(transaction)
+        })?;
+        Ok(Some(transaction))
+    }
+
+    /// The epoch the network has reached, or `None` while the wallet cannot tell.
+    ///
+    /// Under [`IndexerTrust::Verify`] this is the epoch of the latest validator set the wallet trusts, which the
+    /// network has reached as far as the wallet's anchor is right: past the anchor, only a checkpoint signed by the
+    /// previous set advances it.
+    async fn current_epoch(&self) -> Result<Option<Epoch>, TransactionApiError> {
+        if self.indexer_trust.is_verify() {
+            return Ok(self.validator_set_api.latest()?.map(|set| set.epoch()));
+        }
+        Ok(Some(self.network_interface.get_current_epoch().await?))
+    }
+
+    /// Verifies the result the network committed for `transaction` and returns it decoded: the indexer's proof of the
+    /// committed receipt verifies against a validator set the wallet trusts, and `execution_result` is the result that
+    /// receipt commits.
+    ///
+    /// A receipt proven in an epoch before the wallet's anchor can never verify, because the wallet trusts no set
+    /// before it. When `transaction` was also submitted before the wallet anchored, its result is
+    /// [`CommittedResult::PredatesAnchor`] and is taken from the indexer, as the anchor itself was. A transaction
+    /// submitted after the anchor gets no such fallback, because the indexer chooses the epoch it proves a receipt in
+    /// and could back-date any proof past verification. Its result stays [`CommittedResult::Unproven`], including when
+    /// it committed in the epoch before the anchor's, in a shard group that had not yet ended that epoch when the
+    /// wallet anchored.
+    async fn verify_committed_result(
+        &self,
+        transaction: &WalletTransaction,
+        execution_result: Option<&Encoded<ExecuteResult>>,
+        proven: Option<&ProvenTransactionReceipt>,
+    ) -> Result<CommittedResult, TransactionApiError> {
+        let transaction_id = transaction.id;
+        let Some((proven, proof)) = proven.and_then(|proven| proven.proof.as_ref().map(|proof| (proven, proof))) else {
+            info!(
+                target: LOG_TARGET,
+                "Transaction {} committed, but the indexer served no proof of its receipt yet. Will check again later.",
+                transaction_id
+            );
+            return Ok(CommittedResult::Unproven);
+        };
+        let Some(committee) = self
+            .validator_set_api
+            .verify_committee(proof.anchor.epoch, proof.anchor.shard_group)
+            .await?
+        else {
+            if self.predates_anchor(transaction, proof.anchor.epoch)? {
+                warn!(
+                    target: LOG_TARGET,
+                    "The receipt of transaction {} is proven in {}, before the wallet's anchor, and the transaction was submitted before the wallet anchored. Storing the result its indexer serves.",
+                    transaction_id,
+                    proof.anchor.epoch
+                );
+                return Ok(CommittedResult::PredatesAnchor);
+            }
+            info!(
+                target: LOG_TARGET,
+                "The receipt of transaction {} is proven in {}, for which the wallet trusts no validator set yet. Will check again later.",
+                transaction_id,
+                proof.anchor.epoch
+            );
+            return Ok(CommittedResult::Unproven);
+        };
+        if execution_result.is_none() {
+            return Err(TransactionApiError::InvalidTransactionQueryResponse {
+                details: format!("Transaction {transaction_id} committed, but the indexer served no result"),
+            });
+        }
+        let unverified = |source| TransactionApiError::FinalizationUnverified { transaction_id, source };
+        let (_, result) = committee
+            .verify_result(transaction_id, proven, execution_result)
+            .map_err(unverified)?;
+        Ok(CommittedResult::Verified(Box::new(result)))
+    }
+
+    /// Whether `transaction` was submitted before the wallet anchored, and `proven_in` is an epoch before the anchor.
+    fn predates_anchor(&self, transaction: &WalletTransaction, proven_in: Epoch) -> Result<bool, TransactionApiError> {
+        let Some(anchor) = self.validator_set_api.anchor()? else {
+            return Ok(false);
+        };
+        let submitted_before_anchor = transaction
+            .submitted_at
+            .is_some_and(|submitted_at| submitted_at < anchor.anchored_at);
+        Ok(submitted_before_anchor && proven_in < anchor.validator_set.epoch())
+    }
+
     pub fn release_all_locks_for_transaction(&self, transaction_id: TransactionId) -> Result<(), TransactionApiError> {
         self.store
             .with_write_tx(|tx| self.release_all_locks_for_transaction_internal(tx, transaction_id))
+    }
+
+    /// Releases every lock linked to `transaction_id` unless the wallet stored the transaction. Only a stored
+    /// transaction resolves its locks, and the stale sweep skips linked locks.
+    pub fn release_locks_of_unstored_transaction(
+        &self,
+        transaction_id: TransactionId,
+    ) -> Result<(), TransactionApiError> {
+        self.store.with_write_tx(|tx| {
+            if tx.transactions_get(transaction_id).optional()?.is_some() {
+                return Ok(());
+            }
+            self.release_all_locks_for_transaction_internal(tx, transaction_id)
+        })
     }
 
     pub fn locks_set_transaction_id(
@@ -370,7 +553,7 @@ where
         tx: &mut <TStore as WriteableWalletStore>::WriteTransaction<'_>,
         transaction_id: TransactionId,
     ) -> Result<(), TransactionApiError> {
-        if let Some(lock_id) = tx.locks_get_by_transaction_id(transaction_id).optional()? {
+        for lock_id in tx.locks_get_by_transaction_id(transaction_id)? {
             debug!(target: LOG_TARGET, "Releasing lock {} (and associated outputs) for transaction {} that was not committed", lock_id, transaction_id);
             tx.locks_release(lock_id)?;
         }
@@ -600,6 +783,28 @@ where
     }
 }
 
+/// What [`TransactionApi::submit_transaction`] did with a transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Submission {
+    /// The network accepted the transaction, which is now `Pending`.
+    Submitted,
+    /// The network refused the transaction, which is now `InvalidTransaction`.
+    Rejected,
+    /// The wallet verifies results and trusts no validator set yet, so the transaction stays `New` for a later
+    /// submission.
+    Deferred,
+}
+
+/// What [`TransactionApi::verify_committed_result`] found for a committed transaction.
+enum CommittedResult {
+    /// The result the verified receipt commits.
+    Verified(Box<ExecuteResult>),
+    /// The receipt is proven before the wallet's anchor, and the transaction was submitted before it anchored.
+    PredatesAnchor,
+    /// No proof the wallet can verify yet.
+    Unproven,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum TransactionApiError {
     #[error("Store error: {0}")]
@@ -618,6 +823,13 @@ pub enum TransactionApiError {
     InvalidTransactionQueryResponse { details: String },
     #[error("Dry run transaction mismatch error: {details}")]
     DryRunMismatchError { details: String },
+    #[error("The indexer's finalization of transaction {transaction_id} does not verify: {source}")]
+    FinalizationUnverified {
+        transaction_id: TransactionId,
+        source: LightClientError,
+    },
+    #[error("Validator set error: {0}")]
+    ValidatorSet(#[from] ValidatorSetApiError),
 }
 
 impl IsNotFoundError for TransactionApiError {

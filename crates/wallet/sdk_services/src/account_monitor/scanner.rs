@@ -13,6 +13,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{
     SubstateVersion,
+    VersionedSubstateId,
     optional::Optional,
     substate_type::{SubstateType, check_diff_substate_types},
 };
@@ -20,7 +21,10 @@ use tari_ootle_transaction::TransactionId;
 use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkSpec,
-    apis::substate::ValidatorScanResult,
+    apis::{
+        stealth_outputs::UpdatedOutputs,
+        substate::{ReadSubstate, SubstateApiError, ValidatorScanResult},
+    },
     models::{
         AccountChangedEvent,
         AccountCreatedEvent,
@@ -28,6 +32,7 @@ use tari_ootle_wallet_sdk::{
         BalanceChangeSource,
         NewAccountData,
         NonFungibleToken,
+        UtxoBurntEvent,
         WalletEvent,
     },
 };
@@ -39,7 +44,9 @@ use tari_template_lib_types::{
     NonFungibleAddress,
     NonFungibleId,
     ResourceAddress,
+    UtxoAddress,
     VaultId,
+    crypto::PedersenCommitmentBytes,
 };
 
 use crate::{account_monitor::monitor::AccountMonitorError, notify::Notify};
@@ -64,6 +71,7 @@ where TSpec: WalletSdkSpec
             .await
     }
 
+    #[allow(clippy::too_many_lines)]
     pub(crate) async fn refresh_account_with_source(
         &self,
         account_address: ComponentAddress,
@@ -124,46 +132,55 @@ where TSpec: WalletSdkSpec
                 (s.into_substate_id(), version)
             })
             .collect::<HashMap<_, _>>();
+        let vault_substate_ids = indexed_value
+            .vault_ids()
+            .iter()
+            .map(|vault_id| SubstateId::Vault(*vault_id))
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let latest_vaults = substate_api.get_substates_from_network(&vault_substate_ids).await?;
         for vault_id in indexed_value.vault_ids() {
             let vault_substate_id = SubstateId::Vault(*vault_id);
-            let Some(ValidatorScanResult {
-                id: versioned_vault_substate_id,
-                substate,
-                ..
-            }) = substate_api
-                .fetch_substate_from_network(&vault_substate_id, None)
-                .await
-                .optional()?
-            else {
+            let Some(substate) = latest_vaults.get(&vault_substate_id) else {
                 warn!(target: LOG_TARGET, "Vault {} for account {} does not exist according to indexer", vault_substate_id, account_substate_id);
                 continue;
             };
+            let versioned_vault_substate_id = VersionedSubstateId::new(vault_substate_id.clone(), substate.version());
 
-            let maybe_vault_version = known_child_vaults.get(&vault_substate_id).copied().flatten();
-            if let Some(vault_version) = maybe_vault_version {
-                // The first time a vault is found, know about the vault substate from the tx result but never added
-                // it to the database.
-                if versioned_vault_substate_id.version() <= vault_version && accounts_api.has_vault(vault_id)? {
-                    info!(target: LOG_TARGET, "Vault {} is up to date", versioned_vault_substate_id.substate_id());
-                    continue;
-                }
-            }
-
-            let SubstateValue::Vault(latest_vault) = substate else {
+            let SubstateValue::Vault(latest_vault) = substate.substate_value() else {
                 error!(target: LOG_TARGET, "Substate {} is not a vault. This should be impossible.", vault_substate_id);
                 continue;
             };
 
+            let maybe_vault_version = known_child_vaults.get(&vault_substate_id).copied().flatten();
+            // The first time a vault is found, know about the vault substate from the tx result but never added
+            // it to the database.
+            let is_known_version = maybe_vault_version
+                .is_some_and(|vault_version| versioned_vault_substate_id.version() <= vault_version) &&
+                accounts_api.has_vault(vault_id)?;
+            // A known vault version is only up to date once every confidential output and non-fungible it names is
+            // recorded.
+            let unrecorded_outputs = if is_known_version {
+                self.count_unrecorded_vault_contents(account_address, *vault_id, latest_vault)?
+            } else {
+                0
+            };
+            if is_known_version && unrecorded_outputs == 0 {
+                info!(target: LOG_TARGET, "Vault {} is up to date", versioned_vault_substate_id.substate_id());
+                continue;
+            }
+
             let Some(account_addr) = account_substate_id.substate_id().as_component_address() else {
                 continue;
             };
-            self.add_vault_to_account_if_not_exist(&account_addr, *vault_id, &latest_vault)
+            self.add_vault_to_account_if_not_exist(&account_addr, *vault_id, latest_vault)
                 .await?;
             self.refresh_vault(
                 account_addr,
                 *vault_id,
                 versioned_vault_substate_id.version(),
-                &latest_vault,
+                latest_vault,
                 Default::default(),
                 source,
             )
@@ -174,6 +191,12 @@ where TSpec: WalletSdkSpec
                 versioned_vault_substate_id.as_versioned_ref(),
                 [SubstateId::from(*latest_vault.resource_address())],
             )?;
+            // At a known version only newly recorded outputs and non-fungibles can change the vault.
+            if is_known_version &&
+                self.count_unrecorded_vault_contents(account_address, *vault_id, latest_vault)? == unrecorded_outputs
+            {
+                continue;
+            }
             is_updated = true;
 
             self.notify.notify(AccountChangedEvent {
@@ -265,21 +288,17 @@ where TSpec: WalletSdkSpec
             // Confidential OutputBodies live in separate ConfidentialOutput substates. Only commitments the
             // wallet does not already have a record for are fetched (verify_and_update_confidential_outputs
             // skips known ones anyway), in one batched network request. A commitment the indexer does not
-            // return (e.g. spent since the vault was fetched) is skipped rather than failing the refresh.
+            // return (e.g. spent since the vault was fetched) is skipped rather than failing the refresh; while it
+            // has no record, `count_unrecorded_confidential_outputs` keeps the vault version out of date, so the next
+            // account refresh fetches it again.
             let account = self
                 .wallet_sdk
                 .accounts_api()
                 .get_account_by_address(&account_address)?;
             let resource_address = *latest_vault.resource_address();
 
-            let known_commitments = self
-                .wallet_sdk
-                .confidential_outputs_api()
-                .outputs_get_many(&resource_address, Some(&account_address), None)?
-                .into_iter()
-                .filter(|o| o.vault_id == vault_id)
-                .map(|o| o.commitment)
-                .collect::<HashSet<_>>();
+            let known_commitments =
+                self.known_confidential_commitments(account_address, vault_id, &resource_address)?;
 
             let ids_to_fetch = commitments
                 .iter()
@@ -291,7 +310,7 @@ where TSpec: WalletSdkSpec
             let mut substates = self
                 .wallet_sdk
                 .substate_api()
-                .get_substates_from_network(ids_to_fetch)
+                .get_substates_from_network(&ids_to_fetch)
                 .await?;
 
             let mut outputs = Vec::with_capacity(substates.len());
@@ -371,6 +390,69 @@ where TSpec: WalletSdkSpec
         }
 
         Ok(has_changed)
+    }
+
+    /// The commitments in `vault_id` that have a local output record, whatever its status. Outputs the wallet cannot
+    /// decrypt are recorded as invalid, so they count as known.
+    fn known_confidential_commitments(
+        &self,
+        account_address: ComponentAddress,
+        vault_id: VaultId,
+        resource_address: &ResourceAddress,
+    ) -> Result<HashSet<PedersenCommitmentBytes>, AccountMonitorError> {
+        let commitments = self
+            .wallet_sdk
+            .confidential_outputs_api()
+            .outputs_get_many(resource_address, Some(&account_address), None)?
+            .into_iter()
+            .filter(|o| o.vault_id == vault_id)
+            .map(|o| o.commitment)
+            .collect();
+        Ok(commitments)
+    }
+
+    /// The confidential outputs and non-fungibles `vault` names that the wallet holds no record of.
+    fn count_unrecorded_vault_contents(
+        &self,
+        account_address: ComponentAddress,
+        vault_id: VaultId,
+        vault: &Vault,
+    ) -> Result<usize, AccountMonitorError> {
+        Ok(
+            self.count_unrecorded_confidential_outputs(account_address, vault_id, vault)? +
+                self.count_unrecorded_non_fungibles(vault_id, vault)?,
+        )
+    }
+
+    fn count_unrecorded_non_fungibles(&self, vault_id: VaultId, vault: &Vault) -> Result<usize, AccountMonitorError> {
+        let nft_ids = vault.get_non_fungible_ids();
+        if nft_ids.is_empty() {
+            return Ok(0);
+        }
+        let stored = self
+            .wallet_sdk
+            .non_fungible_api()
+            .get_nft_ids_by_vault_id(&vault_id, 1_000_000, 0)?;
+        Ok(nft_ids.iter().filter(|id| !stored.contains(*id)).count())
+    }
+
+    /// The number of confidential outputs `vault` names that have no local record. An output the indexer did not
+    /// return when a vault version was scanned keeps that version out of date, so it is fetched again on the next
+    /// refresh.
+    fn count_unrecorded_confidential_outputs(
+        &self,
+        account_address: ComponentAddress,
+        vault_id: VaultId,
+        vault: &Vault,
+    ) -> Result<usize, AccountMonitorError> {
+        let Some(commitments) = vault.get_confidential_commitments() else {
+            return Ok(0);
+        };
+        if commitments.is_empty() {
+            return Ok(0);
+        }
+        let known = self.known_confidential_commitments(account_address, vault_id, vault.resource_address())?;
+        Ok(commitments.iter().filter(|c| !known.contains(*c)).count())
     }
 
     pub(crate) fn record_stealth_balance_change(
@@ -519,10 +601,19 @@ where TSpec: WalletSdkSpec
             let nft = match updated_nft_data_cache.remove(&id) {
                 Some(nft) => nft,
                 None => {
-                    let substate = self
+                    let substate = match self
                         .fetch_substate(&NonFungibleAddress::new(*latest_vault.resource_address(), id.clone()).into())
                         .await
-                        .optional()?;
+                    {
+                        // A token the indexer cannot prove costs only its own entry. While it is unstored,
+                        // `count_unrecorded_non_fungibles` keeps the vault version out of date, so the next account
+                        // refresh fetches it again.
+                        Err(AccountMonitorError::Substate(err @ SubstateApiError::SubstateUnverified { .. })) => {
+                            warn!(target: LOG_TARGET, "Non-fungible {} for vault {} is not stored: {}", id, vault_id, err);
+                            continue;
+                        },
+                        result => result.optional()?,
+                    };
                     let Some(substate) = substate else {
                         warn!(target: LOG_TARGET, "Non-fungible {} for vault {} does not exist according to indexer. Unable to update it", id, vault_id);
                         continue;
@@ -609,7 +700,18 @@ where TSpec: WalletSdkSpec
             .up_iter()
             .filter_map(|(id, s)| Some((id.as_utxo_address()?, s.substate_value().as_utxo()?)));
 
-        let touched_stealth_balances = stealth_outputs_api.verify_and_update_outputs(utxos)?;
+        let UpdatedOutputs {
+            touched_balances: touched_stealth_balances,
+            burnt,
+        } = stealth_outputs_api.verify_and_update_outputs(utxos)?;
+        for (account_address, address) in burnt {
+            self.notify.notify(UtxoBurntEvent {
+                account_address,
+                address,
+            });
+        }
+        self.prove_held_outputs(diff.up_iter().filter_map(|(id, _)| id.as_utxo_address()))
+            .await?;
 
         let accounts = diff.up_iter().filter(|(_, s)| is_account(s)).filter_map(|(a, s)| {
             let address = a.as_component_address()?;
@@ -627,6 +729,9 @@ where TSpec: WalletSdkSpec
         });
 
         let mut updated_accounts = HashSet::new();
+        // Accounts the diff shows holding a vault that is neither in the diff nor known to the wallet. The diff cannot
+        // bring these up to date, so they are refreshed from the network.
+        let mut accounts_to_refresh = HashSet::new();
         // Find and process all new/existing vaults
         for (account_address, value, account_version) in accounts {
             // If we know about this account, mark it as on-chain (if it isn't already)
@@ -673,6 +778,10 @@ where TSpec: WalletSdkSpec
                             BalanceChangeSource::Transaction { transaction_id: tx_id },
                         )
                         .await?;
+                } else {
+                    if !accounts_api.has_vault(vault_id)? {
+                        accounts_to_refresh.insert(account_address);
+                    }
                 }
             }
 
@@ -801,6 +910,24 @@ where TSpec: WalletSdkSpec
             }
         }
 
+        for account_address in accounts_to_refresh {
+            info!(
+                target: LOG_TARGET,
+                "🏦 Transaction {} shows account {} holding a vault this wallet does not know. Refreshing the account.",
+                tx_id,
+                account_address
+            );
+            if let Err(err) = self
+                .refresh_account_with_source(account_address, BalanceChangeSource::Scan)
+                .await
+            {
+                warn!(
+                    target: LOG_TARGET,
+                    "🏦 Failed to refresh account {} after transaction {}: {}", account_address, tx_id, err
+                );
+            }
+        }
+
         Ok(())
     }
 
@@ -819,6 +946,120 @@ where TSpec: WalletSdkSpec
                 ..Default::default()
             })?;
         Ok(())
+    }
+
+    /// Proves each output the wallet holds on chain without a proof of any version, and records the proof. An output
+    /// held without a proof can use only a down proof to show its spend, which the network keeps for a limited
+    /// window. Outputs received while the wallet did not verify its indexer have none. The indexer serves only live
+    /// outputs, so one spent before this runs stays without a proof.
+    pub async fn prove_unproven_held_outputs(&self) -> Result<(), AccountMonitorError> {
+        if !self.wallet_sdk.sdk_config().indexer_trust.is_verify() {
+            return Ok(());
+        }
+        let addresses = self.wallet_sdk.stealth_outputs_api().get_unproven_held_addresses()?;
+        if addresses.is_empty() {
+            return Ok(());
+        }
+        let num_proven = self.prove_outputs(&addresses, Level::Debug).await?;
+        if num_proven < addresses.len() {
+            info!(
+                target: LOG_TARGET,
+                "{} of {} stealth outputs the wallet holds without a proof could not be proven. Their spends will need a down proof.",
+                addresses.len() - num_proven,
+                addresses.len()
+            );
+        }
+        Ok(())
+    }
+
+    /// Proves each of `addresses` that the wallet holds without a proof of any version, and records the proof (see
+    /// [`ProvenUp`](tari_ootle_wallet_sdk::models::ProvenUp)). A transaction's outputs are proven only through its
+    /// receipt, which can commit before another shard group commits them, so it does not show a block the outputs were
+    /// up at. An output the indexer cannot prove is left without a proof, and its spend then needs a down proof.
+    async fn prove_held_outputs<I: IntoIterator<Item = UtxoAddress>>(
+        &self,
+        addresses: I,
+    ) -> Result<(), AccountMonitorError> {
+        if !self.wallet_sdk.sdk_config().indexer_trust.is_verify() {
+            return Ok(());
+        }
+        let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
+        let mut unproven = Vec::new();
+        for address in addresses {
+            if stealth_outputs_api
+                .get_utxo(&address)?
+                .is_some_and(|output| output.proven_up.is_none())
+            {
+                unproven.push(address);
+            }
+        }
+        if unproven.is_empty() {
+            return Ok(());
+        }
+        self.prove_outputs(&unproven, Level::Warn).await?;
+        Ok(())
+    }
+
+    /// Proves each of `addresses` in one fetch and records each proof, or the burn of an output proven burnt. Returns
+    /// how many were proven. Each output that is not proven is logged at `failure_level`.
+    async fn prove_outputs(
+        &self,
+        addresses: &[UtxoAddress],
+        failure_level: Level,
+    ) -> Result<usize, AccountMonitorError> {
+        let reads = match self
+            .wallet_sdk
+            .substate_api()
+            .get_each_substate_from_network(&addresses.iter().cloned().map(Into::into).collect::<Vec<_>>())
+            .await
+        {
+            Ok(reads) => reads,
+            Err(err @ SubstateApiError::StoreError(_)) => return Err(err.into()),
+            Err(err) => {
+                log!(
+                    target: LOG_TARGET,
+                    failure_level,
+                    "⚠️ Could not prove {} stealth outputs the wallet holds ({}). Their spends will need a down proof.",
+                    addresses.len(),
+                    err
+                );
+                return Ok(0);
+            },
+        };
+        let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
+        let mut num_proven = 0;
+        for (address, (_, read)) in addresses.iter().zip(reads) {
+            match read {
+                Ok(read) if read.proven_up.is_some() && read.is_burnt_utxo() => {
+                    if let Some(account_address) = stealth_outputs_api.mark_burnt(address)? {
+                        self.notify.notify(UtxoBurntEvent {
+                            account_address,
+                            address: address.clone(),
+                        });
+                    }
+                    num_proven += 1;
+                },
+                Ok(ReadSubstate {
+                    proven_up: Some(proven_up),
+                    ..
+                }) => {
+                    stealth_outputs_api.record_proven_up(address, proven_up)?;
+                    num_proven += 1;
+                },
+                Ok(_) => {},
+                Err(err @ SubstateApiError::StoreError(_)) => return Err(err.into()),
+                Err(err) => {
+                    log!(
+                        target: LOG_TARGET,
+                        failure_level,
+                        "⚠️ Could not prove stealth output {} ({}). Its spend will need a down proof.",
+                        address,
+                        err
+                    );
+                },
+            }
+        }
+        Ok(num_proven)
     }
 
     async fn add_vault_to_account_if_not_exist(

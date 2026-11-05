@@ -13,7 +13,7 @@
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine::fees::FeeTable;
 use tari_engine_types::{
-    fees::{FeeRates, FeeReceipt},
+    fees::{FeeRates, FeeReceipt, FeeScale},
     stealth::{MergedStealthTransferShape, persisted_utxo_bytes},
 };
 use tari_ootle_transaction::{Epoch, Transaction};
@@ -55,11 +55,11 @@ fn setup() -> Harness {
     let mut test = TemplateTest::new(CRATE_PATH, Vec::<&str>::new());
     let (account, owner, key) = test.create_funded_account();
     test.enable_auto_add_proofs_from_signers();
-    // The harness prices a created substate at 1; the shipped tables price it at 25. Take the
+    // The harness prices a created substate at 1; the shipped tables price it at 250. Take the
     // shipped figure so the slot premium carries the weight it does on a real network, where an
     // extra output costs the most.
     test.set_fee_table(FeeTable {
-        per_substate_create_cost: 25,
+        per_substate_create_cost: 250,
         ..test.fee_table().clone()
     });
     Harness {
@@ -73,7 +73,7 @@ fn setup() -> Harness {
 /// The rates the harness is executing at, as the estimator takes them. Both sides pricing from one
 /// table is the point: what is under test is the formula, not the numbers it is fed.
 fn rates(harness: &Harness) -> FeeRates {
-    harness.test.fee_table().to_rates()
+    harness.test.fee_table().to_rates(FeeScale::ONE)
 }
 
 /// Moves `count × UTXO_VALUE` of the account's TARI into stealth UTXOs, so a later transfer has
@@ -113,14 +113,16 @@ fn estimate_then_execute(
     minted: &StealthSecretTransferData,
     num_inputs: usize,
     num_outputs: usize,
+    input_fanout: u32,
 ) -> (FeeReceipt, MergedStealthTransferShape) {
     harness.test.enable_fees();
     harness.test.set_burn_rate_bps(BURN_RATE_BPS);
+    harness.test.set_input_fanout(input_fanout);
 
     // Neither the weight nor the outputs' stored size follows the amounts a statement carries, only
     // its shape, so a build at a placeholder fee measures both for the real one.
     let probe = build(harness, minted, num_inputs, num_outputs, PLACEHOLDER_FEE);
-    let shape = shape_of(&probe, num_inputs, num_outputs);
+    let shape = shape_of(harness, &probe, num_inputs, num_outputs, input_fanout);
 
     let settled = build(
         harness,
@@ -130,7 +132,7 @@ fn estimate_then_execute(
         shape.estimate_fee(&rates(harness)),
     );
     assert_eq!(
-        shape_of(&settled, num_inputs, num_outputs),
+        shape_of(harness, &settled, num_inputs, num_outputs, input_fanout),
         shape,
         "the fee a statement reveals must not move the shape it is priced at",
     );
@@ -140,8 +142,15 @@ fn estimate_then_execute(
 }
 
 /// The shape a build presents to the estimator: counts from the transfer, stored size from the
-/// outputs it generated, weight from the sealed transaction.
-fn shape_of(build: &Build, num_inputs: usize, num_outputs: usize) -> MergedStealthTransferShape {
+/// outputs it generated, weight from the sealed transaction, and its declared inputs as the harness
+/// holds them.
+fn shape_of(
+    harness: &Harness,
+    build: &Build,
+    num_inputs: usize,
+    num_outputs: usize,
+    input_fanout: u32,
+) -> MergedStealthTransferShape {
     MergedStealthTransferShape {
         num_inputs,
         num_outputs,
@@ -155,6 +164,8 @@ fn shape_of(build: &Build, num_inputs: usize, num_outputs: usize) -> MergedSteal
         // TARI is the only resource a fee can be paid in, and it carries no view key.
         has_view_key: false,
         transaction_weight: build.transaction.calculate_transaction_weight().as_u64(),
+        input_bytes: harness.test.declared_input_bytes(&build.transaction),
+        input_fanout,
     }
 }
 
@@ -241,8 +252,10 @@ fn the_estimate_bounds_what_the_engine_charges() {
     let mut harness = setup();
     for num_inputs in 1..=4usize {
         for num_outputs in 1..=3usize {
+            // Spread across the matrix rather than multiplying it: every fanout meets several shapes.
+            let input_fanout = ((num_inputs + num_outputs) % 3) as u32;
             let minted = mint_utxos(&mut harness, num_inputs);
-            let (receipt, shape) = estimate_then_execute(&mut harness, &minted, num_inputs, num_outputs);
+            let (receipt, shape) = estimate_then_execute(&mut harness, &minted, num_inputs, num_outputs, input_fanout);
             assert_bounds(&receipt, &shape);
         }
     }
@@ -294,6 +307,39 @@ fn the_runtime_call_count_matches_the_instruction_sequence() {
     );
 }
 
+/// The estimate prices native execution from the shape alone. Reading the charge back with only native points priced
+/// pins it to every point the engine charged, verification and authorization alike. Every price is a multiple of the
+/// divisor, so no point is lost to rounding.
+#[test]
+fn the_native_points_match_the_shape() {
+    use tari_engine::fees::FeeTable;
+    use tari_engine_types::fees::FeeSource;
+    const DIVISOR: u64 = 100;
+
+    let mut harness = setup();
+    let minted = mint_utxos(&mut harness, 2);
+
+    let mut fee_table = FeeTable::zero_rated();
+    fee_table.per_wasm_point_cost = 1;
+    fee_table.wasm_points_cost_divisor = DIVISOR;
+    harness.test.set_fee_table(fee_table);
+    harness.test.set_burn_rate_bps(0);
+    harness.test.enable_fees();
+
+    let probe = build(&harness, &minted, 2, 2, PLACEHOLDER_FEE);
+    let shape = shape_of(&harness, &probe, 2, 2, 0);
+    let result = harness.test.execute_expect_success(probe.transaction, vec![]);
+    assert_eq!(
+        result
+            .finalize
+            .fee_receipt
+            .fee_breakdown()
+            .get(FeeSource::NativeExecution) *
+            DIVISOR,
+        shape.native_points(),
+    );
+}
+
 /// The matrix's lower bound rests on an underpaid transaction being rejected. Revealing a hair under
 /// what the shape costs shows that it is: without this, an estimate that came in under would still
 /// commit and the matrix would be asserting nothing.
@@ -304,7 +350,7 @@ fn revealing_under_the_charge_is_rejected() {
     harness.test.enable_fees();
     harness.test.set_burn_rate_bps(BURN_RATE_BPS);
 
-    let shape = shape_of(&build(&harness, &minted, 1, 1, PLACEHOLDER_FEE), 1, 1);
+    let shape = shape_of(&harness, &build(&harness, &minted, 1, 1, PLACEHOLDER_FEE), 1, 1, 0);
 
     // Half the estimate is under the charge whatever the estimate's margin, which MAX_OVERSHOOT
     // bounds to a few microtari.

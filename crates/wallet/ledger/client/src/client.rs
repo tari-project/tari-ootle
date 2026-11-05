@@ -214,7 +214,7 @@ mod tests {
         let client = LedgerClient::new(speculos_transport());
 
         let version = client.get_app_version().await.unwrap();
-        assert_eq!(version, "0.2.0");
+        assert_eq!(version, "0.4.0");
 
         let app_name = client.get_app_name().await.unwrap();
         assert_eq!(app_name, "Tari Ootle");
@@ -232,18 +232,19 @@ mod tests {
     }
 
     use indexmap::IndexSet;
+    use tari_ootle_common_types::signature::Sr25519SignatureBytes;
     use tari_ootle_transaction::{
         Blob,
         Blobs,
         Epoch,
         Instruction,
+        MainSigner,
         PreimageSegment,
         TransactionSealSignature,
         TransactionSignature,
         UnsealedTransactionV1,
         UnsignedTransactionV1,
     };
-    use tari_template_lib_types::crypto::SchnorrSignatureBytes;
 
     fn sample_unsigned() -> UnsignedTransactionV1 {
         let mut blobs = Blobs::empty();
@@ -258,7 +259,7 @@ mod tests {
             inputs: IndexSet::new(),
             min_epoch: None,
             max_epoch: Epoch(1),
-            is_seal_signer_authorized: false,
+            main_signer: MainSigner::None,
             dry_run: false,
             nonce: 0,
             blobs,
@@ -302,7 +303,7 @@ mod tests {
 
         let signature = TransactionSignature::new(
             RistrettoPublicKeyBytes::from(response.public_key),
-            SchnorrSignatureBytes::try_from(&response.signature[..]).unwrap(),
+            Sr25519SignatureBytes::from_array(response.signature),
         );
         assert!(
             signature.verify_v1(&seal_signer, &tx),
@@ -332,7 +333,7 @@ mod tests {
 
         let seal = TransactionSealSignature::new(
             RistrettoPublicKeyBytes::from(response.public_key),
-            SchnorrSignatureBytes::try_from(&response.signature[..]).unwrap(),
+            Sr25519SignatureBytes::from_array(response.signature),
         );
         assert!(seal.verify_v1(&unsealed), "device seal signature did not verify");
     }
@@ -358,6 +359,12 @@ mod tests {
             .await
             .unwrap();
         let account_pk = RistrettoPublicKey::from_canonical_bytes(&account_pk_bytes[..]).unwrap();
+        // The view key at the same path keys the stealth tweak.
+        let view_pk_bytes = client
+            .get_public_key(account, index, KeyType::ViewOnlyKey, None)
+            .await
+            .unwrap();
+        let view_pk = RistrettoPublicKey::from_canonical_bytes(&view_pk_bytes[..]).unwrap();
         let r = RistrettoSecretKey::random(&mut rand::rng());
         let r_pub = RistrettoPublicKey::from_secret_key(&r);
         let mut nonce = [0u8; 32];
@@ -386,19 +393,19 @@ mod tests {
             "device signed with the account key"
         );
 
-        // The returned key must equal the recipient-derivable stealth address for this network.
+        // The returned key must equal the sender-derived stealth address for this network.
         let network = Network::try_from(tx.network).unwrap();
-        let expected = owner_stealth_dh_stealth_address(network, &account_pk, &r);
+        let expected = owner_stealth_dh_stealth_address(network, &account_pk, &view_pk, &r);
         assert_eq!(
             &response.public_key[..],
             expected.as_bytes(),
             "unexpected stealth address"
         );
 
-        // And the stealth signature verifies under tari_crypto.
+        // And the stealth signature verifies as a transaction signature.
         let signature = TransactionSignature::new(
             RistrettoPublicKeyBytes::from(response.public_key),
-            SchnorrSignatureBytes::try_from(&response.signature[..]).unwrap(),
+            Sr25519SignatureBytes::from_array(response.signature),
         );
         assert!(
             signature.verify_v1(&seal_signer, &tx),

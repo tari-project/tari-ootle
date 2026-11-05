@@ -5,14 +5,15 @@ use std::{collections::HashMap, convert::Infallible, future::Future, marker::Pha
 
 use futures::StreamExt;
 use ootle_byte_type::ToByteType;
-use tari_crypto::tari_utilities::SafePassword;
+use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey, tari_utilities::SafePassword};
 use tari_engine_types::{
     Utxo,
-    crypto::commit_amount,
+    UtxoOutput,
+    crypto::{OutputBody, commit_amount},
     resource::Resource,
     substate::{Substate, SubstateId},
 };
-use tari_indexer_client::types::WatchedSubstateItem;
+use tari_indexer_client::types::{EpochCheckpointEntry, ValidatorSetCommittee, WatchedSubstateItem};
 use tari_ootle_address::Network;
 use tari_ootle_common_types::{
     Epoch,
@@ -24,12 +25,14 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
 use tari_ootle_wallet_sdk::{
+    IndexerTrust,
     WalletSdk,
     WalletSdkConfig,
     WalletSdkSpec,
     cipher_seed::CipherSeedRestore,
     local_key_store::LocalKeyStore,
     models::{
+        AccountWithAddress,
         ConfidentialOutputModel,
         EpochBirthday,
         KeyBranch,
@@ -39,13 +42,15 @@ use tari_ootle_wallet_sdk::{
         WalletLockId,
     },
     network::{
+        FetchedSubstates,
+        FetchedUtxos,
+        PlacedTagAndNoncePair,
         SubstateQueryResult,
         TransactionFinalizedStream,
         TransactionQueryResult,
         UtxoUpdateStream,
         WalletNetworkInterface,
     },
-    storage::TagAndPublicNoncePair,
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_abi::TemplateDef;
@@ -63,7 +68,10 @@ use tari_template_lib::types::{
     access_rules::ResourceAccessRules,
     constants::{STEALTH_TARI_RESOURCE_ADDRESS, TOKEN_SYMBOL},
     crypto::PedersenCommitmentBytes,
+    stealth::SpendAuthorization,
 };
+
+use super::{random_key, random_keypair};
 
 pub struct TestSdkSpec<TNetwork = PanicNetworkInterface>(PhantomData<TNetwork>);
 
@@ -89,7 +97,12 @@ impl Test {
 
 impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
     pub fn with_network(network: TNetwork) -> Self {
-        let test = Self::without_accounts(network);
+        Self::with_network_trusting(network, IndexerTrust::Trust)
+    }
+
+    /// A wallet with the test account, which trusts its indexer as far as `indexer_trust` says.
+    pub fn with_network_trusting(network: TNetwork, indexer_trust: IndexerTrust) -> Self {
+        let test = Self::without_accounts_trusting(network, indexer_trust);
         let accounts_api = test.sdk.accounts_api();
         accounts_api
             .add_account(
@@ -116,8 +129,14 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
         test
     }
 
-    /// A wallet with the stealth TARI resource and no accounts.
+    /// A wallet with the stealth TARI resource and no accounts, which takes its indexer at its word.
     pub fn without_accounts(network: TNetwork) -> Self {
+        Self::without_accounts_trusting(network, IndexerTrust::Trust)
+    }
+
+    /// A wallet with the stealth TARI resource and no accounts, which trusts its indexer as far as `indexer_trust`
+    /// says.
+    pub fn without_accounts_trusting(network: TNetwork, indexer_trust: IndexerTrust) -> Self {
         let temp = tempfile::tempdir().unwrap();
         let store = SqliteWalletStore::try_open(temp.path().join("data/wallet.sqlite")).unwrap();
         store.run_migrations().unwrap();
@@ -128,6 +147,7 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
             WalletSdkConfig {
                 network: Network::LocalNet,
                 override_keyring_password: Some(SafePassword::from_str("SuuuCh Sekret W0W").unwrap()),
+                indexer_trust,
             },
             EpochBirthday::new(1200.try_into().unwrap(), u64::MAX),
         )
@@ -195,6 +215,48 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
         commitment
     }
 
+    /// A stealth TARI UTXO of `amount` that `account` can read and spend.
+    pub fn owned_utxo(&self, account: &AccountWithAddress, amount: u64) -> (UtxoId, Utxo) {
+        let sdk = &self.sdk;
+        let view_key = sdk.key_manager_api().get_key(account.view_only_key_id()).unwrap();
+        let owner_key = sdk
+            .key_manager_api()
+            .get_key(account.owner_key_id().expect("account is locally owned"))
+            .unwrap();
+        let owner_public_key = RistrettoPublicKey::from_secret_key(&owner_key.secret);
+        let view_public_key = RistrettoPublicKey::from_secret_key(&view_key.secret);
+        let (nonce_secret, public_nonce) = random_keypair();
+
+        let tag = sdk.stealth_crypto_api().derive_stealth_output_tag(
+            sdk.network(),
+            &view_key.secret,
+            &public_nonce,
+            &STEALTH_TARI_RESOURCE_ADDRESS,
+        );
+        let mask = random_key();
+        let commitment = commit_amount(&mask, amount.into()).unwrap().to_byte_type();
+        let encrypted_data = sdk
+            .stealth_crypto_api()
+            .encrypt_value_and_mask(amount, &mask, &view_public_key, &nonce_secret, None)
+            .unwrap();
+        let stealth_owner_public_key = sdk
+            .stealth_crypto_api()
+            .derive_stealth_owner_public_key(sdk.network(), &owner_public_key, &view_public_key, &nonce_secret)
+            .to_byte_type();
+
+        let utxo = Utxo::new(UtxoOutput {
+            output: OutputBody {
+                public_nonce: public_nonce.to_byte_type(),
+                encrypted_data,
+                minimum_value_promise: 0,
+                viewable_balance: None,
+            },
+            auth: SpendAuthorization::Key(stealth_owner_public_key),
+            tag,
+        });
+        (UtxoId::from(commitment), utxo)
+    }
+
     pub fn new_lock(&self) -> WalletLockDropGuard<'_, SqliteWalletStore> {
         self.sdk.locks_api().create_lock().unwrap()
     }
@@ -217,15 +279,42 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
     }
 }
 
-/// Network interface that answers `query_transaction_result` with a canned result and panics on every other call.
+/// Network interface that answers `query_transaction_result` with a canned result, `get_current_epoch` with a canned
+/// epoch and, if set to, `submit_transaction` with a rejection, and panics on every other call.
 #[derive(Debug, Clone)]
 pub struct CannedTransactionResultInterface {
-    result: TransactionQueryResult,
+    /// `None` answers that the transaction is not found.
+    result: Option<TransactionQueryResult>,
+    current_epoch: Option<Epoch>,
+    rejects_submissions: bool,
 }
 
 impl CannedTransactionResultInterface {
     pub fn new(result: TransactionQueryResult) -> Self {
-        Self { result }
+        Self {
+            result: Some(result),
+            current_epoch: None,
+            rejects_submissions: false,
+        }
+    }
+
+    /// An indexer that has no result for any transaction.
+    pub fn not_found() -> Self {
+        Self {
+            result: None,
+            current_epoch: None,
+            rejects_submissions: false,
+        }
+    }
+
+    pub fn with_current_epoch(mut self, epoch: Epoch) -> Self {
+        self.current_epoch = Some(epoch);
+        self
+    }
+
+    pub fn rejecting_submissions(mut self) -> Self {
+        self.rejects_submissions = true;
+        self
     }
 }
 
@@ -238,17 +327,18 @@ impl WalletNetworkInterface for CannedTransactionResultInterface {
         _address: &SubstateId,
         _version: Option<SubstateVersion>,
         _local_search_only: bool,
+        _include_proof: bool,
     ) -> Result<SubstateQueryResult, Self::Error> {
         panic!("CannedTransactionResultInterface called")
     }
 
-    async fn get_substates(&self, _: Vec<SubstateId>) -> Result<HashMap<SubstateId, Substate>, Self::Error> {
+    async fn get_substates(&self, _: &[SubstateId], _: bool) -> Result<FetchedSubstates, Self::Error> {
         panic!("CannedTransactionResultInterface called")
     }
 
-    #[allow(clippy::diverging_sub_expression)]
     async fn submit_transaction(&self, _transaction: Transaction) -> Result<TransactionId, Self::Error> {
-        panic!("CannedTransactionResultInterface called")
+        assert!(self.rejects_submissions, "CannedTransactionResultInterface called");
+        Err(PanicError::Rejected)
     }
 
     async fn submit_transaction_envelope(
@@ -258,19 +348,19 @@ impl WalletNetworkInterface for CannedTransactionResultInterface {
         panic!("CannedTransactionResultInterface called")
     }
 
-    #[allow(clippy::diverging_sub_expression)]
     async fn submit_dry_run_transaction(
         &self,
         _transaction: Transaction,
     ) -> Result<TransactionQueryResult, Self::Error> {
-        panic!("CannedTransactionResultInterface called")
+        self.result.clone().ok_or(PanicError::NotFound)
     }
 
     async fn query_transaction_result(
         &self,
         _transaction_id: TransactionId,
+        _include_proof: bool,
     ) -> Result<TransactionQueryResult, Self::Error> {
-        Ok(self.result.clone())
+        self.result.clone().ok_or(PanicError::NotFound)
     }
 
     async fn subscribe_transaction_finalized(&self) -> Result<TransactionFinalizedStream<Self::Error>, Self::Error> {
@@ -300,15 +390,42 @@ impl WalletNetworkInterface for CannedTransactionResultInterface {
         panic!("CannedTransactionResultInterface called")
     }
 
-    async fn get_unspent_utxos(
+    async fn fetch_utxos(
         &self,
         _resource_address: ResourceAddress,
-        _tag_and_nonce_pairs: Vec<TagAndPublicNoncePair>,
-    ) -> Result<Vec<(UtxoId, Utxo)>, Self::Error> {
+        _tag_and_nonce_pairs: Vec<PlacedTagAndNoncePair>,
+    ) -> Result<FetchedUtxos, Self::Error> {
+        panic!("CannedTransactionResultInterface called")
+    }
+
+    async fn get_latest_epoch_checkpoint(&self, _shard: Shard) -> Result<EpochCheckpointEntry, Self::Error> {
+        panic!("CannedTransactionResultInterface called")
+    }
+
+    async fn get_latest_shard_group_checkpoints(&self) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        panic!("CannedTransactionResultInterface called")
+    }
+
+    async fn list_epoch_checkpoints(
+        &self,
+        _from_epoch: Epoch,
+        _limit: u32,
+        _shard: Shard,
+    ) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        panic!("CannedTransactionResultInterface called")
+    }
+
+    async fn get_committee(&self, _epoch: Epoch, _shard: Shard) -> Result<ValidatorSetCommittee, Self::Error> {
         panic!("CannedTransactionResultInterface called")
     }
 
     async fn get_current_epoch(&self) -> Result<Epoch, Self::Error> {
+        Ok(self
+            .current_epoch
+            .expect("CannedTransactionResultInterface has no current epoch"))
+    }
+
+    async fn get_consensus_epoch(&self) -> Result<Option<Epoch>, Self::Error> {
         panic!("CannedTransactionResultInterface called")
     }
 
@@ -330,11 +447,12 @@ impl WalletNetworkInterface for PanicNetworkInterface {
         _address: &SubstateId,
         _version: Option<SubstateVersion>,
         _local_search_only: bool,
+        _include_proof: bool,
     ) -> Result<SubstateQueryResult, Self::Error> {
         panic!("PanicNetworkInterface called")
     }
 
-    async fn get_substates(&self, _: Vec<SubstateId>) -> Result<HashMap<SubstateId, Substate>, Self::Error> {
+    async fn get_substates(&self, _: &[SubstateId], _: bool) -> Result<FetchedSubstates, Self::Error> {
         panic!("PanicNetworkInterface called")
     }
 
@@ -362,6 +480,7 @@ impl WalletNetworkInterface for PanicNetworkInterface {
     async fn query_transaction_result(
         &self,
         _transaction_id: TransactionId,
+        _include_proof: bool,
     ) -> Result<TransactionQueryResult, Self::Error> {
         panic!("PanicNetworkInterface called")
     }
@@ -393,15 +512,40 @@ impl WalletNetworkInterface for PanicNetworkInterface {
         panic!("PanicNetworkInterface called")
     }
 
-    async fn get_unspent_utxos(
+    async fn fetch_utxos(
         &self,
         _resource_address: ResourceAddress,
-        _tag_and_nonce_pairs: Vec<TagAndPublicNoncePair>,
-    ) -> Result<Vec<(UtxoId, Utxo)>, Self::Error> {
-        panic!("PanicNetworkInterface get_unspent_utxos called")
+        _tag_and_nonce_pairs: Vec<PlacedTagAndNoncePair>,
+    ) -> Result<FetchedUtxos, Self::Error> {
+        panic!("PanicNetworkInterface fetch_utxos called")
+    }
+
+    async fn get_latest_epoch_checkpoint(&self, _shard: Shard) -> Result<EpochCheckpointEntry, Self::Error> {
+        panic!("PanicNetworkInterface called")
+    }
+
+    async fn get_latest_shard_group_checkpoints(&self) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        panic!("PanicNetworkInterface called")
+    }
+
+    async fn list_epoch_checkpoints(
+        &self,
+        _from_epoch: Epoch,
+        _limit: u32,
+        _shard: Shard,
+    ) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        panic!("PanicNetworkInterface called")
+    }
+
+    async fn get_committee(&self, _epoch: Epoch, _shard: Shard) -> Result<ValidatorSetCommittee, Self::Error> {
+        panic!("PanicNetworkInterface called")
     }
 
     async fn get_current_epoch(&self) -> Result<Epoch, Self::Error> {
+        panic!("PanicNetworkInterface called")
+    }
+
+    async fn get_consensus_epoch(&self) -> Result<Option<Epoch>, Self::Error> {
         panic!("PanicNetworkInterface called")
     }
 
@@ -411,7 +555,11 @@ impl WalletNetworkInterface for PanicNetworkInterface {
 }
 
 #[derive(Debug)]
-pub enum PanicError {}
+pub enum PanicError {
+    /// The errors a test network answers with in place of panicking.
+    NotFound,
+    Rejected,
+}
 
 impl std::fmt::Display for PanicError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -423,16 +571,20 @@ impl std::error::Error for PanicError {}
 
 impl TransactionStatusResponseError for PanicError {
     fn get_status(&self) -> ResponseErrorStatus {
-        panic!("get_status called on PanicError")
+        let message = self.get_error_message();
+        match self {
+            Self::NotFound => ResponseErrorStatus::NotFound { message },
+            Self::Rejected => ResponseErrorStatus::TransactionRejected { message },
+        }
     }
 
     fn get_error_message(&self) -> String {
-        panic!("get_error_message called on PanicError")
+        format!("{self:?}")
     }
 }
 
 impl IsNotFoundError for PanicError {
     fn is_not_found_error(&self) -> bool {
-        false
+        matches!(self, Self::NotFound)
     }
 }

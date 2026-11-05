@@ -25,18 +25,19 @@ use std::{collections::HashSet, sync::Arc, time::Instant};
 use log::*;
 use ootle_network::Network;
 use tari_engine_types::{
-    commit_result::{ExecuteResult, FinalizeResult},
-    component::{Component, derive_component_address_from_public_key},
+    commit_result::{ExecuteResult, FeeIntentFallback, FinalizeResult},
+    component::derive_component_address_from_public_key,
+    creation_check::{CreationCheck, NoCreationCheck},
     entity_id_provider::EntityIdProvider,
-    fees::ExhaustBurnRate,
+    fees::{ExhaustBurnRate, FeeScale},
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     limits,
     lock::LockFlag,
     published_template::TemplateBlob,
+    substate::SubstateId,
     virtual_substate::VirtualSubstates,
 };
-use tari_ootle_common_types::{optional::Optional, services::template_provider::TemplateProvider};
-use tari_ootle_template_metadata::MetadataHash;
+use tari_ootle_common_types::{InputDeclaration, optional::Optional, services::template_provider::TemplateProvider};
 use tari_ootle_transaction::{
     AllocatableAddressType,
     ComponentReference,
@@ -47,7 +48,7 @@ use tari_ootle_transaction::{
     call_arg,
     call_args,
 };
-use tari_template_abi::FunctionDef;
+use tari_template_abi::{FunctionDef, FunctionKind, Receiver};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args::{BucketAction, BucketGetAmountArg, BucketRef, WorkspaceAction},
@@ -55,10 +56,10 @@ use tari_template_lib::{
     models::{Bucket, BucketId},
     types::{
         Amount,
-        ComponentAddress,
         NonFungibleAddress,
         OwnerRule,
         TemplateAddress,
+        TemplateMetadataHash,
         access_rules::ComponentAccessRules,
         constants::STEALTH_TARI_RESOURCE_ADDRESS,
         crypto::RistrettoPublicKeyBytes,
@@ -72,7 +73,8 @@ use crate::{
     runtime::{
         AuthParams,
         AuthorizationScope,
-        NativeAction,
+        DeclaredInputLoad,
+        LoadedComponent,
         PayFee,
         Runtime,
         RuntimeError,
@@ -95,6 +97,26 @@ const ACCOUNT_DEPOSIT_METHOD: &str = "deposit";
 
 pub type ModulesCollection<TStore> = Arc<[Box<dyn RuntimeModule<TStore>>]>;
 
+/// The encoded bytes of the values of `inputs`, measured the way the fee module tallies storage.
+///
+/// Every declared input counts, global ones included: every shard group resolves a global input
+/// locally and pledges it to the others. Every declared input is resolved before execution —
+/// consensus aborts a transaction that names one it cannot find, and a dry run fails to fetch it —
+/// so one missing from `store` is an invariant violation.
+fn declared_input_bytes<'a, TStore: StateReader, I: IntoIterator<Item = &'a SubstateId>>(
+    store: &TStore,
+    inputs: I,
+) -> Result<u64, TransactionError> {
+    inputs.into_iter().try_fold(0u64, |total, id| {
+        let substate = store
+            .get_state(id)
+            .map_err(|err| TransactionErrorKind::InvariantError {
+                details: format!("Declared input {id} was not resolved before execution: {err}"),
+            })?;
+        Ok(total.saturating_add(tari_bor::encoded_len(substate.substate_value()) as u64))
+    })
+}
+
 pub struct TransactionProcessor<TStore, TTemplateProvider> {
     template_provider: Arc<TTemplateProvider>,
     state_db: TStore,
@@ -105,6 +127,11 @@ pub struct TransactionProcessor<TStore, TTemplateProvider> {
     wasm_metering_rate: WasmMeteringRate,
     /// The exhaust burn rate resolved for the execution epoch and seeded onto the fee state.
     burn_rate: ExhaustBurnRate,
+    /// The other shard groups the transaction's declared inputs are pledged to, which the caller
+    /// derives from the shard layout the transaction executes under.
+    input_fanout: u32,
+    /// The fee scale resolved for the execution epoch and seeded onto the fee state.
+    fee_scale: FeeScale,
     /// Selects the substate schema version for the execution epoch, which is scheduled per network.
     network: Network,
     dry_run: bool,
@@ -125,6 +152,8 @@ where
         claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
         wasm_metering_rate: WasmMeteringRate,
         burn_rate: ExhaustBurnRate,
+        input_fanout: u32,
+        fee_scale: FeeScale,
         network: Network,
         dry_run: bool,
     ) -> Self {
@@ -137,13 +166,36 @@ where
             claim_burn_proof_verifier,
             wasm_metering_rate,
             burn_rate,
+            input_fanout,
+            fee_scale,
             network,
             dry_run,
         }
     }
 
-    #[expect(clippy::too_many_lines)]
     pub fn execute<E: Executable + WeightedExecutable>(self, executable: E) -> Result<ExecuteResult, TransactionError> {
+        self.execute_inner(executable, &NoCreationCheck, false)
+            .map(|(result, _)| result)
+    }
+
+    /// Executes `executable` as consensus does. A fee intent that creates a substate `fee_intent_creations` reports as
+    /// taken can never commit, so the transaction is rejected before its main intent runs. A transaction that
+    /// commits in full also settles what committing its fee intent alone would persist; see [`FeeIntentFallback`].
+    pub fn execute_with_fee_intent_fallback<E: Executable + WeightedExecutable>(
+        self,
+        executable: E,
+        fee_intent_creations: &dyn CreationCheck,
+    ) -> Result<(ExecuteResult, Option<FeeIntentFallback>), TransactionError> {
+        self.execute_inner(executable, fee_intent_creations, true)
+    }
+
+    #[expect(clippy::too_many_lines)]
+    fn execute_inner<E: Executable + WeightedExecutable>(
+        self,
+        executable: E,
+        fee_intent_creations: &dyn CreationCheck,
+        with_fee_intent_fallback: bool,
+    ) -> Result<(ExecuteResult, Option<FeeIntentFallback>), TransactionError> {
         let (id, intent_commitment) = executable.to_id_and_intent_commitment();
         let timer = Instant::now();
         let entity_id_provider = EntityIdProvider::new(id.as_hash(), 1000);
@@ -156,6 +208,8 @@ where
             claim_burn_proof_verifier,
             wasm_metering_rate,
             burn_rate,
+            input_fanout,
+            fee_scale,
             network,
             dry_run,
         } = self;
@@ -163,15 +217,14 @@ where
         let execute_epoch = virtual_substates.current_epoch();
 
         let initial_auth_scope = AuthorizationScope::new(auth_params.initial_ownership_proofs);
-        let mut initial_call_scope = CallScope::new();
-        initial_call_scope.set_auth_scope(initial_auth_scope);
+        let mut initial_call_scope = CallScope::with_auth_scope(initial_auth_scope);
         // Because XTR resource is immutable, we can make it available to every shard group (genesis state) and
         // transaction (payment of fees)
         initial_call_scope.add_substate_to_owned(STEALTH_TARI_RESOURCE_ADDRESS.into());
         let mut read_declared_inputs = HashSet::new();
         let mut write_declared_inputs = HashSet::new();
         for input in executable.all_inputs_iter() {
-            debug!(
+            trace!(
                 target: LOG_TARGET,
                 "Adding substate to initial call scope: {}",
                 input
@@ -188,6 +241,15 @@ where
         // building the declaration set, repeated here because an `Executable` may chain several.
         read_declared_inputs.retain(|id| !write_declared_inputs.contains(id));
 
+        let charged_inputs = executable
+            .charged_inputs_iter()
+            .map(InputDeclaration::into_substate_id)
+            .collect::<HashSet<_>>();
+        let declared_input_load = DeclaredInputLoad {
+            bytes: declared_input_bytes(&state_db, &charged_inputs)?,
+            fanout: input_fanout,
+        };
+
         let transaction_weight = executable.calculate_weight();
         let tracker = StateTracker::new(
             state_db,
@@ -197,18 +259,21 @@ where
             id.as_hash(),
             intent_commitment,
             transaction_weight,
+            declared_input_load,
             wasm_metering_rate,
             burn_rate,
+            fee_scale,
             network,
             dry_run,
         );
 
-        let transaction_signer_public_key =
-            executable
-                .main_signer()
-                .ok_or_else(|| TransactionErrorKind::InvariantError {
-                    details: "Transaction must have at least one authorized signature".to_string(),
-                })?;
+        if executable.signers_iter().next().is_none() {
+            return Err(TransactionErrorKind::InvariantError {
+                details: "Transaction must have at least one authorized signature".to_string(),
+            }
+            .into());
+        }
+        let main_signer = executable.main_signer();
 
         let instructions = executable.into_instructions();
 
@@ -217,7 +282,7 @@ where
         let runtime_interface = std::rc::Rc::new(RuntimeInterfaceImpl::initialize(
             tracker,
             template_provider.clone(),
-            transaction_signer_public_key,
+            main_signer,
             entity_id_provider,
             modules,
             claim_burn_proof_verifier,
@@ -235,20 +300,25 @@ where
             Ok(()) => {
                 // Checkpoint the tracker state after the fee instructions have been executed in case of transaction
                 // failure.
-                if let Err(err) = runtime.interface().checkpoint_fee_intent() {
+                let checkpoint = match Self::find_taken_creation(&runtime, fee_intent_creations)? {
+                    Some(address) => Err(RuntimeError::SubstateAlreadyExists { address }),
+                    None => runtime.interface().checkpoint_fee_intent(),
+                };
+                if let Err(err) = checkpoint {
                     let mut finalize = FinalizeResult::new_rejected(transaction_hash, err.to_reject_reason(None));
                     // Nothing is taken and nothing is written, but what committing would have cost
                     // is the number the payer has to raise their fee to.
                     let required = runtime.interface().required_fee_payment();
                     finalize.fee_receipt = runtime.interface().metered_fee_receipt();
                     finalize = finalize.with_total_fees_required(required);
-                    return Ok(ExecuteResult {
+                    let result = ExecuteResult {
                         finalize,
                         execution_time: timer.elapsed(),
                         execute_epoch: execute_epoch.map(Into::into),
                         wasm_execution_points: runtime.interface().wasm_points_consumed(),
                         native_execution_points: runtime.interface().native_points_consumed(),
-                    });
+                    };
+                    return Ok((result, None));
                 }
             },
             Err(err) if err.is_node_fault() => return Err(err),
@@ -262,13 +332,14 @@ where
                 let required = runtime.interface().required_fee_payment();
                 let mut finalize = FinalizeResult::new_rejected(transaction_hash, err.to_reject_reason());
                 finalize.fee_receipt = runtime.interface().metered_fee_receipt();
-                return Ok(ExecuteResult {
+                let result = ExecuteResult {
                     finalize: finalize.with_total_fees_required(required),
                     execution_time: timer.elapsed(),
                     execute_epoch: execute_epoch.map(Into::into),
                     wasm_execution_points: runtime.interface().wasm_points_consumed(),
                     native_execution_points: runtime.interface().native_points_consumed(),
-                });
+                };
+                return Ok((result, None));
             },
         };
 
@@ -287,14 +358,19 @@ where
         match instruction_result {
             Err(err) if err.is_node_fault() => Err(err),
             Ok(()) => {
-                let finalize = runtime.interface().finalize()?;
-                Ok(ExecuteResult {
+                let (finalize, fallback) = if with_fee_intent_fallback {
+                    runtime.interface().finalize_with_fee_intent_fallback()?
+                } else {
+                    (runtime.interface().finalize()?, None)
+                };
+                let result = ExecuteResult {
                     finalize,
                     execution_time: timer.elapsed(),
                     execute_epoch: execute_epoch.map(Into::into),
                     wasm_execution_points,
                     native_execution_points,
-                })
+                };
+                Ok((result, fallback))
             },
             // This can happen e.g if you have dangling buckets after running the instructions
             Err(err) => {
@@ -302,15 +378,34 @@ where
                 // successful instructions are still charged even though the transaction failed.
                 // Finalize will now contain the fee payments and vault refunds only
                 let finalize = runtime.interface().finalize_failure(err.to_reject_reason())?;
-                Ok(ExecuteResult {
+                let result = ExecuteResult {
                     finalize,
                     execution_time: timer.elapsed(),
                     execute_epoch: execute_epoch.map(Into::into),
                     wasm_execution_points,
                     native_execution_points,
-                })
+                };
+                Ok((result, None))
             },
         }
+    }
+
+    /// The first substate the fee intent created that `fee_intent_creations` reports as taken. Nothing the fee intent
+    /// created can be committed then, so stopping before the main intent leaves only the fee intent's flat compute
+    /// credit unpaid.
+    fn find_taken_creation(
+        runtime: &Runtime,
+        fee_intent_creations: &dyn CreationCheck,
+    ) -> Result<Option<SubstateId>, TransactionError> {
+        for id in runtime.interface().created_substates()? {
+            if fee_intent_creations
+                .is_creation_taken(&id)
+                .map_err(TransactionErrorKind::from)?
+            {
+                return Ok(Some(id));
+            }
+        }
+        Ok(None)
     }
 
     fn process_instructions(
@@ -343,7 +438,7 @@ where
         instruction: Instruction,
         blobs: &tari_ootle_transaction::Blobs,
     ) -> Result<Option<IndexedValue>, TransactionErrorKind> {
-        debug!(target: LOG_TARGET, "instruction = {:?}", instruction);
+        trace!(target: LOG_TARGET, "instruction = {:?}", instruction);
         match instruction {
             Instruction::CreateAccount {
                 owner_public_key: public_key_address,
@@ -441,6 +536,18 @@ where
                 revealed_input_bucket,
             } => Self::stealth_transfer(runtime, resource_address, statement, revealed_input_bucket),
             Instruction::PayFeeFromBucket { bucket } => Self::pay_fee_from_bucket(runtime, bucket),
+            Instruction::AuthorizeProof { proof } => {
+                runtime
+                    .interface()
+                    .workspace_invoke(WorkspaceAction::AuthorizeProof, invoke_args![proof].into())?;
+                Ok(None)
+            },
+            Instruction::DropProofAuthorization { proof } => {
+                runtime
+                    .interface()
+                    .workspace_invoke(WorkspaceAction::DropProofAuthorization, invoke_args![proof].into())?;
+                Ok(None)
+            },
             Instruction::UpdateComponentTemplate {
                 component,
                 migrate,
@@ -456,7 +563,8 @@ where
         new_template_addr: TemplateAddress,
         migrate: Option<MigrateFunction>,
     ) -> Result<Option<IndexedValue>, TransactionErrorKind> {
-        let (component_address, component) = runtime.interface().load_component(component)?;
+        let component = runtime.interface().load_component(component)?;
+        let component_address = component.address;
 
         let template = template_provider
             .get_template(&new_template_addr)
@@ -473,28 +581,30 @@ where
             .track_template_loaded(&new_template_addr, template.code_size())?;
 
         let component_lock = runtime.interface().lock_component(component_address, LockFlag::Write)?;
+        // Evaluated in the instruction's own scope: the migration frame pushed below carries no signer badges and
+        // no loan of the authorized proofs.
+        runtime.interface().check_component_upgrade_rule(&component_lock)?;
 
+        let template_def = template.shared_template_def();
         let migration_function = migrate
             .as_ref()
             .map(|f| {
-                template
-                    .template_def()
+                template_def
                     .get_function(&f.name)
-                    .cloned()
                     .ok_or_else(|| TransactionErrorKind::FunctionNotFound {
                         name: f.name.to_string(),
                     })
                     .and_then(|f| {
-                        if f.is_migration {
+                        if f.is_migration() {
                             Ok(f)
                         } else {
-                            Err(TransactionErrorKind::NotAMigrationFunction { name: f.name })
+                            Err(TransactionErrorKind::NotAMigrationFunction { name: f.name.clone() })
                         }
                     })
             })
             .transpose()?;
 
-        let component_scope = IndexedWellKnownTypes::from_value(component.state())?;
+        let component_scope = component.state_scope;
 
         let (call_frame, final_args) = if migration_function.is_some() {
             let resolved_args = migrate
@@ -523,7 +633,7 @@ where
                 component_scope,
                 component_lock,
                 arg_scope: Box::new(arg_scope),
-                entity_id: *component.entity_id(),
+                entity_id: component.entity_id,
             };
             (frame, resolved_args)
         } else {
@@ -533,7 +643,7 @@ where
                 component_scope,
                 component_lock,
                 arg_scope: Box::new(IndexedWellKnownTypes::new()),
-                entity_id: *component.entity_id(),
+                entity_id: component.entity_id,
             };
             (frame, vec![])
         };
@@ -543,20 +653,13 @@ where
         // executes in this frame, so the template identity is honest — but `template(...)` (and
         // `direct_caller_template(...)`) would become forgeable if any other code ever ran here.
         runtime.interface().push_call_frame(call_frame, None)?;
-        // This must come after the call frame as that defines the authorization scope
-        runtime
-            .interface()
-            .check_component_ownership(NativeAction::UpdateComponentTemplate.into())?;
-        // A migration with no `migrate` function never reaches `invoke_template`, so this frame's call boundary
-        // ends here.
-        runtime.interface().revoke_boundary_proofs()?;
 
         runtime.interface().update_component_template(new_template_addr)?;
 
         let returned = migration_function
             .map(|function_def| {
                 let result =
-                    Self::invoke_template(new_template_addr, template, runtime.clone(), &function_def, &final_args)?;
+                    Self::invoke_template(new_template_addr, template, runtime.clone(), function_def, &final_args)?;
                 runtime.interface().validate_return_value(&result)?;
                 Ok::<_, TransactionErrorKind>(result)
             })
@@ -632,7 +735,7 @@ where
     fn publish_template(
         runtime: &Runtime,
         binary: &[u8],
-        metadata_hash: Option<MetadataHash>,
+        metadata_hash: Option<TemplateMetadataHash>,
     ) -> Result<Option<IndexedValue>, TransactionErrorKind> {
         if binary.len() > limits::ENGINE_LIMITS.max_template_binary_size_bytes {
             return Err(TransactionErrorKind::WasmBinaryTooBig {
@@ -697,18 +800,17 @@ where
             .optional()?;
 
         match maybe_existing_account {
-            Some((_, component)) => {
+            Some(component) => {
                 // Component exists, we'll attempt deposit funds into it as necessary
 
                 // Ensure that the existing component is indeed an Account
-                if *component.template_address() != ACCOUNT_TEMPLATE_ADDRESS {
+                if component.template_address != ACCOUNT_TEMPLATE_ADDRESS {
                     return Err(TransactionErrorKind::InvalidCreateAccount {
                         component_address: account_address,
                         details: format!(
                             "A component already exists at the derived account address {}, but it is not an Account \
                              (template address: {})",
-                            account_address,
-                            component.template_address()
+                            account_address, component.template_address
                         ),
                     });
                 }
@@ -724,28 +826,19 @@ where
 
                 if let Some(workspace_id) = workspace_id {
                     let args = call_args![WorkspaceOffset(workspace_id)];
-                    Self::invoke_component(
-                        template,
-                        runtime,
-                        account_address,
-                        &component,
-                        ACCOUNT_DEPOSIT_METHOD,
-                        args,
-                        None,
-                    )?;
+                    Self::invoke_component(template, runtime, component, ACCOUNT_DEPOSIT_METHOD, args, None)?;
                 }
 
                 // The instruction output is always the ComponentAddress
                 Ok(Some(IndexedValue::from_type(&account_address)?))
             },
             None => {
-                let function_def = template
-                    .template_def()
-                    .get_function(ACCOUNT_CONSTRUCTOR_FUNCTION)
-                    .cloned()
-                    .ok_or_else(|| TransactionErrorKind::FunctionNotFound {
+                let template_def = template.shared_template_def();
+                let function_def = template_def.get_function(ACCOUNT_CONSTRUCTOR_FUNCTION).ok_or_else(|| {
+                    TransactionErrorKind::FunctionNotFound {
                         name: ACCOUNT_CONSTRUCTOR_FUNCTION.to_string(),
-                    })?;
+                    }
+                })?;
 
                 let mut args = call_args![
                     // the public key NFT is the first argument of the Account template constructor specifying the
@@ -783,7 +876,7 @@ where
                     ACCOUNT_TEMPLATE_ADDRESS,
                     template,
                     runtime.clone(),
-                    &function_def,
+                    function_def,
                     &resolved_args,
                 )?;
 
@@ -824,16 +917,29 @@ where
             .interface()
             .track_template_loaded(template_address, template.code_size())?;
 
-        let function_def = template.template_def().get_function(function).cloned().ok_or_else(|| {
-            TransactionErrorKind::FunctionNotFound {
-                name: function.to_string(),
-            }
-        })?;
+        let template_def = template.shared_template_def();
+        let function_def =
+            template_def
+                .get_function(function)
+                .ok_or_else(|| TransactionErrorKind::FunctionNotFound {
+                    name: function.to_string(),
+                })?;
 
-        if function_def.is_migration {
-            return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
-                name: function_def.name,
-            });
+        match function_def.kind {
+            FunctionKind::Function => {},
+            FunctionKind::Migration { .. } => {
+                return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
+                    name: function_def.name.clone(),
+                });
+            },
+            // A method runs only in its component's frame, after the component's access rules. A static frame has
+            // neither, and carries the template's identity.
+            FunctionKind::Method(_) => {
+                return Err(TransactionErrorKind::MethodCalledAsFunction {
+                    template_address: *template_address,
+                    name: function_def.name.clone(),
+                });
+            },
         }
 
         let resolved_args = runtime.interface().resolve_args(None, &args)?;
@@ -854,7 +960,7 @@ where
             *template_address,
             template,
             runtime.clone(),
-            &function_def,
+            function_def,
             &resolved_args,
         )?;
 
@@ -872,8 +978,8 @@ where
         args: Vec<InstructionArg>,
         restrict_frame_to: Option<FrameWriteMode>,
     ) -> Result<IndexedValue, TransactionErrorKind> {
-        let (component_address, component) = runtime.interface().load_component(call)?;
-        let template_address = *component.template_address();
+        let component = runtime.interface().load_component(call)?;
+        let template_address = component.template_address;
 
         let template = template_provider
             .get_template(&template_address)
@@ -889,66 +995,59 @@ where
             .interface()
             .track_template_loaded(&template_address, template.code_size())?;
 
-        Self::invoke_component(
-            template,
-            runtime,
-            component_address,
-            &component,
-            method,
-            args,
-            restrict_frame_to,
-        )
+        Self::invoke_component(template, runtime, component, method, args, restrict_frame_to)
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn invoke_component(
         template: LoadedTemplate,
         runtime: &Runtime,
-        component_address: ComponentAddress,
-        component: &Component,
+        component: LoadedComponent,
         method: &str,
         args: Vec<InstructionArg>,
         restrict_frame_to: Option<FrameWriteMode>,
     ) -> Result<IndexedValue, TransactionErrorKind> {
-        let function_def = template.template_def().get_function(method).cloned().ok_or_else(|| {
-            TransactionErrorKind::FunctionNotFound {
+        let template_def = template.shared_template_def();
+        let function_def = template_def
+            .get_function(method)
+            .ok_or_else(|| TransactionErrorKind::FunctionNotFound {
                 name: method.to_string(),
-            }
-        })?;
+            })?;
 
-        if function_def.is_migration {
-            return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
-                name: function_def.name,
-            });
-        }
-
-        let lock_flag = if function_def.is_mut {
-            LockFlag::Write
-        } else {
-            LockFlag::Read
+        let lock_flag = match function_def.kind {
+            FunctionKind::Method(Receiver::RefMut) => LockFlag::Write,
+            FunctionKind::Method(Receiver::Ref) => LockFlag::Read,
+            FunctionKind::Migration { .. } => {
+                return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
+                    name: function_def.name.clone(),
+                });
+            },
+            FunctionKind::Function => {
+                return Err(TransactionErrorKind::FunctionCalledAsMethod {
+                    component_address: component.address,
+                    name: function_def.name.clone(),
+                });
+            },
         };
 
-        let component_lock = runtime.interface().lock_component(component_address, lock_flag)?;
+        let component_lock = runtime.interface().lock_component(component.address, lock_flag)?;
 
         let resolved_args = runtime
             .interface()
-            .resolve_args(Some(InstructionArg::from_type(&component_address)?), &args)?;
+            .resolve_args(Some(InstructionArg::from_type(&component.address)?), &args)?;
         let arg_scope = resolved_args
             .iter()
             .skip(1)
             .map(IndexedWellKnownTypes::from_value)
             .collect::<Result<_, _>>()?;
 
-        let component_scope = IndexedWellKnownTypes::from_value(component.state())?;
-
         runtime.interface().push_call_frame(
             PushCallFrame::ForComponent {
-                template_address: component.header.template_address,
+                template_address: component.template_address,
                 module_name: template.template_name().to_string(),
-                component_scope,
+                component_scope: component.state_scope,
                 component_lock,
                 arg_scope: Box::new(arg_scope),
-                entity_id: component.header.entity_id,
+                entity_id: component.entity_id,
             },
             restrict_frame_to,
         )?;
@@ -957,10 +1056,10 @@ where
         runtime.interface().check_component_access_rules(method)?;
 
         let result = Self::invoke_template(
-            component.header.template_address,
+            component.template_address,
             template,
             runtime.clone(),
-            &function_def,
+            function_def,
             &resolved_args,
         )?;
 
@@ -970,9 +1069,7 @@ where
     }
 
     /// Runs a template function in the frame the caller has already pushed. This is the only path from the engine
-    /// into template code, so it is where a frame stops holding the proofs that were in scope for its call
-    /// boundary: whatever the frame's access rule was evaluated against, the code itself acts with its own badges
-    /// and its `Proof` arguments.
+    /// into template code.
     ///
     /// The call runs on the instance of `template_address` the transaction's earlier calls used, if any (see
     /// [`WasmInstanceCache`]), restored first to the state of a fresh instantiation.
@@ -983,8 +1080,6 @@ where
         function_def: &FunctionDef,
         args: &[tari_bor::Value],
     ) -> Result<IndexedValue, TransactionErrorKind> {
-        runtime.interface().revoke_boundary_proofs()?;
-
         let result = match module {
             LoadedTemplate::Wasm(loaded) => {
                 // Every call pays for an instantiation, whether it gets a new instance or a reused one reset to

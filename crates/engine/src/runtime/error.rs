@@ -48,6 +48,7 @@ use tari_template_lib::{
         Amount,
         ClaimedOutputTombstoneAddress,
         ComponentAddress,
+        NonFungibleAddress,
         NonFungibleId,
         ResourceAddress,
         ResourceType,
@@ -60,7 +61,7 @@ use tari_template_lib::{
     },
 };
 
-use super::workspace::WorkspaceError;
+use super::{scope::RestrictedFrame, workspace::WorkspaceError};
 use crate::{
     runtime::{ActionIdent, RuntimeModuleError, locking::LockError},
     state_store::StateStoreError,
@@ -112,10 +113,26 @@ pub enum RuntimeError {
     BucketNotInScope { bucket_id: BucketId },
     #[error("Encountered unknown or out of scope proof {proof_id}")]
     ProofNotInScope { proof_id: ProofId },
+    #[error(
+        "Proof {proof_id} was shown to this call and remains the caller's: it can be read here but not authorized, \
+         passed on, returned, stored or dropped"
+    )]
+    ProofNotHeld { proof_id: ProofId },
     #[error("Encountered unknown or out of scope address allocation {id}")]
     AddressAllocationNotInScope { id: AddressAllocationId },
     #[error("Encountered unknown or out of scope signer badge with public key {public_key}")]
     SignerBadgeNotInScope { public_key: RistrettoPublicKeyBytes },
+    #[error(
+        "This call does not carry the badge {badge}. A call carries the transaction signers' badges when the \
+         transaction makes it directly, its direct caller's badges when a template makes it, and the badges of the \
+         proofs authorized in this frame or around the call"
+    )]
+    BadgeNotInScope { badge: NonFungibleAddress },
+    #[error(
+        "{needed_for} needs the transaction's main signer, but the transaction has no main signer that signed it. \
+         Declare a main signer that signs the transaction, or name the key explicitly"
+    )]
+    NoMainSigner { needed_for: &'static str },
     #[error("Layer one commitment not found with address '{address}'")]
     LayerOneCommitmentNotFound { address: ClaimedOutputTombstoneAddress },
     #[error("Invalid argument {argument}: {reason}")]
@@ -135,10 +152,28 @@ pub enum RuntimeError {
         requirement: RuleRequirement,
     },
     #[error(
+        "{argument} has an {composite} rule that lists nothing; an {composite} rule must list at least one rule or \
+         requirement, and deny_all is the rule that admits nobody"
+    )]
+    EmptyAccessRuleComposite {
+        argument: &'static str,
+        composite: &'static str,
+    },
+    #[error(
         "Intrinsic {intrinsic} is not supported by this validator. The template requires a newer engine — validators \
          and indexers must be upgraded before it can be called."
     )]
     IntrinsicNotSupported { intrinsic: IntrinsicId },
+    #[error(
+        "A template verified a signature under an empty domain. A signature domain names what the signature is for; \
+         declare one with custom_signature_domain!"
+    )]
+    EmptySignatureDomain,
+    #[error(
+        "A template verified a signature scoped to the current component outside a component method. Only a method \
+         call has a component to bind the signature to."
+    )]
+    SignatureScopeOutsideComponent,
     #[error("Invalid number of arguments: expected {expected}, but got {len}")]
     InvalidNumberOfArguments { expected: usize, len: usize },
     #[error("Invalid amount '{amount}': {reason}")]
@@ -207,6 +242,12 @@ pub enum RuntimeError {
         id: WorkspaceOffsetId,
         existing_ids: Vec<WorkspaceId>,
     },
+    #[error("Workspace item {key} is not a proof")]
+    WorkspaceItemNotAProof { key: WorkspaceOffsetId },
+    #[error("Proof {proof_id} is not authorized, so there is no authorization to drop")]
+    ProofNotAuthorized { proof_id: ProofId },
+    #[error("Proof {proof_id} is already authorized")]
+    ProofAlreadyAuthorized { proof_id: ProofId },
     #[error("Attempted to take the last output but there was no previous instruction output")]
     NoLastInstructionOutput,
     #[error(transparent)]
@@ -227,18 +268,31 @@ pub enum RuntimeError {
     },
     #[error("Resource Auth Hook Denied Access for action {action_ident}: {details}")]
     AccessDeniedAuthHook { action_ident: ActionIdent, details: String },
+    #[error(
+        "Resource {resource_address} has an auth hook on component {component_address}, which the transaction did not \
+         declare as an input. Declare the hook component as an input to act on this resource."
+    )]
+    AuthHookComponentNotDeclared {
+        resource_address: ResourceAddress,
+        component_address: ComponentAddress,
+    },
     #[error("Access Denied: You must be the owner to perform this action: {action}")]
     AccessDeniedOwnerRequired { action: ActionIdent },
+    #[error("Component {component} cannot be upgraded: its upgrade rule is Locked")]
+    ComponentUpgradesLocked { component: ComponentAddress },
     #[error("Write attempted in a read-only execution context")]
     WriteInReadOnlyContext,
     #[error("Host operation '{operation}' is forbidden inside a read-only (spend-script) context")]
     ForbiddenInReadOnlyContext { operation: &'static str },
-    #[error("Write to {id} attempted in a resource auth hook, which may only modify its own component state")]
-    WriteOutsideOwnComponent { id: SubstateId },
+    #[error("Write to {id} attempted in {frame}, which may only modify its own component state")]
+    WriteOutsideOwnComponent { id: SubstateId, frame: RestrictedFrame },
     #[error("Write to {id} attempted, but the transaction declared it as a read-only input")]
     WriteToReadDeclaredInput { id: SubstateId },
-    #[error("Host operation '{operation}' is forbidden inside a resource auth hook")]
-    ForbiddenInAuthHookContext { operation: &'static str },
+    #[error("Host operation '{operation}' is forbidden inside {frame}")]
+    ForbiddenInRestrictedFrame {
+        operation: &'static str,
+        frame: RestrictedFrame,
+    },
     #[error("Freeze on resource {resource_address} targeted vault {vault_id}, which holds resource {vault_resource}")]
     FreezeResourceMismatch {
         vault_id: VaultId,
@@ -269,8 +323,6 @@ pub enum RuntimeError {
     ClaimNotSignedByClaimKey { claim_public_key: RistrettoPublicKeyBytes },
     #[error("Burn claim proof verifier failed on this node: {details}")]
     ClaimProofVerifierFault { details: String },
-    #[error("Layer one commitment already claimed with address '{address}'")]
-    ConfidentialOutputAlreadyClaimed { address: ClaimedOutputTombstoneAddress },
     #[error("Template {template_address} not found")]
     TemplateNotFound { template_address: TemplateAddress },
     #[error("Insufficient fees paid: required {required_fee}, paid {fees_paid}")]
@@ -350,6 +402,8 @@ pub enum RuntimeError {
     },
     #[error("Duplicate substate {address}")]
     DuplicateSubstate { address: SubstateId },
+    #[error("Substate {address} already exists, so this transaction cannot create it")]
+    SubstateAlreadyExists { address: SubstateId },
     #[error("Substate {id} is orphaned")]
     OrphanedSubstate { id: SubstateId },
     #[error("{} orphaned substate(s) detected: {}", .substates.len(), .substates.join(", "))]
@@ -358,6 +412,11 @@ pub enum RuntimeError {
     CallFrameRemainingOnStack { remaining: usize },
     #[error("Duplicate reference to substate {address}")]
     DuplicateReference { address: SubstateId },
+    #[error(
+        "Vault {vault_id} already belongs to a component and cannot be placed in another component's state: a vault \
+         may be added to component state only by the call that created it, and only once"
+    )]
+    VaultAlreadyOwned { vault_id: VaultId },
     #[error("Invalid argument: {0}")]
     ArgumentValidationError(#[from] ArgumentValidationError),
     #[error("Fee payment found in main intent, which is not allowed")]
@@ -392,6 +451,12 @@ pub enum RuntimeError {
     AddressAllocationNotUsed { id: u32 },
     #[error("Address allocation type mismatch: got {id}, expected: {expected}")]
     AddressAllocationTypeMismatch { id: SubstateId, expected: &'static str },
+    #[error("Address allocation {id} was created by template {allocated_by} and cannot be used by template {used_by}")]
+    AddressAllocationTemplateMismatch {
+        id: AddressAllocationId,
+        allocated_by: TemplateAddress,
+        used_by: TemplateAddress,
+    },
     #[error("Allocated address does not have an associated template")]
     AddressAllocationNoTemplate,
 
@@ -493,30 +558,37 @@ impl RuntimeError {
             Self::WorkspaceError(_) |
             Self::SubstateAlreadySpent { .. } |
             Self::ProofNotInScope { .. } |
+            Self::ProofNotHeld { .. } |
             Self::AddressAllocationNotInScope { .. } |
             Self::SignerBadgeNotInScope { .. } |
+            Self::NoMainSigner { .. } |
             Self::InvalidArgument { .. } |
             Self::IntrinsicNotSupported { .. } |
+            Self::EmptySignatureDomain |
+            Self::SignatureScopeOutsideComponent |
             Self::InvalidNumberOfArguments { .. } |
             Self::InvalidMOfNThreshold { .. } |
             Self::DuplicateMOfNRequirement { .. } |
+            Self::EmptyAccessRuleComposite { .. } |
             Self::InvalidAmount { .. } |
             Self::BucketNotFound { .. } |
             Self::BucketNotInScope { .. } |
             Self::ProofNotFound { .. } |
             Self::ItemNotOnWorkspace { .. } |
+            Self::WorkspaceItemNotAProof { .. } |
+            Self::ProofNotAuthorized { .. } |
+            Self::ProofAlreadyAuthorized { .. } |
             Self::NoLastInstructionOutput |
-            Self::DuplicateNonFungibleId { .. } |
             Self::SpendContextUnavailable |
-            Self::ConfidentialOutputAlreadyClaimed { .. } |
             Self::NoFeesPaid { .. } |
-            Self::ComponentAlreadyExists { .. } |
             Self::InvalidOpLockedBucket { .. } |
             Self::DuplicateReference { .. } |
+            Self::VaultAlreadyOwned { .. } |
             Self::ArgumentValidationError(_) |
             Self::FeePaymentInMainIntent |
             Self::AddressAllocationNotFound { .. } |
             Self::AddressAllocationTypeMismatch { .. } |
+            Self::AddressAllocationTemplateMismatch { .. } |
             Self::AddressAllocationNoTemplate |
             Self::NumericConversionError { .. } |
             Self::WriteToReadDeclaredInput { .. } |
@@ -525,6 +597,7 @@ impl RuntimeError {
             Self::SubstateNotFound { .. } |
             Self::RootSubstateNotFound { .. } |
             Self::ReferencedSubstateNotFound { .. } |
+            Self::AuthHookComponentNotDeclared { .. } |
             Self::NonExistentSubstateReturned { .. } |
             Self::ComponentReferencedUnknownSubstate { .. } |
             Self::LayerOneCommitmentNotFound { .. } |
@@ -541,10 +614,12 @@ impl RuntimeError {
             Self::AccessDeniedSetComponentState { .. } |
             Self::AccessDeniedAuthHook { .. } |
             Self::AccessDeniedOwnerRequired { .. } |
+            Self::ComponentUpgradesLocked { .. } |
             Self::WriteInReadOnlyContext |
             Self::ForbiddenInReadOnlyContext { .. } |
             Self::WriteOutsideOwnComponent { .. } |
-            Self::ForbiddenInAuthHookContext { .. } |
+            Self::ForbiddenInRestrictedFrame { .. } |
+            Self::BadgeNotInScope { .. } |
             Self::CrossTemplateCallNotAllowed { .. } => C::AccessDenied,
 
             Self::VaultFrozen { .. } |
@@ -562,6 +637,10 @@ impl RuntimeError {
             Self::ClaimNotSignedByClaimKey { .. } => C::AccessDenied,
 
             Self::ClaimProofNotYetValid { .. } => C::NotYetValid,
+
+            Self::SubstateAlreadyExists { .. } |
+            Self::DuplicateNonFungibleId { .. } |
+            Self::ComponentAlreadyExists { .. } => C::Conflict,
 
             Self::BucketNotEmpty { .. } |
             Self::OrphanedSubstate { .. } |

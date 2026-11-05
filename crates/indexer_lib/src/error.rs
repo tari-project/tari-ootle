@@ -3,8 +3,9 @@
 
 use std::time;
 
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{published_template::PublishedTemplateAddress, substate::SubstateId};
 use tari_epoch_manager::EpochManagerError;
+use tari_ootle_common_types::SubstateVersion;
 
 use crate::substate_cache::SubstateCacheError;
 
@@ -18,8 +19,23 @@ pub enum IndexerError {
     ValidatorNodeClientError(String),
     #[error("Committee members did not agree on the substate's state, and none could prove it")]
     InvalidSubstateState,
-    #[error("Invalid substate value")]
-    InvalidSubstateValue,
+    #[error("A committee member answered v{answered} for a read of v{requested}")]
+    VersionMismatch {
+        requested: SubstateVersion,
+        answered: SubstateVersion,
+    },
+    #[error("{vn} served a value for {substate_id} that does not decode: {details}")]
+    UndecodableSubstateValue {
+        vn: String,
+        substate_id: SubstateId,
+        details: String,
+    },
+    #[error("{vn} served a template for {requested} whose author and binary hash derive {derived}")]
+    TemplateAddressMismatch {
+        vn: String,
+        requested: PublishedTemplateAddress,
+        derived: PublishedTemplateAddress,
+    },
     #[error("Not found transaction for component address {0} and version {1}")]
     NotFoundTransaction(SubstateId, u32),
     #[error("Failed to get consensus constants: {0}")]

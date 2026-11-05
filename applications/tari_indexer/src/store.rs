@@ -10,13 +10,13 @@ use std::{
 
 use async_trait::async_trait;
 use serde::{Serialize, de::DeserializeOwned};
-use tari_common_types::types::FixedHash;
 use tari_engine_types::{
     Utxo,
+    encoded::Encoded,
     events::Event,
     fees::FeeReceipt,
     published_template::PublishedTemplateMetadata,
-    substate::{Substate, SubstateId},
+    substate::{EncodedSubstate, SubstateId},
     transaction_receipt::{FinalizeOutcome, TransactionReceipt},
 };
 use tari_indexer_client::types::{TransactionEntry, TransactionSource, UtxoStateUpdateSet};
@@ -37,6 +37,8 @@ use tari_ootle_storage::{
     time::PrimitiveDateTime,
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
+use tari_sidechain::FixedHash;
+use tari_state_tree::LeafKey;
 use tari_template_lib_types::{
     Amount,
     ResourceAddress,
@@ -51,8 +53,12 @@ use tari_validator_node_rpc::client::SubstateProofData;
 use crate::{
     network_state_sync::{EventFilter, SyncProgress},
     storage_sqlite::models::{
+        CheckpointShardLeaf,
         Key,
         KeyValue,
+        SnapshotSubstate,
+        StagedAccumulator,
+        StagedVersion,
         SubstateCacheInvalidation,
         SubstateRecord,
         TemplateCatalogueEntry,
@@ -96,7 +102,7 @@ pub trait IndexerStoreReadTransaction {
         version: Option<SubstateVersion>,
     ) -> Result<Option<SubstateRecord>, StorageError>;
 
-    fn get_substates(&mut self, ids: &[SubstateId]) -> Result<HashMap<SubstateId, Substate>, StorageError>;
+    fn get_substates(&mut self, ids: &[SubstateId]) -> Result<HashMap<SubstateId, EncodedSubstate>, StorageError>;
 
     /// Returns the events matching `query` with id below `before_id` (or from the newest when
     /// `None`), newest first, skipping the first `offset` matches.
@@ -145,12 +151,12 @@ pub trait IndexerStoreReadTransaction {
         last_id: Option<TransactionReceiptAddress>,
         limit: u64,
         ordering: Ordering,
-    ) -> Result<Vec<(TransactionReceiptAddress, TransactionReceipt)>, StorageError>;
+    ) -> Result<Vec<(TransactionReceiptAddress, Encoded<TransactionReceipt>)>, StorageError>;
 
     fn get_transaction_receipt(
         &mut self,
         address: &TransactionReceiptAddress,
-    ) -> Result<TransactionReceipt, StorageError>;
+    ) -> Result<Encoded<TransactionReceipt>, StorageError>;
 
     /// The sum of every validator fee pool balance: the leader fees validators have earned and not yet claimed.
     fn sum_validator_fee_pool_balances(&mut self) -> Result<Amount, StorageError>;
@@ -161,19 +167,22 @@ pub trait IndexerStoreReadTransaction {
 
     // -------------------------------- Epoch Checkpoints -------------------------------- //
     fn epoch_checkpoint_exists(&mut self, shard_group: ShardGroup, epoch: Epoch) -> Result<bool, StorageError>;
-    fn epoch_checkpoint_get_all(&mut self, from_epoch: Epoch, limit: u64)
-    -> Result<Vec<EpochCheckpoint>, StorageError>;
-    fn epoch_checkpoint_get_latest(&mut self) -> Result<EpochCheckpoint, StorageError>;
+    /// Checkpoints from `from_epoch` on, ascending by epoch, of every shard group or of the shard groups that contain
+    /// `shard`.
+    fn epoch_checkpoint_get_all(
+        &mut self,
+        from_epoch: Epoch,
+        shard: Option<Shard>,
+        limit: u64,
+    ) -> Result<Vec<EpochCheckpoint>, StorageError>;
+    /// The checkpoint of the latest epoch, of any shard group or of the shard group that contains `shard`.
+    fn epoch_checkpoint_get_latest(&mut self, shard: Option<Shard>) -> Result<EpochCheckpoint, StorageError>;
 
     // -------------------------------- UTXOs -------------------------------- //
 
-    fn utxos_get_max_state_version(
-        &mut self,
-        resource_address: ResourceAddress,
-        shard: Shard,
-    ) -> Result<StateVersion, StorageError>;
-
-    /// Get UTXO updates for a given resource address and shard, starting from a specific state version.
+    /// Reads up to `limit` of a shard's UTXO rows above `from_state_version`, in whole state versions,
+    /// and returns the updates among them that pass `from_epoch` and `unspents_only`. A single state
+    /// version wider than `limit` is read whole, overrunning it.
     fn utxos_get_updates(
         &mut self,
         resource_address: ResourceAddress,
@@ -184,18 +193,66 @@ pub trait IndexerStoreReadTransaction {
         limit: u32,
     ) -> Result<UtxoStateUpdateSet, StorageError>;
 
-    fn utxos_list(
-        &mut self,
-        resource_address: &ResourceAddress,
-        from_id: Option<UtxoId>,
-        limit: u32,
-    ) -> Result<Vec<(UtxoId, Utxo)>, StorageError>;
-
+    /// Up to `limit` unspent UTXOs matching `public_nonce_and_tag` in id order, after `after_id` when given. Any number
+    /// of unspent UTXOs may share a nonce and tag.
     fn utxos_get_unspent_by_public_nonce_and_tag(
         &mut self,
         resource_address: &ResourceAddress,
         public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
-    ) -> Result<Vec<(UtxoId, Utxo)>, StorageError>;
+        after_id: Option<UtxoId>,
+        limit: u32,
+    ) -> Result<Vec<(UtxoId, Encoded<Utxo>)>, StorageError>;
+
+    /// The pairs of `public_nonce_and_tag` with an unspent UTXO.
+    fn utxos_get_unspent_public_nonce_and_tag(
+        &mut self,
+        resource_address: &ResourceAddress,
+        public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
+    ) -> Result<Vec<(UtxoTag, RistrettoPublicKeyBytes)>, StorageError>;
+
+    /// The pairs of `public_nonce_and_tag` whose UTXO is spent or burnt.
+    fn utxos_get_spent_public_nonce_and_tag(
+        &mut self,
+        resource_address: &ResourceAddress,
+        public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
+    ) -> Result<Vec<(UtxoTag, RistrettoPublicKeyBytes)>, StorageError>;
+
+    /// The state version at and below which this indexer may lack the tombstone of a UTXO spent in `shard`, or `None`
+    /// when it holds every one.
+    fn utxo_tombstone_horizon(&mut self, shard: Shard) -> Result<Option<StateVersion>, StorageError>;
+
+    /// [`Self::utxo_tombstone_horizon`] of every shard that has one, ascending by shard.
+    fn utxo_tombstone_horizons(&mut self) -> Result<Vec<(Shard, StateVersion)>, StorageError>;
+
+    // -------------------------------- Staged Versions -------------------------------- //
+
+    /// The accumulators of the last `limit` versions of `shard` staged, ascending by version.
+    fn staged_accumulators_tail(&mut self, shard: Shard, limit: usize) -> Result<Vec<StagedAccumulator>, StorageError>;
+
+    /// The first `limit` stored checkpoint leaves of `shard` above `state_version`, ascending. A `state_version` of
+    /// `None` is below v0, so every leaf is above it.
+    fn checkpoint_shard_leaves_above(
+        &mut self,
+        shard: Shard,
+        state_version: Option<StateVersion>,
+        limit: usize,
+    ) -> Result<Vec<CheckpointShardLeaf>, StorageError>;
+
+    /// The staged `state_version` of `shard`, if it is staged.
+    fn staged_version_get(
+        &mut self,
+        shard: Shard,
+        state_version: StateVersion,
+    ) -> Result<Option<StagedVersion>, StorageError>;
+
+    /// The first `limit` staged snapshot substates of `shard` after `after`, ascending by creation epoch and then leaf
+    /// key.
+    fn snapshot_substates_page(
+        &mut self,
+        shard: Shard,
+        after: Option<(Epoch, LeafKey)>,
+        limit: usize,
+    ) -> Result<Vec<SnapshotSubstate>, StorageError>;
 
     // -------------------------------- Template Catalogue -------------------------------- //
 
@@ -270,13 +327,40 @@ pub trait IndexerStoreWriteTransaction {
     fn commit(self) -> Result<(), StorageError>;
     fn rollback(self) -> Result<(), StorageError>;
     fn key_value_set<K: AsRef<str>, V: Serialize>(&mut self, key: K, value: V) -> Result<(), StorageError>;
-    /// Applies each UTXO update, returning the addresses of unspent outputs skipped because an
-    /// unspent row already holds their `(resource, public nonce, tag)`. The stored row is kept.
+    /// Applies each UTXO update, returning the addresses of unspent outputs skipped because a row
+    /// already holds their version. The stored row is kept.
     fn batch_insert_utxo_updates<I: IntoIterator<Item = UtxoUpdateRecord>>(
         &mut self,
         epoch: Epoch,
         updates: I,
     ) -> Result<Vec<UtxoAddress>, StorageError>;
+    /// Raises `shard`'s [UTXO tombstone horizon](IndexerStoreReadTransaction::utxo_tombstone_horizon) to
+    /// `state_version`, leaving a higher one as it is.
+    fn raise_utxo_tombstone_horizon(&mut self, shard: Shard, state_version: StateVersion) -> Result<(), StorageError>;
+    /// Stages a streamed version of `shard` until a verified leaf covers it.
+    fn staged_version_insert(&mut self, shard: Shard, version: &StagedVersion) -> Result<(), StorageError>;
+    /// Stores the shard leaves of a quorum-signed checkpoint, keeping any already stored.
+    fn checkpoint_shard_leaves_insert(&mut self, leaves: &[CheckpointShardLeaf]) -> Result<(), StorageError>;
+    /// Deletes the stored checkpoint leaves of `shard` at or below `state_version`.
+    fn checkpoint_shard_leaves_delete_through(
+        &mut self,
+        shard: Shard,
+        state_version: StateVersion,
+    ) -> Result<(), StorageError>;
+    /// Deletes the versions of `shard` staged at or below `state_version`.
+    fn staged_versions_delete_through(&mut self, shard: Shard, state_version: StateVersion)
+    -> Result<(), StorageError>;
+    /// Deletes the versions of `shard` staged above `state_version`, returning the distinct peers that streamed them. A
+    /// `state_version` of `None` is below v0, so every staged version is above it.
+    fn staged_versions_discard_above(
+        &mut self,
+        shard: Shard,
+        state_version: Option<StateVersion>,
+    ) -> Result<Vec<Vec<u8>>, StorageError>;
+    /// Stages substates of a snapshot of `shard`.
+    fn snapshot_substates_insert(&mut self, shard: Shard, substates: &[SnapshotSubstate]) -> Result<(), StorageError>;
+    /// Deletes every staged snapshot substate of `shard`.
+    fn snapshot_substates_delete(&mut self, shard: Shard) -> Result<(), StorageError>;
     fn upsert_substate(&mut self, substate: &SubstateData) -> Result<(), StorageError>;
     /// Inserts each receipt with its events, skipping any whose address already holds a receipt.
     /// A receipt address is written once on the network, so the stored receipt is kept: replacing
@@ -321,6 +405,11 @@ pub trait IndexerStoreWriteTransaction {
     /// Deletes up to `limit` events emitted by transactions that committed before `cutoff`, oldest
     /// first, returning the number deleted.
     fn prune_events_before_epoch(&mut self, cutoff: Epoch, limit: usize) -> Result<usize, StorageError>;
+    /// Deletes up to `limit` tombstones of UTXOs spent before `cutoff`, oldest first, returning the number deleted.
+    /// Each shard's [tombstone horizon](IndexerStoreReadTransaction::utxo_tombstone_horizon) is raised to the
+    /// highest state version deleted from it in the same transaction, so that a client resuming from below a pruned
+    /// tombstone is told its spends are incomplete.
+    fn prune_utxo_tombstones_before_epoch(&mut self, cutoff: Epoch, limit: usize) -> Result<usize, StorageError>;
     fn insert_or_ignore_epoch_checkpoint(&mut self, epoch_checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
     fn upsert_template_catalogue(
         &mut self,
@@ -436,11 +525,20 @@ impl EventQuery {
 
 #[derive(Debug, Clone, Default)]
 pub struct EventsPage {
-    pub events: Vec<(i64, TransactionId, Event)>,
+    pub events: Vec<StoredEvent>,
     /// The id to resume from (`before_id` or `after_id`, matching the query's direction), or
     /// `None` once no further rows can match. A page can be shorter than the limit, or empty,
     /// and still carry a cursor when a wildcard scan stopped at its limit.
     pub next_cursor: Option<i64>,
+}
+
+/// An indexed event as stored: its CBOR encoding, with the columns it is queried by.
+#[derive(Debug, Clone)]
+pub struct StoredEvent {
+    pub id: i64,
+    pub transaction_id: TransactionId,
+    pub topic: String,
+    pub event: Encoded<Event>,
 }
 
 /// What [`IndexerStoreWriteTransaction::batch_insert_transaction_receipts`] wrote.
@@ -468,6 +566,8 @@ pub struct InsertedEvent {
     pub id: i64,
     pub transaction_id: TransactionId,
     pub event: Arc<Event>,
+    /// `event` as stored.
+    pub encoded: Encoded<Event>,
 }
 
 pub struct ReadOnlyStore<T: IndexerStoreReader> {
@@ -509,7 +609,7 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
         last_id: Option<TransactionReceiptAddress>,
         limit: u64,
         ordering: Ordering,
-    ) -> Result<Vec<(TransactionReceiptAddress, TransactionReceipt)>, StorageError> {
+    ) -> Result<Vec<(TransactionReceiptAddress, Encoded<TransactionReceipt>)>, StorageError> {
         self.inner
             .with_read_tx(move |tx| tx.list_transaction_receipts(last_id, limit, ordering))
             .await
@@ -518,7 +618,7 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
     pub async fn get_transaction_receipt(
         &self,
         address: &TransactionReceiptAddress,
-    ) -> Result<TransactionReceipt, StorageError> {
+    ) -> Result<Encoded<TransactionReceipt>, StorageError> {
         let address = *address;
         self.inner
             .with_read_tx(move |tx| tx.get_transaction_receipt(&address))
@@ -589,6 +689,49 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
             .await
     }
 
+    /// A shard's UTXO updates past `from_state_version`, with the shard's tombstone horizon read in the same
+    /// transaction, so that no tombstone the read lacks is pruned below a horizon it does not report.
+    ///
+    /// A read that reaches the end of the resource's rows in the shard reports at least `verified`, and the horizon,
+    /// as its `max_state_version`. `verified` must be a version of the shard read as verified no later than this
+    /// read: every row at or below it was promoted with it, so the read has seen them all. A client of a resource
+    /// that is quiet in the shard then resumes above every tombstone of other resources there, and pruning one does
+    /// not flag it.
+    pub async fn get_utxo_updates(
+        &self,
+        resource_address: ResourceAddress,
+        from_epoch: Epoch,
+        shard: Shard,
+        from_state_version: StateVersion,
+        unspent_only: bool,
+        limit: u32,
+        verified: Option<StateVersion>,
+    ) -> Result<(UtxoStateUpdateSet, Option<StateVersion>), StorageError> {
+        self.inner
+            .with_read_tx(move |tx| {
+                let mut updates = tx.utxos_get_updates(
+                    resource_address,
+                    from_epoch,
+                    shard,
+                    from_state_version,
+                    unspent_only,
+                    limit,
+                )?;
+                let horizon = tx.utxo_tombstone_horizon(shard)?;
+                if !updates.has_more {
+                    for bound in [verified, horizon].into_iter().flatten() {
+                        updates.max_state_version = updates.max_state_version.max(bound);
+                    }
+                }
+                Ok((updates, horizon))
+            })
+            .await
+    }
+
+    pub async fn get_utxo_tombstone_horizons(&self) -> Result<Vec<(Shard, StateVersion)>, StorageError> {
+        self.inner.with_read_tx(|tx| tx.utxo_tombstone_horizons()).await
+    }
+
     pub async fn get_sync_progress(&self) -> Result<SyncProgress, StorageError> {
         self.inner
             .with_read_tx(|tx| tx.key_value_get_value(Key::SyncProgress))
@@ -607,15 +750,29 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
             .await
     }
 
-    pub async fn get_events_after_id(
+    /// Returns the events matching `query` with id above `after_id`, oldest first, or `None` if
+    /// retention has pruned any event with id above `after_id`: a client resuming from that cursor
+    /// would silently miss events. The check and the page share one read transaction, so a prune
+    /// cannot land between them.
+    pub async fn get_unpruned_events_after_id(
         &self,
         query: EventQuery,
         after_id: i64,
         limit: u32,
-    ) -> Result<EventsPage, StorageError> {
+    ) -> Result<Option<EventsPage>, StorageError> {
         self.inner
-            .with_read_tx(move |tx| tx.get_events_after_id(&query, after_id, limit))
+            .with_read_tx(move |tx| {
+                if after_id < events_pruned_through_id(tx)? {
+                    return Ok(None);
+                }
+                tx.get_events_after_id(&query, after_id, limit).map(Some)
+            })
             .await
+    }
+
+    /// The highest id of any event retention has pruned, or 0 if none has been.
+    pub async fn get_events_pruned_through_id(&self) -> Result<i64, StorageError> {
+        self.inner.with_read_tx(|tx| events_pruned_through_id(tx)).await
     }
 
     pub async fn list_template_catalogue(
@@ -644,15 +801,47 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
     pub async fn epoch_checkpoint_get_all(
         &self,
         from_epoch: Epoch,
+        shard: Option<Shard>,
         limit: u64,
     ) -> Result<Vec<EpochCheckpoint>, StorageError> {
         self.inner
-            .with_read_tx(move |tx| tx.epoch_checkpoint_get_all(from_epoch, limit))
+            .with_read_tx(move |tx| tx.epoch_checkpoint_get_all(from_epoch, shard, limit))
             .await
     }
 
-    pub async fn epoch_checkpoint_get_latest(&self) -> Result<EpochCheckpoint, StorageError> {
-        self.inner.with_read_tx(|tx| tx.epoch_checkpoint_get_latest()).await
+    pub async fn epoch_checkpoint_get_latest(&self, shard: Option<Shard>) -> Result<EpochCheckpoint, StorageError> {
+        self.inner
+            .with_read_tx(move |tx| tx.epoch_checkpoint_get_latest(shard))
+            .await
+    }
+
+    /// The latest checkpoint of the shard group holding each shard, each once and in shard order: the latest of the
+    /// group holding the first shard, then of the group holding the shard after that group's last, until a shard that
+    /// no stored checkpoint covers. A checkpoint read for a shard holds it, so each one read moves the walk forward.
+    pub async fn epoch_checkpoint_get_latest_of_each_shard_group(&self) -> Result<Vec<EpochCheckpoint>, StorageError> {
+        self.inner
+            .with_read_tx(|tx| {
+                let mut checkpoints = Vec::new();
+                let mut next_shard = Some(Shard::first());
+                while let Some(shard) = next_shard {
+                    let Some(checkpoint) = tx.epoch_checkpoint_get_latest(Some(shard)).optional()? else {
+                        break;
+                    };
+                    let shard_group =
+                        checkpoint
+                            .checked_shard_group()
+                            .map_err(|e| StorageError::DataInconsistency {
+                                details: format!(
+                                    "stored checkpoint of {} has an invalid shard group: {e}",
+                                    checkpoint.epoch()
+                                ),
+                            })?;
+                    next_shard = shard_group.end().as_u32().checked_add(1).map(Shard::from);
+                    checkpoints.push(checkpoint);
+                }
+                Ok(checkpoints)
+            })
+            .await
     }
 
     pub async fn list_watched_substates(
@@ -666,4 +855,11 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
             .with_read_tx(move |tx| tx.list_watched_substates(template_address.as_ref(), limit, offset))
             .await
     }
+}
+
+fn events_pruned_through_id<TTx: IndexerStoreReadTransaction>(tx: &mut TTx) -> Result<i64, StorageError> {
+    Ok(tx
+        .key_value_get_value::<_, i64>(Key::EventsPrunedThroughId)
+        .optional()?
+        .unwrap_or(0))
 }

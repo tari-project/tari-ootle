@@ -20,6 +20,7 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+mod backup_snapshot;
 mod base_layer;
 mod bootstrap;
 mod config;
@@ -30,6 +31,7 @@ mod file_l1_submitter;
 mod genesis_state;
 mod http_ui;
 mod json_rpc;
+pub mod logging;
 mod memory_budget;
 #[cfg(feature = "metrics")]
 mod metrics;
@@ -47,6 +49,7 @@ use tari_engine_types::crypto::{MAX_LAZY_BP_AGG_FACTORS, get_commitment_factory,
 use tari_epoch_manager::traits::EpochManagerSpec;
 use tari_epoch_oracles::EpochOracle;
 use tari_ootle_app_utilities::{
+    allowed_hosts::AllowedHosts,
     consensus_constants_file::load_consensus_constants,
     keypair::RistrettoKeypair,
     protocol_activation::check_and_record_activation_schedule,
@@ -58,7 +61,7 @@ use tari_ootle_storage_sqlite::{SqliteDbFactory, global::SqliteGlobalDbAdapter};
 use tari_shutdown::Shutdown;
 use tokio::task;
 
-pub use crate::config::{ApplicationConfig, ValidatorNodeConfig};
+pub use crate::config::{ApplicationConfig, MIN_PINNED_CHECKPOINT_EPOCHS, ValidatorNodeConfig};
 use crate::{
     bootstrap::{Services, spawn_services},
     consensus::spec::ValidatorNodeStateStore,
@@ -126,6 +129,8 @@ pub async fn run_validator_node(
 
     #[cfg(feature = "metrics")]
     let metrics_registry = create_metrics_registry(keypair.public_key(), &mut base_registry);
+    #[cfg(feature = "metrics")]
+    tari_logging::LogSinkCollector.register(metrics_registry);
 
     let consensus_constants = load_consensus_constants(
         config.network,
@@ -142,6 +147,12 @@ pub async fn run_validator_node(
         metrics_registry,
     )
     .await?;
+    let report_signal = shutdown.to_signal();
+    services.handles.push(task::spawn(async move {
+        tari_logging::report_dropped_lines(report_signal).await;
+        Ok(())
+    }));
+
     let info = services.networking.get_local_peer_info().await?;
     info!(target: LOG_TARGET, "🚀 Node started: {}", info);
 
@@ -153,6 +164,10 @@ pub async fn run_validator_node(
         let (bound_addr, jrpc_handle) = spawn_json_rpc(
             *jrpc_address,
             config.validator_node.enable_permissive_cors,
+            AllowedHosts::new(
+                "validator_node.json_rpc_allowed_hosts",
+                config.validator_node.json_rpc_allowed_hosts.iter(),
+            ),
             handlers,
             shutdown.to_signal(),
         )

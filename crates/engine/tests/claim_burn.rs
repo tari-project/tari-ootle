@@ -294,7 +294,7 @@ mod fee_estimate {
     use tari_crypto::keys::SecretKey as _;
     use tari_engine::fees::FeeTable;
     use tari_engine_types::{
-        fees::{FeeRates, FeeSource},
+        fees::{FeeRates, FeeScale, FeeSource},
         stealth::{ClaimBurnShape, persisted_utxo_bytes},
     };
     use tari_template_lib::types::{Amount, constants::TARI_TOKEN, stealth::StealthTransferStatement};
@@ -324,7 +324,7 @@ mod fee_estimate {
         // Price a created substate as the shipped tables do, so the slots the claim creates carry the
         // weight they do on a real network.
         test.set_fee_table(FeeTable {
-            per_substate_create_cost: 25,
+            per_substate_create_cost: 250,
             ..test.fee_table().clone()
         });
         test.enable_fees();
@@ -333,7 +333,7 @@ mod fee_estimate {
     }
 
     fn rates(test: &TemplateTest) -> FeeRates {
-        test.fee_table().to_rates()
+        test.fee_table().to_rates(FeeScale::ONE)
     }
 
     fn new_claim() -> MaskAndValue {
@@ -374,7 +374,11 @@ mod fee_estimate {
         }
     }
 
-    fn shape_of(build: &Build) -> ClaimBurnShape {
+    /// The groups beyond the first that a claim's declared inputs are taken to be pledged to: the TARI
+    /// resource and the claim's tombstone in two groups.
+    const INPUT_FANOUT: u32 = 1;
+
+    fn shape_of(test: &TemplateTest, build: &Build) -> ClaimBurnShape {
         ClaimBurnShape {
             persisted_output_bytes: build
                 .statement
@@ -384,18 +388,21 @@ mod fee_estimate {
                 .map(persisted_utxo_bytes)
                 .sum(),
             transaction_weight: build.transaction.calculate_transaction_weight().as_u64(),
+            input_bytes: test.declared_input_bytes(&build.transaction),
+            input_fanout: INPUT_FANOUT,
         }
     }
 
     #[test]
     fn the_estimate_bounds_what_the_engine_charges_a_claim() {
         let mut test = setup();
+        test.set_input_fanout(INPUT_FANOUT);
         let claimed = new_claim();
 
-        let shape = shape_of(&build(&test, &claimed, PLACEHOLDER_FEE));
+        let shape = shape_of(&test, &build(&test, &claimed, PLACEHOLDER_FEE));
         let settled = build(&test, &claimed, shape.estimate_fee(&rates(&test)));
         assert_eq!(
-            shape_of(&settled),
+            shape_of(&test, &settled),
             shape,
             "the fee a claim reveals must not move the shape it is priced at"
         );
@@ -434,13 +441,38 @@ mod fee_estimate {
         );
     }
 
+    /// Reading the native charge back with only native points priced pins the claim's native points to every point
+    /// the engine charged, verification and authorization alike. Every price is a multiple of the divisor, so no
+    /// point is lost to rounding.
+    #[test]
+    fn the_native_points_match_the_claim_shape() {
+        const DIVISOR: u64 = 100;
+        let mut test = setup();
+        let mut fee_table = FeeTable::zero_rated();
+        fee_table.per_wasm_point_cost = 1;
+        fee_table.wasm_points_cost_divisor = DIVISOR;
+        test.set_fee_table(fee_table);
+        test.set_burn_rate_bps(0);
+
+        let result = test.execute_expect_success(build(&test, &new_claim(), PLACEHOLDER_FEE).transaction, vec![]);
+        assert_eq!(
+            result
+                .finalize
+                .fee_receipt
+                .fee_breakdown()
+                .get(FeeSource::NativeExecution) *
+                DIVISOR,
+            ClaimBurnShape::native_points(),
+        );
+    }
+
     /// The bound rests on an underpaid claim being rejected. Revealing half the estimate shows that it
     /// is, so the bound is not passing vacuously.
     #[test]
     fn revealing_under_the_charge_rejects_the_claim() {
         let mut test = setup();
         let claimed = new_claim();
-        let shape = shape_of(&build(&test, &claimed, PLACEHOLDER_FEE));
+        let shape = shape_of(&test, &build(&test, &claimed, PLACEHOLDER_FEE));
         let too_little = shape.estimate_fee(&rates(&test)) / 2;
 
         let result = test

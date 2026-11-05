@@ -25,6 +25,7 @@ use std::error::Error;
 use log::warn;
 use tari_engine_types::{
     commit_result::{ExecutionFailureCode, RejectReason},
+    creation_check::CreationCheckError,
     indexed_value::IndexedValueError,
 };
 use tari_template_lib::types::{ComponentAddress, HashParseError, TemplateAddress};
@@ -159,6 +160,22 @@ pub enum TransactionErrorKind {
     CannotCallMigrationFunctionDirectly { name: String },
     #[error("The account constructor cannot be called directly. Use the CreateAccount instruction.")]
     CannotCallAccountConstructor,
+    #[error(
+        "'{name}' of template {template_address} takes a component receiver (&self or &mut self), so it can only be \
+         called as a method on one of the template's components"
+    )]
+    MethodCalledAsFunction {
+        template_address: TemplateAddress,
+        name: String,
+    },
+    #[error(
+        "'{name}' of component {component_address} has no component receiver (&self or &mut self), so it can only be \
+         called as a function of the component's template"
+    )]
+    FunctionCalledAsMethod {
+        component_address: ComponentAddress,
+        name: String,
+    },
     #[error("Invalid CreateAccount operation for component {component_address}: {details}")]
     InvalidCreateAccount {
         component_address: ComponentAddress,
@@ -166,6 +183,8 @@ pub enum TransactionErrorKind {
     },
     #[error("Blob index {index} out of bounds (transaction has {count} blob(s))")]
     BlobIndexOutOfBounds { index: u8, count: usize },
+    #[error(transparent)]
+    CreationCheck(#[from] CreationCheckError),
 }
 
 impl TransactionErrorKind {
@@ -186,11 +205,13 @@ impl TransactionErrorKind {
             Self::NotAMigrationFunction { .. } |
             Self::CannotCallMigrationFunctionDirectly { .. } |
             Self::CannotCallAccountConstructor |
+            Self::MethodCalledAsFunction { .. } |
+            Self::FunctionCalledAsMethod { .. } |
             Self::InvalidCreateAccount { .. } |
             Self::BlobIndexOutOfBounds { .. } => C::InvalidArgument,
 
             Self::WasmBinaryTooBig { .. } => C::LimitExceeded,
-            Self::InvariantError { .. } | Self::TemplateProvider(_) => C::EngineInvariant,
+            Self::InvariantError { .. } | Self::TemplateProvider(_) | Self::CreationCheck(_) => C::EngineInvariant,
 
             Self::WasmExecutionError(err) => err.failure_code(),
             Self::RuntimeError(err) => err.failure_code(),

@@ -14,4 +14,5 @@ export type ExecutionFailureCode =
   | "InvalidProof"
   | "EngineInvariant"
   | "NotYetValid"
+  | "Conflict"
   | "Unclassified";

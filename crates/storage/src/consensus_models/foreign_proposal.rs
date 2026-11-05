@@ -10,17 +10,20 @@ use std::{
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, LeafBlock};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::{ProtocolVersion, UnknownProtocolVersionError, fees::ExhaustBurnRate};
 use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, committee::CommitteeInfo};
 use tari_ootle_transaction::TransactionId;
-use tari_sidechain::QuorumCertificate;
+use tari_sidechain::{FixedHash, QuorumCertificate};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
-use super::{BlockPledge, Command, CommandOrHash, CommandsCommitProof, LockedEpoch};
+use super::{BlockHeaderMetadata, BlockPledge, Command, CommandOrHash, CommandsCommitProof};
 use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
+
+/// How many epochs either side of the local epoch a foreign proposal may come from. Prepare and accept rounds may
+/// be conducted in the epoch before or after an epoch end.
+pub const FOREIGN_PROPOSAL_EPOCH_WINDOW: u64 = 1;
 
 #[derive(Debug, Clone, Deserialize, Serialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 pub struct ForeignProposalRecord {
@@ -249,6 +252,13 @@ pub struct ForeignProposalAtom {
 }
 
 impl ForeignProposalAtom {
+    /// The key a block orders its foreign proposal commands by (see [`BlockCommands`](super::BlockCommands)): shard
+    /// group, then block id. Replicas apply a block's foreign proposals in this order, so a proposer must apply them in
+    /// the same order to derive the same transaction commands.
+    pub fn block_order_key(&self) -> (ShardGroup, &BlockId) {
+        (self.shard_group, &self.block_id)
+    }
+
     pub fn exists<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<bool, StorageError> {
         tx.foreign_proposals_exists(&self.block_id)
     }
@@ -365,13 +375,22 @@ pub struct ForeignProposal {
     commit_proof: CommandsCommitProof,
     #[n(1)]
     block_pledge: BlockPledge,
+    /// The preimage of the metadata hash in the proven header, which a validator checks against that hash before
+    /// reading anything from it.
+    #[n(2)]
+    block_metadata: BlockHeaderMetadata,
 }
 
 impl ForeignProposal {
-    pub fn new(commit_proof: CommandsCommitProof, block_pledge: BlockPledge) -> Self {
+    pub fn new(
+        commit_proof: CommandsCommitProof,
+        block_pledge: BlockPledge,
+        block_metadata: BlockHeaderMetadata,
+    ) -> Self {
         Self {
             commit_proof,
             block_pledge,
+            block_metadata,
         }
     }
 
@@ -393,6 +412,21 @@ impl ForeignProposal {
 
     pub fn block_pledge(&self) -> &BlockPledge {
         &self.block_pledge
+    }
+
+    pub fn block_metadata(&self) -> &BlockHeaderMetadata {
+        &self.block_metadata
+    }
+
+    /// Whether [`Self::block_metadata`] is the preimage of the metadata hash in the proven header.
+    pub fn is_block_metadata_proven(&self) -> bool {
+        self.block_metadata.calculate_hash() == self.commit_proof.sidechain_block_commit_proof().header.metadata_hash
+    }
+
+    /// The exhaust burn rate the proposing block names for its epoch. Validation rejects a proposal whose proven
+    /// metadata names none.
+    pub fn exhaust_burn_rate(&self) -> Option<ExhaustBurnRate> {
+        self.block_metadata.try_exhaust_burn_rate()
     }
 
     pub fn get_justify_qc(&self) -> Option<&QuorumCertificate> {
@@ -418,16 +452,6 @@ impl ForeignProposal {
 
     pub fn epoch_hash(&self) -> &FixedHash {
         &self.commit_proof.sidechain_block_commit_proof().header().epoch_hash
-    }
-
-    /// The execution context this proposal pins a transaction to.
-    ///
-    /// `exhaust_burn_rate` is supplied rather than read off the proposal: a foreign proposal is
-    /// proved against the layer-1 shaped header, which carries the block's metadata hash and not the
-    /// extra data the rate lives in. The caller resolves it for [`Self::epoch`] from the governance
-    /// schedule, which keeps the rate of every epoch a foreign proposal can still carry.
-    pub fn to_locked_epoch(&self, exhaust_burn_rate: ExhaustBurnRate) -> LockedEpoch {
-        LockedEpoch::new(self.epoch(), self.epoch_hash().into_array().into(), exhaust_burn_rate)
     }
 
     pub fn proposed_by(&self) -> RistrettoPublicKeyBytes {
@@ -483,6 +507,8 @@ impl ForeignProposal {
             .into()
     }
 
+    /// The transactions whose evidence names the committee's shard group. An aborting transaction's evidence clears
+    /// the outputs of every shard group, so an output-only shard group is named with no substates.
     pub fn all_transaction_ids_in_committee<'a>(
         &'a self,
         committee_info: &'a CommitteeInfo,
@@ -494,7 +520,7 @@ impl ForeignProposal {
             .filter_map(|cmd| cmd.transaction())
             .filter(|t| {
                 t.evidence()
-                    .is_some_and(|evidence| evidence.has_and_not_empty(&committee_info.shard_group()))
+                    .is_some_and(|evidence| evidence.has(&committee_info.shard_group()))
             })
             .map(|t| t.id())
     }
@@ -507,8 +533,8 @@ impl ForeignProposal {
         self.commands().iter().filter_map(|cmd| cmd.command())
     }
 
-    pub fn into_parts(self) -> (CommandsCommitProof, BlockPledge) {
-        (self.commit_proof, self.block_pledge)
+    pub fn into_parts(self) -> (CommandsCommitProof, BlockPledge, BlockHeaderMetadata) {
+        (self.commit_proof, self.block_pledge, self.block_metadata)
     }
 }
 

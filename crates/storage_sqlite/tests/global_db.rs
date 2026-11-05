@@ -1,15 +1,14 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use diesel::{Connection, RunQueryDsl, SqliteConnection, sql_query, sql_types::Integer};
-use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
+use diesel::{Connection, SqliteConnection};
 use ootle_byte_type::ToByteType;
-use tari_common_types::types::FixedHash;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, SubstateAddress, VotePower};
+use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, SubstateAddress, ValidatorSetHash, VotePower};
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::global::{BlockHeaderModel, GlobalDb, ValidatorNodeDb};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
+use tari_sidechain::FixedHash;
 use tari_template_lib::types::Hash32;
 use tari_utilities::ByteArray;
 
@@ -283,54 +282,166 @@ fn reassigning_a_committee_replaces_the_previous_assignment() {
     assert_eq!(validator_nodes.count_in_shard_group(Epoch(1), first_half).unwrap(), 1);
 }
 
-#[derive(diesel::QueryableByName)]
-struct CommitteeRow {
-    #[diesel(sql_type = Integer)]
-    validator_node_id: i32,
-    #[diesel(sql_type = Integer)]
-    shard_start: i32,
+/// Leader rotation and the validator set leaf both index a committee by position, so every node must read the members
+/// in the same order.
+#[test]
+fn a_shard_group_committee_is_read_in_public_key_order() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut validator_nodes = db.validator_nodes(&mut tx);
+    insert_vns(&mut validator_nodes, 20, Epoch(1));
+
+    let committee = validator_nodes
+        .get_committee_for_shard_group(Epoch(1), ShardGroup::all_shards(NumPreshards::P256), 100)
+        .unwrap();
+    let public_keys = committee.public_keys().copied().collect::<Vec<_>>();
+    let mut sorted = public_keys.clone();
+    sorted.sort();
+    assert_eq!(public_keys.len(), 20);
+    assert_eq!(public_keys, sorted);
 }
 
-/// A node that assigned an epoch's committees more than once holds duplicate rows, which must not stop the
-/// unique index being created. The most recent assignment is the one kept.
 #[test]
-fn migration_keeps_the_latest_of_duplicate_committee_assignments() {
-    const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
-    let mut conn = SqliteConnection::establish(":memory:").unwrap();
-    // Only the initial schema, as it was when the duplicates were written.
-    conn.run_next_migration(MIGRATIONS).unwrap();
+fn an_epoch_has_no_validator_set_until_one_is_stored() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut epochs = db.epochs(&mut tx);
+    epochs.insert_epoch(Epoch(1), FixedHash::zero()).unwrap();
 
-    sql_query("PRAGMA foreign_keys = ON").execute(&mut conn).unwrap();
-    sql_query(
-        "INSERT INTO validator_nodes (id, public_key, address, shard_key, start_epoch, fee_claim_public_key, power) \
-         VALUES (1, x'01', 'vn1', x'01', 0, x'01', 1), (2, x'02', 'vn2', x'02', 0, x'02', 1)",
-    )
-    .execute(&mut conn)
-    .unwrap();
-    sql_query(
-        "INSERT INTO committees (validator_node_id, epoch, shard_start, shard_end) VALUES (1, 5, 0, 255), (2, 5, 0, \
-         255), (1, 5, 128, 255), (1, 6, 0, 255)",
-    )
-    .execute(&mut conn)
-    .unwrap();
-
-    conn.run_pending_migrations(MIGRATIONS).unwrap();
-
-    let rows =
-        sql_query("SELECT validator_node_id, shard_start FROM committees WHERE epoch = 5 ORDER BY validator_node_id")
-            .load::<CommitteeRow>(&mut conn)
-            .unwrap();
-    let rows = rows
-        .into_iter()
-        .map(|r| (r.validator_node_id, r.shard_start))
-        .collect::<Vec<_>>();
-    assert_eq!(rows, vec![(1, 128), (2, 0)]);
-
-    let duplicate =
-        sql_query("INSERT INTO committees (validator_node_id, epoch, shard_start, shard_end) VALUES (1, 6, 0, 255)")
-            .execute(&mut conn);
-    assert!(
-        duplicate.is_err(),
-        "a second assignment for the same validator and epoch must be rejected"
+    assert_eq!(
+        epochs.get_epoch_data(Epoch(1)).unwrap().unwrap().validator_set_hash,
+        None
     );
+    assert!(epochs.get_validator_set_leaves(Epoch(1)).unwrap().is_empty());
+}
+
+#[test]
+fn storing_a_validator_set_replaces_the_previous_one() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut epochs = db.epochs(&mut tx);
+    epochs.insert_epoch(Epoch(1), FixedHash::zero()).unwrap();
+    epochs.insert_epoch(Epoch(2), FixedHash::zero()).unwrap();
+
+    let low = ShardGroup::new(0, 127);
+    let high = ShardGroup::new(128, 255);
+    epochs
+        .set_validator_set(Epoch(1), &ValidatorSetHash::from_array([1; 32]), &[(
+            ShardGroup::all_shards(NumPreshards::P256),
+            Hash32::from_array([9; 32]),
+        )])
+        .unwrap();
+    epochs
+        .set_validator_set(Epoch(2), &ValidatorSetHash::from_array([5; 32]), &[(
+            low,
+            Hash32::from_array([5; 32]),
+        )])
+        .unwrap();
+    epochs
+        .set_validator_set(Epoch(1), &ValidatorSetHash::from_array([2; 32]), &[
+            (high, Hash32::from_array([4; 32])),
+            (low, Hash32::from_array([3; 32])),
+        ])
+        .unwrap();
+
+    assert_eq!(
+        epochs.get_epoch_data(Epoch(1)).unwrap().unwrap().validator_set_hash,
+        Some(ValidatorSetHash::from_array([2; 32]))
+    );
+    assert_eq!(epochs.get_validator_set_leaves(Epoch(1)).unwrap(), vec![
+        (low, Hash32::from_array([3; 32])),
+        (high, Hash32::from_array([4; 32])),
+    ]);
+    assert_eq!(epochs.get_validator_set_leaves(Epoch(2)).unwrap(), vec![(
+        low,
+        Hash32::from_array([5; 32])
+    )]);
+}
+
+#[test]
+fn a_validator_set_needs_its_epoch() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut epochs = db.epochs(&mut tx);
+
+    epochs
+        .set_validator_set(Epoch(1), &ValidatorSetHash::from_array([1; 32]), &[])
+        .unwrap_err();
+}
+
+#[test]
+fn copy_into_writes_a_database_that_opens_with_the_same_contents() {
+    let db = create_db();
+    {
+        let mut tx = db.create_transaction().unwrap();
+        insert_vns(&mut db.validator_nodes(&mut tx), 3, Epoch(1));
+        db.commit(tx).unwrap();
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("global_storage.sqlite");
+    db.adapter().copy_into(&path).unwrap();
+
+    let copy = GlobalDb::new(SqliteGlobalDbAdapter::<PeerAddress>::new(
+        SqliteConnection::establish(path.to_str().unwrap()).unwrap(),
+    ));
+    let mut tx = copy.create_transaction().unwrap();
+    assert_eq!(copy.validator_nodes(&mut tx).count(Epoch(1)).unwrap(), 3);
+
+    assert!(
+        db.adapter().copy_into(&path).is_err(),
+        "copying over an existing file must fail rather than replace it"
+    );
+}
+
+fn is_registered_at(
+    validator_nodes: &mut ValidatorNodeDb<'_, '_, SqliteGlobalDbAdapter<PeerAddress>>,
+    public_key: &RistrettoPublicKey,
+    epoch: Epoch,
+) -> bool {
+    let public_key = public_key.to_byte_type();
+    validator_nodes
+        .get_all_registered_within_start_epoch(epoch)
+        .unwrap()
+        .iter()
+        .any(|vn| vn.public_key == public_key)
+}
+
+/// A validator that leaves and registers again has one row per registration. Deactivating the current registration
+/// closes that row only, so the validator stays out of the set for the gap between its registrations.
+#[test]
+fn deactivating_a_registration_leaves_earlier_registrations_closed() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut validator_nodes = db.validator_nodes(&mut tx);
+    let pk = new_public_key();
+
+    insert_vn_with_public_key(&mut validator_nodes, pk.clone(), Epoch(1));
+    validator_nodes.deactivate(pk.to_byte_type(), Epoch(5)).unwrap();
+    insert_vn_with_public_key(&mut validator_nodes, pk.clone(), Epoch(10));
+    validator_nodes.deactivate(pk.to_byte_type(), Epoch(20)).unwrap();
+
+    assert!(is_registered_at(&mut validator_nodes, &pk, Epoch(3)));
+    assert!(!is_registered_at(&mut validator_nodes, &pk, Epoch(7)));
+    assert!(is_registered_at(&mut validator_nodes, &pk, Epoch(15)));
+    assert!(!is_registered_at(&mut validator_nodes, &pk, Epoch(20)));
+}
+
+/// A registration deactivated before its start epoch never becomes active.
+#[test]
+fn deactivating_a_registration_before_it_starts_keeps_it_inactive() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut validator_nodes = db.validator_nodes(&mut tx);
+    let pk = new_public_key();
+
+    insert_vn_with_public_key(&mut validator_nodes, pk.clone(), Epoch(10));
+    validator_nodes.deactivate(pk.to_byte_type(), Epoch(5)).unwrap();
+
+    for epoch in [5, 10, 15] {
+        assert!(
+            !is_registered_at(&mut validator_nodes, &pk, Epoch(epoch)),
+            "epoch {epoch}"
+        );
+    }
 }

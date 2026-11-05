@@ -30,6 +30,7 @@ use tari_ootle_wallet_sdk::{
         BalanceChangeSourceType,
         KeyBranch,
         KeyId,
+        LockOwner,
         OutputStatus,
         StealthOutputModel,
         VaultModel,
@@ -92,7 +93,7 @@ fn setup_store_at(path: impl AsRef<Path>) -> (SqliteWalletStore, VaultId, VaultI
     let second_vault = vault_address(2);
     let first_resource = resource_address(1);
     let second_resource = resource_address(2);
-    let owner_public_key = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(1000)).to_byte_type();
+    let owner_public_key = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(1000u64)).to_byte_type();
     let mut tx = store.create_write_tx().unwrap();
     tx.accounts_insert(
         Some("test"),
@@ -790,6 +791,8 @@ fn stealth_output(
         is_on_chain: !matches!(status, OutputStatus::LockedUnconfirmed),
         is_condition_spendable: true,
         lock_id,
+        proven_up: None,
+        spent_version: None,
     }
 }
 
@@ -847,7 +850,7 @@ fn lock_finalize_records_confidential_spend_for_vaultless_account() {
 
     let spent = stealth_output(account, stealth_resource, 1_000_000, 7, OutputStatus::Unspent, None);
     tx.stealth_outputs_insert(&spent).unwrap();
-    let lock_id = tx.locks_create(None).unwrap();
+    let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
     tx.locks_link_transaction(lock_id, transaction_id).unwrap();
     tx.stealth_outputs_lock_many(&stealth_resource, &[&spent.commitment], lock_id)
         .unwrap();
@@ -942,7 +945,7 @@ fn lock_finalize_records_confidential_spend_for_vault_backed_resource() {
 
     let spent = stealth_output(account, stealth_resource, 1_000_000, 9, OutputStatus::Unspent, None);
     tx.stealth_outputs_insert(&spent).unwrap();
-    let lock_id = tx.locks_create(None).unwrap();
+    let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
     tx.locks_link_transaction(lock_id, transaction_id).unwrap();
     tx.stealth_outputs_lock_many(&stealth_resource, &[&spent.commitment], lock_id)
         .unwrap();
@@ -1024,7 +1027,7 @@ fn lock_finalize_records_on_vault_created_by_transaction() {
 
     let spent = stealth_output(account, stealth_resource, 1_000_000, 11, OutputStatus::Unspent, None);
     tx.stealth_outputs_insert(&spent).unwrap();
-    let lock_id = tx.locks_create(None).unwrap();
+    let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
     tx.locks_link_transaction(lock_id, transaction_id).unwrap();
     tx.stealth_outputs_lock_many(&stealth_resource, &[&spent.commitment], lock_id)
         .unwrap();
@@ -1140,7 +1143,7 @@ fn lock_finalize_records_revealed_movement_from_diff_not_lock_amount() {
     .unwrap();
     tx.transactions_insert(&transaction, None, &[account], false).unwrap();
 
-    let lock_id = tx.locks_create(None).unwrap();
+    let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
     tx.locks_link_transaction(lock_id, transaction_id).unwrap();
     tx.vaults_lock_revealed_funds(lock_id, &stealth_vault, Amount::from(1_000_255u64))
         .unwrap();
@@ -1391,4 +1394,42 @@ fn history_keeps_snapshot_metadata_after_live_rows_are_changed_or_deleted() {
     drop(tx);
     drop(store);
     std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn a_stealth_spend_records_the_latest_version_it_took_down() {
+    let (store, _, _, _, _) = setup_store();
+    let stealth_resource = resource_address(3);
+    let account = account_address();
+    let transaction = build_transaction(9);
+
+    let mut tx = store.create_write_tx().unwrap();
+    upsert_stealth_resource(&mut tx, &stealth_resource);
+    tx.transactions_insert(&transaction, None, &[account], false).unwrap();
+    let spent = stealth_output(account, stealth_resource, 1_000, 7, OutputStatus::Unspent, None);
+    tx.stealth_outputs_insert(&spent).unwrap();
+    let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.locks_link_transaction(lock_id, transaction.calculate_id()).unwrap();
+    tx.stealth_outputs_lock_many(&stealth_resource, &[&spent.commitment], lock_id)
+        .unwrap();
+    let mut diff = SubstateDiff::new();
+    diff.down(SubstateId::Utxo(spent.to_utxo_address()), SubstateVersion::new(2));
+    tx.locks_unlock_finalized(lock_id, &diff).unwrap();
+
+    let stored = tx
+        .stealth_outputs_get_by_commitment(&stealth_resource, &spent.commitment)
+        .unwrap();
+    assert_eq!(stored.status, OutputStatus::Spent);
+    assert_eq!(stored.spent_version, Some(SubstateVersion::new(2)));
+
+    tx.stealth_outputs_record_spent_version(&spent.to_utxo_address(), SubstateVersion::new(1))
+        .unwrap();
+    let stored = tx
+        .stealth_outputs_get_by_commitment(&stealth_resource, &spent.commitment)
+        .unwrap();
+    assert_eq!(
+        stored.spent_version,
+        Some(SubstateVersion::new(2)),
+        "an earlier version does not replace it"
+    );
 }

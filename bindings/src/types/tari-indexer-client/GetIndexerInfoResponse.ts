@@ -2,6 +2,8 @@
 import type { Epoch } from "../Epoch";
 import type { Network } from "../Network";
 import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
+import type { Shard } from "../Shard";
+import type { StateVersion } from "../StateVersion";
 
 /**
  * The configuration of a single indexer node, as far as it affects what its API returns. Every field
@@ -74,4 +76,19 @@ export type GetIndexerInfoResponse = {
    * filters, so event queries answer over a subset and absence is not proof an event did not occur.
    */
   indexes_all_events: boolean;
+  /**
+   * How many epochs past the epoch a UTXO was spent in this indexer retains its tombstone before
+   * pruning it. `None` means tombstones are retained indefinitely. Pruning raises the shard's
+   * entry in `utxo_tombstone_horizons`, so a UTXO stream resuming from further back is told its
+   * spends are incomplete.
+   */
+  utxo_tombstone_retention_epochs: bigint | null;
+  /**
+   * Per shard, the state version at and below which this indexer may lack the tombstone of a spent
+   * UTXO, ascending by shard. A shard's first sync fetches only its live substates, so a spend
+   * before it is not seen, and pruning a tombstone raises the horizon over it. A shard not listed
+   * has every tombstone. The UTXO stream sets `StartOfShard::spends_incomplete` for a shard whose
+   * cursor is below its horizon. This is sync state, and rises while the indexer runs.
+   */
+  utxo_tombstone_horizons: Array<[Shard, StateVersion]>;
 };

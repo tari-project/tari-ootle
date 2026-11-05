@@ -52,7 +52,11 @@ use tari_ootle_walletd_client::{
 };
 
 use super::context::{AuthIdentity, HandlerContext};
-use crate::handlers::helpers::{invalid_params, invalid_request};
+use crate::handlers::{
+    component_upgrades::component_upgrades,
+    helpers,
+    helpers::{invalid_params, invalid_request},
+};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::signing_requests";
 
@@ -118,7 +122,7 @@ pub async fn handle_create(
             seal_public_key: &req.seal_public_key,
             key_id: req.key_id,
             signer_public_key: &signer_public_key,
-            message_hash: &message_hash,
+            message_hash: message_hash.as_bytes(),
             memo: &req.memo,
             requester: &requester,
             ttl,
@@ -190,7 +194,7 @@ fn validate_create_request(
         ));
     }
 
-    if !is_signing_key(&req.key_id) {
+    if !is_signing_key(context, &req.key_id)? {
         return Err(invalid_params(
             "key_id",
             Some(format!(
@@ -255,7 +259,7 @@ pub async fn handle_approve(
     // The approver was shown `message_hash`; sign only if the stored request
     // still produces exactly that message.
     let message = TransactionSignature::create_message(&request.seal_public_key, &request.unsigned_transaction);
-    if message != request.message_hash {
+    if *message.as_bytes() != request.message_hash {
         return Err(invalid_request(format!(
             "Signing request {} no longer produces the message it was created with; reject it and ask for a new one",
             req.request_id
@@ -335,21 +339,15 @@ fn get_pending(context: &HandlerContext, request_id: SigningRequestId) -> Result
 }
 
 fn requester_of(auth: AuthIdentity) -> SigningRequester {
-    match (auth.api_key_name, auth.delegated) {
-        (Some(name), _) => SigningRequester::ApiKey { name },
-        (None, true) => SigningRequester::ConnectedApp,
-        (None, false) => SigningRequester::WalletSession,
-    }
+    auth.signing_requester()
 }
 
-/// Keys whose signatures may authorize a transaction. Mask, nonce and view
-/// branches derive secrets that protect outputs; a signature or public key
-/// under them must never leave the wallet.
-fn is_signing_key(key_id: &KeyId) -> bool {
-    match key_id {
-        KeyId::Imported { .. } => true,
-        KeyId::Derived { key_branch, .. } => matches!(key_branch, KeyBranch::Account | KeyBranch::Transaction),
-    }
+/// Keys a signing request may name. A nonce key signs only as the throw-away
+/// authorizer of a stealth statement's revealed funds, in a transaction walletd
+/// seals itself, so a co-signature for another party never needs one.
+fn is_signing_key(context: &HandlerContext, key_id: &KeyId) -> Result<bool, anyhow::Error> {
+    let is_signing_key = helpers::is_signing_key(context.wallet_sdk(), "key_id", key_id)?;
+    Ok(is_signing_key && key_id.derived_branch() != Some(KeyBranch::Nonce))
 }
 
 /// The first 8 bytes of the authorization message, as shown to the approver.
@@ -358,10 +356,15 @@ fn fingerprint(message_hash: &[u8; 64]) -> String {
 }
 
 fn to_info(model: SigningRequestModel) -> SigningRequestInfo {
+    let component_upgrades = component_upgrades(
+        model.unsigned_transaction.fee_instructions(),
+        model.unsigned_transaction.instructions(),
+    );
     SigningRequestInfo {
         request_id: model.id,
         status: model.effective_status_now(),
         transaction: model.unsigned_transaction,
+        component_upgrades,
         seal_public_key: model.seal_public_key,
         key_id: model.key_id,
         signer_public_key: model.signer_public_key,
@@ -437,7 +440,7 @@ mod tests {
                     seal_public_key: &seal_public_key(),
                     key_id: signer_key(),
                     signer_public_key: &signer_public_key,
-                    message_hash: &message_hash,
+                    message_hash: message_hash.as_bytes(),
                     memo: "",
                     requester: &SigningRequester::ApiKey {
                         name: "governance-signer".to_string(),
@@ -489,12 +492,10 @@ mod tests {
         let signature = info.signature.expect("a signed request carries its signature");
         assert_eq!(Some(&signature), response.signature.as_ref());
         assert_eq!(*signature.public_key(), info.signer_public_key);
-        assert_eq!(
-            info.message_hash,
-            TransactionSignature::create_message(&seal_public_key(), &transaction())
-        );
+        let message = TransactionSignature::create_message(&seal_public_key(), &transaction());
+        assert_eq!(info.message_hash, *message.as_bytes());
         assert!(
-            signature.verify_message(info.message_hash),
+            signature.verify_message(message),
             "the signature must verify against the message the approver was shown"
         );
     }
@@ -552,6 +553,7 @@ mod tests {
 
         assert_eq!(requester(&delegated), SigningRequester::ConnectedApp);
         assert_eq!(requester(&test.session), SigningRequester::WalletSession);
+        assert_eq!(requester(&test.daemon.cookie), SigningRequester::LocalClient);
         assert_eq!(requester(&test.api_key), SigningRequester::ApiKey {
             name: "governance-signer".to_string()
         });

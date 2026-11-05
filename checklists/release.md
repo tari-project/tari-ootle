@@ -26,6 +26,11 @@ Shared reference — what a tag sets off, the command index, recovery: [README.m
       Apply only the bumps it prints. A tier-3 (core) break moves `[workspace.package].version` and
       every tier-3 pin in `[workspace.dependencies]`; independent crates move on their own.
 - [ ] **`[workspace.package].version` is the version you are about to tag.**
+- [ ] **Every npm package the tag publishes already exists on npm.** The npm jobs authenticate only
+      through trusted publishing (OIDC), which npm configures per existing package, so a package's
+      first version is published by hand: build it, `npm publish --access public --tag bootstrap`
+      a `0.0.0-bootstrap.0` version, then add this repo and its publish workflow as the package's
+      trusted publisher on npmjs.com. **(human)**
 - [ ] `cargo +nightly-2025-12-05 fmt --all` and `cargo metadata` both clean (metadata catches a pin
       left behind outside the root manifest).
 - [ ] **Version bump PR merged**, titled `chore: release vX.Y.Z`.
@@ -66,6 +71,9 @@ Shared reference — what a tag sets off, the command index, recovery: [README.m
       assembled from the legs that succeeded, so read the matrix rather than the run's colour
       alone. **(human)**
 - [ ] All six **FFI platforms** present. ootle-go cannot ship a gap.
+- [ ] Both docker images (`ootle`, `ootle-walletd`) pushed and **public** on GHCR. GHCR creates
+      a new package private, so the first push of a new image needs an org admin to change its
+      visibility before anyone outside the org can pull or verify it. **(human)**
 - [ ] **Re-run a failed leg** rather than publishing without it:
       - binaries: re-run the failed job from the Actions UI, or push a `build-bins-*` / `build-all-*`
         branch at the tag's commit;
@@ -131,6 +139,9 @@ in doubt, update all three; they are cheap.
       ```
       Bump `pyproject.toml`'s version, PR, then tag `v*` — PyPI publishes on the tag via trusted
       publishing.
+- [ ] **Minotari base layer** (only when this release published a breaking `tari_sidechain`): bump
+      its pin in `tari-project/tari`'s root `Cargo.toml` and PR into `development`. A patch release
+      is picked up by the existing pin.
 
 ## 8. Announce
 

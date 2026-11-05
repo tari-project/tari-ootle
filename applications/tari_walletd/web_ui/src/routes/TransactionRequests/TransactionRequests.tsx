@@ -8,6 +8,7 @@ import {
   useSubmitTransactionRequest,
 } from "@api/hooks/useTransactionRequests";
 import { Accordion, AccordionDetails, AccordionSummary } from "@components/Accordion";
+import ComponentUpgradeWarning from "@components/ComponentUpgradeWarning";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import PageHeading from "@components/PageHeading";
 import { StyledPaper } from "@components/StyledComponents";
@@ -19,16 +20,39 @@ import Divider from "@mui/material/Divider";
 import Grid from "@mui/material/Grid";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import type { EffectiveStatus, KeyId, TransactionRequestInfo } from "@tari-project/ootle-ts-bindings";
+import type {
+  EffectiveStatus,
+  KeyId,
+  TransactionRequestInfo,
+  TransactionRequestMainSigner,
+} from "@tari-project/ootle-ts-bindings";
+import { TARI_TOKEN } from "@tari-project/ootle-ts-bindings";
 import { useEffect, useState } from "react";
 import Inputs from "../Transactions/Inputs";
-import Instructions from "../Transactions/Instructions";
+import Instructions, { BlobContents } from "../Transactions/Instructions";
 
 function formatKeyId(keyId: KeyId): string {
   if ("Derived" in keyId) {
     return `${keyId.Derived.key_branch.replace(/_/g, " ")} key #${keyId.Derived.index}`;
   }
   return `imported key #${keyId.Imported.local_key_id}`;
+}
+
+function describeMainSigner(mainSigner: TransactionRequestMainSigner): {
+  label: string;
+  publicKey?: string;
+  color: "default" | "warning" | "error";
+} {
+  if (mainSigner === "SealSigner") {
+    return { label: "the seal signer", color: "warning" };
+  }
+  if (mainSigner === "None") {
+    return { label: "none", color: "default" };
+  }
+  if ("WalletKey" in mainSigner) {
+    return { label: "a key of this wallet", publicKey: mainSigner.WalletKey.public_key, color: "warning" };
+  }
+  return { label: "a key outside this wallet", publicKey: mainSigner.External.public_key, color: "error" };
 }
 
 function statusColor(status: EffectiveStatus): "default" | "warning" | "success" | "error" | "info" {
@@ -61,27 +85,31 @@ function Countdown({ expiresAt }: { expiresAt: bigint }) {
   return <Chip label={`expires in ${mins}:${secs.toString().padStart(2, "0")}`} size="small" variant="outlined" />;
 }
 
-function ValueSummary({ request }: { request: TransactionRequestInfo }) {
+function ValueSummaries({ request }: { request: TransactionRequestInfo }) {
   // A stealth transfer's instructions are commitments and range proofs, so a
   // person cannot read an amount out of them. The wallet owns the masks and is
-  // the only party that can say what leaves. Without this the approver is
-  // authorising an opaque blob.
-  if (!request.value_summary) {
-    return null;
-  }
-  const { amount_leaving, inputs_total, change_total, resource_address } = request.value_summary;
+  // the only party that can say what of its stealth outputs leaves. Other
+  // instructions are read from the instruction list itself.
   return (
-    <Alert severity="warning" icon={false} sx={{ mb: 2 }}>
-      <Typography variant="h6" sx={{ fontWeight: 600 }}>
-        {amount_leaving.toLocaleString()} µT leaves this wallet
-      </Typography>
-      <Typography variant="body2" sx={{ opacity: 0.85 }}>
-        {inputs_total.toLocaleString()} µT spent, {change_total.toLocaleString()} µT returned as change
-      </Typography>
-      <Typography variant="body2" sx={{ opacity: 0.7, wordBreak: "break-all" }}>
-        {resource_address}
-      </Typography>
-    </Alert>
+    <>
+      {request.value_summaries.map(({ amount_leaving, inputs_total, change_total, resource_address }) => {
+        // Amounts are in the resource's smallest unit, which is µT only for TARI.
+        const unit = resource_address === TARI_TOKEN ? "µT" : "base units";
+        return (
+          <Alert key={resource_address} severity="warning" icon={false} sx={{ mb: 2 }}>
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              {amount_leaving.toLocaleString()} {unit} of stealth funds leaves this wallet
+            </Typography>
+            <Typography variant="body2" sx={{ opacity: 0.85 }}>
+              {inputs_total.toLocaleString()} {unit} spent, {change_total.toLocaleString()} {unit} returned as change
+            </Typography>
+            <Typography variant="body2" sx={{ opacity: 0.7, wordBreak: "break-all" }}>
+              {resource_address}
+            </Typography>
+          </Alert>
+        );
+      })}
+    </>
   );
 }
 
@@ -109,7 +137,9 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
   const instructions = v1?.instructions ?? [];
   const feeInstructions = v1?.fee_instructions ?? [];
   const inputs = v1?.inputs ?? [];
-  const isSealSignerAuthorized = v1?.is_seal_signer_authorized ?? false;
+  const blobs = v1?.blobs ?? [];
+  const isSealSignerAuthorized = v1?.main_signer === "SealSigner";
+  const mainSigner = describeMainSigner(request.main_signer);
 
   const togglePanel = (panel: string) => (_event: React.SyntheticEvent, isExpanded: boolean) =>
     setExpanded(isExpanded ? panel : null);
@@ -118,7 +148,12 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
     <StyledPaper sx={{ mb: 2 }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }} flexWrap="wrap" gap={1}>
         <Typography variant="h5">
-          {request.requested_by ? `"${request.requested_by}"` : "A wallet session"} requests approval
+          {request.requested_by === "local-cookie"
+            ? "A local client"
+            : request.requested_by
+              ? `"${request.requested_by}"`
+              : "A wallet session"}{" "}
+          requests approval
         </Typography>
         <Stack direction="row" spacing={1} alignItems="center">
           {isActionable && <Countdown expiresAt={request.expires_at} />}
@@ -126,7 +161,8 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
         </Stack>
       </Stack>
 
-      <ValueSummary request={request} />
+      <ComponentUpgradeWarning upgrades={request.component_upgrades} />
+      <ValueSummaries request={request} />
 
       <Grid container spacing={2} sx={{ mb: 1 }}>
         <Grid size={12}>
@@ -146,6 +182,34 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
             />
           </Stack>
         </Grid>
+        <Grid size={12}>
+          <Typography variant="body2" sx={{ opacity: 0.7 }}>
+            Main signer
+          </Typography>
+          {/* Whatever the transaction creates as "owned by signer" belongs to
+              this key, and templates that ask for the transaction's signer
+              see it. */}
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+            <Chip label={mainSigner.label} size="small" color={mainSigner.color} variant="outlined" />
+            {mainSigner.publicKey && (
+              <Typography variant="body2" sx={{ fontFamily: "monospace", wordBreak: "break-all" }}>
+                {mainSigner.publicKey}
+              </Typography>
+            )}
+          </Stack>
+        </Grid>
+        {request.external_signers.length > 0 && (
+          <Grid size={12}>
+            <Typography variant="body2" sx={{ opacity: 0.7 }}>
+              Also signed by ({request.external_signers.length} key(s) outside this wallet)
+            </Typography>
+            {request.external_signers.map((publicKey) => (
+              <Typography key={publicKey} variant="body2" sx={{ fontFamily: "monospace", wordBreak: "break-all" }}>
+                {publicKey}
+              </Typography>
+            ))}
+          </Grid>
+        )}
       </Grid>
 
       <Accordion expanded={expanded === "instructions"} onChange={togglePanel("instructions")}>
@@ -153,7 +217,7 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
           <Typography variant="h6">Instructions ({instructions.length})</Typography>
         </AccordionSummary>
         <AccordionDetails>
-          <Instructions data={instructions} />
+          <Instructions data={instructions} blobs={blobs} />
         </AccordionDetails>
       </Accordion>
       <Accordion expanded={expanded === "fees"} onChange={togglePanel("fees")}>
@@ -161,7 +225,15 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
           <Typography variant="h6">Fee Instructions ({feeInstructions.length})</Typography>
         </AccordionSummary>
         <AccordionDetails>
-          <Instructions data={feeInstructions} />
+          <Instructions data={feeInstructions} blobs={blobs} />
+        </AccordionDetails>
+      </Accordion>
+      <Accordion expanded={expanded === "blobs"} onChange={togglePanel("blobs")}>
+        <AccordionSummary aria-controls="request-blobs-content">
+          <Typography variant="h6">Blobs ({blobs.length})</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <BlobContents blobs={blobs} />
         </AccordionDetails>
       </Accordion>
       <Accordion expanded={expanded === "inputs"} onChange={togglePanel("inputs")}>

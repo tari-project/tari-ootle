@@ -67,6 +67,7 @@ mod tests {
                     owner_rule: SubstateOwnerRule::None,
                     access_rules: Default::default(),
                     entity_id: Default::default(),
+                    upgrade_rule: Default::default(),
                 },
                 body: ComponentBody { state: Value::Null },
             })),

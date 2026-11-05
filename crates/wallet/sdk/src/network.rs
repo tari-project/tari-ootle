@@ -10,10 +10,18 @@ use tari_engine_types::{
     SubstateVersion,
     Utxo,
     commit_result::ExecuteResult,
-    substate::{Substate, SubstateId, SubstateValue},
+    encoded::Encoded,
+    substate::{EncodedSubstate, SubstateId},
     transaction_receipt::FinalizeOutcome,
 };
-use tari_indexer_client::types::WatchedSubstateItem;
+use tari_indexer_client::types::{
+    EpochCheckpointEntry,
+    ProvenTransactionReceipt,
+    SubstateProof,
+    SubstateState,
+    ValidatorSetCommittee,
+    WatchedSubstateItem,
+};
 use tari_ootle_common_types::{
     Epoch,
     StateVersion,
@@ -54,17 +62,24 @@ pub struct TransactionFinalizedNotification {
 pub trait WalletNetworkInterface {
     type Error: IsNotFoundError + TransactionStatusResponseError + std::error::Error + Send + Sync + 'static;
 
+    /// Queries a substate, at `version` or its latest. With `include_proof`, the result carries the proof the indexer
+    /// verified it with, when a committee member could prove it. Only a query with `include_proof` that names `version`
+    /// may be answered with [`SubstateState::Down`].
     fn query_substate(
         &self,
         address: &SubstateId,
         version: Option<SubstateVersion>,
         local_search_only: bool,
+        include_proof: bool,
     ) -> impl Future<Output = Result<SubstateQueryResult, Self::Error>> + Send;
 
+    /// Fetches the latest version of each of `substate_ids` that exists. With `include_proofs`, the result carries the
+    /// proof of each substate a committee member could prove.
     fn get_substates(
         &self,
-        substate_ids: Vec<SubstateId>,
-    ) -> impl Future<Output = Result<HashMap<SubstateId, Substate>, Self::Error>> + Send;
+        substate_ids: &[SubstateId],
+        include_proofs: bool,
+    ) -> impl Future<Output = Result<FetchedSubstates, Self::Error>> + Send;
 
     fn submit_transaction(
         &self,
@@ -80,9 +95,12 @@ pub trait WalletNetworkInterface {
         transaction: Transaction,
     ) -> impl Future<Output = Result<TransactionQueryResult, Self::Error>> + Send;
 
+    /// Queries the result of a transaction. With `include_proof`, a committed transaction's result carries its receipt
+    /// and the proof that the receipt was committed.
     fn query_transaction_result(
         &self,
         transaction_id: TransactionId,
+        include_proof: bool,
     ) -> impl Future<Output = Result<TransactionQueryResult, Self::Error>> + Send;
 
     /// Subscribes to finalization notifications for every transaction the network commits from this point on.
@@ -104,11 +122,14 @@ pub trait WalletNetworkInterface {
         unspent_only: bool,
     ) -> impl Future<Output = Result<UtxoUpdateStream<Self::Error>, Self::Error>> + Send;
 
-    fn get_unspent_utxos(
+    /// Fetches the unspent UTXOs of `resource_address` matching `tag_and_nonce_pairs`, and which of the pairs are spent
+    /// or burnt. A pair placed where its UTXO was seen unspent, and with no unspent UTXO, is spent once the indexer has
+    /// indexed the shard through that state version, whether or not the indexer still holds its tombstone.
+    fn fetch_utxos(
         &self,
         resource_address: ResourceAddress,
-        tag_and_nonce_pairs: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
-    ) -> impl Future<Output = Result<Vec<(UtxoId, Utxo)>, Self::Error>> + Send;
+        tag_and_nonce_pairs: Vec<PlacedTagAndNoncePair>,
+    ) -> impl Future<Output = Result<FetchedUtxos, Self::Error>> + Send;
 
     fn list_watched_substates(
         &self,
@@ -116,8 +137,42 @@ pub trait WalletNetworkInterface {
         limit: Option<u64>,
         offset: Option<u64>,
     ) -> impl Future<Output = Result<Vec<WatchedSubstateItem>, Self::Error>> + Send;
+    /// The latest end-of-epoch checkpoint of the shard group that holds `shard`, with the next epoch's committee of
+    /// that shard group and its proof.
+    fn get_latest_epoch_checkpoint(
+        &self,
+        shard: Shard,
+    ) -> impl Future<Output = Result<EpochCheckpointEntry, Self::Error>> + Send;
+
+    /// The latest end-of-epoch checkpoint of the shard group that holds each shard, each listed once, in shard order
+    /// and without committees. Empty before the network has ended an epoch.
+    fn get_latest_shard_group_checkpoints(
+        &self,
+    ) -> impl Future<Output = Result<Vec<EpochCheckpointEntry>, Self::Error>> + Send;
+
+    /// Up to `limit` end-of-epoch checkpoints of the shard group that holds `shard`, from `from_epoch` in ascending
+    /// epoch order, each with the next epoch's committee of that shard group and its proof.
+    fn list_epoch_checkpoints(
+        &self,
+        from_epoch: Epoch,
+        limit: u32,
+        shard: Shard,
+    ) -> impl Future<Output = Result<Vec<EpochCheckpointEntry>, Self::Error>> + Send;
+
+    /// The committee of the shard group that holds `shard` in `epoch`, with its proof against that epoch's validator
+    /// set.
+    fn get_committee(
+        &self,
+        epoch: Epoch,
+        shard: Shard,
+    ) -> impl Future<Output = Result<ValidatorSetCommittee, Self::Error>> + Send;
+
     /// The epoch the network executes transactions in.
     fn get_current_epoch(&self) -> impl Future<Output = Result<Epoch, Self::Error>> + Send;
+
+    /// The epoch the validators execute transactions in, as the indexer has observed from their committed blocks, or
+    /// `None` before it has observed every committee.
+    fn get_consensus_epoch(&self) -> impl Future<Output = Result<Option<Epoch>, Self::Error>> + Send;
 
     fn wait_until_ready(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
@@ -125,13 +180,45 @@ pub trait WalletNetworkInterface {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SubstateQueryResult {
     pub version: SubstateVersion,
-    pub substate: SubstateValue,
+    /// What the shard group holds for `version`.
+    pub state: SubstateState,
+    /// The proof of `state`, when one was asked for and served.
+    #[serde(default)]
+    pub proof: Option<SubstateProof>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct FetchedSubstates {
+    /// Each substate as the indexer served it, its value undecoded.
+    pub substates: HashMap<SubstateId, EncodedSubstate>,
+    /// The proof of each substate in `substates` that was asked for and served.
+    #[serde(default)]
+    pub proofs: HashMap<SubstateId, SubstateProof>,
+}
+
+/// A tag and nonce pair, with the shard and state version its UTXO was seen unspent at, when known.
+pub type PlacedTagAndNoncePair = ((UtxoTag, RistrettoPublicKeyBytes), Option<(Shard, StateVersion)>);
+
+#[derive(Debug, Clone, Default)]
+pub struct FetchedUtxos {
+    /// The unspent UTXOs matching a requested tag and nonce pair.
+    pub unspent: Vec<(UtxoId, Utxo)>,
+    /// The requested tag and nonce pairs whose UTXO is spent or burnt. A requested pair in neither list is unknown to
+    /// the indexer that answered, which may not yet have indexed it, or may have pruned its tombstone.
+    pub spent: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TransactionQueryResult {
     pub result: TransactionFinalizedResult,
     pub transaction_id: TransactionId,
+    /// The committed receipt and its proof, when the query asked for a proof and the transaction committed.
+    #[serde(default)]
+    pub receipt: Option<ProvenTransactionReceipt>,
+    /// The execution result as the indexer served it, which `result` holds decoded. A verifier checks these bytes
+    /// against `receipt`.
+    #[serde(default)]
+    pub encoded_execution_result: Option<Encoded<ExecuteResult>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

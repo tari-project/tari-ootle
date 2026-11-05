@@ -1,10 +1,10 @@
 # A sample log configuration file for running in release mode. By default, this configuration splits up log messages to
 # three destinations:
 #    * Console: For log messages with level INFO and higher
-#    * log/validator-node/network.log: INFO-level logs related to the comms crate. This file will be quite busy since there
+#    * {{log_dir}}/network.log: INFO-level logs related to the comms crate. This file will be quite busy since there
 #      are lots of P2P debug messages, and so this traffic is segregated from the application log messages
-#    * log/validator-node/ootle.log: Non-comms related INFO-level messages and higher are logged into this file
-#    * log/validator-node/other.log: Third-party crates' messages will be logged here at an ERROR level
+#    * {{log_dir}}/ootle.log: Non-comms related INFO-level messages and higher are logged into this file
+#    * {{log_dir}}/other.log: Third-party crates' messages will be logged here at an ERROR level
 #
 #  See https://docs.rs/log4rs/0.8.3/log4rs/encode/pattern/index.html for deciphering the log pattern. The log format
 #  used in this sample configuration prints messages as:
@@ -108,7 +108,7 @@ appenders:
         kind: fixed_window
         base: 1
         count: 10
-        pattern: "log/validator-node/wallet_daemon.{}.log"
+        pattern: "{{log_dir}}/wallet_daemon.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
 
@@ -125,7 +125,7 @@ appenders:
         kind: fixed_window
         base: 1
         count: 10
-        pattern: "log/validator-node/other.{}.log"
+        pattern: "{{log_dir}}/other.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
 

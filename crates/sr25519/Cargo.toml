@@ -1,0 +1,24 @@
+[package]
+name = "tari_ootle_sr25519"
+version = "0.1.0"
+description = "sr25519 (schnorrkel-compatible) signing and verification over tari_crypto Ristretto keys"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_crypto = { workspace = true }
+tari_template_lib_types = { workspace = true }
+
+curve25519-dalek = { workspace = true }
+merlin = { workspace = true }
+rand = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+# schnorrkel's RNG interface
+rand_core_06 = { package = "rand_core", version = "0.6.4", default-features = false }
+# Reference implementation for interop tests. Pinned exactly because a test reproduces its deterministic batch
+# weight derivation.
+schnorrkel = { version = "=0.11.5", default-features = false, features = ["alloc", "getrandom"] }

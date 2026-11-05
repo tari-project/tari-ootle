@@ -99,6 +99,9 @@ where
                     );
                     table.add_row(value);
                 }
+                if smallest_row_size == usize::MAX {
+                    smallest_row_size = 0;
+                }
                 let total = cf.count(OPERATION)?;
                 table
                     .set_total_entries(total)
@@ -231,12 +234,11 @@ fn create_transformer<CF: Cf>() -> Box<dyn Fn(serde_json::Value) -> anyhow::Resu
     };
     match prefix {
         KeyPrefix::TransactionPool => Box::new(|mut v| {
-            let stage = v.get("pending_stage").unwrap().as_str().unwrap_or_else(|| {
-                v.get("stage")
-                    .unwrap()
-                    .as_str()
-                    .unwrap_or_else(|| panic!("{} Stage should be a string", CF::name()))
-            });
+            let stage = v
+                .get("pending_stage")
+                .and_then(|s| s.as_str())
+                .or_else(|| v.get("stage").and_then(|s| s.as_str()))
+                .ok_or_else(|| anyhow!("{} Stage should be a string", CF::name()))?;
             let evidence: Evidence = serde_json::from_value(v["evidence"].clone())?;
             let summary = evidence
                 .iter()
@@ -289,8 +291,11 @@ fn create_transformer<CF: Cf>() -> Box<dyn Fn(serde_json::Value) -> anyhow::Resu
         }),
 
         KeyPrefix::ProposalCertificates => Box::new(|mut v| {
-            v["num_signatures"] =
-                serde_json::Value::Number(v["signatures"].as_array().map_or(0, |sigs| sigs.len()).into());
+            let count = v["signatures"]
+                .as_array()
+                .or_else(|| v["signatures"]["Schnorr"]["signatures"].as_array())
+                .map_or(0, Vec::len);
+            v["num_signatures"] = serde_json::Value::Number(count.into());
             Ok(v)
         }),
         _ => Box::new(Ok),

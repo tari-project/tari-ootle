@@ -4,7 +4,7 @@
 mod support;
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashSet, VecDeque},
     sync::{
         Arc,
         Mutex,
@@ -18,13 +18,12 @@ use tari_consensus_types::Decision;
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{
     Epoch,
-    Utxo,
     commit_result::{AbortReason, ExecuteResult, FinalizeResult, TransactionResult},
     fees::FeeReceipt,
-    substate::{Substate, SubstateDiff, SubstateId},
+    substate::{SubstateDiff, SubstateId},
     transaction_receipt::FinalizeOutcome,
 };
-use tari_indexer_client::types::WatchedSubstateItem;
+use tari_indexer_client::types::{EpochCheckpointEntry, ValidatorSetCommittee, WatchedSubstateItem};
 use tari_ootle_common_types::{
     StateVersion,
     SubstateVersion,
@@ -36,6 +35,9 @@ use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId, ar
 use tari_ootle_wallet_sdk::{
     models::{TransactionStatus, WalletEvent},
     network::{
+        FetchedSubstates,
+        FetchedUtxos,
+        PlacedTagAndNoncePair,
         SubstateQueryResult,
         TransactionFinalizedNotification,
         TransactionFinalizedResult,
@@ -44,7 +46,6 @@ use tari_ootle_wallet_sdk::{
         UtxoUpdateStream,
         WalletNetworkInterface,
     },
-    storage::TagAndPublicNoncePair,
 };
 use tari_ootle_wallet_sdk_services::{
     notify::Notify,
@@ -52,7 +53,7 @@ use tari_ootle_wallet_sdk_services::{
 };
 use tari_shutdown::Shutdown;
 use tari_template_abi::TemplateDef;
-use tari_template_lib::types::{ResourceAddress, TemplateAddress, UtxoId};
+use tari_template_lib::types::{ResourceAddress, TemplateAddress};
 use time::{OffsetDateTime, PrimitiveDateTime};
 use tokio::sync::{broadcast, mpsc};
 
@@ -92,6 +93,13 @@ struct ScriptedNetwork {
     query_count: Arc<AtomicUsize>,
     subscribe_count: Arc<AtomicUsize>,
     notifications: Arc<Mutex<Option<mpsc::UnboundedReceiver<TransactionFinalizedNotification>>>>,
+    /// Transactions whose result query fails.
+    failing: Arc<Mutex<HashSet<TransactionId>>>,
+    /// How many of the coming submissions fail.
+    failing_submits: Arc<AtomicUsize>,
+    /// Transactions whose every submission fails.
+    always_failing_submits: Arc<Mutex<HashSet<TransactionId>>>,
+    submit_count: Arc<AtomicUsize>,
 }
 
 impl ScriptedNetwork {
@@ -104,6 +112,10 @@ impl ScriptedNetwork {
             query_count: Arc::new(AtomicUsize::new(0)),
             subscribe_count: Arc::new(AtomicUsize::new(0)),
             notifications: Arc::new(Mutex::new(Some(rx))),
+            failing: Arc::new(Mutex::new(HashSet::new())),
+            failing_submits: Arc::new(AtomicUsize::new(0)),
+            always_failing_submits: Arc::new(Mutex::new(HashSet::new())),
+            submit_count: Arc::new(AtomicUsize::new(0)),
         };
         (network, tx)
     }
@@ -116,6 +128,29 @@ impl ScriptedNetwork {
     /// tells it the service has noticed the stream end and fallen back to polling.
     fn subscribe_count(&self) -> usize {
         self.subscribe_count.load(Ordering::SeqCst)
+    }
+
+    /// Makes every result query for `transaction_id` fail from now on.
+    fn fail_queries_for(&self, transaction_id: TransactionId) {
+        self.failing.lock().unwrap().insert(transaction_id);
+    }
+
+    /// Makes the next `count` submissions fail.
+    fn fail_submits(&self, count: usize) {
+        self.failing_submits.store(count, Ordering::SeqCst);
+    }
+
+    /// Makes every submission of `transaction_id` fail from now on.
+    fn fail_every_submit_of(&self, transaction_id: TransactionId) {
+        self.always_failing_submits.lock().unwrap().insert(transaction_id);
+    }
+
+    fn stop_failing_submits_of(&self, transaction_id: TransactionId) {
+        self.always_failing_submits.lock().unwrap().remove(&transaction_id);
+    }
+
+    fn submit_count(&self) -> usize {
+        self.submit_count.load(Ordering::SeqCst)
     }
 
     /// Makes `result` the answer to every query from now on.
@@ -134,15 +169,32 @@ impl WalletNetworkInterface for ScriptedNetwork {
         _address: &SubstateId,
         _version: Option<SubstateVersion>,
         _local_search_only: bool,
+        _include_proof: bool,
     ) -> Result<SubstateQueryResult, Self::Error> {
         panic!("ScriptedNetwork::query_substate called")
     }
 
-    async fn get_substates(&self, _: Vec<SubstateId>) -> Result<HashMap<SubstateId, Substate>, Self::Error> {
+    async fn get_substates(&self, _: &[SubstateId], _: bool) -> Result<FetchedSubstates, Self::Error> {
         panic!("ScriptedNetwork::get_substates called")
     }
 
     async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, Self::Error> {
+        self.submit_count.fetch_add(1, Ordering::SeqCst);
+        if self
+            .always_failing_submits
+            .lock()
+            .unwrap()
+            .contains(&transaction.calculate_id())
+        {
+            return Err(ScriptedError("the submission always fails"));
+        }
+        if self
+            .failing_submits
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok()
+        {
+            return Err(ScriptedError("the submission failed"));
+        }
         Ok(transaction.calculate_id())
     }
 
@@ -157,15 +209,24 @@ impl WalletNetworkInterface for ScriptedNetwork {
     async fn query_transaction_result(
         &self,
         transaction_id: TransactionId,
+        _include_proof: bool,
     ) -> Result<TransactionQueryResult, Self::Error> {
         self.query_count.fetch_add(1, Ordering::SeqCst);
+        if self.failing.lock().unwrap().contains(&transaction_id) {
+            return Err(ScriptedError("the result query failed"));
+        }
         let mut results = self.results.lock().unwrap();
         let result = if results.len() > 1 {
             results.pop_front().unwrap()
         } else {
             results.front().cloned().expect("no scripted result")
         };
-        Ok(TransactionQueryResult { transaction_id, result })
+        Ok(TransactionQueryResult {
+            transaction_id,
+            result,
+            receipt: None,
+            encoded_execution_result: None,
+        })
     }
 
     async fn subscribe_transaction_finalized(&self) -> Result<TransactionFinalizedStream<Self::Error>, Self::Error> {
@@ -199,16 +260,41 @@ impl WalletNetworkInterface for ScriptedNetwork {
         panic!("ScriptedNetwork::list_watched_substates called")
     }
 
-    async fn get_unspent_utxos(
+    async fn fetch_utxos(
         &self,
         _: ResourceAddress,
-        _: Vec<TagAndPublicNoncePair>,
-    ) -> Result<Vec<(UtxoId, Utxo)>, Self::Error> {
-        panic!("ScriptedNetwork::get_unspent_utxos called")
+        _: Vec<PlacedTagAndNoncePair>,
+    ) -> Result<FetchedUtxos, Self::Error> {
+        panic!("ScriptedNetwork::fetch_utxos called")
+    }
+
+    async fn get_latest_epoch_checkpoint(&self, _shard: Shard) -> Result<EpochCheckpointEntry, Self::Error> {
+        panic!("ScriptedNetwork called")
+    }
+
+    async fn get_latest_shard_group_checkpoints(&self) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        panic!("ScriptedNetwork called")
+    }
+
+    async fn list_epoch_checkpoints(
+        &self,
+        _from_epoch: Epoch,
+        _limit: u32,
+        _shard: Shard,
+    ) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        panic!("ScriptedNetwork called")
+    }
+
+    async fn get_committee(&self, _epoch: Epoch, _shard: Shard) -> Result<ValidatorSetCommittee, Self::Error> {
+        panic!("ScriptedNetwork called")
     }
 
     async fn get_current_epoch(&self) -> Result<Epoch, Self::Error> {
         panic!("ScriptedNetwork::get_current_epoch called")
+    }
+
+    async fn get_consensus_epoch(&self) -> Result<Option<Epoch>, Self::Error> {
+        panic!("ScriptedNetwork::get_consensus_epoch called")
     }
 
     async fn wait_until_ready(&self) -> Result<(), Self::Error> {
@@ -222,11 +308,15 @@ fn now() -> PrimitiveDateTime {
 }
 
 fn build_transaction() -> Transaction {
-    Transaction::builder_localnet(Epoch(100))
+    build_transaction_valid_to(Epoch(100))
+}
+
+fn build_transaction_valid_to(max_epoch: Epoch) -> Transaction {
+    Transaction::builder_localnet(max_epoch)
         .allocate_component_address("component")
         .put_last_instruction_output_on_workspace("bucket")
         .call_method("component", "new", args!["bucket"])
-        .build_and_seal(&RistrettoSecretKey::from(1))
+        .build_and_seal(&RistrettoSecretKey::from(1u64))
 }
 
 fn committed(transaction_id: TransactionId) -> TransactionFinalizedResult {
@@ -266,7 +356,7 @@ struct Running {
     handle: TransactionServiceHandle,
     events: broadcast::Receiver<WalletEvent>,
     _shutdown: Shutdown,
-    _test: TestWithNetwork<ScriptedNetwork>,
+    test: TestWithNetwork<ScriptedNetwork>,
 }
 
 /// Starts the service and waits for it to subscribe to the finalization stream, so that a test that pushes a
@@ -288,7 +378,7 @@ async fn start(config: TransactionServiceConfig, network: ScriptedNetwork) -> Ru
         handle,
         events,
         _shutdown: shutdown,
-        _test: test,
+        test,
     }
 }
 
@@ -356,6 +446,7 @@ fn fast_config() -> TransactionServiceConfig {
         post_submit_check_delay: Duration::from_millis(20),
         silent_transaction_timeout: Duration::from_secs(60),
         stream_reconnect_backoff: Duration::from_millis(20),
+        validator_set_sync_interval: Duration::from_secs(60 * 60),
     }
 }
 
@@ -436,4 +527,134 @@ async fn every_pending_transaction_is_polled_while_the_stream_is_down() {
 
     let status = wait_for_finalized(&mut running.events, transaction_id).await;
     assert_eq!(status, Some(TransactionStatus::Accepted));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transaction_that_fails_to_check_does_not_hold_up_the_others() {
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    let failing = build_transaction_valid_to(Epoch(101));
+    let (network, notifications) = ScriptedNetwork::new(vec![TransactionFinalizedResult::Pending]);
+    network.fail_queries_for(failing.calculate_id());
+    let mut running = start(fast_config(), network.clone()).await;
+    drop(notifications);
+    assert!(
+        wait_until(|| network.subscribe_count() >= 2).await,
+        "service never re-subscribed after the stream ended"
+    );
+
+    running.handle.submit_transaction(transaction).await.unwrap();
+    // The poll checks the newest pending transaction first, so the failing one goes ahead of the other.
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    running.handle.submit_transaction(failing).await.unwrap();
+    network.set_result(committed(transaction_id));
+
+    let status = wait_for_finalized(&mut running.events, transaction_id).await;
+    assert_eq!(status, Some(TransactionStatus::Accepted));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transaction_whose_submission_fails_is_queued_and_submitted_by_the_poll() {
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    let (network, _notifications) = ScriptedNetwork::new(vec![committed(transaction_id)]);
+    network.fail_submits(1);
+    let mut running = start(fast_config(), network.clone()).await;
+
+    // The wallet holds the transaction and submits it again, so the caller gets its id rather than an error.
+    let submitted = running.handle.submit_transaction(transaction).await.unwrap();
+    assert_eq!(submitted, transaction_id);
+
+    let status = wait_for_finalized(&mut running.events, transaction_id).await;
+    assert_eq!(status, Some(TransactionStatus::Accepted));
+    assert_eq!(network.submit_count(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transaction_that_fails_to_submit_does_not_hold_up_the_others() {
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    let failing = build_transaction_valid_to(Epoch(101));
+    let (network, _notifications) = ScriptedNetwork::new(vec![committed(transaction_id)]);
+    network.fail_every_submit_of(transaction_id);
+    network.fail_every_submit_of(failing.calculate_id());
+    let mut running = start(fast_config(), network.clone()).await;
+
+    running.handle.submit_transaction(transaction).await.unwrap();
+    // The poll submits the newest transaction first, so the failing one goes ahead of the other.
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    running.handle.submit_transaction(failing).await.unwrap();
+    network.stop_failing_submits_of(transaction_id);
+
+    let status = wait_for_finalized(&mut running.events, transaction_id).await;
+    assert_eq!(status, Some(TransactionStatus::Accepted));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transaction_is_not_stored_when_its_lock_cannot_be_linked() {
+    let (network, _notifications) = ScriptedNetwork::new(vec![TransactionFinalizedResult::Pending]);
+    let running = start(fast_config(), network.clone()).await;
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    let sdk = running.test.sdk();
+    // A lock belongs to one transaction, so a lock already linked to another cannot be linked to this one.
+    let lock_id = running.test.new_lock().keep_locked();
+    let other_transaction_id = TransactionId::new([1u8; 32]);
+    sdk.transaction_api()
+        .locks_set_transaction_id(lock_id, other_transaction_id)
+        .unwrap();
+
+    running
+        .handle
+        .submit_transaction_with_opts(transaction, None, Some(lock_id))
+        .await
+        .unwrap_err();
+
+    let linked = sdk
+        .locks_api()
+        .get_locks_by_transaction_id(other_transaction_id)
+        .unwrap();
+    assert_eq!(
+        linked,
+        vec![lock_id],
+        "the lock stays linked to the transaction it was linked to"
+    );
+
+    assert!(
+        sdk.transaction_api()
+            .get(transaction_id)
+            .unwrap_err()
+            .is_not_found_error()
+    );
+    assert_eq!(network.submit_count(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lock_stays_free_when_its_transaction_cannot_be_stored() {
+    let (network, _notifications) = ScriptedNetwork::new(vec![TransactionFinalizedResult::Pending]);
+    let running = start(fast_config(), network.clone()).await;
+    let transaction = build_transaction();
+    let sdk = running.test.sdk();
+    // Storing a transaction id twice fails, after the lock is linked in the same write.
+    sdk.transaction_api()
+        .insert_new_transaction(transaction.clone(), None, &[], false, &[])
+        .unwrap();
+    let lock_id = running.test.new_lock().keep_locked();
+
+    running
+        .handle
+        .submit_transaction_with_opts(transaction, None, Some(lock_id))
+        .await
+        .unwrap_err();
+
+    // A retry seals a new transaction, which takes the same lock.
+    let retry = build_transaction_valid_to(Epoch(101));
+    let retry_id = running
+        .handle
+        .submit_transaction_with_opts(retry, None, Some(lock_id))
+        .await
+        .unwrap();
+    assert_eq!(sdk.locks_api().get_locks_by_transaction_id(retry_id).unwrap(), [
+        lock_id
+    ]);
 }

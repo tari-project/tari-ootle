@@ -204,7 +204,7 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
             return Err(RuntimeError::SubstateAlreadySpent { id });
         }
         if self.exists(&id)? {
-            return Err(RuntimeError::DuplicateSubstate { address: id });
+            return Err(RuntimeError::SubstateAlreadyExists { address: id });
         }
         self.new_substates.insert(id, value);
         Ok(())
@@ -239,6 +239,17 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
 
     pub fn take_downed(&mut self) -> IndexSet<SubstateId> {
         mem::take(&mut self.downed)
+    }
+
+    /// The substates the transaction has created so far, excluding new versions of substates it was given.
+    pub fn created_substate_ids(&self) -> Result<Vec<SubstateId>, RuntimeError> {
+        let mut created = Vec::new();
+        for id in self.new_substates.keys() {
+            if !self.loaded_substates.contains_key(id) && !self.state_store.exists(id)? {
+                created.push(id.clone());
+            }
+        }
+        Ok(created)
     }
 
     pub fn mutated_substates(&self) -> &IndexMap<SubstateId, SubstateValue> {
@@ -364,24 +375,6 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
             function: "load_component",
             details: format!("Substate at address {} is not a component", address),
         })
-    }
-
-    /// The value this transaction currently has for `id`: what it has written, else what it has loaded, else the
-    /// backing store. Unlike [`Self::get_unmodified_substate`] this sees a substate the transaction created, and
-    /// unlike the locked accessors it needs no lock, so it is only for reads of immutable fields.
-    pub(super) fn get_latest_substate(&self, id: &SubstateId) -> Result<&SubstateValue, RuntimeError> {
-        if let Some(value) = self.new_substates.get(id) {
-            return Ok(value);
-        }
-        if let Some(substate) = self.loaded_substates.get(id) {
-            return Ok(substate.substate_value());
-        }
-        let substate = self
-            .state_store
-            .get_state(id)
-            .optional()?
-            .ok_or_else(|| RuntimeError::SubstateNotFound { id: id.clone() })?;
-        Ok(substate.substate_value())
     }
 
     pub(super) fn get_unmodified_substate(&self, id: &SubstateId) -> Result<&Substate, RuntimeError> {

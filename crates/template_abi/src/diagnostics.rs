@@ -92,8 +92,9 @@ mod render {
         /// Renders the message the template would have carried, drawing the function name and the
         /// argument type from `func_def`.
         ///
-        /// `None` when the diagnostic does not describe `func_def` — an index past its arguments —
-        /// which means the marker did not come from this function's dispatcher.
+        /// `None` when the diagnostic does not describe `func_def`, which means the marker did not
+        /// come from this function's dispatcher: an index past its parameters, or index 0 on a
+        /// method or migration, whose component the dispatcher reports as `ComponentDecode`.
         pub fn render(&self, func_def: &FunctionDef, detail: &str) -> Option<String> {
             let name = &func_def.name;
             match *self {
@@ -101,7 +102,14 @@ mod render {
                     "failed to decode component instance for function '{name}'{DETAIL_SEPARATOR}{detail}"
                 )),
                 Self::ArgDecode { index } => {
-                    let arg = func_def.arguments.get(index)?;
+                    // The dispatcher counts the component among a method's or migration's parameters, and
+                    // `arguments` does not.
+                    let position = if func_def.takes_component() {
+                        index.checked_sub(1)?
+                    } else {
+                        index
+                    };
+                    let arg = func_def.arguments.get(position)?;
                     let kind = match arg.arg_type {
                         Type::Tuple(_) => "tuple argument",
                         _ => "argument",
@@ -132,18 +140,13 @@ pub use render::expand_panic_message;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArgDef, FunctionDef, Type};
+    use crate::{ArgDef, FunctionDef, FunctionKind, Receiver, Type};
 
     fn func_def() -> FunctionDef {
         FunctionDef {
             name: "withdraw".to_string(),
+            kind: FunctionKind::Method(Receiver::RefMut),
             arguments: vec![
-                ArgDef {
-                    name: "self".to_string(),
-                    arg_type: Type::Other {
-                        name: "&mut self".to_string(),
-                    },
-                },
                 ArgDef {
                     name: "amount".to_string(),
                     arg_type: Type::Other {
@@ -156,8 +159,6 @@ mod tests {
                 },
             ],
             output: Type::Unit,
-            is_mut: true,
-            is_migration: false,
         }
     }
 
@@ -214,6 +215,24 @@ mod tests {
             expand_panic_message(&func_def(), message),
             "failed to decode tuple argument at position 2 (Tuple<String,U32>) for function 'withdraw': unexpected \
              type"
+        );
+    }
+
+    #[test]
+    fn renders_a_migration_argument_failure_past_the_previous_state() {
+        let migration = FunctionDef {
+            name: "migrate".to_string(),
+            kind: FunctionKind::Migration {
+                from: Type::Other {
+                    name: "CounterV1".to_string(),
+                },
+            },
+            ..func_def()
+        };
+        let message = format!("{}: unexpected type", PanicDiagnostic::ArgDecode { index: 1 }.marker());
+        assert_eq!(
+            expand_panic_message(&migration, message),
+            "failed to decode argument at position 1 (Amount) for function 'migrate': unexpected type"
         );
     }
 
@@ -287,7 +306,9 @@ mod tests {
         for message in CRAFTED {
             let expanded = expand_panic_message(&func_def, message.to_string());
             match PanicDiagnostic::parse(message) {
-                Some((PanicDiagnostic::ArgDecode { index }, _)) if index >= func_def.arguments.len() => {
+                Some((PanicDiagnostic::ArgDecode { index }, _))
+                    if (index == 0 && func_def.takes_component()) || index >= func_def.num_call_args() =>
+                {
                     assert_eq!(&expanded, message, "out-of-range index rewrote {message:?}");
                 },
                 Some(_) => assert!(

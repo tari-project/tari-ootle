@@ -35,7 +35,7 @@ pub use tari_template_abi::tari_alloc;
 static ALLOC: lol_alloc::AssumeSingleThreaded<lol_alloc::FreeListAllocator> =
     unsafe { lol_alloc::AssumeSingleThreaded::new(lol_alloc::FreeListAllocator::new()) };
 
-// Hard-coded minicbor encoding of `TemplateDef::V1(TemplateDefV1 { template_name: "Buggy",
+// Hard-coded minicbor encoding of `VersionedTemplateDef::V1(TemplateDefV1 { template_name: "Buggy",
 // abi_version: 0, functions: [] })`. The leading 4 bytes are the little-endian length prefix used
 // by `encode_for_wasm_embedding`. Regenerate by running the snippet preserved in
 // `tests/test.rs::test_buggy_template` (currently commented out at the top of that function).
@@ -67,7 +67,6 @@ pub unsafe extern "C" fn Buggy_main(_call_info: *mut u8, _call_info_len: usize) 
 #[link(wasm_import_module = "env")]
 unsafe extern "C" {
     pub fn tari_engine(op: i32, input_ptr: *const u8, input_len: usize) -> *mut u8;
-    pub fn tari_debug(input_ptr: *const u8, input_len: usize);
     pub fn on_panic(msg_ptr: *const u8, msg_len: u32, line: u32, column: u32);
 }
 
@@ -105,8 +104,8 @@ mod engine_call_in_alloc_or_free {
     const USIZE_SIZE: usize = size_of::<usize>();
     const USIZE_ALIGN: usize = align_of::<usize>();
 
-    /// Hard-coded minicbor encoding of `TemplateDef::V1(TemplateDefV1 { template_name: "Buggy",
-    /// abi_version: 0, functions: [FunctionDef { name: "main", arguments: [], output: Type::Unit,
+    /// Hard-coded minicbor encoding of `VersionedTemplateDef::V1(TemplateDefV1 { template_name: "Buggy",
+    /// abi_version: 0, functions: [FunctionDefV1 { name: "main", arguments: [], output: Type::Unit,
     /// is_mut: false, is_migration: false }] })`, with the 4-byte little-endian length prefix that
     /// `encode_for_wasm_embedding` adds. The one declared function makes the template callable, so
     /// the engine drives the `tari_alloc` of the `CallInfo` and the `tari_free` of the returned

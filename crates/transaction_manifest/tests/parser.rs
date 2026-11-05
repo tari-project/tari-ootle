@@ -918,6 +918,64 @@ fn put_into_bucket_unknown_variable_errors() {
     assert!(err.contains("missing"), "unexpected error: {err}");
 }
 
+#[test]
+fn authorize_and_drop_authorize_macros() {
+    let manifest = r#"
+        use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;
+
+        fn main() {
+            let bucket = MyTemplate::make_bucket();
+            let proof = MyTemplate::make_proof();
+            authorize!(proof);
+            MyTemplate::guarded();
+            drop_authorize!(proof);
+        }
+    "#;
+
+    let ManifestInstructions { instructions, .. } =
+        parse_manifest(manifest, HashMap::new(), Default::default(), Default::default()).unwrap();
+
+    assert_eq!(instructions[4], Instruction::AuthorizeProof {
+        proof: WorkspaceOffsetId::new(1),
+    });
+    assert!(matches!(instructions[5], Instruction::CallFunction { .. }));
+    assert_eq!(instructions[6], Instruction::DropProofAuthorization {
+        proof: WorkspaceOffsetId::new(1),
+    });
+}
+
+#[test]
+fn authorize_unknown_variable_errors() {
+    let manifest = r#"
+        fn main() {
+            authorize!(missing);
+        }
+    "#;
+
+    let err = match parse_manifest(manifest, HashMap::new(), Default::default(), HashMap::new()) {
+        Ok(_) => panic!("expected an error"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("missing"), "unexpected error: {err}");
+}
+
+#[test]
+fn authorize_rejects_an_input_value() {
+    let manifest = r#"
+        fn main() {
+            let pk = var!["pk"];
+            authorize!(pk);
+        }
+    "#;
+    let globals = HashMap::from([("pk".to_string(), PK1.parse().unwrap())]);
+
+    let err = match parse_manifest(manifest, globals, Default::default(), HashMap::new()) {
+        Ok(_) => panic!("expected an error"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("workspace value"), "unexpected error: {err}");
+}
+
 const LIST_TEMPLATE: &str = "c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7";
 const PK1: &str = "044bccd4d01ceb41816bc9106a836806e6f9412646ecda4c2d726d8372b2c843";
 const PK2: &str = "5e8b3e7e6e3aa6d8f9c3a3c4e5d9b1f2a7c6e8d0f1a2b3c4d5e6f708192a3b4c";
@@ -1169,4 +1227,401 @@ fn list_passes_a_tuple() {
     assert_eq!(bytes, tari_bor::encode(&(123u64, "hello".to_string())).unwrap());
     let decoded: (u64, String) = tari_bor::decode(bytes).unwrap();
     assert_eq!(decoded, (123, "hello".to_string()));
+}
+
+fn caller_component() -> ManifestValue {
+    SubstateId::Component(ComponentAddress::new([9u8; ObjectKey::LENGTH].into())).into()
+}
+
+#[test]
+fn manifest_binding_shadows_input_variable_in_every_position() {
+    let manifest = r#"
+        fn main() {
+            let acc = new_component_addr!();
+            acc.withdraw(TARI, acc);
+        }
+    "#;
+    let globals = HashMap::from([("acc".to_string(), caller_component())]);
+
+    let ManifestInstructions { instructions, .. } =
+        parse_manifest(manifest, globals, Default::default(), Default::default()).unwrap();
+
+    let Instruction::CallMethod { call, args, .. } = &instructions[1] else {
+        panic!("expected a method call");
+    };
+    assert_eq!(*call, ComponentReference::Workspace(0));
+    assert_eq!(args[1], InstructionArg::Workspace(WorkspaceOffsetId::new(0)));
+}
+
+#[test]
+fn output_binding_shadows_input_variable() {
+    let manifest = r#"
+        fn main() {
+            let src = var!["src"];
+            let bucket = src.withdraw(TARI, 10);
+            src.deposit(bucket);
+        }
+    "#;
+    let globals = HashMap::from([
+        ("src".to_string(), caller_component()),
+        ("bucket".to_string(), "1".parse().unwrap()),
+    ]);
+
+    let ManifestInstructions { instructions, .. } =
+        parse_manifest(manifest, globals, Default::default(), Default::default()).unwrap();
+
+    let Instruction::CallMethod { args, .. } = &instructions[2] else {
+        panic!("expected a method call");
+    };
+    assert_eq!(*args, vec![InstructionArg::Workspace(WorkspaceOffsetId::new(0))]);
+}
+
+#[test]
+fn later_binding_shadows_earlier_input_alias() {
+    let manifest = r#"
+        fn main() {
+            let acc = var!["acc"];
+            let acc = new_component_addr!();
+            acc.withdraw(TARI, acc);
+        }
+    "#;
+    let globals = HashMap::from([("acc".to_string(), caller_component())]);
+
+    let ManifestInstructions { instructions, .. } =
+        parse_manifest(manifest, globals, Default::default(), Default::default()).unwrap();
+
+    let Instruction::CallMethod { call, args, .. } = &instructions[1] else {
+        panic!("expected a method call");
+    };
+    assert_eq!(*call, ComponentReference::Workspace(0));
+    assert_eq!(args[1], InstructionArg::Workspace(WorkspaceOffsetId::new(0)));
+}
+
+#[test]
+fn list_rejects_workspace_value_shadowing_input_variable() {
+    let manifest = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+
+        fn main() {{
+            let bucket = MyTemplate::make();
+            MyTemplate::create([1u8, bucket]);
+        }}
+    "#
+    );
+    let globals = HashMap::from([("bucket".to_string(), "1".parse().unwrap())]);
+
+    let err = parse_manifest(&manifest, globals, Default::default(), Default::default())
+        .err()
+        .expect("a workspace value cannot be a list element");
+    assert!(err.to_string().contains("bucket"), "{err}");
+}
+
+#[test]
+fn template_alias_cannot_be_redefined() {
+    let manifest = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as Account;
+
+        fn main() {{
+            Account::create();
+        }}
+    "#
+    );
+
+    let err = parse_manifest(&manifest, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("the built-in Account alias cannot be redefined");
+    assert!(err.to_string().contains("Account"), "{err}");
+}
+
+#[test]
+fn blob_binding_shadows_earlier_binding() {
+    let manifest = r#"
+        fn main() {
+            let acc = var!["acc"];
+            let acc = blob!("wasm");
+            acc.withdraw(TARI, 10);
+        }
+    "#;
+    let globals = HashMap::from([("acc".to_string(), caller_component())]);
+    let blob_inputs = HashMap::from([("wasm".to_string(), tari_ootle_transaction::Blob::from(vec![1u8]))]);
+
+    let err = parse_manifest(manifest, globals, Default::default(), blob_inputs)
+        .err()
+        .expect("the later blob binding replaces the input alias");
+    assert!(err.to_string().contains("blob"), "{err}");
+}
+
+#[test]
+fn later_binding_shadows_blob_binding() {
+    let manifest = r#"
+        fn main() {
+            let template = blob!("wasm");
+            let template = var!["template"];
+            publish_template!(template);
+        }
+    "#;
+    let globals = HashMap::from([("template".to_string(), caller_component())]);
+    let blob_inputs = HashMap::from([("wasm".to_string(), tari_ootle_transaction::Blob::from(vec![1u8]))]);
+
+    let err = parse_manifest(manifest, globals, Default::default(), blob_inputs)
+        .err()
+        .expect("the later input binding replaces the blob binding");
+    assert!(err.to_string().contains("publish_template!"), "{err}");
+}
+
+#[test]
+fn local_function_call_cannot_be_bound() {
+    let manifest = r#"
+        fn helper() {
+            drop_all_proofs!();
+        }
+
+        fn main() {
+            let x = helper();
+        }
+    "#;
+
+    let err = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("a local function call has no value to bind");
+    assert!(err.to_string().contains("local function"), "{err}");
+}
+
+/// Parses `manifest` on a thread with the 2 MiB stack a tokio worker gets by default, so a parser
+/// whose recursion grows with the input aborts the test rather than passing on a larger stack.
+fn parse_on_worker_stack(manifest: String) -> Result<ManifestInstructions, String> {
+    assert!(manifest.len() <= 64 * 1024, "the manifest must fit the size cap");
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(move || {
+            parse_manifest(&manifest, HashMap::new(), Default::default(), Default::default()).map_err(|e| e.to_string())
+        })
+        .unwrap()
+        .join()
+        .unwrap()
+}
+
+#[test]
+fn deeply_nested_groups_are_rejected() {
+    let depth = 20_000;
+    for (open, close) in [("(", ")"), ("[", "]"), ("{", "}")] {
+        let manifest = format!(
+            "fn main() {{ acc.deposit({}1{}); }}",
+            open.repeat(depth),
+            close.repeat(depth)
+        );
+        let err = parse_on_worker_stack(manifest)
+            .err()
+            .expect("deeply nested groups are rejected");
+        assert!(err.contains("braces or parentheses"), "{err}");
+    }
+}
+
+#[test]
+fn nesting_up_to_the_depth_cap_fails_with_an_error() {
+    // The function body and the call's parentheses are the first two levels.
+    let depth = 2 * tari_bor::MAX_DECODE_DEPTH - 2;
+    let cases = [
+        format!(
+            "fn main() {{ acc.deposit({}1{}); }}",
+            "[".repeat(depth),
+            "]".repeat(depth)
+        ),
+        format!(
+            "fn main() {{ acc.deposit({}1{}); }}",
+            "(".repeat(depth),
+            ")".repeat(depth)
+        ),
+        format!(
+            "fn main() {{ acc.deposit(cbor!({}1{})); }}",
+            "[".repeat(depth - 1),
+            "]".repeat(depth - 1)
+        ),
+        format!(
+            "fn main() {{ acc.deposit(amount!({}1{})); }}",
+            "(".repeat(depth - 1),
+            ")".repeat(depth - 1)
+        ),
+    ];
+    for manifest in cases {
+        let err = parse_on_worker_stack(manifest)
+            .err()
+            .expect("a value nested past the list depth is rejected");
+        assert!(
+            !err.contains("braces or parentheses"),
+            "the parser rejects it, not the group cap: {err}"
+        );
+    }
+}
+
+#[test]
+fn long_expression_chains_are_rejected() {
+    let cases = [
+        format!("fn main() {{ acc.deposit({}1); }}", "-".repeat(30_000)),
+        format!("fn main() {{ let x = {}acc; }}", "!".repeat(30_000)),
+        format!("fn main() {{ let x = {}acc; }}", "&".repeat(30_000)),
+        format!("fn main() {{ let x = {}acc; }}", "acc + ".repeat(8_000)),
+        format!("fn main() {{ let x = {}acc; }}", "acc = ".repeat(8_000)),
+        format!("fn main() {{ let x = acc{}; }}", ".b()".repeat(10_000)),
+        format!("fn main() {{ let x = {}acc; }}", "|| ".repeat(10_000)),
+        format!("fn main() {{ let x = {}acc; }}", "return ".repeat(5_000)),
+        format!(
+            "fn main() {{ let x: {}u8{} = acc; }}",
+            "A<".repeat(10_000),
+            ">".repeat(10_000)
+        ),
+        format!("fn main() {{ let {}x = acc; }}", "&".repeat(30_000)),
+    ];
+    for manifest in cases {
+        let prefix = manifest.chars().take(40).collect::<String>();
+        assert!(
+            parse_on_worker_stack(manifest).is_err(),
+            "a chained expression is not a manifest statement: {prefix}"
+        );
+    }
+}
+
+#[test]
+fn deepest_valid_list_still_parses() {
+    // The scalar inside the innermost list is one more level of the encoded value.
+    let depth = tari_bor::MAX_DECODE_DEPTH - 1;
+    let manifest = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+
+        fn main() {{
+            MyTemplate::create({}1u8{});
+        }}
+    "#,
+        "[".repeat(depth),
+        "]".repeat(depth),
+    );
+
+    let ManifestInstructions { instructions, .. } = parse_on_worker_stack(manifest).unwrap();
+    assert_eq!(instructions.len(), 1);
+}
+
+#[test]
+fn doc_comments_and_attributes_are_ignored() {
+    let manifest = r#"
+        /// Pays the fee.
+        fn fee_main() {
+            let account = var!["account"];
+            account.pay_fee(1000);
+        }
+
+        #[allow(unused)]
+        fn main() {
+            //! The main body.
+            /// The account.
+            let mut account = var!["account"];
+            account.deposit(amount!(1))
+        }
+    "#;
+
+    let globals = HashMap::from([("account".to_string(), caller_component())]);
+    let ManifestInstructions {
+        instructions,
+        fee_instructions,
+        ..
+    } = parse_manifest(manifest, globals, Default::default(), Default::default()).unwrap();
+    assert_eq!(instructions.len(), 1);
+    assert_eq!(fee_instructions.len(), 1);
+}
+
+#[test]
+fn multi_segment_call_and_argument_paths_are_rejected() {
+    const STMT_CALL: &str = "Invalid function call, expected `Template::function(..)` or `local_function()`";
+    const LET_CALL: &str = "Invalid function call, expected `Template::function(..)`";
+    const ARG_PATH: &str = "Invalid path, only single segment paths are supported";
+    let cases = [
+        ("fn main() { Foo::Bar::baz(); }", STMT_CALL),
+        ("fn main() { let x = Foo::Bar::baz(); }", LET_CALL),
+        ("fn main() { ::Foo::bar(); }", STMT_CALL),
+        ("fn main() { let x = ::Foo::bar(); }", LET_CALL),
+        ("fn main() { Foo::bar(Baz::Qux); }", ARG_PATH),
+    ];
+    for (manifest, expected) in cases {
+        let err = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default())
+            .err()
+            .expect("Expected syntax error for invalid path");
+        assert_eq!(
+            err.to_string(),
+            format!("Syntax error: {expected}"),
+            "Unexpected error for `{manifest}`"
+        );
+    }
+}
+
+#[test]
+fn local_function_call_with_arguments_is_rejected() {
+    let manifest = r#"
+        fn helper() {
+            drop_all_proofs!();
+        }
+
+        fn main() {
+            helper(1);
+        }
+    "#;
+
+    let err = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("local function calls take no arguments");
+    assert!(err.to_string().contains("take no arguments"), "{err}");
+}
+
+#[test]
+fn duplicate_functions_and_tuple_bindings_are_rejected() {
+    let dup_fn = r#"
+        fn helper() {}
+        fn helper() {}
+        fn main() {}
+    "#;
+    let err = parse_manifest(dup_fn, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("duplicate helper function should fail");
+    assert!(err.to_string().contains("duplicate function `helper`"), "{err}");
+
+    for name in ["main", "fee_main"] {
+        let dup_entry = format!("fn {name}() {{ drop_all_proofs!(); }} fn {name}() {{ drop_all_proofs!(); }}");
+        let err = parse_manifest(&dup_entry, HashMap::new(), Default::default(), Default::default())
+            .err()
+            .unwrap_or_else(|| panic!("duplicate `{name}` should fail"));
+        assert!(
+            err.to_string().contains(&format!("duplicate function `{name}`")),
+            "{err}"
+        );
+    }
+
+    let dup_tuple = r#"
+        fn main() {
+            let (a, a) = comp.redeem(100);
+        }
+    "#;
+    let err = parse_manifest(dup_tuple, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("duplicate identifier in tuple pattern should fail");
+    assert!(
+        err.to_string()
+            .contains("identifier `a` is bound more than once in the same pattern"),
+        "{err}"
+    );
+}
+
+#[test]
+fn zero_arg_macros_reject_arguments() {
+    let cases = [
+        "fn main() { let a = new_component_addr!(1); }",
+        "fn main() { let r = new_resource_addr!(1); }",
+        "fn main() { drop_all_proofs!(1); }",
+    ];
+    for manifest in cases {
+        let err = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default())
+            .err()
+            .expect("zero-arg macro with arguments should fail");
+        assert!(err.to_string().contains("takes no arguments"), "{err}");
+    }
 }

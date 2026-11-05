@@ -10,8 +10,8 @@ use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_template_lib_types::{InvalidByteLengthError, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
+    destination_tag::DestinationTag,
     hrp::{hrp_from_network, network_from_hrp},
-    pay_ref::PayRef,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -20,12 +20,12 @@ pub struct OotleAddress {
     network: Network,
     view_only_key: RistrettoPublicKeyBytes,
     account_key: RistrettoPublicKeyBytes,
-    pay_ref: Option<PayRef>,
+    destination_tag: Option<DestinationTag>,
 }
 
 impl OotleAddress {
-    /// Minimum byte length of the encoded address: network (1) + view_only_key (32) + account_key (32) + pay_ref len
-    /// (1)
+    /// Minimum byte length of the encoded address: network (1) + view_only_key (32) + account_key (32) +
+    /// destination_tag len (1)
     const MIN_BYTE_LENGTH: usize = 1 + 32 + 32 + 1;
 
     pub fn new(network: Network, view_only_key: RistrettoPublicKeyBytes, account_key: RistrettoPublicKeyBytes) -> Self {
@@ -33,19 +33,19 @@ impl OotleAddress {
             network,
             view_only_key,
             account_key,
-            pay_ref: None,
+            destination_tag: None,
         }
     }
 
-    /// Adds a pay reference to the address.
-    pub fn with_pay_ref(mut self, pay_ref: PayRef) -> Self {
-        self.pay_ref = Some(pay_ref);
+    /// Adds a destination tag to the address.
+    pub fn with_destination_tag(mut self, destination_tag: DestinationTag) -> Self {
+        self.destination_tag = Some(destination_tag);
         self
     }
 
-    /// Removes the pay reference from the address.
-    pub fn without_pay_ref(mut self) -> Self {
-        self.pay_ref = None;
+    /// Removes the destination tag from the address.
+    pub fn without_destination_tag(mut self) -> Self {
+        self.destination_tag = None;
         self
     }
 
@@ -56,7 +56,7 @@ impl OotleAddress {
     }
 
     pub const fn byte_length(&self) -> usize {
-        Self::MIN_BYTE_LENGTH + self.pay_ref_len()
+        Self::MIN_BYTE_LENGTH + self.destination_tag_len()
     }
 
     pub fn network(&self) -> Network {
@@ -71,8 +71,8 @@ impl OotleAddress {
         &self.account_key
     }
 
-    pub fn pay_ref(&self) -> Option<&PayRef> {
-        self.pay_ref.as_ref()
+    pub fn destination_tag(&self) -> Option<&DestinationTag> {
+        self.destination_tag.as_ref()
     }
 
     fn to_account_key_ristretto(&self) -> Result<RistrettoPublicKey, OotleAddressError> {
@@ -116,23 +116,25 @@ impl OotleAddress {
 
         let mut buf = [0u8; 1];
         reader.read_exact(&mut buf)?;
-        let pay_ref_len = buf[0] as usize;
-        if pay_ref_len > PayRef::MAX_LEN {
+        let destination_tag_len = buf[0] as usize;
+        if destination_tag_len > DestinationTag::MAX_LEN {
             return Err(OotleAddressError::InvalidAddressBytes(InvalidByteLengthError::new(
-                pay_ref_len,
-                PayRef::MAX_LEN,
+                destination_tag_len,
+                DestinationTag::MAX_LEN,
             )));
         }
 
-        let pay_ref = if pay_ref_len > 0 {
-            let mut pr_buf = vec![0u8; pay_ref_len];
+        let destination_tag = if destination_tag_len > 0 {
+            let mut tag_buf = vec![0u8; destination_tag_len];
             reader
-                .read_exact(&mut pr_buf)
-                .map_err(|e| OotleAddressError::InvalidPayRefLengthSpecifier {
-                    given_len: pay_ref_len,
+                .read_exact(&mut tag_buf)
+                .map_err(|e| OotleAddressError::InvalidDestinationTagLengthSpecifier {
+                    given_len: destination_tag_len,
                     source: e,
                 })?;
-            Some(PayRef::from_bytes(&pr_buf).expect("decode_from_reader: pay_ref_len checked and read"))
+            Some(
+                DestinationTag::from_bytes(&tag_buf).expect("decode_from_reader: destination_tag_len checked and read"),
+            )
         } else {
             None
         };
@@ -141,23 +143,23 @@ impl OotleAddress {
             network,
             view_only_key,
             account_key,
-            pay_ref,
+            destination_tag,
         })
     }
 
     pub fn encode_to_writer<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
         writer.write_all(&[self.network as u8])?;
         self.encode_keys_to_writer(writer)?;
-        // Write the length of the pay reference as a u8.
-        let pay_ref_len = u8::try_from(self.pay_ref_len()).map_err(|_| {
+        // Write the length of the destination tag as a u8.
+        let destination_tag_len = u8::try_from(self.destination_tag_len()).map_err(|_| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "invariant violation: pay reference length exceeds 255 (u8::MAX)",
+                "invariant violation: destination tag length exceeds 255 (u8::MAX)",
             )
         })?;
-        writer.write_all(&[pay_ref_len])?;
+        writer.write_all(&[destination_tag_len])?;
 
-        self.encode_payref_to_writer(writer)?;
+        self.encode_destination_tag_to_writer(writer)?;
         Ok(())
     }
 
@@ -167,9 +169,9 @@ impl OotleAddress {
         Ok(())
     }
 
-    fn encode_payref_to_writer<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-        if let Some(pay_ref) = &self.pay_ref {
-            writer.write_all(pay_ref.as_ref())?;
+    fn encode_destination_tag_to_writer<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        if let Some(destination_tag) = &self.destination_tag {
+            writer.write_all(destination_tag.as_ref())?;
         }
         Ok(())
     }
@@ -177,8 +179,8 @@ impl OotleAddress {
     const fn encoded_bech32_payload_len(&self) -> usize {
         // const_option_ops and const_option_basic are unstable, so we'll implement these operations manually
         let kl = RistrettoPublicKeyBytes::length();
-        match self.pay_ref {
-            Some(ref pr) => kl * 2 + pr.len(),
+        match self.destination_tag {
+            Some(ref tag) => kl * 2 + tag.len(),
             None => kl * 2,
         }
     }
@@ -189,7 +191,7 @@ impl OotleAddress {
         let mut buf = vec![0u8; len];
         let writer = &mut buf.as_mut_slice();
         self.encode_keys_to_writer(writer)?;
-        self.encode_payref_to_writer(writer)?;
+        self.encode_destination_tag_to_writer(writer)?;
         bech32::encode_lower_to_fmt::<Bech32m, _>(f, hrp, &buf)?;
         Ok(())
     }
@@ -211,29 +213,31 @@ impl OotleAddress {
 
         let mut address = OotleAddress::new(network, view_only_key, account_key);
         if data.len() > KL * 2 {
-            let pay_ref = PayRef::from_bytes(data.get(KL * 2..).expect("decode_bech32: len checked (pay-ref)")).ok_or(
-                OotleAddressError::AddressLengthTooLong {
-                    maximum: KL * 2 + PayRef::MAX_LEN,
-                    actual: data.len(),
-                },
-            )?;
-            address = address.with_pay_ref(pay_ref);
+            let destination_tag = DestinationTag::from_bytes(
+                data.get(KL * 2..)
+                    .expect("decode_bech32: len checked (destination tag)"),
+            )
+            .ok_or(OotleAddressError::AddressLengthTooLong {
+                maximum: KL * 2 + DestinationTag::MAX_LEN,
+                actual: data.len(),
+            })?;
+            address = address.with_destination_tag(destination_tag);
         }
 
         Ok(address)
     }
 
-    const fn pay_ref_len(&self) -> usize {
+    const fn destination_tag_len(&self) -> usize {
         // const_option_ops and const_option_basic are unstable, so we'll implement these operations manually
-        match self.pay_ref {
-            Some(ref pr) => pr.len(),
+        match self.destination_tag {
+            Some(ref tag) => tag.len(),
             None => 0,
         }
     }
 
     pub fn to_bech32_string(&self) -> String {
-        let pr_len = self.pay_ref_len();
-        let mut s = String::with_capacity(119 + pr_len);
+        let tag_len = self.destination_tag_len();
+        let mut s = String::with_capacity(119 + tag_len);
         self.encode_bech32_to_fmt(&mut s).unwrap();
         s
     }
@@ -243,7 +247,7 @@ impl OotleAddress {
             network: self.network,
             view_only_key: self.to_view_only_key_ristretto()?,
             account_key: self.to_account_key_ristretto()?,
-            pay_ref: self.pay_ref,
+            destination_tag: self.destination_tag,
         })
     }
 }
@@ -280,8 +284,8 @@ pub enum OotleAddressError {
     AddressLengthTooLong { maximum: usize, actual: usize },
     #[error("{remaining} unexpected bytes remaining after decoding address")]
     BytesRemaining { remaining: usize },
-    #[error("Invalid pay reference length specifier: given length {given_len}, source error: {source}")]
-    InvalidPayRefLengthSpecifier { given_len: usize, source: io::Error },
+    #[error("Invalid destination tag length specifier: given length {given_len}, source error: {source}")]
+    InvalidDestinationTagLengthSpecifier { given_len: usize, source: io::Error },
     #[error("Invalid public key")]
     InvalidPublicKey,
     #[error("IO error: {0}")]
@@ -331,7 +335,7 @@ pub struct RistrettoOotleAddress {
     pub network: Network,
     pub view_only_key: RistrettoPublicKey,
     pub account_key: RistrettoPublicKey,
-    pub pay_ref: Option<PayRef>,
+    pub destination_tag: Option<DestinationTag>,
 }
 
 impl RistrettoOotleAddress {
@@ -340,12 +344,12 @@ impl RistrettoOotleAddress {
             network,
             view_only_key,
             account_key,
-            pay_ref: None,
+            destination_tag: None,
         }
     }
 
-    pub fn with_pay_ref(mut self, pay_ref: PayRef) -> Self {
-        self.pay_ref = Some(pay_ref);
+    pub fn with_destination_tag(mut self, destination_tag: DestinationTag) -> Self {
+        self.destination_tag = Some(destination_tag);
         self
     }
 
@@ -361,8 +365,8 @@ impl RistrettoOotleAddress {
         &self.account_key
     }
 
-    pub fn pay_ref(&self) -> Option<&PayRef> {
-        self.pay_ref.as_ref()
+    pub fn destination_tag(&self) -> Option<&DestinationTag> {
+        self.destination_tag.as_ref()
     }
 
     pub fn into_byte_address(self) -> OotleAddress {
@@ -370,7 +374,7 @@ impl RistrettoOotleAddress {
             network: self.network,
             view_only_key: self.view_only_key.to_byte_type(),
             account_key: self.account_key.to_byte_type(),
-            pay_ref: self.pay_ref,
+            destination_tag: self.destination_tag,
         }
     }
 }
@@ -384,7 +388,7 @@ impl ConvertFromByteType<OotleAddress> for RistrettoOotleAddress {
             network: bytes.network,
             view_only_key: bytes.to_view_only_key_ristretto()?,
             account_key: bytes.to_account_key_ristretto()?,
-            pay_ref: bytes.pay_ref.clone(),
+            destination_tag: bytes.destination_tag.clone(),
         })
     }
 }
@@ -397,7 +401,7 @@ impl ToByteType for RistrettoOotleAddress {
             network: self.network,
             view_only_key: self.view_only_key.to_byte_type(),
             account_key: self.account_key.to_byte_type(),
-            pay_ref: self.pay_ref.clone(),
+            destination_tag: self.destination_tag.clone(),
         }
     }
 }
@@ -430,7 +434,7 @@ mod tests {
         assert_eq!(addr.network(), decoded.network());
         assert_eq!(addr.view_only_key(), decoded.view_only_key());
         assert_eq!(addr.account_public_key(), decoded.account_public_key());
-        assert_eq!(addr.pay_ref(), None);
+        assert_eq!(addr.destination_tag(), None);
     }
 
     #[test]
@@ -441,7 +445,7 @@ mod tests {
         assert_eq!(addr.network(), decoded.network());
         assert_eq!(addr.view_only_key(), decoded.view_only_key());
         assert_eq!(addr.account_public_key(), decoded.account_public_key());
-        assert_eq!(addr.pay_ref(), None);
+        assert_eq!(addr.destination_tag(), None);
     }
 
     #[test]
@@ -452,40 +456,40 @@ mod tests {
         assert_eq!(addr.network(), parsed.network());
         assert_eq!(addr.view_only_key(), parsed.view_only_key());
         assert_eq!(addr.account_public_key(), parsed.account_public_key());
-        assert_eq!(addr.pay_ref(), None);
+        assert_eq!(addr.destination_tag(), None);
     }
 
-    mod with_pay_ref {
+    mod with_destination_tag {
         use std::iter;
 
         use super::*;
 
         #[test]
-        fn it_encodes_and_decodes_with_pay_ref() {
-            let pay_ref = PayRef::new_checked(vec![1; PayRef::MAX_LEN]).unwrap();
-            let addr = sample(10).with_pay_ref(pay_ref.clone());
+        fn it_encodes_and_decodes_with_destination_tag() {
+            let destination_tag = DestinationTag::new_checked(vec![1; DestinationTag::MAX_LEN]).unwrap();
+            let addr = sample(10).with_destination_tag(destination_tag.clone());
             let bytes = addr.to_bytes();
             let decoded = OotleAddress::from_bytes(&bytes).unwrap();
             assert_eq!(addr.network(), decoded.network());
             assert_eq!(addr.view_only_key(), decoded.view_only_key());
             assert_eq!(addr.account_public_key(), decoded.account_public_key());
-            assert_eq!(addr.pay_ref(), Some(&pay_ref));
+            assert_eq!(addr.destination_tag(), Some(&destination_tag));
         }
 
         #[test]
-        fn it_errors_if_payref_length_is_inaccurate() {
+        fn it_errors_if_destination_tag_length_is_inaccurate() {
             let mut bytes = sample(11).to_bytes();
-            // Encode pay_ref length to an incorrect value
-            let invalid_payref_len = PayRef::MAX_LEN as u8;
+            // Encode destination_tag length to an incorrect value
+            let invalid_destination_tag_len = DestinationTag::MAX_LEN as u8;
             // Say we have MAX_LEN bytes but we have 0
-            let payref_len_index = 1 + 32 + 32; // network (1) + account_key (32) + view_only_key (32)
-            bytes[payref_len_index] = invalid_payref_len;
+            let destination_tag_len_index = 1 + 32 + 32; // network (1) + account_key (32) + view_only_key (32)
+            bytes[destination_tag_len_index] = invalid_destination_tag_len;
             let result = OotleAddress::from_bytes(&bytes);
             assert!(
                 matches!(
                     result,
-                    Err(OotleAddressError::InvalidPayRefLengthSpecifier {
-                        given_len: PayRef::MAX_LEN,
+                    Err(OotleAddressError::InvalidDestinationTagLengthSpecifier {
+                        given_len: DestinationTag::MAX_LEN,
                         ..
                     })
                 ),
@@ -494,8 +498,8 @@ mod tests {
             );
             // Say we have 10 bytes but we have 12
             let mut bytes = sample(11).to_bytes();
-            bytes[payref_len_index] = 10;
-            bytes.extend(iter::repeat_n(12, 12)); // add dummy pay_ref bytes
+            bytes[destination_tag_len_index] = 10;
+            bytes.extend(iter::repeat_n(12, 12)); // add dummy destination_tag bytes
             let result = OotleAddress::from_bytes(&bytes);
             assert!(
                 matches!(result, Err(OotleAddressError::BytesRemaining { remaining: 2 })),
@@ -505,13 +509,13 @@ mod tests {
 
             // Say we have 12 bytes but we have 10
             let mut bytes = sample(11).to_bytes();
-            bytes[payref_len_index] = 12;
-            bytes.extend(iter::repeat_n(12, 10)); // add dummy pay_ref bytes
+            bytes[destination_tag_len_index] = 12;
+            bytes.extend(iter::repeat_n(12, 10)); // add dummy destination_tag bytes
             let result = OotleAddress::from_bytes(&bytes);
             assert!(
                 matches!(
                     result,
-                    Err(OotleAddressError::InvalidPayRefLengthSpecifier { given_len: 12, .. })
+                    Err(OotleAddressError::InvalidDestinationTagLengthSpecifier { given_len: 12, .. })
                 ),
                 "Got: {:?}",
                 result
@@ -519,13 +523,13 @@ mod tests {
         }
 
         #[test]
-        fn it_errors_if_payref_is_too_large() {
+        fn it_errors_if_destination_tag_is_too_large() {
             let mut bytes = sample(11).to_bytes();
-            // Encode pay_ref length to an incorrect value
-            let invalid_payref_len = PayRef::MAX_LEN as u8 + 1;
-            let payref_len_index = 1 + 32 + 32; // network (1) + account_key (32) + view_only_key (32)
-            bytes[payref_len_index] = invalid_payref_len;
-            bytes.extend(iter::repeat_n(12, invalid_payref_len as usize)); // add dummy pay_ref bytes
+            // Encode destination_tag length to an incorrect value
+            let invalid_destination_tag_len = DestinationTag::MAX_LEN as u8 + 1;
+            let destination_tag_len_index = 1 + 32 + 32; // network (1) + account_key (32) + view_only_key (32)
+            bytes[destination_tag_len_index] = invalid_destination_tag_len;
+            bytes.extend(iter::repeat_n(12, invalid_destination_tag_len as usize)); // add dummy destination_tag bytes
             let result = OotleAddress::from_bytes(&bytes);
             assert!(
                 matches!(result, Err(OotleAddressError::InvalidAddressBytes(_))),
@@ -548,7 +552,7 @@ mod tests {
             assert_eq!(addr.network(), deserialized.network());
             assert_eq!(addr.view_only_key(), deserialized.view_only_key());
             assert_eq!(addr.account_public_key(), deserialized.account_public_key());
-            assert_eq!(addr.pay_ref(), None);
+            assert_eq!(addr.destination_tag(), None);
         }
 
         #[test]
@@ -559,34 +563,34 @@ mod tests {
             assert_eq!(addr.network(), deserialized.network());
             assert_eq!(addr.view_only_key(), deserialized.view_only_key());
             assert_eq!(addr.account_public_key(), deserialized.account_public_key());
-            assert_eq!(addr.pay_ref(), None);
+            assert_eq!(addr.destination_tag(), None);
         }
 
-        mod with_pay_ref {
+        mod with_destination_tag {
             use super::*;
 
             #[test]
-            fn it_serializes_to_json_with_pay_ref() {
-                let pay_ref = PayRef::new_checked(vec![10; PayRef::MAX_LEN]).unwrap();
-                let addr = sample(7).with_pay_ref(pay_ref.clone());
+            fn it_serializes_to_json_with_destination_tag() {
+                let destination_tag = DestinationTag::new_checked(vec![10; DestinationTag::MAX_LEN]).unwrap();
+                let addr = sample(7).with_destination_tag(destination_tag.clone());
                 let json = serde_json::to_string(&addr).unwrap();
                 let deserialized: OotleAddress = serde_json::from_str(&json).unwrap();
                 assert_eq!(addr.network(), deserialized.network());
                 assert_eq!(addr.view_only_key(), deserialized.view_only_key());
                 assert_eq!(addr.account_public_key(), deserialized.account_public_key());
-                assert_eq!(addr.pay_ref(), Some(&pay_ref));
+                assert_eq!(addr.destination_tag(), Some(&destination_tag));
             }
 
             #[test]
-            fn it_serializes_to_bytes_with_pay_ref() {
-                let pay_ref = PayRef::new_checked(vec![40, 50, 60, 70]).unwrap();
-                let addr = sample(8).with_pay_ref(pay_ref.clone());
+            fn it_serializes_to_bytes_with_destination_tag() {
+                let destination_tag = DestinationTag::new_checked(vec![40, 50, 60, 70]).unwrap();
+                let addr = sample(8).with_destination_tag(destination_tag.clone());
                 let bytes = tari_bor::serde_codec::to_vec(&addr).unwrap();
                 let deserialized: OotleAddress = tari_bor::serde_codec::from_slice(&bytes).unwrap();
                 assert_eq!(addr.network(), deserialized.network());
                 assert_eq!(addr.view_only_key(), deserialized.view_only_key());
                 assert_eq!(addr.account_public_key(), deserialized.account_public_key());
-                assert_eq!(addr.pay_ref(), Some(&pay_ref));
+                assert_eq!(addr.destination_tag(), Some(&destination_tag));
             }
         }
     }

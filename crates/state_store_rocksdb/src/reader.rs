@@ -76,11 +76,11 @@ use tari_ootle_storage::{
         LivenessCounters,
         LockedSubstateValue,
         PendingShardStateTreeDiff,
+        ProposalFilter,
         StateVersionProof,
         StateVersionTransitions,
         SubstateChange,
         SubstateCreate,
-        SubstateData,
         SubstateDestroy,
         SubstateDownProofRecord,
         SubstateLock,
@@ -88,7 +88,6 @@ use tari_ootle_storage::{
         SubstateRecord,
         SubstateUpdateProof,
         SubstateValueFilterFlags,
-        SubstateValueOrHash,
         TransactionExecution,
         TransactionPoolRecord,
         TransactionPoolStage,
@@ -98,7 +97,7 @@ use tari_ootle_storage::{
     time::PrimitiveDateTime,
 };
 use tari_ootle_transaction::TransactionId;
-use tari_state_tree::{Node, NodeKey, StateTreePayload, Version};
+use tari_state_tree::{Node, NodeKey, StateTreePayload, TransitionAccumulator, Version};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
@@ -138,7 +137,7 @@ use crate::{
         lock_conflict,
         parked_block,
         pending_state_tree_diff::ShardStateTreeDiff,
-        state_sync_rewind_point::StateSyncRewindPointCf,
+        state_sync_rewind_point::{StateSyncMissingValueCf, StateSyncRewindPointCf},
         state_transition,
         state_transition::StateTransitionType,
         state_tree,
@@ -253,6 +252,27 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a, R: RocksRea
         }
 
         Ok(block_ids)
+    }
+
+    /// The latest pending transaction pool update for each transaction in the pending chain ending at `block_id`. Merge
+    /// one into its pool record to read the record's state at that block.
+    fn transaction_pool_updates_in_chain(
+        &self,
+        block_id: &BlockId,
+    ) -> Result<
+        HashMap<TransactionId, transaction_pool_state_update::TransactionPoolStateUpdateData>,
+        RocksDbStorageError,
+    > {
+        let query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
+        let mut updates = HashMap::new();
+        // Oldest first so the latest update wins per transaction.
+        for block_id in self.get_pending_chain_ordered(block_id)?.into_iter().rev() {
+            for result in query.query_prefix_range_iterator(Ordering::default(), &block_id) {
+                let ((_, tx_id), update) = result?;
+                updates.insert(tx_id, update);
+            }
+        }
+        Ok(updates)
     }
 
     /// Every transaction that has a lock conflict recorded against it in any block.
@@ -836,22 +856,27 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         let query = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
 
         // An execution may only be reused if it was recorded on an ancestor of `from_block`. This is determined with
-        // index lookups only - no blocks are loaded:
-        //  - a block on `from_block`'s pending chain is an uncommitted ancestor, so reusable;
-        //  - a block no longer in the pending-chain index has been committed, and because the committed chain is final
-        //    and linear every committed block is an ancestor, so reusable;
-        //  - a block still in the pending-chain index but not on `from_block`'s chain is an uncommitted
-        //    orphan/abandoned branch (e.g. left over across a restart) and must NOT be reused - its execution is pinned
-        //    to already-spent input versions.
-        let pending_chain = self.get_pending_chain_until(from_block.block_id())?;
-        let pending_index = self.db().cf(chain::PendingChainIndex)?;
+        // index and existence lookups only - no full blocks are loaded:
+        //  - a block in `from_block`'s chain scope (on its uncommitted pending chain, or at/below the commit position)
+        //    that is present in `BlockCf` is an ancestor, so reusable;
+        //  - an execution written for a block that was never saved (`OnPropose` records executions before inserting its
+        //    block, and a proposal may never be inserted) is either outside the chain scope or absent from `BlockCf`,
+        //    and must NOT be reused.
+        // Epoch GC removes the blocks of earlier epochs but keeps their executions until the transaction is finalized,
+        // and a transaction may still be pending across an epoch change. `BlockCf` therefore only decides ancestry for
+        // blocks in `from_block`'s epoch, which GC never prunes.
+        let scope = self.chain_scope(from_block.block_id())?;
 
         // Heights restart at zero each epoch, so the most recent ancestor is the one with the highest (epoch, height).
         let mut best: Option<(TransactionId, BlockId, Epoch, NodeHeight)> = None;
         let candidates = query.query_prefix_range_key_iterator(Ordering::default(), transaction_id);
         for res in candidates {
             let (tx_id, block_id, epoch, height) = res?;
-            let is_ancestor = pending_chain.contains(&block_id) || !pending_index.exists(&block_id, OPERATION)?;
+            if (epoch, height) > (from_block.epoch(), from_block.height()) {
+                continue;
+            }
+            let is_ancestor = self.is_in_chain_scope(&scope, &block_id, epoch, height)? &&
+                (epoch < from_block.epoch() || self.blocks_exists(&block_id)?);
             if is_ancestor && best.as_ref().is_none_or(|(_, _, e, h)| (*e, *h) < (epoch, height)) {
                 best = Some((tx_id, block_id, epoch, height));
             }
@@ -1308,19 +1333,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         // Overlay each record's latest pending update by walking the pending chain back from the leaf block, so
         // callers see its effective state at the tip. With no leaf block yet (e.g. freshly state-synced, before
         // joining consensus) there is no pending chain and nothing to overlay.
-        let mut updates = HashMap::new();
-        if let Some(leaf_block) = self.leaf_block_get_any().optional()? {
-            let pending_chain = self.get_pending_chain_ordered(leaf_block.block_id())?;
-            let query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
-            // Oldest first so the tip's update wins per transaction.
-            for block_id in pending_chain.into_iter().rev() {
-                let iter = query.query_prefix_range_iterator(Ordering::default(), &block_id);
-                for result in iter {
-                    let ((_, tx_id), update) = result?;
-                    updates.insert(tx_id, update);
-                }
-            }
-        }
+        let mut updates = match self.leaf_block_get_any().optional()? {
+            Some(leaf_block) => self.transaction_pool_updates_in_chain(leaf_block.block_id())?,
+            None => HashMap::new(),
+        };
 
         let iter = cf.value_iterator(Ordering::Ascending, OPERATION);
         let mut transactions = Vec::new();
@@ -1337,8 +1353,18 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         Ok(transactions)
     }
 
-    fn transaction_pool_for_each_ready<F>(&self, block_id: &BlockId, mut f: F) -> Result<(), StorageError>
-    where F: FnMut(TransactionPoolRecord) {
+    fn transaction_pool_for_each_ready<F>(
+        &self,
+        block_id: &BlockId,
+        filter: &ProposalFilter,
+        start_id: &TransactionId,
+        max_records: usize,
+        max_reads: usize,
+        mut f: F,
+    ) -> Result<(), StorageError>
+    where
+        F: FnMut(TransactionPoolRecord),
+    {
         const OPERATION: &str = "transaction_pool_for_each_ready";
         if !self.blocks_exists(block_id)? {
             return Err(StorageError::QueryError {
@@ -1347,26 +1373,18 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         }
 
         let cf = self.db().cf(TransactionPoolCf)?;
-
-        let query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
         let lock_conflicted = self.lock_conflicted_transaction_ids()?;
+        let mut updates = self.transaction_pool_updates_in_chain(block_id)?;
 
-        let pending_chain = self.get_pending_chain_ordered(block_id)?;
+        let iter = cf
+            .table_range_value_iterator(Ordering::Ascending, Some(start_id), None, OPERATION)
+            .chain(cf.table_range_value_iterator(Ordering::Ascending, None, Some(start_id), OPERATION))
+            .take(max_reads);
 
-        let mut updates = HashMap::new();
-        for block_id in pending_chain.into_iter().rev() {
-            let iter = query.query_prefix_range_iterator(Ordering::default(), &block_id);
-            for result in iter {
-                let ((_, tx_id), update) = result?;
-                if lock_conflicted.contains(&tx_id) {
-                    continue;
-                }
-                updates.insert(tx_id, update);
-            }
+        if max_records == 0 {
+            return Ok(());
         }
-
-        let iter = cf.value_iterator(Ordering::default(), OPERATION);
-
+        let mut num_offered = 0usize;
         for result in iter {
             let mut tx = result?;
             if lock_conflicted.contains(tx.id()) {
@@ -1375,8 +1393,12 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
             if let Some(update) = updates.remove(tx.id()) {
                 update.merge_into(&mut tx);
             }
-            if tx.is_ready() {
+            if filter.accepts(&tx) {
                 f(tx);
+                num_offered += 1;
+                if num_offered == max_records {
+                    break;
+                }
             }
         }
 
@@ -1441,6 +1463,25 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         for result in cf.value_iterator(Ordering::default(), OPERATION) {
             let rec = result?;
             if !lock_conflicted.contains(rec.id()) && predicate(&rec) {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    fn transaction_pool_any_in_chain<F>(&self, block_id: &BlockId, mut predicate: F) -> Result<bool, StorageError>
+    where F: FnMut(&TransactionPoolRecord) -> bool {
+        const OPERATION: &str = "transaction_pool_any_in_chain";
+
+        let mut updates = self.transaction_pool_updates_in_chain(block_id)?;
+        let cf = self.db().cf(TransactionPoolCf)?;
+        for result in cf.value_iterator(Ordering::default(), OPERATION) {
+            let mut rec = result?;
+            if let Some(update) = updates.remove(rec.id()) {
+                update.merge_into(&mut rec);
+            }
+            if predicate(&rec) {
                 return Ok(true);
             }
         }
@@ -1770,43 +1811,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
                         // leave the caller holding a substate nothing later in the stream takes back down.
                         None
                     } else {
-                        let metadata_mode = value_filter.contains(SubstateValueFilterFlags::TEMPLATE_METADATA);
-                        let template_metadata_opt = if metadata_mode && substate.substate_id.is_template() {
-                            substate
-                                .substate_value
-                                .as_ref()
-                                .and_then(|v| v.as_template())
-                                .map(|t| t.clone().into_template_metadata())
-                        } else {
-                            None
-                        };
-
-                        let is_metadata_only = metadata_mode &&
-                            !value_filter.contains(SubstateValueFilterFlags::TEMPLATE) &&
-                            substate.substate_id.is_template();
-                        let resolved_value = value_filter
-                                .contains_substate(&substate.substate_id)
-                                // filter includes substate, return full value if available (unless metadata-only for templates), otherwise return hash
-                                .then(|| {
-                                    substate
-                                        .substate_value
-                                        .filter(|_| !is_metadata_only)
-                                        .map(|v| SubstateValueOrHash::Value(Box::new(v)))
-                                        .unwrap_or_else(|| SubstateValueOrHash::Hash(substate.state_hash))
-                                })
-                                // Otherwise if the client still wants all hashes for filtered out substates
-                                .or_else(|| all_hashes.then_some(SubstateValueOrHash::Hash(substate.state_hash)));
-
-                        resolved_value.map(|value| {
-                            SubstateUpdateProof::Create(Box::new(SubstateCreate {
-                                substate: SubstateData {
-                                    substate_id: substate.substate_id,
-                                    version: substate.version,
-                                    value,
-                                    template_metadata: template_metadata_opt,
-                                },
-                            }))
-                        })
+                        value_filter
+                            .serve(substate)
+                            .map(|substate| SubstateUpdateProof::Create(Box::new(SubstateCreate { substate })))
                     }
                 },
                 StateTransitionType::Down => (!up_only)
@@ -1835,6 +1842,44 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
             state_version: version,
             updates,
         })
+    }
+
+    fn state_transitions_get_latest_epoch(
+        &self,
+        shard: Shard,
+        state_version: Version,
+    ) -> Result<Option<Epoch>, StorageError> {
+        const OPERATION: &str = "state_transitions_get_latest_epoch";
+
+        let transitions_cf = self.db().cf(state_transition::StateTransitionCf)?;
+        if let Some(data) = transitions_cf.get(&(shard, state_version), OPERATION).optional()? {
+            return Ok(Some(data.epoch));
+        }
+        let query = self.db().cf(state_transition::ByShardAndStateVersionQuery)?;
+        let latest = query
+            .query_range_iterator(Ordering::Descending, (shard, 0)..(shard, state_version))
+            .next()
+            .transpose()?;
+        Ok(latest.map(|(_, data)| data.epoch))
+    }
+
+    fn state_transitions_get_accumulator(
+        &self,
+        shard: Shard,
+        state_version: Version,
+    ) -> Result<TransitionAccumulator, StorageError> {
+        const OPERATION: &str = "state_transitions_get_accumulator";
+
+        let transitions_cf = self.db().cf(state_transition::StateTransitionCf)?;
+        if let Some(data) = transitions_cf.get(&(shard, state_version), OPERATION).optional()? {
+            return Ok(data.transition_acc);
+        }
+        let query = self.db().cf(state_transition::ByShardAndStateVersionQuery)?;
+        let latest = query
+            .query_range_iterator(Ordering::Descending, (shard, 0)..(shard, state_version))
+            .next()
+            .transpose()?;
+        Ok(latest.map_or_else(TransitionAccumulator::zero, |(_, data)| data.transition_acc))
     }
 
     fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node<StateTreePayload>, StorageError> {
@@ -1921,6 +1966,24 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
             .iterator(Ordering::Ascending, OPERATION)
             .collect::<Result<_, _>>()?;
         Ok(points)
+    }
+
+    fn state_sync_missing_values_get_earliest(
+        &self,
+        shard: Shard,
+        from: Version,
+    ) -> Result<Option<(SubstateAddress, Version)>, StorageError> {
+        let cf = self.db().cf(StateSyncMissingValueCf)?;
+        let start = cf.encode_key(&(shard, SubstateAddress::zero()));
+        let end = cf.encode_key(&(shard, SubstateAddress::max()));
+        let mut earliest = None::<(SubstateAddress, Version)>;
+        for entry in cf.range_iterator(Ordering::Ascending, start..end) {
+            let ((_, address), created_at) = entry?;
+            if created_at >= from && earliest.is_none_or(|(_, version)| created_at < version) {
+                earliest = Some((address, created_at));
+            }
+        }
+        Ok(earliest)
     }
 
     fn state_tree_versions_get_latest_for_shard_group(
@@ -2066,6 +2129,19 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         const OPERATION: &str = "parked_block_exists";
         let exists = self.db().cf(parked_block::ParkedBlockCf)?.exists(block_id, OPERATION)?;
         Ok(exists)
+    }
+
+    fn parked_blocks_count_by_proposer(
+        &self,
+        epoch: Epoch,
+        height: NodeHeight,
+        proposed_by: &RistrettoPublicKeyBytes,
+    ) -> Result<usize, StorageError> {
+        let count = self
+            .db()
+            .cf(parked_block::ByProposerQuery)?
+            .count_prefix(&(epoch, height, *proposed_by))?;
+        Ok(count)
     }
 
     fn foreign_parked_blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {

@@ -17,6 +17,7 @@ use crate::{
     Instruction,
     InstructionLimitTracker,
     MAX_TRANSACTION_INSTRUCTIONS,
+    MainSigner,
     ResourceAddressRef,
     Signable,
     TransactionSignature,
@@ -66,7 +67,7 @@ pub struct UnsignedTransactionV1 {
     #[n(5)]
     pub max_epoch: Epoch,
     #[n(6)]
-    pub is_seal_signer_authorized: bool,
+    pub main_signer: MainSigner,
     #[n(7)]
     pub dry_run: bool,
 
@@ -75,8 +76,6 @@ pub struct UnsignedTransactionV1 {
     /// raw blob bytes are excluded so that storage layers can drop them without affecting
     /// signature verifiability or transaction id.
     #[n(8)]
-    #[cfg_attr(feature = "serde", serde(default))]
-    #[cbor(default)]
     pub blobs: Blobs,
 
     /// Distinguishes otherwise-identical transactions. The transaction id excludes the seal
@@ -84,12 +83,8 @@ pub struct UnsignedTransactionV1 {
     /// an intent builder (e.g. a wallet) that wants each submission to execute independently
     /// must stamp a distinct nonce per intent. Part of the signing and id domains.
     #[n(9)]
-    #[cfg_attr(
-        feature = "serde",
-        serde(default, deserialize_with = "ootle_serde::str_number::deserialize")
-    )]
+    #[cfg_attr(feature = "serde", serde(deserialize_with = "ootle_serde::str_number::deserialize"))]
     #[cfg_attr(feature = "ts", ts(type = "number | bigint | string"))]
-    #[cbor(default)]
     pub nonce: u64,
 }
 
@@ -102,7 +97,7 @@ impl UnsignedTransactionV1 {
             inputs: IndexSet::new(),
             min_epoch: None,
             max_epoch,
-            is_seal_signer_authorized: true,
+            main_signer: MainSigner::SealSigner,
             dry_run: false,
             blobs: Blobs::empty(),
             nonce: 0,
@@ -125,7 +120,7 @@ impl UnsignedTransactionV1 {
             inputs,
             min_epoch,
             max_epoch,
-            is_seal_signer_authorized: true,
+            main_signer: MainSigner::SealSigner,
             dry_run,
             blobs: Blobs::empty(),
             nonce: 0,
@@ -227,7 +222,8 @@ impl UnsignedTransactionV1 {
             })
     }
 
-    /// Returns all substates addresses referenced by this transaction
+    /// Returns the substates this transaction references that it may declare as inputs (see
+    /// [`SubstateId::is_declarable_input`]).
     pub fn to_referenced_substates(&self) -> Result<HashSet<SubstateId>, IndexedValueError> {
         let all_instructions = self.instructions().iter().chain(self.fee_instructions());
 
@@ -237,7 +233,7 @@ impl UnsignedTransactionV1 {
                 Instruction::CallFunction { args, .. } => {
                     for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
                         let value = IndexedValue::from_raw(arg)?;
-                        substates.extend(value.referenced_substates().filter(|id| !id.is_virtual()));
+                        substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
                     }
                 },
                 Instruction::CallMethod { call, args, .. } => {
@@ -246,7 +242,7 @@ impl UnsignedTransactionV1 {
                     }
                     for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
                         let value = IndexedValue::from_raw(arg)?;
-                        substates.extend(value.referenced_substates().filter(|id| !id.is_virtual()));
+                        substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
                     }
                 },
                 Instruction::ClaimValidatorFees { address, .. } => {
@@ -278,7 +274,7 @@ impl UnsignedTransactionV1 {
                         .filter_map(|a| a.as_literal_bytes())
                     {
                         let value = IndexedValue::from_raw(arg)?;
-                        substates.extend(value.referenced_substates().filter(|id| !id.is_virtual()));
+                        substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
                     }
                 },
                 _ => {},
@@ -293,10 +289,9 @@ impl UnsignedTransactionV1 {
 }
 
 impl Signable<&RistrettoPublicKeyBytes> for UnsignedTransactionV1 {
-    type MessageOutput = [u8; 64];
     type Signature = TransactionSignature;
 
-    fn to_signing_message(&self, seal_signer: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
+    fn to_signing_message(&self, seal_signer: &RistrettoPublicKeyBytes) -> crate::TransactionMessage {
         TransactionSignature::create_message_v1(seal_signer, self)
     }
 }

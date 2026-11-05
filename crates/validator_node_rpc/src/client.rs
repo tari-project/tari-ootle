@@ -10,14 +10,13 @@ use std::{
 };
 
 use anyhow::anyhow;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
-use tari_bor::decode_with_max_depth;
 use tari_consensus_types::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
-    limits::MAX_CBOR_NESTING_DEPTH,
-    substate::{Substate, SubstateId, SubstateValue},
+    encoded::Encoded,
+    substate::{EncodedSubstate, SubstateId},
 };
 use tari_networking::{MessageSpec, NetworkingHandle, PeerId};
 use tari_ootle_common_types::{NodeAddressable, SubstateRequirementRef, SubstateVersion};
@@ -36,6 +35,7 @@ use tari_ootle_p2p::{
 };
 use tari_ootle_storage::time::{PrimitiveDateTime, UtcDateTime};
 use tari_ootle_transaction::{Transaction, TransactionId};
+use tari_rpc_framework::RpcStatus;
 use tokio::{sync::RwLock, time};
 
 use crate::{ValidatorNodeRpcClientError, rpc_service};
@@ -103,9 +103,6 @@ pub struct BatchedSubstate {
     /// Epoch the substate value hash was computed at; needed to re-derive the leaf value hash when
     /// verifying an inclusion proof.
     pub proof_epoch: u64,
-    /// CBOR-encoded SubstateDownProof, decoded for wire compatibility. Validators leave it empty: a batch answers
-    /// with heads, which a down proof cannot settle.
-    pub substate_down_proof: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -116,7 +113,8 @@ pub enum TransactionResultStatus {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FinalizedResult {
-    pub execute_result: Option<ExecuteResult>,
+    /// The result as the responder encoded it, undecoded.
+    pub execute_result: Option<Encoded<ExecuteResult>>,
     pub final_decision: Decision,
     pub execution_time: Duration,
     pub finalized_time: PrimitiveDateTime,
@@ -127,10 +125,11 @@ pub struct FinalizedResult {
 pub enum SubstateResult {
     #[n(0)]
     DoesNotExist,
+    /// A live version, its value as the responder encoded it.
     #[n(1)]
     Up {
         #[n(0)]
-        substate: Box<Substate>,
+        substate: EncodedSubstate,
     },
     #[n(2)]
     Down {
@@ -148,16 +147,16 @@ impl SubstateResult {
         }
     }
 
-    pub fn up(&self) -> Option<&Substate> {
+    pub fn up(&self) -> Option<&EncodedSubstate> {
         match self {
             SubstateResult::Up { substate, .. } => Some(substate),
             _ => None,
         }
     }
 
-    pub fn into_up(self) -> Option<Substate> {
+    pub fn into_up(self) -> Option<EncodedSubstate> {
         match self {
-            SubstateResult::Up { substate } => Some(*substate),
+            SubstateResult::Up { substate } => Some(substate),
             _ => None,
         }
     }
@@ -174,8 +173,8 @@ pub struct SubstateProofData {
     /// Epoch the substate value hash was computed at; needed to re-derive the leaf value hash when
     /// verifying an inclusion proof.
     pub proof_epoch: u64,
-    /// CBOR-encoded SubstateDownProof proving a down result was committed before it went down. A down result is
-    /// only proven by this: an exclusion proof alone is also satisfied by a version that never existed.
+    /// CBOR-encoded SubstateDownProof proving a down result was committed before it went down. Without it, a down
+    /// result's `substate_value_proof` is an exclusion alone, which a version that never existed also satisfies.
     pub substate_down_proof: Option<Vec<u8>>,
     /// The shard state version at which the responder recorded the substate's destruction, for a down result.
     pub destroyed_at_state_version: Option<u64>,
@@ -247,14 +246,7 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
                     .map_err(ValidatorNodeRpcClientError::InvalidResponse)?;
                 let execution_result = Some(response.execution_result)
                     .filter(|r| !r.is_empty())
-                    // A peer's bytes, decoded before any content validation runs over them.
-                    .map(|r| decode_with_max_depth(&r, MAX_CBOR_NESTING_DEPTH))
-                    .transpose()
-                    .map_err(|_| {
-                        ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
-                            "Node returned an invalid or empty execution result"
-                        ))
-                    })?;
+                    .map(Encoded::from_bytes);
 
                 let execution_time = Duration::from_micros(response.execution_time_us);
                 let finalized_time = UtcDateTime::from_unix_timestamp(response.finalized_timestamp).map_err(|e| {
@@ -304,13 +296,9 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
         // }
 
         match status {
-            SubstateStatus::Up => {
-                let substate = SubstateValue::from_bytes(&resp.substate)
-                    .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!(e)))?;
-                Ok(SubstateResult::Up {
-                    substate: Box::new(Substate::new(SubstateVersion::new(resp.version), substate)),
-                })
-            },
+            SubstateStatus::Up => Ok(SubstateResult::Up {
+                substate: EncodedSubstate::new(resp.version, Encoded::from_bytes(resp.substate)),
+            }),
             SubstateStatus::Down => Ok(SubstateResult::Down {
                 version: SubstateVersion::new(resp.version),
             }),
@@ -340,12 +328,8 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
         let proof = decode_substate_proof(status, &mut resp);
 
         let result = match status {
-            SubstateStatus::Up => {
-                let substate = SubstateValue::from_bytes(&resp.substate)
-                    .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!(e)))?;
-                SubstateResult::Up {
-                    substate: Box::new(Substate::new(SubstateVersion::new(resp.version), substate)),
-                }
+            SubstateStatus::Up => SubstateResult::Up {
+                substate: EncodedSubstate::new(resp.version, Encoded::from_bytes(std::mem::take(&mut resp.substate))),
             },
             SubstateStatus::Down => SubstateResult::Down {
                 version: SubstateVersion::new(resp.version),
@@ -363,70 +347,115 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
     ) -> Result<SubstateBatch, ValidatorNodeRpcClientError> {
         let mut conn = self.client_connection().await?;
         // NOTE: current maximum is 50 substates per request
-        let mut stream = conn
+        let stream = conn
             .get_substate_batch(proto::rpc::GetSubstatesBatchRequest {
                 substate_ids: substate_ids.iter().map(|id| id.to_bytes()).collect(),
                 include_proofs,
             })
             .await?;
 
-        // For simplicity, we'll collect the stream instead of returning a decoded stream
-        let requested = substate_ids.iter().copied().collect::<HashSet<_>>();
-        let mut batch = SubstateBatch {
-            substates: Vec::with_capacity(substate_ids.len()),
-            ..Default::default()
-        };
-        while let Some(resp) = stream.next().await {
-            let Some(response) = resp?.response else {
-                continue;
-            };
-            match response {
-                batch_response::Response::CommitProof(commit_proof) => {
-                    batch.commit_proof = Some(commit_proof);
-                },
-                batch_response::Response::Substate(proven) => {
-                    // A responder can only answer for what was asked. Bounding the stream by the
-                    // request keeps a peer from growing this vec without limit, and dropping ids we
-                    // did not ask for keeps them out of the caller's results.
-                    if batch.substates.len() >= substate_ids.len() {
-                        return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
-                            "Node returned more substates than the {} requested",
-                            substate_ids.len()
-                        )));
-                    }
-                    let substate = decode_batched_substate(proven)?;
-                    if !requested.contains(&substate.substate_id) {
-                        return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
-                            "Node returned {} which was not requested",
-                            substate.substate_id
-                        )));
-                    }
-                    batch.substates.push(substate);
-                },
-                batch_response::Response::Missing(missing) => {
-                    for id in &missing.substate_ids {
-                        batch.missing.push(
-                            SubstateId::from_bytes(id)
-                                .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!("{}", e)))?,
-                        );
-                    }
-                },
-            }
-        }
+        collect_substate_batch(stream, substate_ids).await
+    }
+}
 
-        // Every requested id is either answered or named as missing. A responder that accounts for
-        // none of them is not answering this protocol - most likely it predates the batch response
-        // becoming a oneof, and its substates decoded as an unknown field. Failing here keeps that
-        // skew from reading as "none of these substates exist".
-        if batch.substates.is_empty() && batch.missing.is_empty() {
+/// How long a batch response may take from its first frame to its last. The per-message deadline bounds only the gap
+/// between frames; this bounds the response as a whole. A responder reads the whole batch before it streams any of
+/// it, so this is spent almost entirely on transfer. A caller tries several members in turn, so this also bounds how
+/// long each one that stalls can hold up the read.
+const BATCH_RESPONSE_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Collects a batch response stream into a [`SubstateBatch`], bounding the response by the request: every requested
+/// id is answered at most once, and nothing else is accepted.
+async fn collect_substate_batch<S>(
+    stream: S,
+    substate_ids: &[&SubstateId],
+) -> Result<SubstateBatch, ValidatorNodeRpcClientError>
+where
+    S: Stream<Item = Result<proto::rpc::GetSubstatesBatchResponse, RpcStatus>> + Unpin,
+{
+    time::timeout(
+        BATCH_RESPONSE_TIMEOUT,
+        collect_substate_batch_frames(stream, substate_ids),
+    )
+    .await
+    .map_err(|_| ValidatorNodeRpcClientError::ResponseTimeout {
+        timeout: BATCH_RESPONSE_TIMEOUT,
+    })?
+}
+
+async fn collect_substate_batch_frames<S>(
+    mut stream: S,
+    substate_ids: &[&SubstateId],
+) -> Result<SubstateBatch, ValidatorNodeRpcClientError>
+where
+    S: Stream<Item = Result<proto::rpc::GetSubstatesBatchResponse, RpcStatus>> + Unpin,
+{
+    let requested = substate_ids.iter().copied().collect::<HashSet<_>>();
+    // A substate frame per requested id, plus the commit proof and the missing list.
+    let max_frames = requested.len() + 2;
+    let mut answered = HashSet::with_capacity(requested.len());
+    let mut answer_for = |id: &SubstateId| match requested.get(id) {
+        Some(&id) if answered.insert(id) => Ok(()),
+        Some(_) => Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+            "Node answered for {id} more than once"
+        ))),
+        None => Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+            "Node answered for {id} which was not requested"
+        ))),
+    };
+
+    let mut batch = SubstateBatch {
+        substates: Vec::with_capacity(requested.len()),
+        ..Default::default()
+    };
+    let mut num_frames = 0usize;
+    while let Some(resp) = stream.next().await {
+        num_frames += 1;
+        if num_frames > max_frames {
             return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
-                "Node accounted for none of the {} requested substates",
-                substate_ids.len()
+                "Node sent more than {max_frames} messages answering for {} substate(s)",
+                requested.len()
             )));
         }
-
-        Ok(batch)
+        let Some(response) = resp?.response else {
+            continue;
+        };
+        match response {
+            batch_response::Response::CommitProof(commit_proof) => {
+                if batch.commit_proof.is_some() {
+                    return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+                        "Node sent more than one commit proof"
+                    )));
+                }
+                batch.commit_proof = Some(commit_proof);
+            },
+            batch_response::Response::Substate(proven) => {
+                let substate = decode_batched_substate(proven)?;
+                answer_for(&substate.substate_id)?;
+                batch.substates.push(substate);
+            },
+            batch_response::Response::Missing(missing) => {
+                for id in &missing.substate_ids {
+                    let id = SubstateId::from_bytes(id)
+                        .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!("{}", e)))?;
+                    answer_for(&id)?;
+                    batch.missing.push(id);
+                }
+            },
+        }
     }
+
+    // Every requested id is either answered or named as missing. A responder that accounts for
+    // none of them is not answering, and failing here keeps that from reading as "none of these
+    // substates exist".
+    if batch.substates.is_empty() && batch.missing.is_empty() {
+        return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+            "Node accounted for none of the {} requested substates",
+            substate_ids.len()
+        )));
+    }
+
+    Ok(batch)
 }
 
 /// The proof a single-substate response carries, taken out of `resp`. The responder omits the commit proof when it has
@@ -458,10 +487,8 @@ fn decode_batched_substate(proven: proto::rpc::ProvenSubstate) -> Result<Batched
             version: SubstateVersion::new(substate.version),
         }
     } else {
-        let value = SubstateValue::from_bytes(&substate.substate)
-            .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!("{}", e)))?;
         SubstateResult::Up {
-            substate: Box::new(Substate::new(SubstateVersion::new(substate.version), value)),
+            substate: EncodedSubstate::new(substate.version, Encoded::from_bytes(substate.substate)),
         }
     };
 
@@ -470,7 +497,6 @@ fn decode_batched_substate(proven: proto::rpc::ProvenSubstate) -> Result<Batched
         result,
         value_proof: Some(proven.substate_value_proof).filter(|proof| !proof.is_empty()),
         proof_epoch: proven.proof_epoch,
-        substate_down_proof: Some(proven.substate_down_proof).filter(|proof| !proof.is_empty()),
     })
 }
 
@@ -531,13 +557,7 @@ impl<TMsg: MessageSpec> RpcMultiPool<TMsg> {
         // transport allows, and the pool is shared by every caller: holding the lock across the dial
         // would queue all of them - including those bound for peers that are up - behind the one that
         // is down.
-        let client: rpc_service::ValidatorNodeRpcClient =
-            time::timeout(CONNECT_TIMEOUT, self.networking.connect_rpc(*addr))
-                .await
-                .map_err(|_| ValidatorNodeRpcClientError::ConnectTimeout {
-                    peer_id: *addr,
-                    timeout: CONNECT_TIMEOUT,
-                })??;
+        let client = self.connect_unpooled(addr).await?;
 
         let mut sessions = self.sessions.write().await;
         // Another caller may have connected to the same peer while this dial was in flight. Keep
@@ -549,6 +569,22 @@ impl<TMsg: MessageSpec> RpcMultiPool<TMsg> {
                 Ok(client)
             },
         }
+    }
+
+    /// Opens a session with `addr` that no other caller shares. A session serves one request at a time, so a
+    /// long-lived stream belongs on one of these: on the pooled session it holds every other caller's request to
+    /// the peer until it ends. The session closes when the last clone of the client is dropped.
+    pub async fn connect_unpooled(
+        &self,
+        addr: &PeerId,
+    ) -> Result<rpc_service::ValidatorNodeRpcClient, ValidatorNodeRpcClientError> {
+        let client = time::timeout(CONNECT_TIMEOUT, self.networking.connect_rpc(*addr))
+            .await
+            .map_err(|_| ValidatorNodeRpcClientError::ConnectTimeout {
+                peer_id: *addr,
+                timeout: CONNECT_TIMEOUT,
+            })??;
+        Ok(client)
     }
 
     async fn connected_session(&self, addr: &PeerId) -> Option<rpc_service::ValidatorNodeRpcClient> {
@@ -572,6 +608,139 @@ mod tests {
     /// The response as the client receives it, having crossed the wire.
     fn over_the_wire<M: Message + Default>(message: &M) -> M {
         M::decode(message.encode_to_vec().as_slice()).unwrap()
+    }
+
+    fn other_substate_id() -> SubstateId {
+        SubstateId::Component(ComponentAddress::new(ObjectKey::from_array([2; ObjectKey::LENGTH])))
+    }
+
+    fn frame(response: batch_response::Response) -> Result<proto::rpc::GetSubstatesBatchResponse, RpcStatus> {
+        Ok(over_the_wire(&proto::rpc::GetSubstatesBatchResponse {
+            response: Some(response),
+        }))
+    }
+
+    fn missing_frame(ids: &[&SubstateId]) -> Result<proto::rpc::GetSubstatesBatchResponse, RpcStatus> {
+        frame(batch_response::Response::Missing(proto::rpc::MissingSubstates {
+            substate_ids: ids.iter().map(|id| id.to_bytes()).collect(),
+        }))
+    }
+
+    fn down_substate_frame(id: &SubstateId) -> Result<proto::rpc::GetSubstatesBatchResponse, RpcStatus> {
+        frame(batch_response::Response::Substate(proto::rpc::ProvenSubstate {
+            substate: Some(proto::consensus::Substate {
+                substate_id: id.to_bytes(),
+                version: 2,
+                substate: vec![],
+                created: None,
+                destroyed: Some(proto::consensus::SubstateDestroyedMetadata {
+                    at_epoch: None,
+                    at_state_version: 5,
+                }),
+            }),
+            substate_value_proof: vec![],
+            proof_epoch: 0,
+        }))
+    }
+
+    async fn collect(
+        frames: Vec<Result<proto::rpc::GetSubstatesBatchResponse, RpcStatus>>,
+        requested: &[&SubstateId],
+    ) -> Result<SubstateBatch, ValidatorNodeRpcClientError> {
+        collect_substate_batch(futures::stream::iter(frames), requested).await
+    }
+
+    #[tokio::test]
+    async fn a_response_accounting_for_each_requested_id_once_is_accepted() {
+        let (a, b) = (substate_id(), other_substate_id());
+        let batch = collect(
+            vec![
+                frame(batch_response::Response::CommitProof(vec![1, 2, 3])),
+                down_substate_frame(&a),
+                missing_frame(&[&b]),
+            ],
+            &[&a, &b],
+        )
+        .await
+        .unwrap();
+        assert_eq!(batch.commit_proof, Some(vec![1, 2, 3]));
+        assert_eq!(batch.substates.len(), 1);
+        assert_eq!(batch.missing, vec![b]);
+    }
+
+    /// The message a response is rejected with.
+    async fn rejection_of(
+        frames: Vec<Result<proto::rpc::GetSubstatesBatchResponse, RpcStatus>>,
+        requested: &[&SubstateId],
+    ) -> String {
+        collect(frames, requested)
+            .await
+            .expect_err("the response was accepted")
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn a_peer_cannot_name_more_missing_ids_than_were_requested() {
+        let id = substate_id();
+        let frames = (0..100).map(|_| missing_frame(&[&id; 100])).collect();
+        let rejection = rejection_of(frames, &[&id]).await;
+        assert!(rejection.contains("more than once"), "{rejection}");
+    }
+
+    #[tokio::test]
+    async fn a_peer_cannot_name_an_unrequested_id_as_missing() {
+        let (a, b) = (substate_id(), other_substate_id());
+        let rejection = rejection_of(vec![missing_frame(&[&a, &b])], &[&a]).await;
+        assert!(rejection.contains("which was not requested"), "{rejection}");
+    }
+
+    #[tokio::test]
+    async fn a_peer_cannot_answer_for_an_id_twice() {
+        let id = substate_id();
+        let rejection = rejection_of(vec![down_substate_frame(&id), missing_frame(&[&id])], &[&id]).await;
+        assert!(rejection.contains("more than once"), "{rejection}");
+        let rejection = rejection_of(vec![missing_frame(&[&id]), down_substate_frame(&id)], &[&id]).await;
+        assert!(rejection.contains("more than once"), "{rejection}");
+    }
+
+    #[tokio::test]
+    async fn a_peer_cannot_send_more_than_one_commit_proof() {
+        let id = substate_id();
+        let frames = vec![
+            frame(batch_response::Response::CommitProof(vec![1])),
+            frame(batch_response::Response::CommitProof(vec![1])),
+            missing_frame(&[&id]),
+        ];
+        let rejection = rejection_of(frames, &[&id]).await;
+        assert!(rejection.contains("more than one commit proof"), "{rejection}");
+    }
+
+    #[tokio::test]
+    async fn a_peer_cannot_send_more_frames_than_the_request_accounts_for() {
+        let id = substate_id();
+        let empty_frames = (0..10_000)
+            .map(|_| Ok(proto::rpc::GetSubstatesBatchResponse { response: None }))
+            .chain([missing_frame(&[&id])])
+            .collect();
+        let rejection = rejection_of(empty_frames, &[&id]).await;
+        assert!(rejection.contains("more than 3 messages"), "{rejection}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_response_that_never_ends_times_out() {
+        let id = substate_id();
+        let never_ends = futures::stream::iter([frame(batch_response::Response::CommitProof(vec![1]))])
+            .chain(futures::stream::pending());
+        let result = time::timeout(
+            Duration::from_secs(24 * 60 * 60),
+            collect_substate_batch(never_ends, &[&id]),
+        )
+        .await
+        .expect("the batch read is not bounded in time");
+        assert!(
+            matches!(result, Err(ValidatorNodeRpcClientError::ResponseTimeout { .. })),
+            "{result:?}"
+        );
     }
 
     #[test]
@@ -611,7 +780,7 @@ mod tests {
     }
 
     #[test]
-    fn a_batched_down_substate_carries_its_down_proof() {
+    fn a_batched_destroyed_substate_decodes_as_down() {
         let destroyed = over_the_wire(&proto::rpc::ProvenSubstate {
             substate: Some(proto::consensus::Substate {
                 substate_id: substate_id().to_bytes(),
@@ -625,27 +794,8 @@ mod tests {
             }),
             substate_value_proof: vec![1],
             proof_epoch: 0,
-            substate_down_proof: vec![7, 8],
         });
         let batched = decode_batched_substate(destroyed).unwrap();
         assert!(matches!(batched.result, SubstateResult::Down { .. }));
-        assert_eq!(batched.substate_down_proof, Some(vec![7, 8]));
-
-        let without = over_the_wire(&proto::rpc::ProvenSubstate {
-            substate: Some(proto::consensus::Substate {
-                substate_id: substate_id().to_bytes(),
-                version: 2,
-                substate: vec![],
-                created: None,
-                destroyed: Some(proto::consensus::SubstateDestroyedMetadata {
-                    at_epoch: None,
-                    at_state_version: 5,
-                }),
-            }),
-            substate_value_proof: vec![1],
-            proof_epoch: 0,
-            substate_down_proof: vec![],
-        });
-        assert_eq!(decode_batched_substate(without).unwrap().substate_down_proof, None);
     }
 }

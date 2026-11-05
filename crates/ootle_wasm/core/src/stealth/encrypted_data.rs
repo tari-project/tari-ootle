@@ -19,7 +19,7 @@ pub struct DecryptedOutputResult {
     pub mask: Vec<u8>,
     /// The plaintext value (microtari).
     pub value: u64,
-    /// JSON-encoded `Memo` (one of `U256`/`Message`/`Bytes`/`PayRefAndBytes`) or `None` if the encrypted
+    /// JSON-encoded `Memo` (one of `U256`/`Message`/`Bytes`/`DestinationTagAndBytes`) or `None` if the encrypted
     /// payload carried no memo, or if the caller passed `skip_memo`.
     pub memo_json: Option<String>,
 }

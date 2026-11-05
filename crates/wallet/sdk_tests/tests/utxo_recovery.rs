@@ -1,0 +1,552 @@
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+mod support;
+
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+
+use futures::StreamExt;
+use tari_engine_types::{Epoch, Utxo, substate::SubstateId};
+use tari_indexer_client::types::{EpochCheckpointEntry, ValidatorSetCommittee, WatchedSubstateItem};
+use tari_ootle_common_types::{
+    StateVersion,
+    SubstateVersion,
+    optional::IsNotFoundError,
+    response_status::{ResponseErrorStatus, TransactionStatusResponseError},
+    shard::Shard,
+};
+use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
+use tari_ootle_wallet_sdk::{
+    models::{AccountWithAddress, StartOfShard, UtxoUnspent, UtxoUpdatePayload, WalletEvent, WalletUtxoUpdate},
+    network::{
+        FetchedSubstates,
+        FetchedUtxos,
+        PlacedTagAndNoncePair,
+        SubstateQueryResult,
+        TransactionFinalizedStream,
+        TransactionQueryResult,
+        UtxoUpdateStream,
+        WalletNetworkInterface,
+    },
+    storage::{
+        QueuedUtxo,
+        ReadableWalletStore,
+        TagAndPublicNoncePair,
+        WalletStoreReader,
+        WalletStoreWriter,
+        WriteableWalletStore,
+    },
+};
+use tari_ootle_wallet_sdk_services::{
+    notify::Notify,
+    utxo_scanner::{StealthUtxoScannerWorker, UtxoRecovery},
+};
+use tari_template_abi::TemplateDef;
+use tari_template_lib::types::{
+    Amount,
+    ResourceAddress,
+    TemplateAddress,
+    UtxoAddress,
+    UtxoId,
+    constants::STEALTH_TARI_RESOURCE_ADDRESS,
+};
+
+use crate::support::TestWithNetwork;
+
+#[derive(Debug, thiserror::Error)]
+#[error("not found")]
+struct FakeError;
+
+impl IsNotFoundError for FakeError {
+    fn is_not_found_error(&self) -> bool {
+        true
+    }
+}
+
+impl TransactionStatusResponseError for FakeError {
+    fn get_status(&self) -> ResponseErrorStatus {
+        ResponseErrorStatus::NotFound {
+            message: self.to_string(),
+        }
+    }
+
+    fn get_error_message(&self) -> String {
+        self.to_string()
+    }
+}
+
+#[derive(Debug, Default)]
+struct UtxoNetworkState {
+    /// The UTXOs streamed as unspent in shard 0 at state version 1.
+    streamed: Vec<(UtxoId, Utxo)>,
+    /// The UTXOs the full-UTXO lookup returns.
+    indexed: Vec<(UtxoId, Utxo)>,
+    /// The pairs the full-UTXO lookup reports spent.
+    spent: Vec<TagAndPublicNoncePair>,
+    /// The state version the full-UTXO lookup has indexed each shard through. A requested pair placed at or below it
+    /// that the lookup does not return is reported spent.
+    indexed_through: HashMap<Shard, StateVersion>,
+}
+
+/// An indexer whose UTXO stream and full-UTXO lookup can disagree, as two indexers at different heights do.
+#[derive(Debug, Clone, Default)]
+struct UtxoNetwork {
+    state: Arc<Mutex<UtxoNetworkState>>,
+}
+
+impl UtxoNetwork {
+    fn stream(&self, utxo: (UtxoId, Utxo)) {
+        self.state.lock().unwrap().streamed.push(utxo);
+    }
+
+    fn index(&self, utxo: (UtxoId, Utxo)) {
+        self.state.lock().unwrap().indexed.push(utxo);
+    }
+
+    fn spend(&self, utxo: &Utxo) {
+        self.state.lock().unwrap().spent.push(tag_and_nonce(utxo));
+    }
+
+    fn index_through(&self, shard: u32, state_version: u64) {
+        self.state
+            .lock()
+            .unwrap()
+            .indexed_through
+            .insert(Shard::from(shard), StateVersion::from(state_version));
+    }
+}
+
+fn tag_and_nonce(utxo: &Utxo) -> TagAndPublicNoncePair {
+    let output = utxo.output().expect("an unspent UTXO has an output");
+    (output.tag, output.output.public_nonce)
+}
+
+impl WalletNetworkInterface for UtxoNetwork {
+    type Error = FakeError;
+
+    async fn query_substate(
+        &self,
+        _address: &SubstateId,
+        _version: Option<SubstateVersion>,
+        _local_search_only: bool,
+        _include_proof: bool,
+    ) -> Result<SubstateQueryResult, Self::Error> {
+        panic!("UtxoNetwork::query_substate called")
+    }
+
+    async fn get_substates(&self, _: &[SubstateId], _: bool) -> Result<FetchedSubstates, Self::Error> {
+        panic!("UtxoNetwork::get_substates called")
+    }
+
+    async fn submit_transaction(&self, _: Transaction) -> Result<TransactionId, Self::Error> {
+        panic!("UtxoNetwork::submit_transaction called")
+    }
+
+    async fn submit_transaction_envelope(&self, _: TransactionEnvelope) -> Result<TransactionId, Self::Error> {
+        panic!("UtxoNetwork::submit_transaction_envelope called")
+    }
+
+    async fn submit_dry_run_transaction(&self, _: Transaction) -> Result<TransactionQueryResult, Self::Error> {
+        panic!("UtxoNetwork::submit_dry_run_transaction called")
+    }
+
+    async fn query_transaction_result(&self, _: TransactionId, _: bool) -> Result<TransactionQueryResult, Self::Error> {
+        panic!("UtxoNetwork::query_transaction_result called")
+    }
+
+    async fn subscribe_transaction_finalized(&self) -> Result<TransactionFinalizedStream<Self::Error>, Self::Error> {
+        Ok(futures::stream::pending().boxed())
+    }
+
+    async fn fetch_template_definition(&self, _: TemplateAddress) -> Result<TemplateDef, Self::Error> {
+        panic!("UtxoNetwork::fetch_template_definition called")
+    }
+
+    async fn stream_stealth_utxo_updates(
+        &self,
+        _from_epoch: Epoch,
+        _resource_address: ResourceAddress,
+        shard_state_versions: Vec<(Shard, StateVersion)>,
+        _unspent_only: bool,
+    ) -> Result<UtxoUpdateStream<Self::Error>, Self::Error> {
+        let shard = Shard::from(0u32);
+        let synced = shard_state_versions
+            .iter()
+            .any(|(s, v)| *s == shard && *v >= StateVersion::from(1));
+        if synced {
+            return Ok(futures::stream::empty().boxed());
+        }
+        let sos = StartOfShard {
+            shard,
+            max_state_version: StateVersion::from(1),
+            has_more: false,
+            spends_incomplete: false,
+        };
+        let payloads = self
+            .state
+            .lock()
+            .unwrap()
+            .streamed
+            .iter()
+            .enumerate()
+            .map(|(i, (_, utxo))| {
+                let (tag, public_nonce) = tag_and_nonce(utxo);
+                Ok(UtxoUpdatePayload {
+                    sos: (i == 0).then_some(sos.clone()),
+                    update: Some(WalletUtxoUpdate::Unspent(UtxoUnspent { tag, public_nonce })),
+                    eos: None,
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(futures::stream::iter(payloads).boxed())
+    }
+
+    async fn list_watched_substates(
+        &self,
+        _: Option<TemplateAddress>,
+        _: Option<u64>,
+        _: Option<u64>,
+    ) -> Result<Vec<WatchedSubstateItem>, Self::Error> {
+        panic!("UtxoNetwork::list_watched_substates called")
+    }
+
+    async fn fetch_utxos(
+        &self,
+        _resource_address: ResourceAddress,
+        tag_and_nonce_pairs: Vec<PlacedTagAndNoncePair>,
+    ) -> Result<FetchedUtxos, Self::Error> {
+        let state = self.state.lock().unwrap();
+        let requested =
+            |pair: &TagAndPublicNoncePair| tag_and_nonce_pairs.iter().any(|(requested, _)| requested == pair);
+        let unspent = state
+            .indexed
+            .iter()
+            .filter(|(_, utxo)| requested(&tag_and_nonce(utxo)))
+            .cloned()
+            .collect::<Vec<_>>();
+        let held = unspent.iter().map(|(_, utxo)| tag_and_nonce(utxo)).collect::<Vec<_>>();
+        let gone = tag_and_nonce_pairs
+            .iter()
+            .filter(|(pair, unspent_at)| {
+                !held.contains(pair) &&
+                    !state.spent.contains(pair) &&
+                    unspent_at.is_some_and(|(shard, state_version)| {
+                        state
+                            .indexed_through
+                            .get(&shard)
+                            .is_some_and(|indexed_through| *indexed_through >= state_version)
+                    })
+            })
+            .map(|(pair, _)| *pair);
+        let spent = state.spent.iter().copied().filter(requested).chain(gone).collect();
+        Ok(FetchedUtxos { unspent, spent })
+    }
+
+    async fn get_latest_epoch_checkpoint(&self, _shard: Shard) -> Result<EpochCheckpointEntry, Self::Error> {
+        panic!("UtxoNetwork::get_latest_epoch_checkpoint called")
+    }
+
+    async fn get_latest_shard_group_checkpoints(&self) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        panic!("UtxoNetwork::get_latest_shard_group_checkpoints called")
+    }
+
+    async fn list_epoch_checkpoints(
+        &self,
+        _from_epoch: Epoch,
+        _limit: u32,
+        _shard: Shard,
+    ) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        panic!("UtxoNetwork::list_epoch_checkpoints called")
+    }
+
+    async fn get_committee(&self, _epoch: Epoch, _shard: Shard) -> Result<ValidatorSetCommittee, Self::Error> {
+        panic!("UtxoNetwork::get_committee called")
+    }
+
+    async fn get_current_epoch(&self) -> Result<Epoch, Self::Error> {
+        panic!("UtxoNetwork::get_current_epoch called")
+    }
+
+    async fn get_consensus_epoch(&self) -> Result<Option<Epoch>, Self::Error> {
+        panic!("UtxoNetwork::get_consensus_epoch called")
+    }
+
+    async fn wait_until_ready(&self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+type Test = TestWithNetwork<UtxoNetwork>;
+
+fn new_test(network: UtxoNetwork) -> (Test, AccountWithAddress) {
+    let test = TestWithNetwork::without_accounts(network);
+    let address = test.sdk().key_manager_api().next_account_address().unwrap();
+    let account = test
+        .sdk()
+        .accounts_api()
+        .create_account(Some("test"), false, address)
+        .unwrap();
+    (test, account)
+}
+
+fn queued(test: &Test) -> usize {
+    test.store()
+        .with_read_tx(|tx| tx.utxo_process_queue_fetch_batch(None, 1000))
+        .unwrap()
+        .len()
+}
+
+fn is_stored(test: &Test, id: UtxoId) -> bool {
+    test.sdk()
+        .stealth_outputs_api()
+        .utxo_exists(&UtxoAddress::new(STEALTH_TARI_RESOURCE_ADDRESS, id))
+        .unwrap()
+}
+
+fn balance(test: &Test, account: &AccountWithAddress) -> Amount {
+    test.sdk()
+        .stealth_outputs_api()
+        .get_unspent_balance_for_account_resource(account.account.component_address(), &STEALTH_TARI_RESOURCE_ADDRESS)
+        .unwrap()
+}
+
+/// Scans the account once, queueing every streamed UTXO for recovery.
+async fn scan(test: &Test, account: &AccountWithAddress) {
+    let (_join, scanner) = StealthUtxoScannerWorker::new(test.sdk().clone(), Notify::new(10)).spawn();
+    scanner
+        .scan(*account.account.component_address(), STEALTH_TARI_RESOURCE_ADDRESS)
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_utxo_the_lookup_does_not_know_stays_queued_until_it_is_recovered() {
+    let network = UtxoNetwork::default();
+    let (test, account) = new_test(network.clone());
+    let (id, utxo) = test.owned_utxo(&account, 1_234);
+    network.stream((id, utxo.clone()));
+
+    scan(&test, &account).await;
+    assert_eq!(queued(&test), 1);
+
+    let notify = Notify::new(10);
+    let mut events = notify.subscribe();
+    let mut recovery = UtxoRecovery::new(test.sdk().clone()).with_notify(notify);
+    let num_unresolved = recovery.process_utxo_validation_queue().await.unwrap();
+    assert_eq!(num_unresolved, 1);
+    assert_eq!(
+        queued(&test),
+        1,
+        "an output the lookup does not know is not known to be spent"
+    );
+    assert!(!is_stored(&test, id));
+    assert!(
+        events.try_recv().is_err(),
+        "a round that resolves nothing publishes no events"
+    );
+
+    network.index((id, utxo));
+    let num_unresolved = recovery.process_utxo_validation_queue().await.unwrap();
+    assert_eq!(num_unresolved, 0);
+    assert_eq!(queued(&test), 0);
+    assert!(is_stored(&test, id));
+    assert_eq!(balance(&test, &account), Amount::from_u64(1_234));
+
+    let events = std::iter::from_fn(|| events.try_recv().ok()).collect::<Vec<_>>();
+    assert!(matches!(events.first(), Some(WalletEvent::UtxoRecoveryStarted(_))));
+    assert!(matches!(events.last(), Some(WalletEvent::UtxoRecoveryCompleted(e)) if e.num_recovered == 1));
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(e, WalletEvent::UtxoRecoveryCompleted(_)))
+            .count(),
+        1
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_partial_lookup_resolves_the_returned_and_spent_utxos_and_keeps_the_rest_queued() {
+    let network = UtxoNetwork::default();
+    let (test, account) = new_test(network.clone());
+    let (returned_id, returned) = test.owned_utxo(&account, 100);
+    let (spent_id, spent) = test.owned_utxo(&account, 200);
+    let (unknown_id, unknown) = test.owned_utxo(&account, 300);
+    network.stream((returned_id, returned.clone()));
+    network.stream((spent_id, spent.clone()));
+    network.stream((unknown_id, unknown));
+    network.index((returned_id, returned));
+    network.spend(&spent);
+
+    scan(&test, &account).await;
+    assert_eq!(queued(&test), 3);
+
+    let num_unresolved = UtxoRecovery::new(test.sdk().clone())
+        .process_utxo_validation_queue()
+        .await
+        .unwrap();
+    assert_eq!(num_unresolved, 1);
+    assert_eq!(queued(&test), 1, "only the unknown output stays queued");
+    assert!(is_stored(&test, returned_id));
+    assert!(!is_stored(&test, spent_id));
+    assert!(!is_stored(&test, unknown_id));
+    assert_eq!(balance(&test, &account), Amount::from_u64(100));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_round_reaches_entries_queued_behind_more_than_a_batch_of_unknown_utxos() {
+    let network = UtxoNetwork::default();
+    let (test, account) = new_test(network.clone());
+    let account_address = *account.account.component_address();
+    let unknown = (0..150).map(|_| test.owned_utxo(&account, 1)).collect::<Vec<_>>();
+    let (id, utxo) = test.owned_utxo(&account, 777);
+    network.index((id, utxo.clone()));
+
+    let queue_items = unknown
+        .iter()
+        .chain([&(id, utxo)])
+        .map(|(_, utxo)| {
+            let (tag, public_nonce) = tag_and_nonce(utxo);
+            (UtxoUnspent { tag, public_nonce }, QueuedUtxo {
+                account: account_address,
+                unspent_at: None,
+            })
+        })
+        .collect::<Vec<_>>();
+    test.store()
+        .with_write_tx(|tx| tx.utxo_process_queue_extend(&STEALTH_TARI_RESOURCE_ADDRESS, queue_items))
+        .unwrap();
+    assert_eq!(queued(&test), 151);
+
+    let num_unresolved = UtxoRecovery::new(test.sdk().clone())
+        .process_utxo_validation_queue()
+        .await
+        .unwrap();
+    assert_eq!(num_unresolved, 150);
+    assert_eq!(queued(&test), 150);
+    assert!(
+        is_stored(&test, id),
+        "the entry behind the unknown ones is processed in the same round"
+    );
+}
+
+fn queue_at(test: &Test, account: &AccountWithAddress, utxo: &Utxo, unspent_at: Option<(u32, u64)>) {
+    let (tag, public_nonce) = tag_and_nonce(utxo);
+    let item = (UtxoUnspent { tag, public_nonce }, QueuedUtxo {
+        account: *account.account.component_address(),
+        unspent_at: unspent_at.map(|(shard, state_version)| (Shard::from(shard), StateVersion::from(state_version))),
+    });
+    test.store()
+        .with_write_tx(|tx| tx.utxo_process_queue_extend(&STEALTH_TARI_RESOURCE_ADDRESS, [item]))
+        .unwrap();
+}
+
+fn second_account(test: &Test) -> AccountWithAddress {
+    let address = test.sdk().key_manager_api().next_account_address().unwrap();
+    test.sdk()
+        .accounts_api()
+        .create_account(Some("second"), false, address)
+        .unwrap()
+}
+
+async fn recover(test: &Test) -> usize {
+    UtxoRecovery::new(test.sdk().clone())
+        .process_utxo_validation_queue()
+        .await
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_utxo_the_lookup_has_indexed_past_and_does_not_hold_leaves_the_queue() {
+    let network = UtxoNetwork::default();
+    let (test, account) = new_test(network.clone());
+    let (id, utxo) = test.owned_utxo(&account, 100);
+    network.stream((id, utxo));
+    scan(&test, &account).await;
+    assert_eq!(queued(&test), 1);
+    network.index_through(0, 1);
+
+    assert_eq!(recover(&test).await, 0);
+    assert_eq!(
+        queued(&test),
+        0,
+        "an output streamed unspent at a version the lookup has indexed through, and not held unspent, is spent"
+    );
+    assert!(!is_stored(&test, id));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_utxo_in_a_shard_the_lookup_has_not_indexed_through_its_version_stays_queued() {
+    let network = UtxoNetwork::default();
+    let (test, account) = new_test(network.clone());
+    let (_, utxo) = test.owned_utxo(&account, 100);
+    queue_at(&test, &account, &utxo, Some((1, 4)));
+    network.index_through(1, 3);
+
+    assert_eq!(recover(&test).await, 1);
+    assert_eq!(queued(&test), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_utxo_with_an_unknown_placement_stays_queued() {
+    let network = UtxoNetwork::default();
+    let (test, account) = new_test(network.clone());
+    let (_, utxo) = test.owned_utxo(&account, 100);
+    queue_at(&test, &account, &utxo, None);
+    network.index_through(1, 100);
+
+    assert_eq!(recover(&test).await, 1);
+    assert_eq!(queued(&test), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_utxo_queued_again_in_its_shard_is_placed_at_the_later_version() {
+    let network = UtxoNetwork::default();
+    let (test, account) = new_test(network.clone());
+    let (_, utxo) = test.owned_utxo(&account, 100);
+    queue_at(&test, &account, &utxo, Some((1, 4)));
+    queue_at(&test, &account, &utxo, Some((1, 2)));
+    network.index_through(1, 3);
+
+    assert_eq!(recover(&test).await, 1);
+    assert_eq!(queued(&test), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_utxo_queued_for_two_accounts_in_two_shards_stays_queued() {
+    let network = UtxoNetwork::default();
+    let (test, account) = new_test(network.clone());
+    let other = second_account(&test);
+    let (_, utxo) = test.owned_utxo(&account, 100);
+    queue_at(&test, &other, &utxo, Some((2, 1)));
+    queue_at(&test, &account, &utxo, Some((1, 1)));
+    network.index_through(1, 5);
+
+    assert_eq!(recover(&test).await, 1);
+    assert_eq!(
+        test.store()
+            .with_read_tx(|tx| tx.utxo_process_queue_fetch_batch(None, 1000))
+            .unwrap()
+            .len(),
+        1,
+        "the other account's entry may be in a shard the lookup has not indexed yet"
+    );
+}
+
+#[test]
+fn a_batch_places_a_pair_by_every_queued_entry_of_it_beyond_the_batch() {
+    let (test, account) = new_test(UtxoNetwork::default());
+    let other = second_account(&test);
+    let (_, utxo) = test.owned_utxo(&account, 100);
+    queue_at(&test, &account, &utxo, Some((1, 1)));
+    queue_at(&test, &other, &utxo, Some((2, 100)));
+
+    let batch = test
+        .store()
+        .with_read_tx(|tx| tx.utxo_process_queue_fetch_batch(None, 1))
+        .unwrap();
+    let queued = batch.entries[&STEALTH_TARI_RESOURCE_ADDRESS][&tag_and_nonce(&utxo)];
+    assert_eq!(queued.unspent_at, None);
+}

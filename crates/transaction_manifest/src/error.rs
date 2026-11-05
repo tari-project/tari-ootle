@@ -26,6 +26,8 @@ pub enum ManifestError {
     LexError(String),
     #[error("Manifest source is {size} bytes, exceeding the maximum of {max}")]
     ManifestTooLarge { size: usize, max: usize },
+    #[error("Manifest nests brackets, braces or parentheses more than {max} levels deep")]
+    NestingTooDeep { max: usize },
     #[error("Syntax error: {0}")]
     SyntaxError(#[from] syn::Error),
     #[error("Missing expression")]
@@ -44,6 +46,8 @@ pub enum ManifestError {
     InvalidVariableType(String),
     #[error("Template alias '{alias}' not defined")]
     TemplateAliasNotDefined { alias: String },
+    #[error("Template alias '{alias}' is already defined for a different template")]
+    TemplateAliasRedefined { alias: String },
     #[error("Invalid instruction: {reason}")]
     InvalidInstruction { reason: String },
     #[error("Maximum call depth of {max} exceeded")]

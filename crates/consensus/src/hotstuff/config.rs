@@ -16,8 +16,14 @@ pub struct HotstuffConfig {
     /// The number of state versions the state store keeps the tree nodes of. A substate's down proof is built from a
     /// version within it.
     pub state_history_length: u64,
+    /// The number of most recent epoch checkpoints at whose versions the state store keeps each shard's whole tree.
+    pub pinned_checkpoint_epochs: u64,
     pub state_tree_cleanup_interval: Duration,
     pub epoch_gc_interval: Duration,
     pub epoch_end_grace_period: Duration,
+    /// How long a leader drains cross-shard transactions before an end of epoch that changes the number of
+    /// committees (see [`EpochEndDrain`](crate::hotstuff::EpochEndDrain)). It must cover a healthy round trip with a
+    /// foreign shard group, so that only transactions whose foreign shard group fails to deliver are aborted.
+    pub epoch_end_drain_period: Duration,
     pub catch_up_request_timeout: Duration,
 }

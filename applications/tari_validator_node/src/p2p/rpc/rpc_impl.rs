@@ -21,24 +21,26 @@
 // OTHERWISE) ARISING IN ANY WAY OUT OF THE  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
 // DAMAGE.
 use std::{
+    collections::{BTreeSet, HashSet},
     convert::{TryFrom, TryInto},
     num::NonZeroUsize,
+    sync::{Arc, Mutex, PoisonError},
 };
 
 use log::*;
 use tari_bor::encode;
 use tari_consensus::hotstuff::commit_proofs::generate_block_commit_proof;
-use tari_consensus_types::{BlockId, HighPc, ProposalCertificate};
+use tari_consensus_types::{HighPc, ProposalCertificate};
 use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_ootle_common_types::{
     Epoch,
-    NodeHeight,
     NumPreshards,
     ShardGroup,
     SubstateRequirement,
     displayable::Displayable,
     optional::Optional,
+    shard::Shard,
 };
 use tari_ootle_p2p::{
     PeerAddress,
@@ -54,6 +56,8 @@ use tari_ootle_p2p::{
         GetConsensusStateResponse,
         GetHighQcRequest,
         GetHighQcResponse,
+        GetShardSnapshotRequest,
+        GetShardSnapshotResponse,
         GetSubstateRequest,
         GetSubstateResponse,
         GetSubstatesBatchRequest,
@@ -62,14 +66,13 @@ use tari_ootle_p2p::{
         GetTransactionResultResponse,
         PayloadResultStatus,
         SubstateStatus,
-        SyncBlocksRequest,
-        SyncBlocksResponse,
         SyncStateRequest,
         SyncStateResponse,
         get_substates_batch_response as batch_response,
     },
 };
 use tari_ootle_storage::{
+    CommittedShardGroupState,
     StateStore,
     StateStoreReadTransaction,
     StorageError,
@@ -79,6 +82,7 @@ use tari_ootle_storage::{
         BookkeepingEpochAgnosticRead,
         CommittedBlockProof,
         EpochCheckpoint,
+        ShardStateLeaf,
         SubstateRecord,
         SubstateValueFilterFlags,
         TransactionRecord,
@@ -87,17 +91,28 @@ use tari_ootle_storage::{
 };
 use tari_ootle_transaction::TransactionId;
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
-use tari_state_tree::SubstateValueProof;
+use tari_sidechain::FixedHash;
+use tari_state_tree::{LeafKey, SubstateValueProof, TreeHash};
 use tari_validator_node_rpc::{STATE_SYNC_MAX_BATCH_SIZE, rpc_service::ValidatorNodeRpcService};
-use tokio::{sync::mpsc, task};
+use tokio::{
+    sync::{OwnedSemaphorePermit, Semaphore, mpsc},
+    task,
+};
 
 use crate::{
     consensus::ConsensusHandle,
     p2p::{
         rpc::{
             CONSENSUS_NOT_RUNNING,
-            block_sync_task::BlockSyncTask,
-            state_sync_task::{HeldHistory, ShardCursor, StateSyncTask, TipAuthority, ensure_epoch_reached},
+            shard_snapshot::{MAX_SNAPSHOT_PAGE_SUBSTATES, ShardSnapshotPage, read_shard_snapshot},
+            state_sync_task::{
+                HeldHistory,
+                ShardCursor,
+                StateSyncTask,
+                TipAuthority,
+                ensure_epoch_reached,
+                ensure_history_values_held,
+            },
         },
         services::mempool::MempoolHandle,
     },
@@ -105,12 +120,26 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::p2p::rpc";
 
+/// The most state version reads `sync_state` streams run at once. A read is synchronous and occupies a runtime worker,
+/// one per core, so state sync reads take at most half of them and leave the rest to consensus.
+fn max_concurrent_state_sync_reads() -> usize {
+    std::thread::available_parallelism()
+        .map_or(1, |cores| cores.get() / 2)
+        .max(1)
+}
+
 pub struct ValidatorNodeRpcServiceImpl<TStateStore> {
     epoch_manager: EpochManagerHandle<PeerAddress>,
     state_store: TStateStore,
     mempool: MempoolHandle,
     consensus: ConsensusHandle,
     max_transaction_size_bytes: usize,
+    /// The epochs of history the state store keeps before epoch GC prunes it, destroyed substates' values included.
+    epoch_history_length: u64,
+    /// Permits for the batch responses held in memory at once; see [`MAX_BUFFERED_BATCH_RESPONSES`].
+    batch_responses: Arc<Semaphore>,
+    state_sync_reads: Arc<Semaphore>,
+    root_mismatch_log: Arc<RootMismatchLog>,
 }
 
 impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
@@ -120,6 +149,7 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
         mempool: MempoolHandle,
         consensus: ConsensusHandle,
         max_transaction_size_bytes: usize,
+        epoch_history_length: u64,
     ) -> Self {
         Self {
             epoch_manager,
@@ -127,6 +157,10 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
             mempool,
             consensus,
             max_transaction_size_bytes,
+            epoch_history_length,
+            batch_responses: Arc::new(Semaphore::new(MAX_BUFFERED_BATCH_RESPONSES)),
+            state_sync_reads: Arc::new(Semaphore::new(max_concurrent_state_sync_reads())),
+            root_mismatch_log: Arc::default(),
         }
     }
 
@@ -162,41 +196,41 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
             .map(|info| info.shard_group()))
     }
 
-    fn check_consensus_state(&self) -> Result<(), RpcStatus> {
-        if self.consensus.can_serve_committed_state() {
-            Ok(())
-        } else {
-            Err(RpcStatus::unavailable(CONSENSUS_NOT_RUNNING))
-        }
-    }
-
     /// Attaches a commit proof and a substate value proof for `substate` to `resp`, anchored to the
-    /// latest committed block. Generated within the caller's read tx (the same one used for the
-    /// substate lookup) so the value proof's group root matches the commit proof's block header. If
-    /// nothing is committed beyond the epoch genesis yet, no proof is attached and the caller treats
-    /// the result as unverified.
+    /// block [`read_anchor`] picks. Generated within the caller's read tx (the same one used for the
+    /// substate lookup) so the value proof's group root matches the commit proof's block header. With
+    /// no anchor, no proof is attached and the caller treats the result as unverified.
     ///
-    /// A down substate is proven only together with a [`SubstateDownProof`](tari_state_tree::SubstateDownProof),
-    /// since its exclusion proof alone is also satisfied by a version that never existed. A down substate this node
-    /// recorded no such proof for is answered with no proof at all.
+    /// A down substate is proven with a [`SubstateDownProof`](tari_state_tree::SubstateDownProof) while this node holds
+    /// its record, and otherwise with its exclusion proof alone. The exclusion is also satisfied by a version that
+    /// never existed, so it shows the version gone only to a reader that has proven the version up at a block of an
+    /// earlier epoch.
     fn attach_substate_proof<TTx: StateStoreReadTransaction>(
-        &self,
         tx: &TTx,
         num_preshards: NumPreshards,
+        anchor_at: ReadAnchorAt,
         substate: &SubstateRecord,
         resp: &mut GetSubstateResponse,
     ) -> Result<(), RpcStatus> {
-        let epoch = self.consensus.current_epoch();
-        let Some(commit_proof) = latest_commit_proof(tx, epoch).map_err(RpcStatus::log_internal_error(LOG_TARGET))?
-        else {
+        let Some(commit_proof) = read_anchor(tx, anchor_at).map_err(RpcStatus::log_internal_error(LOG_TARGET))? else {
             return Ok(());
         };
         attach_substate_proof_at(tx, num_preshards, &commit_proof, substate, resp)
     }
+
+    /// Where reads are anchored: consensus's epoch, and the shard group this node is a member of in it.
+    async fn read_anchor_at(&self) -> Result<ReadAnchorAt, RpcStatus> {
+        let epoch = self.consensus.current_epoch();
+        Ok(ReadAnchorAt {
+            epoch,
+            shard_group: self.local_shard_group_at(epoch).await?,
+        })
+    }
 }
 
 /// Attaches the proof of `substate` anchored at `commit_proof` to `resp`, or leaves every proof field empty when the
-/// anchor cannot speak for the substate or the substate is down without a recorded down proof.
+/// anchor cannot speak for the substate. A down substate without a recorded down proof is answered with its exclusion
+/// proof and no down proof.
 fn attach_substate_proof_at<TTx: StateStoreReadTransaction>(
     tx: &TTx,
     num_preshards: NumPreshards,
@@ -223,9 +257,6 @@ fn attach_substate_proof_at<TTx: StateStoreReadTransaction>(
 
     let down_proof = encode_down_proof(tx, num_preshards, substate, &value_proof)
         .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-    if substate.is_destroyed() && down_proof.is_none() {
-        return Ok(());
-    }
 
     resp.commit_proof = commit_proof.to_bytes();
     resp.substate_value_proof =
@@ -280,9 +311,44 @@ fn proof_shard_group(commit_proof: &CommittedBlockProof) -> Result<ShardGroup, S
 
 /// What the responder needs to prove a batch of substates against its own committed state.
 struct BatchProofContext {
-    epoch: Epoch,
+    /// Where the batch's proofs are anchored. `None` when no proofs were asked for.
+    anchor_at: Option<ReadAnchorAt>,
     num_preshards: NumPreshards,
-    include_proofs: bool,
+    /// The most encoded bytes the anchor and substate frames of one response may take. The missing list
+    /// is bounded by the request's id count instead.
+    max_response_bytes: usize,
+}
+
+/// A batch response is read whole before any of it is streamed, and stays in memory until the peer
+/// has read it, so it is bounded in bytes as well as in substates. A single substate of up to the
+/// engine's size limit always fits.
+const MAX_BATCH_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+
+/// How many batch responses the node holds at once, from the store read until the peer's stream is
+/// dropped. Together with [`MAX_BATCH_RESPONSE_BYTES`] this bounds the memory batch responses can
+/// take, however many sessions peers open.
+const MAX_BUFFERED_BATCH_RESPONSES: usize = 32;
+
+/// Streams `responses` to the peer. The stream holds `permit` until the server has finished sending
+/// the response and drops it.
+fn stream_batch_response(
+    responses: Vec<batch_response::Response>,
+    permit: OwnedSemaphorePermit,
+) -> Streaming<GetSubstatesBatchResponse> {
+    let (sender, receiver) = mpsc::channel(responses.len().max(1));
+    task::spawn(async move {
+        for resp in responses {
+            if sender
+                .send(Ok(GetSubstatesBatchResponse { response: Some(resp) }))
+                .await
+                .is_err()
+            {
+                warn!(target: LOG_TARGET, "Receiver dropped the stream, stopping substate batch response stream");
+                return;
+            }
+        }
+    });
+    Streaming::new(receiver).with_guard(permit)
 }
 
 /// Reads the head version of each of `ids` and, when proofs were asked for, a single anchor followed
@@ -292,6 +358,10 @@ struct BatchProofContext {
 /// shard-group root. The anchor comes first so a client can establish that root before it has to
 /// verify anything against it; `missing` comes last, once the ids that were found are known.
 ///
+/// Substates are answered in request order until the next one would take the response past
+/// `ctx.max_response_bytes`; that one and every id after it are reported as missing without being
+/// read. The first substate is always answered, so every substate can be served by some batch.
+///
 /// A substate whose shard has no committed state cannot be proved against the anchor. It is reported
 /// as missing rather than failing the batch, so the ids that can be answered still are; the client
 /// refetches whatever it did not get.
@@ -300,16 +370,14 @@ fn read_substate_batch<TTx: StateStoreReadTransaction>(
     ids: &[SubstateId],
     ctx: BatchProofContext,
 ) -> Result<Vec<batch_response::Response>, StorageError> {
-    let (substates, missing) = SubstateRecord::get_any_max_version(tx, ids)?;
-    let mut missing = missing.into_iter().map(|id| id.to_bytes()).collect::<Vec<_>>();
-
+    let mut missing = Vec::new();
     let mut generator = None;
-    let mut messages = Vec::with_capacity(substates.len() + 2);
-    if ctx.include_proofs &&
-        let Some(commit_proof) = latest_commit_proof(tx, ctx.epoch)?
+    let mut messages = Vec::with_capacity(ids.len() + 2);
+    let mut response_bytes = 0usize;
+    if let Some(anchor_at) = ctx.anchor_at &&
+        let Some(commit_proof) = read_anchor(tx, anchor_at)?
     {
         let shard_group = proof_shard_group(&commit_proof)?;
-        messages.push(batch_response::Response::CommitProof(commit_proof.to_bytes()));
         generator = Some(SubstateProofGenerator::new(
             tx,
             shard_group,
@@ -318,9 +386,27 @@ fn read_substate_batch<TTx: StateStoreReadTransaction>(
                 reason: format!("commit proof: {e}"),
             })?,
         )?);
+        let frame = batch_response::Response::CommitProof(commit_proof.to_bytes());
+        response_bytes = frame.encoded_len();
+        messages.push(frame);
     }
 
-    for substate in substates {
+    let mut seen = HashSet::with_capacity(ids.len());
+    let mut answered_any = false;
+    let mut is_full = false;
+    for id in ids {
+        if !seen.insert(id) {
+            continue;
+        }
+        if is_full {
+            missing.push(id.to_bytes());
+            continue;
+        }
+        let Some(substate) = tx.substates_get_any_max_version([id])?.pop() else {
+            missing.push(id.to_bytes());
+            continue;
+        };
+
         let mut value_proof = Vec::new();
         if let Some(generator) = generator.as_mut() {
             let Some(proof) = generator.generate(&substate.to_versioned_substate_id())? else {
@@ -337,10 +423,16 @@ fn read_substate_batch<TTx: StateStoreReadTransaction>(
             })?;
         }
 
-        messages.push(batch_response::Response::Substate(proven_substate(
-            &substate,
-            value_proof,
-        )));
+        let frame = batch_response::Response::Substate(proven_substate(&substate, value_proof));
+        let frame_bytes = frame.encoded_len();
+        if answered_any && response_bytes.saturating_add(frame_bytes) > ctx.max_response_bytes {
+            is_full = true;
+            missing.push(id.to_bytes());
+            continue;
+        }
+        response_bytes = response_bytes.saturating_add(frame_bytes);
+        answered_any = true;
+        messages.push(frame);
     }
 
     if !missing.is_empty() {
@@ -355,13 +447,12 @@ fn read_substate_batch<TTx: StateStoreReadTransaction>(
 
 /// A batch entry for `substate` with its value proof.
 ///
-/// A batch answers with each substate's head, which a down proof cannot settle (it says nothing of later versions),
-/// so a batch entry carries no down proof.
+/// A batch answers with each substate's head, which a down proof cannot settle (it says nothing of later versions).
+/// A down proof is served by GetSubstate for a read of the version it names.
 fn proven_substate(substate: &SubstateRecord, value_proof: Vec<u8>) -> proto::rpc::ProvenSubstate {
     proto::rpc::ProvenSubstate {
         proof_epoch: substate.created().at_epoch.as_u64(),
         substate_value_proof: value_proof,
-        substate_down_proof: Vec::new(),
         substate: Some(proto::consensus::Substate {
             substate_id: substate.substate_id().to_bytes(),
             version: substate.version().as_u64(),
@@ -397,6 +488,109 @@ fn latest_commit_proof<TTx: StateStoreReadTransaction>(
         reason: format!("generate_block_commit_proof: {e}"),
     })?;
     Ok(Some(CommittedBlockProof::new(proof)))
+}
+
+/// The most shard leaves a `GetCommittedBlockProof` request may name: every shard and the global shard.
+const MAX_LEAF_SHARDS: usize = NumPreshards::MAX.num_shards() + 1;
+
+/// The leaf of each of `leaf_shards` in the state merkle root of `commit_proof`'s block, in ascending shard order.
+/// Shards outside the block's shard group, other than the global shard, have no leaf there and are skipped.
+///
+/// `commit_proof` must be the proof of the node's latest committed block, read in `tx`: the committed shard states are
+/// then the ones that block's root commits. If they build another root, the node cannot prove its committed state, so
+/// it serves no leaves, and reports the mismatch through `root_mismatch_log`.
+fn prove_shard_leaves<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    commit_proof: &CommittedBlockProof,
+    leaf_shards: &BTreeSet<Shard>,
+    root_mismatch_log: &RootMismatchLog,
+) -> Result<Vec<ShardStateLeaf>, StorageError> {
+    if leaf_shards.is_empty() {
+        return Ok(vec![]);
+    }
+    let shard_group = proof_shard_group(commit_proof)?;
+    let protocol_version = commit_proof.protocol_version().map_err(|e| StorageError::QueryError {
+        reason: format!("commit proof: {e}"),
+    })?;
+    let state = CommittedShardGroupState::read(tx, shard_group, protocol_version)?;
+    let root = state.root();
+    if root.as_slice() != commit_proof.state_merkle_root().as_slice() {
+        let level = if root_mismatch_log.is_first_for(commit_proof.block_id()) {
+            Level::Error
+        } else {
+            Level::Debug
+        };
+        log!(
+            target: LOG_TARGET,
+            level,
+            "BUG: committed state of {shard_group} has root {root}, but its latest committed block {} (epoch {}, \
+             height {}) commits {}. Serving the commit proof without shard leaves.",
+            commit_proof.block_id(),
+            commit_proof.epoch(),
+            commit_proof.height(),
+            commit_proof.state_merkle_root()
+        );
+        return Ok(vec![]);
+    }
+    let mut leaves = Vec::with_capacity(leaf_shards.len());
+    for shard in leaf_shards {
+        if let Some(leaf) = state.prove_leaf(*shard)? {
+            leaves.push(leaf);
+        }
+    }
+    Ok(leaves)
+}
+
+/// The block whose root mismatch was last logged as an error. A peer polling the tip repeats the mismatch on every
+/// request until the next block commits, so it is an error once per block and a debug line after that.
+#[derive(Default)]
+struct RootMismatchLog {
+    last_block: Mutex<Option<FixedHash>>,
+}
+
+impl RootMismatchLog {
+    /// True the first time it is called for `block_id` since it was last called for another block.
+    fn is_first_for(&self, block_id: FixedHash) -> bool {
+        let mut last_block = self.last_block.lock().unwrap_or_else(PoisonError::into_inner);
+        last_block.replace(block_id) != Some(block_id)
+    }
+}
+
+/// The epoch and shard group a read is anchored in.
+#[derive(Debug, Clone, Copy)]
+struct ReadAnchorAt {
+    /// Consensus's current epoch. Before consensus starts this is zero, which finds nothing to anchor to.
+    epoch: Epoch,
+    /// The shard group this node is a member of in `epoch`, if any.
+    shard_group: Option<ShardGroup>,
+}
+
+/// The commit proof a read is proven against: the latest committed block of `anchor_at.epoch`, or, while nothing past
+/// that epoch's genesis has committed, the end-of-epoch block that closed the epoch before it.
+///
+/// Nothing has committed since that end-of-epoch block, so the node's committed state is the state its header's root
+/// commits, and every epoch commits its end block, so a shard group with no traffic still has an anchor. The indexer
+/// and the wallet accept an anchor from the epoch before the current one.
+///
+/// The end block's proof is read from that epoch's checkpoint, which epoch GC keeps after it prunes the block itself.
+/// The checkpoint is looked up by the node's shard group in the current epoch. A node saves the checkpoint of a group
+/// only once its state for that group is the state the checkpoint's root commits, from committing the end block or
+/// from syncing to the checkpoint, so the lookup finds an anchor exactly when the node's state matches one. `None` when
+/// there is no anchor.
+fn read_anchor<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    anchor_at: ReadAnchorAt,
+) -> Result<Option<CommittedBlockProof>, StorageError> {
+    if let Some(proof) = latest_commit_proof(tx, anchor_at.epoch)? {
+        return Ok(Some(proof));
+    }
+    let (Some(shard_group), Some(previous_epoch)) = (anchor_at.shard_group, anchor_at.epoch.checked_sub(1u64)) else {
+        return Ok(None);
+    };
+    Ok(tx
+        .epoch_checkpoint_get_by_shard_group(previous_epoch, shard_group)
+        .optional()?
+        .map(|checkpoint| checkpoint.block_commit_proof()))
 }
 
 #[tari_rpc_framework::async_trait]
@@ -466,6 +660,11 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         } else {
             None
         };
+        let anchor_at = if req.include_proof {
+            Some(self.read_anchor_at().await?)
+        } else {
+            None
+        };
 
         debug!(
             target: LOG_TARGET,
@@ -515,11 +714,11 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             }
         };
 
-        if req.include_proof {
+        if let Some(anchor_at) = anchor_at {
             let info = local_committee_info
                 .as_ref()
                 .expect("committee info is fetched whenever include_proof is set");
-            self.attach_substate_proof(&tx, info.num_preshards(), &substate, &mut resp)?;
+            Self::attach_substate_proof(&tx, info.num_preshards(), anchor_at, &substate, &mut resp)?;
         }
 
         Ok(Response::new(resp))
@@ -569,81 +768,6 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             // For simplicity, we simply encode the whole result as a CBOR blob.
             execution_result: encode(execution.result()).map_err(RpcStatus::log_internal_error(LOG_TARGET))?,
         }))
-    }
-
-    async fn sync_blocks(
-        &self,
-        request: Request<SyncBlocksRequest>,
-    ) -> Result<Streaming<SyncBlocksResponse>, RpcStatus> {
-        self.check_consensus_state()?;
-        let req = request.into_message();
-        let store = self.state_store.clone();
-
-        if proto::rpc::StreamSubstateSelection::try_from(req.stream_substates).is_err() {
-            return Err(RpcStatus::bad_request("StreamSubstateSelection is invalid"));
-        }
-
-        let current_epoch = self
-            .epoch_manager
-            .current_epoch()
-            .await
-            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-
-        let start_block_id = Some(req.start_block_id.as_slice())
-            .filter(|i| !i.is_empty())
-            .map(BlockId::try_from)
-            .transpose()
-            .map_err(|e| RpcStatus::bad_request(format!("Invalid encoded block id: {}", e)))?;
-
-        let start_block_id = {
-            let tx = store
-                .create_read_tx()
-                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-
-            match start_block_id {
-                Some(id) => {
-                    if !Block::record_exists(&tx, &id).map_err(RpcStatus::log_internal_error(LOG_TARGET))? {
-                        return Err(RpcStatus::not_found(format!("start_block_id {id} not found",)));
-                    }
-                    id
-                },
-                None => {
-                    let epoch = req
-                        .epoch
-                        .map(Epoch::from)
-                        .map(|end| end.min(current_epoch))
-                        .unwrap_or(current_epoch);
-
-                    let mut block_ids = Block::get_ids_by_epoch_and_height(&tx, epoch, NodeHeight::zero())
-                        .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-
-                    let Some(block_id) = block_ids.pop() else {
-                        return Err(RpcStatus::not_found(format!(
-                            "Block not found with epoch={epoch},height=0"
-                        )));
-                    };
-                    if !block_ids.is_empty() {
-                        return Err(RpcStatus::conflict(format!(
-                            "Multiple applicable blocks for epoch={} and height=0",
-                            current_epoch
-                        )));
-                    }
-
-                    block_id
-                },
-            }
-        };
-
-        let committee_info = self
-            .epoch_manager
-            .get_local_committee_info(current_epoch)
-            .await
-            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-
-        let (sender, receiver) = mpsc::channel(10);
-        task::spawn(BlockSyncTask::new(store, start_block_id, None, sender, committee_info.num_preshards()).run(req));
-
-        Ok(Streaming::new(receiver))
     }
 
     async fn get_checkpoints(
@@ -756,6 +880,12 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                 .await
                 .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
             ensure_epoch_reached(end_epoch, current_epoch)?;
+            // Epoch GC prunes by the epoch the store records, which can differ from the epoch manager's.
+            let store_epoch = self
+                .state_store
+                .with_read_tx(|tx| tx.current_epoch())
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+            ensure_history_values_held(end_epoch, store_epoch, self.epoch_history_length)?;
             self.held_history(end_epoch)
                 .await?
                 .ensure_holds_all(&cursors, end_epoch)?;
@@ -819,6 +949,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                     .expect("STATE_SYNC_MAX_BATCH_SIZE is not zero"),
                 value_filter_flags,
                 req.include_version_proofs,
+                self.state_sync_reads.clone(),
             )
             .run(),
         );
@@ -874,23 +1005,115 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
 
     async fn get_committed_block_proof(
         &self,
-        _req: Request<GetCommittedBlockProofRequest>,
+        req: Request<GetCommittedBlockProofRequest>,
     ) -> Result<Response<GetCommittedBlockProofResponse>, RpcStatus> {
+        let req = req.into_message();
+        if req.leaf_shards.len() > MAX_LEAF_SHARDS {
+            return Err(RpcStatus::bad_request(format!(
+                "Cannot request more than {MAX_LEAF_SHARDS} shard leaves at once"
+            )));
+        }
+        let leaf_shards = req.leaf_shards.into_iter().map(Shard::from).collect::<BTreeSet<_>>();
+
         let epoch = self.consensus.current_epoch();
         let store = self.state_store.clone();
+        let root_mismatch_log = self.root_mismatch_log.clone();
 
         let maybe_proof = task::spawn_blocking(move || {
             store
-                .with_read_tx(|tx| latest_commit_proof(tx, epoch))
+                .with_read_tx(|tx| {
+                    let Some(proof) = latest_commit_proof(tx, epoch)? else {
+                        return Ok(None);
+                    };
+                    let leaves = prove_shard_leaves(tx, &proof, &leaf_shards, &root_mismatch_log)?
+                        .iter()
+                        .map(TryInto::try_into)
+                        .collect::<Result<Vec<_>, anyhow::Error>>()
+                        .map_err(|e| StorageError::QueryError {
+                            reason: format!("encode shard leaves: {e}"),
+                        })?;
+                    Ok::<_, StorageError>(Some((proof, leaves)))
+                })
                 .map_err(RpcStatus::log_internal_error(LOG_TARGET))
         })
         .await
         .map_err(RpcStatus::log_internal_error(LOG_TARGET))??;
 
-        let proof = maybe_proof.ok_or_else(|| RpcStatus::not_found("No committed block beyond genesis yet"))?;
+        let (proof, leaves) =
+            maybe_proof.ok_or_else(|| RpcStatus::not_found("No committed block beyond genesis yet"))?;
 
         Ok(Response::new(GetCommittedBlockProofResponse {
             commit_proof: proof.to_bytes(),
+            shard_leaves: leaves,
+        }))
+    }
+
+    async fn get_shard_snapshot(
+        &self,
+        req: Request<GetShardSnapshotRequest>,
+    ) -> Result<Response<GetShardSnapshotResponse>, RpcStatus> {
+        let req = req.into_message();
+        let shard = Shard::from_u32(req.shard);
+        if shard > NumPreshards::MAX_SHARD {
+            return Err(RpcStatus::bad_request(format!(
+                "Shard {shard} out of range. Maximum shard is {}",
+                NumPreshards::MAX_SHARD
+            )));
+        }
+        let after = if req.after_leaf_key.is_empty() {
+            None
+        } else {
+            let key = TreeHash::try_from_bytes(&req.after_leaf_key)
+                .map_err(|_| RpcStatus::bad_request("after_leaf_key must be empty or 32 bytes"))?;
+            Some(LeafKey::new(key))
+        };
+        let value_filters = SubstateValueFilterFlags::from_bits_truncate(req.value_filters);
+        if value_filters.is_empty() {
+            return Err(RpcStatus::bad_request(
+                "At least one SubstateValueFilterFlag must be set",
+            ));
+        }
+        let limit = usize::try_from(req.limit)
+            .unwrap_or(usize::MAX)
+            .clamp(1, MAX_SNAPSHOT_PAGE_SUBSTATES);
+
+        // A page is a synchronous read like a state sync version's, so it takes the same permits. Any node holding the
+        // tree at the version serves it: the caller checks the leaves against a quorum-signed root.
+        let _permit = self
+            .state_sync_reads
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        let store = self.state_store.clone();
+        let state_version = req.state_version;
+        let page = task::spawn_blocking(move || {
+            store
+                .with_read_tx(|tx| read_shard_snapshot(tx, shard, state_version, after.as_ref(), limit, value_filters))
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))
+        })
+        .await
+        .map_err(RpcStatus::log_internal_error(LOG_TARGET))??;
+
+        Ok(Response::new(match page {
+            ShardSnapshotPage::Unavailable => GetShardSnapshotResponse {
+                version_unavailable: true,
+                ..Default::default()
+            },
+            ShardSnapshotPage::Page {
+                substates,
+                is_last,
+                last_leaf_proof,
+            } => GetShardSnapshotResponse {
+                substates,
+                is_last,
+                version_unavailable: false,
+                last_leaf_proof: last_leaf_proof
+                    .map(|proof| tari_bor::serde_codec::to_vec(&proof))
+                    .transpose()
+                    .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
+                    .unwrap_or_default(),
+            },
         }))
     }
 
@@ -902,8 +1125,8 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         // building the tree over them - plus a leaf traversal per substate. Measured on a 256-shard
         // group (see the `proof_cost` test), that is ~220us fixed against ~4us per substate, so a
         // request answering 50 costs ~450us where 50 single-substate requests cost ~11ms. A lower cap
-        // would therefore make a flood *more* expensive to serve, not less; what 50 bounds is the
-        // response, which the responder holds in memory before streaming.
+        // would therefore make a flood *more* expensive to serve, not less. `MAX_BATCH_RESPONSE_BYTES`
+        // bounds the response's size.
         const MAX_REQUESTS: usize = 50;
         let req = req.into_message();
 
@@ -947,22 +1170,33 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             )));
         }
 
-        let (sender, receiver) = mpsc::channel(req.substate_ids.len() + 2);
+        // A peer that does not read its response holds the permit, so a full node refuses rather than
+        // queueing; the client asks another member of the committee.
+        let Ok(permit) = self.batch_responses.clone().try_acquire_owned() else {
+            debug!(
+                target: LOG_TARGET,
+                "Refusing a substate batch request: {MAX_BUFFERED_BATCH_RESPONSES} batch responses are already held",
+            );
+            return Err(RpcStatus::unavailable(
+                "This node is serving too many substate batches; retry later or ask another member",
+            ));
+        };
 
         let store = self.state_store.clone();
-        // The epoch to look for a committed block at. Before consensus starts this is zero, which
-        // finds nothing and yields no anchor, so results go out unproven rather than failing.
-        let consensus_epoch = self.consensus.current_epoch();
+        let anchor_at = if req.include_proofs {
+            Some(self.read_anchor_at().await?)
+        } else {
+            None
+        };
         let num_preshards = local_committee_info.num_preshards();
-        let include_proofs = req.include_proofs;
         let responses = task::spawn_blocking(move || {
             // TODO: we should use a snapshot - will need to refactor the state store to support this, by abstracting
             // the .cf(X) call and implementing read only transaction for all implementors of this trait
             store.with_read_tx(|tx| {
                 read_substate_batch(tx, &ids, BatchProofContext {
-                    epoch: consensus_epoch,
+                    anchor_at,
                     num_preshards,
-                    include_proofs,
+                    max_response_bytes: MAX_BATCH_RESPONSE_BYTES,
                 })
             })
         })
@@ -970,38 +1204,41 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
         .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
-        task::spawn(async move {
-            for resp in responses {
-                if sender
-                    .send(Ok(GetSubstatesBatchResponse { response: Some(resp) }))
-                    .await
-                    .is_err()
-                {
-                    warn!(target: LOG_TARGET, "Receiver dropped the stream, stopping substate batch response stream");
-                    break;
-                }
-            }
-        });
-
-        Ok(Streaming::new(receiver))
+        Ok(stream_batch_response(responses, permit))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use futures::StreamExt;
+    use prost::Message;
+    use tari_consensus_types::{BlockId, LastExecuted};
     use tari_engine_types::{
         non_fungible::NonFungibleContainer,
+        published_template::{PublishedTemplate, PublishedTemplateAddress},
         substate::{SubstateId, SubstateValue, hash_substate},
     };
-    use tari_ootle_common_types::{SubstateVersion, VersionedSubstateId};
+    use tari_ootle_common_types::{NodeHeight, SubstateVersion, VersionedSubstateId, shard::Shard};
     use tari_ootle_storage::{
         StateStoreWriteTransaction,
-        consensus_models::{SubstateCreated, SubstateDestroyed, SubstateDownProofRecord},
+        consensus_models::{
+            BlockHeaderMetadata,
+            EndOfEpochCommand,
+            EpochCheckpoint,
+            SubstateCreated,
+            SubstateDestroyed,
+            SubstateDownProofRecord,
+            SubstateTransition,
+            SubstateUpdateBatch,
+            SubstateValueOrHash,
+        },
     };
     use tari_ootle_transaction::Network;
     use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
     use tari_state_tree::{KeyedProofTree, LeafKey, SubstateDownProof, TreeHash};
-    use tari_template_lib_types::{ComponentAddress, ObjectKey};
+    use tari_template_lib_types::{ComponentAddress, Hash32, ObjectKey, crypto::RistrettoPublicKeyBytes};
 
     use super::*;
 
@@ -1054,42 +1291,53 @@ mod tests {
     }
 
     fn exclusion() -> SubstateValueProof {
-        SubstateValueProof::new(TreeHash::new([5; 32]), 2, proof_ext(5), proof_ext(6))
+        SubstateValueProof::new(
+            TreeHash::new([5; 32]),
+            2,
+            tari_state_tree::TransitionAccumulator::zero(),
+            proof_ext(5),
+            proof_ext(6),
+        )
     }
 
     /// An anchor for `shard`'s group of one. The responder serves its own state under the anchor it is given, so the
     /// root the header names does not matter here.
     fn anchor_of(shard: tari_ootle_common_types::shard::Shard) -> CommittedBlockProof {
-        let protocol_version = tari_engine_types::ProtocolVersion::at(Network::LocalNet, Epoch(1));
-        CommittedBlockProof::new(tari_sidechain::SidechainBlockCommitProof {
+        CommittedBlockProof::new(block_commit_proof(1, ShardGroup::new(shard, shard)))
+    }
+
+    /// The commit proof of a block of `shard_group` at `epoch`.
+    fn block_commit_proof(epoch: u64, shard_group: ShardGroup) -> tari_sidechain::SidechainBlockCommitProof {
+        let protocol_version = tari_engine_types::ProtocolVersion::at(Network::LocalNet, Epoch(epoch));
+        tari_sidechain::SidechainBlockCommitProof {
             header: tari_sidechain::SidechainBlockHeader {
                 network: Network::LocalNet.as_byte(),
                 protocol_version: protocol_version.as_u32(),
                 parent_id: Default::default(),
                 justify_id: Default::default(),
                 height: 4,
-                epoch: 1,
+                epoch,
                 epoch_hash: Default::default(),
                 shard_group: tari_sidechain::ShardGroup {
-                    start: shard.as_u32(),
-                    end_inclusive: shard.as_u32(),
+                    start: shard_group.start().as_u32(),
+                    end_inclusive: shard_group.end().as_u32(),
                 },
                 proposed_by: Default::default(),
                 state_merkle_root: Default::default(),
                 command_merkle_root: Default::default(),
-                transaction_merkle_root: None,
+                transaction_merkle_root: Default::default(),
                 signature: Default::default(),
                 accumulated_data: Default::default(),
                 metadata_hash: Default::default(),
             },
             proof_elements: vec![],
-        })
+        }
     }
 
-    /// An exclusion proof alone does not show a version ever existed, so a down substate with no recorded down proof
-    /// is answered with no proof at all, while one with a record carries all three.
+    /// A down substate with no recorded down proof is answered with its exclusion proof alone, while one with a record
+    /// also carries the down proof.
     #[test]
-    fn a_down_substate_without_a_recorded_down_proof_is_served_unproven() {
+    fn a_down_substate_without_a_recorded_down_proof_is_served_its_exclusion() {
         use tari_ootle_storage::ShardScopedTreeStoreWriter;
         use tari_state_tree::{SpreadPrefixStateTree, SubstateTreeChange};
 
@@ -1118,8 +1366,8 @@ mod tests {
             let tx = store.create_read_tx().unwrap();
             let mut resp = GetSubstateResponse::default();
             attach_substate_proof_at(&tx, NUM_PRESHARDS, &anchor_of(shard), &down, &mut resp).unwrap();
-            assert!(resp.commit_proof.is_empty());
-            assert!(resp.substate_value_proof.is_empty());
+            assert!(!resp.commit_proof.is_empty());
+            assert!(!resp.substate_value_proof.is_empty());
             assert!(resp.substate_down_proof.is_empty());
         }
 
@@ -1128,6 +1376,7 @@ mod tests {
             value_hash: TreeHash::new([1; 32]),
             leaf_proof: proof_ext(1),
             shard_root: TreeHash::new([2; 32]),
+            transition_acc: tari_state_tree::TransitionAccumulator::zero(),
             shard_root_proof: proof_ext(2),
         };
         store
@@ -1145,13 +1394,166 @@ mod tests {
         assert!(!resp.substate_down_proof.is_empty());
     }
 
-    /// A batch answers with heads, which a down proof cannot settle, so a down substate's batch entry carries none,
-    /// even where the single-substate path would serve one.
+    fn template_record(seed: u8, binary_len: usize) -> SubstateRecord {
+        let id = SubstateId::Template(PublishedTemplateAddress::from(Hash32::from_array([seed; 32])));
+        let template = PublishedTemplate {
+            template_name: "batch".try_into().unwrap(),
+            author: RistrettoPublicKeyBytes::default(),
+            binary: vec![seed; binary_len].try_into().unwrap(),
+            at_epoch: 0,
+            metadata_hash: None,
+        };
+        SubstateRecord::new(
+            Network::LocalNet,
+            id,
+            SubstateVersion::ZERO,
+            SubstateValue::Template(template),
+            SubstateCreated {
+                at_epoch: Epoch::zero(),
+                in_shard: Shard::global(),
+                at_state_version: 1,
+            },
+        )
+    }
+
+    /// A batch of large substates is answered only up to the response byte budget; the rest are named as missing so
+    /// the client refetches them, and every requested id is accounted for exactly once.
     #[test]
-    fn a_batch_entry_carries_no_down_proof() {
-        let entry = proven_substate(&substate(true), vec![1]);
-        assert!(entry.substate_down_proof.is_empty());
-        assert!(entry.substate.unwrap().destroyed.is_some());
+    fn a_batch_response_is_bounded_by_its_byte_budget() {
+        const NUM_IDS: u8 = 50;
+        const VALUE_BYTES: usize = 512 * 1024;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        let records = (0..NUM_IDS)
+            .map(|seed| template_record(seed, VALUE_BYTES))
+            .collect::<Vec<_>>();
+        let mut batch = SubstateUpdateBatch::new(Network::LocalNet, Epoch::zero());
+        let transitions = batch.with_transition(Shard::global(), 1);
+        for record in &records {
+            transitions.push(SubstateTransition::Up {
+                id: record.substate_id().clone(),
+                version: SubstateVersion::ZERO,
+                substate_or_hash: SubstateValueOrHash::Value(Box::new(record.substate_value().unwrap().clone())),
+            });
+        }
+        store.with_write_tx(|tx| tx.substates_commit_batch(batch)).unwrap();
+
+        // Repeating an id does not repeat its answer.
+        let ids = records
+            .iter()
+            .chain(records.iter())
+            .map(|record| record.substate_id().clone())
+            .collect::<Vec<_>>();
+        let tx = store.create_read_tx().unwrap();
+        let messages = read_substate_batch(&tx, &ids, BatchProofContext {
+            anchor_at: None,
+            num_preshards: NUM_PRESHARDS,
+            max_response_bytes: MAX_BATCH_RESPONSE_BYTES,
+        })
+        .unwrap();
+
+        let response_bytes = messages
+            .iter()
+            .filter(|response| !matches!(response, batch_response::Response::Missing(_)))
+            .map(|response| {
+                GetSubstatesBatchResponse {
+                    response: Some(response.clone()),
+                }
+                .encoded_len()
+            })
+            .sum::<usize>();
+        assert!(
+            response_bytes <= MAX_BATCH_RESPONSE_BYTES,
+            "the response is {response_bytes} bytes, over the {MAX_BATCH_RESPONSE_BYTES} byte budget"
+        );
+
+        let mut accounted = Vec::new();
+        let mut answered = 0;
+        for message in messages {
+            match message {
+                batch_response::Response::Substate(proven) => {
+                    answered += 1;
+                    accounted.push(proven.substate.unwrap().substate_id);
+                },
+                batch_response::Response::Missing(missing) => accounted.extend(missing.substate_ids),
+                batch_response::Response::CommitProof(_) => panic!("no proofs were asked for"),
+            }
+        }
+        assert!(answered > 0, "a batch answers as much as fits");
+        assert!(answered < usize::from(NUM_IDS), "the batch does not fit the budget");
+        accounted.sort();
+        let mut expected = records
+            .iter()
+            .map(|record| record.substate_id().to_bytes())
+            .collect::<Vec<_>>();
+        expected.sort();
+        assert_eq!(accounted, expected);
+    }
+
+    /// A substate larger than the budget is still served when it is the first in the batch, so no substate is
+    /// unservable through the batch path.
+    #[test]
+    fn a_batch_always_answers_its_first_substate() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        let records = [template_record(1, 1024), template_record(2, 1024)];
+        let mut batch = SubstateUpdateBatch::new(Network::LocalNet, Epoch::zero());
+        let transitions = batch.with_transition(Shard::global(), 1);
+        for record in &records {
+            transitions.push(SubstateTransition::Up {
+                id: record.substate_id().clone(),
+                version: SubstateVersion::ZERO,
+                substate_or_hash: SubstateValueOrHash::Value(Box::new(record.substate_value().unwrap().clone())),
+            });
+        }
+        store.with_write_tx(|tx| tx.substates_commit_batch(batch)).unwrap();
+
+        let ids = records
+            .iter()
+            .map(|record| record.substate_id().clone())
+            .collect::<Vec<_>>();
+        let tx = store.create_read_tx().unwrap();
+        let messages = read_substate_batch(&tx, &ids, BatchProofContext {
+            anchor_at: None,
+            num_preshards: NUM_PRESHARDS,
+            max_response_bytes: 1,
+        })
+        .unwrap();
+        assert_eq!(messages.len(), 2);
+        let batch_response::Response::Substate(first) = &messages[0] else {
+            panic!("the first substate is answered");
+        };
+        assert_eq!(first.substate.as_ref().unwrap().substate_id, ids[0].to_bytes());
+        let batch_response::Response::Missing(missing) = &messages[1] else {
+            panic!("the rest are named as missing");
+        };
+        assert_eq!(missing.substate_ids, vec![ids[1].to_bytes()]);
+    }
+
+    /// A batch response stream ends after its last response, and holds its permit until the stream is dropped, so the
+    /// limit counts every response still buffered for a peer.
+    #[tokio::test]
+    async fn a_batch_response_ends_and_holds_its_permit_until_the_stream_is_dropped() {
+        let permits = Arc::new(Semaphore::new(1));
+        let permit = permits.clone().try_acquire_owned().unwrap();
+        let responses = vec![batch_response::Response::CommitProof(vec![1]); 3];
+        let mut stream = stream_batch_response(responses, permit);
+
+        let frames = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut frames = 0;
+            while let Some(frame) = stream.next().await {
+                frame.unwrap();
+                frames += 1;
+            }
+            frames
+        })
+        .await
+        .expect("the stream ends once every response is sent");
+        assert_eq!(frames, 3);
+        assert_eq!(permits.available_permits(), 0);
+        drop(stream);
+        assert_eq!(permits.available_permits(), 1);
     }
 
     #[test]
@@ -1165,6 +1567,7 @@ mod tests {
             value_hash: TreeHash::new([1; 32]),
             leaf_proof: proof_ext(1),
             shard_root: TreeHash::new([2; 32]),
+            transition_acc: tari_state_tree::TransitionAccumulator::zero(),
             shard_root_proof: proof_ext(2),
         };
 
@@ -1214,6 +1617,197 @@ mod tests {
             encode_down_proof(&tx, NUM_PRESHARDS, &substate(false), &exclusion())
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    /// A store holding one substate in each of shards 1 and 2 of `group`, committed at state versions 1 and 2.
+    fn store_with_shard_state(group: ShardGroup) -> (tempfile::TempDir, RocksDbStateStore<String>) {
+        use tari_ootle_storage::ShardScopedTreeStoreWriter;
+        use tari_state_tree::{SpreadPrefixStateTree, SubstateTreeChange};
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        let up = substate(false);
+        let id = up.to_versioned_substate_id();
+        store
+            .with_write_tx(|tx| {
+                for (shard, version) in [(Shard::from(1u32), 1), (Shard::from(2u32), 2)] {
+                    assert!(group.contains(&shard));
+                    let mut tree_store = ShardScopedTreeStoreWriter::new(tx, shard);
+                    SpreadPrefixStateTree::new(&mut tree_store)
+                        .batch_put_substate_changes(None, version, vec![SubstateTreeChange::Up {
+                            id: id.clone(),
+                            value_hash: *up.state_hash(),
+                        }])
+                        .unwrap();
+                    tx.state_tree_shard_versions_set(shard, version)?;
+                }
+                Ok::<_, StorageError>(())
+            })
+            .unwrap();
+        (dir, store)
+    }
+
+    /// The commit proof of a block of `group` whose state merkle root is `root`.
+    fn commit_proof_with_root(group: ShardGroup, root: TreeHash) -> CommittedBlockProof {
+        let mut proof = block_commit_proof(1, group);
+        proof.header.state_merkle_root = tari_sidechain::FixedHash::new(root.into_array());
+        CommittedBlockProof::new(proof)
+    }
+
+    /// Every leaf served verifies against the commit proof served with it, after the wire round trip, whether the
+    /// shard holds state, holds none, or is the global shard. A shard outside the block's group has no leaf to serve.
+    #[test]
+    fn served_shard_leaves_verify_against_the_commit_proof() {
+        let group = ShardGroup::new(1, 4);
+        let (_dir, store) = store_with_shard_state(group);
+        let tx = store.create_read_tx().unwrap();
+        let protocol_version = tari_engine_types::ProtocolVersion::at(Network::LocalNet, Epoch(1));
+        let root = CommittedShardGroupState::read(&tx, group, protocol_version)
+            .unwrap()
+            .root();
+        let commit_proof = commit_proof_with_root(group, root);
+
+        let requested = [2u32, 1, 3, 200, 2]
+            .into_iter()
+            .map(Shard::from)
+            .chain([Shard::global()])
+            .collect::<BTreeSet<_>>();
+        let leaves = prove_shard_leaves(&tx, &commit_proof, &requested, &RootMismatchLog::default()).unwrap();
+
+        let served = leaves.iter().map(|l| (l.shard, l.state_version)).collect::<Vec<_>>();
+        assert_eq!(served, vec![
+            (Shard::global(), 0),
+            (Shard::from(1u32), 1),
+            (Shard::from(2u32), 2),
+            (Shard::from(3u32), 0),
+        ]);
+        for leaf in &leaves {
+            let wire = proto::rpc::ShardStateLeaf::try_from(leaf).unwrap();
+            let leaf = ShardStateLeaf::try_from(wire).unwrap();
+            leaf.verify(Network::LocalNet, &commit_proof)
+                .unwrap_or_else(|e| panic!("leaf of {} does not verify: {e}", leaf.shard));
+        }
+
+        assert!(
+            prove_shard_leaves(&tx, &commit_proof, &BTreeSet::new(), &RootMismatchLog::default())
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    /// A node whose committed state builds another root than its latest committed block's cannot prove that state, so
+    /// it serves no leaves.
+    #[test]
+    fn no_shard_leaves_are_served_when_the_committed_state_builds_another_root() {
+        let group = ShardGroup::new(1, 4);
+        let (_dir, store) = store_with_shard_state(group);
+        let tx = store.create_read_tx().unwrap();
+        let commit_proof = commit_proof_with_root(group, TreeHash::new([1; 32]));
+
+        let requested = BTreeSet::from([Shard::from(1u32)]);
+        let root_mismatch_log = RootMismatchLog::default();
+        assert!(
+            prove_shard_leaves(&tx, &commit_proof, &requested, &root_mismatch_log)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !root_mismatch_log.is_first_for(commit_proof.block_id()),
+            "the mismatch was not reported for the block"
+        );
+    }
+
+    /// A root mismatch is logged as an error once per block, however often peers ask for the block's leaves.
+    #[test]
+    fn a_root_mismatch_is_first_reported_once_per_block() {
+        let log = RootMismatchLog::default();
+        let (a, b) = (FixedHash::new([1; 32]), FixedHash::new([2; 32]));
+        assert!(log.is_first_for(a));
+        assert!(!log.is_first_for(a));
+        assert!(log.is_first_for(b));
+        assert!(!log.is_first_for(b));
+        assert!(log.is_first_for(a));
+    }
+
+    fn node_group() -> ShardGroup {
+        ShardGroup::new(0, 255)
+    }
+
+    /// A store holding only the checkpoint of an end-of-epoch block of `shard_group` at `epoch`: the block itself is
+    /// absent, as it is once epoch GC has pruned it.
+    fn store_with_checkpoint(epoch: u64, shard_group: ShardGroup) -> (tempfile::TempDir, RocksDbStateStore<String>) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        let checkpoint = EpochCheckpoint::new(
+            tari_sidechain::CommandCommitProof::new(
+                EndOfEpochCommand::new(Default::default()),
+                block_commit_proof(epoch, shard_group),
+                proof_ext(7),
+            ),
+            Default::default(),
+            BlockHeaderMetadata {
+                total_leader_fee: 0,
+                timestamp: 0,
+                extra_data: Default::default(),
+                timeout_certificate_id: None,
+                is_dummy: false,
+            },
+        );
+        store.with_write_tx(|tx| tx.epoch_checkpoint_save(&checkpoint)).unwrap();
+        (dir, store)
+    }
+
+    fn anchor_for(
+        store: &RocksDbStateStore<String>,
+        epoch: u64,
+        shard_group: Option<ShardGroup>,
+    ) -> Option<CommittedBlockProof> {
+        let tx = store.create_read_tx().unwrap();
+        read_anchor(&tx, ReadAnchorAt {
+            epoch: Epoch(epoch),
+            shard_group,
+        })
+        .unwrap()
+    }
+
+    /// A shard group with no traffic commits nothing in an epoch but its end block, so until something commits in the
+    /// new epoch a read is proven against the end block of the previous one, after that block is pruned too.
+    #[test]
+    fn with_nothing_executed_this_epoch_a_read_is_anchored_to_the_previous_epochs_end_block() {
+        let (_dir, store) = store_with_checkpoint(4, node_group());
+        let anchor = anchor_for(&store, 5, Some(node_group())).expect("no record of an executed block");
+        assert_eq!(anchor.epoch(), Epoch(4));
+        assert_eq!(anchor.shard_group().unwrap(), node_group());
+
+        store
+            .with_write_tx(|tx| {
+                tx.last_executed_set(&LastExecuted {
+                    height: NodeHeight::zero(),
+                    block_id: BlockId::zero(),
+                    epoch: Epoch(5),
+                })
+            })
+            .unwrap();
+        let anchor = anchor_for(&store, 5, Some(node_group())).expect("the new epoch's genesis");
+        assert_eq!(anchor.epoch(), Epoch(4));
+    }
+
+    #[test]
+    fn an_end_block_from_before_the_previous_epoch_anchors_nothing() {
+        let (_dir, store) = store_with_checkpoint(3, node_group());
+        assert!(anchor_for(&store, 5, Some(node_group())).is_none());
+    }
+
+    /// A node whose shard group changed at the epoch boundary holds the state of other shards than the end block's
+    /// root commits.
+    #[test]
+    fn an_end_block_of_another_shard_group_anchors_nothing() {
+        let (_dir, store) = store_with_checkpoint(4, ShardGroup::new(0, 127));
+        assert!(anchor_for(&store, 5, Some(node_group())).is_none());
+        assert!(
+            anchor_for(&store, 5, None).is_none(),
+            "a node outside every shard group"
         );
     }
 }

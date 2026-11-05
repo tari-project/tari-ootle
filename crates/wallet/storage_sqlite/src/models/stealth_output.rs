@@ -2,8 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use diesel::dsl;
+use tari_engine_types::SubstateVersion;
+use tari_ootle_common_types::Epoch;
 use tari_ootle_wallet_sdk::{
-    models::{StealthOutputInfo, StealthOutputModel},
+    models::{ProvenUp, StealthOutputInfo, StealthOutputModel},
     storage::WalletStorageError,
 };
 use tari_template_lib_types::{
@@ -70,6 +72,9 @@ pub struct StealthOutput {
     pub is_frozen: bool,
     pub is_on_chain: bool,
     pub is_condition_spendable: bool,
+    pub proven_version: Option<i64>,
+    pub proven_up_epoch: Option<i64>,
+    pub spent_version: Option<i64>,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
 }
@@ -125,6 +130,14 @@ impl StealthOutput {
             is_on_chain: self.is_on_chain,
             is_condition_spendable: self.is_condition_spendable,
             lock_id: self.locked_by_proof,
+            proven_up: self
+                .proven_version
+                .zip(self.proven_up_epoch)
+                .map(|(version, epoch)| ProvenUp {
+                    version: SubstateVersion::new(version as u64),
+                    epoch: Epoch(epoch as u64),
+                }),
+            spent_version: self.spent_version.map(|version| SubstateVersion::new(version as u64)),
         })
     }
 }

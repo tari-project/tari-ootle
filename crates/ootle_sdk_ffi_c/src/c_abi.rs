@@ -54,7 +54,7 @@ use serde::Deserialize;
 /// static pointer). Every host binding asserts this at startup to detect a header/lib mismatch. Bump on any
 /// breaking ABI change (a changed signature, envelope layout, or handle contract) so a stale lib is
 /// caught loudly rather than mis-marshalled.
-const ABI_VERSION: &[u8] = b"ootle-sdk-ffi-c/17\0";
+const ABI_VERSION: &[u8] = b"ootle-sdk-ffi-c/19\0";
 
 /// The kind discriminant that guards opaque-handle **type confusion** across the FFI.
 ///
@@ -326,7 +326,7 @@ pub(crate) unsafe fn required_str<'a>(ptr: *const c_char, arg: &str) -> Result<&
 
 /// Reads an **optional** `*const c_char`: a NULL pointer is `Ok(None)` (the absent case), a non-null
 /// pointer is read as a `&str` (mapping invalid UTF-8 to an `INVALID` envelope). Used for nullable
-/// FFI string args (e.g. an optional `pay_ref_hex`).
+/// FFI string args (e.g. an optional `destination_tag_hex`).
 ///
 /// # Safety
 /// `ptr`, if non-null, must point to a valid NUL-terminated C string that outlives the borrow.
@@ -664,10 +664,10 @@ pub unsafe extern "C" fn ootle_derive_account_address(account_public_key_hex: *c
 /// [`ParsedAddress`](ootle_sdk_core::ParsedAddress):
 /// - substate: `{"kind":"component"|"resource","canonical":"…_<hex>"}`;
 /// - identity: `{"kind":"identity","network":"<keyword>","account_key":"<hex>","view_only_key":"<hex>",
-///   "pay_ref":"<hex>"?,"bech32m":"otl_…"}` (`pay_ref` is absent when none).
+///   "destination_tag":"<hex>"?,"bech32m":"otl_…"}` (`destination_tag` is absent when none).
 ///
 /// An unknown prefix, a malformed substate id, or a bad bech32m string (checksum / HRP / length /
-/// oversize pay_ref) ⇒ `"PARSE"`; no handle.
+/// oversize destination_tag) ⇒ `"PARSE"`; no handle.
 ///
 /// # Safety
 /// `address_str` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed
@@ -689,35 +689,35 @@ pub unsafe extern "C" fn ootle_parse_address(address_str: *const c_char) -> Ootl
 ///
 /// `network` is the L1 discriminant byte (selects the network-qualified HRP — `otl_` MainNet,
 /// `otl_loc_` LocalNet, `otl_esm_` Esmeralda, …). `account_key_hex` / `view_only_key_hex` are the
-/// lowercase-hex 32-byte public keys. `pay_ref_hex` is a **nullable** lowercase-hex payment reference
+/// lowercase-hex 32-byte public keys. `destination_tag_hex` is a **nullable** lowercase-hex destination tag
 /// (pass NULL for none); over 64 bytes ⇒ `"PARSE"`. On success `data_json` is `{"bech32m":"otl_…"}`;
 /// no handle.
 ///
-/// Bad / odd / uppercase key hex or pay_ref hex ⇒ `"PARSE"`.
+/// Bad / odd / uppercase key hex or destination_tag hex ⇒ `"PARSE"`.
 ///
 /// # Safety
 /// `account_key_hex` and `view_only_key_hex` must be valid NUL-terminated UTF-8 C strings.
-/// `pay_ref_hex` must be NULL or such a string. The returned envelope must be freed with
+/// `destination_tag_hex` must be NULL or such a string. The returned envelope must be freed with
 /// [`ootle_result_free`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ootle_format_identity_address(
     network: u8,
     account_key_hex: *const c_char,
     view_only_key_hex: *const c_char,
-    pay_ref_hex: *const c_char,
+    destination_tag_hex: *const c_char,
 ) -> OotleResult {
     guarded(|| {
         flatten((|| {
             let network = network_from_byte(network)?;
             let account_hex = unsafe { required_str(account_key_hex, "account_key_hex") }?;
             let view_hex = unsafe { required_str(view_only_key_hex, "view_only_key_hex") }?;
-            // The pay_ref is optional: NULL ⇒ None (handle the null before any required_str path).
-            let pay_ref = unsafe { optional_str(pay_ref_hex, "pay_ref_hex") }?;
+            // The destination_tag is optional: NULL ⇒ None (handle the null before any required_str path).
+            let destination_tag = unsafe { optional_str(destination_tag_hex, "destination_tag_hex") }?;
 
             let account = public_key_from_hex(account_hex, "account_key_hex")?;
             let view = public_key_from_hex(view_hex, "view_only_key_hex")?;
 
-            match format_identity_address(network, &account, &view, pay_ref) {
+            match format_identity_address(network, &account, &view, destination_tag) {
                 Ok(bech32m) => {
                     let body = serde_json::json!({ "bech32m": bech32m });
                     Ok(OotleResult::ok_json(&output_json(&body, "identity address")?))
@@ -928,15 +928,24 @@ pub unsafe extern "C" fn ootle_seal_and_encode(
 /// public handle. **Borrows** the handle (does **not** consume it) so A can ship the record JSON *and*
 /// keep the handle to seal later with [`ootle_seal_and_encode_with_auth`].
 ///
+/// `main_signer_hex` (lowercase hex, nullable) names the co-signer the transaction acts as wherever it
+/// needs a single signer (`OwnerRule::OwnedBySigner`, the default owner of new components and
+/// resources). NULL declares no main signer. Pass the same value to [`ootle_seal_and_encode_with_auth`].
+///
 /// On success `data_json` is the `UnsignedTransactionRecord` JSON (`{"unsigned": <UnsignedTransaction>}`).
-/// An unresolved partial ⇒ a `RESOLUTION` error (the handle is left intact).
+/// An unresolved partial ⇒ a `RESOLUTION` error (the handle is left intact). Bad `main_signer_hex` ⇒
+/// `PARSE`.
 ///
 /// # Safety
-/// `handle` must be a non-null, not-yet-consumed public handle. The returned envelope must be freed
-/// with [`ootle_result_free`]. The handle is **not** consumed; free it with
-/// [`ootle_partial_transaction_free`] (or consume it via a seal fn) exactly once afterwards.
+/// `handle` must be a non-null, not-yet-consumed public handle. `main_signer_hex` must be NULL or a
+/// valid NUL-terminated UTF-8 C string. The returned envelope must be freed with [`ootle_result_free`].
+/// The handle is **not** consumed; free it with [`ootle_partial_transaction_free`] (or consume it via a
+/// seal fn) exactly once afterwards.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ootle_unsigned_record_for_cosign(handle: *const OotlePartialTransaction) -> OotleResult {
+pub unsafe extern "C" fn ootle_unsigned_record_for_cosign(
+    handle: *const OotlePartialTransaction,
+    main_signer_hex: *const c_char,
+) -> OotleResult {
     guarded(|| {
         if handle.is_null() {
             return OotleResult::err("INVALID", "argument `handle` must not be null");
@@ -946,9 +955,12 @@ pub unsafe extern "C" fn ootle_unsigned_record_for_cosign(handle: *const OotlePa
         }
         // SAFETY: non-null, kind-checked public handle; borrowed (not boxed/consumed).
         let partial: &PartialTransaction = unsafe { &(*handle).inner };
-        flatten((|| match ootle_sdk_core::unsigned_record_for_cosign(partial) {
-            Ok(record) => Ok(OotleResult::ok_json(&output_json(&record, "unsigned record")?)),
-            Err(e) => Ok(OotleResult::from_core_err(&e)),
+        flatten((|| {
+            let main_signer = unsafe { optional_main_signer(main_signer_hex) }?;
+            match ootle_sdk_core::unsigned_record_for_cosign(partial, main_signer.as_ref()) {
+                Ok(record) => Ok(OotleResult::ok_json(&output_json(&record, "unsigned record")?)),
+                Err(e) => Ok(OotleResult::from_core_err(&e)),
+            }
         })())
     })
 }
@@ -1005,18 +1017,23 @@ pub unsafe extern "C" fn ootle_add_signature(
 ///
 /// `keys_json` is `{account_secret}` (lowercase hex). `authorizations_json` is a JSON array
 /// `[{ "public_key": "<hex>", "signature": "<hex>" }, ...]`. An empty array behaves like the plain
-/// single-key seal. On success `data_json` is the `EncodedPublicTransfer`. The bytes/id are not
-/// reproducible (random-nonce seal).
+/// single-key seal. `main_signer_hex` (nullable) must be the value passed to
+/// [`ootle_unsigned_record_for_cosign`]; a main signer that is not one of the authorizations ⇒
+/// `INVALID`, and an authorization that does not verify against the sealed transaction (for example
+/// one signed over a record with a different main signer) ⇒ `VALIDATION`. On success `data_json` is the
+/// `EncodedPublicTransfer`. The bytes/id are not reproducible (random-nonce seal).
 ///
 /// # Safety
 /// `handle` must be a non-null, not-yet-consumed public handle. `keys_json` and `authorizations_json`
-/// must be valid NUL-terminated UTF-8 C strings. The returned envelope must be freed with
-/// [`ootle_result_free`]. Do **not** free `handle` afterwards — it is consumed here.
+/// must be valid NUL-terminated UTF-8 C strings, and `main_signer_hex` NULL or one. The returned
+/// envelope must be freed with [`ootle_result_free`]. Do **not** free `handle` afterwards — it is
+/// consumed here.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ootle_seal_and_encode_with_auth(
     handle: *mut OotlePartialTransaction,
     keys_json: *const c_char,
     authorizations_json: *const c_char,
+    main_signer_hex: *const c_char,
 ) -> OotleResult {
     guarded(|| {
         if handle.is_null() {
@@ -1032,12 +1049,23 @@ pub unsafe extern "C" fn ootle_seal_and_encode_with_auth(
             let keys: ProductionKeysJson = parse_json(keys_json, "keys")?;
             let authorizations_json = unsafe { required_str(authorizations_json, "authorizations_json") }?;
             let authorizations: Vec<Authorization> = parse_json(authorizations_json, "authorizations")?;
-            match seal_and_encode_with_auth(partial, &keys.into_core(), &authorizations) {
+            let main_signer = unsafe { optional_main_signer(main_signer_hex) }?;
+            match seal_and_encode_with_auth(partial, &keys.into_core(), &authorizations, main_signer.as_ref()) {
                 Ok(encoded) => Ok(OotleResult::ok_json(&output_json(&encoded, "encoded transfer")?)),
                 Err(e) => Ok(OotleResult::from_core_err(&e)),
             }
         })())
     })
+}
+
+/// Reads the nullable `main_signer_hex` co-sign argument.
+///
+/// # Safety
+/// `ptr` must be NULL or a valid NUL-terminated C string.
+unsafe fn optional_main_signer(ptr: *const c_char) -> Result<Option<PublicKeyBytes>, OotleResult> {
+    unsafe { optional_str(ptr, "main_signer_hex") }?
+        .map(|hex| public_key_from_hex(hex, "main_signer_hex"))
+        .transpose()
 }
 
 // --- Result parsing -------------------------------------------------------------------------------

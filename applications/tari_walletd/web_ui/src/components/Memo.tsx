@@ -24,26 +24,27 @@ export function Memo({ memo }: MemoProps) {
     // The resolved Ootle address is surfaced separately (see StealthUtxoList); show a label if we end up here.
     return <span>Sender address</span>;
   }
-  if ("PayRefAndBytes" in memo) {
+  if ("DestinationTagAndBytes" in memo) {
     try {
-      const bytes = hexToU8(memo.PayRefAndBytes);
+      const bytes = hexToU8(memo.DestinationTagAndBytes);
       const len = bytes[0];
-      const payRef = tryDecodeUtf8(bytes.slice(1, len)) || Buffer.from(bytes.slice(1, len)).toString("hex");
+      const destinationTag =
+        tryDecodeUtf8(bytes.slice(1, 1 + len)) || Buffer.from(bytes.slice(1, 1 + len)).toString("hex");
       const message = bytes.length >= 1 + len ? tryDecodeUtf8(bytes.slice(1 + len)) : [];
       return (
         <span>
           {message}
           <span style={{ marginLeft: "8px" }}>
-            {payRef && (
-              <StatusChip color={StatusChipColors.Blue} title="This UTXO has an attached Payment Ref.">
-                <CopyToClipboard copy={payRef} /> {payRef}{" "}
+            {destinationTag && (
+              <StatusChip color={StatusChipColors.Blue} title="This UTXO has an attached destination tag">
+                <CopyToClipboard copy={destinationTag} /> {destinationTag}{" "}
               </StatusChip>
             )}
           </span>
         </span>
       );
     } catch (e) {
-      console.warn("Failed to decode PayRefAndBytes memo:", e);
+      console.warn("Failed to decode DestinationTagAndBytes memo:", e);
       // ignore
     }
   }

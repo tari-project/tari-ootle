@@ -81,10 +81,15 @@ let addr = allocate_component_address!();  // Alias
 ### Proof Management
 
 ```rust
+authorize!(proof);
+drop_authorize!(proof);
 drop_all_proofs!();
 ```
 
-Drops all proofs currently in the workspace. Typically called after protected operations.
+`authorize!(proof)` opens an authorization window over a workspace proof: every instruction until
+`drop_authorize!(proof)` is lent it, one hop deep. A proof on the workspace authorizes nothing outside a window,
+and passing it as a method argument only shows it to the callee. `drop_all_proofs!()` drops every proof in the
+workspace, closing their windows; typically called after protected operations.
 
 ### Local Function Calls
 
@@ -252,7 +257,7 @@ MyTemplate::create([1u8, 2u8], [], [["a"], [amount!(3), None, TARI]]);
 
 ### TARI
 
-Constant representing the native Tari token resource address. Use `TARI` in all new manifests. `XTR` is a deprecated alias that still works but should not be used.
+Constant representing the native Tari token resource address.
 
 ```rust
 let bucket = account.withdraw(TARI, 1000);
@@ -266,6 +271,10 @@ Bare identifiers reference results from prior instructions:
 let bucket = account.withdraw(TARI, 100);
 shop.buy(bucket);  // 'bucket' references the withdraw result
 ```
+
+A name bound with `let` refers to that binding everywhere it appears, as a receiver, an argument or a list
+element, even when a variable of the same name is passed to `parse_manifest()`. A bare identifier resolves to a
+passed variable only when the manifest does not bind that name. A later `let` replaces an earlier one.
 
 ## ManifestValue (Rust API)
 

@@ -32,6 +32,8 @@ pub enum PruneTarget {
     TransactionReceipts,
     /// Events, aged by the epoch the transaction that emitted them committed in.
     Events,
+    /// Tombstones of spent UTXOs, aged by the epoch the UTXO was spent in.
+    UtxoTombstones,
 }
 
 impl PruneTarget {
@@ -40,6 +42,7 @@ impl PruneTarget {
             Self::Transactions => "transaction(s)",
             Self::TransactionReceipts => "transaction receipt(s)",
             Self::Events => "event(s)",
+            Self::UtxoTombstones => "UTXO tombstone(s)",
         }
     }
 }
@@ -136,6 +139,7 @@ impl<TStore: IndexerStore + Clone> RetentionPruner<TStore> {
                 PruneTarget::Transactions => tx.prune_transactions_before_epoch(cutoff, BATCH_SIZE),
                 PruneTarget::TransactionReceipts => tx.prune_transaction_receipts_before_epoch(cutoff, BATCH_SIZE),
                 PruneTarget::Events => tx.prune_events_before_epoch(cutoff, BATCH_SIZE),
+                PruneTarget::UtxoTombstones => tx.prune_utxo_tombstones_before_epoch(cutoff, BATCH_SIZE),
             })
             .await
     }

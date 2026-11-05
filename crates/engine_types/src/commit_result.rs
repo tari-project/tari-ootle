@@ -55,21 +55,16 @@ pub struct ExecuteResult {
     pub execute_epoch: Option<Epoch>,
     /// Total WASM metering points consumed by the transaction across all calls, including failed/aborted execution.
     /// Metering is deterministic, so every validator computes the identical value for the same transaction and
-    /// pledged state. Defaults to 0 when decoding executions persisted before this field existed.
+    /// pledged state.
     #[n(3)]
-    #[cbor(default)]
-    #[serde(default)]
     pub wasm_execution_points: u64,
     /// Total native-verification points (stealth transfers, confidential withdraws, burn claims) charged to the
     /// transaction, priced in WASM-point equivalents by [`NativeExecutionPoints`]. Deterministic for the same
     /// reason as [`Self::wasm_execution_points`] — the price is a pure function of the declared statement — so
-    /// every validator computes the identical value. Defaults to 0 when decoding executions persisted before this
-    /// field existed.
+    /// every validator computes the identical value.
     ///
     /// [`NativeExecutionPoints`]: crate::limits::NativeExecutionPoints
     #[n(4)]
-    #[cbor(default)]
-    #[serde(default)]
     pub native_execution_points: u64,
 }
 
@@ -165,22 +160,20 @@ pub struct FinalizeResult {
     pub events: Vec<Event>,
     #[n(2)]
     pub logs: Vec<LogEntry>,
-    // Index 3 is retired: it carried template return values, which payloads from older nodes may
-    // still hold and decoding skips. It must not be reused.
-    #[n(4)]
+    #[n(3)]
     pub result: TransactionResult,
-    #[n(5)]
+    #[n(4)]
     pub fee_receipt: FeeReceipt,
     /// What committing the whole transaction was priced at, which is what the commit-or-reject
     /// decision was made against.
     ///
     /// Equal to `fee_receipt.total_fees_charged()` on a full commit. When only the fee intent
-    /// commits, the charges are re-derived over the fee checkpoint alone and so fall below what was
-    /// paid; this keeps the figure the main intent was rejected for — the one a resubmission has to
-    /// clear. Execution metadata rather than settled state, so it stays out of the persisted
-    /// receipt, whose every field is priced into the storage charge of each transaction.
-    #[n(6)]
-    #[serde(default)]
+    /// commits, the receipt's storage charges are re-derived over the fee checkpoint, so its total
+    /// can fall below this figure; this keeps the figure the main intent was rejected for — the one a
+    /// resubmission has to clear. Execution metadata rather than settled state, so it stays out of
+    /// the persisted receipt, whose every field is priced into the storage charge of each
+    /// transaction.
+    #[n(5)]
     pub total_fees_required: u64,
 }
 
@@ -315,6 +308,52 @@ impl FinalizeResult {
             .into_iter()
             .flat_map(|diff| diff.up_iter())
             .filter_map(|(id, s)| id.as_resource_address().zip(s.substate_value().as_resource()))
+    }
+}
+
+/// What a fully executed transaction commits instead when consensus cannot commit its full result:
+/// the fee intent's state, billed for the whole execution, exactly as a failure of the main intent
+/// would have committed it.
+///
+/// Consensus discovers some failures only after execution — an output version that already exists
+/// is the one it acts on — and the engine cannot re-run the transaction then, so it settles this
+/// beside the full result. The transaction receipt does not record why the main intent was
+/// rejected, so the fallback is complete without knowing the reason it will be committed for.
+#[derive(Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
+pub struct FeeIntentFallback {
+    #[n(0)]
+    pub diff: SubstateDiff,
+    #[n(1)]
+    pub events: Vec<Event>,
+    #[n(2)]
+    pub logs: Vec<LogEntry>,
+    #[n(3)]
+    pub fee_receipt: FeeReceipt,
+}
+
+impl FeeIntentFallback {
+    /// The fallback a fee-intent finalization produced, or `None` if the fee intent could not pay for
+    /// the state it persists.
+    pub fn from_fee_intent_finalization(result: FinalizeResult) -> Option<Self> {
+        let diff = result.result.into_any_accept()?;
+        Some(Self {
+            diff,
+            events: result.events,
+            logs: result.logs,
+            fee_receipt: result.fee_receipt,
+        })
+    }
+
+    /// The result of committing the fee intent of `committed` alone, rejecting the rest for `reason`.
+    pub fn into_finalize_result(self, committed: &FinalizeResult, reason: RejectReason) -> FinalizeResult {
+        FinalizeResult::new(
+            committed.transaction_hash,
+            self.logs,
+            self.events,
+            TransactionResult::AcceptFeeRejectRest(self.diff, reason),
+            self.fee_receipt,
+        )
+        .with_total_fees_required(committed.charged_fees())
     }
 }
 
@@ -600,6 +639,11 @@ pub enum ExecutionFailureCode {
     /// than reporting a failure. Nothing the caller sends differently would help now.
     #[n(13)]
     NotYetValid,
+    /// The transaction creates a substate that already exists, either in chain state (an NFT id that was
+    /// minted before, a claimed burn) or earlier in the same transaction. The same transaction can never
+    /// succeed; the conflicting substate is named in the message.
+    #[n(14)]
+    Conflict,
     /// No code has been assigned to this failure yet. Consumers fall back to the message.
     ///
     /// Not a resting place: the engine emits a `warn!` whenever it produces one, so the tail can be
@@ -656,6 +700,10 @@ pub enum AbortReason {
     /// groups involved, so no block could deliver them.
     #[n(10)]
     InputPledgeTooLarge,
+    /// The transaction calls the burn rate governance component and reached execution in a later
+    /// epoch than the one it was pinned to. The council can resubmit it.
+    #[n(11)]
+    GovernanceCallAfterPinnedEpoch,
 }
 
 impl Display for AbortReason {
@@ -716,28 +764,5 @@ mod tests {
     fn required_fees_reports_the_larger_of_the_two() {
         let result = result_charged(400).with_total_fees_required(9_000);
         assert!(result.required_fees() > 9_000);
-    }
-
-    /// A result from an older node carries its template return values at index 3.
-    #[test]
-    fn a_payload_carrying_return_values_still_decodes() {
-        let result = result_charged(400);
-        let return_values = tari_bor::Value::Array(vec![tari_bor::Value::Array(vec![
-            tari_bor::Value::Text("returned".to_string()),
-            tari_bor::Value::Null,
-        ])]);
-
-        let tari_bor::Value::Array(mut fields) = tari_bor::to_value(&result).unwrap() else {
-            panic!("FinalizeResult is not encoded as an array");
-        };
-        fields[3] = return_values;
-        let decoded: FinalizeResult =
-            tari_bor::decode_exact(&tari_bor::encode(&tari_bor::Value::Array(fields)).unwrap()).unwrap();
-        assert_eq!(decoded.fee_receipt.total_fees_charged(), 400);
-
-        let mut json = serde_json::to_value(&result).unwrap();
-        json["execution_results"] = serde_json::json!([{ "indexed": null, "return_type": "Unit" }]);
-        let decoded: FinalizeResult = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded.fee_receipt.total_fees_charged(), 400);
     }
 }

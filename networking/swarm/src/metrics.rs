@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 pub use libp2p::metrics::Recorder;
-use libp2p::rendezvous;
+use libp2p::{rendezvous, swarm::SwarmEvent};
 use prometheus_client::metrics::counter::Counter;
 
 use crate::TariNodeBehaviourEvent;
@@ -38,9 +38,22 @@ impl<TCodec: libp2p_messaging::Codec + Send + Clone + 'static> Recorder<TariNode
             TariNodeBehaviourEvent::Messaging(messaging_event) => self.extended_metrics.record(messaging_event),
             TariNodeBehaviourEvent::Substream(substream_event) => self.extended_metrics.record(substream_event),
             TariNodeBehaviourEvent::ConnectionLimits(_) => {}, // No events for connection limits
-            TariNodeBehaviourEvent::IpLimits(_) => {},         // No events for IP limits
+            TariNodeBehaviourEvent::InboundLimits(_) => {},    // No events for inbound limits
             TariNodeBehaviourEvent::Mdns(_) => {},             // No metrics for mDNS events
             TariNodeBehaviourEvent::Autonat(_) => {},          // No metrics for Autonat events
+        }
+    }
+}
+
+/// Every swarm event must be recorded: libp2p's identify metrics retain each identified peer until the event closing
+/// its last connection is recorded.
+impl<TCodec: libp2p_messaging::Codec + Send + Clone + 'static> Recorder<SwarmEvent<TariNodeBehaviourEvent<TCodec>>>
+    for Metrics
+{
+    fn record(&self, event: &SwarmEvent<TariNodeBehaviourEvent<TCodec>>) {
+        self.libp2p_metrics.record(event);
+        if let SwarmEvent::Behaviour(event) = event {
+            self.record(event);
         }
     }
 }

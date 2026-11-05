@@ -15,8 +15,33 @@ mod template {
     }
 
     impl TemplateV1 {
-        pub fn new(owner_rule: OwnerRule, signers: MaxVec<10, RistrettoPublicKeyBytes>) -> Component<Self> {
-            let resource_address = ResourceBuilder::non_fungible().mintable(rule!(allow_all), OWNER).build();
+        pub fn new(
+            owner_rule: OwnerRule,
+            upgrade_rule: UpdateRule,
+            signers: MaxVec<10, RistrettoPublicKeyBytes>,
+        ) -> Component<Self> {
+            let resource_address = ResourceBuilder::non_fungible()
+                .mintable(rule!(allow_all), OWNER)
+                .build();
+
+            Component::new(Self {
+                signers,
+                manager: resource_address.into(),
+                supply_vault: Vault::new_empty(resource_address),
+            })
+            .with_owner_rule(owner_rule)
+            .with_upgrade_rule(upgrade_rule)
+            .with_access_rules(AccessRules::allow_all())
+            .create()
+        }
+
+        pub fn new_with_default_upgrade_rule(
+            owner_rule: OwnerRule,
+            signers: MaxVec<10, RistrettoPublicKeyBytes>,
+        ) -> Component<Self> {
+            let resource_address = ResourceBuilder::non_fungible()
+                .mintable(rule!(allow_all), OWNER)
+                .build();
 
             Component::new(Self {
                 signers,

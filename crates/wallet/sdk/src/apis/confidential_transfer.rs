@@ -7,13 +7,14 @@ use log::*;
 use ootle_byte_type::{FromByteType, ToByteType};
 use tari_bor::{Deserialize, Serialize};
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
+use tari_engine_types::confidential::MIN_CONFIDENTIAL_OUTPUT_VALUE_PROMISE;
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{
     Epoch,
     InputDeclaration,
     optional::{IsNotFoundError, Optional},
 };
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_transaction::{Transaction, TransactionBuilder, args};
 use tari_ootle_wallet_crypto::{MaskAndValue, OutputWitness, memo::Memo};
 use tari_template_lib::types::{
     Amount,
@@ -448,22 +449,22 @@ where TSpec: WalletSdkSpec
                 }
             })
             .then(|builder| {
-                // The badge authorizes the resource's withdraw rule inside the account's frame, which it
-                // reaches as a `Proof` argument.
+                // The badge authorizes the resource's withdraw rule inside the account's frame, which is lent it
+                // by the window opened around the call.
+                let withdraw = |builder: TransactionBuilder| {
+                    builder
+                        .call_method(*from_account.component_address(), "withdraw_confidential", args![
+                            params.resource_address,
+                            proof
+                        ])
+                        .put_last_instruction_output_on_workspace("bucket")
+                };
                 if params.proof_from_resource.is_some() {
-                    builder.call_method(
-                        *from_account.component_address(),
-                        "withdraw_confidential_with_auth",
-                        args![params.resource_address, proof, Workspace("proof")],
-                    )
+                    builder.with_authorized_proof("proof", withdraw)
                 } else {
-                    builder.call_method(*from_account.component_address(), "withdraw_confidential", args![
-                        params.resource_address,
-                        proof
-                    ])
+                    withdraw(builder)
                 }
             })
-            .put_last_instruction_output_on_workspace("bucket")
             .call_method(to_account.address, "deposit", args![Workspace("bucket")])
             .then(|builder| {
                 if params.proof_from_resource.is_some() {
@@ -521,7 +522,7 @@ where TSpec: WalletSdkSpec
             mask: mask.key,
             sender_public_nonce: public_nonce,
             encrypted_data,
-            minimum_value_promise: 0,
+            minimum_value_promise: MIN_CONFIDENTIAL_OUTPUT_VALUE_PROMISE,
             resource_view_key,
         })
     }

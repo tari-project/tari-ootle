@@ -12,7 +12,7 @@ license.workspace = true
 tari_common = { workspace = true }
 tari_common_types = { workspace = true }
 tari_crypto = { workspace = true }
-tari_ootle_app_utilities = { workspace = true }
+tari_ootle_app_utilities = { workspace = true, features = ["allowed_hosts"] }
 tari_shutdown = { workspace = true }
 tari_ootle_wallet_crypto = { workspace = true, features = ["mmap-value-lookup"] }
 tari_ootle_address = { workspace = true }
@@ -46,6 +46,7 @@ dashmap = { workspace = true }
 either = { workspace = true }
 hex = { workspace = true }
 humantime-serde = { workspace = true }
+mini-moka = { workspace = true }
 futures = { workspace = true }
 include_dir = { workspace = true, optional = true }
 indexmap = { workspace = true }
@@ -70,16 +71,19 @@ tokio = { workspace = true, features = [
     "default",
     "rt-multi-thread",
     "macros",
+    "signal",
     "time",
 ] }
 tower-http = { workspace = true, features = ["cors", "trace"] }
 url = { workspace = true }
 webrtc = "0.14.0"
-webauthn-rs = { workspace = true }
+# `danger-credential-internals` exposes a stored passkey's signature counter, which login checks.
+webauthn-rs = { workspace = true, features = ["danger-credential-internals"] }
 uuid = { workspace = true }
 wasm-opt = "0.116.1"
 tempfile.workspace = true
 sha2 = { workspace = true }
+subtle = { workspace = true }
 time = { workspace = true }
 zeroize = { workspace = true, features = ["derive"] }
 
@@ -98,8 +102,12 @@ windows-native-keyring-store = { workspace = true }
 [dev-dependencies]
 # Test-only, so the wallet binary does not carry the consensus engine: lets the config guard
 # assert against the real network ceiling rather than drifting from a hand-copied number.
+serde-saphyr = { workspace = true }
 tari_consensus = { workspace = true }
 tari_utilities = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+tower = { workspace = true, features = ["util"] }
 
 [package.metadata.cargo-machete]
 ignored = [

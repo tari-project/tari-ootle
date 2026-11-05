@@ -1,7 +1,11 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use log::*;
 use tari_engine_types::commit_result::ExecuteResult;
@@ -13,6 +17,7 @@ use tari_ootle_transaction::{Transaction, TransactionId};
 use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkSpec,
+    apis::transaction::Submission,
     models::{
         TransactionContext,
         TransactionContextKind,
@@ -57,6 +62,10 @@ pub struct TransactionServiceConfig {
     /// Delay before re-subscribing to the finalization stream after it drops. While disconnected every poll
     /// queries every pending transaction.
     pub stream_reconnect_backoff: Duration,
+    /// Interval at which a wallet that verifies its indexer brings its trusted validator set up to date. Syncing while
+    /// online keeps the wallet's record of when it last synced honest, which decides whether an indexer's claim that
+    /// the wallet fell far behind is believable.
+    pub validator_set_sync_interval: Duration,
 }
 
 impl Default for TransactionServiceConfig {
@@ -66,6 +75,7 @@ impl Default for TransactionServiceConfig {
             post_submit_check_delay: Duration::from_millis(750),
             silent_transaction_timeout: Duration::from_secs(10),
             stream_reconnect_backoff: Duration::from_secs(5),
+            validator_set_sync_interval: Duration::from_secs(10 * 60),
         }
     }
 }
@@ -84,9 +94,15 @@ pub struct TransactionService<TSpec: WalletSdkSpec> {
     pending: HashSet<TransactionId>,
     /// Set when the next poll must query every pending transaction; cleared only once such a poll has run.
     check_all_on_next_tick: bool,
+    /// The submission context of each transaction held back until the wallet trusts a validator set. The store keeps
+    /// only a transaction's new-account data, so the poll that submits a held-back transaction announces its context
+    /// from here.
+    deferred_contexts: DeferredContexts,
     config: TransactionServiceConfig,
     shutdown_signal: ShutdownSignal,
 }
+
+type DeferredContexts = Arc<Mutex<HashMap<TransactionId, TransactionContext>>>;
 
 /// Which pending transactions a poll queries the network about.
 #[derive(Debug, Clone, Copy)]
@@ -104,6 +120,10 @@ impl CheckScope {
             CheckScope::PendingFor(min_age) => time_since(transaction.last_update_time) >= *min_age,
         }
     }
+}
+
+fn lock_deferred(contexts: &DeferredContexts) -> std::sync::MutexGuard<'_, HashMap<TransactionId, TransactionContext>> {
+    contexts.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn time_since(timestamp: ::time::PrimitiveDateTime) -> Duration {
@@ -146,6 +166,7 @@ where
             stream_connected: false,
             pending: HashSet::new(),
             check_all_on_next_tick: false,
+            deferred_contexts: Arc::default(),
             config,
             shutdown_signal,
         };
@@ -157,6 +178,8 @@ where
         let mut events_subscription = self.notify.subscribe();
         let mut poll_interval = time::interval(self.config.poll_interval);
         poll_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let mut validator_set_sync_interval = time::interval(self.config.validator_set_sync_interval);
+        validator_set_sync_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let mut rx_watch_events = FinalizedWatch::spawn(
             self.wallet_sdk.get_network_interface().clone(),
             self.config.stream_reconnect_backoff,
@@ -225,6 +248,10 @@ where
                     }
                 }
 
+                _ = validator_set_sync_interval.tick() => {
+                    self.on_validator_set_sync();
+                }
+
                 _ = poll_interval.tick() => {
                     let scope = if self.check_all_on_next_tick || !self.stream_connected {
                         CheckScope::All
@@ -252,19 +279,12 @@ where
                     .send(self.handle_submit_transaction(transaction, context, lock_id).await)
                     .map_err(|_| TransactionServiceError::ServiceShutdown)?;
             },
-            TransactionServiceRequest::SubmitDryRunTransaction {
-                transaction,
-                settled_fee,
-                reply,
-            } => {
+            TransactionServiceRequest::SubmitDryRunTransaction { transaction, reply } => {
                 let transaction_id = transaction.calculate_id();
                 let transaction_api = self.wallet_sdk.transaction_api();
                 // Unlock all locks related to the transaction immediately since this is a dry run
                 transaction_api.release_all_locks_for_transaction(transaction_id)?;
-                match transaction_api
-                    .submit_dry_run_transaction(transaction, settled_fee)
-                    .await
-                {
+                match transaction_api.submit_dry_run_transaction(transaction).await {
                     Ok(finalized_transaction) => {
                         let finalize =
                             finalized_transaction
@@ -307,28 +327,63 @@ where
             .as_ref()
             .map(|c| c.linked_accounts.as_slice())
             .unwrap_or_default();
-        let transaction_id =
-            transaction_api.insert_new_transaction(transaction, new_account_info, linked_accounts, false)?;
+        // The poll submits any stored transaction, so the lock is linked in the write that stores it: an error
+        // returned from here on means the wallet holds no transaction for the caller's inputs.
+        let transaction_id = transaction_api.insert_new_transaction(
+            transaction,
+            new_account_info,
+            linked_accounts,
+            false,
+            lock_id.as_slice(),
+        )?;
 
-        if let Some(lock_id) = lock_id {
-            transaction_api.locks_set_transaction_id(lock_id, transaction_id)?;
+        // A poll can submit the transaction while this call waits on the validator set, so the context is in place
+        // before the submission starts.
+        if let Some(context) = &context {
+            lock_deferred(&self.deferred_contexts).insert(transaction_id, context.clone());
         }
-
-        if transaction_api.submit_transaction(transaction_id).await? {
-            self.notify.notify(TransactionSubmittedEvent {
+        let submission = transaction_api.submit_transaction(transaction_id).await;
+        if matches!(submission, Ok(Submission::Submitted | Submission::Rejected)) {
+            lock_deferred(&self.deferred_contexts).remove(&transaction_id);
+        }
+        match submission {
+            Ok(Submission::Submitted) => self.notify.notify(TransactionSubmittedEvent {
                 transaction_id,
                 context,
-            });
-            Ok(transaction_id)
-        } else {
-            self.notify.notify(TransactionInvalidEvent {
+            }),
+            Ok(Submission::Rejected) => self.notify.notify(TransactionInvalidEvent {
                 transaction_id,
                 status: TransactionStatus::InvalidTransaction,
                 finalize: None,
                 final_fee: None,
-            });
-            Ok(transaction_id)
+            }),
+            Ok(Submission::Deferred) => {
+                info!(
+                    target: LOG_TARGET,
+                    "Transaction {transaction_id} waits to be submitted until the wallet trusts a validator set"
+                );
+            },
+            // The transaction is stored as `New`, so the poll submits it again: the wallet is committed to it and the
+            // caller gets its id to follow. A failed call is also ambiguous, since the network may have received the
+            // transaction before the error.
+            Err(err) => {
+                let left_new = transaction_api
+                    .get(transaction_id)
+                    .is_ok_and(|transaction| transaction.status != TransactionStatus::New);
+                if left_new {
+                    // A poll that fetched the transaction before its context was in place submitted it, so nothing
+                    // else removes the context.
+                    lock_deferred(&self.deferred_contexts).remove(&transaction_id);
+                    debug!(target: LOG_TARGET, "Transaction {transaction_id} was submitted by a poll: {err}");
+                } else {
+                    warn!(
+                        target: LOG_TARGET,
+                        "Submitting transaction {transaction_id} failed, it is queued to be submitted again: {err}"
+                    );
+                }
+            },
         }
+        Ok(transaction_id)
     }
 
     /// Starts a poll, returning `false` without polling if one is already in progress.
@@ -343,8 +398,9 @@ where
 
         let wallet_sdk = self.wallet_sdk.clone();
         let notify = self.notify.clone();
+        let deferred_contexts = self.deferred_contexts.clone();
         tokio::spawn(async move {
-            if let Err(err) = Self::resubmit_new_transactions(&wallet_sdk, &notify).await {
+            if let Err(err) = Self::resubmit_new_transactions(&wallet_sdk, &notify, &deferred_contexts).await {
                 error!(target: LOG_TARGET, "Error resubmitting new transactions: {}", err);
             }
             if let Err(err) = Self::check_pending_transactions(&wallet_sdk, &notify, scope).await {
@@ -357,6 +413,19 @@ where
             drop(permit);
         });
         Ok(true)
+    }
+
+    /// Brings the trusted validator set up to date in the background, when the wallet verifies its indexer.
+    fn on_validator_set_sync(&self) {
+        if !self.wallet_sdk.sdk_config().indexer_trust.is_verify() {
+            return;
+        }
+        let wallet_sdk = self.wallet_sdk.clone();
+        tokio::spawn(async move {
+            if let Err(err) = wallet_sdk.validator_set_api().sync().await {
+                warn!(target: LOG_TARGET, "Failed to bring the trusted validator set up to date: {err}");
+            }
+        });
     }
 
     /// Queries the result of a transaction the network reports as finalized and this wallet is waiting on.
@@ -418,6 +487,7 @@ where
     async fn resubmit_new_transactions(
         wallet_sdk: &WalletSdk<TSpec>,
         notify: &Notify<WalletEvent>,
+        deferred_contexts: &DeferredContexts,
     ) -> Result<(), TransactionServiceError> {
         let transaction_api = wallet_sdk.transaction_api();
         let new_transactions = transaction_api.fetch_all(Some(TransactionStatus::New), None)?;
@@ -433,29 +503,46 @@ where
             new_transactions.len()
         );
         for transaction in new_transactions {
-            info!(
-                target: LOG_TARGET,
-                "Resubmitting transaction {}",
-                transaction.id,
-            );
             let transaction_id = transaction.id;
-            if transaction_api.submit_transaction(transaction_id).await? {
-                // Only NewAccountData is persisted in the DB, so only that context is recoverable on
-                // resubmit. Other context variants (e.g. ClaimBurn) are in-memory only — if the daemon
-                // restarts, that context is lost and the caller must retry.
-                notify.notify(TransactionSubmittedEvent {
-                    transaction_id,
-                    context: transaction
-                        .new_account_info
-                        .map(|data| TransactionContext::default().with_kind(TransactionContextKind::NewAccount(data))),
-                });
+            let level = if lock_deferred(deferred_contexts).contains_key(&transaction_id) {
+                Level::Debug
             } else {
-                notify.notify(TransactionInvalidEvent {
-                    transaction_id,
-                    status: TransactionStatus::InvalidTransaction,
-                    finalize: None,
-                    final_fee: None,
-                });
+                Level::Info
+            };
+            log!(target: LOG_TARGET, level, "Resubmitting transaction {transaction_id}");
+            let submission = match transaction_api.submit_transaction(transaction_id).await {
+                Ok(submission) => submission,
+                // The transaction stays `New` for the next poll, and the ones after it are submitted now.
+                Err(err) => {
+                    warn!(target: LOG_TARGET, "Resubmitting transaction {transaction_id} failed: {err}");
+                    continue;
+                },
+            };
+            match submission {
+                // The store keeps only a transaction's new-account data, so that is all the context a transaction
+                // inserted before a restart carries.
+                Submission::Submitted => {
+                    let context = lock_deferred(deferred_contexts).remove(&transaction_id).or_else(|| {
+                        transaction.new_account_info.map(|data| {
+                            TransactionContext::default().with_kind(TransactionContextKind::NewAccount(data))
+                        })
+                    });
+                    notify.notify(TransactionSubmittedEvent {
+                        transaction_id,
+                        context,
+                    });
+                },
+                Submission::Rejected => {
+                    lock_deferred(deferred_contexts).remove(&transaction_id);
+                    notify.notify(TransactionInvalidEvent {
+                        transaction_id,
+                        status: TransactionStatus::InvalidTransaction,
+                        finalize: None,
+                        final_fee: None,
+                    });
+                },
+                // The rest wait on the same validator set.
+                Submission::Deferred => break,
             }
         }
         Ok(())
@@ -493,7 +580,10 @@ where
                 target: LOG_TARGET,
                 "Requesting result for transaction {tx_id}",
             );
-            Self::check_pending_transaction(wallet_sdk, notify, tx_id).await?;
+            // One transaction that fails to check leaves it pending for the next poll, and the rest are still checked.
+            if let Err(err) = Self::check_pending_transaction(wallet_sdk, notify, tx_id).await {
+                error!(target: LOG_TARGET, "Error checking pending transaction {tx_id}: {err}");
+            }
         }
         Ok(())
     }
@@ -562,7 +652,9 @@ where
             WalletEvent::UtxoRecovered(_) |
             WalletEvent::UtxoRecoveryCompleted(_) |
             WalletEvent::UtxoSpent(_) |
-            WalletEvent::TransactionRequestCreated(_) => {},
+            WalletEvent::UtxoBurnt(_) |
+            WalletEvent::TransactionRequestCreated(_) |
+            WalletEvent::ValidatorSetReanchored(_) => {},
         }
         Ok(())
     }

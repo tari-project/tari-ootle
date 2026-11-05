@@ -54,7 +54,7 @@ export interface SendMoneyFormState {
   badge: string | null;
   memo: string;
   attachSenderAddress: boolean;
-  payRef: string;
+  destinationTag: string;
   swapPoolAddress: string;
   // Calculated from fee estimate + pool ratio, not user-entered
   swapInputAmount: string;
@@ -161,9 +161,9 @@ export default function FormStep({
     poolRate !== null &&
     (poolRate.balance_a === 0n || poolRate.balance_b === 0n);
 
-  // Pay reference is capped at 64 bytes whether it's embedded in a PayRefAndBytes or a SenderAddress memo.
-  const payRefByteLength = new TextEncoder().encode(transferFormState.payRef).length;
-  const payRefTooLong = payRefByteLength > 64;
+  // Destination tag is capped at 64 bytes whether it's embedded in a DestinationTagAndBytes or a SenderAddress memo.
+  const destinationTagByteLength = new TextEncoder().encode(transferFormState.destinationTag).length;
+  const destinationTagTooLong = destinationTagByteLength > 64;
 
   const isFormValid =
     !isNaNAmount &&
@@ -172,7 +172,7 @@ export default function FormStep({
     !hasInsufficientFunds &&
     !poolError &&
     !poolHasNoLiquidity &&
-    !payRefTooLong;
+    !destinationTagTooLong;
 
   // Format amount for display
   const formatAmountValue = (amount: string) => {
@@ -283,14 +283,14 @@ export default function FormStep({
             )}
             {isStealth && !transferFormState.outputToRevealed && (
               <TextField
-                name="payRef"
-                label="Encrypted Pay ref (optional, max 64 bytes)"
-                value={transferFormState.payRef}
+                name="destinationTag"
+                label="Encrypted Destination tag (optional, max 64 bytes)"
+                value={transferFormState.destinationTag}
                 onChange={(e) => onFormValueChange(e.target.name, e.target.value)}
-                error={payRefTooLong}
+                error={destinationTagTooLong}
                 helperText={
-                  payRefTooLong
-                    ? `Too long: ${payRefByteLength} bytes (max 64)`
+                  destinationTagTooLong
+                    ? `Too long: ${destinationTagByteLength} bytes (max 64)`
                     : "Auto-filled from the destination address if it has one."
                 }
                 disabled={disabled}

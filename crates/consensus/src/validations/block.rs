@@ -4,13 +4,13 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common_types::types::FixedHash;
 use tari_engine_types::fees::ExhaustBurnRate;
 use tari_ootle_common_types::{
     Epoch,
     committee::{Committee, CommitteeInfo},
 };
 use tari_ootle_storage::consensus_models::{Block, BlockHeader};
+use tari_sidechain::FixedHash;
 
 use super::common::{
     check_block_signature,
@@ -19,6 +19,7 @@ use super::common::{
     check_exhaust_burn_rate,
     check_height,
     check_network,
+    check_next_epoch_fee_scale,
     check_proposal_certificate,
     check_protocol_version,
     check_shard_group_bounds,
@@ -70,6 +71,7 @@ fn check_proposal<TConsensusSpec: ConsensusSpec>(
         signer_service,
     )?;
     check_block(block)?;
+    check_next_epoch_fee_scale(block, config.network)?;
     check_proposal_certificate::<TConsensusSpec>(config.network, block, committee_for_block, signer_service)?;
     check_timeout_certificate::<TConsensusSpec>(config.network, block, committee_for_block, signer_service)?;
 

@@ -3,7 +3,8 @@ create table substates
     id               integer   not NULL primary key AUTOINCREMENT,
     address          text      not NULL,
     version          bigint    not NULL,
-    data             text      not NULL,
+    -- The CBOR-encoded `SubstateValue`.
+    data             blob      not NULL,
     template_address text      NULL,
     module_name      text      NULL,
     updated_at       timestamp not null default current_timestamp,
@@ -12,23 +13,6 @@ create table substates
 
 create unique index uniq_substates_address on substates (address);
 
-create table substate_transitions
-(
-    id            integer   not NULL primary key AUTOINCREMENT,
-    shard         int       not NULL,
-    state_version bigint    not NULL,
-    epoch         bigint    not NULL,
-    substate_id   text      not NULL,
-    version       bigint    not NULL,
-    substate_type text      not NULL,
-    is_up         bool      not NULL,
-    value_hash    text      NULL,
-    created_at    timestamp not null default current_timestamp
-);
-
-create unique index substate_transitions_substate_id_version_uniq on substate_transitions (substate_id, version, is_up);
-create index substate_transitions_shard_state_version_idx on substate_transitions (shard, state_version);
-
 -- Event data
 create table events
 (
@@ -36,12 +20,15 @@ create table events
     template_address text      not NULL,
     tx_hash          text      not NULL,
     topic            text      not NULL,
-    payload          text      not NULL,
+    -- The CBOR-encoded `Event`, served as stored.
+    event            blob      not NULL,
     substate_id      text      NULL,
     -- The resource this event's substate_id names, set for the `std.resource.*` family only, so SSE
     -- consumers can filter a stream down to a single token's activity server-side.
     resource_address text      NULL,
-    created_at       timestamp not null default current_timestamp
+    created_at       timestamp not null default current_timestamp,
+    -- The epoch the transaction committed in. Retention ages events out by it.
+    epoch            bigint    not null default 0
 );
 
 -- DB index for faster collection scan queries
@@ -50,19 +37,24 @@ create index events_indexer on events (template_address, tx_hash);
 create index events_topic_idx on events (topic);
 create index events_substate_id_idx on events (substate_id);
 create index events_resource_address_idx on events (resource_address);
+create index events_epoch_idx on events (epoch);
 
 -- Transaction receipts
 create table transaction_receipts
 (
     id              integer   not NULL primary key AUTOINCREMENT,
     address         text      not NULL,
-    data            text      not NULL,
+    -- The CBOR-encoded `TransactionReceipt`, served as stored.
+    data            blob      not NULL,
     created_at      timestamp not null default current_timestamp,
     outcome         text      not null default 'Commit',
-    total_fees_paid bigint    not null default 0
+    total_fees_paid bigint    not null default 0,
+    -- The epoch the transaction committed in. Retention ages receipts and their events out by it.
+    epoch           bigint    not null default 0
 );
 
 create unique index transaction_receipts_address_uniq on transaction_receipts (address);
+create index transaction_receipts_epoch_idx on transaction_receipts (epoch);
 
 create table transactions
 (
@@ -107,7 +99,11 @@ CREATE TABLE epoch_checkpoints
     shard_group TEXT                              NOT NULL,
     json_data   TEXT                              NOT NULL,
     created_at  DATETIME                          NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at  DATETIME                          NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at  DATETIME                          NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- The shard range of the checkpoint's shard group, so that the checkpoints of the shard group containing a given
+    -- shard can be selected. `shard_group` holds the range as "start-end".
+    shard_start INTEGER                           NOT NULL DEFAULT 0,
+    shard_end   INTEGER                           NOT NULL DEFAULT 0
 );
 
 CREATE UNIQUE INDEX epoch_checkpoints_uniq_epoch_shard_group ON epoch_checkpoints (epoch, shard_group);
@@ -116,22 +112,87 @@ create table utxos
 (
     id               integer   not NULL primary key AUTOINCREMENT,
     commitment       text      not NULL,
-    public_nonce     text      not NULL,
+    -- `public_nonce` and `utxo_tag` are NULL on the tombstone of an output this indexer never held unspent: it was spent
+    -- before this indexer saw its creation, which the shard's first sync skips and a later sync streams without a value.
+    public_nonce     text      NULL,
     version          bigint    not NULL,
     resource_address text      not NULL,
     shard            int       not NULL,
     state_version    bigint    not NULL,
-    output           blob      NULL,
-    utxo_tag         int       not NULL,
+    -- The CBOR-encoded `Utxo` while unspent, served as stored. NULL once spent.
+    utxo             blob      NULL,
+    utxo_tag         int       NULL,
     epoch            bigint    not NULL,
     is_spent         boolean   not NULL,
     is_burnt         boolean   not NULL,
-    is_frozen        boolean   not NULL,
     created_at       timestamp not null default current_timestamp
 );
 
-CREATE INDEX utxos_resource_state_version_shard_epoch_idx ON utxos (resource_address, state_version, shard, epoch);
-CREATE UNIQUE INDEX utxos_resource_public_nonce_utxo_tag_uniq_partial ON utxos (resource_address, public_nonce, utxo_tag) WHERE is_spent = false;
+-- Every read of `utxos` by state version is for one shard. With `shard` ahead of `state_version`, such a read is a
+-- range within that shard's entries rather than over the whole resource's history.
+CREATE INDEX utxos_resource_shard_state_version_epoch_idx ON utxos (resource_address, shard, state_version, epoch);
+-- Finds a resource's unspent UTXOs by public nonce and tag, as fetching UTXOs by key does. A public nonce is unproven
+-- bytes a sender chooses, so any number of unspent UTXOs may share a nonce and tag.
+CREATE INDEX utxos_resource_public_nonce_utxo_tag_unspent_idx ON utxos (resource_address, public_nonce, utxo_tag) WHERE is_spent = false;
+-- One row per version of a UTXO. Finds a UTXO by its commitment, as marking an output spent does.
+CREATE UNIQUE INDEX utxos_resource_commitment_version_uniq ON utxos (resource_address, commitment, version);
+-- Finds a resource's spent or burnt UTXOs by public nonce and tag, as fetching UTXOs by key does to report which of
+-- the requested outputs are spent. Queries must repeat this condition as SQL literals for SQLite to use the index.
+CREATE INDEX utxos_resource_public_nonce_utxo_tag_spent_idx ON utxos (resource_address, public_nonce, utxo_tag) WHERE is_spent = true OR is_burnt = true;
+-- Spent UTXOs by the epoch they were spent in, as the tombstone pruner reads them oldest first. Queries must repeat
+-- this condition as an SQL literal for SQLite to use the index.
+CREATE INDEX utxos_spent_epoch_idx ON utxos (epoch) WHERE is_spent = true;
+
+-- Per shard, the state version at and below which this indexer may lack the tombstone of a spent UTXO. A shard
+-- synced from its live substates rather than from its first version does not see the spends before them, and the
+-- tombstone pruner raises the horizon over every tombstone it deletes. The UTXO stream tells a client resuming from
+-- below a shard's horizon that its spends are incomplete. A shard with no row has every tombstone.
+create table utxo_tombstone_horizons
+(
+    shard         int    not null primary key,
+    state_version bigint not null
+);
+
+-- Streamed state versions that no quorum-verified shard leaf covers yet. Each is promoted to the indexed tables once a
+-- verified leaf matches the transition accumulator computed through it, and is discarded if one does not.
+create table staged_versions
+(
+    shard          int    not null,
+    state_version  bigint not null,
+    epoch          bigint not null,
+    -- The shard's transition accumulator after this version.
+    transition_acc blob   not null,
+    -- The peer id of the committee member that streamed the version.
+    streamed_by    blob   not null,
+    -- The version's length-delimited, prost-encoded `SubstateBatch` chunks, in the order they were streamed.
+    batch          blob   not null,
+    primary key (shard, state_version)
+);
+
+-- The shard leaves of every quorum-signed checkpoint stored, above each shard's last verified version. A stream
+-- catching up checks its staged versions against each in turn, so that no more than an epoch's versions are staged
+-- unchecked.
+create table checkpoint_shard_leaves
+(
+    shard          int    not null,
+    state_version  bigint not null,
+    transition_acc blob   not null,
+    primary key (shard, state_version)
+);
+
+-- The substates a shard's tree holds at a verified version, for those the indexer indexes, staged while a snapshot of
+-- the shard is downloaded. They are promoted together once the snapshot rebuilds the root the version's leaf commits.
+create table snapshot_substates
+(
+    shard    int    not null,
+    -- The epoch the substate was created in.
+    epoch    bigint not null,
+    -- The substate's key in the shard's tree.
+    leaf_key blob   not null,
+    -- The prost-encoded `SubstateData`.
+    substate blob   not null,
+    primary key (shard, epoch, leaf_key)
+);
 
 -- Lightweight template metadata received from validators via the TEMPLATE_METADATA sync flag. This
 -- lets the indexer serve a searchable template catalogue without storing full WASM binaries.
@@ -234,3 +295,19 @@ create table substate_cache_invalidations
 );
 
 create index idx_substate_cache_invalidations_expiry on substate_cache_invalidations (invalidated_at);
+
+-- The proof each cached substate version was verified with, so that a request for it need not ask the
+-- committee again. A proof is served only while its version is the head `substate_cache` holds, and
+-- the pruner removes those that no longer match a cached head.
+create table substate_cache_proofs
+(
+    substate_id  text   not null,
+    version      bigint not null,
+    -- CBOR-encoded SubstateValueProof
+    value_proof  blob   not null,
+    -- CBOR-encoded CommittedBlockProof anchoring `value_proof`
+    commit_proof blob   not null,
+    -- The epoch the substate value hash was computed in
+    proof_epoch  bigint not null,
+    primary key (substate_id, version)
+);

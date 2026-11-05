@@ -33,6 +33,9 @@ versioning rules below.
 ./scripts/publish_crates.py --dry-run        # cargo publish --dry-run each crate
 ./scripts/publish_crates.py --execute        # actually publish
 ./scripts/publish_crates.py --from <crate> --execute   # resume after a failure
+# --execute also relocks a crates.io copy of a publish-set crate (pulled in by a crates.io dependent, e.g. the
+# minotari crates' tari_sidechain -> tari_jellyfish) to the in-tree version once that version is published.
+# Commit the Cargo.lock change it reports.
 
 # Is this tree safe to tag? (bumps, pins, changelog, npm, publish order)
 ./scripts/release_check.py
@@ -59,7 +62,7 @@ cohort; every other tier is independently versioned (each crate carries its own
 
 | Tier | Label      | Policy |
 |------|------------|--------|
-| 1    | `stable`   | Shared primitives, rarely change (e.g. `tari_bor`, `ootle-network`, `ootle_byte_type`, `ootle_serde`, `tari_ootle_address`). |
+| 1    | `stable`   | Shared primitives, rarely change (e.g. `tari_bor`, `ootle-network`, `ootle_byte_type`, `ootle_serde`, `tari_ootle_address`), and the sidechain crates the Minotari base layer also consumes (`tari_sidechain`, `tari_jellyfish`). |
 | 2    | `template` | The template-authoring API (`tari_template_*`, `tari_ootle_template_*`). |
 | 3    | `core`     | Share `[workspace.package].version` in the root `Cargo.toml`. **Move together.** A breaking bump on any tier-3 crate moves the entire cohort. |
 | 4    | `wallet`   | Wallet SDK, clients & storage (`tari_ootle_wallet_*`, `tari_*_client`, `ootle-rs`). Decoupled from the core version. |

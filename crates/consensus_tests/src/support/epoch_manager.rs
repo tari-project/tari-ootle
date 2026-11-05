@@ -9,7 +9,6 @@ use std::{
 
 use ootle_byte_type::ToByteType;
 use rand::seq::IteratorRandom;
-use tari_common_types::types::FixedHash;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_epoch_manager::{EpochManagerError, EpochManagerEvent, EpochManagerReader};
 use tari_ootle_common_types::{
@@ -18,13 +17,16 @@ use tari_ootle_common_types::{
     SubstateAddress,
     SubstateVersion,
     ToSubstateAddress,
+    ValidatorSetHash,
     VersionedSubstateId,
     VotePower,
     committee::{Committee, CommitteeInfo},
     optional::Optional,
 };
 use tari_ootle_storage::{StorageError, global::models::ValidatorNode};
-use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+use tari_ootle_transaction::Network;
+use tari_sidechain::FixedHash;
+use tari_template_lib_types::{Hash32, crypto::RistrettoPublicKeyBytes};
 use tokio::sync::{Mutex, MutexGuard, broadcast};
 
 use crate::support::{
@@ -63,9 +65,14 @@ pub struct TestEpochManager {
     ///
     /// Production keeps the two apart: the activated row wins, and the oracle's scanned boundary is
     /// the fallback. Separating them here is what lets a test hold a validator in the state where it
-    /// can ratify an `EndEpoch` but cannot yet open the next epoch. Like the lag fields, a fresh
-    /// `Arc` is allocated per validator by `clone_for`.
+    /// can ratify an `EndEpoch`'s boundary hash but has no validator set for the next epoch. Like the lag fields, a
+    /// fresh `Arc` is allocated per validator by `clone_for`.
     oracle_observed_boundaries: Arc<StdMutex<HashSet<Epoch>>>,
+    /// Overrides the validator set hash this validator reports from `get_validator_set_hash`. When `Some(hash)`,
+    /// simulates a node whose epoch oracle assigned different committees than its peers. `None` = derive the hash
+    /// from the epoch hash this validator reports. Like the lag fields, a fresh `Arc` is allocated per validator by
+    /// `clone_for`.
+    validator_set_hash_override: Arc<StdMutex<Option<ValidatorSetHash>>>,
 }
 
 impl TestEpochManager {
@@ -79,6 +86,7 @@ impl TestEpochManager {
             oracle_current_epoch_cap: Arc::new(StdMutex::new(None)),
             oracle_epoch_hash_override: Arc::new(StdMutex::new(None)),
             oracle_observed_boundaries: Arc::new(StdMutex::new(HashSet::new())),
+            validator_set_hash_override: Arc::new(StdMutex::new(None)),
         }
     }
 
@@ -136,15 +144,29 @@ impl TestEpochManager {
 
     /// Mark `epoch`'s boundary block as scanned by this validator's oracle without activating the
     /// epoch. `get_observed_epoch_hash(epoch)` then reports the boundary hash — enough to ratify an
-    /// `EndEpoch` — while a `set_oracle_visible_epoch` cap keeps `get_epoch_hash(epoch)` answering
-    /// `NoEpochFound`, so the node still cannot open the epoch. That pair is the real state of a node
-    /// mid-catch-up, and the two must be settable independently.
+    /// `EndEpoch`'s boundary hash but not its validator set — while a `set_oracle_visible_epoch` cap
+    /// keeps `get_epoch_hash(epoch)` answering `NoEpochFound`, so the node still cannot open the epoch. That pair is
+    /// the real state of a node mid-catch-up, and the two must be settable independently.
     pub fn set_oracle_observed_boundary(&self, epoch: Epoch) {
         self.oracle_observed_boundaries.lock().unwrap().insert(epoch);
     }
 
     fn has_oracle_observed_boundary(&self, epoch: Epoch) -> bool {
         self.oracle_observed_boundaries.lock().unwrap().contains(&epoch)
+    }
+
+    /// Override the validator set hash this validator reports for every epoch, modelling a node whose epoch oracle
+    /// assigned committees its peers did not.
+    pub fn set_validator_set_hash(&self, hash: ValidatorSetHash) {
+        *self.validator_set_hash_override.lock().unwrap() = Some(hash);
+    }
+
+    pub fn clear_validator_set_hash(&self) {
+        *self.validator_set_hash_override.lock().unwrap() = None;
+    }
+
+    fn validator_set_hash_override(&self) -> Option<ValidatorSetHash> {
+        *self.validator_set_hash_override.lock().unwrap()
     }
 
     pub async fn set_current_epoch(&mut self, current_epoch: Epoch, shard_group: ShardGroup) -> &Self {
@@ -182,6 +204,7 @@ impl TestEpochManager {
         copy.oracle_current_epoch_cap = Arc::new(StdMutex::new(None));
         copy.oracle_epoch_hash_override = Arc::new(StdMutex::new(None));
         copy.oracle_observed_boundaries = Arc::new(StdMutex::new(HashSet::new()));
+        copy.validator_set_hash_override = Arc::new(StdMutex::new(None));
         if let Some(our_validator_node) = self.our_validator_node.clone() {
             copy.our_validator_node = Some(ValidatorNode {
                 address,
@@ -232,6 +255,30 @@ impl TestEpochManager {
 
             state.committees.insert(shard_group, Arc::new(committee));
         }
+        self
+    }
+
+    /// Gives `epoch` a committee layout of its own, read only by `get_committee_info_by_validator_address` and
+    /// `get_random_committee_member`. Every other lookup returns the `add_committees` layout for any epoch. Its
+    /// members must also belong to a committee added with `add_committees`.
+    pub async fn set_epoch_committees(
+        &self,
+        epoch: Epoch,
+        committees: HashMap<ShardGroup, Committee<TestAddress>>,
+    ) -> &Self {
+        let committees = committees.into_iter().map(|(sg, c)| (sg, Arc::new(c))).collect();
+        self.state_lock().await.epoch_committees.insert(epoch, committees);
+        self
+    }
+
+    /// Makes `get_num_committees(epoch)` report `num_committees`. Every other lookup keeps the `add_committees`
+    /// layout, so this models a committee-count change for the code that detects one, up to the end of the epoch
+    /// before it.
+    pub async fn set_epoch_num_committees(&self, epoch: Epoch, num_committees: u32) -> &Self {
+        self.state_lock()
+            .await
+            .epoch_num_committees
+            .insert(epoch, num_committees);
         self
     }
 
@@ -352,8 +399,42 @@ impl EpochManagerReader for TestEpochManager {
         Ok(self.inner.lock().await.last_epoch_hash)
     }
 
-    async fn get_num_committees(&self, _epoch: Epoch) -> Result<u32, EpochManagerError> {
-        Ok(self.inner.lock().await.committees.len() as u32)
+    async fn get_validator_set_hash(&self, epoch: Epoch) -> Result<ValidatorSetHash, EpochManagerError> {
+        // Committees are assigned when an epoch activates, so the set is unknown until the epoch is.
+        if epoch > self.current_epoch().await? {
+            return Err(EpochManagerError::NoValidatorSet { epoch });
+        }
+        let Some(epoch_hash) = self.get_epoch_hash(epoch).await.optional()? else {
+            return Err(EpochManagerError::NoValidatorSet { epoch });
+        };
+        if let Some(hash) = self.validator_set_hash_override() {
+            return Ok(hash);
+        }
+        // Every validator that agrees on the epoch hash agrees on the set.
+        Ok(ValidatorSetHash::calculate(
+            Network::LocalNet,
+            epoch,
+            TEST_NUM_PRESHARDS,
+            &Hash32::from_array(epoch_hash.into_array()),
+        ))
+    }
+
+    async fn get_validator_set_committee_proof(
+        &self,
+        _epoch: Epoch,
+        _shard_group: ShardGroup,
+    ) -> Result<tari_state_tree::ValidatorSetCommitteeProof, EpochManagerError> {
+        unimplemented!()
+    }
+
+    async fn get_num_committees(&self, epoch: Epoch) -> Result<u32, EpochManagerError> {
+        let state = self.inner.lock().await;
+        let num_committees = state
+            .epoch_num_committees
+            .get(&epoch)
+            .copied()
+            .unwrap_or(state.committees.len() as u32);
+        Ok(num_committees)
     }
 
     async fn get_committee_info_by_validator_address(
@@ -362,21 +443,17 @@ impl EpochManagerReader for TestEpochManager {
         address: &Self::Addr,
     ) -> Result<CommitteeInfo, EpochManagerError> {
         let state = self.state_lock().await;
-        let (sg, committee) = state
-            .committees
+        let committees = state.committees_at(epoch);
+        let (sg, committee) = committees
             .iter()
             .find(|(_, committee)| committee.contains(address))
             .ok_or_else(|| EpochManagerError::ValidatorNodeNotRegistered {
                 address: address.to_string(),
                 epoch,
             })?;
-        let num_committees = state.committees.len() as u32;
+        let num_committees = committees.len() as u32;
         let num_members = committee.len();
-        let total_power = state
-            .committees
-            .get(sg)
-            .map(|c| c.total_power())
-            .unwrap_or_else(VotePower::zero);
+        let total_power = committee.total_power();
         Ok(CommitteeInfo::new(
             TEST_NUM_PRESHARDS,
             num_members as u32,
@@ -481,18 +558,19 @@ impl EpochManagerReader for TestEpochManager {
 
     async fn get_random_committee_member(
         &self,
-        _epoch: Epoch,
+        epoch: Epoch,
         shard_group: Option<ShardGroup>,
         excluding: HashSet<Self::Addr>,
     ) -> Result<ValidatorNode<Self::Addr>, EpochManagerError> {
         let state = self.state_lock().await;
         let vn = match shard_group {
             Some(shard_group) => state
-                .validator_nodes
-                .values()
-                .filter(|(_, sg)| *sg == shard_group)
-                .map(|(vn, _)| vn)
-                .find(|vn| !excluding.contains(&vn.address))
+                .committees_at(epoch)
+                .get(&shard_group)
+                .into_iter()
+                .flat_map(|committee| committee.iter())
+                .find(|member| !excluding.contains(&member.address))
+                .map(|member| &state.validator_nodes[&member.address].0)
                 .ok_or_else(|| {
                     EpochManagerError::StorageError(StorageError::NotFound {
                         item: "validator_nodes",
@@ -516,7 +594,8 @@ impl EpochManagerReader for TestEpochManager {
         shard_group: ShardGroup,
     ) -> Result<CommitteeInfo, EpochManagerError> {
         let state = self.state_lock().await;
-        let committee = state.committees.get(&shard_group).ok_or_else(|| {
+        let committees = state.committees_at(epoch);
+        let committee = committees.get(&shard_group).ok_or_else(|| {
             EpochManagerError::StorageError(StorageError::NotFound {
                 item: "committee",
                 key: format!("for shard group {shard_group}"),
@@ -529,7 +608,7 @@ impl EpochManagerReader for TestEpochManager {
         Ok(CommitteeInfo::new(
             TEST_NUM_PRESHARDS,
             num_members as u32,
-            state.committees.len() as u32,
+            committees.len() as u32,
             shard_group,
             epoch,
             total_power,
@@ -570,7 +649,19 @@ pub struct TestEpochManagerState {
     #[allow(clippy::type_complexity)]
     pub validator_nodes: HashMap<TestAddress, (ValidatorNode<TestAddress>, ShardGroup)>,
     pub committees: HashMap<ShardGroup, Arc<Committee<TestAddress>>>,
+    /// Layouts of epochs whose committees differ from `committees`. See `TestEpochManager::set_epoch_committees`
+    /// for the lookups that read them.
+    #[allow(clippy::type_complexity)]
+    pub epoch_committees: HashMap<Epoch, HashMap<ShardGroup, Arc<Committee<TestAddress>>>>,
+    /// Committee counts reported by `get_num_committees`. See `TestEpochManager::set_epoch_num_committees`.
+    pub epoch_num_committees: HashMap<Epoch, u32>,
     pub address_shard: HashMap<TestAddress, ShardGroup>,
+}
+
+impl TestEpochManagerState {
+    fn committees_at(&self, epoch: Epoch) -> &HashMap<ShardGroup, Arc<Committee<TestAddress>>> {
+        self.epoch_committees.get(&epoch).unwrap_or(&self.committees)
+    }
 }
 
 impl Default for TestEpochManagerState {
@@ -581,6 +672,8 @@ impl Default for TestEpochManagerState {
             last_epoch_hash: FixedHash::default(),
             validator_nodes: HashMap::new(),
             committees: HashMap::new(),
+            epoch_committees: HashMap::new(),
+            epoch_num_committees: HashMap::new(),
             address_shard: HashMap::new(),
         }
     }

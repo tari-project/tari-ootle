@@ -9,6 +9,7 @@ use axum::{
 };
 use log::*;
 use tari_engine_types::{
+    encoded::Encoded,
     limits::{MAX_NATIVE_POINTS_PER_TRANSACTION, MAX_WASM_POINTS_PER_TRANSACTION},
     substate::SubstateId,
 };
@@ -32,7 +33,7 @@ use tari_rpc_framework::RpcStatusCode;
 
 use crate::{
     dry_run::error::DryRunTransactionProcessorError,
-    event_manager::{MAX_EVENT_QUERY_OFFSET, WILDCARD_TOPIC_SCAN_LIMIT},
+    event_query_limits::{MAX_EVENT_QUERY_OFFSET, WILDCARD_TOPIC_SCAN_LIMIT},
     network_client::NetworkClientError,
     rest_api::{
         context::HandlerContext,
@@ -42,6 +43,7 @@ use crate::{
         rate_limit::RequestCost,
     },
     store::EventQuery,
+    substate_manager::ProvenLookup,
     transaction_manager::error::TransactionManagerError,
 };
 
@@ -186,7 +188,8 @@ pub async fn submit_transaction_dry_run(
     Ok((
         Extension(cost),
         Json(SubmitTransactionDryRunResponse {
-            result: exec_result,
+            result: Encoded::encode(&exec_result)
+                .map_err(|e| ErrorResponse::internal_error(format!("Error encoding the dry-run result: {e}")))?,
             transaction_id,
         }),
     ))
@@ -274,7 +277,8 @@ pub async fn get_transaction(
 #[utoipa::path(
     get,
     path = "/transactions/{transaction_id}/result",
-    description = "Get the result of a submitted transaction (by transaction ID)",
+    description = "Get the result of a submitted transaction (by transaction ID). The execution result, and the receipt \
+                   when a proof is requested, are served in their CBOR encoding, base64 in the JSON body.",
     params(
         ("transaction_id" = String, Path, description = "The transaction ID"),
         (
@@ -311,14 +315,13 @@ pub async fn get_transaction_result(
         .map_err(ErrorResponse::anyhow)?
         .ok_or_else(|| ErrorResponse::not_found(format!("Transaction {transaction_id} not found")))?;
 
-    let is_committed = matches!(
-        &result,
-        IndexerTransactionFinalizedResult::Finalized { final_decision, .. } if final_decision.is_commit()
-    );
-    let receipt = if query.include_proof && is_committed {
-        get_proven_receipt(&context, transaction_id).await?
-    } else {
-        None
+    let receipt = match &result {
+        IndexerTransactionFinalizedResult::Finalized { final_decision, .. }
+            if query.include_proof && final_decision.is_commit() =>
+        {
+            get_proven_receipt(&context, transaction_id).await?
+        },
+        _ => None,
     };
 
     Ok(Json(GetTransactionResultResponse { result, receipt }))
@@ -330,23 +333,24 @@ async fn get_proven_receipt(
     transaction_id: TransactionId,
 ) -> HandlerResult<Option<ProvenTransactionReceipt>> {
     let receipt_id = SubstateId::TransactionReceipt(transaction_id.into_receipt_address());
-    let Some(fetched) = context
+    let fetched = match context
         .substate_manager()
         .fetch_substate_with_proof(SubstateRequirementRef::unversioned(&receipt_id))
         .await
         .map_err(substate_lookup_error)?
-    else {
-        return Ok(None);
+    {
+        Some(ProvenLookup::Up(fetched)) => *fetched,
+        // A down proof answers only a lookup that names its version.
+        Some(ProvenLookup::Down { version, .. }) => {
+            return Err(ErrorResponse::internal_error(format!(
+                "Unversioned lookup of {receipt_id} was answered with a down proof of v{version}"
+            )));
+        },
+        None => return Ok(None),
     };
-    let version = fetched.substate.version();
-    let receipt = fetched
-        .substate
-        .into_substate_value()
-        .into_transaction_receipt()
-        .ok_or_else(|| ErrorResponse::internal_error(format!("Substate {receipt_id} is not a transaction receipt")))?;
     Ok(Some(ProvenTransactionReceipt {
-        version,
-        receipt,
+        version: fetched.substate.version(),
+        value: fetched.substate.into_value(),
         proof: fetched.proof.map(to_substate_proof).transpose()?,
     }))
 }
@@ -408,7 +412,7 @@ pub async fn query_transaction_events(
     let events = page
         .events
         .into_iter()
-        .map(|(_, transaction_id, event)| (transaction_id, event))
+        .map(|stored| (stored.transaction_id, stored.event))
         .collect();
     let next_before_id = page.next_cursor.and_then(|id| u64::try_from(id).ok());
     Ok(Json(QueryTransactionEventsResponse { events, next_before_id }))

@@ -10,18 +10,15 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_template_abi::rust::collections::BTreeSet;
-use tari_template_lib::{
-    prelude::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-    types::{
-        Amount,
-        NonFungibleAddress,
-        NonFungibleId,
-        ResourceAddress,
-        ResourceType,
-        UtxoId,
-        confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    },
+use tari_template_lib::types::{
+    Amount,
+    NonFungibleAddress,
+    NonFungibleId,
+    ResourceAddress,
+    ResourceType,
+    UtxoId,
+    confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
 };
 
 use crate::{commit_result::ExecutionFailureCode, confidential, crypto::OutputBody, substate::SubstateId};
@@ -120,18 +117,6 @@ impl ResourceContainer {
             address,
             revealed_amount,
             locked_amount: Amount::zero(),
-        }
-    }
-
-    pub fn public_key(public_key: RistrettoPublicKeyBytes) -> Self {
-        Self::NonFungible {
-            address: PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-            token_ids: {
-                let mut set = BTreeSet::new();
-                set.insert(NonFungibleId::from_public_key(public_key));
-                set
-            },
-            locked_token_ids: Default::default(),
         }
     }
 
@@ -282,7 +267,7 @@ impl ResourceContainer {
                     amount: other_amount, ..
                 },
             ) => {
-                *amount = checked_deposit(*amount, *locked_amount, other_amount)?;
+                *amount = checked_deposit(*amount, *locked_amount, other_amount, "deposit")?;
             },
             (
                 Self::NonFungible { token_ids, .. },
@@ -320,7 +305,7 @@ impl ResourceContainer {
                         ));
                     }
                 }
-                *revealed_amount = checked_deposit(*revealed_amount, *locked_revealed_amount, other_amount)?;
+                *revealed_amount = checked_deposit(*revealed_amount, *locked_revealed_amount, other_amount, "deposit")?;
             },
             (
                 Self::Stealth {
@@ -333,7 +318,7 @@ impl ResourceContainer {
                     ..
                 },
             ) => {
-                *revealed_amount = checked_deposit(*revealed_amount, *locked_amount, other_amount)?;
+                *revealed_amount = checked_deposit(*revealed_amount, *locked_amount, other_amount, "deposit")?;
             },
             (this, other) => {
                 return Err(ResourceError::ResourceTypeMismatch {
@@ -478,6 +463,7 @@ impl ResourceContainer {
                 address,
                 commitments,
                 revealed_amount,
+                locked_revealed_amount,
                 ..
             } => {
                 let address = *address;
@@ -515,7 +501,15 @@ impl ResourceContainer {
                         ),
                     });
                 }
-                *revealed_amount -= validated_proof.input_revealed_amount;
+
+                // Revealed change always returns to the container, so the balance proof — not a sufficiency check —
+                // is what constrains it. Only the sum can fail here.
+                *revealed_amount = checked_deposit(
+                    *revealed_amount - validated_proof.input_revealed_amount,
+                    *locked_revealed_amount,
+                    validated_proof.change_revealed_amount,
+                    "withdraw_confidential change",
+                )?;
 
                 let mut created_outputs = Vec::new();
 
@@ -526,15 +520,6 @@ impl ResourceContainer {
                             "Confidential withdraw contained duplicate commitment in change commitment".to_string(),
                         ));
                     }
-
-                    // The change's revealed amount returns to the container, so the balance proof — not a
-                    // sufficiency check — is what constrains it. Only the sum can fail here.
-                    *revealed_amount = revealed_amount
-                        .checked_add(validated_proof.change_revealed_amount)
-                        .ok_or(ResourceError::BalanceOverflow {
-                            operate: "withdraw_confidential change",
-                            amount: validated_proof.change_revealed_amount,
-                        })?;
                     created_outputs.push((change_commitment, change.into_output_body()));
                 }
 
@@ -636,9 +621,9 @@ impl ResourceContainer {
                         details: "lock_all: resource container contained no funds".to_string(),
                     });
                 }
+                *locked_amount = checked_add(*locked_amount, *amount, "lock")?;
                 // Sets to zero and returns the amount
                 let newly_locked_amount = mem::take(amount);
-                *locked_amount += newly_locked_amount;
                 Ok(Self::public_fungible(resource_address, newly_locked_amount))
             },
             Self::NonFungible {
@@ -670,11 +655,11 @@ impl ResourceContainer {
                         details: "lock_all: resource container contained no commitments or revealed funds".to_string(),
                     });
                 }
+                *locked_revealed_amount = checked_add(*locked_revealed_amount, *revealed_amount, "lock")?;
                 let newly_locked_commitments = mem::take(commitments);
                 // Sets to zero and returns the amount
                 let newly_locked_revealed_amount = mem::take(revealed_amount);
                 locked_commitments.extend(newly_locked_commitments.iter().copied());
-                *locked_revealed_amount += newly_locked_revealed_amount;
 
                 Ok(Self::confidential(
                     resource_address,
@@ -693,9 +678,9 @@ impl ResourceContainer {
                     });
                 }
 
+                *locked_amount = checked_add(*locked_amount, *revealed_amount, "lock")?;
                 // Sets to zero and returns the amount
                 let newly_locked_amount = mem::take(revealed_amount);
-                *locked_amount += newly_locked_amount;
                 Ok(Self::stealth(resource_address, newly_locked_amount))
             },
         }
@@ -881,8 +866,8 @@ impl ResourceContainer {
                         ),
                     });
                 }
+                *locked_amount = checked_add(*locked_amount, amount, "lock")?;
                 *available_amount -= amount;
-                *locked_amount += amount;
                 Ok(Self::public_fungible(*self.resource_address(), amount))
             },
             Self::NonFungible {
@@ -927,8 +912,8 @@ impl ResourceContainer {
                         ),
                     });
                 }
+                *locked_revealed_amount = checked_add(*locked_revealed_amount, amount, "lock")?;
                 *revealed_amount -= amount;
-                *locked_revealed_amount += amount;
                 Ok(Self::confidential(*self.resource_address(), None, amount))
             },
             Self::Stealth {
@@ -945,8 +930,8 @@ impl ResourceContainer {
                         ),
                     });
                 }
+                *locked_amount = checked_add(*locked_amount, amount, "lock")?;
                 *available_amount -= amount;
-                *locked_amount += amount;
                 Ok(Self::stealth(*self.resource_address(), amount))
             },
         }
@@ -967,14 +952,20 @@ fn checked_add(amount: Amount, other: Amount, operate: &'static str) -> Result<A
         .ok_or(ResourceError::BalanceOverflow { operate, amount: other })
 }
 
-/// Returns the new unlocked balance for a deposit of `deposit` into a container holding `unlocked` and `locked`.
+/// Returns the new unlocked balance for a credit of `deposit` to a container holding `unlocked` and `locked`.
 ///
 /// A container's balance is the two fields together, so [`Amount::MAX`] bounds their sum rather than either one.
-/// Deposit is the only operation that raises that sum — locking and unlocking move value between the fields and
-/// leave it alone — so bounding it here is what keeps every one of those moves in range.
-fn checked_deposit(unlocked: Amount, locked: Amount, deposit: Amount) -> Result<Amount, ResourceError> {
-    let new_unlocked = checked_add(unlocked, deposit, "deposit")?;
-    checked_add(new_unlocked, locked, "deposit")?;
+/// Every operation that raises that sum — a deposit, or the revealed change a confidential withdraw returns to its
+/// source — must credit the unlocked balance through here. Locking and unlocking move value between the fields and
+/// leave the sum alone, so bounding every credit is what keeps those moves in range.
+fn checked_deposit(
+    unlocked: Amount,
+    locked: Amount,
+    deposit: Amount,
+    operate: &'static str,
+) -> Result<Amount, ResourceError> {
+    let new_unlocked = checked_add(unlocked, deposit, operate)?;
+    checked_add(new_unlocked, locked, operate)?;
     Ok(new_unlocked)
 }
 
@@ -1057,6 +1048,51 @@ impl ResourceError {
             Self::OperationNotAllowed(_) => C::ResourceRestricted,
             Self::NonFungibleTokenIdNotFound { .. } => C::NotFound,
             Self::InvariantError(_) => C::EngineInvariant,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_template_lib::prelude::PUBLIC_IDENTITY_RESOURCE_ADDRESS;
+
+    use super::*;
+
+    /// Returns a container whose unlocked + locked balance exceeds [`Amount::MAX`], a state no operation may produce.
+    fn container_past_the_bound(mut container: ResourceContainer) -> ResourceContainer {
+        let _proof = container.lock_by_amount(Amount::MAX).unwrap();
+        match &mut container {
+            ResourceContainer::Fungible { amount, .. } => *amount = Amount::from(1u64),
+            ResourceContainer::Confidential { revealed_amount, .. } |
+            ResourceContainer::Stealth { revealed_amount, .. } => *revealed_amount = Amount::from(1u64),
+            ResourceContainer::NonFungible { .. } => unreachable!("a non-fungible container has no amount"),
+        }
+        container
+    }
+
+    #[test]
+    fn locking_past_the_balance_bound_fails_without_changing_the_container() {
+        for container in [
+            ResourceContainer::public_fungible(PUBLIC_IDENTITY_RESOURCE_ADDRESS, Amount::MAX),
+            ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, None, Amount::MAX),
+            ResourceContainer::stealth(PUBLIC_IDENTITY_RESOURCE_ADDRESS, Amount::MAX),
+        ] {
+            let mut container = container_past_the_bound(container);
+            let ty = container.resource_type();
+
+            let err = container.lock_all().unwrap_err();
+            assert!(
+                matches!(err, ResourceError::BalanceOverflow { operate: "lock", .. }),
+                "{ty}: expected BalanceOverflow, got {err:?}"
+            );
+            let err = container.lock_by_amount(Amount::from(1u64)).unwrap_err();
+            assert!(
+                matches!(err, ResourceError::BalanceOverflow { operate: "lock", .. }),
+                "{ty}: expected BalanceOverflow, got {err:?}"
+            );
+
+            assert_eq!(container.unlocked_amount(), Amount::from(1u64), "{ty}");
+            assert_eq!(container.locked_amount(), Amount::MAX, "{ty}");
         }
     }
 }

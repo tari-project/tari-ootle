@@ -165,10 +165,10 @@ OotleResult ootle_derive_account_address(const char *account_public_key_hex);
  * [`ParsedAddress`](ootle_sdk_core::ParsedAddress):
  * - substate: `{"kind":"component"|"resource","canonical":"…_<hex>"}`;
  * - identity: `{"kind":"identity","network":"<keyword>","account_key":"<hex>","view_only_key":"<hex>",
- *   "pay_ref":"<hex>"?,"bech32m":"otl_…"}` (`pay_ref` is absent when none).
+ *   "destination_tag":"<hex>"?,"bech32m":"otl_…"}` (`destination_tag` is absent when none).
  *
  * An unknown prefix, a malformed substate id, or a bad bech32m string (checksum / HRP / length /
- * oversize pay_ref) ⇒ `"PARSE"`; no handle.
+ * oversize destination_tag) ⇒ `"PARSE"`; no handle.
  *
  * # Safety
  * `address_str` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed
@@ -181,21 +181,21 @@ OotleResult ootle_parse_address(const char *address_str);
  *
  * `network` is the L1 discriminant byte (selects the network-qualified HRP — `otl_` MainNet,
  * `otl_loc_` LocalNet, `otl_esm_` Esmeralda, …). `account_key_hex` / `view_only_key_hex` are the
- * lowercase-hex 32-byte public keys. `pay_ref_hex` is a **nullable** lowercase-hex payment reference
+ * lowercase-hex 32-byte public keys. `destination_tag_hex` is a **nullable** lowercase-hex destination tag
  * (pass NULL for none); over 64 bytes ⇒ `"PARSE"`. On success `data_json` is `{"bech32m":"otl_…"}`;
  * no handle.
  *
- * Bad / odd / uppercase key hex or pay_ref hex ⇒ `"PARSE"`.
+ * Bad / odd / uppercase key hex or destination_tag hex ⇒ `"PARSE"`.
  *
  * # Safety
  * `account_key_hex` and `view_only_key_hex` must be valid NUL-terminated UTF-8 C strings.
- * `pay_ref_hex` must be NULL or such a string. The returned envelope must be freed with
+ * `destination_tag_hex` must be NULL or such a string. The returned envelope must be freed with
  * [`ootle_result_free`].
  */
 OotleResult ootle_format_identity_address(uint8_t network,
                                           const char *account_key_hex,
                                           const char *view_only_key_hex,
-                                          const char *pay_ref_hex);
+                                          const char *destination_tag_hex);
 
 /**
  * Builds the public-transfer unsigned tx + the want list to resolve it.
@@ -292,15 +292,22 @@ OotleResult ootle_seal_and_encode(OotlePartialTransaction *handle,
  * public handle. **Borrows** the handle (does **not** consume it) so A can ship the record JSON *and*
  * keep the handle to seal later with [`ootle_seal_and_encode_with_auth`].
  *
+ * `main_signer_hex` (lowercase hex, nullable) names the co-signer the transaction acts as wherever it
+ * needs a single signer (`OwnerRule::OwnedBySigner`, the default owner of new components and
+ * resources). NULL declares no main signer. Pass the same value to [`ootle_seal_and_encode_with_auth`].
+ *
  * On success `data_json` is the `UnsignedTransactionRecord` JSON (`{"unsigned": <UnsignedTransaction>}`).
- * An unresolved partial ⇒ a `RESOLUTION` error (the handle is left intact).
+ * An unresolved partial ⇒ a `RESOLUTION` error (the handle is left intact). Bad `main_signer_hex` ⇒
+ * `PARSE`.
  *
  * # Safety
- * `handle` must be a non-null, not-yet-consumed public handle. The returned envelope must be freed
- * with [`ootle_result_free`]. The handle is **not** consumed; free it with
- * [`ootle_partial_transaction_free`] (or consume it via a seal fn) exactly once afterwards.
+ * `handle` must be a non-null, not-yet-consumed public handle. `main_signer_hex` must be NULL or a
+ * valid NUL-terminated UTF-8 C string. The returned envelope must be freed with [`ootle_result_free`].
+ * The handle is **not** consumed; free it with [`ootle_partial_transaction_free`] (or consume it via a
+ * seal fn) exactly once afterwards.
  */
-OotleResult ootle_unsigned_record_for_cosign(const OotlePartialTransaction *handle);
+OotleResult ootle_unsigned_record_for_cosign(const OotlePartialTransaction *handle,
+                                             const char *main_signer_hex);
 
 /**
  * Authorizes party A's serialized unsigned transaction record (production path: fresh random Schnorr
@@ -333,17 +340,22 @@ OotleResult ootle_add_signature(uint8_t network,
  *
  * `keys_json` is `{account_secret}` (lowercase hex). `authorizations_json` is a JSON array
  * `[{ "public_key": "<hex>", "signature": "<hex>" }, ...]`. An empty array behaves like the plain
- * single-key seal. On success `data_json` is the `EncodedPublicTransfer`. The bytes/id are not
- * reproducible (random-nonce seal).
+ * single-key seal. `main_signer_hex` (nullable) must be the value passed to
+ * [`ootle_unsigned_record_for_cosign`]; a main signer that is not one of the authorizations ⇒
+ * `INVALID`, and an authorization that does not verify against the sealed transaction (for example
+ * one signed over a record with a different main signer) ⇒ `VALIDATION`. On success `data_json` is the
+ * `EncodedPublicTransfer`. The bytes/id are not reproducible (random-nonce seal).
  *
  * # Safety
  * `handle` must be a non-null, not-yet-consumed public handle. `keys_json` and `authorizations_json`
- * must be valid NUL-terminated UTF-8 C strings. The returned envelope must be freed with
- * [`ootle_result_free`]. Do **not** free `handle` afterwards — it is consumed here.
+ * must be valid NUL-terminated UTF-8 C strings, and `main_signer_hex` NULL or one. The returned
+ * envelope must be freed with [`ootle_result_free`]. Do **not** free `handle` afterwards — it is
+ * consumed here.
  */
 OotleResult ootle_seal_and_encode_with_auth(OotlePartialTransaction *handle,
                                             const char *keys_json,
-                                            const char *authorizations_json);
+                                            const char *authorizations_json,
+                                            const char *main_signer_hex);
 
 /**
  * Parses a raw indexer finalized-result JSON string into the typed `FinalizedResult`.
@@ -401,6 +413,93 @@ void ootle_result_free(OotleResult result);
 void ootle_partial_transaction_free(OotlePartialTransaction *handle);
 
 /**
+ * Decodes a served `Event`.
+ *
+ * `event_json` is an `Event` as the indexer serves it (e.g. the `event` field of a `/transactions/events/stream`
+ * message): a JSON string holding its base64 CBOR encoding, passed verbatim with its quotes (`"<base64>"`). Bare
+ * base64 yields `"PARSE"`.
+ *
+ * On success `data_json` is `{ "substate_id": "<id>" | null, "template_address": "<hex>",
+ * "topic": "<topic>", "payload": { … } }`.
+ *
+ * # Safety
+ * `event_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
+ * [`ootle_result_free`](crate::ootle_result_free). It never carries a handle.
+ */
+OotleResult ootle_decode_event(const char *event_json);
+
+/**
+ * Decodes a served `SubstateValue` in full.
+ *
+ * `substate_value_json` is a `SubstateValue` as the indexer serves it: a JSON string holding its base64 CBOR encoding,
+ * passed verbatim with its quotes (`"<base64>"`). Bare base64 yields `"PARSE"`.
+ *
+ * On success `data_json` is the value's serde JSON, keyed by variant
+ * (`{ "Component": { … } }`, `{ "Vault": { … } }`, …).
+ *
+ * # Safety
+ * `substate_value_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
+ * [`ootle_result_free`](crate::ootle_result_free). It never carries a handle.
+ */
+OotleResult ootle_decode_substate_value(const char *substate_value_json);
+
+/**
+ * Decodes a served `ExecuteResult`.
+ *
+ * `execute_result_json` is an `ExecuteResult` as the indexer serves it (e.g. a dry run's `result`): a JSON string
+ * holding its base64 CBOR encoding, passed verbatim with its quotes (`"<base64>"`). Bare base64 yields `"PARSE"`.
+ *
+ * On success `data_json` is its serde JSON.
+ *
+ * # Safety
+ * `execute_result_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
+ * [`ootle_result_free`](crate::ootle_result_free). It never carries a handle.
+ */
+OotleResult ootle_decode_execute_result(const char *execute_result_json);
+
+/**
+ * Decodes a served `TransactionReceipt`.
+ *
+ * `receipt_json` is a `TransactionReceipt` as the indexer serves it: a JSON string holding its base64 CBOR encoding,
+ * passed verbatim with its quotes (`"<base64>"`). Bare base64 yields `"PARSE"`.
+ *
+ * On success `data_json` is its serde JSON.
+ *
+ * # Safety
+ * `receipt_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
+ * [`ootle_result_free`](crate::ootle_result_free). It never carries a handle.
+ */
+OotleResult ootle_decode_transaction_receipt(const char *receipt_json);
+
+/**
+ * Decodes a served `Resource`.
+ *
+ * `resource_json` is a `Resource` as the indexer serves it: a JSON string holding its base64 CBOR encoding, passed
+ * verbatim with its quotes (`"<base64>"`). Bare base64 yields `"PARSE"`.
+ *
+ * On success `data_json` is its serde JSON.
+ *
+ * # Safety
+ * `resource_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
+ * [`ootle_result_free`](crate::ootle_result_free). It never carries a handle.
+ */
+OotleResult ootle_decode_resource(const char *resource_json);
+
+/**
+ * Decodes a served `Utxo`.
+ *
+ * `utxo_json` is a `Utxo` as the indexer serves it: a JSON string holding its base64 CBOR encoding, passed verbatim
+ * with its quotes (`"<base64>"`). Bare base64 yields `"PARSE"`.
+ *
+ * On success `data_json` is its serde JSON.
+ *
+ * # Safety
+ * `utxo_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be freed with
+ * [`ootle_result_free`](crate::ootle_result_free). It never carries a handle.
+ */
+OotleResult ootle_decode_utxo(const char *utxo_json);
+
+/**
  * One-shot random-nonce default stealth send: build (resolve inputs + assemble) and seal/encode in
  * one call, expanding all proof + seal entropy from a fresh OS-RNG seed.
  *
@@ -411,7 +510,7 @@ void ootle_partial_transaction_free(OotlePartialTransaction *handle);
  *   wanted `utxo_<…>` ids are a pure function of each input's resource + commitment).
  * - `spend_secrets_json` — a JSON array of lowercase-hex secret scalars, one **positional** per `intent.inputs`, used
  *   to decrypt each input's spend mask.
- * - `keys_json` — `{account_secret}` (lowercase hex).
+ * - `keys_json` — `{account_secret, view_secret}` (lowercase hex).
  *
  * On success `data_json` is the `EncodedPublicTransfer` (`{encoded_transaction, transaction_id}`,
  * lowercase hex; the wire shape is shared with the public path). The bytes/id are **not** reproducible
@@ -431,7 +530,7 @@ OotleResult ootle_build_and_encode_stealth_transfer(uint8_t network,
 
 /**
  * Seed-reproducible counterpart of [`ootle_build_and_encode_stealth_transfer`]. The single build seed
- * in `keys_json` (`{account_secret, seed}`, lowercase hex) expands into **both** the account-key
+ * in `keys_json` (`{account_secret, view_secret, seed}`, lowercase hex) expands into **both** the account-key
  * authorization + seal nonces and the proof + seal-side entropy, so the result is reproducible from
  * the seed + intent (except the aggregated bulletproof, which is never byte-stable — compare
  * *semantically*).
@@ -507,8 +606,8 @@ OotleResult ootle_build_stealth_unsigned_with_seed(uint8_t network,
  * # Safety
  * `handle` must be a non-null pointer previously returned by [`ootle_build_stealth_unsigned`] /
  * [`ootle_build_stealth_unsigned_with_seed`] / this fn and not yet consumed. `fetched_json`,
- * `spend_secrets_json` and `keys_json` (`{account_secret}`, lowercase hex — assembly names the revealed output's
- * receiver, which is the key that will seal) must each be a valid NUL-terminated UTF-8 C string. The returned
+ * `spend_secrets_json` and `keys_json` (`{account_secret, view_secret}`, lowercase hex — assembly names the revealed
+ * output's receiver, which is the key that will seal) must each be a valid NUL-terminated UTF-8 C string. The returned
  * envelope must be freed with [`ootle_result_free`](crate::ootle_result_free).
  */
 OotleResult ootle_apply_fetched_substates_stealth(OotleStealthPartialTransaction *handle,
@@ -522,7 +621,7 @@ OotleResult ootle_apply_fetched_substates_stealth(OotleStealthPartialTransaction
  *
  * **Consumes** `handle` (taken by value — treat the pointer you passed as invalid afterwards, even on
  * error). `network` must be the transfer's network (the partial does not carry it; different networks
- * yield different stealth keys). `keys_json` is `{account_secret}`; the seal nonces are expanded from
+ * yield different stealth keys). `keys_json` is `{account_secret, view_secret}`; the seal nonces are expanded from
  * a fresh OS-RNG seed. On success `data_json` is the `EncodedPublicTransfer`. No handle is returned.
  * The bytes/id are not reproducible (random-nonce seal).
  *
@@ -545,8 +644,8 @@ OotleResult ootle_seal_and_encode_stealth(OotleStealthPartialTransaction *handle
  * **Stateless — returns no handle.**
  *
  * - `network` — the L1 network discriminant byte.
- * - `scan_keys_json` — `{view_secret, account_secret?, skip_memo?}` (secrets lowercase hex; `account_secret` optional
- *   — when absent the tag + spend-condition ownership checks are skipped; `skip_memo` defaults to `false`).
+ * - `scan_keys_json` — `{view_secret, account_public_key, skip_memo?}` (lowercase hex; `skip_memo` defaults to
+ *   `false`).
  * - `inbound_output_json` — an `InboundStealthOutput` (the on-the-wire shape of a created stealth output).
  *
  * `data_json` on success is **always** a JSON object:
@@ -570,8 +669,8 @@ OotleResult ootle_scan_stealth_output(uint8_t network,
  *
  * - `substate_id_json` — the UTXO's canonical address string (`utxo_<resource>_<commitment>`), carrying the on-chain
  *   commitment + resource address the value body omits. A JSON string.
- * - `substate_value_json` — the `SubstateValue` JSON the indexer returned, verbatim (the same shape the resolver
- *   already consumes).
+ * - `substate_value_json` — the substate value the indexer returned (a JSON base64 CBOR string), verbatim (the same
+ *   shape the resolver already consumes).
  *
  * On success `data_json` is the decoded [`InboundStealthOutput`] (a JSON object with hex byte
  * fields). A non-UTXO / frozen / burnt substate or a malformed nonce yields `"INVALID"` / `"KEY"`;
@@ -593,11 +692,10 @@ OotleResult ootle_decode_stealth_utxo(const char *substate_id_json,
  * `data_json`: not-mine ⇒ `{"is_mine":false}`, not an error.
  *
  * - `network` — the L1 network discriminant byte.
- * - `scan_keys_json` — `{view_secret, account_secret?, skip_memo?}` (the same bundle [`ootle_scan_stealth_output`]
- *   takes; secrets lowercase hex; `account_secret` optional — when absent the tag + spend-condition ownership checks
- *   are skipped; `skip_memo` defaults to `false`).
+ * - `scan_keys_json` — `{view_secret, account_public_key, skip_memo?}` (the same bundle [`ootle_scan_stealth_output`]
+ *   takes; lowercase hex; `skip_memo` defaults to `false`).
  * - `substate_id_json` — the UTXO's canonical address string. A JSON string.
- * - `substate_value_json` — the `SubstateValue` JSON the indexer returned, verbatim.
+ * - `substate_value_json` — the substate value the indexer returned (a JSON base64 CBOR string), verbatim.
  *
  * `data_json` on success is **always** a JSON object: the `DecryptedOutput`
  * (`{is_mine:true, value, mask, memo}`) when addressed to the scanner, or `{"is_mine":false}` when
@@ -692,10 +790,10 @@ OotleResult ootle_build_stealth_outputs_statement_with_seed(uint8_t network,
 void ootle_stealth_partial_transaction_free(OotleStealthPartialTransaction *handle);
 
 /**
- * Decodes any fetched substate JSON into the kind-tagged
+ * Decodes any fetched substate value into the kind-tagged
  * [`DecodedSubstate`](ootle_sdk_core::DecodedSubstate). **Stateless — returns no handle.**
  *
- * `substate_value_json` is the indexer's `SubstateValue` JSON, passed verbatim. On success
+ * `substate_value_json` is the indexer's substate value (a JSON base64 CBOR string), passed verbatim. On success
  * `data_json` is `{ "kind": "component|vault|resource|other", "value": { … } }`. For a vault the
  * `value.revealed_balance` is the revealed/unlocked amount only — the confidential side is surfaced
  * as `value.confidential_commitment_count` + `value.kind`, never a silent zero. Balances are native
@@ -713,8 +811,8 @@ OotleResult ootle_decode_substate(const char *substate_value_json);
 /**
  * Computes the **revealed** balance per resource for an account. **Stateless — returns no handle.**
  *
- * `account_substate_json` is the account `Component` substate JSON; `vault_substates_json` is a JSON
- * array of [`FetchedSubstate`](ootle_sdk_core::FetchedSubstate) records (`{substate_id, version,
+ * `account_substate_json` is the account `Component` substate value as the indexer serves it; `vault_substates_json`
+ * is a JSON array of [`FetchedSubstate`](ootle_sdk_core::FetchedSubstate) records (`{substate_id, version,
  * substate_value}`) — the vaults the host already fetched (the ids
  * [`ootle_account_balance_wants`] named). The core rediscovers the account's vault ids from its CBOR
  * state and matches them by id: a referenced vault not supplied is a `"RESOLUTION"` error, never a
@@ -740,8 +838,8 @@ OotleResult ootle_account_balances(const char *account_substate_json,
  * Names the `vault_<hex>` ids a host should fetch to satisfy [`ootle_account_balances`] for an
  * account. **Stateless — returns no handle.**
  *
- * `account_substate_json` is the account `Component` substate JSON. On success `data_json` is
- * `{ "fetch_ids": [ "vault_<hex>", … ] }` — the same component-vault discovery
+ * `account_substate_json` is the account `Component` substate value as the indexer serves it. On success `data_json`
+ * is `{ "fetch_ids": [ "vault_<hex>", … ] }` — the same component-vault discovery
  * [`ootle_account_balances`] does, surfaced as opaque ids. The host fetches them and feeds them back
  * as `vault_substates_json`.
  *

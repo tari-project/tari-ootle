@@ -64,7 +64,7 @@ use super::{
 };
 use crate::{
     support::{
-        RoundRobinLeaderStrategy,
+        SmoothWeightedRoundRobin,
         ValidatorChannels,
         address::TestAddress,
         epoch_manager::TestEpochManager,
@@ -80,7 +80,7 @@ use crate::{
 pub struct Test {
     validators: HashMap<TestAddress, Validator>,
     network: TestNetwork,
-    _leader_strategy: RoundRobinLeaderStrategy,
+    _leader_strategy: SmoothWeightedRoundRobin,
     _epoch_manager: TestEpochManager,
     num_committees: u32,
     submitted_transactions: Vec<TransactionId>,
@@ -118,6 +118,8 @@ impl Test {
                 .collect(),
             new_outputs: new_outputs.clone(),
             validator_fee_withdrawals: vec![],
+            calls_template: None,
+            fee_intent_fallback_fee: None,
         });
 
         self.send_transaction_to_destination(TestVnDestination::All, transaction.clone())
@@ -155,6 +157,8 @@ impl Test {
             input_locks,
             new_outputs,
             validator_fee_withdrawals: vec![],
+            calls_template: None,
+            fee_intent_fallback_fee: None,
         });
         self
     }
@@ -222,7 +226,7 @@ impl Test {
             .collect::<Vec<_>>();
 
         self.validators.values().filter(|vn| dest.is_for_vn(vn)).for_each(|v| {
-            let mut batch = SubstateUpdateBatch::new(Network::LocalNet, Epoch::zero());
+            let mut batch = SubstateUpdateBatch::new_unrecorded(Network::LocalNet, Epoch::zero());
             for substate in &substates {
                 let shard = substate.to_versioned_substate_id().to_shard(TEST_NUM_PRESHARDS);
                 if v.shard_group.contains(&shard) {
@@ -550,18 +554,23 @@ impl Test {
     }
 
     async fn wait_all_for_predicate<T: Display, P: FnMut(&Validator) -> bool>(&self, description: T, mut predicate: P) {
+        // A loaded CI runner can take several seconds per block, so the wait must cover a few 3-chains. It only bounds
+        // how long a stalled test takes to fail.
+        const MAX_WAIT: Duration = Duration::from_secs(60);
+        let deadline = Instant::now() + MAX_WAIT;
         let mut complete = vec![];
-        let mut remaining_loops = 100usize; // ~10 seconds
         loop {
+            let timed_out = Instant::now() >= deadline;
             self.with_all_validators(|v| {
                 if complete.contains(&v.address) {
                     return;
                 }
                 if predicate(v) {
                     complete.push(v.address.clone());
-                } else if remaining_loops == 0 {
+                } else if timed_out {
                     panic!(
-                        "Timed out waiting for {} ({} of {} validators passed)",
+                        "Timed out after {:?} waiting for {} ({} of {} validators passed)",
+                        MAX_WAIT,
                         description,
                         complete.len(),
                         self.validators.len()
@@ -570,8 +579,6 @@ impl Test {
                     // 📎
                 }
             });
-
-            remaining_loops -= 1;
 
             if complete.len() == self.validators.len() {
                 break;
@@ -740,9 +747,11 @@ impl TestBuilder {
                     exhaust_burn_rate: ExhaustBurnRate::new(500),
                 },
                 state_history_length: tari_state_store_rocksdb::DatabaseOptions::default().state_history_length,
+                pinned_checkpoint_epochs: tari_state_store_rocksdb::DatabaseOptions::default().pinned_checkpoint_epochs,
                 state_tree_cleanup_interval: Duration::from_secs(1000),
                 epoch_gc_interval: Duration::from_secs(1000),
                 epoch_end_grace_period: Duration::from_secs(1),
+                epoch_end_drain_period: Duration::from_secs(5),
                 catch_up_request_timeout: Duration::from_secs(15),
             },
         }
@@ -765,6 +774,12 @@ impl TestBuilder {
         self
     }
 
+    /// Sets the per-shard output budget a proposer fills a block to.
+    pub fn with_max_block_shard_output_bytes(mut self, max_bytes: usize) -> Self {
+        self.config.consensus_constants.max_block_shard_output_bytes = max_bytes;
+        self
+    }
+
     pub fn with_test_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
@@ -777,16 +792,16 @@ impl TestBuilder {
 
     pub fn add_committee(mut self, committee_num: u32, addresses: Vec<&'static str>) -> Self {
         let entry = self.committees.entry(committee_num).or_insert_with(Committee::empty);
-
-        for addr in addresses {
+        let added = addresses.into_iter().map(|addr| {
             let addr = TestAddress::new(addr);
             let (_, pk) = helpers::derive_keypair_from_address(&addr);
-            entry.members_mut().push(CommitteeMember {
+            CommitteeMember {
                 address: addr,
                 public_key: pk.to_byte_type(),
                 vote_power: VotePower::of(1),
-            });
-        }
+            }
+        });
+        *entry = entry.iter().cloned().chain(added).collect();
         self
     }
 
@@ -816,7 +831,7 @@ impl TestBuilder {
     }
 
     async fn build_validators(
-        leader_strategy: &RoundRobinLeaderStrategy,
+        leader_strategy: &SmoothWeightedRoundRobin,
         epoch_manager: &TestEpochManager,
         rocks_path_override: Option<String>,
         config: HotstuffConfig,
@@ -890,7 +905,7 @@ impl TestBuilder {
         let committees = build_committees(self.committees);
         let num_committees = u32::try_from(committees.len()).expect("WAAAY too many committees");
 
-        let leader_strategy = RoundRobinLeaderStrategy::new();
+        let leader_strategy = SmoothWeightedRoundRobin::new();
         let (tx_epoch_events, _) = broadcast::channel(10);
         let epoch_manager = TestEpochManager::new(tx_epoch_events);
         epoch_manager.add_committees(committees).await;

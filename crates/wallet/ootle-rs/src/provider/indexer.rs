@@ -10,7 +10,7 @@ use std::{
 use tari_indexer_client::{
     error::IndexerRestClientError,
     rest_api_client::IndexerRestApiClient,
-    types::{GetSubstateRequest, GetSubstatesRequest, GetUtxosRequest, SubmitTransactionRequest},
+    types::{GetUtxosRequest, SubmitTransactionRequest},
 };
 use tari_ootle_common_types::{
     Epoch,
@@ -29,7 +29,7 @@ use tari_template_lib_types::{
     UtxoId,
     crypto::{RistrettoPublicKeyBytes, UtxoTag},
 };
-use tracing::debug;
+use tracing::{debug, warn};
 use url::Url;
 
 use crate::{
@@ -40,16 +40,19 @@ use crate::{
         Provider,
         ProviderError,
         ProviderResult,
+        ShardStateVersionBound,
         StealthUtxoStream,
         StealthUtxoWatchRequest,
         TransactionEventFilter,
         TransactionEventStream,
         TransactionWatcher,
+        TrustedValidatorSet,
         WalletProvider,
         WantInput,
         input_resolver::TransactionInputResolver,
         tx_stream::{EventStream, Paused},
         tx_watcher::TransactionWatcherHandle,
+        verifier::{IndexerTrust, IndexerVerifier, SavedValidatorSet},
     },
     wallet::NetworkWallet,
 };
@@ -61,17 +64,61 @@ pub struct IndexerProvider<Wallet> {
     network: Network,
     tx_timeout: Duration,
     tx_watcher: Arc<OnceLock<TransactionWatcherHandle>>,
+    verifier: Arc<IndexerVerifier>,
 }
 
 impl<Wallet> IndexerProvider<Wallet> {
+    /// A provider that takes the indexer at its word, as [`IndexerTrust::Trust`] describes. Call
+    /// [`with_indexer_trust`](Self::with_indexer_trust) to verify what it serves.
     pub fn new(client: IndexerRestApiClient, wallet: Wallet, network: Network) -> Self {
+        let client = Arc::new(client);
+        let verifier = Arc::new(IndexerVerifier::new(
+            Arc::downgrade(&client),
+            network,
+            IndexerTrust::default(),
+        ));
         Self {
-            client: Arc::new(client),
+            client,
             wallet,
             network,
             tx_timeout: Duration::from_secs(60),
             tx_watcher: Arc::new(OnceLock::new()),
+            verifier,
         }
+    }
+
+    /// Whether this provider verifies what the indexer serves. Clones of a provider share the validator sets they
+    /// trust, so this is set before the provider is first cloned or used.
+    pub fn with_indexer_trust(mut self, trust: IndexerTrust) -> Self {
+        self.verifier = Arc::new(IndexerVerifier::new(Arc::downgrade(&self.client), self.network, trust));
+        self
+    }
+
+    pub fn indexer_trust(&self) -> IndexerTrust {
+        self.verifier.trust()
+    }
+
+    /// This provider's trust in the network's validator sets, or `None` before it first anchors. An application that
+    /// saves it and passes it to [`restore_validator_set`](Self::restore_validator_set) on its next run walks on from
+    /// it, where it would otherwise trust its indexer anew.
+    pub async fn saved_validator_set(&self) -> Option<SavedValidatorSet> {
+        self.verifier.saved_validator_set().await
+    }
+
+    /// Trusts `saved`, such as an earlier run's trust, in place of the validator sets trusted before. The next
+    /// verification walks the end-of-epoch handovers on from it.
+    pub async fn restore_validator_set(&self, saved: SavedValidatorSet) -> ProviderResult<()> {
+        Ok(self.verifier.restore_validator_set(saved).await?)
+    }
+
+    /// Brings the trusted validator set up to the one the indexer's latest checkpoint names, anchoring on that set on
+    /// first use. Verification does this as it needs; calling it checks that the indexer serves a walkable chain.
+    pub async fn sync_validator_set(&self) -> ProviderResult<TrustedValidatorSet> {
+        Ok(self.verifier.sync().await?)
+    }
+
+    pub(crate) fn verifier(&self) -> &Arc<IndexerVerifier> {
+        &self.verifier
     }
 
     /// The default timeout when waiting for a transaction to be finalized. This is used by the `PendingTransaction`
@@ -79,10 +126,6 @@ impl<Wallet> IndexerProvider<Wallet> {
     pub fn with_transaction_timeout(mut self, timeout: Duration) -> Self {
         self.tx_timeout = timeout;
         self
-    }
-
-    pub(crate) fn client(&self) -> &IndexerRestApiClient {
-        &self.client
     }
 
     /// The indexer URL this provider currently sends requests to.
@@ -111,12 +154,9 @@ impl<Wallet> IndexerProvider<Wallet> {
         Ok(resp.network)
     }
 
+    /// The live substate of `substate_id`, verified unless the provider trusts its indexer.
     pub async fn fetch_substate<T: Into<SubstateId>>(&self, substate_id: T) -> ProviderResult<Substate> {
-        let resp = self
-            .client
-            .get_substate(&substate_id.into(), GetSubstateRequest::default())
-            .await?;
-        Ok(Substate::new(resp.version, resp.substate))
+        Ok(self.verifier.fetch_substate(&substate_id.into()).await?)
     }
 
     pub async fn get_epoch(&self) -> ProviderResult<Epoch> {
@@ -140,28 +180,53 @@ impl<Wallet> IndexerProvider<Wallet> {
         TransactionEventStream::new(Arc::downgrade(&self.client), filter)
     }
 
+    /// The live substate of `substate_id`, verified unless the provider trusts its indexer. `None` if the indexer has
+    /// none, which no proof shows.
     pub async fn get_substate<T: Into<SubstateId>>(&self, substate_id: T) -> ProviderResult<Option<Substate>> {
-        let resp = self
-            .client
-            .get_substate(&substate_id.into(), GetSubstateRequest::default())
-            .await
-            .optional()?;
-        Ok(resp.map(|r| Substate::new(r.version, r.substate)))
+        Ok(self.verifier.fetch_substate(&substate_id.into()).await.optional()?)
     }
 
-    /// Fetch a resource by address. The returned [`Resource`] carries its type, optional view key,
-    /// divisibility, and total supply.
+    /// Fetch a resource by address, verified unless the provider trusts its indexer. The returned [`Resource`] carries
+    /// its type, optional view key, divisibility, and total supply.
     pub async fn get_resource(&self, resource_address: ResourceAddress) -> ProviderResult<Resource> {
-        let resp = self.client.get_resource(resource_address).await?;
-        Ok(resp.resource)
+        self.verifier
+            .fetch_substate(&SubstateId::Resource(resource_address))
+            .await?
+            .into_substate_value()
+            .into_resource()
+            .ok_or_else(|| ProviderError::other(format!("Expected resource substate for {resource_address}")))
+    }
+
+    /// The bound a pass of [`watch_stealth_utxos`](Self::watch_stealth_utxos) moves a
+    /// [`ShardCursor`](crate::provider::ShardCursor)'s verified cursors by: each shard's state version in the
+    /// latest verified end-of-epoch checkpoint of its shard group, or [`ShardStateVersionBound::Unbounded`] when
+    /// the provider trusts its indexer.
+    ///
+    /// Fails while the checkpoints do not verify, as when the provider anchored on the latest checkpoint and trusts no
+    /// validator set of its epoch. A pass can then go on under [`ShardStateVersionBound::default`], which holds its
+    /// progress only as claims.
+    pub async fn shard_state_version_bound(&self) -> ProviderResult<ShardStateVersionBound> {
+        if !self.verifier.is_verifying() {
+            return Ok(ShardStateVersionBound::Unbounded);
+        }
+        Ok(ShardStateVersionBound::Verified(
+            self.verifier.verified_shard_state_versions().await?,
+        ))
     }
 
     /// Watch stealth UTXO updates for a resource, resuming from a per-shard cursor.
     ///
+    /// Build the request from a [`ShardCursor`](crate::provider::ShardCursor) with
+    /// [`ShardCursor::resume`](crate::provider::ShardCursor::resume) under the bound from
+    /// [`shard_state_version_bound`](Self::shard_state_version_bound), and advance it under the same bound, so that an
+    /// indexer that reports a shard past its real state version hides none of the shard's updates for long.
+    ///
     /// Each drained pass yields typed [`StealthUtxoFrame`](crate::provider::StealthUtxoFrame)s. An
     /// `Unspent` frame carries only the `(tag, public_nonce)` fetch key — resolve the commitment and
     /// viewable-balance ciphertext with [`Self::fetch_unspent_utxos`]. Set `unspent_only = false` on
-    /// the request to also receive `Spent`/`Burnt` frames.
+    /// the request to also receive `Spent`/`Burnt` frames. Such a request is told when a shard's
+    /// spends below its cursor may be missing; see
+    /// [`StealthUtxoFrame::StartOfShard::spends_incomplete`](crate::provider::StealthUtxoFrame::StartOfShard::spends_incomplete).
     pub fn watch_stealth_utxos(&self, request: StealthUtxoWatchRequest) -> StealthUtxoStream {
         StealthUtxoStream::new(Arc::downgrade(&self.client), request)
     }
@@ -172,7 +237,12 @@ impl<Wallet> IndexerProvider<Wallet> {
     ///
     /// Only currently-unspent outputs are returned — the indexer prunes an output's ciphertext once
     /// it is spent, so a key whose output has since been spent is simply absent from the result.
-    /// Requests are automatically chunked to the indexer's per-request limit.
+    /// Requests are automatically chunked to the indexer's per-request limit, and every page of a chunk's outputs is
+    /// read. Any number of outputs may share a tag and nonce pair. An output re-versioned while its pages are read is
+    /// returned at the version its page held.
+    ///
+    /// The outputs are served unproven and are not verified under any [`IndexerTrust`]. Read an output with
+    /// [`Self::get_substate`] to verify it.
     pub async fn fetch_unspent_utxos(
         &self,
         resource_address: ResourceAddress,
@@ -184,14 +254,28 @@ impl<Wallet> IndexerProvider<Wallet> {
         }
         let mut utxos = Vec::with_capacity(tag_and_nonce_pairs.len());
         for chunk in tag_and_nonce_pairs.chunks(MAX_PAIRS_PER_REQUEST) {
-            let resp = self
-                .client
-                .get_utxos(GetUtxosRequest {
-                    resource_address,
-                    tag_and_nonce_pairs: chunk.to_vec(),
-                })
-                .await?;
-            utxos.extend(resp.utxos);
+            let mut cursor = None;
+            loop {
+                let resp = self
+                    .client
+                    .get_utxos(GetUtxosRequest {
+                        resource_address,
+                        tag_and_nonce_pairs: chunk.to_vec(),
+                        unspent_at: Vec::new(),
+                        cursor,
+                    })
+                    .await?;
+                for (id, utxo) in resp.utxos {
+                    let utxo = utxo.decode().map_err(|e| IndexerRestClientError::InvalidResponse {
+                        message: format!("The indexer served UTXO {id} that does not decode: {e}"),
+                    })?;
+                    utxos.push((id, utxo));
+                }
+                cursor = resp.next_cursor;
+                if cursor.is_none() {
+                    break;
+                }
+            }
         }
         Ok(utxos)
     }
@@ -220,7 +304,16 @@ impl<Wallet: NetworkWallet + Send + Sync> IndexerProvider<Wallet> {
                 transaction: TransactionEnvelope::encode(tx)?,
             })
             .await?;
-        Ok(resp.result)
+        let result = resp
+            .result
+            .decode()
+            .map_err(|e| IndexerRestClientError::InvalidResponse {
+                message: format!(
+                    "The indexer served a dry-run result of transaction {} that does not decode: {e}",
+                    resp.transaction_id
+                ),
+            })?;
+        Ok(result)
     }
 
     pub async fn send_transaction(&mut self, transaction: Transaction) -> ProviderResult<PendingTransaction> {
@@ -235,12 +328,18 @@ impl<Wallet: NetworkWallet + Send + Sync> IndexerProvider<Wallet> {
     ) -> ProviderResult<PendingTransaction> {
         // Start the tx watcher if not already started
         let watcher = self.get_tx_watcher().clone();
+        if let Err(err) = self.verifier.anchor_if_untrusted().await {
+            warn!("Failed to anchor the trusted validator set before submitting a transaction: {err}");
+        }
 
         let resp = self
             .client
             .submit_transaction(SubmitTransactionRequest { transaction })
             .await?;
-        Ok(PendingTransaction::new(watcher, self.weak_client(), resp.transaction_id).with_timeout(self.tx_timeout))
+        Ok(
+            PendingTransaction::new(watcher, self.weak_client(), self.verifier.clone(), resp.transaction_id)
+                .with_timeout(self.tx_timeout),
+        )
     }
 
     pub(crate) fn get_tx_watcher(&self) -> &TransactionWatcherHandle {
@@ -273,7 +372,7 @@ impl<Wallet: NetworkWallet + Send + Sync> Provider for IndexerProvider<Wallet> {
         mut transaction: UnsignedTransaction,
         want_list: &HashSet<WantInput>,
     ) -> ProviderResult<UnsignedTransaction> {
-        TransactionInputResolver::new(self.weak_client())
+        TransactionInputResolver::new(self.verifier.clone())
             .resolve_inputs(&mut transaction, want_list)
             .await?;
         Ok(transaction)
@@ -284,23 +383,7 @@ impl<Wallet: NetworkWallet + Send + Sync> Provider for IndexerProvider<Wallet> {
         substate_ids: I,
     ) -> ProviderResult<HashMap<SubstateId, Substate>> {
         let substate_ids = substate_ids.into_iter().collect::<Vec<_>>();
-        if substate_ids.is_empty() {
-            // The request API will not allow us to send an empty list, so we short-circuit here
-            return Ok(HashMap::new());
-        }
-
-        let resp = self
-            .client
-            .fetch_substates(GetSubstatesRequest {
-                requests: substate_ids
-                    .try_into()
-                    .map_err(|_| ProviderError::other("Too many substates requested in single request"))?,
-                cached_only: false,
-                include_proofs: false,
-            })
-            .await?;
-
-        Ok(resp.substates)
+        Ok(self.verifier.fetch_substates(&substate_ids).await?)
     }
 }
 
@@ -313,5 +396,58 @@ impl<Wallet: NetworkWallet + Send + Sync> WalletProvider for IndexerProvider<Wal
 
     fn wallet_mut(&mut self) -> &mut Self::Wallet {
         &mut self.wallet
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_common_types::engine_types::{UtxoOutput, crypto::OutputBody};
+    use tari_ootle_light_client::test_fixtures::ValidatorSetFixture;
+    use tari_template_lib_types::{
+        EncryptedData,
+        constants::STEALTH_TARI_RESOURCE_ADDRESS,
+        stealth::SpendAuthorization,
+    };
+
+    use super::*;
+    use crate::provider::{IndexerTrust, test_indexer::TestIndexer};
+
+    fn utxo(seed: u8) -> (UtxoId, Utxo) {
+        let key = RistrettoPublicKeyBytes::from_bytes(&[seed; 32]).unwrap();
+        let utxo = Utxo::new(UtxoOutput {
+            output: OutputBody {
+                public_nonce: key,
+                encrypted_data: EncryptedData::empty(),
+                minimum_value_promise: 0,
+                viewable_balance: None,
+            },
+            auth: SpendAuthorization::Key(key),
+            tag: UtxoTag::new(0),
+        });
+        (UtxoId::from_array([seed; 32]), utxo)
+    }
+
+    #[tokio::test]
+    async fn fetching_unspent_utxos_reads_every_page() {
+        let sets = (1..=2).map(ValidatorSetFixture::new).collect::<Vec<_>>();
+        let indexer = TestIndexer::spawn(&sets, 0).await;
+        indexer.serve_utxos((1..=5).map(utxo).collect(), 2);
+        let provider = indexer.provider(IndexerTrust::Trust);
+
+        let pair = (UtxoTag::new(0), RistrettoPublicKeyBytes::from_bytes(&[1; 32]).unwrap());
+        let utxos = provider
+            .fetch_unspent_utxos(STEALTH_TARI_RESOURCE_ADDRESS, &[pair])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            utxos.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            (1..=5).map(|seed| UtxoId::from_array([seed; 32])).collect::<Vec<_>>()
+        );
+        assert_eq!(indexer.utxo_fetch_cursors(), [
+            None,
+            Some(UtxoId::from_array([2; 32])),
+            Some(UtxoId::from_array([4; 32]))
+        ]);
     }
 }

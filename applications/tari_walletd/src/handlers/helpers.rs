@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashSet, fmt::Display, path::Path};
+use std::{collections::HashSet, fmt::Display, path::Path, time::Duration};
 
 use anyhow::anyhow;
 use ootle_byte_type::ToByteType;
@@ -16,17 +16,29 @@ use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkSpec,
     apis::accounts::{AccountsApi, AccountsApiError},
-    models::{AccountWithAddress, DerivedKeyIndex, TransactionFinalizedEvent, WalletEvent},
+    models::{AccountWithAddress, DerivedKeyIndex, KeyId, TransactionFinalizedEvent, WalletEvent},
 };
 use tari_ootle_walletd_client::{ComponentAddressOrName, types::ClaimBurnProofContents};
 use tari_sidechain::CompleteClaimBurnProof;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::{ComponentAddress, EncryptedData};
-use tokio::sync::broadcast;
+use tokio::{sync::broadcast, time};
 
 use crate::server::ApplicationErrorCode;
 
+/// How long a handler waits for its transaction to finalize before answering that it is still pending.
+const RESULT_WAIT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
 pub async fn wait_for_result(
+    events: &mut broadcast::Receiver<WalletEvent>,
+    transaction_id: TransactionId,
+) -> Result<TransactionFinalizedEvent, anyhow::Error> {
+    time::timeout(RESULT_WAIT_TIMEOUT, wait_for_result_unbounded(events, transaction_id))
+        .await
+        .map_err(|_| still_pending(transaction_id))?
+}
+
+async fn wait_for_result_unbounded(
     events: &mut broadcast::Receiver<WalletEvent>,
     transaction_id: TransactionId,
 ) -> Result<TransactionFinalizedEvent, anyhow::Error> {
@@ -51,6 +63,19 @@ pub async fn wait_for_result(
 }
 
 pub async fn wait_for_result_and_account(
+    events: &mut broadcast::Receiver<WalletEvent>,
+    transaction_id: &TransactionId,
+    account_address: &ComponentAddress,
+) -> Result<(TransactionFinalizedEvent, Option<ComponentAddress>), anyhow::Error> {
+    time::timeout(
+        RESULT_WAIT_TIMEOUT,
+        wait_for_result_and_account_unbounded(events, transaction_id, account_address),
+    )
+    .await
+    .map_err(|_| still_pending(*transaction_id))?
+}
+
+async fn wait_for_result_and_account_unbounded(
     events: &mut broadcast::Receiver<WalletEvent>,
     transaction_id: &TransactionId,
     account_address: &ComponentAddress,
@@ -159,6 +184,57 @@ pub(super) fn invalid_params<T: Display>(field: &str, details: Option<T>) -> any
     .into()
 }
 
+/// Whether a caller-named key may sign, refusing an imported key id the wallet holds no key at as an
+/// invalid `field`.
+pub(super) fn is_signing_key<TSpec: WalletSdkSpec>(
+    sdk: &WalletSdk<TSpec>,
+    field: &str,
+    key_id: &KeyId,
+) -> Result<bool, anyhow::Error> {
+    sdk.key_manager_api()
+        .is_signing_key(*key_id)
+        .optional()?
+        .ok_or_else(|| {
+            invalid_params(
+                field,
+                Some(format!(
+                    "{key_id} does not exist: the wallet holds no imported key with that id"
+                )),
+            )
+        })
+}
+
+/// Refuses a caller-named key unless it may sign (see [`KeyId::is_signing_key`]). The key manager
+/// refuses the same keys when signing; checking here names the offending request field.
+pub(super) fn ensure_signing_key<TSpec: WalletSdkSpec>(
+    sdk: &WalletSdk<TSpec>,
+    field: &str,
+    key_id: &KeyId,
+) -> Result<(), anyhow::Error> {
+    if is_signing_key(sdk, field, key_id)? {
+        return Ok(());
+    }
+    Err(invalid_params(
+        field,
+        Some(format!(
+            "{key_id} is not a signing key: only account, transaction, nonce and imported keys other than view keys \
+             sign"
+        )),
+    ))
+}
+
+/// [`ensure_signing_key`] for a transaction's `seal_signer` and each of its `other_signers`.
+pub(super) fn ensure_transaction_signers<TSpec: WalletSdkSpec>(
+    sdk: &WalletSdk<TSpec>,
+    seal_signer: &KeyId,
+    other_signers: &[KeyId],
+) -> Result<(), anyhow::Error> {
+    ensure_signing_key(sdk, "seal_signer", seal_signer)?;
+    other_signers
+        .iter()
+        .try_for_each(|key_id| ensure_signing_key(sdk, "other_signers", key_id))
+}
+
 pub(super) fn application_error<T: Display>(code: ApplicationErrorCode, details: T) -> anyhow::Error {
     axum_jrpc::error::JsonRpcError::new(
         axum_jrpc::error::JsonRpcErrorReason::ApplicationError(code as i32),
@@ -167,6 +243,18 @@ pub(super) fn application_error<T: Display>(code: ApplicationErrorCode, details:
     )
     .into()
 }
+
+fn still_pending(transaction_id: TransactionId) -> anyhow::Error {
+    application_error(
+        ApplicationErrorCode::TransactionPending,
+        format!(
+            "Transaction {transaction_id} has not finalized within {}s. The wallet keeps tracking it, and \
+             transactions.wait_result reports its outcome.",
+            RESULT_WAIT_TIMEOUT.as_secs()
+        ),
+    )
+}
+
 pub(super) fn not_found<T: Display>(details: T) -> anyhow::Error {
     axum_jrpc::error::JsonRpcError::new(
         axum_jrpc::error::JsonRpcErrorReason::ApplicationError(ApplicationErrorCode::NotFound as i32),
@@ -296,6 +384,28 @@ mod tests {
             e.downcast_ref::<JsonRpcError>().map(|e| e.error_reason()),
             Some(JsonRpcErrorReason::ApplicationError(code)) if code == ApplicationErrorCode::NotFound as i32
         )
+    }
+
+    fn error_code(e: &anyhow::Error) -> Option<i32> {
+        match e.downcast_ref::<JsonRpcError>().map(|e| e.error_reason()) {
+            Some(JsonRpcErrorReason::ApplicationError(code)) => Some(code),
+            _ => None,
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_transaction_that_never_finalizes_is_reported_pending_after_the_timeout() {
+        let (_sender, mut events) = broadcast::channel::<WalletEvent>(1);
+        let transaction_id = TransactionId::new([1; 32]);
+
+        let err = wait_for_result(&mut events, transaction_id).await.unwrap_err();
+        assert_eq!(error_code(&err), Some(ApplicationErrorCode::TransactionPending as i32));
+
+        let account = ComponentAddress::from_array([2; 32]);
+        let err = wait_for_result_and_account(&mut events, &transaction_id, &account)
+            .await
+            .unwrap_err();
+        assert_eq!(error_code(&err), Some(ApplicationErrorCode::TransactionPending as i32));
     }
 
     #[test]

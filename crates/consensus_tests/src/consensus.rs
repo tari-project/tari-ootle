@@ -11,7 +11,7 @@
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -485,6 +485,83 @@ async fn node_requests_missing_transaction_from_local_leader() {
 
     test.stop();
     test.assert_all_validators_committed(&tx_ids[0]);
+    test.assert_clean_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn node_requests_missing_transactions_over_several_responses() {
+    const NUM_TXS: usize = 4;
+    const TX_BYTES: usize = 1024 * 1024;
+
+    setup_logger();
+    let num_responses = Arc::new(AtomicUsize::new(0));
+    let mut test = Test::builder()
+        .add_committee(0, vec!["1", "2"])
+        // Every transaction fits in one block, so the block's missing transactions span several responses
+        .modify_consensus_constants(|c| {
+            c.max_block_weight = 100_000_000;
+            c.max_block_validation_weight = 100_000_000;
+        })
+        .with_message_filter(Box::new({
+            let num_responses = num_responses.clone();
+            move |_from, _to, msg| {
+                if matches!(msg, HotstuffMessage::MissingTransactionsResponse(_)) {
+                    num_responses.fetch_add(1, Ordering::SeqCst);
+                }
+                true
+            }
+        }))
+        .start()
+        .await;
+    // Only the next leader "2" holds the transactions, so "1" has to request them all from it
+    let mut tx_ids = Vec::with_capacity(NUM_TXS);
+    for seed in 0..NUM_TXS {
+        let inputs = test.create_substates_on_vns(TestVnDestination::All, 1);
+        let transaction = build_transaction_from(
+            Transaction::builder_localnet(Epoch(1))
+                .call_function(Default::default(), "big", args![vec![
+                    u8::try_from(seed).unwrap();
+                    TX_BYTES
+                ]])
+                .with_inputs(inputs.iter().cloned().map(Into::into))
+                .build_and_seal(&PrivateKey::default()),
+        );
+        tx_ids.push(*transaction.id());
+        test.create_execution_at_destination_for_transaction(
+            TestVnDestination::All,
+            &transaction,
+            Decision::Commit,
+            5,
+            inputs
+                .into_iter()
+                .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
+                .collect(),
+            vec![],
+        );
+        test.send_transaction_to_destination(TestVnDestination::Address(TestAddress::new("2")), transaction)
+            .await;
+    }
+    test.start_epoch(Epoch(1)).await;
+    loop {
+        let (_, _, _, committed_height) = test.on_block_committed().await;
+
+        if test.is_transaction_pool_empty() {
+            break;
+        }
+        if committed_height >= NodeHeight(10) {
+            test.dump_pool_info();
+            panic!("Not all transaction committed after {} blocks", committed_height);
+        }
+    }
+
+    test.stop();
+    for tx_id in &tx_ids {
+        test.assert_all_validators_committed(tx_id);
+    }
+    assert!(
+        num_responses.load(Ordering::SeqCst) > 1,
+        "expected the missing transactions to arrive over several responses"
+    );
     test.assert_clean_shutdown().await;
 }
 
@@ -1154,6 +1231,8 @@ async fn single_shard_input_conflict() {
         input_locks: vec![(substate_id.substate_id().clone(), SubstateLockType::Write)],
         new_outputs: vec![],
         validator_fee_withdrawals: vec![],
+        calls_template: None,
+        fee_intent_fallback_fee: None,
     })
     .add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
         transaction: tx2.transaction().clone(),
@@ -1162,6 +1241,8 @@ async fn single_shard_input_conflict() {
         input_locks: vec![(substate_id.substate_id().clone(), SubstateLockType::Write)],
         new_outputs: vec![],
         validator_fee_withdrawals: vec![],
+        calls_template: None,
+        fee_intent_fallback_fee: None,
     });
 
     test.network()
@@ -1289,6 +1370,8 @@ async fn single_shard_unversioned_inputs() {
             .collect(),
         new_outputs: vec![],
         validator_fee_withdrawals: vec![],
+        calls_template: None,
+        fee_intent_fallback_fee: None,
     });
 
     test.start_epoch(Epoch(1)).await;
@@ -1376,6 +1459,8 @@ async fn multishard_unversioned_input_conflict() {
         ],
         new_outputs: vec![],
         validator_fee_withdrawals: vec![],
+        calls_template: None,
+        fee_intent_fallback_fee: None,
     })
     .add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
         transaction: tx2.transaction().clone(),
@@ -1387,6 +1472,8 @@ async fn multishard_unversioned_input_conflict() {
         ],
         new_outputs: vec![],
         validator_fee_withdrawals: vec![],
+        calls_template: None,
+        fee_intent_fallback_fee: None,
     });
 
     // NOTE: we send tx1 to committee 0 and tx2 to committee 1 to loosely ensure that we create the situation this test
@@ -1480,6 +1567,8 @@ async fn multishard_unversioned_input_conflict_delay_prepare() {
         ],
         new_outputs: vec![],
         validator_fee_withdrawals: vec![],
+        calls_template: None,
+        fee_intent_fallback_fee: None,
     })
     .add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
         transaction: tx2.transaction().clone(),
@@ -1491,6 +1580,8 @@ async fn multishard_unversioned_input_conflict_delay_prepare() {
         ],
         new_outputs: vec![],
         validator_fee_withdrawals: vec![],
+        calls_template: None,
+        fee_intent_fallback_fee: None,
     });
 
     test.network()
@@ -1568,6 +1659,8 @@ async fn multishard_publish_template() {
             .collect(),
         new_outputs: vec![SubstateId::Template(template_id)],
         validator_fee_withdrawals: vec![],
+        calls_template: None,
+        fee_intent_fallback_fee: None,
     });
 
     test.start_epoch(Epoch(1)).await;
@@ -1606,6 +1699,100 @@ async fn multishard_publish_template() {
     test.assert_clean_shutdown().await;
 }
 
+/// A transaction declaring a published template as an input is global: every committee holds the template, so every
+/// committee sequences, prepares and commits it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn multishard_global_input() {
+    setup_logger();
+    let mut test = Test::builder()
+        .add_committee(0, vec!["1", "2"])
+        .add_committee(1, vec!["3", "4"])
+        .add_committee(2, vec!["5", "6"])
+        .add_committee(3, vec!["7", "8"])
+        .start()
+        .await;
+    let (sk, pk) = create_key_pair();
+    let wasm = load_binary_fixture("state.wasm");
+    let template_id =
+        PublishedTemplateAddress::from_author_and_binary_hash(&pk.to_byte_type(), &hash_template_code(&wasm));
+    let publish_input = test
+        .create_substates_on_vns(TestVnDestination::Committee(0), 1)
+        .remove(0);
+    let publish = Transaction::builder_localnet(Epoch(1))
+        .publish_template(wasm)
+        .with_inputs([publish_input.clone().into()])
+        .build_and_seal(&sk);
+    let publish = TransactionRecord::new(publish);
+    test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
+        transaction: publish.transaction().clone(),
+        decision: Decision::Commit,
+        fee: 1,
+        input_locks: vec![(publish_input.into_substate_id(), SubstateLockType::Write)],
+        new_outputs: vec![SubstateId::Template(template_id)],
+        validator_fee_withdrawals: vec![],
+        calls_template: None,
+        fee_intent_fallback_fee: None,
+    });
+    test.send_transaction_to_destination(TestVnDestination::All, publish.clone())
+        .await;
+
+    test.start_epoch(Epoch(1)).await;
+    loop {
+        test.on_block_committed().await;
+        if test.is_transaction_finalized_at_destination(TestVnDestination::All, publish.id()) {
+            break;
+        }
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        if leaf.height >= NodeHeight(30) {
+            panic!("Template not published after {} blocks", leaf.height);
+        }
+    }
+    test.assert_all_validators_have_decision(publish.id(), Decision::Commit)
+        .await;
+
+    // The only non-global input is in committee 0, so the template input alone involves the other committees.
+    let local_input = test
+        .create_substates_on_vns(TestVnDestination::Committee(0), 1)
+        .remove(0);
+    let template_input = VersionedSubstateId::new(SubstateId::Template(template_id), SubstateVersion::ZERO);
+    let tx = Transaction::builder_localnet(Epoch(1))
+        .with_inputs([local_input.clone().into(), template_input.clone().into()])
+        .build_and_seal(&create_key_pair().0);
+    let tx = TransactionRecord::new(tx);
+    assert!(tx.transaction().is_global());
+    test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
+        transaction: tx.transaction().clone(),
+        decision: Decision::Commit,
+        fee: 1,
+        input_locks: vec![
+            (local_input.into_substate_id(), SubstateLockType::Write),
+            (template_input.into_substate_id(), SubstateLockType::Read),
+        ],
+        new_outputs: vec![],
+        validator_fee_withdrawals: vec![],
+        calls_template: None,
+        fee_intent_fallback_fee: None,
+    });
+    test.send_transaction_to_destination(TestVnDestination::All, tx.clone())
+        .await;
+
+    loop {
+        test.on_block_committed().await;
+        if test.is_transaction_finalized_at_destination(TestVnDestination::All, tx.id()) {
+            break;
+        }
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        if leaf.height >= NodeHeight(60) {
+            panic!("Global transaction not committed after {} blocks", leaf.height);
+        }
+    }
+
+    test.stop();
+    test.assert_all_validators_have_decision(tx.id(), Decision::Commit)
+        .await;
+    test.assert_clean_shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn multishard_validator_fee_claim() {
     setup_logger();
@@ -1632,6 +1819,8 @@ async fn multishard_validator_fee_claim() {
         input_locks: vec![(address.into(), SubstateLockType::Write)],
         new_outputs: vec![],
         validator_fee_withdrawals: vec![ValidatorFeeWithdrawal { address, amount: 500 }],
+        calls_template: None,
+        fee_intent_fallback_fee: None,
     });
 
     // Get some fees

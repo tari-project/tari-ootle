@@ -5,6 +5,7 @@ mod epoch_cleanup;
 mod pending_chain;
 mod rewind;
 mod shard_scoped_state_tree;
+mod state_tree_retention;
 mod substate_value_proof;
 use std::{collections::HashMap, ops::Deref};
 
@@ -14,6 +15,7 @@ pub use pending_chain::*;
 pub use rewind::*;
 use serde::{Deserialize, Serialize};
 pub use shard_scoped_state_tree::*;
+pub use state_tree_retention::*;
 pub use substate_value_proof::*;
 use tari_consensus_types::{
     BlockId,
@@ -41,7 +43,6 @@ use tari_ootle_common_types::{
     Epoch,
     NodeAddressable,
     NodeHeight,
-    NumPreshards,
     ShardGroup,
     ShardStateVersions,
     SubstateAddress,
@@ -51,7 +52,7 @@ use tari_ootle_common_types::{
     shard::Shard,
 };
 use tari_ootle_transaction::TransactionId;
-use tari_state_tree::{Node, NodeKey, StaleTreeNode, StateTreePayload, Version};
+use tari_state_tree::{Node, NodeKey, StaleTreeNode, StateTreePayload, TransitionAccumulator, Version};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use time::PrimitiveDateTime;
 
@@ -72,6 +73,8 @@ use crate::{
         LockedSubstateValue,
         NoVoteReason,
         PendingShardStateTreeDiff,
+        ProposalFilter,
+        ProposalOrigin,
         StateVersionProof,
         StateVersionTransitions,
         SubstateChange,
@@ -333,10 +336,21 @@ pub trait StateStoreReadTransaction: Sized {
     ) -> Result<TransactionPoolRecord, StorageError>;
     fn transaction_pool_exists(&self, transaction_id: &TransactionId) -> Result<bool, StorageError>;
     fn transaction_pool_get_all(&self, limit: usize) -> Result<Vec<TransactionPoolRecord>, StorageError>;
-    /// Offers `f` every ready record that is not lock-conflicted, with the pending updates in the chain ending at
-    /// `block_id` applied. The order the records are offered in is unspecified.
-    fn transaction_pool_for_each_ready<F>(&self, block_id: &BlockId, f: F) -> Result<(), StorageError>
-    where F: FnMut(TransactionPoolRecord);
+    /// Offers `f` records that are not lock-conflicted and that `filter` accepts, with the pending updates in the chain
+    /// ending at `block_id` applied. Records are read in transaction id order from the first id at or after
+    /// `start_id`, wrapping around to the lowest id, until `max_records` have been offered, `max_reads` records have
+    /// been read (accepted or not), or every record has been read once.
+    fn transaction_pool_for_each_ready<F>(
+        &self,
+        block_id: &BlockId,
+        filter: &ProposalFilter,
+        start_id: &TransactionId,
+        max_records: usize,
+        max_reads: usize,
+        f: F,
+    ) -> Result<(), StorageError>
+    where
+        F: FnMut(TransactionPoolRecord);
     fn transaction_pool_has_pending_state_updates(&self, block_id: &BlockId) -> Result<bool, StorageError>;
 
     fn transaction_pool_count(
@@ -348,6 +362,10 @@ pub trait StateStoreReadTransaction: Sized {
     /// Returns true as soon as one pool record satisfies `predicate`. Records with a lock conflict are never offered to
     /// `predicate` when `skip_lock_conflicted` is set.
     fn transaction_pool_any<F>(&self, skip_lock_conflicted: bool, predicate: F) -> Result<bool, StorageError>
+    where F: FnMut(&TransactionPoolRecord) -> bool;
+    /// Returns true as soon as one pool record, with the pending updates in the chain ending at `block_id` applied,
+    /// satisfies `predicate`.
+    fn transaction_pool_any_in_chain<F>(&self, block_id: &BlockId, predicate: F) -> Result<bool, StorageError>
     where F: FnMut(&TransactionPoolRecord) -> bool;
 
     //---------------------------------- Substates --------------------------------------------//
@@ -428,6 +446,20 @@ pub trait StateStoreReadTransaction: Sized {
         state_version: Version,
         value_filters: SubstateValueFilterFlags,
     ) -> Result<StateVersionTransitions, StorageError>;
+    /// The epoch of the shard's last state transition at or below `state_version`, if it has one.
+    fn state_transitions_get_latest_epoch(
+        &self,
+        shard: Shard,
+        state_version: Version,
+    ) -> Result<Option<Epoch>, StorageError>;
+    /// The shard's [`TransitionAccumulator`] at `state_version`: that of its last state transition at or below the
+    /// version, or [`TransitionAccumulator::zero`] if it has committed none by then. A version with no transition
+    /// leaves the accumulator as it was, so this is the accumulator the shard's leaf commits at any version.
+    fn state_transitions_get_accumulator(
+        &self,
+        shard: Shard,
+        state_version: Version,
+    ) -> Result<TransitionAccumulator, StorageError>;
 
     // -------------------------------- State Tree -------------------------------- //
 
@@ -449,6 +481,13 @@ pub trait StateStoreReadTransaction: Sized {
     fn state_sync_rewind_point_get(&self, shard: Shard) -> Result<Option<Version>, StorageError>;
     /// Every shard that has a rewind point, with that rewind point.
     fn state_sync_rewind_points_get_all(&self) -> Result<Vec<(Shard, Version)>, StorageError>;
+    /// Of the up substates of `shard` that state sync committed without their value at state version `from` or later,
+    /// the one created at the lowest state version, with that version.
+    fn state_sync_missing_values_get_earliest(
+        &self,
+        shard: Shard,
+        from: Version,
+    ) -> Result<Option<(SubstateAddress, Version)>, StorageError>;
     /// The state version proofs held for `shard` at versions in `from..=to`, in ascending version order.
     fn state_version_proofs_get_range(
         &self,
@@ -498,6 +537,12 @@ pub trait StateStoreReadTransaction: Sized {
     ) -> Result<SubstatePledges, StorageError>;
     // -------------------------------- Parked blocks / Missing Transactions -------------------------------- //
     fn parked_block_exists(&self, block_id: &BlockId) -> Result<bool, StorageError>;
+    fn parked_blocks_count_by_proposer(
+        &self,
+        epoch: Epoch,
+        height: NodeHeight,
+        proposed_by: &RistrettoPublicKeyBytes,
+    ) -> Result<usize, StorageError>;
 
     // -------------------------------- Foreign parked block -------------------------------- //
     fn foreign_parked_blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError>;
@@ -648,18 +693,24 @@ pub trait StateStoreWriteTransaction {
 
     // -------------------------------- Parked blocks / Missing Transactions -------------------------------- //
 
+    /// Parks a block until its missing transactions arrive. Parking a block that is already parked keeps the first
+    /// record, except that a `CatchUp` origin replaces a `Live` one.
     fn parked_block_insert<'a, IMissing: IntoIterator<Item = &'a TransactionId>>(
         &mut self,
         park_block: &Block,
         foreign_proposals: &[ForeignProposal],
+        origin: ProposalOrigin,
         missing_transaction_ids: IMissing,
     ) -> Result<(), StorageError>;
 
     fn parked_block_remove_missing_transaction(
         &mut self,
-        height: NodeHeight,
         transaction_id: &TransactionId,
-    ) -> Result<Option<(Block, Vec<ForeignProposal>)>, StorageError>;
+    ) -> Result<Option<(Block, Vec<ForeignProposal>, ProposalOrigin)>, StorageError>;
+
+    /// Removes every parked block, with its missing-transaction records, from earlier epochs and from `epoch` up to and
+    /// including `height`. Returns the number of blocks removed.
+    fn parked_blocks_remove_up_to(&mut self, epoch: Epoch, height: NodeHeight) -> Result<usize, StorageError>;
 
     // -------------------------------- Foreign parked block -------------------------------- //
     fn foreign_parked_blocks_insert(&mut self, park_block: &ForeignParkedProposal) -> Result<(), StorageError>;
@@ -694,6 +745,8 @@ pub trait StateStoreWriteTransaction {
 
     // -------------------------------- Substates -------------------------------- //
 
+    /// Commits the batch's transitions, recording each state version's transitions with the shard's
+    /// [`TransitionAccumulator`] extended by them.
     fn substates_commit_batch(&mut self, update_batch: SubstateUpdateBatch) -> Result<(), StorageError>;
     /// Clears the values of substates downed in or before `epoch`, stopping at the first index entry that takes the
     /// count to `limit` or more. Returns the number of values cleared; a result below `limit` means none remain.
@@ -755,13 +808,17 @@ pub trait StateStoreWriteTransaction {
         nodes: &[StaleTreeNode],
     ) -> Result<(), StorageError>;
 
-    /// Deletes stale state tree nodes older than the state history window, one whole stale version at a time,
-    /// stopping once `max_deletes` rows or more are deleted. Returns the number of rows deleted (nodes plus stale
-    /// version records); a result below `max_deletes` means none remain.
+    /// Deletes the stale state tree nodes of each shard in `retention` that no tree it keeps holds, one whole stale
+    /// version at a time, stopping once `max_writes` rows or more are written. Returns the number of rows written; a
+    /// result below `max_writes` means none remain.
+    ///
+    /// The nodes made stale at a version that leaves the shard's state history window are deleted, except those the
+    /// tree at a pinned version holds, which are kept until that version is no longer pinned. A pin above the lowest
+    /// releases its nodes only once every pin below it is released too, as checkpoints age out oldest first.
     fn state_tree_nodes_clear_stale(
         &mut self,
-        num_preshards: NumPreshards,
-        max_deletes: usize,
+        retention: &StateTreeRetention,
+        max_writes: usize,
     ) -> Result<usize, StorageError>;
     fn state_tree_shard_versions_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError>;
     /// Truncates the state tree for `shard` back to `target_version`.
@@ -786,6 +843,16 @@ pub trait StateStoreWriteTransaction {
     /// that they can be rewound if the sync never verifies them, even across a restart.
     fn state_sync_rewind_point_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError>;
     fn state_sync_rewind_point_remove(&mut self, shard: Shard) -> Result<(), StorageError>;
+    /// Records that state sync committed the substate at `address`, created at `created_at`, without its value. A
+    /// rewind keeps the record in step with the substate: it drops the record with the substate's creation, and adds
+    /// one for a substate it restores to up without its value.
+    fn state_sync_missing_value_insert(
+        &mut self,
+        shard: Shard,
+        address: &SubstateAddress,
+        created_at: Version,
+    ) -> Result<(), StorageError>;
+    fn state_sync_missing_value_remove(&mut self, shard: Shard, address: &SubstateAddress) -> Result<(), StorageError>;
     /// Stores `proof`. A proof point is kept for good. Any other proof is kept while its version is within
     /// `state_history_length` versions of its shard's latest, or while a live down proof record cites it.
     fn state_version_proofs_insert(&mut self, proof: &StateVersionProof) -> Result<(), StorageError>;

@@ -33,6 +33,7 @@ use tari_common::{
 };
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_indexer_lib::cached_substate_manager::DEFAULT_NEGATIVE_CACHE_TTL;
+use tari_logging::LoggingConfig;
 use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
     p2p_config::{P2pConfig, PeerSeedsConfig},
@@ -127,19 +128,11 @@ pub struct IndexerConfig {
     /// separate from the API server, so that metrics can be bound to a private interface while the API is public.
     /// Only used when the `metrics` feature is enabled (default = "127.0.0.1:18302"); `None` disables the listener.
     pub metrics_listen_address: Option<SocketAddr>,
-    /// GraphQL port of the indexer application
-    pub graphql_address: Option<SocketAddr>,
     /// The address of the Web UI
     pub web_ui_address: Option<SocketAddr>,
     /// The publicly-accessible URL that the UI uses to connect to the API.
     /// If this is None, then the api_listen_address will be used.
     pub web_ui_public_api_url: Option<String>,
-    /// The jrpc address where the UI should connect to the GraphQL API(it can be the same as the json_rpc_address, but
-    /// doesn't have to be), if this will be None, then the listen_addr will be used.
-    pub web_ui_public_graphql_url: Option<String>,
-    /// How often do we want to scan the second layer for new versions
-    #[serde(with = "serializers::seconds")]
-    pub block_scanning_interval: Duration,
     /// How long a shard group waits before reopening its state sync stream after the stream fails,
     /// or after a validator that does not follow its tip closes it. Also how often sync statistics
     /// are reported.
@@ -224,15 +217,15 @@ pub struct IndexerConfig {
     /// longer, so a pruned transaction still resolves to its receipt-backed outcome. Set this well above the
     /// longest a client may take to poll for a result: once pruned, a transaction no longer appears in the
     /// recent-transactions listing or single transaction lookup, and a mempool rejection reason recorded for it is
-    /// lost. Transactions stored before this indexer recorded a terminal epoch carry epoch 0, so the first
-    /// pass on an indexer upgraded from a build that retained everything prunes that entire backlog.
+    /// lost.
     ///
     /// Pruning bounds database growth but does not return disk to the filesystem: SQLite reuses the
     /// freed pages rather than shrinking the file.
     #[serde(default = "default_transaction_retention_epochs", with = "retention_epochs")]
     pub transaction_retention_epochs: Option<u64>,
     /// How many epochs past the epoch its transaction committed in a transaction receipt is retained
-    /// before it is pruned. Write `"forever"` (the default) to retain receipts indefinitely.
+    /// before it is pruned. Defaults to 1000 epochs. Write `"forever"` to retain receipts
+    /// indefinitely; receipts are synced for the whole network, so that grows the database without bound.
     ///
     /// A pruned receipt no longer answers a result lookup or appears in the receipt listing, so set
     /// this well above the longest a client may take to fetch a result. A window not longer than
@@ -240,15 +233,27 @@ pub struct IndexerConfig {
     /// indefinitely while transactions are; see [`IndexerConfig::effective_receipt_retention_epochs`].
     /// The network economic totals, including the receipt count, are accumulated as receipts are
     /// indexed and keep counting pruned ones.
-    #[serde(default, with = "retention_epochs")]
+    #[serde(default = "default_transaction_receipt_retention_epochs", with = "retention_epochs")]
     pub transaction_receipt_retention_epochs: Option<u64>,
     /// How many epochs past the epoch its transaction committed in an event is retained before it is
-    /// pruned. Write `"forever"` (the default) to retain events indefinitely.
+    /// pruned. Defaults to 1000 epochs. Write `"forever"` to retain events indefinitely; with no
+    /// `event_filters` that indexes every event on the network and grows the database without bound.
     ///
-    /// A pruned event no longer answers event queries or the event stream's catch-up, so a client
-    /// resuming from an older cursor misses it.
-    #[serde(default, with = "retention_epochs")]
+    /// A pruned event no longer answers event queries. The event stream refuses to resume from a
+    /// cursor older than the newest pruned event, so a client learns it must resynchronise.
+    #[serde(default = "default_event_retention_epochs", with = "retention_epochs")]
     pub event_retention_epochs: Option<u64>,
+    /// How many epochs past the epoch a UTXO was spent in its tombstone is retained before it is
+    /// pruned. Defaults to 504 epochs, about a week at 20-minute epochs. Write `"forever"` to retain
+    /// tombstones indefinitely; every spend on the network leaves one, so that grows the database
+    /// without bound.
+    ///
+    /// Pruning raises the shard's tombstone horizon over each tombstone it deletes. A wallet that
+    /// resumes its UTXO stream from below the horizon is told its spends are incomplete and checks
+    /// the outputs it holds in that shard itself, so a wallet offline for longer than this window
+    /// still learns of every spend, at the cost of that check.
+    #[serde(default = "default_utxo_tombstone_retention_epochs", with = "retention_epochs")]
+    pub utxo_tombstone_retention_epochs: Option<u64>,
     /// Store transactions observed on the network-wide transaction gossip topic, not only those
     /// submitted directly to this indexer. When enabled the indexer joins the transaction mesh as a
     /// full participant: it validates what it receives and propagates it onward. Disabling it leaves
@@ -298,6 +303,9 @@ pub struct IndexerConfig {
     pub verify_substate_proofs: bool,
     /// Rate-limiting configuration for the REST API endpoints
     pub rate_limits: IndexerRateLimitsConfig,
+    /// Where log events go: the console and one file per named sink.
+    #[serde(default = "crate::logging::default_logging_config")]
+    pub logging: LoggingConfig,
 }
 
 fn default_verify_substate_proofs() -> bool {
@@ -349,6 +357,7 @@ pub struct PublishedIndexerConfig {
     pub transaction_retention_epochs: Option<u64>,
     pub transaction_receipt_retention_epochs: Option<u64>,
     pub event_retention_epochs: Option<u64>,
+    pub utxo_tombstone_retention_epochs: Option<u64>,
     pub index_gossiped_transactions: bool,
     pub verify_substate_proofs: bool,
     pub substate_cache_max_serve_lag: Duration,
@@ -362,6 +371,7 @@ impl From<&IndexerConfig> for PublishedIndexerConfig {
             transaction_retention_epochs: config.transaction_retention_epochs,
             transaction_receipt_retention_epochs: config.effective_receipt_retention_epochs(),
             event_retention_epochs: config.event_retention_epochs,
+            utxo_tombstone_retention_epochs: config.utxo_tombstone_retention_epochs,
             index_gossiped_transactions: config.index_gossiped_transactions,
             verify_substate_proofs: config.verify_substate_proofs,
             substate_cache_max_serve_lag: config.substate_cache_max_serve_lag,
@@ -373,6 +383,18 @@ impl From<&IndexerConfig> for PublishedIndexerConfig {
 
 fn default_transaction_retention_epochs() -> Option<u64> {
     Some(50)
+}
+
+fn default_transaction_receipt_retention_epochs() -> Option<u64> {
+    Some(1000)
+}
+
+fn default_event_retention_epochs() -> Option<u64> {
+    Some(1000)
+}
+
+fn default_utxo_tombstone_retention_epochs() -> Option<u64> {
+    Some(504)
 }
 
 mod retention_epochs {
@@ -475,11 +497,8 @@ impl Default for IndexerConfig {
             p2p: P2pConfig::default(),
             api_listen_address: Some("127.0.0.1:18300".parse().unwrap()),
             metrics_listen_address: Some("127.0.0.1:18302".parse().unwrap()),
-            graphql_address: Some("127.0.0.1:18301".parse().unwrap()),
             web_ui_address: Some("127.0.0.1:15000".parse().unwrap()),
             web_ui_public_api_url: None,
-            web_ui_public_graphql_url: None,
-            block_scanning_interval: Duration::from_secs(10),
             state_scanning_interval: Duration::from_secs(60),
             state_sync_stream_deadline: default_state_sync_stream_deadline(),
             state_sync_keepalive_interval: default_state_sync_keepalive_interval(),
@@ -491,8 +510,9 @@ impl Default for IndexerConfig {
             substate_cache_max_entries: default_substate_cache_max_entries(),
             substate_cache_negative_ttl: default_substate_cache_negative_ttl(),
             transaction_retention_epochs: default_transaction_retention_epochs(),
-            transaction_receipt_retention_epochs: None,
-            event_retention_epochs: None,
+            transaction_receipt_retention_epochs: default_transaction_receipt_retention_epochs(),
+            event_retention_epochs: default_event_retention_epochs(),
+            utxo_tombstone_retention_epochs: default_utxo_tombstone_retention_epochs(),
             index_gossiped_transactions: default_index_gossiped_transactions(),
             max_transaction_gossip_queue_bytes: default_max_transaction_gossip_queue_bytes(),
             prune_interval: default_prune_interval(),
@@ -501,6 +521,7 @@ impl Default for IndexerConfig {
             watched_templates: default_watched_templates(),
             verify_substate_proofs: default_verify_substate_proofs(),
             rate_limits: IndexerRateLimitsConfig::default(),
+            logging: crate::logging::default_logging_config(),
         }
     }
 }
@@ -519,6 +540,7 @@ impl SubConfigPath for IndexerConfig {
 /// the per-minute throughput intact while letting clients recover from a burst
 /// in seconds rather than a full minute.
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct IndexerRateLimitsConfig {
     /// On by default, since the API is public. Local networks such as the swarm turn it off.
     pub enabled: bool,

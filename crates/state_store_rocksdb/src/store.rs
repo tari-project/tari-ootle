@@ -20,18 +20,17 @@ use rocksdb::{
     TransactionDBOptions,
     TransactionOptions,
     WriteOptions,
+    checkpoint::TransactionDBCheckpoint,
 };
 use serde::{Serialize, de::DeserializeOwned};
-use tari_ootle_common_types::{NodeAddressable, optional::Optional};
+use tari_ootle_common_types::NodeAddressable;
 use tari_ootle_storage::{Ordering, StateStore, StorageError};
 
 use crate::{
     block_diff_table::{BlockDiffEntry, BlockDiffTable},
     cf_api::DbContext,
-    codecs::ByteColumn,
     column_families::{
         block_diff::BlockDiffRecordCf,
-        bookkeeping::DatabaseMigrationVersion,
         cf_names,
         pending_state_tree_diff::PendingStateTreeDiffRecordCf,
         substate_locks::BlockLockSetCf,
@@ -112,7 +111,7 @@ pub(crate) fn build_default_store_opts(options: &DatabaseOptions) -> (rocksdb::O
     // they belong inside the shared cache where they are accounted for and evictable.
     bb_opts.set_cache_index_and_filter_blocks(true);
     bb_opts.set_pin_l0_filter_and_index_blocks_in_cache(true);
-    bb_opts.set_format_version(6);
+    bb_opts.set_format_version(7);
     bb_opts.set_ribbon_filter(10.0);
     bb_opts.set_optimize_filters_for_memory(true);
     bb_opts.set_block_cache(budget.cache());
@@ -160,8 +159,8 @@ impl<TAddr> RocksDbStateStore<TAddr, TransactionDB> {
     /// This is not typically needed but can be useful for experimentation.
     pub fn compact_all<P: AsRef<Path>>(path: P) -> Result<(), StorageError> {
         let (options, _budget) = build_default_store_opts(&DatabaseOptions::default());
-        let cf_names = all_column_families_iter();
-        let db = DB::open_cf(&options, path, cf_names).map_err(|e| StorageError::ConnectionError {
+        let cf_names = all_column_families_iter().map(|name| ColumnFamilyDescriptor::new(name, options.clone()));
+        let db = DB::open_cf_descriptors(&options, path, cf_names).map_err(|e| StorageError::ConnectionError {
             reason: e.into_string(),
         })?;
         for name in all_column_families_iter() {
@@ -171,6 +170,20 @@ impl<TAddr> RocksDbStateStore<TAddr, TransactionDB> {
             db.compact_range_cf(handle, None::<Vec<u8>>, None::<Vec<u8>>);
         }
         Ok(())
+    }
+
+    /// Writes a consistent point-in-time copy of the database to `dir`, which must not exist. Memtables are flushed
+    /// first, then the immutable SST files are hard-linked into `dir`. On the store's filesystem that makes a
+    /// checkpoint cheap to take, though it pins those files' disk space until it is deleted; on another filesystem
+    /// RocksDB copies the files instead.
+    ///
+    /// The checkpoint opens with [`RocksDbStateStore::open`] like any other store directory.
+    pub fn create_checkpoint<P: AsRef<Path>>(&self, dir: P) -> Result<(), StorageError> {
+        let checkpoint = TransactionDBCheckpoint::new(&self.db)
+            .map_err(|e| StorageError::general("create_checkpoint", e.into_string()))?;
+        checkpoint
+            .create_checkpoint(dir)
+            .map_err(|e| StorageError::general("create_checkpoint", e.into_string()))
     }
 
     /// Open a consistent point-in-time read view (a RocksDB snapshot) over the database. This is the
@@ -274,21 +287,13 @@ fn load_pending_state(db: &TransactionDB) -> Result<PendingState, StorageError> 
         block_diffs.insert(block_id, Arc::new(BlockDiffEntry::new(changes)));
     }
 
-    // Tree diff records written before schema version 3 are in an older encoding. The migration to version 3 rewrites
-    // them and adds them to the table.
     let mut tree_diffs = TreeDiffTable::default();
-    let schema_version = ctx
-        .cf(DatabaseMigrationVersion)?
-        .get(&ByteColumn, OPERATION)
-        .optional()?;
-    if schema_version.is_none_or(|version| version >= 3) {
-        for result in ctx
-            .cf(PendingStateTreeDiffRecordCf)?
-            .iterator(Ordering::Ascending, OPERATION)
-        {
-            let (block_id, diffs) = result?;
-            tree_diffs.insert(block_id, diffs.into());
-        }
+    for result in ctx
+        .cf(PendingStateTreeDiffRecordCf)?
+        .iterator(Ordering::Ascending, OPERATION)
+    {
+        let (block_id, diffs) = result?;
+        tree_diffs.insert(block_id, diffs.into());
     }
 
     Ok(PendingState {

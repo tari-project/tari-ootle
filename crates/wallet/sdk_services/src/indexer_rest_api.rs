@@ -2,7 +2,6 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::HashMap,
     ops::Deref,
     sync::{Arc, Mutex},
     time::Duration,
@@ -13,24 +12,32 @@ use futures::{StreamExt, TryStreamExt};
 use log::warn;
 use reqwest::{IntoUrl, StatusCode, Url};
 use tari_engine_types::{
-    Utxo,
     commit_result::ExecuteResult,
-    substate::{Substate, SubstateId},
+    encoded::Encoded,
+    substate::{SubstateId, SubstateValue},
 };
 use tari_indexer_client::{
     error::IndexerRestClientError,
     event::{IndexerEvent, TransactionFinalizedEvent},
     protobuf,
     rest_api_client::IndexerRestApiClient,
+    sse::SseStreamError,
     types::{
+        EpochCheckpointEntry,
+        GetCommitteeRequest,
+        GetLatestEpochCheckpointRequest,
         GetSubstateRequest,
         GetSubstatesRequest,
         GetTransactionResultRequest,
         GetUtxoUpdatesRequest,
         GetUtxosRequest,
         IndexerTransactionFinalizedResult,
+        ListEpochCheckpointsRequest,
         ListWatchedSubstatesRequest,
+        MAX_SUBSTATES_PER_FETCH,
         SubmitTransactionRequest,
+        SubstateState,
+        ValidatorSetCommittee,
         WatchedSubstateItem,
     },
 };
@@ -49,6 +56,9 @@ use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
 use tari_ootle_wallet_sdk::{
     models::{EndOfShard, StartOfShard, UtxoBurnt, UtxoSpent, UtxoUnspent, UtxoUpdatePayload, WalletUtxoUpdate},
     network::{
+        FetchedSubstates,
+        FetchedUtxos,
+        PlacedTagAndNoncePair,
         SubstateQueryResult,
         TransactionFinalizedNotification,
         TransactionFinalizedResult,
@@ -58,12 +68,7 @@ use tari_ootle_wallet_sdk::{
         WalletNetworkInterface,
     },
 };
-use tari_template_lib_types::{
-    ResourceAddress,
-    TemplateAddress,
-    UtxoId,
-    crypto::{RistrettoPublicKeyBytes, UtxoTag},
-};
+use tari_template_lib_types::{ResourceAddress, TemplateAddress, UtxoId, crypto::RistrettoPublicKeyBytes};
 use time::{OffsetDateTime, PrimitiveDateTime};
 use url::ParseError;
 
@@ -124,7 +129,8 @@ enum IndexerHealth {
     /// The indexer answered.
     Answered,
     /// The indexer could not be reached or cannot serve: a 502, 503 or 504, whether from the indexer (e.g. still
-    /// syncing) or a gateway in front of it, or an answer that fails the client's checks.
+    /// syncing) or a gateway in front of it, a response longer than the client accepts, or an answer that fails the
+    /// client's checks.
     Unavailable,
     /// Nothing can be concluded, e.g. the indexer is rate limiting this wallet.
     Inconclusive,
@@ -145,6 +151,9 @@ impl IndexerHealth {
                     },
                     Some(_) => Self::Answered,
                 }
+            },
+            IndexerRestClientError::UnexpectedStatus { .. } | IndexerRestClientError::ResponseTooLarge { .. } => {
+                Self::Unavailable
             },
             _ => Self::Inconclusive,
         }
@@ -218,17 +227,56 @@ impl IndexerRestApiNetworkInterface {
         client: &TrackedClient,
         request: impl Future<Output = Result<T, IndexerRestClientError>>,
     ) -> Result<T, IndexerRestApiNetworkInterfaceError> {
-        self.observe_checked(client, request, |_| Ok(())).await
+        self.observe_checked(client, request, |_| Ok::<_, IndexerRestApiNetworkInterfaceError>(()))
+            .await
     }
 
     /// As [`Self::observe`], and refuses an answer that fails `check`. A refused answer counts as the indexer being
     /// unavailable, so an indexer that keeps sending invalid answers is failed over.
-    async fn observe_checked<T>(
+    async fn observe_checked<T, E: Into<IndexerRestApiNetworkInterfaceError>>(
         &self,
         client: &TrackedClient,
         request: impl Future<Output = Result<T, IndexerRestClientError>>,
-        check: impl FnOnce(&T) -> Result<(), SubstateTypeMismatch>,
+        check: impl FnOnce(&T) -> Result<(), E>,
     ) -> Result<T, IndexerRestApiNetworkInterfaceError> {
+        self.observe_read(client, request, |answer| check(&answer).map(|()| answer))
+            .await
+    }
+
+    /// As [`Self::observe`], and reads the answer with `read`. An answer `read` refuses counts as the indexer being
+    /// unavailable, as [`Self::observe_checked`] describes.
+    async fn observe_read<T, U, E: Into<IndexerRestApiNetworkInterfaceError>>(
+        &self,
+        client: &TrackedClient,
+        request: impl Future<Output = Result<T, IndexerRestClientError>>,
+        read: impl FnOnce(T) -> Result<U, E>,
+    ) -> Result<U, IndexerRestApiNetworkInterfaceError> {
+        self.observe_with(client, request, read, IndexerHealth::Answered).await
+    }
+
+    /// As [`Self::observe`] for a request that opens a stream. The indexer is judged by what the stream delivers, so
+    /// opening it successfully counts as [`IndexerHealth::Inconclusive`].
+    async fn observe_stream_open<T>(
+        &self,
+        client: &TrackedClient,
+        request: impl Future<Output = Result<T, IndexerRestClientError>>,
+    ) -> Result<T, IndexerRestApiNetworkInterfaceError> {
+        self.observe_with(
+            client,
+            request,
+            Ok::<_, IndexerRestApiNetworkInterfaceError>,
+            IndexerHealth::Inconclusive,
+        )
+        .await
+    }
+
+    async fn observe_with<T, U, E: Into<IndexerRestApiNetworkInterfaceError>>(
+        &self,
+        client: &TrackedClient,
+        request: impl Future<Output = Result<T, IndexerRestClientError>>,
+        read: impl FnOnce(T) -> Result<U, E>,
+        health_on_success: IndexerHealth,
+    ) -> Result<U, IndexerRestApiNetworkInterfaceError> {
         let Ok(result) = tokio::time::timeout(self.request_timeout, request).await else {
             self.record_health(&client.endpoint, IndexerHealth::Unavailable);
             return Err(IndexerRestApiNetworkInterfaceError::IndexerTimedOut {
@@ -236,11 +284,22 @@ impl IndexerRestApiNetworkInterface {
                 timeout: self.request_timeout,
             });
         };
-        if let Err(err) = result.as_ref().map_or(Ok(()), check) {
-            self.record_health(&client.endpoint, IndexerHealth::Unavailable);
-            return Err(err.into());
-        }
-        self.record_health(&client.endpoint, IndexerHealth::of(&result));
+        let result = match result {
+            Ok(answer) => match read(answer) {
+                Ok(read) => Ok(read),
+                Err(err) => {
+                    self.record_health(&client.endpoint, IndexerHealth::Unavailable);
+                    return Err(err.into());
+                },
+            },
+            Err(err) => Err(err),
+        };
+        let health = if result.is_ok() {
+            health_on_success
+        } else {
+            IndexerHealth::of(&result)
+        };
+        self.record_health(&client.endpoint, health);
         Ok(result?)
     }
 
@@ -286,6 +345,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         substate_id: &SubstateId,
         version: Option<SubstateVersion>,
         local_search_only: bool,
+        include_proof: bool,
     ) -> Result<SubstateQueryResult, Self::Error> {
         let client = self.tracked_client();
         let result = self
@@ -294,26 +354,37 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
                 client.get_substate(substate_id, GetSubstateRequest {
                     version,
                     local_search_only,
-                    include_proof: false,
+                    include_proof,
                 }),
-                |resp| check_substate_type(substate_id, &resp.substate),
+                |resp| match &resp.state {
+                    SubstateState::Up { substate } => check_encoded_substate_type(substate_id, substate),
+                    // Only a request with proofs that names the version is answered as down.
+                    SubstateState::Down {} if include_proof && version.is_some() => Ok(()),
+                    SubstateState::Down {} => Err(IndexerRestApiNetworkInterfaceError::UnrequestedDownAnswer {
+                        substate_id: substate_id.clone(),
+                        version: resp.version,
+                    }),
+                },
             )
             .await?;
         Ok(SubstateQueryResult {
             version: result.version,
-            substate: result.substate,
+            state: result.state,
+            proof: result.proof,
         })
     }
 
-    async fn get_substates(&self, substate_ids: Vec<SubstateId>) -> Result<HashMap<SubstateId, Substate>, Self::Error> {
-        // The indexer's substates/fetch endpoint accepts at most this many IDs per request, so larger
-        // requests are split into sequential batches. Substates the indexer cannot find are omitted from
+    async fn get_substates(
+        &self,
+        substate_ids: &[SubstateId],
+        include_proofs: bool,
+    ) -> Result<FetchedSubstates, Self::Error> {
+        // The indexer's substates/fetch endpoint accepts at most MAX_SUBSTATES_PER_FETCH IDs per request, so
+        // larger requests are split into sequential batches. Substates the indexer cannot find are omitted from
         // the result, not an error.
-        const MAX_IDS_PER_REQUEST: usize = 20;
-
         let client = self.tracked_client();
-        let mut substates = HashMap::with_capacity(substate_ids.len());
-        for chunk in substate_ids.chunks(MAX_IDS_PER_REQUEST) {
+        let mut fetched = FetchedSubstates::default();
+        for chunk in substate_ids.chunks(MAX_SUBSTATES_PER_FETCH) {
             let requests = chunk.to_vec().try_into().map_err(|_| {
                 IndexerRestApiNetworkInterfaceError::IndexerClientError(IndexerRestClientError::RequestInvariant {
                     details: "Too many substate IDs requested".to_string(),
@@ -325,19 +396,21 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
                     client.fetch_substates(GetSubstatesRequest {
                         requests,
                         cached_only: false,
-                        include_proofs: false,
+                        include_proofs,
                     }),
                     |resp| {
                         resp.substates
                             .iter()
-                            .try_for_each(|(id, substate)| check_substate_type(id, substate.substate_value()))
+                            .try_for_each(|(id, substate)| check_encoded_substate_type(id, substate.value()))
                     },
                 )
                 .await?;
-            substates.extend(resp.substates);
+            let (substates, proofs) = resp.into_proven();
+            fetched.substates.extend(substates);
+            fetched.proofs.extend(proofs);
         }
 
-        Ok(substates)
+        Ok(fetched)
     }
 
     async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, Self::Error> {
@@ -374,60 +447,83 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
 
         let transaction = TransactionEnvelope::encode(transaction)?;
         let client = self.tracked_client();
-        let resp = self
-            .observe_checked(
+        let (transaction_id, result) = self
+            .observe_read(
                 &client,
                 client.submit_transaction_dry_run(SubmitTransactionRequest { transaction }),
-                |resp| check_execute_result_substate_types(&resp.result),
-            )
-            .await?;
-
-        Ok(TransactionQueryResult {
-            transaction_id: resp.transaction_id,
-            // TODO: clean this up
-            result: TransactionFinalizedResult::Finalized {
-                final_decision: (&resp.result.finalize.result).into(),
-                execution_time: resp.result.execution_time,
-                execution_result: Some(Box::new(resp.result)),
-                finalized_time: now(),
-                abort_details: None,
-            },
-        })
-    }
-
-    async fn query_transaction_result(
-        &self,
-        transaction_id: TransactionId,
-    ) -> Result<TransactionQueryResult, Self::Error> {
-        let client = self.tracked_client();
-        let resp = self
-            .observe_checked(
-                &client,
-                client.get_transaction_result(GetTransactionResultRequest {
-                    transaction_id,
-                    include_proof: false,
-                }),
-                |resp| match &resp.result {
-                    IndexerTransactionFinalizedResult::Finalized {
-                        execution_result: Some(execution_result),
-                        ..
-                    } => check_execute_result_substate_types(execution_result),
-                    _ => Ok(()),
+                |resp| {
+                    let result =
+                        resp.result
+                            .decode()
+                            .map_err(|e| IndexerRestApiNetworkInterfaceError::UndecodableValue {
+                                what: "dry-run result",
+                                details: e.to_string(),
+                            })?;
+                    check_execute_result_substate_types(&result)?;
+                    Ok::<_, IndexerRestApiNetworkInterfaceError>((resp.transaction_id, result))
                 },
             )
             .await?;
 
         Ok(TransactionQueryResult {
             transaction_id,
-            result: convert_indexer_result_to_wallet_result(resp.result),
+            // TODO: clean this up
+            result: TransactionFinalizedResult::Finalized {
+                final_decision: (&result.finalize.result).into(),
+                execution_time: result.execution_time,
+                execution_result: Some(Box::new(result)),
+                finalized_time: now(),
+                abort_details: None,
+            },
+            receipt: None,
+            encoded_execution_result: None,
         })
+    }
+
+    async fn query_transaction_result(
+        &self,
+        transaction_id: TransactionId,
+        include_proof: bool,
+    ) -> Result<TransactionQueryResult, Self::Error> {
+        let client = self.tracked_client();
+        self.observe_read(
+            &client,
+            client.get_transaction_result(GetTransactionResultRequest {
+                transaction_id,
+                include_proof,
+            }),
+            |resp| {
+                let (result, encoded_execution_result) = decode_indexer_result(resp.result)?;
+                if let TransactionFinalizedResult::Finalized {
+                    execution_result: Some(execution_result),
+                    ..
+                } = &result
+                {
+                    check_execute_result_substate_types(execution_result)?;
+                }
+                Ok::<_, IndexerRestApiNetworkInterfaceError>(TransactionQueryResult {
+                    transaction_id,
+                    result,
+                    receipt: resp.receipt,
+                    encoded_execution_result,
+                })
+            },
+        )
+        .await
     }
 
     async fn subscribe_transaction_finalized(&self) -> Result<TransactionFinalizedStream<Self::Error>, Self::Error> {
         let client = self.tracked_client();
-        let events = self.observe(&client, client.sse_events()).await?;
+        let events = self.observe_stream_open(&client, client.sse_events()).await?;
+        let network = self.clone();
         let stream = events
-            .map_err(|e| IndexerRestApiNetworkInterfaceError::StreamDecodeError(e.into()))
+            .map_err(move |e| {
+                // A transport failure shows when the stream is reopened; a malformed stream reopens without error.
+                if matches!(e, SseStreamError::EventParseError { .. }) {
+                    network.record_health(&client.endpoint, IndexerHealth::Unavailable);
+                }
+                IndexerRestApiNetworkInterfaceError::StreamDecodeError(e.into())
+            })
             .try_filter_map(|event| async move {
                 if event.event_type != IndexerEvent::TRANSACTION_FINALIZED_EVENT_NAME {
                     return Ok(None);
@@ -492,6 +588,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
                     shard: Shard::from(sos.shard),
                     max_state_version: StateVersion::from(sos.max_state_version),
                     has_more: sos.has_more,
+                    spends_incomplete: sos.spends_incomplete,
                 });
                 let update = res
                     .update
@@ -541,24 +638,61 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         Ok(stream.boxed())
     }
 
-    async fn get_unspent_utxos(
+    async fn fetch_utxos(
         &self,
         resource_address: ResourceAddress,
-        tag_and_nonce_pairs: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
-    ) -> Result<Vec<(UtxoId, Utxo)>, Self::Error> {
+        tag_and_nonce_pairs: Vec<PlacedTagAndNoncePair>,
+    ) -> Result<FetchedUtxos, Self::Error> {
         let client = self.tracked_client();
+        let (tag_and_nonce_pairs, mut unspent_at): (Vec<_>, Vec<_>) = tag_and_nonce_pairs.into_iter().unzip();
+        if unspent_at.iter().all(Option::is_none) {
+            unspent_at.clear();
+        }
         // TODO: Given the potential size of substates protobuf, json + hex encoding may be too inefficient. Consider
         // supporting the application/x-protobuf content type in the indexer REST API.
-        let resp = self
-            .observe(
-                &client,
-                client.get_utxos(GetUtxosRequest {
-                    resource_address,
-                    tag_and_nonce_pairs,
-                }),
-            )
-            .await?;
-        Ok(resp.utxos)
+        let mut fetched = FetchedUtxos {
+            unspent: Vec::new(),
+            spent: Vec::new(),
+        };
+        let mut cursor = None;
+        loop {
+            let (unspent, spent, next_cursor) = self
+                .observe_read(
+                    &client,
+                    client.get_utxos(GetUtxosRequest {
+                        resource_address,
+                        tag_and_nonce_pairs: tag_and_nonce_pairs.clone(),
+                        unspent_at: unspent_at.clone(),
+                        cursor,
+                    }),
+                    |resp| {
+                        let unspent = resp
+                            .utxos
+                            .into_iter()
+                            .map(|(id, utxo)| {
+                                let utxo = utxo.decode().map_err(|e| {
+                                    IndexerRestApiNetworkInterfaceError::UndecodableValue {
+                                        what: "UTXO",
+                                        details: e.to_string(),
+                                    }
+                                })?;
+                                Ok((id, utxo))
+                            })
+                            .collect::<Result<Vec<_>, IndexerRestApiNetworkInterfaceError>>()?;
+                        Ok::<_, IndexerRestApiNetworkInterfaceError>((unspent, resp.spent, resp.next_cursor))
+                    },
+                )
+                .await?;
+            // Every page reports the spent pairs of the whole request
+            if cursor.is_none() {
+                fetched.spent = spent;
+            }
+            fetched.unspent.extend(unspent);
+            if next_cursor.is_none() {
+                return Ok(fetched);
+            }
+            cursor = next_cursor;
+        }
     }
 
     async fn list_watched_substates(
@@ -583,10 +717,67 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         Ok(resp.substates)
     }
 
+    async fn get_latest_epoch_checkpoint(&self, shard: Shard) -> Result<EpochCheckpointEntry, Self::Error> {
+        let client = self.tracked_client();
+        let resp = self
+            .observe(
+                &client,
+                client.get_latest_epoch_checkpoint(GetLatestEpochCheckpointRequest {
+                    shard: Some(shard),
+                    include_committees: true,
+                }),
+            )
+            .await?;
+        Ok(resp.checkpoint)
+    }
+
+    async fn get_latest_shard_group_checkpoints(&self) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        let client = self.tracked_client();
+        let resp = self
+            .observe(&client, client.get_latest_shard_group_checkpoints())
+            .await?;
+        Ok(resp.checkpoints)
+    }
+
+    async fn list_epoch_checkpoints(
+        &self,
+        from_epoch: Epoch,
+        limit: u32,
+        shard: Shard,
+    ) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        let client = self.tracked_client();
+        let resp = self
+            .observe(
+                &client,
+                client.list_epoch_checkpoints(ListEpochCheckpointsRequest {
+                    from_epoch: Some(from_epoch),
+                    limit: Some(limit),
+                    shard: Some(shard),
+                    include_committees: true,
+                }),
+            )
+            .await?;
+        Ok(resp.checkpoints)
+    }
+
+    async fn get_committee(&self, epoch: Epoch, shard: Shard) -> Result<ValidatorSetCommittee, Self::Error> {
+        let client = self.tracked_client();
+        let resp = self
+            .observe(&client, client.get_committee(GetCommitteeRequest { epoch, shard }))
+            .await?;
+        Ok(resp.committee)
+    }
+
     async fn get_current_epoch(&self) -> Result<Epoch, Self::Error> {
         let client = self.tracked_client();
         let stats = self.observe(&client, client.get_epoch_manager_stats()).await?;
         Ok(stats.consensus_epoch.unwrap_or(stats.current_epoch))
+    }
+
+    async fn get_consensus_epoch(&self) -> Result<Option<Epoch>, Self::Error> {
+        let client = self.tracked_client();
+        let stats = self.observe(&client, client.get_epoch_manager_stats()).await?;
+        Ok(stats.consensus_epoch)
     }
 
     async fn wait_until_ready(&self) -> Result<(), Self::Error> {
@@ -615,6 +806,13 @@ pub enum IndexerRestApiNetworkInterfaceError {
     IndexerTimedOut { endpoint: Url, timeout: Duration },
     #[error("Indexer returned an invalid substate: {0}")]
     SubstateTypeMismatch(#[from] SubstateTypeMismatch),
+    #[error("Indexer served a {what} that does not decode: {details}")]
+    UndecodableValue { what: &'static str, details: String },
+    #[error("Indexer answered {substate_id} v{version} as down to a request without proofs")]
+    UnrequestedDownAnswer {
+        substate_id: SubstateId,
+        version: SubstateVersion,
+    },
 }
 
 impl IsNotFoundError for IndexerRestApiNetworkInterfaceError {
@@ -675,7 +873,9 @@ impl TransactionStatusResponseError for IndexerRestApiNetworkInterfaceError {
             },
             IndexerRestApiNetworkInterfaceError::NoIndexerEndpoints |
             IndexerRestApiNetworkInterfaceError::IndexerTimedOut { .. } |
-            IndexerRestApiNetworkInterfaceError::SubstateTypeMismatch(_) => ResponseErrorStatus::InternalError {
+            IndexerRestApiNetworkInterfaceError::SubstateTypeMismatch(_) |
+            IndexerRestApiNetworkInterfaceError::UndecodableValue { .. } |
+            IndexerRestApiNetworkInterfaceError::UnrequestedDownAnswer { .. } => ResponseErrorStatus::InternalError {
                 message: self.to_string(),
             },
         }
@@ -686,30 +886,60 @@ impl TransactionStatusResponseError for IndexerRestApiNetworkInterfaceError {
     }
 }
 
-/// These types are identical, however in order to keep the wallet decoupled from the indexer, we define two types and
-/// this conversion function.
-// TODO: the common interface and types between the wallet and indexer could be made into a shared "view of the network"
-// interface and we can avoid defining two types.
-fn convert_indexer_result_to_wallet_result(result: IndexerTransactionFinalizedResult) -> TransactionFinalizedResult {
+/// The wallet's form of an indexer's transaction result, with its execution result decoded, and the execution result as
+/// the indexer served it.
+fn decode_indexer_result(
+    result: IndexerTransactionFinalizedResult,
+) -> Result<(TransactionFinalizedResult, Option<Encoded<ExecuteResult>>), IndexerRestApiNetworkInterfaceError> {
     match result {
-        IndexerTransactionFinalizedResult::Pending => TransactionFinalizedResult::Pending,
+        IndexerTransactionFinalizedResult::Pending => Ok((TransactionFinalizedResult::Pending, None)),
         IndexerTransactionFinalizedResult::Finalized {
             final_decision,
             execution_result,
             finalized_time,
             execution_time,
             abort_details,
-        } => TransactionFinalizedResult::Finalized {
-            final_decision,
-            execution_result,
-            execution_time,
-            finalized_time,
-            abort_details,
+        } => {
+            let decoded = execution_result
+                .as_ref()
+                .map(|encoded| {
+                    encoded
+                        .decode()
+                        .map_err(|e| IndexerRestApiNetworkInterfaceError::UndecodableValue {
+                            what: "execution result",
+                            details: e.to_string(),
+                        })
+                })
+                .transpose()?;
+            Ok((
+                TransactionFinalizedResult::Finalized {
+                    final_decision,
+                    execution_result: decoded.map(Box::new),
+                    execution_time,
+                    finalized_time,
+                    abort_details,
+                },
+                execution_result,
+            ))
         },
         IndexerTransactionFinalizedResult::Rejected { details, rejected_time } => {
-            TransactionFinalizedResult::Rejected { details, rejected_time }
+            Ok((TransactionFinalizedResult::Rejected { details, rejected_time }, None))
         },
     }
+}
+
+/// Checks that `value` decodes to the type of substate `id` addresses.
+fn check_encoded_substate_type(
+    id: &SubstateId,
+    value: &Encoded<SubstateValue>,
+) -> Result<(), IndexerRestApiNetworkInterfaceError> {
+    let value = value
+        .decode()
+        .map_err(|e| IndexerRestApiNetworkInterfaceError::UndecodableValue {
+            what: "substate value",
+            details: e.to_string(),
+        })?;
+    Ok(check_substate_type(id, &value)?)
 }
 
 fn check_execute_result_substate_types(result: &ExecuteResult) -> Result<(), SubstateTypeMismatch> {
@@ -726,22 +956,34 @@ fn now() -> PrimitiveDateTime {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use tari_consensus_types::Decision;
     use tari_crypto::ristretto::RistrettoSecretKey;
     use tari_engine_types::{
+        Utxo,
+        UtxoOutput,
         commit_result::{FinalizeResult, TransactionResult},
+        crypto::OutputBody,
         fees::FeeReceipt,
         resource_container::ResourceContainer,
-        substate::{SubstateDiff, SubstateValue},
+        substate::{EncodedSubstate, Substate, SubstateDiff, SubstateValue},
         vault::Vault,
     };
     use tari_indexer_client::types::{
         GetSubstateResponse,
         GetSubstatesResponse,
         GetTransactionResultResponse,
+        GetUtxosResponse,
         SubmitTransactionDryRunResponse,
     };
-    use tari_template_lib_types::{ComponentAddress, constants::TARI_TOKEN};
+    use tari_template_lib_types::{
+        ComponentAddress,
+        EncryptedData,
+        constants::TARI_TOKEN,
+        crypto::UtxoTag,
+        stealth::SpendAuthorization,
+    };
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
@@ -905,6 +1147,10 @@ mod tests {
             IndexerHealth::Unavailable
         );
         assert_eq!(
+            health_of_request_to(spawn_status_server("304 Not Modified", "").await).await,
+            IndexerHealth::Unavailable
+        );
+        assert_eq!(
             health_of_request_to(spawn_status_server("429 Too Many Requests", "{}").await).await,
             IndexerHealth::Inconclusive
         );
@@ -916,6 +1162,17 @@ mod tests {
             health_of_request_to(spawn_status_server("500 Internal Server Error", "{}").await).await,
             IndexerHealth::Answered
         );
+    }
+
+    #[tokio::test]
+    async fn a_response_longer_than_the_client_accepts_is_unavailable() {
+        let url = spawn_status_server("200 OK", " ".repeat(1024)).await;
+        let client = IndexerRestApiClient::connect(url).unwrap().with_max_response_bytes(512);
+
+        let result = client.get_epoch_manager_stats().await;
+
+        assert!(matches!(result, Err(IndexerRestClientError::ResponseTooLarge { .. })));
+        assert_eq!(IndexerHealth::of(&result), IndexerHealth::Unavailable);
     }
 
     #[tokio::test]
@@ -974,6 +1231,51 @@ mod tests {
         ));
     }
 
+    /// Answers every request with an event stream whose only line is longer than the client accepts.
+    async fn spawn_oversized_event_stream_server() -> Url {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        tokio::spawn(async move {
+            let body = vec![b'x'; 2 * 1024 * 1024];
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 4096];
+                let _ignore = socket.read(&mut buf).await;
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n",
+                    body.len()
+                );
+                let _ignore = socket.write_all(head.as_bytes()).await;
+                let _ignore = socket.write_all(&body).await;
+            }
+        });
+        url
+    }
+
+    #[tokio::test]
+    async fn an_indexer_that_keeps_streaming_malformed_events_is_failed_over() {
+        let malformed = spawn_oversized_event_stream_server().await;
+        let other = spawn_status_server("503 Service Unavailable", "{}").await;
+        let network = IndexerRestApiNetworkInterface::init(vec![malformed.clone()]).unwrap();
+        network.set_endpoints(vec![malformed.clone(), other.clone()]).unwrap();
+
+        for _ in 0..FAILOVER_THRESHOLD {
+            assert_eq!(network.get_endpoint(), malformed);
+            let mut stream = network.subscribe_transaction_finalized().await.unwrap();
+            let err = tokio::time::timeout(Duration::from_secs(5), stream.next())
+                .await
+                .expect("the stream produced nothing within the timeout")
+                .expect("the stream ended without an error")
+                .unwrap_err();
+            assert!(
+                matches!(err, IndexerRestApiNetworkInterfaceError::StreamDecodeError(_)),
+                "{err}"
+            );
+        }
+
+        assert_eq!(network.get_endpoint(), other);
+    }
+
     fn component_id() -> SubstateId {
         ComponentAddress::from_array([1; 32]).into()
     }
@@ -990,14 +1292,19 @@ mod tests {
     async fn a_substate_of_another_type_than_requested_is_refused() {
         let body = serde_json::to_string(&GetSubstateResponse {
             version: SubstateVersion::new(1),
-            substate: vault_value(),
+            state: SubstateState::Up {
+                substate: Encoded::encode(&vault_value()).unwrap(),
+            },
             verified: true,
             proof: None,
         })
         .unwrap();
         let network = network_answering_with(body).await;
 
-        let err = network.query_substate(&component_id(), None, false).await.unwrap_err();
+        let err = network
+            .query_substate(&component_id(), None, false, false)
+            .await
+            .unwrap_err();
 
         assert!(matches!(
             err,
@@ -1006,15 +1313,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetched_substates_with_a_mistyped_value_are_refused() {
-        let body = serde_json::to_string(&GetSubstatesResponse {
-            substates: HashMap::from([(component_id(), Substate::new(1, vault_value()))]),
-            proofs: HashMap::new(),
+    async fn a_substate_whose_value_does_not_decode_is_refused() {
+        let body = serde_json::to_string(&GetSubstateResponse {
+            version: SubstateVersion::new(1),
+            state: SubstateState::Up {
+                substate: Encoded::from_bytes(vec![0xff]),
+            },
+            verified: true,
+            proof: None,
         })
         .unwrap();
         let network = network_answering_with(body).await;
 
-        let err = network.get_substates(vec![component_id()]).await.unwrap_err();
+        let err = network
+            .query_substate(&component_id(), None, false, false)
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(err, IndexerRestApiNetworkInterfaceError::UndecodableValue { .. }),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetched_substates_with_a_mistyped_value_are_refused() {
+        let body = serde_json::to_string(&GetSubstatesResponse::new(
+            HashMap::from([(
+                component_id(),
+                EncodedSubstate::encode(&Substate::new(1, vault_value())).unwrap(),
+            )]),
+            [],
+        ))
+        .unwrap();
+        let network = network_answering_with(body).await;
+
+        let err = network.get_substates(&[component_id()], false).await.unwrap_err();
 
         assert!(matches!(
             err,
@@ -1045,11 +1379,11 @@ mod tests {
     async fn a_dry_run_result_with_a_mistyped_substate_is_refused() {
         let transaction = Transaction::builder_localnet(Epoch(100))
             .with_dry_run(true)
-            .build_and_seal(&RistrettoSecretKey::from(1));
+            .build_and_seal(&RistrettoSecretKey::from(1u64));
         let transaction_id = transaction.calculate_id();
         let body = serde_json::to_string(&SubmitTransactionDryRunResponse {
             transaction_id,
-            result: mistyped_execute_result(transaction_id),
+            result: Encoded::encode(&mistyped_execute_result(transaction_id)).unwrap(),
         })
         .unwrap();
         let network = network_answering_with(body).await;
@@ -1066,7 +1400,9 @@ mod tests {
     async fn an_indexer_that_keeps_returning_mistyped_substates_is_failed_over() {
         let body = serde_json::to_string(&GetSubstateResponse {
             version: SubstateVersion::new(1),
-            substate: vault_value(),
+            state: SubstateState::Up {
+                substate: Encoded::encode(&vault_value()).unwrap(),
+            },
             verified: true,
             proof: None,
         })
@@ -1078,10 +1414,68 @@ mod tests {
 
         for _ in 0..FAILOVER_THRESHOLD {
             assert_eq!(network.get_endpoint(), invalid);
-            network.query_substate(&component_id(), None, false).await.unwrap_err();
+            network
+                .query_substate(&component_id(), None, false, false)
+                .await
+                .unwrap_err();
         }
 
         assert_eq!(network.get_endpoint(), other);
+    }
+
+    /// Only a request with proofs may be answered down, so an indexer that keeps answering one without is failed over.
+    #[tokio::test]
+    async fn an_indexer_that_keeps_answering_down_without_proofs_is_failed_over() {
+        let body = serde_json::to_string(&GetSubstateResponse {
+            version: SubstateVersion::new(1),
+            state: SubstateState::Down {},
+            verified: true,
+            proof: None,
+        })
+        .unwrap();
+        let invalid = spawn_status_server("200 OK", body).await;
+        let other = spawn_status_server("503 Service Unavailable", "{}").await;
+        let network = IndexerRestApiNetworkInterface::init(vec![invalid.clone()]).unwrap();
+        network.set_endpoints(vec![invalid.clone(), other.clone()]).unwrap();
+
+        for _ in 0..FAILOVER_THRESHOLD {
+            assert_eq!(network.get_endpoint(), invalid);
+            let err = network
+                .query_substate(&component_id(), Some(SubstateVersion::new(1)), false, false)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, IndexerRestApiNetworkInterfaceError::UnrequestedDownAnswer { .. }),
+                "{err}"
+            );
+        }
+
+        assert_eq!(network.get_endpoint(), other);
+    }
+
+    #[tokio::test]
+    async fn a_down_answer_to_a_proven_request_for_a_version_is_served_down() {
+        let body = serde_json::to_string(&GetSubstateResponse {
+            version: SubstateVersion::new(1),
+            state: SubstateState::Down {},
+            verified: true,
+            proof: None,
+        })
+        .unwrap();
+        let answering = spawn_status_server("200 OK", body).await;
+        let other = spawn_status_server("503 Service Unavailable", "{}").await;
+        let network = IndexerRestApiNetworkInterface::init(vec![answering.clone()]).unwrap();
+        network.set_endpoints(vec![answering.clone(), other]).unwrap();
+
+        for _ in 0..FAILOVER_THRESHOLD {
+            let resp = network
+                .query_substate(&component_id(), Some(SubstateVersion::new(1)), false, true)
+                .await
+                .unwrap();
+            assert!(matches!(resp.state, SubstateState::Down {}));
+        }
+
+        assert_eq!(network.get_endpoint(), answering, "a down answer is a valid one");
     }
 
     #[tokio::test]
@@ -1090,7 +1484,7 @@ mod tests {
         let body = serde_json::to_string(&GetTransactionResultResponse {
             result: IndexerTransactionFinalizedResult::Finalized {
                 final_decision: Decision::Commit,
-                execution_result: Some(Box::new(mistyped_execute_result(transaction_id))),
+                execution_result: Some(Encoded::encode(&mistyped_execute_result(transaction_id)).unwrap()),
                 execution_time: Duration::from_secs(1),
                 finalized_time: now(),
                 abort_details: None,
@@ -1100,11 +1494,134 @@ mod tests {
         .unwrap();
         let network = network_answering_with(body).await;
 
-        let err = network.query_transaction_result(transaction_id).await.unwrap_err();
+        let err = network
+            .query_transaction_result(transaction_id, false)
+            .await
+            .unwrap_err();
 
         assert!(matches!(
             err,
             IndexerRestApiNetworkInterfaceError::SubstateTypeMismatch(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn a_transaction_result_is_served_decoded_with_the_bytes_it_was_served_as() {
+        let transaction_id = TransactionId::default();
+        let mut execute_result = mistyped_execute_result(transaction_id);
+        execute_result.finalize.result = TransactionResult::Accept(SubstateDiff::new());
+        let served = Encoded::encode(&execute_result).unwrap();
+        let body = serde_json::to_string(&GetTransactionResultResponse {
+            result: IndexerTransactionFinalizedResult::Finalized {
+                final_decision: Decision::Commit,
+                execution_result: Some(served.clone()),
+                execution_time: Duration::from_secs(1),
+                finalized_time: now(),
+                abort_details: None,
+            },
+            receipt: None,
+        })
+        .unwrap();
+        let network = network_answering_with(body).await;
+
+        let resp = network.query_transaction_result(transaction_id, false).await.unwrap();
+
+        assert_eq!(resp.encoded_execution_result, Some(served.clone()));
+        let decoded = resp.result.into_execute_result().unwrap();
+        assert_eq!(tari_bor::encode(&decoded).unwrap(), served.as_bytes());
+    }
+
+    /// Answers each UTXO fetch with a page of `utxos` in id order of at most `page_size`, whose ids order after its
+    /// cursor, as the indexer pages them, and reports `pair` spent on the first page only. Records the `cursor` of
+    /// each fetch.
+    async fn spawn_utxo_pages_server(
+        mut utxos: Vec<(UtxoId, Utxo)>,
+        page_size: usize,
+        pair: (UtxoTag, RistrettoPublicKeyBytes),
+        cursors: Arc<Mutex<Vec<Option<UtxoId>>>>,
+    ) -> Url {
+        utxos.sort_by_key(|(id, _)| *id);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut buf = [0u8; 4096];
+                let body = loop {
+                    let n = socket.read(&mut buf).await.unwrap();
+                    request.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&request);
+                    if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                        let len = head
+                            .lines()
+                            .find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length: ")?.parse().ok())
+                            .unwrap_or(0);
+                        if body.len() >= len {
+                            break body.to_string();
+                        }
+                    }
+                };
+                let req: GetUtxosRequest = serde_json::from_str(&body).unwrap();
+                cursors.lock().unwrap().push(req.cursor);
+                let start = req
+                    .cursor
+                    .map_or(0, |cursor| utxos.partition_point(|(id, _)| *id <= cursor));
+                let end = (start + page_size).min(utxos.len());
+                let body = serde_json::to_string(&GetUtxosResponse {
+                    utxos: utxos[start..end]
+                        .iter()
+                        .map(|(id, utxo)| (*id, Encoded::encode(utxo).unwrap()))
+                        .collect(),
+                    spent: if start == 0 { vec![pair] } else { Vec::new() },
+                    next_cursor: (end < utxos.len()).then(|| utxos[end - 1].0),
+                })
+                .unwrap();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: \
+                     close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ignore = socket.write_all(response.as_bytes()).await;
+            }
+        });
+        url
+    }
+
+    #[tokio::test]
+    async fn fetching_utxos_reads_every_page_and_the_spent_pairs_of_the_first() {
+        let pair = (UtxoTag::new(0), RistrettoPublicKeyBytes::from_bytes(&[1; 32]).unwrap());
+        let utxos = (1..=5u8)
+            .map(|seed| {
+                let key = RistrettoPublicKeyBytes::from_bytes(&[seed; 32]).unwrap();
+                let utxo = Utxo::new(UtxoOutput {
+                    output: OutputBody {
+                        public_nonce: key,
+                        encrypted_data: EncryptedData::empty(),
+                        minimum_value_promise: 0,
+                        viewable_balance: None,
+                    },
+                    auth: SpendAuthorization::Key(key),
+                    tag: UtxoTag::new(0),
+                });
+                (UtxoId::from_array([seed; 32]), utxo)
+            })
+            .collect::<Vec<_>>();
+        let cursors = Arc::new(Mutex::new(Vec::new()));
+        let url = spawn_utxo_pages_server(utxos.clone(), 2, pair, cursors.clone()).await;
+        let network = IndexerRestApiNetworkInterface::init(vec![url]).unwrap();
+
+        let fetched = network.fetch_utxos(TARI_TOKEN, vec![(pair, None)]).await.unwrap();
+
+        assert_eq!(
+            fetched.unspent.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            utxos.iter().map(|(id, _)| *id).collect::<Vec<_>>()
+        );
+        assert_eq!(fetched.spent, [pair]);
+        assert_eq!(*cursors.lock().unwrap(), [
+            None,
+            Some(UtxoId::from_array([2; 32])),
+            Some(UtxoId::from_array([4; 32]))
+        ]);
     }
 }

@@ -3,6 +3,7 @@ import type { BlobHashes } from "./BlobHashes";
 import type { Epoch } from "./Epoch";
 import type { InputDeclaration } from "./InputDeclaration";
 import type { Instruction } from "./Instruction";
+import type { MainSigner } from "./MainSigner";
 
 /**
  * Mirror of `UnsignedTransactionV1` but with blob commitments instead of blob payloads.
@@ -17,7 +18,7 @@ export type PrunedUnsignedTransactionV1 = {
   inputs: Array<InputDeclaration>;
   min_epoch: Epoch | null;
   max_epoch: Epoch;
-  is_seal_signer_authorized: boolean;
+  main_signer: MainSigner;
   dry_run: boolean;
   /**
    * Per-blob commitments. Mirrors `UnsignedTransactionV1::blobs.hashes()` of the full form.
@@ -26,8 +27,7 @@ export type PrunedUnsignedTransactionV1 = {
   /**
    * Byte size of each blob, parallel to `blob_hashes`. **Not part of the signing/id domain**
    * — populated at conversion time from `Blobs` so that API consumers and UIs can show
-   * blob sizes without downloading payloads. May be empty when deserialised from older
-   * archives that didn't record sizes.
+   * blob sizes without downloading payloads.
    */
   blob_sizes: Array<number>;
   /**

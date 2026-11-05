@@ -134,9 +134,7 @@ where
     }
 
     let vault_substate_ids: Vec<SubstateId> = vault_ids.iter().take(2).map(|id| SubstateId::Vault(*id)).collect();
-    let vault_substates = substate_api
-        .get_substates_from_network(vault_substate_ids.clone())
-        .await?;
+    let vault_substates = substate_api.get_substates_from_network(&vault_substate_ids).await?;
 
     let mut reserves = Vec::with_capacity(2);
     for id in &vault_substate_ids {

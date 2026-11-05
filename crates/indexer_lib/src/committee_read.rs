@@ -26,23 +26,33 @@ pub type MemberResponse = Result<(SubstateResult, Option<SubstateProofData>), In
 /// Folds committee members' responses to a single-substate read into an answer.
 ///
 /// Responses arrive in whatever order the members answer, so the tally cannot assume anything about
-/// which member it hears from first. What settles a read is decided per response: a proven `Up`, a
+/// which member it hears from first. A versioned read ignores any `Up` or `Down` of another
+/// version, proven or not, keeping it neither as the unproven fallback nor in the per-version
+/// `Down` count, and records an error in case no member answers for the requested version. What
+/// settles a read is decided per response: a proven `Up`, a
 /// proven `Down` of the version the read asked for (or any `Up`/`Down` while proofs are not
 /// required) answers on the spot. `DoesNotExist` answers only once more than `f` members agree, and
 /// so does a `Down` no member has proven, counted per version: a single member's word that a substate
 /// is down could otherwise make the indexer treat a live substate as spent. When `f` is 0 that one
-/// member is the threshold, so its unproven `Down` answers only once every member has responded and
-/// none has proven anything. The highest unproven `Up`
+/// member is the threshold, so its `DoesNotExist` or unproven `Down` answers only once every member
+/// has responded and none has proven anything (with an unproven `Down` or `Up` taking precedence
+/// over `DoesNotExist`). The highest unproven `Up`
 /// is held as a fallback in case nothing settles the read; an unproven `Down` never is, and a read
 /// that ends with only too few of them fails rather than reporting the substate down or absent.
 ///
-/// A proof of a `Down` shows that the version it names was committed and is no longer up. That
+/// A down proof of a `Down` shows that the version it names was committed and is no longer up. That
 /// answers a read for that version, but says nothing about whether a later version is up, so it
 /// cannot answer a read for the head; there it counts as one member's `Down`.
+///
+/// A `Down` of the version the read asked for may instead come with only an exclusion proof, which a
+/// version that never existed also satisfies, as does a version committed after the anchor. It counts
+/// as one member's unproven `Down`, and the first such proof is attached to the `Down` the read
+/// settles on, for a reader that has proven the version up at a block of an earlier epoch.
 #[derive(Debug)]
 pub struct CommitteeReadTally {
     /// Byzantine tolerance of the committee: `DoesNotExist` needs `f + 1` agreeing members before it
-    /// is believed, since any `f` of them may be lying or behind.
+    /// is believed (or every member when `f` is 0, if none reported `Up` or `Down`), since any `f`
+    /// of them may be lying or behind.
     f: usize,
     verify_substate_proofs: bool,
     /// The version the read asked for, or `None` for the head.
@@ -50,6 +60,8 @@ pub struct CommitteeReadTally {
     num_nexist: usize,
     /// How many members reported each version down without a proof that answers the read.
     unproven_downs: HashMap<SubstateVersion, usize>,
+    /// The first exclusion proof served with a `Down` of the requested version.
+    exclusion: Option<SubstateProofData>,
     last_error: Option<IndexerError>,
     /// Highest-version `Up` that came back without a proof. Only served if nothing settles the read. A
     /// `Down` is never kept here: one member's unproven `Down` would otherwise refuse a live input.
@@ -68,6 +80,7 @@ impl CommitteeReadTally {
             requested_version,
             num_nexist: 0,
             unproven_downs: HashMap::new(),
+            exclusion: None,
             last_error: None,
             unproven_up: None,
         }
@@ -78,7 +91,18 @@ impl CommitteeReadTally {
         match response {
             Ok((substate_result, proof)) => match substate_result {
                 SubstateResult::Up { .. } | SubstateResult::Down { .. } => {
-                    if !self.verify_substate_proofs || (proof.is_some() && self.proof_answers_read(&substate_result)) {
+                    if let Some(requested) = self.requested_version &&
+                        let Some(answered) = substate_result.version() &&
+                        answered != requested
+                    {
+                        self.last_error = Some(IndexerError::VersionMismatch { requested, answered });
+                        return None;
+                    }
+                    if !self.verify_substate_proofs ||
+                        proof
+                            .as_ref()
+                            .is_some_and(|proof| self.proof_answers_read(&substate_result, proof))
+                    {
                         return Some(SubstateLookupResult {
                             result: substate_result,
                             verified: proof.is_some(),
@@ -86,15 +110,17 @@ impl CommitteeReadTally {
                         });
                     }
                     if let SubstateResult::Down { version } = substate_result {
+                        if self.exclusion.is_none() && self.requested_version == Some(version) {
+                            self.exclusion = proof;
+                        }
                         let count = self.unproven_downs.entry(version).or_default();
                         *count += 1;
                         // With f = 0 the threshold is one member, whose word must not preempt a member still
                         // proving an Up. Such a Down is answered only once every member has responded.
-                        return (self.f > 0 && *count > self.f).then_some(SubstateLookupResult {
-                            result: substate_result,
-                            verified: false,
-                            proof: None,
-                        });
+                        if self.f > 0 && *count > self.f {
+                            return Some(self.unproven_down(version));
+                        }
+                        return None;
                     }
                     // The member could not prove an `Up` (e.g. nothing committed since the epoch
                     // started). Keep the highest version as an unverified fallback (a member that is
@@ -111,7 +137,7 @@ impl CommitteeReadTally {
                 },
                 SubstateResult::DoesNotExist => {
                     self.num_nexist += 1;
-                    (self.num_nexist > self.f).then_some(SubstateLookupResult {
+                    (self.f > 0 && self.num_nexist > self.f).then_some(SubstateLookupResult {
                         result: SubstateResult::DoesNotExist,
                         verified: false,
                         proof: None,
@@ -126,16 +152,30 @@ impl CommitteeReadTally {
         }
     }
 
-    /// Whether a proof of `result` answers this read. See [`CommitteeReadTally`].
-    fn proof_answers_read(&self, result: &SubstateResult) -> bool {
+    /// Whether `proof` of `result` answers this read. See [`CommitteeReadTally`].
+    fn proof_answers_read(&self, result: &SubstateResult, proof: &SubstateProofData) -> bool {
         match result {
-            SubstateResult::Down { version } => self.requested_version == Some(*version),
+            SubstateResult::Down { version } => {
+                self.requested_version == Some(*version) && proof.substate_down_proof.is_some()
+            },
             SubstateResult::Up { .. } | SubstateResult::DoesNotExist => true,
         }
     }
 
+    /// The answer that `version` is down, which no member has proven, with the exclusion proof served for it.
+    fn unproven_down(&mut self, version: SubstateVersion) -> SubstateLookupResult {
+        SubstateLookupResult {
+            result: SubstateResult::Down { version },
+            verified: false,
+            proof: self
+                .exclusion
+                .take()
+                .filter(|_| self.requested_version == Some(version)),
+        }
+    }
+
     /// The answer once every member has responded without settling the read.
-    pub fn conclude(self, describe: impl std::fmt::Display) -> Result<SubstateLookupResult, IndexerError> {
+    pub fn conclude(mut self, describe: impl std::fmt::Display) -> Result<SubstateLookupResult, IndexerError> {
         // Only with f = 0 can a version reach the threshold without having settled the read when it did.
         // A Down of a version no later than an Up held unproven names a spent version, not the head,
         // so the Up answers instead.
@@ -152,11 +192,7 @@ impl CommitteeReadTally {
                     .is_none_or(|up_version| up_version < *version)
             })
         {
-            return Ok(SubstateLookupResult {
-                result: SubstateResult::Down { version },
-                verified: false,
-                proof: None,
-            });
+            return Ok(self.unproven_down(version));
         }
 
         if let Some(result) = self.unproven_up {
@@ -181,6 +217,14 @@ impl CommitteeReadTally {
                 self.f,
             );
             return Err(IndexerError::InvalidSubstateState);
+        }
+
+        if self.num_nexist > self.f {
+            return Ok(SubstateLookupResult {
+                result: SubstateResult::DoesNotExist,
+                verified: false,
+                proof: None,
+            });
         }
 
         log::warn!(
@@ -246,10 +290,14 @@ mod tests {
     use futures::future::{BoxFuture, FutureExt};
     use tari_engine_types::{
         non_fungible::NonFungibleContainer,
-        substate::{Substate, SubstateValue},
+        substate::{EncodedSubstate, Substate, SubstateValue},
     };
 
     use super::*;
+
+    fn encoded(substate: Substate) -> EncodedSubstate {
+        EncodedSubstate::encode(&substate).unwrap()
+    }
 
     fn down(version: u64) -> SubstateResult {
         SubstateResult::Down {
@@ -259,7 +307,7 @@ mod tests {
 
     fn up(version: u64) -> SubstateResult {
         SubstateResult::Up {
-            substate: Box::new(Substate::new(
+            substate: encoded(Substate::new(
                 version,
                 SubstateValue::NonFungible(NonFungibleContainer::no_data()),
             )),
@@ -274,6 +322,18 @@ mod tests {
             substate_down_proof: None,
             destroyed_at_state_version: None,
         })
+    }
+
+    fn down_proven() -> Option<SubstateProofData> {
+        proven().map(|proof| SubstateProofData {
+            substate_down_proof: Some(vec![]),
+            ..proof
+        })
+    }
+
+    /// The proof of a `Down` that carries only its exclusion.
+    fn excluded() -> Option<SubstateProofData> {
+        proven()
     }
 
     fn error() -> IndexerError {
@@ -331,7 +391,10 @@ mod tests {
     async fn a_member_that_never_answers_does_not_delay_the_rest() {
         let result = tokio::time::timeout(
             Duration::from_secs(1),
-            race(3, READ_RACE_WIDTH, true, Some(4), vec![(1, Ok((down(4), proven())))]),
+            race(3, READ_RACE_WIDTH, true, Some(4), vec![(
+                1,
+                Ok((down(4), down_proven())),
+            )]),
         )
         .await
         .expect("read stalled behind an unresponsive member")
@@ -358,7 +421,7 @@ mod tests {
         let result = race(3, 1, true, Some(2), vec![
             (0, Err(error())),
             (1, Err(error())),
-            (2, Ok((down(2), proven()))),
+            (2, Ok((down(2), down_proven()))),
         ])
         .await
         .unwrap();
@@ -370,7 +433,7 @@ mod tests {
         // Member 0 answers first and cannot prove; member 1 can.
         let result = race(4, 1, true, Some(7), vec![
             (0, Ok((down(7), None))),
-            (1, Ok((down(7), proven()))),
+            (1, Ok((down(7), down_proven()))),
         ])
         .await
         .unwrap();
@@ -382,7 +445,7 @@ mod tests {
     #[tokio::test]
     async fn a_proven_down_does_not_answer_a_read_for_the_head() {
         let result = race(4, 1, true, None, vec![
-            (0, Ok((down(3), proven()))),
+            (0, Ok((down(3), down_proven()))),
             (1, Ok((up(4), proven()))),
         ])
         .await
@@ -394,7 +457,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_proven_down_alone_leaves_a_read_for_the_head_unverified() {
-        let result = race(1, 1, true, None, vec![(0, Ok((down(3), proven())))])
+        let result = race(1, 1, true, None, vec![(0, Ok((down(3), down_proven())))])
             .await
             .unwrap();
         assert_eq!(result.result.version(), Some(SubstateVersion::new(3)));
@@ -405,8 +468,8 @@ mod tests {
     #[tokio::test]
     async fn a_proven_down_of_another_version_does_not_answer_a_versioned_read() {
         let result = race(4, 1, true, Some(5), vec![
-            (0, Ok((down(6), proven()))),
-            (1, Ok((down(5), proven()))),
+            (0, Ok((down(6), down_proven()))),
+            (1, Ok((down(5), down_proven()))),
         ])
         .await
         .unwrap();
@@ -415,8 +478,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_proven_up_of_another_version_does_not_answer_a_versioned_read() {
+        let result = race(4, 1, true, Some(5), vec![
+            (0, Ok((up(4), proven()))),
+            (1, Ok((down(5), down_proven()))),
+        ])
+        .await
+        .unwrap();
+        assert!(matches!(result.result, SubstateResult::Down { .. }));
+        assert_eq!(result.result.version(), Some(SubstateVersion::new(5)));
+        assert!(result.verified);
+    }
+
+    #[tokio::test]
     async fn a_proven_answer_carries_its_proof() {
-        let result = race(2, 1, true, Some(3), vec![(0, Ok((down(3), proven())))])
+        let result = race(2, 1, true, Some(3), vec![(0, Ok((down(3), down_proven())))])
             .await
             .unwrap();
         assert!(result.verified);
@@ -558,11 +634,49 @@ mod tests {
 
     #[tokio::test]
     async fn one_proven_down_settles_a_read_for_its_version() {
-        let result = race(4, 1, true, Some(3), vec![(0, Ok((down(3), proven())))])
+        let result = race(4, 1, true, Some(3), vec![(0, Ok((down(3), down_proven())))])
             .await
             .unwrap();
         assert_eq!(result.result.version(), Some(SubstateVersion::new(3)));
         assert!(result.verified);
+    }
+
+    /// An exclusion alone is also satisfied by a version committed after its anchor, so one member's
+    /// exclusion does not settle the read.
+    #[tokio::test]
+    async fn one_excluded_down_does_not_settle_a_read_for_its_version() {
+        let result = race(4, 1, true, Some(3), vec![
+            (0, Ok((down(3), excluded()))),
+            (1, Ok((up(3), proven()))),
+        ])
+        .await
+        .unwrap();
+        assert!(matches!(result.result, SubstateResult::Up { .. }));
+        assert!(result.verified);
+    }
+
+    #[tokio::test]
+    async fn f_plus_one_downs_of_the_requested_version_settle_with_the_exclusion_served() {
+        let result = race(4, 1, true, Some(3), vec![
+            (0, Ok((down(3), None))),
+            (1, Ok((down(3), excluded()))),
+        ])
+        .await
+        .unwrap();
+        assert_eq!(result.result.version(), Some(SubstateVersion::new(3)));
+        assert!(!result.verified);
+        let proof = result.proof.expect("the exclusion is attached");
+        assert!(proof.substate_down_proof.is_none());
+    }
+
+    #[tokio::test]
+    async fn with_f_zero_a_concluded_down_carries_the_exclusion_served() {
+        let result = race(1, 1, true, Some(3), vec![(0, Ok((down(3), excluded())))])
+            .await
+            .unwrap();
+        assert_eq!(result.result.version(), Some(SubstateVersion::new(3)));
+        assert!(!result.verified);
+        assert!(result.proof.is_some());
     }
 
     #[tokio::test]
@@ -605,7 +719,7 @@ mod tests {
     async fn a_single_nonexistence_is_outvoted_by_a_proven_version() {
         let result = race(4, 1, true, Some(1), vec![
             (0, Ok((SubstateResult::DoesNotExist, None))),
-            (1, Ok((down(1), proven()))),
+            (1, Ok((down(1), down_proven()))),
         ])
         .await
         .unwrap();
@@ -636,5 +750,61 @@ mod tests {
         .await
         .unwrap();
         assert!(matches!(result.result, SubstateResult::DoesNotExist));
+    }
+
+    #[tokio::test]
+    async fn with_f_zero_nonexistence_does_not_preempt_an_up_or_down() {
+        for size in [2, 3] {
+            let result = race(size, 1, true, None, vec![
+                (0, Ok((SubstateResult::DoesNotExist, None))),
+                (1, Ok((up(3), proven()))),
+            ])
+            .await
+            .unwrap();
+            assert!(matches!(result.result, SubstateResult::Up { .. }), "{size}");
+            assert!(result.verified, "{size}");
+
+            let result = race(size, 1, false, None, vec![
+                (0, Ok((SubstateResult::DoesNotExist, None))),
+                (1, Ok((up(3), None))),
+            ])
+            .await
+            .unwrap();
+            assert!(matches!(result.result, SubstateResult::Up { .. }), "{size}");
+
+            let result = race(size, 1, true, Some(3), vec![
+                (0, Ok((SubstateResult::DoesNotExist, None))),
+                (1, Ok((down(3), down_proven()))),
+            ])
+            .await
+            .unwrap();
+            assert!(matches!(result.result, SubstateResult::Down { .. }), "{size}");
+            assert!(result.verified, "{size}");
+        }
+    }
+
+    #[tokio::test]
+    async fn with_f_zero_nonexistence_is_concluded_once_everyone_answers() {
+        let result = race(2, 1, true, None, vec![
+            (0, Ok((SubstateResult::DoesNotExist, None))),
+            (1, Err(error())),
+        ])
+        .await
+        .unwrap();
+        assert!(matches!(result.result, SubstateResult::DoesNotExist));
+        assert!(!result.verified);
+    }
+
+    #[tokio::test]
+    async fn a_versioned_read_answered_only_with_another_version_fails_closed() {
+        let result = race(1, 1, true, Some(5), vec![(0, Ok((up(4), proven())))]).await;
+        assert!(
+            matches!(
+                result,
+                Err(IndexerError::VersionMismatch { requested, answered })
+                    if requested == SubstateVersion::new(5) && answered == SubstateVersion::new(4)
+            ),
+            "{result:?}"
+        );
     }
 }

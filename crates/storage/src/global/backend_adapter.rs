@@ -23,12 +23,23 @@
 use std::collections::{HashMap, HashSet};
 
 use serde::{Serialize, de::DeserializeOwned};
-use tari_common_types::types::FixedHash;
-use tari_ootle_common_types::{Epoch, NodeAddressable, ShardGroup, SubstateAddress, VotePower, committee::Committee};
+use tari_ootle_common_types::{
+    Epoch,
+    NodeAddressable,
+    ShardGroup,
+    SubstateAddress,
+    ValidatorSetHash,
+    VotePower,
+    committee::Committee,
+};
+use tari_sidechain::FixedHash;
 use tari_template_lib_types::{Hash32, crypto::RistrettoPublicKeyBytes};
 
 use super::{BlockHeaderModel, EpochData};
-use crate::{atomic::AtomicDb, global::models::ValidatorNode};
+use crate::{
+    atomic::AtomicDb,
+    global::models::{ShardGroupSize, ValidatorNode},
+};
 
 pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
     type Addr: NodeAddressable;
@@ -95,6 +106,13 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         epoch: Epoch,
         shard_group: ShardGroup,
     ) -> Result<u64, Self::Error>;
+    /// Returns the member count and summed vote power of `shard_group` in `epoch`.
+    fn validator_nodes_size_of_shard_group(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<ShardGroupSize, Self::Error>;
 
     fn validator_nodes_clear_committees(
         &self,
@@ -110,6 +128,7 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         epoch: Epoch,
     ) -> Result<(), Self::Error>;
 
+    /// Returns the committee of `shard_group` in `epoch`, ascending by public key.
     fn validator_nodes_get_for_shard_group(
         &self,
         tx: &mut Self::DbTransaction<'_>,
@@ -133,12 +152,6 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         excluding: HashSet<Self::Addr>,
     ) -> Result<ValidatorNode<Self::Addr>, Self::Error>;
 
-    fn validator_nodes_get_committees_for_epoch(
-        &self,
-        tx: &mut Self::DbTransaction<'_>,
-        epoch: Epoch,
-    ) -> Result<HashMap<ShardGroup, Committee<Self::Addr>>, Self::Error>;
-
     /// Upserts the epoch hash for `epoch`. Overwrites an existing row so the epoch manager can apply
     /// an oracle hash correction for an epoch it has already persisted (only done while the epoch is
     /// unlocked; locked epochs are guarded in `EpochManagerService::activate_epoch`).
@@ -149,6 +162,23 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         epoch_hash: FixedHash,
     ) -> Result<(), Self::Error>;
     fn get_epoch(&self, tx: &mut Self::DbTransaction<'_>, epoch: Epoch) -> Result<Option<EpochData>, Self::Error>;
+
+    /// Stores `epoch`'s validator set hash and the committee leaf hash of each of its shard groups, replacing any the
+    /// epoch already holds. The epoch row must exist.
+    fn set_validator_set(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        epoch: Epoch,
+        validator_set_hash: &ValidatorSetHash,
+        leaves: &[(ShardGroup, Hash32)],
+    ) -> Result<(), Self::Error>;
+
+    /// Returns the committee leaf hash of each of `epoch`'s shard groups, ascending by shard group.
+    fn get_validator_set_leaves(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        epoch: Epoch,
+    ) -> Result<Vec<(ShardGroup, Hash32)>, Self::Error>;
 
     fn insert_block_header(
         &self,

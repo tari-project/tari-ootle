@@ -1,9 +1,9 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup};
 use tari_ootle_storage::consensus_models::VerifiedBlockTip;
+use tari_sidechain::FixedHash;
 
 use crate::storage_sqlite::schema::verified_state_roots;
 
@@ -11,7 +11,7 @@ use crate::storage_sqlite::schema::verified_state_roots;
 #[diesel(table_name = verified_state_roots)]
 pub(crate) struct VerifiedStateRootRow {
     #[allow(dead_code)]
-    pub id: i32,
+    pub id: i64,
     // Redundant with the query filter; reads echo the caller's epoch/shard_group rather than re-parse.
     #[allow(dead_code)]
     pub epoch: i64,

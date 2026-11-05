@@ -138,7 +138,7 @@ fn minting_a_commitment_without_a_value_proof_is_rejected() {
 
 #[test]
 fn mint_more_later() {
-    let (confidential_proof, _mask, value_proofs) = mint_statement(0, None);
+    let (confidential_proof, _mask, value_proofs) = mint_statement(1, None);
     let (mut template_test, faucet, _faucet_resx) = setup(confidential_proof, value_proofs, None);
 
     let (confidential_proof, mask, value_proofs) = mint_statement(100, None);
@@ -245,6 +245,8 @@ fn transfer_confidential_amounts_between_accounts() {
     // account1 vault, account2 component and the single spent input ConfidentialOutput.
     assert_eq!(diff.up_iter().count(), 7);
     assert_eq!(diff.down_iter().count(), 3);
+
+    template_test.assert_substate_lengths_match_encoding();
 }
 
 #[test]
@@ -800,7 +802,7 @@ fn minting_a_duplicate_commitment_is_rejected() {
         vec![owner],
     );
 
-    assert_reject_reason(reason, RuntimeError::DuplicateSubstate {
+    assert_reject_reason(reason, RuntimeError::SubstateAlreadyExists {
         address: address.into(),
     });
 }

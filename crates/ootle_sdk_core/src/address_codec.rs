@@ -7,8 +7,8 @@
 //!    `tari_template_lib_types` produces). Not bech32m. Parsing wraps the `*Str::parse` validators in
 //!    [`crate::types::address`]; formatting is their `Display`.
 //! 2. **Identity / payment address** — the `otl_…` bech32m recipient handle carrying `{network, account_key,
-//!    view_only_key, pay_ref}`. The bech32m codec lives in the [`tari_ootle_address`] crate; this module calls it
-//!    (`OotleAddress::decode_bech32` / `encode_bech32_to_fmt`).
+//!    view_only_key, destination_tag}`. The bech32m codec lives in the [`tari_ootle_address`] crate; this module calls
+//!    it (`OotleAddress::decode_bech32` / `encode_bech32_to_fmt`).
 //!
 //! [`parse_address`] dispatches on the string prefix and returns a kind-tagged [`ParsedAddress`].
 //! [`format_identity_address`] constructs an [`OotleAddress`] and bech32m-encodes it under the
@@ -16,11 +16,11 @@
 //! Esmeralda `otl_esm_`, …).
 //!
 //! Error mapping: an unknown prefix, a malformed bech32m string (bad checksum / HRP / length), a
-//! substate-id parse failure, bad/odd/uppercase `pay_ref` hex, or an oversize `pay_ref` (> 64 bytes)
+//! substate-id parse failure, bad/odd/uppercase `destination_tag` hex, or an oversize `destination_tag` (> 64 bytes)
 //! all map to [`OotleSdkError::Parse`].
 
 use serde::{Deserialize, Serialize};
-use tari_ootle_address::{OotleAddress, PayRef};
+use tari_ootle_address::{DestinationTag, OotleAddress};
 
 use crate::types::{
     address::{ComponentAddressStr, ResourceAddressStr},
@@ -62,9 +62,9 @@ pub enum ParsedAddress {
         account_key: PublicKeyBytes,
         /// The view-only public key, lowercase hex.
         view_only_key: PublicKeyBytes,
-        /// The optional payment reference, lowercase hex (`None` if absent).
+        /// The optional destination tag, lowercase hex (`None` if absent).
         #[serde(skip_serializing_if = "Option::is_none")]
-        pay_ref: Option<String>,
+        destination_tag: Option<String>,
         /// The canonical bech32m string this parsed from (re-encoded; round-trips byte-for-byte).
         bech32m: String,
     },
@@ -104,20 +104,20 @@ pub fn parse_address(s: &str) -> Result<ParsedAddress, OotleSdkError> {
 /// ([`OotleAddress::encode_bech32_to_fmt`]); the HRP is derived from `network`, so the encoded prefix
 /// is network-qualified.
 ///
-/// `pay_ref` is an optional lowercase-hex string. Bad/odd/uppercase hex, or a decoded length over the
+/// `destination_tag` is an optional lowercase-hex string. Bad/odd/uppercase hex, or a decoded length over the
 /// 64-byte cap, map to [`OotleSdkError::Parse`].
 pub fn format_identity_address(
     network: Network,
     account_key: &PublicKeyBytes,
     view_only_key: &PublicKeyBytes,
-    pay_ref: Option<&str>,
+    destination_tag: Option<&str>,
 ) -> Result<String, OotleSdkError> {
     // `OotleAddress::new` takes (network, view_only_key, account_key) in that order — pass the keys
     // by name to avoid a silent swap.
     let mut addr = OotleAddress::new(network.into(), view_only_key.to_internal(), account_key.to_internal());
 
-    if let Some(pr_hex) = pay_ref {
-        addr = addr.with_pay_ref(pay_ref_from_hex(pr_hex)?);
+    if let Some(tag_hex) = destination_tag {
+        addr = addr.with_destination_tag(destination_tag_from_hex(tag_hex)?);
     }
 
     let mut out = String::new();
@@ -134,24 +134,26 @@ fn identity_from_ootle_address(addr: &OotleAddress) -> ParsedAddress {
         network: Network::from(addr.network()),
         account_key: PublicKeyBytes::from_internal(addr.account_public_key()),
         view_only_key: PublicKeyBytes::from_internal(addr.view_only_key()),
-        pay_ref: addr.pay_ref().map(|pr| hex::encode(pr.as_bytes())),
+        destination_tag: addr.destination_tag().map(|tag| hex::encode(tag.as_bytes())),
         bech32m: addr.to_bech32_string(),
     }
 }
 
-/// Decodes a lowercase-hex `pay_ref` into a [`PayRef`], enforcing the lowercase-hex contract and the
+/// Decodes a lowercase-hex `destination_tag` into a [`DestinationTag`], enforcing the lowercase-hex contract and the
 /// 64-byte cap. Any violation is [`OotleSdkError::Parse`].
-fn pay_ref_from_hex(pr_hex: &str) -> Result<PayRef, OotleSdkError> {
-    if pr_hex.chars().any(|c| c.is_ascii_uppercase()) {
-        return Err(OotleSdkError::Parse("pay_ref must be lowercase hex".to_string()));
+fn destination_tag_from_hex(tag_hex: &str) -> Result<DestinationTag, OotleSdkError> {
+    if tag_hex.chars().any(|c| c.is_ascii_uppercase()) {
+        return Err(OotleSdkError::Parse(
+            "destination_tag must be lowercase hex".to_string(),
+        ));
     }
-    let bytes = hex::decode(pr_hex).map_err(|e| OotleSdkError::Parse(format!("invalid pay_ref hex: {e}")))?;
-    // `new_checked` rejects both empty and > MAX_LEN: a present-but-empty pay_ref is meaningless, so
+    let bytes = hex::decode(tag_hex).map_err(|e| OotleSdkError::Parse(format!("invalid destination_tag hex: {e}")))?;
+    // `new_checked` rejects both empty and > MAX_LEN: a present-but-empty destination_tag is meaningless, so
     // empty hex is a parse error.
-    PayRef::new_checked(bytes).ok_or_else(|| {
+    DestinationTag::new_checked(bytes).ok_or_else(|| {
         OotleSdkError::Parse(format!(
-            "pay_ref must be 1..={} bytes (got an empty or oversize value)",
-            PayRef::MAX_LEN
+            "destination_tag must be 1..={} bytes (got an empty or oversize value)",
+            DestinationTag::MAX_LEN
         ))
     })
 }
@@ -190,7 +192,7 @@ mod tests {
                     network: n,
                     account_key,
                     view_only_key,
-                    pay_ref,
+                    destination_tag,
                     bech32m,
                 } => {
                     assert_eq!(n, network, "the network byte must survive the round-trip");
@@ -201,7 +203,7 @@ mod tests {
                         view(),
                         "view_only_key must round-trip (not the account key)"
                     );
-                    assert_eq!(pay_ref, None);
+                    assert_eq!(destination_tag, None);
                     assert_eq!(bech32m, s, "the re-encoded bech32m equals the parsed input");
                 },
                 other => panic!("expected Identity, got {other:?}"),
@@ -226,16 +228,16 @@ mod tests {
     }
 
     #[test]
-    fn identity_with_pay_ref_round_trips() {
-        let pr_hex = "deadbeef";
-        let s = format_identity_address(Network::LocalNet, &account(), &view(), Some(pr_hex)).unwrap();
-        let ParsedAddress::Identity { pay_ref, .. } = parse_address(&s).unwrap() else {
+    fn identity_with_destination_tag_round_trips() {
+        let tag_hex = "deadbeef";
+        let s = format_identity_address(Network::LocalNet, &account(), &view(), Some(tag_hex)).unwrap();
+        let ParsedAddress::Identity { destination_tag, .. } = parse_address(&s).unwrap() else {
             panic!("expected Identity");
         };
         assert_eq!(
-            pay_ref.as_deref(),
-            Some(pr_hex),
-            "pay_ref must round-trip lowercase hex"
+            destination_tag.as_deref(),
+            Some(tag_hex),
+            "destination_tag must round-trip lowercase hex"
         );
     }
 
@@ -257,26 +259,26 @@ mod tests {
     }
 
     #[test]
-    fn pay_ref_at_cap_is_accepted_and_over_cap_rejected() {
+    fn destination_tag_at_cap_is_accepted_and_over_cap_rejected() {
         // Exactly 64 bytes (the cap) is accepted.
-        let at_cap = "aa".repeat(PayRef::MAX_LEN);
+        let at_cap = "aa".repeat(DestinationTag::MAX_LEN);
         assert!(format_identity_address(Network::Esmeralda, &account(), &view(), Some(&at_cap)).is_ok());
 
         // 65 bytes is rejected with PARSE.
-        let over_cap = "aa".repeat(PayRef::MAX_LEN + 1);
+        let over_cap = "aa".repeat(DestinationTag::MAX_LEN + 1);
         let err = format_identity_address(Network::Esmeralda, &account(), &view(), Some(&over_cap)).unwrap_err();
         assert_eq!(err.code(), "PARSE");
     }
 
     #[test]
-    fn pay_ref_bad_hex_is_parse() {
+    fn destination_tag_bad_hex_is_parse() {
         // Uppercase hex.
         let err = format_identity_address(Network::Esmeralda, &account(), &view(), Some("DEADBEEF")).unwrap_err();
         assert_eq!(err.code(), "PARSE");
         // Odd-length hex.
         let err = format_identity_address(Network::Esmeralda, &account(), &view(), Some("abc")).unwrap_err();
         assert_eq!(err.code(), "PARSE");
-        // Empty pay_ref (use None for "no pay_ref").
+        // Empty destination_tag (use None for "no destination_tag").
         let err = format_identity_address(Network::Esmeralda, &account(), &view(), Some("")).unwrap_err();
         assert_eq!(err.code(), "PARSE");
     }

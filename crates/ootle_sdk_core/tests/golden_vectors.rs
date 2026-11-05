@@ -84,6 +84,7 @@ use tari_crypto::{
 };
 use tari_engine_types::{
     component::{Component, ComponentBody, ComponentHeader},
+    encoded::Encoded,
     resource_container::ResourceContainer,
     substate::{SubstateId, SubstateValue},
     vault::Vault,
@@ -313,10 +314,11 @@ fn resolve_component_json(vault_ids: &[VaultId]) -> serde_json::Value {
             owner_rule: SubstateOwnerRule::None,
             access_rules: ComponentAccessRules::new(),
             entity_id: EntityId::from_array([0u8; EntityId::LENGTH]),
+            upgrade_rule: Default::default(),
         },
         body: ComponentBody::from_cbor_value(state),
     };
-    serde_json::to_value(SubstateValue::Component(component)).expect("component json")
+    indexer_substate_json(&SubstateValue::Component(component))
 }
 
 /// A `SubstateValue::Vault` JSON holding `resolve_resource()`.
@@ -325,7 +327,7 @@ fn resolve_vault_json() -> serde_json::Value {
         resolve_resource(),
         Amount::new(1_000_000),
     ));
-    serde_json::to_value(SubstateValue::Vault(vault)).expect("vault json")
+    indexer_substate_json(&SubstateValue::Vault(vault))
 }
 
 /// The single-round fetched batch that resolves the want set: the from-component (revealing its
@@ -464,6 +466,7 @@ fn parse_sample_component(vault_ids: &[VaultId]) -> Component {
             owner_rule: SubstateOwnerRule::None,
             access_rules: ComponentAccessRules::new(),
             entity_id: EntityId::from_array([0u8; EntityId::LENGTH]),
+            upgrade_rule: Default::default(),
         },
         body: ComponentBody::from_cbor_value(tari_bor::to_value(&vault_ids.to_vec()).expect("encode vault ids")),
     }
@@ -525,6 +528,11 @@ fn parse_execute_result(
     }
 }
 
+/// `value` as the indexer serves it: its CBOR encoding, base64.
+fn indexer_substate_json(value: &SubstateValue) -> serde_json::Value {
+    serde_json::to_value(Encoded::encode(value).expect("substate value encodes")).expect("base64 serializes")
+}
+
 /// Wraps an `ExecuteResult` in the indexer `Finalized` envelope JSON (exactly the indexer REST shape).
 fn parse_finalized_wire_json(result: tari_engine_types::commit_result::ExecuteResult) -> serde_json::Value {
     use tari_consensus_types::Decision;
@@ -532,7 +540,7 @@ fn parse_finalized_wire_json(result: tari_engine_types::commit_result::ExecuteRe
     serde_json::json!({
         "Finalized": {
             "final_decision": decision,
-            "execution_result": result,
+            "execution_result": Encoded::encode(&result).expect("execution result encodes"),
             "execution_time": { "secs": 1, "nanos": 0 },
             "finalized_time": "2026-06-12 00:00:00.0",
             "abort_details": serde_json::Value::Null,
@@ -608,12 +616,13 @@ fn parse_reject_access_denied_fixture_seed() -> Fixture {
 }
 
 /// Wraps an `ExecuteResult` in the indexer **dry-run** response JSON
-/// (`SubmitTransactionDryRunResponse { transaction_id, result }`) — the `POST /transactions/dry-run`
-/// shape. The parser shape-dispatches on the top-level `result` key and fills `estimated_fee`.
+/// (`SubmitTransactionDryRunResponse { transaction_id, result }`, `result` its base64 CBOR encoding) — the
+/// `POST /transactions/dry-run` shape. The parser shape-dispatches on the top-level `result` key and fills
+/// `estimated_fee`.
 fn parse_dry_run_wire_json(result: tari_engine_types::commit_result::ExecuteResult) -> serde_json::Value {
     serde_json::json!({
         "transaction_id": result.finalize.transaction_hash,
-        "result": result,
+        "result": Encoded::encode(&result).unwrap(),
     })
 }
 
@@ -783,6 +792,8 @@ const STEALTH_TRANSFER_VECTORS: &[VectorCase] = &[
 fn stealth_send_keys(seed_byte: u8) -> VectorStealthKeys {
     VectorStealthKeys {
         account_secret: SecretKeyBytes::from_array(fixed_scalar_bytes(11)),
+        // The view secret the send vectors' stealth input is encrypted to.
+        view_secret: SecretKeyBytes::from_array(fixed_scalar_bytes(162)),
         // The build seed expands into both the account-key nonces and the proof entropy; a distinct
         // byte per fixture keeps the vectors independent.
         seed: BuildSeed::from_array([seed_byte; 32]),
@@ -890,7 +901,7 @@ fn stealth_send_stealth_seal_seed() -> Fixture {
     let fetched = vec![FetchedSubstate {
         substate_id: substate_id.to_string(),
         version: 0,
-        substate_value: serde_json::to_value(SubstateValue::Utxo(utxo)).expect("utxo json"),
+        substate_value: indexer_substate_json(&SubstateValue::Utxo(utxo)),
     }];
 
     let intent = StealthTransferIntent {
@@ -1020,6 +1031,10 @@ fn stealth_send_revealed_output_multi_seed() -> Fixture {
 const STEALTH_SCAN_VECTORS: &[VectorCase] = &[
     ("stealth_scan/mine_basic.json", stealth_scan_mine_basic_seed),
     ("stealth_scan/not_mine.json", stealth_scan_not_mine_seed),
+    (
+        "stealth_scan/foreign_spend_key.json",
+        stealth_scan_foreign_spend_key_seed,
+    ),
 ];
 
 /// Builds an inbound stealth UTXO addressed to (`view_pk`, `account_pk`) for `amount`, using the
@@ -1054,7 +1069,7 @@ fn stealth_scan_inbound(
 
     let resource = stealth_resource();
     let resource_internal = resource.to_internal().unwrap();
-    let owner_pk = crypto.derive_stealth_owner_public_key(internal_network, account_pk, nonce_secret);
+    let owner_pk = crypto.derive_stealth_owner_public_key(internal_network, account_pk, view_pk, nonce_secret);
     let owner_pk_bytes = PublicKeyBytes::from_bytes(owner_pk.as_bytes()).expect("32-byte pk");
     let tag = crypto.derive_stealth_output_tag(internal_network, nonce_secret, view_pk, &resource_internal);
 
@@ -1112,7 +1127,7 @@ fn stealth_scan_mine_basic_seed() -> Fixture {
     let scan = StealthScanInput {
         network: net,
         view_secret: SecretKeyBytes::from_bytes(view_secret.as_bytes()).expect("32-byte secret"),
-        account_secret: Some(SecretKeyBytes::from_bytes(account_secret.as_bytes()).expect("32-byte secret")),
+        account_public_key: PublicKeyBytes::from_bytes(account_pk.as_bytes()).expect("32-byte pk"),
         output,
         skip_memo: true,
     };
@@ -1131,11 +1146,33 @@ fn stealth_scan_not_mine_seed() -> Fixture {
     let scan = StealthScanInput {
         network: net,
         view_secret: SecretKeyBytes::from_bytes(other_view.as_bytes()).expect("32-byte secret"),
-        account_secret: None,
+        account_public_key: PublicKeyBytes::from_bytes(account_pk.as_bytes()).expect("32-byte pk"),
         output,
         skip_memo: true,
     };
     stealth_scan_fixture_seed("stealth_scan/not_mine", scan)
+}
+
+/// Vector 3 — `foreign_spend_key`: a UTXO that decrypts under the scanner's view key and carries the
+/// right tag, but whose spend key pays another account ⇒ `Ok(None)`. A sender can build this to make
+/// a view-only wallet credit funds it cannot spend.
+fn stealth_scan_foreign_spend_key_seed() -> Fixture {
+    let net = Network::Esmeralda;
+    let (view_secret, account_secret, nonce_secret, mask) = stealth_scan_keys();
+    let view_pk = RistrettoPublicKey::from_secret_key(&view_secret);
+    let account_pk = RistrettoPublicKey::from_secret_key(&account_secret);
+    let foreign_account_pk = RistrettoPublicKey::from_secret_key(
+        &RistrettoSecretKey::from_canonical_bytes(&fixed_scalar_bytes(201)).expect("canonical"),
+    );
+    let output = stealth_scan_inbound(net, &foreign_account_pk, &view_pk, &nonce_secret, &mask, 1_234_567);
+    let scan = StealthScanInput {
+        network: net,
+        view_secret: SecretKeyBytes::from_bytes(view_secret.as_bytes()).expect("32-byte secret"),
+        account_public_key: PublicKeyBytes::from_bytes(account_pk.as_bytes()).expect("32-byte pk"),
+        output,
+        skip_memo: true,
+    };
+    stealth_scan_fixture_seed("stealth_scan/foreign_spend_key", scan)
 }
 
 // --- Stealth UTXO decode vectors ------------------------------------------------------
@@ -1181,7 +1218,7 @@ fn stealth_decode_utxo_seed() -> Fixture {
     let encrypted_data = encrypt_data(amount, &mask, &encryption_key, None).expect("encrypt");
     let commitment = commit_u64_amount(&mask, amount).to_byte_type();
     let commitment_hex = hex::encode(commitment.as_bytes());
-    let owner_pk = crypto.derive_stealth_owner_public_key(internal_network, &account_pk, &nonce_secret);
+    let owner_pk = crypto.derive_stealth_owner_public_key(internal_network, &account_pk, &view_pk, &nonce_secret);
     let tag = crypto.derive_stealth_output_tag(internal_network, &nonce_secret, &view_pk, &resource_internal);
 
     let output_body = OutputBody {
@@ -1199,7 +1236,7 @@ fn stealth_decode_utxo_seed() -> Fixture {
     let substate_id = ootle_sdk_core::stealth::stealth_utxo_substate_id(resource.as_str(), &commitment_hex)
         .expect("utxo substate id")
         .to_string();
-    let substate_value = serde_json::to_value(SubstateValue::Utxo(utxo)).expect("SubstateValue serializes");
+    let substate_value = indexer_substate_json(&SubstateValue::Utxo(utxo));
 
     Fixture {
         name: "stealth_scan/decode_utxo".to_string(),
@@ -1262,16 +1299,17 @@ fn balance_account_substate(vault_ids: &[VaultId]) -> serde_json::Value {
             owner_rule: SubstateOwnerRule::None,
             access_rules: ComponentAccessRules::new(),
             entity_id: EntityId::from_array([0u8; EntityId::LENGTH]),
+            upgrade_rule: Default::default(),
         },
         body: ComponentBody::from_cbor_value(state),
     };
-    serde_json::to_value(SubstateValue::Component(component)).expect("component serializes")
+    indexer_substate_json(&SubstateValue::Component(component))
 }
 
 /// A fungible vault substate JSON holding `amount` revealed for `resource`.
 fn balance_vault_substate(resource: ResourceAddress, amount: u128) -> serde_json::Value {
     let vault = Vault::new(ResourceContainer::public_fungible(resource, Amount::new(amount)));
-    serde_json::to_value(SubstateValue::Vault(vault)).expect("vault serializes")
+    indexer_substate_json(&SubstateValue::Vault(vault))
 }
 
 /// Vector — `decode_substate/component`: an account component decodes to a kind-tagged Component with
@@ -1461,9 +1499,9 @@ fn address_seed_account_pk() -> Fixture {
 // --- Address codec vectors (substate parse + otl_ identity bytes ↔ bech32m) ------------
 //
 // Two operations, one address surface:
-//   * `format_identity_address` — `{network, account_key, view_only_key, pay_ref?}` → `otl_…` bech32m, byte-stable
-//     (`"bytes"`). Multi-network vectors lock the network-qualified HRP; ±pay_ref vectors lock the optional 64-byte
-//     memo. The keys are distinct so a field swap would change the encoded bytes.
+//   * `format_identity_address` — `{network, account_key, view_only_key, destination_tag?}` → `otl_…` bech32m,
+//     byte-stable (`"bytes"`). Multi-network vectors lock the network-qualified HRP; ±destination_tag vectors lock the
+//     optional 64-byte memo. The keys are distinct so a field swap would change the encoded bytes.
 //   * `parse_address` — a `component_/resource_<hex>` substate id or an `otl_…` identity string → the kind-tagged
 //     `ParsedAddress`, byte-stable. The identity-parse vector's `input.address` is the exact string the matching
 //     `format_identity_address` vector emits (the same crate codec a wallet uses), so parse cross-checks that a
@@ -1474,8 +1512,8 @@ const ADDRESS_CODEC_VECTORS: &[VectorCase] = &[
     ("address_codec/identity_mainnet.json", identity_mainnet),
     ("address_codec/identity_esmeralda.json", identity_esmeralda),
     (
-        "address_codec/identity_localnet_with_pay_ref.json",
-        identity_localnet_pay_ref,
+        "address_codec/identity_localnet_with_destination_tag.json",
+        identity_localnet_destination_tag,
     ),
     ("address_codec/parse_identity_esmeralda.json", parse_identity_esmeralda),
     ("address_codec/parse_component.json", parse_component),
@@ -1491,11 +1529,11 @@ const IDENTITY_ACCOUNT_PK_HEX: &str = "f6f89e316e6ba5f05e5250ddd4a5d3ed39dcd038c
 /// from the same seed; distinct from the account key, so a field swap would be observable).
 const IDENTITY_VIEW_PK_HEX: &str = "06f832c34f9c91611d7e0b3eeb85a39f55e8f20798ae30adebec385e83983746";
 
-/// A small, stable lowercase-hex pay_ref (a memo) for the ±pay_ref vector.
-const IDENTITY_PAY_REF_HEX: &str = "00112233445566778899aabbccddeeff";
+/// A small, stable lowercase-hex destination_tag (a memo) for the ±destination_tag vector.
+const IDENTITY_DESTINATION_TAG_HEX: &str = "00112233445566778899aabbccddeeff";
 
 /// Builds a `format_identity_address` fixture shell (generator fills `expected.bech32m`).
-fn identity_format_fixture(name: &str, network: Network, pay_ref: Option<&str>) -> Fixture {
+fn identity_format_fixture(name: &str, network: Network, destination_tag: Option<&str>) -> Fixture {
     Fixture {
         name: name.to_string(),
         schema_version: SCHEMA_VERSION,
@@ -1506,7 +1544,7 @@ fn identity_format_fixture(name: &str, network: Network, pay_ref: Option<&str>) 
             network: Some(network),
             account_public_key: Some(IDENTITY_ACCOUNT_PK_HEX.to_string()),
             view_only_key: Some(IDENTITY_VIEW_PK_HEX.to_string()),
-            pay_ref: pay_ref.map(str::to_string),
+            destination_tag: destination_tag.map(str::to_string),
             ..Default::default()
         },
         expected: harness::ExpectedOutput::default(),
@@ -1529,22 +1567,22 @@ fn parse_address_fixture(name: &str, address: String) -> Fixture {
     }
 }
 
-/// Identity vector — MainNet (`otl_` HRP), no pay_ref.
+/// Identity vector — MainNet (`otl_` HRP), no destination_tag.
 fn identity_mainnet() -> Fixture {
     identity_format_fixture("address_codec/identity_mainnet", Network::MainNet, None)
 }
 
-/// Identity vector — Esmeralda (`otl_esm_` HRP), no pay_ref.
+/// Identity vector — Esmeralda (`otl_esm_` HRP), no destination_tag.
 fn identity_esmeralda() -> Fixture {
     identity_format_fixture("address_codec/identity_esmeralda", Network::Esmeralda, None)
 }
 
-/// Identity vector — LocalNet (`otl_loc_` HRP) with a pay_ref (the optional memo path).
-fn identity_localnet_pay_ref() -> Fixture {
+/// Identity vector — LocalNet (`otl_loc_` HRP) with a destination_tag (the optional memo path).
+fn identity_localnet_destination_tag() -> Fixture {
     identity_format_fixture(
-        "address_codec/identity_localnet_with_pay_ref",
+        "address_codec/identity_localnet_with_destination_tag",
         Network::LocalNet,
-        Some(IDENTITY_PAY_REF_HEX),
+        Some(IDENTITY_DESTINATION_TAG_HEX),
     )
 }
 
@@ -1739,7 +1777,7 @@ fn arg_address_transaction_receipt() -> Fixture {
     encode_arg_fixture("arg_dsl/address_transaction_receipt", ArgValue::Address(addr))
 }
 
-/// Arg vector — a `template_<hex>` address (encoded as the typed engine template address).
+/// Arg vector — a `template_<hex>` address (encoded as the untagged `TemplateAddress` hash a template parameter takes).
 fn arg_address_template() -> Fixture {
     let addr = tari_engine_types::published_template::PublishedTemplateAddress::from_hash(Hash32::from_array(
         [0x12; Hash32::LENGTH],
@@ -1871,6 +1909,10 @@ const GENERIC_BUILD_VECTORS: &[VectorCase] = &[
     ("generic_build/create_account.json", generic_create_account_seed),
     ("generic_build/call_function.json", generic_call_function_seed),
     ("generic_build/publish_template.json", generic_publish_template_seed),
+    (
+        "generic_build/publish_template_with_metadata.json",
+        generic_publish_template_with_metadata_seed,
+    ),
     ("generic_build/workspace_pipe.json", generic_workspace_pipe_seed),
     (
         "generic_build/self_funding_faucet.json",
@@ -2036,6 +2078,28 @@ fn generic_publish_template_seed() -> Fixture {
     generic_build_fixture("generic_build/publish_template", intent)
 }
 
+/// A publish carrying a SHA-256 multihash metadata reference (code `0x12`, length `0x20`, 32-byte digest).
+fn generic_publish_template_with_metadata_seed() -> Fixture {
+    let intent = GenericTransactionIntent {
+        fee: BoundaryAmount::new(2000),
+        fee_payment: generic_fee_from_account(),
+        fee_instructions: vec![],
+        instructions: vec![InstructionSpec::PublishTemplate {
+            blob_index: 0,
+            metadata_hash: Some(format!("1220{}", "ab".repeat(32))),
+        }],
+        blobs: vec![BlobSpec {
+            bytes: vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00],
+        }],
+        inputs: generic_explicit_inputs(),
+        extra_inputs: vec![],
+        min_epoch: None,
+        max_epoch: 1,
+        dry_run: false,
+    };
+    generic_build_fixture("generic_build/publish_template_with_metadata", intent)
+}
+
 fn generic_workspace_pipe_seed() -> Fixture {
     // withdraw → put-on-workspace("b") → deposit(Workspace("b")): the workspace pipe encodes the ref
     // to the id the producer registered (id 0).
@@ -2126,7 +2190,7 @@ fn faucet_claim_seed() -> Fixture {
         FetchedSubstate {
             substate_id: SubstateId::Vault(XTR_FAUCET_VAULT_ADDRESS).to_string(),
             version: 0,
-            substate_value: serde_json::to_value(SubstateValue::Vault(faucet_vault)).expect("vault json"),
+            substate_value: indexer_substate_json(&SubstateValue::Vault(faucet_vault)),
         },
     ];
 
@@ -2565,7 +2629,7 @@ fn run_golden_vectors() {
         // `run_operation` decodes + re-verifies every signature (via
         // `decode_and_canonicalize_sealed_transfer`, which errors on a verify failure) and nulls the
         // byte-unstable Schnorr scalars, then the runner compares the deterministic decoded fields
-        // (instructions, inputs, signer public keys, `is_seal_signer_authorized` — everything except the
+        // (instructions, inputs, signer public keys, `main_signer` — everything except the
         // nulled scalars).
         const SEALED_SEMANTIC_OPS: &[&str] = &[
             OP_BUILD_AND_ENCODE_PUBLIC_TRANSFER,

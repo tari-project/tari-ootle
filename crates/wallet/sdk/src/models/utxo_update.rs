@@ -9,7 +9,7 @@ pub use tari_indexer_client::types::{
     UtxoUpdateSet,
     WalletUtxoUpdate,
 };
-use tari_ootle_common_types::{StateVersion, shard::Shard};
+use tari_ootle_common_types::{Epoch, StateVersion, shard::Shard};
 
 #[derive(Debug, Clone)]
 pub struct UtxoUpdatePayload {
@@ -24,9 +24,26 @@ pub struct StartOfShard {
     pub max_state_version: StateVersion,
     /// The shard holds updates beyond this pass, as reported by the indexer.
     pub has_more: bool,
+    /// The indexer may lack the spends of the shard's outputs below its tombstone horizon, which the request's cursor
+    /// is below, so each output the wallet holds in the shard is checked before the shard's cursor is stored.
+    pub spends_incomplete: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct EndOfShard {
     pub max_state_version: StateVersion,
+}
+
+/// A shard's stealth scan cursor as an indexer reported it, past what a verified checkpoint commits for the shard. A
+/// scan resumes from it, and the shard's verified cursor stays where the claim began, until a verified checkpoint that
+/// ended after the claim began expires it. The shard is then scanned again from the verified cursor, so that an
+/// indexer's claim hides no update for longer than that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClaimedStateVersion {
+    pub state_version: StateVersion,
+    /// The state version the claim began at. An honest indexer reported no more than the network had committed then,
+    /// so a checkpoint that ended after the claim began commits at least this.
+    pub first_state_version: StateVersion,
+    /// The epoch of the latest verified checkpoint of the shard when the claim began, or `None` without one.
+    pub verified_epoch: Option<Epoch>,
 }

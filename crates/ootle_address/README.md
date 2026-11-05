@@ -5,13 +5,13 @@
 
 Bech32m-encoded user-facing addresses for the Tari Ootle network. An
 `OotleAddress` encodes an account public key, a view-only key, the target
-network, and an optional opaque payment reference (`PayRef`) into a single
+network, and an optional opaque destination tag (`DestinationTag`) into a single
 human-readable string.
 
 ## Format
 
 ```
-otl_<account_pub_key><view_only_pub_key>[pay_ref]<checksum>
+otl_<account_pub_key><view_only_pub_key>[destination_tag]<checksum>
 ```
 
 The human-readable part (HRP) encodes the network:
@@ -27,7 +27,7 @@ The human-readable part (HRP) encodes the network:
 ## Example
 
 ```rust
-use tari_ootle_address::{OotleAddress, PayRef, Network};
+use tari_ootle_address::{OotleAddress, DestinationTag, Network};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 // Construct from raw key bytes
@@ -42,10 +42,10 @@ let encoded = addr.to_string();
 let decoded: OotleAddress = encoded.parse().unwrap();
 assert_eq!(addr, decoded);
 
-// Optionally attach a payment reference (up to 64 bytes)
+// Optionally attach a destination tag (up to 64 bytes)
 // When a user pays to this address, the reference is automatically included in the UTXO encrypted data when performing stealth payments
-let pay_ref = PayRef::new_checked(b"invoice-42".to_vec()).unwrap();
-let addr_with_ref = addr.with_pay_ref(pay_ref);
+let destination_tag = DestinationTag::new_checked(b"invoice-42".to_vec()).unwrap();
+let addr_with_ref = addr.with_destination_tag(destination_tag);
 ```
 
 ## License

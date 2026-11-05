@@ -47,7 +47,7 @@ use crate::{
         inputs::spend_secrets_map,
         outputs::build_stealth_outputs_statement_from_entropy,
         partial::{StealthPartialTransaction, StealthSignatureRequirementsState},
-        sign_seal::{StealthKeys, seal_public_key},
+        sign_seal::{SpendSecrets, StealthKeys, seal_public_key},
     },
     types::{
         bytes::{BuildSeed, SecretKeyBytes},
@@ -463,8 +463,8 @@ fn resolve_revealed_receiver(
     if intent.revealed_output_amount == 0 {
         return Ok(None);
     }
-    let account_secret = parse_mask(&keys.account_secret)?;
-    let receiver = seal_public_key(network, &account_secret, sig_reqs)?.ok_or_else(|| {
+    let secrets = SpendSecrets::parse(keys)?;
+    let receiver = seal_public_key(network, &secrets, sig_reqs)?.ok_or_else(|| {
         OotleSdkError::Validation(
             "a revealed output needs a receiver that signs, but this transfer has no signer to seal with".to_string(),
         )
@@ -658,10 +658,11 @@ mod tests {
                 owner_rule: SubstateOwnerRule::None,
                 access_rules: ComponentAccessRules::new(),
                 entity_id: EntityId::from_array([0u8; EntityId::LENGTH]),
+                upgrade_rule: Default::default(),
             },
             body: ComponentBody::from_cbor_value(state),
         };
-        serde_json::to_value(SubstateValue::Component(component)).unwrap()
+        crate::substate_decode::indexer_substate_json(&SubstateValue::Component(component))
     }
 
     /// The from-account's vault substate (JSON), holding the tari resource the transfer pays in.
@@ -671,7 +672,7 @@ mod tests {
 
         let resource = tari_resource().as_str().parse().unwrap();
         let vault = Vault::new(ResourceContainer::public_fungible(resource, Amount::new(1_000_000)));
-        serde_json::to_value(SubstateValue::Vault(vault)).unwrap()
+        crate::substate_decode::indexer_substate_json(&SubstateValue::Vault(vault))
     }
 
     /// Serves a fetch request for `id` from the from-account substate store (component + vault), or
@@ -729,7 +730,10 @@ mod tests {
     /// The account key these tests seal with. A revealed output names its public key, since that is the key
     /// `plan_seal` will seal with for an intent that draws on the account.
     fn test_keys() -> StealthKeys {
-        StealthKeys::new(SecretKeyBytes::from_bytes(RistrettoSecretKey::from(42u64).as_bytes()).unwrap())
+        StealthKeys::new(
+            SecretKeyBytes::from_bytes(RistrettoSecretKey::from(42u64).as_bytes()).unwrap(),
+            SecretKeyBytes::from_bytes(RistrettoSecretKey::from(43u64).as_bytes()).unwrap(),
+        )
     }
 
     /// The public key [`test_keys`] seals with — the receiver these tests expect on a revealed output.
@@ -1062,7 +1066,7 @@ mod tests {
         let fetched = vec![FetchedSubstate {
             substate_id: substate_id.to_string(),
             version: 0,
-            substate_value: serde_json::to_value(SubstateValue::Utxo(utxo)).unwrap(),
+            substate_value: crate::substate_decode::indexer_substate_json(&SubstateValue::Utxo(utxo)),
         }];
 
         let intent = StealthTransferIntent {
@@ -1177,7 +1181,7 @@ mod tests {
         let fetched = vec![FetchedSubstate {
             substate_id: substate_id.to_string(),
             version: 0,
-            substate_value: serde_json::to_value(SubstateValue::Utxo(utxo)).unwrap(),
+            substate_value: crate::substate_decode::indexer_substate_json(&SubstateValue::Utxo(utxo)),
         }];
 
         // Even-balance confidential spend (input == output), no revealed bucket, pay_fee_from_revealed on.
@@ -1274,7 +1278,7 @@ mod tests {
         let fetched = vec![FetchedSubstate {
             substate_id: substate_id.to_string(),
             version: 0,
-            substate_value: serde_json::to_value(SubstateValue::Utxo(utxo)).unwrap(),
+            substate_value: crate::substate_decode::indexer_substate_json(&SubstateValue::Utxo(utxo)),
         }];
 
         let intent = StealthTransferIntent {

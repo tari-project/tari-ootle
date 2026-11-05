@@ -17,6 +17,7 @@ tari_ootle_common_types = { workspace = true }
 tari_crypto = { workspace = true }
 tari_shutdown = { workspace = true }
 tari_sidechain = { workspace = true }
+tari_sidechain_l1 = { workspace = true }
 minotari_node_grpc_client = { workspace = true }
 minotari_wallet_grpc_client = { workspace = true }
 tari_validator_node_client = { workspace = true }
@@ -50,6 +51,9 @@ toml = { workspace = true }
 tonic = { workspace = true }
 tower-http = { workspace = true, features = ["fs", "cors"] }
 url = { workspace = true, features = ["default", "serde"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.28.0", default-features = false, features = ["signal"] }

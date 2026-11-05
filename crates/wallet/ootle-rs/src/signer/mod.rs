@@ -6,8 +6,10 @@ mod error;
 pub mod ledger;
 // pub mod local_signer;
 mod stealth_key;
+mod transaction_message;
 
 pub use error::*;
 #[cfg(feature = "ledger")]
 pub use ledger::LedgerSigner;
 pub use stealth_key::*;
+pub use transaction_message::*;

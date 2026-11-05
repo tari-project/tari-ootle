@@ -17,17 +17,26 @@ use crate::Epoch;
 #[borsh(use_discriminant = true)]
 #[serde(into = "u32", try_from = "u32")]
 pub enum ProtocolVersion {
-    /// The genesis schema, which every network starts under.
+    /// The genesis schema of every network launched before V1. Block IDs and votes commit to the version; each leaf of
+    /// a block's state merkle root commits to its shard, shard root and state version; each header commits to a
+    /// transaction merkle root over the decision it reached for every transaction it finalizes; and each leaf of a
+    /// block's command merkle root commits to the shard groups that a foreign commit proof of the block must carry the
+    /// command in full for.
     #[default]
     V0 = 0,
-    /// Each leaf of a block's state merkle root commits to its shard's state version as well as its shard root, so
-    /// a quorum-signed header fixes the version every shard of the group is at. Block IDs commit to the version.
+    /// Each substate value hash commits to the value's CBOR encoding instead of its borsh encoding. A field appended
+    /// to a substate type as an `Option` leaves the hash of every value written before it unchanged, so adding one
+    /// needs a coordinated upgrade but no new protocol version.
     V1 = 1,
-    /// Each block header commits to a transaction merkle root over the decision it reached for every transaction it
-    /// finalizes, and each leaf of a block's state merkle root commits to its shard as well as its shard root and
-    /// state version, so a substate proof can only cite the state of the shard the substate lives in.
-    V2 = 2,
 }
+
+/// Stands in for the V1 activation epoch on a live network until one is chosen. No epoch reaches it, so the network
+/// stays on V0. It must be replaced by a real epoch, far enough ahead to roll every node, before V1 ships there.
+const V1_ACTIVATION_UNSCHEDULED: Epoch = Epoch(u64::MAX);
+
+/// The epoch LocalNet activates V1 at. It is low but non-zero so that local networks and tests run under V0 first and
+/// cross the activation.
+const LOCALNET_V1_ACTIVATION: Epoch = Epoch(10);
 
 impl ProtocolVersion {
     /// The schema activation schedule for `network`, ordered by activation epoch ascending. Entry at
@@ -47,12 +56,12 @@ impl ProtocolVersion {
     /// one.
     const fn activations(network: Network) -> &'static [(Epoch, Self)] {
         match network {
-            Network::MainNet => &[(Epoch(0), Self::V2)],
-            Network::StageNet => &[(Epoch(0), Self::V2)],
-            Network::NextNet => &[(Epoch(0), Self::V2)],
-            Network::Igor => &[(Epoch(0), Self::V2)],
-            Network::Esmeralda => &[(Epoch(0), Self::V0), (Epoch(11925), Self::V1), (Epoch(12220), Self::V2)],
-            Network::LocalNet => &[(Epoch(0), Self::V2)],
+            Network::MainNet => &[(Epoch(0), Self::V1)],
+            Network::StageNet => &[(Epoch(0), Self::V1)],
+            Network::NextNet => &[(Epoch(0), Self::V1)],
+            Network::Igor => &[(Epoch(0), Self::V1)],
+            Network::Esmeralda => &[(Epoch(0), Self::V0), (V1_ACTIVATION_UNSCHEDULED, Self::V1)],
+            Network::LocalNet => &[(Epoch(0), Self::V0), (LOCALNET_V1_ACTIVATION, Self::V1)],
         }
     }
 
@@ -79,7 +88,6 @@ impl ProtocolVersion {
         match v {
             0 => Some(Self::V0),
             1 => Some(Self::V1),
-            2 => Some(Self::V2),
             _ => None,
         }
     }
@@ -280,16 +288,46 @@ mod tests {
             .collect()
     }
 
+    /// Esmeralda and LocalNet have history under V0. Every other network has none, so it starts at the newest version.
     #[test]
-    fn every_network_but_esmeralda_starts_at_v2() {
+    fn networks_without_history_start_at_v1() {
         for network in all_networks() {
-            let expected = if network == Network::Esmeralda {
-                ProtocolVersion::V0
-            } else {
-                ProtocolVersion::V2
+            let expected = match network {
+                Network::Esmeralda | Network::LocalNet => ProtocolVersion::V0,
+                _ => ProtocolVersion::V1,
             };
             assert_eq!(ProtocolVersion::genesis(network), expected, "{network}");
         }
+    }
+
+    #[test]
+    fn localnet_crosses_into_v1() {
+        let before = Epoch(LOCALNET_V1_ACTIVATION.as_u64() - 1);
+        assert_eq!(ProtocolVersion::at(Network::LocalNet, before), ProtocolVersion::V0);
+        assert_eq!(
+            ProtocolVersion::at(Network::LocalNet, LOCALNET_V1_ACTIVATION),
+            ProtocolVersion::V1
+        );
+    }
+
+    #[test]
+    fn an_unscheduled_activation_is_never_reached() {
+        assert_eq!(
+            ProtocolVersion::newest_scheduled_activation(Network::Esmeralda),
+            Some((V1_ACTIVATION_UNSCHEDULED, ProtocolVersion::V1))
+        );
+        assert_eq!(
+            ProtocolVersion::at(Network::Esmeralda, Epoch(u64::MAX - 1)),
+            ProtocolVersion::V0
+        );
+    }
+
+    #[test]
+    fn every_version_round_trips_through_its_u32() {
+        for version in [ProtocolVersion::V0, ProtocolVersion::V1] {
+            assert_eq!(ProtocolVersion::from_u32(version.as_u32()), Some(version));
+        }
+        assert_eq!(ProtocolVersion::from_u32(2), None);
     }
 
     #[test]

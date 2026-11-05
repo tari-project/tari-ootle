@@ -1,9 +1,10 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_engine_types::commit_result::ExecutionFailureCode;
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::types::constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS};
-use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
+use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason_with_code};
 
 /// A brand-new signer can call take() and receive tokens.
 #[test]
@@ -30,19 +31,19 @@ fn different_signers_can_each_claim_once() {
 }
 
 /// The same signer cannot call take() twice.
-/// The second attempt is rejected with "Duplicate NFT token id".
+/// The second attempt is rejected with a `Conflict` on the claim receipt.
 #[test]
 fn second_claim_by_same_signer_is_rejected() {
     let mut test = TemplateTest::new_builtin_only();
     // First claim: succeeds and commits state (including the claim-receipt burned NFT)
     let (account, _owner_proof, secret_key) = test.create_funded_account();
 
-    // Second claim: same signing key → same claim-receipt NFT ID → DuplicateNonFungibleId
+    // Second claim: same account → same claim-receipt NFT ID
     let reject_reason = test.execute_expect_failure(
         Transaction::builder_localnet(Epoch(1))
             .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![account])
             .build_and_seal(&secret_key),
         vec![],
     );
-    assert_reject_reason(&reject_reason, "Duplicate NFT token id");
+    assert_reject_reason_with_code(&reject_reason, "Duplicate NFT token id", ExecutionFailureCode::Conflict);
 }

@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use super::{FeeRates, LITERAL_BYTE_DIVISOR};
+use super::{FeeRates, FeeScale, LITERAL_BYTE_DIVISOR};
 
 /// The narrowest `max_fee` a run can meter at is `1`, which a dry run clamps to. `Amount` encodes as
 /// a native CBOR integer, so that is a single byte.
@@ -58,6 +58,17 @@ pub struct FeeTable {
     /// it is priced well below a persisted byte. Must be non-zero; a zero divisor is treated as
     /// `1`.
     pub log_bytes_cost_divisor: u64,
+    /// Divisor applied to the encoded bytes of a transaction's declared inputs when charging for
+    /// loading them (`per_byte_storage_cost × input_bytes / input_load_bytes_cost_divisor`). Every
+    /// executing validator reads and decodes each input once, so this prices a one-off read rather
+    /// than a retained byte. Must be non-zero; a zero divisor is treated as `1`.
+    pub input_load_bytes_cost_divisor: u64,
+    /// Divisor applied to the encoded bytes of a transaction's declared inputs, multiplied by the
+    /// number of other shard groups they are pledged to, when charging for that pledge traffic
+    /// (`per_byte_storage_cost × input_bytes × input_fanout / input_fanout_bytes_cost_divisor`).
+    /// Pledged bytes draw on each block's bounded pledge budget. Must be non-zero; a zero divisor is
+    /// treated as `1`.
+    pub input_fanout_bytes_cost_divisor: u64,
     /// Divisor applied to consumed Wasmer points when computing WASM execution units
     /// (`per_wasm_point_cost × (points_consumed / wasm_points_cost_divisor)`). Lower values make
     /// metering more aggressive. Must be non-zero; a zero divisor is treated as `1`.
@@ -93,6 +104,8 @@ impl FeeTable {
             storage_cost_divisor: 1,
             template_load_bytes_cost_divisor: 1,
             log_bytes_cost_divisor: 1,
+            input_load_bytes_cost_divisor: 1,
+            input_fanout_bytes_cost_divisor: 1,
             wasm_points_cost_divisor: 1,
             template_size_premium_free_bytes: 0,
             template_size_premium_unit_bytes: 1,
@@ -112,17 +125,27 @@ impl FeeTable {
     /// `tari_engine_types::fees::FEE_ESTIMATE_ALLOWANCE` is the value this yields, restated where
     /// `FeeReceipt::required_fees` can reach it.
     pub const fn fee_estimate_allowance(&self) -> u64 {
+        self.fee_estimate_allowance_at(FeeScale::ONE)
+    }
+
+    /// [`Self::fee_estimate_allowance`] for charges taken at `scale`.
+    ///
+    /// The engine scales each charge on its own and rounds it down, so a drift of `d` in one charge
+    /// moves what it bills by at most `ceil(d × scale)`. Each term is scaled separately for that reason.
+    pub const fn fee_estimate_allowance_at(&self, scale: FeeScale) -> u64 {
         let weight_drift = MAX_FEE_LITERAL_WEIGHT_DRIFT.saturating_mul(self.per_transaction_weight_cost);
         let storage_drift = MAX_FEE_RESIDUAL_BYTE_DRIFT.saturating_mul(self.per_byte_storage_cost) /
             non_zero(self.storage_cost_divisor) +
             1;
-        weight_drift.saturating_add(storage_drift)
+        scale
+            .apply_ceil(weight_drift)
+            .saturating_add(scale.apply_ceil(storage_drift))
     }
 
-    /// The rates a fee estimator needs, projected onto [`FeeRates`]. An estimator — a wallet, say —
-    /// prices a transaction from those alone; the remaining entries here only mean something to an
-    /// engine that executes one.
-    pub fn to_rates(&self) -> FeeRates {
+    /// The rates a fee estimator needs at `fee_scale`, projected onto [`FeeRates`]. An estimator — a
+    /// wallet, say — prices a transaction from those alone; the remaining entries here only mean
+    /// something to an engine that executes one.
+    pub fn to_rates(&self, fee_scale: FeeScale) -> FeeRates {
         FeeRates {
             per_transaction_weight_cost: self.per_transaction_weight_cost(),
             per_module_call_cost: self.per_module_call_cost(),
@@ -131,6 +154,9 @@ impl FeeTable {
             per_wasm_point_cost: self.per_wasm_point_cost(),
             storage_cost_divisor: self.storage_cost_divisor(),
             wasm_points_cost_divisor: self.wasm_points_cost_divisor(),
+            input_load_bytes_cost_divisor: self.input_load_bytes_cost_divisor(),
+            input_fanout_bytes_cost_divisor: self.input_fanout_bytes_cost_divisor(),
+            fee_scale,
         }
     }
 
@@ -172,6 +198,14 @@ impl FeeTable {
 
     pub fn log_bytes_cost_divisor(&self) -> u64 {
         non_zero(self.log_bytes_cost_divisor)
+    }
+
+    pub fn input_load_bytes_cost_divisor(&self) -> u64 {
+        non_zero(self.input_load_bytes_cost_divisor)
+    }
+
+    pub fn input_fanout_bytes_cost_divisor(&self) -> u64 {
+        non_zero(self.input_fanout_bytes_cost_divisor)
     }
 
     pub fn template_size_premium_free_bytes(&self) -> u64 {
@@ -287,6 +321,16 @@ mod tests {
         assert_eq!(table.fee_estimate_allowance(), 6 + 8 + 1);
         table.per_byte_storage_cost = 2;
         assert_eq!(table.fee_estimate_allowance(), 6 + 16 + 1);
+    }
+
+    #[test]
+    fn the_allowance_scales_each_term_up() {
+        let table = shipped_like();
+        assert_eq!(table.fee_estimate_allowance_at(FeeScale::ONE), 3 + 9);
+        // 1.5x: ceil(4.5) + ceil(13.5).
+        assert_eq!(table.fee_estimate_allowance_at(FeeScale::new(15_000)), 5 + 14);
+        // 0.5x: ceil(1.5) + ceil(4.5).
+        assert_eq!(table.fee_estimate_allowance_at(FeeScale::new(5_000)), 2 + 5);
     }
 
     /// `FEE_ESTIMATE_ALLOWANCE` is stated in `tari_engine_types`, which cannot see a `FeeTable`. It

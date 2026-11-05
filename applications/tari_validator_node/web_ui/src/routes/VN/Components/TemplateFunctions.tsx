@@ -27,12 +27,20 @@ import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
-import type { GetTemplateResponse } from "@tari-project/ootle-ts-bindings";
+import type { GetTemplateResponse, Type } from "@tari-project/ootle-ts-bindings";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import PageHeading from "../../../Components/PageHeading";
 import { BoxHeading, BoxHeading2, DataTableCell, StyledPaper } from "../../../Components/StyledComponents";
 import { getTemplate } from "../../../utils/json_rpc";
+
+function formatType(type: Type): string {
+  if (typeof type === "string") return type;
+  if ("Vec" in type) return `Vec<${formatType(type.Vec)}>`;
+  if ("Option" in type) return `Option<${formatType(type.Option)}>`;
+  if ("Tuple" in type) return `(${type.Tuple.map(formatType).join(", ")})`;
+  return type.Other.name;
+}
 
 function TemplateFunctions() {
   const { address } = useParams();
@@ -67,11 +75,15 @@ function TemplateFunctions() {
               <TableRow key={fn.name}>
                 <DataTableCell style={{ textAlign: "left" }}>{fn.name}</DataTableCell>
                 <DataTableCell>
-                  {fn.arguments
-                    .map((a) => {
-                      return a.name + ":" + a.arg_type;
-                    })
-                    .join(", ")}
+                  {[
+                    ...(typeof fn.kind === "object" && "Method" in fn.kind
+                      ? [fn.kind.Method === "RefMut" ? "&mut self" : "&self"]
+                      : []),
+                    ...(typeof fn.kind === "object" && "Migration" in fn.kind
+                      ? ["from:" + formatType(fn.kind.Migration.from)]
+                      : []),
+                    ...fn.arguments.map((a) => a.name + ":" + formatType(a.arg_type)),
+                  ].join(", ")}
                 </DataTableCell>
                 <DataTableCell>{fn.output}</DataTableCell>
               </TableRow>

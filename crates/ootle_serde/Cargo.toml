@@ -1,6 +1,6 @@
 [package]
 name = "ootle_serde"
-version = "0.6.0"
+version = "0.6.2"
 description = "serde utilities for Tari Ootle"
 edition.workspace = true
 authors.workspace = true
@@ -17,6 +17,8 @@ hex = { workspace = true, optional = true }
 [dev-dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+# postcard tags `Some`, so it catches Option impls that skip `serialize_some`
+postcard = { version = "1.1", default-features = false, features = ["alloc"] }
 serde_urlencoded = "0.7"
 tari_bor = { workspace = true, features = ["std", "serde"] }
 

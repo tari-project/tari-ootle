@@ -59,6 +59,15 @@ pub struct WasmLimits {
     /// sized by a guest operand. The cap is well above `max_functions`, which bounds what a
     /// template's own `__indirect_function_table` needs.
     pub max_table_elements: u32,
+    /// Maximum number of active element segments a module may declare. Wasmer re-syncs a
+    /// fixed-size funcref table in full after writing each active segment into it at
+    /// instantiation, empty segments included, so the work is the segment count times the table
+    /// slots while an empty segment costs ~5 bytes of binary. [`PER_TEMPLATE_TABLE_SLOT`] covers the
+    /// sync wasmer runs on every fixed table once the instance is built plus the one a single active
+    /// segment adds. `wasm-ld` emits one active segment for a module's
+    /// `__indirect_function_table`. Only active segments count: declarative and passive ones stay
+    /// out of every table at instantiation.
+    pub max_element_segments: usize,
 }
 
 pub const WASM_LIMITS: WasmLimits = WasmLimits {
@@ -75,6 +84,7 @@ pub const WASM_LIMITS: WasmLimits = WasmLimits {
     max_globals: 1024,
     max_tables: 4,
     max_table_elements: 16_384,
+    max_element_segments: 1,
 };
 
 /// Maximum Wasmer metering points a single template invocation may consume. Enforced by the
@@ -137,10 +147,12 @@ pub const MIN_MAX_COMPUTE_TRANSACTIONS_PER_BLOCK: u64 = 18;
 /// [`template_compile_points`] for a binary at [`EngineLimits::max_template_binary_size_bytes`] comes to ~2.34e9,
 /// and that limit is chosen so the remainder still covers a fee intent (see
 /// `the_largest_publishable_binary_leaves_room_to_source_a_fee`). So a max-size publish *can* reach this cap, by
-/// construction — it is what makes the publish limit binding. Template return values and engine call arguments are
-/// the other flows this cap bounds: [`return_value_points`] and [`engine_arg_points`] are bounded per call, not
-/// per transaction, and about 18 maximal item-heavy returns, or 3 maximal item-heavy engine call arguments, reach the
-/// cap, failing the transaction out of compute. Every remaining flow stays under it on the structural caps alone.
+/// construction — it is what makes the publish limit binding. Template return values, engine call arguments, engine
+/// call responses and component loads are the other flows this cap bounds: [`return_value_points`],
+/// [`engine_arg_points`], [`engine_response_points`] and [`component_load_points`] are bounded per call, not per
+/// transaction, and about 18 maximal item-heavy returns, 3 maximal item-heavy engine call arguments, 8 maximal
+/// item-heavy engine call responses or 30 calls on a component holding a maximal item-heavy state reach the cap,
+/// failing the transaction out of compute. Every remaining flow stays under it on the structural caps alone.
 pub const MAX_NATIVE_POINTS_PER_TRANSACTION: u64 = 2_400_000_000;
 
 /// Execution metering points the fee intent may consume, whatever it has paid. A transaction sources
@@ -335,24 +347,26 @@ pub const PER_TEMPLATE_DATA_SEGMENT: u64 = 700;
 /// Each slot a declared table claims, whether or not anything is written into it.
 ///
 /// Allocating and zeroing the tables is separate from filling them: four tables of
-/// `max_table_elements` with no element section at all measure at 0.114 ms against 192 bytes of
-/// binary. Measured at ~13 points per slot.
-pub const PER_TEMPLATE_TABLE_SLOT: u64 = 16;
+/// `max_table_elements` with no element section at all measure at ~0.083 ms against 192 bytes of
+/// binary, ~11 points per slot, which includes the pass wasmer makes over every fixed-size funcref
+/// table to sync it once the instance is built. The active element segment a module may declare
+/// makes wasmer sync its fixed-size table once more, another ~10 points per slot: one empty active
+/// segment on a fixed table of `max_table_elements` measures at ~411,000 points for the whole
+/// instantiation. The price covers both passes.
+pub const PER_TEMPLATE_TABLE_SLOT: u64 = 24;
 
 /// Each element-segment entry written into a table.
 ///
 /// Active element segments initialise the instance's tables at every instantiation, the same class
 /// of work as copying the data segments but per funcref rather than per byte.
 ///
-/// What bounds the entry count is the binary size, not the table limits. Nothing caps how many
-/// element segments a module declares, and several may target one table at overlapping offsets —
-/// each is written out in turn — so `max_tables` x `max_table_elements` (65,536) is the widest a
-/// single pass over the tables can be, not the most a module can ask for. An entry is a LEB128 func
-/// index, so roughly a byte of binary buys one: a publish at
-/// [`EngineLimits::max_template_binary_size_bytes`] can carry on the order of a million.
+/// A module declares at most [`WasmLimits::max_element_segments`] active segments, and
+/// instantiation refuses one whose entries run past the end of its table before writing any of
+/// them, so a module that loads writes at most `max_table_elements` entries.
 ///
-/// 65,536 entries measure at ~0.21 ms once the table allocation they used to be conflated with is
-/// priced separately by [`PER_TEMPLATE_TABLE_SLOT`], i.e. ~28 points each. Set above that.
+/// One segment filling a fixed table of `max_table_elements` measures at ~0.062 ms, ~511,000 points
+/// over a module with no table. Taking away the same table behind an empty segment, which
+/// [`PER_TEMPLATE_TABLE_SLOT`] prices, leaves ~10 points per entry written. Set well above that.
 pub const PER_TEMPLATE_ELEMENT_ENTRY: u64 = 32;
 
 /// What a module's binary says about the work instantiating it will cost.
@@ -423,10 +437,11 @@ pub const fn return_value_points(bytes: u64, items: u64) -> u64 {
 /// The engine walks it for its item count and nesting depth and decodes it into the op's argument
 /// type, and most ops then decode the byte strings nested in it again: into the handler's argument
 /// types, a component's state as a `Value` it indexes and compares, or a cross-template call's
-/// arguments as the `Value`s it encodes into the callee's `CallInfo`. Each of those decodes is
-/// charged here for the bytes and items it reads. That work runs outside the Wasmer meter and
-/// follows the number of CBOR items far more than the number of bytes, so `items` is priced per
-/// item, with the copies priced per byte.
+/// arguments as the `Value`s it encodes into the callee's `CallInfo`. A transaction instruction's
+/// literal and blob arguments are decoded and encoded into the callee's `CallInfo` the same way.
+/// Each of those decodes is charged here for the bytes and items it reads. That work runs outside
+/// the Wasmer meter and follows the number of CBOR items far more than the number of bytes, so
+/// `items` is priced per item, with the copies priced per byte.
 ///
 /// Measured with `cargo run -p tari_engine --release --example engine_arg_points_calibrate`, which
 /// times the walk and decode of each of those shapes at `max_internal_call_size`.
@@ -434,6 +449,61 @@ pub const fn engine_arg_points(bytes: u64, items: u64) -> u64 {
     NativeExecutionPoints::PER_ENGINE_ARG_ITEM
         .saturating_mul(items)
         .saturating_add(NativeExecutionPoints::PER_ENGINE_ARG_BYTE.saturating_mul(bytes))
+}
+
+/// Points charged for an engine call's response, `bytes` long and holding `items` CBOR data items,
+/// before it is written into the template's memory.
+///
+/// A handler builds its response outside the Wasmer meter, and most build it by encoding a value
+/// the engine holds — a component's state, a non-fungible's data, the statement a spend runs under
+/// — so that the work follows the value's CBOR items far more than its bytes. The engine then walks
+/// the response for its item count and copies it into the template's linear memory. A template pays
+/// the same few metered instructions for a call whatever it is answered with, and may repeat the
+/// call and drop each response unread, so the response is priced by what it holds.
+///
+/// Measured with `cargo run -p tari_engine --release --example engine_response_points_calibrate`,
+/// which times the encode, walk and copy of responses filling `max_internal_call_size` in each item
+/// shape.
+pub const fn engine_response_points(bytes: u64, items: u64) -> u64 {
+    NativeExecutionPoints::PER_ENGINE_RESPONSE_ITEM
+        .saturating_mul(items)
+        .saturating_add(NativeExecutionPoints::PER_ENGINE_RESPONSE_BYTE.saturating_mul(bytes))
+}
+
+/// Points charged for loading a component whose state holds `items` CBOR data items, `references`
+/// of them tags of substate addresses and the other well-known types the engine indexes, before
+/// the state is read.
+///
+/// Every call on a component — a method call, from a transaction or a template, or a template
+/// upgrade — has the engine walk the component's state outside the Wasmer meter: to count its
+/// items, to index the substates it holds and to bring them into the new frame's scope. The call
+/// names only the component, and the method need not read the state at all, so the load is priced
+/// by what the state holds. Indexing decodes each reference and inserts it into the scope, at many
+/// times the cost of walking an item, so references are priced on their own.
+///
+/// A resource auth hook acting on the caller's state is charged the same for counting and copying
+/// that state into the hook's arguments. The hook's call then pays for decoding and indexing them
+/// as a cross-template call's arguments, at [`engine_arg_points`].
+///
+/// Measured with `cargo run -p tari_engine --release --example component_load_points_calibrate`,
+/// which times method calls on components whose states fill `max_internal_call_size` in each item
+/// shape.
+pub const fn component_load_points(items: u64, references: u64) -> u64 {
+    NativeExecutionPoints::PER_COMPONENT_STATE_ITEM
+        .saturating_mul(items)
+        .saturating_add(NativeExecutionPoints::PER_COMPONENT_STATE_REFERENCE.saturating_mul(references))
+}
+
+/// Points charged for moving `ids` non-fungible ids from one container to another: taking them from
+/// a bucket or vault, joining or depositing them, or locking them into a proof and unlocking them.
+///
+/// The engine moves each id on its own, outside the Wasmer meter, while the call asking for the
+/// move names only an amount or a bucket, and is answered with an id, whatever it carries. So the
+/// move is priced by the ids it carries.
+///
+/// Measured with `cargo run -p tari_engine --release --example non_fungible_move_points_calibrate`.
+pub const fn non_fungible_move_points(ids: u64) -> u64 {
+    NativeExecutionPoints::PER_NON_FUNGIBLE_ID_MOVED.saturating_mul(ids)
 }
 
 /// Metering-point prices for native (non-WASM) verification work, charged against the same
@@ -446,10 +516,33 @@ pub const fn engine_arg_points(bytes: u64, items: u64) -> u64 {
 pub struct NativeExecutionPoints;
 
 impl NativeExecutionPoints {
+    /// Each node of an access rule or owner rule visited while authorizing an action: a rule, a requirement list or a
+    /// requirement, before any proofs the requirement examines. A rule's size is set by its author, so each node
+    /// visited is charged. Measures at ~120 points a node.
+    pub const PER_ACCESS_RULE_NODE: u64 = 200;
+    /// Each lookup of a non-fungible requirement's id in a proof of its resource, on top of
+    /// [`Self::PER_ACCESS_RULE_PROOF`]. The lookup is a search of the proof's ids, which measures at ~300 points for
+    /// a handful of the longest string ids and ~1,500 for half a million. Set above that.
+    pub const PER_ACCESS_RULE_NON_FUNGIBLE_LOOKUP: u64 = 2_000;
+    /// Each proof in the authorizing frame's scope a resource or non-fungible requirement examines: a lookup of the
+    /// proof and a comparison of its resource. A requirement no proof satisfies examines every proof in scope, so the
+    /// cost of authorizing grows with the proofs the frame holds, and each one examined is charged. Measures at ~100
+    /// points a proof.
+    pub const PER_ACCESS_RULE_PROOF: u64 = 200;
     /// One Minotari burn-claim proof: a Schnorr ownership proof plus commitment arithmetic (the
     /// same primitives as [`Self::PER_STATEMENT`]) and a bounded kernel-MMR inclusion proof
     /// (Blake2b hashes, microseconds). Priced as the statement cost with headroom.
     pub const PER_CLAIM_BURN: u64 = 3_200_000;
+    /// Each CBOR data item in the state of a component a call loads. Arrays of integers, nulls,
+    /// unknown tags or empty containers, and maps of integers, measure at ~6-52 points an item. Set
+    /// above those. Charged by [`component_load_points`].
+    pub const PER_COMPONENT_STATE_ITEM: u64 = 150;
+    /// Each substate address, or other type the engine indexes, in the state of a component a call
+    /// loads, on top of [`Self::PER_COMPONENT_STATE_ITEM`] for its items. Distinct component,
+    /// resource and vault addresses measure at ~1,400-1,510 points each, the two items making each
+    /// up included, and non-fungible addresses at ~1,100. Set so an address and its items are
+    /// charged above twice that. Charged by [`component_load_points`].
+    pub const PER_COMPONENT_STATE_REFERENCE: u64 = 2_800;
     /// One ElGamal (DLEQ) value proof. It verifies two Schnorr-style equations over four decompressed
     /// points rather than one, so it is priced at double the mask-knowledge variant.
     pub const PER_ELGAMAL_VALUE_PROOF: u64 = 1_200_000;
@@ -465,6 +558,22 @@ impl NativeExecutionPoints {
     /// event payload of short distinct keys, where every entry allocates a key and a value and is
     /// inserted into a map, at ~1,400. Set above that. Charged by [`engine_arg_points`].
     pub const PER_ENGINE_ARG_ITEM: u64 = 1_600;
+    /// Fixed cost of an engine call, whatever its op: dispatching it, the handler's bookkeeping and
+    /// the round trip into the template's allocator for the response. A call whose handler does next
+    /// to nothing, answered with a few items, measures at ~6,000 points beyond its metered WASM. Set
+    /// above that, with the call's argument and response charged on top.
+    pub const PER_ENGINE_CALL: u64 = 10_000;
+    /// Each byte of an engine call's response, which the engine copies out of the value it encodes,
+    /// into the response and into the template's memory. A single byte string, which is nothing but
+    /// those copies, measures at ~1-4 points a byte, the spread following whether its allocations
+    /// fault in fresh pages. Charged by [`engine_response_points`].
+    pub const PER_ENGINE_RESPONSE_BYTE: u64 = 4;
+    /// Each CBOR data item in an engine call's response: encoding it from the value the engine holds,
+    /// encoding it again into the response and walking it for the count. Arrays of integers, nulls,
+    /// tags or empty containers measure at ~110-230 points an item; the costliest, strings, at
+    /// ~230-450. The spread is that of the points-per-millisecond rate across runs. Set above those.
+    /// Charged by [`engine_response_points`].
+    pub const PER_ENGINE_RESPONSE_ITEM: u64 = 600;
     /// Fixed cost of a hash invocation, charged on top of [`Self::PER_HASH_BYTE`].
     pub const PER_HASH: u64 = 10_000;
     /// Each byte fed to a hash.
@@ -472,6 +581,11 @@ impl NativeExecutionPoints {
     /// One stealth/confidential input commitment: decompress + point aggregation (~4.8µs measured).
     /// Substate access is charged separately by the fee module.
     pub const PER_INPUT: u64 = 42_000;
+    /// Each non-fungible id moved from one container to another. Integer ids measure at ~600-900
+    /// points a move; the costliest, the longest string ids, which every comparison reads nearly to
+    /// the end, at ~1,100 taken or joined and ~2,100 locked or unlocked, since a lock copies each id.
+    /// Set above that. Charged by [`non_fungible_move_points`].
+    pub const PER_NON_FUNGIBLE_ID_MOVED: u64 = 4_000;
     /// One stealth/confidential output: its share of the aggregated bulletproof range proof
     /// (~0.68ms measured marginal, no view key). Outputs on a resource with a view key add
     /// [`Self::PER_OUTPUT_VIEWABLE_SURCHARGE`] each.
@@ -539,10 +653,6 @@ pub struct EngineLimits {
     pub max_internal_call_size: usize,
     pub max_logs: usize,
     pub max_log_size_bytes: usize,
-    /// Maximum number of `tari_debug` messages one template call may write. Debug output is
-    /// validator I/O that never reaches the transaction result, so it carries its own budget rather
-    /// than drawing on [`EngineLimits::max_logs`].
-    pub max_debug_messages: usize,
     pub max_events: usize,
     /// Maximum CBOR-encoded size of a single event.
     ///
@@ -576,7 +686,6 @@ pub const ENGINE_LIMITS: EngineLimits = EngineLimits {
     max_internal_call_size: 512 * 1024, // 512 KiB
     max_logs: 256,
     max_log_size_bytes: 32 * 1024, // 32 KiB
-    max_debug_messages: 256,
     max_events: 256,
     max_event_size_bytes: 2 * 1024, // 2 KiB; 256 * 2 KiB = 512 KiB of the 1 MiB substate budget
     max_panic_message_size: 32 * 1024, // 32 KiB

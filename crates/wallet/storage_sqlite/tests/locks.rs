@@ -14,7 +14,10 @@ use std::time::Duration;
 
 use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_ootle_transaction::TransactionId;
-use tari_ootle_wallet_sdk::storage::{CommittableStore, WalletStoreWriter, WriteableWalletStore};
+use tari_ootle_wallet_sdk::{
+    models::LockOwner,
+    storage::{CommittableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
+};
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 
 fn open_store() -> SqliteWalletStore {
@@ -30,25 +33,9 @@ fn a_lock_past_its_deadline_is_swept() {
     let db = open_store();
     let mut tx = db.create_write_tx().unwrap();
 
-    tx.locks_create(Some(Duration::ZERO)).unwrap();
+    tx.locks_create(Some(Duration::ZERO), LockOwner::Wallet).unwrap();
 
     assert_eq!(tx.locks_release_stale().unwrap(), 1, "a lock at its deadline is stale");
-    tx.commit().unwrap();
-}
-
-#[test]
-fn clearing_a_timeout_exempts_a_lock_from_the_sweep() {
-    let db = open_store();
-    let mut tx = db.create_write_tx().unwrap();
-
-    let lock = tx.locks_create(Some(Duration::ZERO)).unwrap();
-    tx.locks_set_timeout(lock, None).unwrap();
-
-    assert_eq!(
-        tx.locks_release_stale().unwrap(),
-        0,
-        "a lock with no deadline is never stale"
-    );
     tx.commit().unwrap();
 }
 
@@ -61,7 +48,7 @@ fn a_lock_linked_to_a_transaction_is_not_swept() {
     let db = open_store();
     let mut tx = db.create_write_tx().unwrap();
 
-    let lock = tx.locks_create(Some(Duration::ZERO)).unwrap();
+    let lock = tx.locks_create(Some(Duration::ZERO), LockOwner::Wallet).unwrap();
     tx.locks_link_transaction(lock, TransactionId::new([1u8; 32])).unwrap();
 
     assert_eq!(
@@ -80,7 +67,19 @@ fn extending_the_timeout_of_an_unknown_lock_is_not_found() {
     let db = open_store();
     let mut tx = db.create_write_tx().unwrap();
 
-    let err = tx.locks_set_timeout(9999, Some(Duration::from_secs(60))).unwrap_err();
+    let err = tx.locks_extend_timeout(9999, Duration::from_secs(60)).unwrap_err();
+    assert!(err.is_not_found_error(), "expected NotFound, got: {err}");
+}
+
+#[test]
+fn a_linked_lock_has_no_timeout_to_extend() {
+    let db = open_store();
+    let mut tx = db.create_write_tx().unwrap();
+
+    let lock = tx.locks_create(Some(Duration::ZERO), LockOwner::Wallet).unwrap();
+    tx.locks_link_transaction(lock, TransactionId::new([1u8; 32])).unwrap();
+
+    let err = tx.locks_extend_timeout(lock, Duration::from_secs(60)).unwrap_err();
     assert!(err.is_not_found_error(), "expected NotFound, got: {err}");
 }
 
@@ -91,8 +90,8 @@ fn extending_a_timeout_saves_a_lock_from_the_stale_sweep() {
 
     // A zero timeout puts `timeout_at` at the current second, so the sweep
     // considers the lock stale immediately. See the companion test.
-    let lock = tx.locks_create(Some(Duration::ZERO)).unwrap();
-    tx.locks_set_timeout(lock, Some(Duration::from_secs(60 * 60))).unwrap();
+    let lock = tx.locks_create(Some(Duration::ZERO), LockOwner::Wallet).unwrap();
+    tx.locks_extend_timeout(lock, Duration::from_secs(60 * 60)).unwrap();
 
     assert_eq!(
         tx.locks_release_stale().unwrap(),
@@ -100,4 +99,109 @@ fn extending_a_timeout_saves_a_lock_from_the_stale_sweep() {
         "a lock whose timeout was extended must survive the sweep"
     );
     tx.commit().unwrap();
+}
+
+#[test]
+fn extending_never_brings_a_deadline_forward() {
+    let db = open_store();
+    let mut tx = db.create_write_tx().unwrap();
+
+    let later = tx
+        .locks_create(Some(Duration::from_secs(24 * 60 * 60)), LockOwner::Wallet)
+        .unwrap();
+    let deadline = tx.locks_get(later).unwrap().timeout_at;
+    tx.locks_extend_timeout(later, Duration::ZERO).unwrap();
+    assert_eq!(tx.locks_get(later).unwrap().timeout_at, deadline);
+
+    let open = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.locks_extend_timeout(open, Duration::ZERO).unwrap();
+    assert_eq!(tx.locks_get(open).unwrap().timeout_at, None, "no deadline stays none");
+
+    assert_eq!(tx.locks_release_stale().unwrap(), 0);
+    tx.commit().unwrap();
+}
+
+#[test]
+fn a_lock_records_its_owner() {
+    let db = open_store();
+    let mut tx = db.create_write_tx().unwrap();
+
+    for owner in [
+        LockOwner::Wallet,
+        LockOwner::LocalCookie,
+        LockOwner::Delegated(u64::MAX),
+        LockOwner::Delegated(3),
+        LockOwner::ApiKey(7),
+    ] {
+        let lock = tx.locks_create(None, owner).unwrap();
+        assert_eq!(tx.locks_get(lock).unwrap().owner, owner);
+    }
+}
+
+#[test]
+fn a_transaction_holds_every_lock_linked_to_it() {
+    let db = open_store();
+    let mut tx = db.create_write_tx().unwrap();
+    let transaction_id = TransactionId::new([1u8; 32]);
+
+    let first = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    let second = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.locks_link_transaction(first, transaction_id).unwrap();
+    tx.locks_link_transaction(second, transaction_id).unwrap();
+
+    assert_eq!(tx.locks_get_by_transaction_id(transaction_id).unwrap(), vec![
+        first, second
+    ]);
+    assert!(
+        tx.locks_get_by_transaction_id(TransactionId::new([2u8; 32]))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_lock_linked_to_one_transaction_cannot_be_linked_to_another() {
+    let db = open_store();
+    let mut tx = db.create_write_tx().unwrap();
+    let linked_to = TransactionId::new([1u8; 32]);
+
+    let lock = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.locks_link_transaction(lock, linked_to).unwrap();
+
+    let err = tx
+        .locks_link_transaction(lock, TransactionId::new([2u8; 32]))
+        .unwrap_err();
+    assert!(err.is_not_found_error(), "expected NotFound, got: {err}");
+    assert_eq!(tx.locks_get(lock).unwrap().transaction_id, Some(linked_to));
+
+    tx.locks_link_transaction(lock, linked_to)
+        .expect("linking a lock again to its own transaction is a no-op");
+}
+
+#[test]
+fn linking_an_unknown_lock_is_not_found() {
+    let db = open_store();
+    let mut tx = db.create_write_tx().unwrap();
+
+    let err = tx
+        .locks_link_transaction(9999, TransactionId::new([1u8; 32]))
+        .unwrap_err();
+    assert!(err.is_not_found_error(), "expected NotFound, got: {err}");
+}
+
+#[test]
+fn unlinking_clears_only_a_link_to_the_named_transaction() {
+    let db = open_store();
+    let mut tx = db.create_write_tx().unwrap();
+    let linked_to = TransactionId::new([1u8; 32]);
+
+    let lock = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.locks_link_transaction(lock, linked_to).unwrap();
+
+    tx.locks_unlink_transaction(lock, TransactionId::new([2u8; 32]))
+        .unwrap();
+    assert_eq!(tx.locks_get(lock).unwrap().transaction_id, Some(linked_to));
+
+    tx.locks_unlink_transaction(lock, linked_to).unwrap();
+    assert_eq!(tx.locks_get(lock).unwrap().transaction_id, None);
 }

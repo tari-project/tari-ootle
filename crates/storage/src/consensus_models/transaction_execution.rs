@@ -1,13 +1,13 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{fmt::Display, time::Duration};
+use std::{collections::HashSet, fmt::Display, time::Duration};
 
 use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::{BlockId, Decision, LeafBlock};
-use tari_engine_types::commit_result::{ExecuteResult, RejectReason};
-use tari_ootle_common_types::{Epoch, NodeHeight, NumPreshards};
+use tari_engine_types::commit_result::{ExecuteResult, FeeIntentFallback, RejectReason};
+use tari_ootle_common_types::{Epoch, LockIntent, NodeHeight, NumPreshards, VersionedSubstateId};
 use tari_ootle_transaction::TransactionId;
 use time::PrimitiveDateTime;
 
@@ -27,6 +27,26 @@ pub struct TransactionExecution {
     pub resolved_inputs: Vec<VersionedSubstateIdLockIntent>,
     #[n(2)]
     pub resulting_outputs: Vec<VersionedSubstateIdLockIntent>,
+    /// What the transaction commits instead if its outputs cannot be created. Settled by the executing node and
+    /// never sent to clients.
+    #[n(3)]
+    #[serde(skip)]
+    #[cfg_attr(feature = "ts", ts(skip))]
+    pub fee_intent_fallback: Option<Box<FeeIntentFallback>>,
+    /// This execution commits only the fee intent of a transaction that cannot create one of its outputs. Set by
+    /// [`Self::take_fee_intent_commit`] and node-internal.
+    #[n(4)]
+    #[serde(skip)]
+    #[cfg_attr(feature = "ts", ts(skip))]
+    pub is_fee_intent_commit: bool,
+    /// The outputs of the full execution that a fee-intent commit does not create. The transaction still involves
+    /// their shard groups, which every shard group must count alike, so they are part of a multishard transaction's
+    /// evidence but are never locked or written. Set by [`Self::take_fee_intent_commit`] and node-internal.
+    #[n(5)]
+    #[cbor(default)]
+    #[serde(skip)]
+    #[cfg_attr(feature = "ts", ts(skip))]
+    pub rejected_outputs: Vec<VersionedSubstateIdLockIntent>,
 }
 
 impl TransactionExecution {
@@ -39,7 +59,53 @@ impl TransactionExecution {
             result,
             resolved_inputs,
             resulting_outputs,
+            fee_intent_fallback: None,
+            is_fee_intent_commit: false,
+            rejected_outputs: Vec::new(),
         }
+    }
+
+    pub fn with_fee_intent_fallback(mut self, fallback: Option<FeeIntentFallback>) -> Self {
+        self.fee_intent_fallback = fallback.map(Box::new);
+        self
+    }
+
+    /// The execution committing only this execution's fee intent, rejecting the rest for `reason`, or `None` if
+    /// there is no fee intent to commit. Inputs keep the locks this execution resolved, which cover every input the
+    /// fee intent touches. The outputs only this execution creates become the commit's rejected outputs.
+    pub fn take_fee_intent_commit(&mut self, reason: RejectReason) -> Option<Self> {
+        let fallback = self.fee_intent_fallback.take()?;
+        let resulting_outputs = fallback
+            .diff
+            .up_iter()
+            .map(|(id, substate)| {
+                VersionedSubstateIdLockIntent::output(VersionedSubstateId::new(id.clone(), substate.version()))
+            })
+            .collect::<Vec<_>>();
+        let fee_intent_outputs = resulting_outputs
+            .iter()
+            .map(|output| output.to_versioned_substate_id_ref())
+            .collect::<HashSet<_>>();
+        let rejected_outputs = self
+            .resulting_outputs
+            .iter()
+            .filter(|output| !fee_intent_outputs.contains(&output.to_versioned_substate_id_ref()))
+            .cloned()
+            .collect();
+        Some(Self {
+            result: ExecuteResult {
+                finalize: fallback.into_finalize_result(&self.result.finalize, reason),
+                execution_time: self.result.execution_time,
+                execute_epoch: self.result.execute_epoch,
+                wasm_execution_points: self.result.wasm_execution_points,
+                native_execution_points: self.result.native_execution_points,
+            },
+            resolved_inputs: self.resolved_inputs.clone(),
+            resulting_outputs,
+            fee_intent_fallback: None,
+            is_fee_intent_commit: true,
+            rejected_outputs,
+        })
     }
 
     pub fn abort(transaction_id: &TransactionId, reject_reason: RejectReason) -> Self {
@@ -47,6 +113,9 @@ impl TransactionExecution {
             result: ExecuteResult::new_rejected(transaction_id.as_hash(), reject_reason, None),
             resolved_inputs: Vec::new(),
             resulting_outputs: Vec::new(),
+            fee_intent_fallback: None,
+            is_fee_intent_commit: false,
+            rejected_outputs: Vec::new(),
         }
     }
 
@@ -90,6 +159,21 @@ impl TransactionExecution {
         &self.resulting_outputs
     }
 
+    pub fn rejected_outputs(&self) -> &[VersionedSubstateIdLockIntent] {
+        &self.rejected_outputs
+    }
+
+    /// The outputs whose shard groups the transaction involves: those it creates, and those a fee-intent commit
+    /// rejects.
+    pub fn involved_outputs(&self) -> impl Iterator<Item = &VersionedSubstateIdLockIntent> {
+        self.resulting_outputs.iter().chain(&self.rejected_outputs)
+    }
+
+    /// The inputs and outputs whose shard groups the transaction involves.
+    pub fn involved_locks(&self) -> impl Iterator<Item = &VersionedSubstateIdLockIntent> {
+        self.resolved_inputs.iter().chain(self.involved_outputs())
+    }
+
     pub fn abort_reason(&self) -> Option<&RejectReason> {
         self.result().finalize.result.any_reject()
     }
@@ -98,6 +182,8 @@ impl TransactionExecution {
         self.result.execution_time
     }
 
+    /// The evidence of a local-only execution, listing the outputs it creates. A local-only execution's rejected
+    /// outputs are local, so they involve no shard group beyond those listed.
     pub fn to_evidence(&self, num_preshards: NumPreshards, num_committees: u32) -> Evidence {
         let mut evidence = Evidence::from_lock_intents(
             num_preshards,

@@ -1,25 +1,38 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashSet, iter, path::Path, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    iter,
+    path::Path,
+    time::Duration,
+};
 
 use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
 use log::*;
 use ootle_byte_type::{FromByteType, ToByteType};
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
-    commit_result::RejectReason,
+    commit_result::{ExecutionFailureCode, RejectReason},
     component::derive_component_address_from_public_key,
     confidential::ClaimBurnOutputData,
     fees::FEE_ESTIMATE_ALLOWANCE,
-    stealth::{ClaimBurnShape, persisted_utxo_bytes},
+    stealth::{ClaimBurnShape, declared_input_bytes, persisted_utxo_bytes},
     substate::SubstateId,
 };
 use tari_ootle_app_utilities::fee_tables::fee_rates_by_network;
-use tari_ootle_common_types::{Epoch, InputDeclaration, SubstateRequirement, optional::Optional};
-use tari_ootle_transaction::{Transaction, args};
+use tari_ootle_common_types::{
+    Epoch,
+    InputDeclaration,
+    NumPreshards,
+    ShardGroup,
+    SubstateRequirement,
+    optional::Optional,
+    shard::Shard,
+};
+use tari_ootle_transaction::{Transaction, TransactionBuilder, args};
 use tari_ootle_wallet_crypto::{
     OutputWitness,
     StealthCryptoApiError,
@@ -30,20 +43,22 @@ use tari_ootle_wallet_crypto::{
 };
 use tari_ootle_wallet_sdk::{
     apis::{
+        accounts::AccountsApiError,
         confidential_transfer::ConfidentialTransferParams,
-        stealth_outputs::{StealthOutputsApiError, TransferStatementParams},
-        stealth_transfer::{InputsToSpend, StealthTransferParams, TransferOutput},
-        substate::ValidatorScanResult,
+        key_manager::KeyManagerApiError,
+        stealth_outputs::StealthOutputsApiError,
+        stealth_transfer::{StealthTransferApiError, StealthTransferParams, TransferOutput, TransferStatementSpec},
+        substate::{SubstateApiError, ValidatorScanResult},
     },
     models::{
         AccountWithAddress,
         KeyBranch,
         NewAccountData,
-        StealthUtxoSpendKeyId,
         TransactionContext,
         TransactionContextKind,
         TransactionSubmittedEvent,
     },
+    network::WalletNetworkInterface,
 };
 use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceHandle;
 use tari_ootle_walletd_client::{
@@ -67,12 +82,16 @@ use tari_ootle_walletd_client::{
         AccountsCreateResponse,
         AccountsCreateStealthTransferStatementRequest,
         AccountsCreateStealthTransferStatementResponse,
+        AccountsExportViewKeyRequest,
+        AccountsExportViewKeyResponse,
         AccountsGetBalanceChangesRequest,
         AccountsGetBalanceChangesResponse,
         AccountsGetBalancesRequest,
         AccountsGetBalancesResponse,
         AccountsGetFaucetBalanceRequest,
         AccountsGetFaucetBalanceResponse,
+        AccountsImportViewOnlyRequest,
+        AccountsImportViewOnlyResponse,
         AccountsListRequest,
         AccountsListResponse,
         AccountsRenameRequest,
@@ -93,6 +112,9 @@ use tari_ootle_walletd_client::{
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::{
     Amount,
+    ComponentAddress,
+    NonFungibleAddress,
+    NonFungibleId,
     ResourceType,
     constants::{
         STEALTH_TARI_RESOURCE_ADDRESS,
@@ -107,25 +129,28 @@ use tari_template_lib_types::{
 use tokio::task;
 
 use super::context::HandlerContext;
-use crate::handlers::{
-    auth::jwt::enforce_scopes,
-    helpers::{
-        complete_burn_proof_to_contents,
-        ensure_seed_recovery_finished,
-        faucet_already_claimed,
-        faucet_empty,
-        general_error,
-        get_account,
-        get_account_by_key_index,
-        get_account_or_default,
-        get_account_with_inputs,
-        invalid_params,
-        invalid_request,
-        not_found,
-        transaction_rejected,
-        validate_burn_proof_file_name,
-        wait_for_result,
-        wait_for_result_and_account,
+use crate::{
+    WalletSdk,
+    handlers::{
+        auth::jwt::enforce_scopes,
+        helpers::{
+            complete_burn_proof_to_contents,
+            ensure_seed_recovery_finished,
+            faucet_already_claimed,
+            faucet_empty,
+            general_error,
+            get_account,
+            get_account_by_key_index,
+            get_account_or_default,
+            get_account_with_inputs,
+            invalid_params,
+            invalid_request,
+            not_found,
+            transaction_rejected,
+            validate_burn_proof_file_name,
+            wait_for_result,
+            wait_for_result_and_account,
+        },
     },
 };
 
@@ -143,7 +168,7 @@ pub async fn handle_create(
     let set_as_default = req
         .is_default
         .map(Ok)
-        .unwrap_or_else(|| accounts_api.any_accounts_exist().map(|b| !b))?;
+        .unwrap_or_else(|| accounts_api.has_default_account().map(|b| !b))?;
 
     ensure_seed_recovery_finished(sdk)?;
     let owner_address = match req.key_index {
@@ -215,7 +240,7 @@ pub async fn handle_create_or_get(
     let set_as_default = req
         .is_default
         .map(Ok)
-        .unwrap_or_else(|| accounts_api.any_accounts_exist().map(|b| !b))?;
+        .unwrap_or_else(|| accounts_api.has_default_account().map(|b| !b))?;
 
     ensure_seed_recovery_finished(sdk)?;
     let wallet_keys = match req.key_index {
@@ -245,6 +270,78 @@ pub async fn handle_create_or_get(
     })
 }
 
+pub async fn handle_import_view_only(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    req: AccountsImportViewOnlyRequest,
+) -> Result<AccountsImportViewOnlyResponse, anyhow::Error> {
+    context.authorize_user_only(token, &[Permission::Admin])?;
+    if req.is_default == Some(true) {
+        return Err(invalid_request(
+            "a view-only account cannot be the default account, which pays fees and signs transactions",
+        ));
+    }
+    let sdk = context.wallet_sdk();
+    ensure_seed_recovery_finished(sdk)?;
+    let accounts_api = sdk.accounts_api();
+
+    let acc = accounts_api
+        .add_view_only_account(
+            Some(&req.account_name),
+            &req.account_public_key,
+            &req.view_secret_key,
+            req.birthday_epoch,
+        )
+        .map_err(|e| {
+            if e.is_name_exists_error() ||
+                e.is_account_exists_error() ||
+                e.is_invalid_view_only_account_error() ||
+                e.is_view_key_used_error() ||
+                matches!(
+                    e,
+                    AccountsApiError::KeyManagerApiError(
+                        KeyManagerApiError::KeyAlreadyImportedWithDifferentType { .. }
+                    )
+                )
+            {
+                invalid_request(e)
+            } else {
+                general_error(e)
+            }
+        })?;
+
+    info!(
+        target: LOG_TARGET,
+        "Imported view-only account: {acc}."
+    );
+
+    Ok(AccountsImportViewOnlyResponse {
+        account_address: *acc.component_address(),
+    })
+}
+
+pub async fn handle_export_view_key(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    req: AccountsExportViewKeyRequest,
+) -> Result<AccountsExportViewKeyResponse, anyhow::Error> {
+    context.authorize_user_only(token, &[Permission::Admin])?;
+    let sdk = context.wallet_sdk();
+    let account = get_account(&req.account, &sdk.accounts_api())?;
+    let view_key = sdk.key_manager_api().get_key(account.view_only_key_id())?;
+    warn!(
+        target: LOG_TARGET,
+        "Exported the view key of account {}.",
+        account.component_address()
+    );
+
+    Ok(AccountsExportViewKeyResponse {
+        account_public_key: *account.owner_public_key(),
+        view_secret_key: view_key.secret,
+        birthday_epoch: account.birthday_epoch(),
+    })
+}
+
 pub async fn handle_set_default(
     context: &HandlerContext,
     token: Option<&Bearer>,
@@ -253,7 +350,12 @@ pub async fn handle_set_default(
     context.authorize(token, &[Permission::Accounts(Crud::Update, None)])?;
     let sdk = context.wallet_sdk();
     let account = get_account(&req.account, &sdk.accounts_api())?;
-    sdk.accounts_api().set_default_account(account.component_address())?;
+    sdk.accounts_api()
+        .set_default_account(account.component_address())
+        .map_err(|e| match e {
+            AccountsApiError::ViewOnlyAccountCannotBeDefault => invalid_request(e),
+            e => e.into(),
+        })?;
     Ok(AccountSetDefaultResponse {})
 }
 
@@ -560,7 +662,17 @@ pub(crate) async fn execute_claim_burn(
     is_dry_run: bool,
     proof_file_name: Option<String>,
 ) -> Result<ClaimBurnResponse, anyhow::Error> {
-    let transaction = build_claim_burn_transaction(sdk, account, proof_contents, max_fee, max_epoch, is_dry_run)?;
+    // A claim declares no input of its own; the TARI resource is the one every transaction declares.
+    let input_pricing = DeclaredInputPricing::fetch(sdk, [SubstateId::from(TARI_TOKEN)]).await?;
+    let transaction = build_claim_burn_transaction(
+        sdk,
+        account,
+        proof_contents,
+        max_fee,
+        max_epoch,
+        is_dry_run,
+        &input_pricing,
+    )?;
 
     if is_dry_run {
         let transaction_id = transaction.calculate_id();
@@ -599,6 +711,7 @@ fn build_claim_burn_transaction(
     max_fee: u64,
     max_epoch: Epoch,
     is_dry_run: bool,
+    input_pricing: &DeclaredInputPricing,
 ) -> Result<Transaction, anyhow::Error> {
     let ClaimBurnProofContents {
         encrypted_data: claimed_encrypted_data,
@@ -682,9 +795,12 @@ fn build_claim_burn_transaction(
     );
 
     // Create stealth address - used during spend time
-    let stealth_output_owner_public_key =
-        sdk.stealth_crypto_api()
-            .derive_stealth_owner_public_key(network, account_owner.public_key(), &nonce);
+    let stealth_output_owner_public_key = sdk.stealth_crypto_api().derive_stealth_owner_public_key(
+        network,
+        account_owner.public_key(),
+        view_only.public_key(),
+        &nonce,
+    );
 
     // We'll create an output with the same encrypted data that was used on L1 burn. Note that this is not strictly
     // necessary. The engine will create the output with whatever you give it, so we could reencrypt.
@@ -755,10 +871,11 @@ fn build_claim_burn_transaction(
     // the claimant. `max_fee` is therefore a ceiling: it can come from a dry run that the
     // configured indexer answers, so the claim is priced here and reveals no more than that.
     //
-    // The transaction's weight and the stored output's size follow the claim's shape alone, so a probe
-    // built at the smallest fee a claim can reveal prices the claim at any fee.
+    // The transaction's weight, the stored output's size and the declared inputs follow the claim's
+    // shape alone, so a probe built at the smallest fee a claim can reveal prices the claim at any fee.
     const PROBE_FEE: u64 = 1;
     let (probe, statement) = build(PROBE_FEE)?;
+    let (input_bytes, input_fanout) = input_pricing.measure(&probe);
     let price = ClaimBurnShape {
         persisted_output_bytes: statement
             .outputs_statement
@@ -767,6 +884,8 @@ fn build_claim_burn_transaction(
             .map(persisted_utxo_bytes)
             .sum(),
         transaction_weight: probe.calculate_transaction_weight().as_u64(),
+        input_bytes,
+        input_fanout,
     }
     .estimate_fee(&fee_rates_by_network(network))
     .saturating_add(FEE_ESTIMATE_ALLOWANCE);
@@ -959,8 +1078,12 @@ pub async fn handle_create_free_test_coins(
     let (finalized, _) = wait_for_result_and_account(&mut events, &tx_id, account.component_address()).await?;
     if let Some(reason) = finalized.finalize.any_reject() {
         return match reason {
-            RejectReason::ExecutionFailure { message, .. } => {
-                if message.contains("Duplicate NFT token id") {
+            RejectReason::ExecutionFailure { code, message } => {
+                // The account component also conflicts when it exists on chain but this wallet has not seen it
+                // yet, so only a conflict on the claim receipt means the account has claimed.
+                if *code == ExecutionFailureCode::Conflict &&
+                    message.contains(&faucet_claim_receipt_address(account.component_address()).to_string())
+                {
                     return Err(faucet_already_claimed());
                 }
                 // The faucet records the claim before it withdraws, so an account that already claimed is
@@ -1013,6 +1136,14 @@ pub async fn handle_create_free_test_coins(
     })
 }
 
+/// The receipt NFT the faucet template mints, and burns, the first time `account` claims.
+fn faucet_claim_receipt_address(account: &ComponentAddress) -> NonFungibleAddress {
+    NonFungibleAddress::new(
+        XTR_FAUCET_CLAIM_RESOURCE_ADDRESS,
+        NonFungibleId::from_u256(account.as_object_key().into_array()),
+    )
+}
+
 #[allow(clippy::too_many_lines)]
 pub async fn handle_transfer(
     context: &HandlerContext,
@@ -1033,7 +1164,7 @@ pub async fn handle_transfer(
 
     let account_owner_key_id = account
         .owner_key_id()
-        .ok_or_else(|| invalid_params("account", Some("cannot transfer from an account without an owner key")))?;
+        .ok_or_else(|| invalid_params("account", Some("cannot transfer from a view-only account")))?;
 
     // get the source account component address
     let source_account_address = *account.component_address();
@@ -1135,22 +1266,22 @@ pub async fn handle_transfer(
             }
         })
         .then(|builder| {
-            // The badge authorizes the resource's withdraw rule inside the account's frame, which it reaches as
-            // a `Proof` argument.
+            // The badge authorizes the resource's withdraw rule inside the account's frame, which is lent it by
+            // the window opened around the call.
+            let withdraw = |builder: TransactionBuilder| {
+                builder
+                    .call_method(source_account_address, "withdraw", args![
+                        req.resource_address,
+                        req.amount
+                    ])
+                    .put_last_instruction_output_on_workspace("bucket")
+            };
             if req.proof_from_badge_resource.is_some() {
-                builder.call_method(source_account_address, "withdraw_with_auth", args![
-                    req.resource_address,
-                    req.amount,
-                    Workspace("proof")
-                ])
+                builder.with_authorized_proof("proof", withdraw)
             } else {
-                builder.call_method(source_account_address, "withdraw", args![
-                    req.resource_address,
-                    req.amount
-                ])
+                withdraw(builder)
             }
         })
-        .put_last_instruction_output_on_workspace("bucket")
         .call_method(destination_account_address, "deposit", args![Workspace("bucket")])
         .then(|builder| {
             if req.proof_from_badge_resource.is_some() {
@@ -1171,11 +1302,15 @@ pub async fn handle_transfer(
     // If dry run we can return the result immediately
     if req.dry_run {
         let transaction_id = transaction.calculate_id();
-        let _execute_result = context
+        let result = context
             .transaction_service()
             .submit_dry_run_transaction(transaction)
             .await?;
-        return Ok(AccountsTransferResponse { transaction_id });
+        return Ok(AccountsTransferResponse {
+            transaction_id,
+            required_fees: Some(result.finalize.required_fees()),
+            dry_run_result: Some(result),
+        });
     }
 
     // Otherwise submit and wait for a result. Link the source account, and the destination too if it
@@ -1217,7 +1352,11 @@ pub async fn handle_transfer(
         finalized.final_fee
     );
 
-    Ok(AccountsTransferResponse { transaction_id: tx_id })
+    Ok(AccountsTransferResponse {
+        transaction_id: tx_id,
+        required_fees: None,
+        dry_run_result: None,
+    })
 }
 
 pub async fn handle_confidential_transfer(
@@ -1273,30 +1412,58 @@ pub async fn handle_confidential_transfer(
             })
             .await?;
 
+        // `transfer` links its lock to the transaction, and only a stored transaction resolves a linked lock. A dry
+        // run is never stored, and a failed submission may leave nothing stored.
+        let transaction_id = transfer.transaction.calculate_id();
         if req.dry_run {
-            let transaction_id = transfer.transaction.calculate_id();
-            let _exec_result = transaction_service
+            let result = transaction_service
                 .submit_dry_run_transaction(transfer.transaction)
-                .await?;
-            return Ok(ConfidentialTransferResponse { transaction_id });
+                .await;
+            if let Err(err) = &result &&
+                let Err(release_err) = sdk.transaction_api().release_locks_of_unstored_transaction(transaction_id)
+            {
+                warn!(
+                    target: LOG_TARGET,
+                    "Transfer {transaction_id} failed ({err}) and its locked inputs could not be released: {release_err}"
+                );
+            }
+            let result = result?;
+            return Ok(ConfidentialTransferResponse {
+                transaction_id,
+                required_fees: Some(result.finalize.required_fees()),
+                dry_run_result: Some(result),
+            });
         }
 
         let mut linked_accounts = vec![source_account_address];
         linked_accounts.extend(owned_destination);
-        let tx_id = transaction_service
+        let submission = transaction_service
             .submit_transaction_with_opts(
                 transfer.transaction,
                 Some(TransactionContext::with_accounts(linked_accounts)),
                 None,
             )
-            .await?;
+            .await;
+        if let Err(err) = &submission &&
+            let Err(release_err) = sdk.transaction_api().release_locks_of_unstored_transaction(transaction_id)
+        {
+            warn!(
+                target: LOG_TARGET,
+                "Transfer {transaction_id} failed ({err}) and its locked inputs could not be released: {release_err}"
+            );
+        }
+        let tx_id = submission?;
 
         notifier.notify(TransactionSubmittedEvent {
             transaction_id: tx_id,
             context: None,
         });
 
-        Ok(ConfidentialTransferResponse { transaction_id: tx_id })
+        Ok(ConfidentialTransferResponse {
+            transaction_id: tx_id,
+            required_fees: None,
+            dry_run_result: None,
+        })
     })
     .await?
 }
@@ -1322,7 +1489,7 @@ pub async fn handle_stealth_transfer(
     if owner_account.owner_key_id().is_none() {
         return Err(invalid_params(
             "owner_account",
-            Some("cannot transfer from an account without an owner key"),
+            Some("cannot transfer from a view-only account"),
         ));
     };
 
@@ -1339,7 +1506,10 @@ pub async fn handle_stealth_transfer(
         .as_bytes()
         .try_into()
         .map_err(|_| invalid_params("owner_account", Some("invalid view public key length")))?;
-    let owner_fallback_pay_ref: Vec<u8> = owner_addr.pay_ref().map(|p| p.as_bytes().to_vec()).unwrap_or_default();
+    let owner_fallback_destination_tag: Vec<u8> = owner_addr
+        .destination_tag()
+        .map(|p| p.as_bytes().to_vec())
+        .unwrap_or_default();
 
     // Link the source account, plus any recipients that are the wallet's own accounts. Resolved before
     // `req.transfers` is consumed below and before `owner_account` is moved into the transfer task.
@@ -1358,22 +1528,27 @@ pub async fn handle_stealth_transfer(
         .transfers
         .into_iter()
         .map(|transfer| {
-            // Resolve the effective pay reference for this transfer. The explicit `pay_ref` request field wins
-            // when present; an explicit empty string disables any pay-ref. When the field is unset, fall back to
-            // the destination address's bech32-embedded pay-ref so non-frontend callers keep the historical
-            // behaviour.
-            let effective_pay_ref: Option<Vec<u8>> = match transfer.pay_ref.as_deref() {
+            // Resolve the effective destination tag for this transfer. The explicit `destination_tag` request field
+            // wins when present; an explicit empty string disables any destination tag. When the field is
+            // unset, fall back to the destination address's bech32-embedded destination tag so non-frontend
+            // callers keep the historical behaviour.
+            let effective_destination_tag: Option<Vec<u8>> = match transfer.destination_tag.as_deref() {
                 Some("") => None,
                 Some(s) => Some(s.as_bytes().to_vec()),
-                None => transfer.destination_address.pay_ref().map(|p| p.as_bytes().to_vec()),
+                None => transfer
+                    .destination_address
+                    .destination_tag()
+                    .map(|p| p.as_bytes().to_vec()),
             };
 
             if transfer.attach_sender_address {
-                let pay_ref_bytes = effective_pay_ref
+                let destination_tag_bytes = effective_destination_tag
                     .as_deref()
-                    .unwrap_or(owner_fallback_pay_ref.as_slice());
-                let memo = Memo::new_sender_address(sender_account_key, sender_view_key, pay_ref_bytes)
-                    .ok_or_else(|| invalid_params("pay_ref", Some("pay reference too long (max 64 bytes)")))?;
+                    .unwrap_or(owner_fallback_destination_tag.as_slice());
+                let memo = Memo::new_sender_address(sender_account_key, sender_view_key, destination_tag_bytes)
+                    .ok_or_else(|| {
+                        invalid_params("destination_tag", Some("destination tag too long (max 64 bytes)"))
+                    })?;
                 return Ok(TransferOutput {
                     address: transfer.destination_address,
                     blinded_amount: transfer.blinded_output_amount,
@@ -1383,13 +1558,13 @@ pub async fn handle_stealth_transfer(
                 });
             }
 
-            match effective_pay_ref {
-                Some(pay_ref) => {
+            match effective_destination_tag {
+                Some(destination_tag) => {
                     let memo = transfer.output_memo.unwrap_or_else(|| Memo::new_message("").unwrap());
-                    if memo.as_pay_ref().is_some() {
+                    if memo.as_destination_tag().is_some() {
                         warn!(
                             target: LOG_TARGET,
-                            "❗️ Overwriting existing pay ref in memo for transfer to address {}",
+                            "❗️ Overwriting existing destination tag in memo for transfer to address {}",
                             transfer.destination_address
                         );
                     }
@@ -1398,9 +1573,15 @@ pub async fn handle_stealth_transfer(
                         .as_memo_message()
                         .map(|s| s.as_bytes())
                         .or_else(|| memo.as_memo_bytes())
-                        .ok_or_else(|| invalid_params("pay_ref", Some("can only include pay ref in message memo")))?;
-                    let memo = Memo::new_pay_ref_and_bytes_truncate(&pay_ref, memo_bytes)
-                        .ok_or_else(|| invalid_params("pay_ref", Some("pay reference too long (max 64 bytes)")))?;
+                        .ok_or_else(|| {
+                            invalid_params(
+                                "destination_tag",
+                                Some("can only include destination tag in message memo"),
+                            )
+                        })?;
+                    let memo = Memo::new_destination_tag_and_bytes_truncate(&destination_tag, memo_bytes).ok_or_else(
+                        || invalid_params("destination_tag", Some("destination tag too long (max 64 bytes)")),
+                    )?;
 
                     Ok(TransferOutput {
                         address: transfer.destination_address,
@@ -1514,8 +1695,18 @@ pub async fn handle_stealth_transfer(
                 // ceiling would have them reveal — unrefundably — far more than the transfer costs.
                 let mut settled_statically = false;
                 if let Some(shape) = transfer.statically_priced_shape.filter(|_| settle_statically) {
+                    let (input_bytes, input_fanout) = DeclaredInputPricing::fetch(
+                        &sdk,
+                        transaction.all_inputs_iter().map(|input| input.substate_id().clone()),
+                    )
+                    .await?
+                    .measure(&transaction);
                     let estimate = shape
-                        .with_transaction_weight(transaction.calculate_transaction_weight().as_u64())
+                        .with_transaction(
+                            transaction.calculate_transaction_weight().as_u64(),
+                            input_bytes,
+                            input_fanout,
+                        )
                         .estimate_fee(&fee_rates)
                         .saturating_add(FEE_ESTIMATE_ALLOWANCE);
                     if estimate != params.max_fee && static_rounds < MAX_STATIC_SETTLE_ROUNDS {
@@ -1535,14 +1726,8 @@ pub async fn handle_stealth_transfer(
                 // Release the lock immediately as dry run does not submit the transaction
                 // TODO: maybe transfer() should not lock the outputs if it's a dry run
                 lock.release();
-                // A statically settled fee is the figure to report, not the lower one the run turns
-                // out to need: input selection targets `amount + max_fee`, so a submission at
-                // anything other than a fee some build was made at picks a different set of UTXOs
-                // and prices a different transaction. The difference is the estimate's own margin,
-                // single-digit microtari, and it is what buys the settlement in a single round trip.
-                let settled_fee = settled_statically.then_some(params.max_fee);
                 let result = transaction_service
-                    .submit_dry_run_transaction_settled_at(transaction, settled_fee)
+                    .submit_dry_run_transaction(transaction)
                     .await
                     .map_err(|e| {
                         anyhow::anyhow!(
@@ -1558,14 +1743,25 @@ pub async fn handle_stealth_transfer(
                 // metering drift a wider `max_fee` causes; testing against it here would treat a fee
                 // that pays in full as insufficient and spend another round chasing it.
                 let charged = result.finalize.charged_fees();
+                // A statically settled fee is the figure to report, not the lower one the run turns
+                // out to need: input selection targets `amount + max_fee`, so a submission at
+                // anything other than a fee some build was made at picks a different set of UTXOs
+                // and prices a different transaction. The difference is the estimate's own margin,
+                // single-digit microtari, and it is what buys the settlement in a single round trip.
                 let response = StealthTransferResponse {
                     transaction_id: result.finalize.transaction_hash.into(),
+                    required_fees: Some(if settled_statically {
+                        params.max_fee
+                    } else {
+                        required_fees
+                    }),
+                    dry_run_result: Some(result),
                 };
                 rounds += 1;
 
                 // The estimator priced under the engine — the one thing `stealth_fee_estimate.rs`
-                // exists to prevent. This round's row records the fee it was built at, which the run
-                // has just shown insufficient, so that row must not become the answer: drop the
+                // exists to prevent. This round's response names the fee it was built at, which the run
+                // has just shown insufficient, so that response must not become the answer: drop the
                 // static estimate for the rest of the request and let the wire rounds settle, as
                 // they did before there was an estimate.
                 if settled_statically && charged > params.max_fee {
@@ -1605,7 +1801,7 @@ pub async fn handle_stealth_transfer(
                             params.max_fee
                         );
                         // A statically settled round either settles or is diverted above, so this
-                        // response records `required_fees` — a figure above what the round cost —
+                        // response carries `required_fees` — a figure above what the round cost —
                         // rather than a settled fee the run disagreed with.
                         return Ok(response);
                     },
@@ -1635,7 +1831,11 @@ pub async fn handle_stealth_transfer(
                 context: None,
             });
 
-            return Ok(StealthTransferResponse { transaction_id: tx_id });
+            return Ok(StealthTransferResponse {
+                transaction_id: tx_id,
+                required_fees: None,
+                dry_run_result: None,
+            });
         }
     })
     .await?
@@ -1670,6 +1870,111 @@ enum FeeEstimateStep {
     GiveUp,
 }
 
+/// What a static fee estimate needs to price a transaction's declared inputs as the engine charges
+/// them: the encoded bytes of the substates it declares, read from the network, and the shard layout
+/// they are pledged across.
+struct DeclaredInputPricing {
+    value_bytes: HashMap<SubstateId, u64>,
+    num_preshards: NumPreshards,
+    num_committees: u32,
+}
+
+impl DeclaredInputPricing {
+    const UNPROVEN_READ_MAX_INTERVAL: Duration = Duration::from_secs(4);
+    /// How long [`Self::fetch`] keeps asking for substates the indexer serves without a proof. The
+    /// indexer cannot prove a read while consensus is still finishing an epoch its epoch manager has
+    /// already left, and serves it unproven until that epoch's last block commits.
+    const UNPROVEN_READ_RETRY_WINDOW: Duration = Duration::from_secs(30);
+
+    /// Reads the substates `ids` names from the network, and the layout the latest end-of-epoch
+    /// checkpoints describe, one per shard group (see [`committees_of_checkpoint_layout`]).
+    async fn fetch<I: IntoIterator<Item = SubstateId>>(sdk: &WalletSdk, ids: I) -> Result<Self, anyhow::Error> {
+        let ids = ids.into_iter().collect::<HashSet<_>>().into_iter().collect::<Vec<_>>();
+        let started = tokio::time::Instant::now();
+        let mut interval = Duration::from_millis(250);
+        let substates = loop {
+            match sdk.substate_api().get_substates_from_network(&ids).await {
+                Err(SubstateApiError::SubstateUnproven { substate_id })
+                    if started.elapsed() < Self::UNPROVEN_READ_RETRY_WINDOW =>
+                {
+                    debug!(
+                        target: LOG_TARGET,
+                        "The indexer served {substate_id} without a proof; asking again in {interval:.1?}"
+                    );
+                    tokio::time::sleep(interval).await;
+                    interval = (interval * 2).min(Self::UNPROVEN_READ_MAX_INTERVAL);
+                },
+                result => break result?,
+            }
+        };
+        let value_bytes = substates
+            .into_iter()
+            .map(|(id, substate)| (id, declared_input_bytes(substate.substate_value())))
+            .collect();
+
+        let num_preshards = NumPreshards::current();
+        let checkpoints = sdk.get_network_interface().get_latest_shard_group_checkpoints().await?;
+        let num_committees = committees_of_checkpoint_layout(
+            num_preshards,
+            checkpoints
+                .iter()
+                .map(|checkpoint| (checkpoint.epoch, checkpoint.shard_group)),
+        );
+        Ok(Self {
+            value_bytes,
+            num_preshards,
+            num_committees,
+        })
+    }
+
+    /// The encoded bytes of `transaction`'s declared inputs and the other shard groups they are
+    /// pledged to. A declared input the network does not hold adds no bytes: consensus aborts the
+    /// transaction before the engine charges it anything.
+    fn measure(&self, transaction: &Transaction) -> (u64, u32) {
+        let input_bytes = transaction
+            .all_inputs_iter()
+            .map(|input| input.substate_id().clone())
+            .collect::<HashSet<_>>()
+            .iter()
+            .filter_map(|id| self.value_bytes.get(id))
+            .sum();
+        (
+            input_bytes,
+            transaction.input_fanout(self.num_preshards, self.num_committees),
+        )
+    }
+}
+
+/// The number of committees the shard groups of `checkpoints`, given in shard order, divide the
+/// network into, when they come from one epoch and together cover every shard.
+///
+/// Any other set, including none, gives one committee per shard. Each further group can only add to
+/// the groups a transaction's inputs span, so that count prices the input fanout of any layout from
+/// above.
+fn committees_of_checkpoint_layout<I: IntoIterator<Item = (Epoch, ShardGroup)>>(
+    num_preshards: NumPreshards,
+    checkpoints: I,
+) -> u32 {
+    let all_shards = ShardGroup::all_shards(num_preshards);
+    let mut checkpoints = checkpoints.into_iter().peekable();
+    let Some(&(epoch, _)) = checkpoints.peek() else {
+        return num_preshards.as_u32();
+    };
+    let mut next_shard = Some(all_shards.start());
+    let mut num_committees = 0u32;
+    for (checkpoint_epoch, shard_group) in checkpoints {
+        if checkpoint_epoch != epoch || Some(shard_group.start()) != next_shard {
+            return num_preshards.as_u32();
+        }
+        next_shard = shard_group.end().as_u32().checked_add(1).map(Shard::from);
+        num_committees += 1;
+    }
+    if next_shard != all_shards.end().as_u32().checked_add(1).map(Shard::from) {
+        return num_preshards.as_u32();
+    }
+    num_committees
+}
+
 /// Decides what an estimation round leads to, given what the round was `built_at`, what the shape it
 /// produced was `charged`, the `required` figure it reports, whether an earlier round named
 /// `built_at`, and how many rounds have run.
@@ -1694,13 +1999,13 @@ fn next_fee_estimate_step(
     FeeEstimateStep::Retry { max_fee: required }
 }
 
-#[allow(clippy::too_many_lines)]
 pub async fn handle_create_stealth_transfer_statement(
     context: &HandlerContext,
     token: Option<&Bearer>,
     req: AccountsCreateStealthTransferStatementRequest,
 ) -> Result<AccountsCreateStealthTransferStatementResponse, anyhow::Error> {
-    let granted = context.check_auth(token)?;
+    let auth = context.check_auth_with_identity(token)?;
+    let granted = &auth.permissions;
     let sdk = context.wallet_sdk().clone();
     if req.requests.is_empty() {
         return Err(invalid_params(
@@ -1716,161 +2021,66 @@ pub async fn handle_create_stealth_transfer_statement(
         ));
     }
 
-    let mut required_signers = HashSet::new();
-    let mut utxo_signers = IndexSet::new();
-    let lock = sdk.locks_api().create_lock_with_timeout(Duration::from_secs(5 * 60))?;
-    let mut statements = Vec::with_capacity(req.requests.len());
+    // Every statement's scopes are checked before any statement is built.
+    let mut specs = Vec::with_capacity(req.requests.len());
     for req in req.requests {
-        let sender_account = get_account(&req.sender_account, &sdk.accounts_api())?;
-        enforce_scopes(&granted, &[Permission::Transfer(
+        let sender = get_account(&req.sender_account, &sdk.accounts_api())?;
+        enforce_scopes(granted, &[Permission::Transfer(
             Crud::Create,
-            Some(*sender_account.component_address()),
+            Some(*sender.component_address()),
         )])?;
-        let Some(sender_key_id) = sender_account.owner_key_id() else {
-            return Err(invalid_params(
-                "owner_account",
-                Some("cannot transfer from an account without an owner key"),
-            ));
-        };
-
-        let resource = sdk.substate_api().fetch_resource(req.resource_address).await?;
-
-        if !resource.resource_type().is_stealth() {
-            return Err(invalid_params(
-                "resource_address",
-                Some(format!(
-                    "Resource is not a stealth resource (type: {})",
-                    resource.resource_type()
-                )),
-            ));
-        }
-
-        // Checked before any input is locked: a malformed or silently-discarded `pay_to` is a request error, and
-        // rejecting it here avoids taking a lock this request can never use.
-        for output in &req.outputs {
-            output
-                .validate_pay_to()
-                .map_err(|reason| invalid_params("pay_to", Some(reason)))?;
-        }
-
-        let amount_to_spend = req.total_output_amount();
-
-        let inputs = if let Some(utxo_addresses) = req.input_selection.as_specific() {
-            // Exact stealth inputs named by the caller: resolve, validate and lock precisely these UTXOs,
-            // preserving the requested order. They contribute no revealed amount. Naming exact UTXOs (and thus
-            // learning their decrypted totals through the balance check) requires scoped stealth-UTXO read
-            // authority in addition to the transfer-create scope enforced above.
-            enforce_scopes(&granted, &[Permission::StealthUtxos(
+        // Naming exact UTXOs (and thus learning their decrypted totals through the balance check) requires scoped
+        // stealth-UTXO read authority in addition to the transfer-create scope.
+        if req.input_selection.as_specific().is_some() {
+            enforce_scopes(granted, &[Permission::StealthUtxos(
                 Crud::Read,
-                Some(*sender_account.component_address()),
+                Some(*sender.component_address()),
             )])?;
-            let inputs = sdk
-                .stealth_outputs_api()
-                .lock_specific_outputs(
-                    sender_account.component_address(),
-                    &req.resource_address,
-                    lock.id(),
-                    utxo_addresses,
-                )
-                .map_err(map_specific_selection_error)?;
-            Some(InputsToSpend {
-                inputs,
-                revealed: Amount::zero(),
-            })
-        } else {
-            req.input_selection
-                .as_selection()
-                .map(|sel| {
-                    sdk.stealth_transfer_api().lock_inputs_for_transfer(
-                        lock.id(),
-                        sender_account.component_address(),
-                        req.resource_address,
-                        amount_to_spend,
-                        sel,
-                    )
-                })
-                .transpose()?
-        };
-
-        let must_sign_with_account_key = inputs.as_ref().is_some_and(|i| i.revealed.is_positive());
-        let signing_key_id = if must_sign_with_account_key {
-            sender_key_id
-        } else {
-            sdk.key_manager_api().next_derived_key_id(KeyBranch::Nonce)?.into()
-        };
-
-        // The signing key is what the engine sees as a badge, so it is the key a revealed output must name.
-        let signing_public_key = sdk.key_manager_api().get_public_key(signing_key_id)?;
-
-        let output_revealed_amount: Amount = req.outputs.iter().map(|o| o.revealed_amount).sum();
-        let outputs = req
-            .outputs
-            .iter()
-            .filter(|o| o.blinded_amount > 0)
-            .map(TryInto::try_into)
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let statement = sdk
-            .stealth_outputs_api()
-            .generate_transfer_statement(TransferStatementParams {
-                view_only_key_id: sender_account.view_only_key_id(),
-                resource_address: &req.resource_address,
-                resource_view_key: resource
-                    .to_view_key_public_key()
-                    .map_err(|e| anyhow!("Failed to decode resource public view key: {e}"))?,
-                inputs: inputs.as_ref().map(|i| i.inputs.as_slice()).unwrap_or(&[]),
-                input_revealed_amount: req
-                    .input_selection
-                    .as_from_bucket()
-                    .unwrap_or(Amount::zero())
-                    .checked_add(inputs.as_ref().map(|i| i.revealed).unwrap_or(Amount::zero()))
-                    .ok_or_else(|| {
-                        invalid_params(
-                            "input_revealed_amount",
-                            Some("input revealed amount overflowed or was negative"),
-                        )
-                    })?,
-                outputs,
-                // The sender signs this transaction, so its key is what authorises the revealed funds.
-                revealed_output: (!output_revealed_amount.is_zero()).then(|| {
-                    RevealedOutput::new(output_revealed_amount, signing_public_key.public_key().to_byte_type())
-                }),
-            })
-            .map_err(map_statement_construction_error)?;
-
-        utxo_signers.extend(inputs.iter().flat_map(|i| &i.inputs).map(|i| StealthUtxoSpendKeyId {
-            account_key_id: sender_key_id,
-            public_nonce: i.public_nonce,
-        }));
-
-        required_signers.insert(signing_key_id);
-        statements.push(statement);
+        }
+        specs.push(TransferStatementSpec {
+            sender,
+            resource_address: req.resource_address,
+            input_selection: req.input_selection,
+            outputs: req.outputs,
+        });
     }
+
+    let lock = sdk
+        .locks_api()
+        .create_owned_lock_with_timeout(Duration::from_secs(5 * 60), auth.lock_owner())?;
+    let built = sdk
+        .stealth_transfer_api()
+        .create_transfer_statements(lock.id(), &specs)
+        .await
+        .map_err(map_transfer_statement_error)?;
 
     // Return without unlocking the outputs
     let lock_id = lock.keep_locked();
 
     Ok(AccountsCreateStealthTransferStatementResponse {
-        statements,
+        statements: built.statements,
         lock_id,
-        signing_keys: required_signers.into_iter().collect(),
-        utxo_signers: utxo_signers.into_iter().collect(),
+        signing_keys: built.signing_keys,
+        utxo_signers: built.utxo_signers,
     })
 }
 
-/// Map a `lock_specific_outputs` failure to an RPC error. Caller-invalid selections (the SDK's `InvalidParameter`)
-/// collapse to a single generic `invalid_params` that never reveals whether a named UTXO is unknown, foreign,
-/// wrong-resource, or otherwise ineligible; genuine internal failures (storage, crypto) propagate unchanged as a
-/// server error.
-fn map_specific_selection_error(err: StealthOutputsApiError) -> anyhow::Error {
-    if matches!(err, StealthOutputsApiError::InvalidParameter { .. }) {
-        debug!(target: LOG_TARGET, "Rejected specific stealth input selection: {err}");
-        invalid_params(
-            "utxo_addresses",
-            Some("one or more requested UTXOs are unavailable or ineligible for this account"),
-        )
-    } else {
-        err.into()
+/// Map a `create_transfer_statements` failure to an RPC error. Request errors become `invalid_params`; an ineligible
+/// exactly-named input collapses to a single generic `invalid_params` that never reveals whether a named UTXO is
+/// unknown, foreign, wrong-resource, or otherwise ineligible; genuine internal failures (storage, crypto) propagate
+/// unchanged as a server error.
+fn map_transfer_statement_error(err: StealthTransferApiError) -> anyhow::Error {
+    match err {
+        StealthTransferApiError::InvalidParameter { param, reason } => invalid_params(param, Some(reason)),
+        StealthTransferApiError::IneligibleSpecificInput(e) => {
+            debug!(target: LOG_TARGET, "Rejected specific stealth input selection: {e}");
+            invalid_params(
+                "utxo_addresses",
+                Some("one or more requested UTXOs are unavailable or ineligible for this account"),
+            )
+        },
+        StealthTransferApiError::OutputsApi(e) => map_statement_construction_error(e),
+        err => err.into(),
     }
 }
 
@@ -1943,6 +2153,7 @@ mod balance_change_handler_tests {
     use tari_ootle_address::Network;
     use tari_ootle_common_types::{Epoch, SubstateVersion};
     use tari_ootle_wallet_sdk::{
+        IndexerTrust,
         WalletSdkConfig,
         cipher_seed::CipherSeedRestore,
         models::{BalanceChangeSnapshot, BalanceChangeSource, EpochBirthday, KeyBranch, KeyId},
@@ -1988,6 +2199,7 @@ mod balance_change_handler_tests {
             WalletSdkConfig {
                 network: Network::LocalNet,
                 override_keyring_password: Some(SafePassword::from_str("test wallet password").unwrap()),
+                indexer_trust: IndexerTrust::default(),
             },
             EpochBirthday::far_future(),
         )
@@ -2267,13 +2479,16 @@ mod create_stealth_transfer_statement_handler_tests {
         resource::Resource,
         stealth::{MerkleTree, hashlock_digest},
     };
-    use tari_ootle_address::{Network, OotleAddress, RistrettoOotleAddress};
+    use tari_ootle_address::{DestinationTag, Network, OotleAddress, RistrettoOotleAddress};
     use tari_ootle_common_types::Epoch;
+    use tari_ootle_transaction::{Instruction, ResourceAddressRef, TransactionBuilder};
     use tari_ootle_wallet_crypto::pay_to::PayTo;
     use tari_ootle_wallet_sdk::{
+        IndexerTrust,
         WalletSdkConfig,
+        apis::confidential_transfer::UtxoInputSelection,
         cipher_seed::CipherSeedRestore,
-        models::{EpochBirthday, KeyBranch, KeyId, OutputStatus, StealthOutputModel},
+        models::{EpochBirthday, KeyId, OutputStatus, StealthOutputModel, WalletLockId},
     };
     use tari_ootle_wallet_sdk_services::{
         account_monitor::AccountMonitor,
@@ -2285,7 +2500,13 @@ mod create_stealth_transfer_statement_handler_tests {
     use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
     use tari_ootle_walletd_client::{
         permissions::Permissions,
-        types::{InputSelection, TransferStatementRequest},
+        types::{
+            InputSelection,
+            TransactionRequestCreateRequest,
+            TransactionRequestGetRequest,
+            TransactionRequestValueSummary,
+            TransferStatementRequest,
+        },
     };
     use tari_shutdown::Shutdown;
     use tari_template_lib_types::{
@@ -2311,6 +2532,7 @@ mod create_stealth_transfer_statement_handler_tests {
             HandlerContext,
             auth::{create_authenticator, jwt::AuthError},
         },
+        server::ApplicationErrorCode,
     };
 
     /// A ready-to-use handler context for `account`, with a stealth resource cached locally so `fetch_resource`
@@ -2352,6 +2574,7 @@ mod create_stealth_transfer_statement_handler_tests {
             WalletSdkConfig {
                 network: Network::LocalNet,
                 override_keyring_password: Some(SafePassword::from_str("test wallet password").unwrap()),
+                indexer_trust: IndexerTrust::default(),
             },
             EpochBirthday::far_future(),
         )
@@ -2359,15 +2582,17 @@ mod create_stealth_transfer_statement_handler_tests {
         sdk.initialize_cipher_seed(CipherSeedRestore::CreateNewIfRequired)
             .unwrap();
 
-        let account: ComponentAddress = "component_0dc41b5cc74b36d696c7b140323a40a2f98b71df5d60e5a6bf4c1a07ffffffff"
-            .parse()
-            .unwrap();
+        let owner_key_id = KeyId::derived(KeyBranch::Account, 0);
+        let owner_public_key = sdk.key_manager_api().get_public_key(owner_key_id).unwrap().public_key;
+        let account = sdk
+            .accounts_api()
+            .derive_account_address_from_public_key(&owner_public_key.to_byte_type());
         sdk.accounts_api()
             .add_account(
                 Some("stealth"),
                 &account,
                 KeyId::derived(KeyBranch::ViewOnlyKey, 0),
-                KeyId::derived(KeyBranch::Account, 0),
+                owner_key_id,
                 Epoch::zero(),
                 true,
                 true,
@@ -2475,6 +2700,8 @@ mod create_stealth_transfer_statement_handler_tests {
             is_on_chain: true,
             is_condition_spendable: true,
             lock_id: None,
+            proven_up: None,
+            spent_version: None,
         };
         sdk.stealth_outputs_api().add_output(&model).unwrap();
         model
@@ -2621,7 +2848,8 @@ mod create_stealth_transfer_statement_handler_tests {
         assert_eq!(response.utxo_signers[0].public_nonce, output_b.sender_public_nonce);
         assert_eq!(response.utxo_signers[1].public_nonce, output_a.sender_public_nonce);
 
-        // keep_locked was reached: both selected outputs remain LockedForSpend under the returned lock.
+        // keep_locked was reached: both selected outputs remain LockedForSpend under the returned lock,
+        // and the wallet-owned output created by the statement is recorded as LockedUnconfirmed under the same lock.
         for output in [&output_b, &output_a] {
             let stored = stored_output(&test, &output.commitment);
             assert!(
@@ -2631,6 +2859,13 @@ mod create_stealth_transfer_statement_handler_tests {
             );
             assert_eq!(stored.lock_id, Some(response.lock_id));
         }
+        let created = &response.statements[0].outputs_statement.outputs[0];
+        let stored_created = stored_output(&test, created.commitment());
+        assert!(matches!(stored_created.status, OutputStatus::LockedUnconfirmed));
+        assert_eq!(stored_created.lock_id, Some(response.lock_id));
+        assert_eq!(stored_created.value, 300);
+        assert!(!stored_created.is_on_chain);
+        assert!(stored_created.is_condition_spendable);
     }
 
     #[tokio::test]
@@ -2673,6 +2908,43 @@ mod create_stealth_transfer_statement_handler_tests {
         assert!(
             matches!(stored.status, OutputStatus::Unspent),
             "expected Unspent after release, got {:?}",
+            stored.status
+        );
+        assert_eq!(stored.lock_id, None);
+    }
+
+    #[tokio::test]
+    async fn rejects_outputs_whose_total_exceeds_the_maximum_amount_before_locking() {
+        let test = setup().await;
+        let bearer = test.bearer(&format!("transfer:create:{}", test.account));
+        let output = insert_valid_output(&test, 100);
+
+        let transfer_output = |revealed_amount| TransferOutput {
+            address: account_ootle_address(&test),
+            revealed_amount,
+            blinded_amount: 0,
+            memo: None,
+            pay_to: PayTo::StealthPublicKey,
+        };
+        let request = AccountsCreateStealthTransferStatementRequest {
+            requests: vec![TransferStatementRequest {
+                sender_account: test.account.into(),
+                resource_address: test.stealth_resource,
+                input_selection: InputSelection::Selection(UtxoInputSelection::PreferConfidential),
+                outputs: vec![transfer_output(Amount::MAX), transfer_output(Amount::ONE)],
+            }],
+        };
+
+        let err = handle_create_stealth_transfer_statement(&test.context, Some(&bearer), request)
+            .await
+            .expect_err("outputs whose total exceeds the maximum amount must be rejected");
+        let message = assert_invalid_params(&err).to_string();
+        assert!(message.contains("'outputs'"), "expected the outputs param: {message}");
+
+        let stored = stored_output(&test, &output.commitment);
+        assert!(
+            matches!(stored.status, OutputStatus::Unspent),
+            "expected Unspent, got {:?}",
             stored.status
         );
         assert_eq!(stored.lock_id, None);
@@ -2846,6 +3118,250 @@ mod create_stealth_transfer_statement_handler_tests {
         }
     }
 
+    async fn statement_value_summaries(
+        test: &StatementTest,
+        statement: StealthTransferStatement,
+        lock_id: WalletLockId,
+    ) -> Vec<TransactionRequestValueSummary> {
+        let bearer = test.bearer("transaction_requests:create,transaction_requests:read");
+        let transaction = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
+            .without_auto_fill_inputs()
+            .with_instructions(vec![Instruction::StealthTransfer {
+                resource_address_ref: ResourceAddressRef::Address(test.stealth_resource),
+                statement,
+                revealed_input_bucket: None,
+            }])
+            .build_unsigned();
+        let created = crate::handlers::transaction_requests::handle_create(
+            &test.context,
+            Some(&bearer),
+            TransactionRequestCreateRequest {
+                transaction,
+                seal_signer: KeyId::derived(KeyBranch::Account, 0),
+                other_signers: vec![],
+                signatures: vec![],
+                lock_ids: vec![lock_id],
+                ttl_secs: Some(60),
+            },
+        )
+        .await
+        .unwrap();
+        crate::handlers::transaction_requests::handle_get(&test.context, Some(&bearer), TransactionRequestGetRequest {
+            request_id: created.request_id,
+        })
+        .await
+        .unwrap()
+        .request
+        .value_summaries
+    }
+
+    fn blinded_output(address: OotleAddress, blinded_amount: u64) -> TransferOutput {
+        TransferOutput {
+            address,
+            revealed_amount: Amount::zero(),
+            blinded_amount,
+            memo: None,
+            pay_to: PayTo::StealthPublicKey,
+        }
+    }
+
+    fn statement_request(
+        test: &StatementTest,
+        input_selection: InputSelection,
+        outputs: Vec<TransferOutput>,
+    ) -> TransferStatementRequest {
+        TransferStatementRequest {
+            sender_account: test.account.into(),
+            resource_address: test.stealth_resource,
+            input_selection,
+            outputs,
+        }
+    }
+
+    fn spend_exactly(output: &StealthOutputModel) -> InputSelection {
+        InputSelection::Specific {
+            utxo_addresses: vec![output.to_utxo_address()],
+        }
+    }
+
+    fn external_address() -> OotleAddress {
+        OotleAddress::new(Network::LocalNet, htlc_participant_key(7), htlc_participant_key(8))
+    }
+
+    fn is_recorded(test: &StatementTest, commitment: &PedersenCommitmentBytes) -> bool {
+        test.context
+            .wallet_sdk()
+            .stealth_outputs_api()
+            .utxos_get_many(&test.stealth_resource, Some(&test.account), None)
+            .unwrap()
+            .iter()
+            .any(|o| &o.commitment == commitment)
+    }
+
+    /// Change a statement pays back to the wallet offsets what the approval summary reports as leaving it.
+    #[tokio::test]
+    async fn change_to_the_wallet_is_recorded_and_offsets_the_amount_leaving() {
+        let test = setup().await;
+        let bearer = test.bearer(&test.transfer_and_read_scopes());
+        let input = insert_valid_output(&test, 100);
+
+        let response = handle_create_stealth_transfer_statement(
+            &test.context,
+            Some(&bearer),
+            AccountsCreateStealthTransferStatementRequest {
+                requests: vec![statement_request(&test, spend_exactly(&input), vec![
+                    blinded_output(external_address(), 40),
+                    blinded_output(account_ootle_address(&test), 60),
+                ])],
+            },
+        )
+        .await
+        .unwrap();
+
+        let outputs = &response.statements[0].outputs_statement.outputs;
+        assert!(!is_recorded(&test, outputs[0].commitment()));
+        let change = stored_output(&test, outputs[1].commitment());
+        assert!(matches!(change.status, OutputStatus::LockedUnconfirmed));
+        assert_eq!(change.lock_id, Some(response.lock_id));
+        assert_eq!(change.value, 60);
+
+        let summaries = statement_value_summaries(&test, response.statements[0].clone(), response.lock_id).await;
+        let [summary] = summaries.as_slice() else {
+            panic!("expected one summary: {summaries:?}");
+        };
+        assert_eq!(
+            (summary.inputs_total, summary.change_total, summary.amount_leaving),
+            (100, 60, 40)
+        );
+    }
+
+    /// An output gated on spend conditions can be claimed by whoever satisfies them, so paying one to the wallet's
+    /// own address is not change.
+    #[tokio::test]
+    async fn a_condition_gated_output_to_the_wallet_is_not_change() {
+        let test = setup().await;
+        let bearer = test.bearer(&test.transfer_and_read_scopes());
+        let input = insert_valid_output(&test, 100);
+        let (claim, refund) = htlc_conditions(b"preimage", 4_242, htlc_participant_key(1), htlc_participant_key(2));
+
+        let response = handle_create_stealth_transfer_statement(
+            &test.context,
+            Some(&bearer),
+            pay_to_conditions_request(&test, &input, vec![claim, refund]),
+        )
+        .await
+        .unwrap();
+
+        assert!(!is_recorded(
+            &test,
+            response.statements[0].outputs_statement.outputs[0].commitment()
+        ));
+        let summaries = statement_value_summaries(&test, response.statements[0].clone(), response.lock_id).await;
+        let [summary] = summaries.as_slice() else {
+            panic!("expected one summary: {summaries:?}");
+        };
+        assert_eq!(
+            (summary.inputs_total, summary.change_total, summary.amount_leaving),
+            (100, 0, 100)
+        );
+    }
+
+    /// A destination tag labels a payment without changing who can spend it, so a tagged self-payment is change.
+    #[tokio::test]
+    async fn a_tagged_payment_to_the_wallet_is_recorded() {
+        let test = setup().await;
+        let bearer = test.bearer(&test.transfer_and_read_scopes());
+        let input = insert_valid_output(&test, 100);
+        let tagged = account_ootle_address(&test).with_destination_tag(DestinationTag::new_checked(*b"tag").unwrap());
+
+        let response = handle_create_stealth_transfer_statement(
+            &test.context,
+            Some(&bearer),
+            AccountsCreateStealthTransferStatementRequest {
+                requests: vec![statement_request(&test, spend_exactly(&input), vec![blinded_output(
+                    tagged, 100,
+                )])],
+            },
+        )
+        .await
+        .unwrap();
+
+        let output = stored_output(&test, response.statements[0].outputs_statement.outputs[0].commitment());
+        assert!(matches!(output.status, OutputStatus::LockedUnconfirmed));
+    }
+
+    /// An address carrying the wallet account's key with another view key pays an output the wallet cannot see.
+    #[tokio::test]
+    async fn a_payment_to_the_account_key_under_a_foreign_view_key_is_not_recorded() {
+        let test = setup().await;
+        let bearer = test.bearer(&test.transfer_and_read_scopes());
+        let input = insert_valid_output(&test, 100);
+        let foreign_view = OotleAddress::new(
+            Network::LocalNet,
+            htlc_participant_key(9),
+            *account_ootle_address(&test).account_public_key(),
+        );
+
+        let response = handle_create_stealth_transfer_statement(
+            &test.context,
+            Some(&bearer),
+            AccountsCreateStealthTransferStatementRequest {
+                requests: vec![statement_request(&test, spend_exactly(&input), vec![blinded_output(
+                    foreign_view,
+                    100,
+                )])],
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(!is_recorded(
+            &test,
+            response.statements[0].outputs_statement.outputs[0].commitment()
+        ));
+    }
+
+    /// Each statement spends only outputs already on chain, so a later statement cannot fund itself from change an
+    /// earlier statement in the same request creates. The failed request releases everything it locked.
+    #[tokio::test]
+    async fn a_later_statement_cannot_spend_change_an_earlier_one_creates() {
+        let test = setup().await;
+        let bearer = test.bearer(&test.transfer_and_read_scopes());
+        let input = insert_valid_output(&test, 100);
+
+        let err = handle_create_stealth_transfer_statement(
+            &test.context,
+            Some(&bearer),
+            AccountsCreateStealthTransferStatementRequest {
+                requests: vec![
+                    statement_request(&test, spend_exactly(&input), vec![
+                        blinded_output(external_address(), 40),
+                        blinded_output(account_ootle_address(&test), 60),
+                    ]),
+                    statement_request(
+                        &test,
+                        InputSelection::Selection(UtxoInputSelection::PreferConfidential),
+                        vec![blinded_output(external_address(), 60)],
+                    ),
+                ],
+            },
+        )
+        .await
+        .expect_err("the only funds for the second statement are the first statement's change");
+        assert!(err.to_string().contains("Insufficient funds"), "{err}");
+
+        let stored = test
+            .context
+            .wallet_sdk()
+            .stealth_outputs_api()
+            .utxos_get_many(&test.stealth_resource, Some(&test.account), None)
+            .unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].commitment, input.commitment);
+        assert!(matches!(stored[0].status, OutputStatus::Unspent));
+        assert_eq!(stored[0].lock_id, None);
+    }
+
     /// Builds a balanced single-output request paying the whole of one 100-value input to `conditions`.
     fn pay_to_conditions_request(
         test: &StatementTest,
@@ -2946,6 +3462,310 @@ mod create_stealth_transfer_statement_handler_tests {
 
         assert_rejected_without_locking(&test, &input, request, "pay_to").await;
     }
+
+    fn assert_invalid_request(err: &anyhow::Error, message: &str) {
+        let rpc = err
+            .downcast_ref::<JsonRpcError>()
+            .unwrap_or_else(|| panic!("expected a JsonRpcError, got: {err}"));
+        assert!(
+            matches!(
+                rpc.error_reason(),
+                JsonRpcErrorReason::ApplicationError(code) if code == ApplicationErrorCode::InvalidRequest as i32
+            ),
+            "{:?}",
+            rpc.error_reason()
+        );
+        assert!(rpc.to_string().contains(message), "{rpc}");
+    }
+
+    #[tokio::test]
+    async fn view_only_import_rejects_bad_requests() {
+        let test = setup().await;
+        let admin = test.bearer("admin");
+        let valid = AccountsImportViewOnlyRequest {
+            account_name: "watch".to_string(),
+            account_public_key: RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut rand::rng()))
+                .to_byte_type(),
+            view_secret_key: RistrettoSecretKey::random(&mut rand::rng()),
+            birthday_epoch: None,
+            is_default: None,
+        };
+        let import = |req: AccountsImportViewOnlyRequest| handle_import_view_only(&test.context, Some(&admin), req);
+
+        let creator = test.bearer("accounts:create");
+        let err = handle_import_view_only(&test.context, Some(&creator), valid.clone())
+            .await
+            .expect_err("importing requires admin");
+        assert!(err.downcast_ref::<AuthError>().is_some(), "{err}");
+
+        let mut req = valid.clone();
+        req.is_default = Some(true);
+        let err = import(req)
+            .await
+            .expect_err("a view-only account cannot be the default");
+        assert_invalid_request(&err, "cannot be the default account");
+
+        let mut req = valid.clone();
+        req.account_public_key = RistrettoPublicKeyBytes::from_bytes(&[0xff; 32]).unwrap();
+        let err = import(req)
+            .await
+            .expect_err("an invalid account public key is rejected");
+        assert_invalid_request(&err, "Invalid view-only account");
+
+        let mut req = valid.clone();
+        req.birthday_epoch = Some(Epoch(7));
+        let err = import(req)
+            .await
+            .expect_err("a birthday after the current epoch is rejected");
+        assert_invalid_request(&err, "birthday epoch is after the current epoch");
+
+        let exported = handle_export_view_key(&test.context, Some(&admin), AccountsExportViewKeyRequest {
+            account: test.account.into(),
+        })
+        .await
+        .unwrap();
+        let mut req = valid.clone();
+        req.view_secret_key = exported.view_secret_key;
+        let err = import(req)
+            .await
+            .expect_err("a view key that another account uses is rejected");
+        assert_invalid_request(&err, "already used by account");
+
+        let mut req = valid;
+        req.account_name = "stealth".to_string();
+        let err = import(req).await.expect_err("a taken name is rejected");
+        assert_invalid_request(&err, "Account name already exists");
+
+        let listed = handle_list(&test.context, Some(&admin), AccountsListRequest {
+            offset: 0,
+            limit: 10,
+        })
+        .await
+        .unwrap();
+        assert_eq!(listed.accounts.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn imported_keys_keep_their_type() {
+        use tari_ootle_wallet_sdk::models::KeyType;
+        use tari_ootle_walletd_client::types::KeysImportRequest;
+
+        use crate::handlers::keys::handle_import;
+
+        let test = setup().await;
+        let admin = test.bearer("admin");
+        let secret_key = RistrettoSecretKey::random(&mut rand::rng());
+        let import_key = |key_type| {
+            handle_import(&test.context, Some(&admin), KeysImportRequest {
+                secret_key: secret_key.clone(),
+                key_type,
+            })
+        };
+        let imported = import_key(KeyType::GeneralPurpose).await.unwrap();
+        assert_eq!(
+            import_key(KeyType::GeneralPurpose).await.unwrap().key_id,
+            imported.key_id
+        );
+
+        let err = import_key(KeyType::ViewOnly)
+            .await
+            .expect_err("re-importing a key as another type is rejected");
+        assert_invalid_request(&err, "already imported as GeneralPurpose");
+
+        let err = handle_import_view_only(&test.context, Some(&admin), AccountsImportViewOnlyRequest {
+            account_name: "watch".to_string(),
+            account_public_key: RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut rand::rng()))
+                .to_byte_type(),
+            view_secret_key: secret_key.clone(),
+            birthday_epoch: None,
+            is_default: None,
+        })
+        .await
+        .expect_err("a view-only import of an imported key is rejected");
+        assert_invalid_request(&err, "already an imported key");
+
+        let key_manager = test.context.wallet_sdk().key_manager_api();
+        assert!(key_manager.is_signing_key(imported.key_id).unwrap());
+        assert_eq!(key_manager.get_key(imported.key_id).unwrap().secret, secret_key);
+    }
+
+    #[tokio::test]
+    async fn an_account_created_after_a_view_only_import_becomes_the_default() {
+        use crate::handlers::test_support::TestDaemon;
+
+        let daemon = TestDaemon::start().await;
+        handle_import_view_only(&daemon.context, Some(&daemon.session), AccountsImportViewOnlyRequest {
+            account_name: "watch".to_string(),
+            account_public_key: RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut rand::rng()))
+                .to_byte_type(),
+            view_secret_key: RistrettoSecretKey::random(&mut rand::rng()),
+            birthday_epoch: None,
+            is_default: None,
+        })
+        .await
+        .unwrap();
+        let accounts = daemon.context.wallet_sdk().accounts_api();
+        assert!(!accounts.has_default_account().unwrap());
+
+        let created = handle_create(&daemon.context, Some(&daemon.session), AccountsCreateRequest {
+            account_name: Some("spending".to_string()),
+            is_default: None,
+            key_index: None,
+        })
+        .await
+        .unwrap();
+        assert!(created.account.is_default);
+        assert_eq!(
+            accounts.get_default().unwrap().component_address(),
+            created.account.component_address()
+        );
+    }
+
+    #[tokio::test]
+    async fn view_only_import_reuses_an_unlinked_imported_view_key() {
+        use tari_ootle_wallet_sdk::models::KeyType;
+        use tari_ootle_walletd_client::types::KeysImportRequest;
+
+        use crate::handlers::keys::handle_import;
+
+        let test = setup().await;
+        let admin = test.bearer("admin");
+        let view_secret_key = RistrettoSecretKey::random(&mut rand::rng());
+        let imported = handle_import(&test.context, Some(&admin), KeysImportRequest {
+            secret_key: view_secret_key.clone(),
+            key_type: KeyType::ViewOnly,
+        })
+        .await
+        .unwrap();
+        let request = |name: &str| AccountsImportViewOnlyRequest {
+            account_name: name.to_string(),
+            account_public_key: RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut rand::rng()))
+                .to_byte_type(),
+            view_secret_key: view_secret_key.clone(),
+            birthday_epoch: None,
+            is_default: None,
+        };
+
+        handle_import_view_only(&test.context, Some(&admin), request("watch"))
+            .await
+            .unwrap();
+        let watch = ComponentAddressOrName::Name("watch".to_string());
+        let account = get_account(&watch, &test.context.wallet_sdk().accounts_api()).unwrap();
+        assert_eq!(account.view_only_key_id(), imported.key_id);
+
+        let err = handle_import_view_only(&test.context, Some(&admin), request("watch2"))
+            .await
+            .expect_err("a view key linked to an account is not reused");
+        assert_invalid_request(&err, "already an imported key");
+    }
+
+    #[tokio::test]
+    async fn view_only_account_is_imported_exported_and_cannot_transfer() {
+        use tari_ootle_wallet_sdk::apis::{
+            confidential_transfer::UtxoInputSelection,
+            stealth_transfer::{BadgeUsage, TransferFeeParams},
+        };
+
+        let test = setup().await;
+        let admin = test.bearer("admin");
+        let account_secret = RistrettoSecretKey::random(&mut rand::rng());
+        let account_public_key = RistrettoPublicKey::from_secret_key(&account_secret).to_byte_type();
+        let view_secret_key = RistrettoSecretKey::random(&mut rand::rng());
+        let import_request = AccountsImportViewOnlyRequest {
+            account_name: "watch".to_string(),
+            account_public_key,
+            view_secret_key: view_secret_key.clone(),
+            birthday_epoch: Some(Epoch::zero()),
+            is_default: None,
+        };
+
+        let imported = handle_import_view_only(&test.context, Some(&admin), import_request.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            imported.account_address,
+            derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &account_public_key)
+        );
+
+        let watch = ComponentAddressOrName::Name("watch".to_string());
+        let account = get_account(&watch, &test.context.wallet_sdk().accounts_api()).unwrap();
+        assert_eq!(account.owner_key_id(), None);
+        assert_eq!(*account.owner_public_key(), account_public_key);
+        assert_eq!(account.birthday_epoch(), Epoch::zero());
+        assert_eq!(
+            *account.address().view_only_key(),
+            RistrettoPublicKey::from_secret_key(&view_secret_key).to_byte_type()
+        );
+
+        // The default account pays fees, so an import never becomes the default
+        let default_account = test.context.wallet_sdk().accounts_api().get_default().unwrap();
+        assert_eq!(*default_account.component_address(), test.account);
+        let err = handle_set_default(&test.context, Some(&admin), AccountSetDefaultRequest {
+            account: watch.clone(),
+        })
+        .await
+        .expect_err("a view-only account cannot be made the default");
+        assert_invalid_request(&err, "A view-only account cannot be the default account");
+        let default_account = test.context.wallet_sdk().accounts_api().get_default().unwrap();
+        assert_eq!(*default_account.component_address(), test.account);
+
+        let mut duplicate = import_request;
+        duplicate.account_name = "watch2".to_string();
+        let err = handle_import_view_only(&test.context, Some(&admin), duplicate)
+            .await
+            .expect_err("importing an existing account must be rejected");
+        assert!(err.to_string().contains("Account already exists"), "{err}");
+
+        let reader = test.bearer("accounts:read");
+        let err = handle_export_view_key(&test.context, Some(&reader), AccountsExportViewKeyRequest {
+            account: watch.clone(),
+        })
+        .await
+        .expect_err("exporting a view key requires admin");
+        assert!(err.downcast_ref::<AuthError>().is_some(), "{err}");
+
+        let exported = handle_export_view_key(&test.context, Some(&admin), AccountsExportViewKeyRequest {
+            account: watch.clone(),
+        })
+        .await
+        .unwrap();
+        assert_eq!(exported.account_public_key, account_public_key);
+        assert_eq!(exported.view_secret_key, view_secret_key);
+        assert_eq!(exported.birthday_epoch, Epoch::zero());
+
+        let err = handle_stealth_transfer(&test.context, Some(&admin), StealthTransferRequest {
+            owner_account: watch.clone(),
+            fee_params: TransferFeeParams::new(UtxoInputSelection::PreferRevealed),
+            input_selection: UtxoInputSelection::PreferRevealed,
+            resource_address: test.stealth_resource,
+            badge_usage: BadgeUsage::None,
+            transfers: vec![],
+            max_fee: 1000,
+            dry_run: false,
+        })
+        .await
+        .expect_err("stealth transfer from a view-only account must be rejected");
+        assert!(
+            assert_invalid_params(&err).to_string().contains("view-only account"),
+            "{err}"
+        );
+
+        let err = handle_transfer(&test.context, Some(&admin), AccountsTransferRequest {
+            account: Some(watch),
+            amount: Amount::from(1u64),
+            resource_address: test.stealth_resource,
+            destination_public_key: RistrettoPublicKeyBytes::default(),
+            max_fee: 1000,
+            proof_from_badge_resource: None,
+            dry_run: false,
+        })
+        .await
+        .expect_err("transfer from a view-only account must be rejected");
+        assert!(
+            assert_invalid_params(&err).to_string().contains("view-only account"),
+            "{err}"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -3023,6 +3843,7 @@ mod claim_burn_fee_tests {
     use tari_ootle_common_types::base_layer_hashing::ownership_proof_hasher64;
     use tari_ootle_transaction::Instruction;
     use tari_ootle_wallet_sdk::{
+        IndexerTrust,
         WalletSdkConfig,
         cipher_seed::CipherSeedRestore,
         models::{EpochBirthday, KeyId},
@@ -3054,6 +3875,7 @@ mod claim_burn_fee_tests {
             WalletSdkConfig {
                 network: Network::LocalNet,
                 override_keyring_password: Some(SafePassword::from_str("test wallet password").unwrap()),
+                indexer_trust: IndexerTrust::default(),
             },
             EpochBirthday::far_future(),
         )
@@ -3171,8 +3993,44 @@ mod claim_burn_fee_tests {
             .amount
     }
 
+    #[test]
+    fn a_complete_one_epoch_checkpoint_layout_gives_its_committee_count() {
+        let epoch = Epoch(3);
+        let layout = [(epoch, ShardGroup::new(1, 128)), (epoch, ShardGroup::new(129, 256))];
+        assert_eq!(committees_of_checkpoint_layout(NumPreshards::P256, layout), 2);
+    }
+
+    #[test]
+    fn an_incomplete_or_mixed_checkpoint_layout_gives_one_committee_per_shard() {
+        let epoch = Epoch(3);
+        let cases = [
+            vec![],
+            vec![(epoch, ShardGroup::new(1, 128))],
+            vec![(epoch, ShardGroup::new(1, 128)), (Epoch(2), ShardGroup::new(129, 256))],
+            vec![(epoch, ShardGroup::new(1, 64)), (epoch, ShardGroup::new(129, 256))],
+        ];
+        for layout in cases {
+            assert_eq!(
+                committees_of_checkpoint_layout(NumPreshards::P256, layout.clone()),
+                256,
+                "{layout:?}"
+            );
+        }
+    }
+
+    /// Prices the TARI resource every claim declares at a nominal size, on a network of two shard
+    /// groups, so the input charges enter the price under test.
+    fn input_pricing() -> DeclaredInputPricing {
+        DeclaredInputPricing {
+            value_bytes: HashMap::from([(SubstateId::from(TARI_TOKEN), 400)]),
+            num_preshards: NumPreshards::current(),
+            num_committees: 2,
+        }
+    }
+
     /// What this wallet prices the claim at, from the transaction it built.
     fn local_price(transaction: &Transaction) -> u64 {
+        let (input_bytes, input_fanout) = input_pricing().measure(transaction);
         ClaimBurnShape {
             persisted_output_bytes: claim_statement(transaction)
                 .outputs_statement
@@ -3181,6 +4039,8 @@ mod claim_burn_fee_tests {
                 .map(persisted_utxo_bytes)
                 .sum(),
             transaction_weight: transaction.calculate_transaction_weight().as_u64(),
+            input_bytes,
+            input_fanout,
         }
         .estimate_fee(&fee_rates_by_network(Network::LocalNet))
         .saturating_add(FEE_ESTIMATE_ALLOWANCE)
@@ -3193,8 +4053,16 @@ mod claim_burn_fee_tests {
         let test = setup();
         let proof = burn_to_account(&test, CLAIMED_VALUE);
 
-        let transaction =
-            build_claim_burn_transaction(&test.sdk, &test.account, proof, CLAIMED_VALUE - 1, Epoch(10), false).unwrap();
+        let transaction = build_claim_burn_transaction(
+            &test.sdk,
+            &test.account,
+            proof,
+            CLAIMED_VALUE - 1,
+            Epoch(10),
+            false,
+            &input_pricing(),
+        )
+        .unwrap();
 
         let price = local_price(&transaction);
         assert_eq!(
@@ -3214,8 +4082,16 @@ mod claim_burn_fee_tests {
         let test = setup();
         for max_fee in [CLAIMED_VALUE, u64::MAX] {
             let proof = burn_to_account(&test, CLAIMED_VALUE);
-            let transaction =
-                build_claim_burn_transaction(&test.sdk, &test.account, proof, max_fee, Epoch(10), false).unwrap();
+            let transaction = build_claim_burn_transaction(
+                &test.sdk,
+                &test.account,
+                proof,
+                max_fee,
+                Epoch(10),
+                false,
+                &input_pricing(),
+            )
+            .unwrap();
             assert_eq!(revealed_fee(&transaction), Amount::from(local_price(&transaction)));
         }
     }
@@ -3225,7 +4101,9 @@ mod claim_burn_fee_tests {
         let test = setup();
         let proof = burn_to_account(&test, CLAIMED_VALUE);
 
-        let transaction = build_claim_burn_transaction(&test.sdk, &test.account, proof, 100, Epoch(10), false).unwrap();
+        let transaction =
+            build_claim_burn_transaction(&test.sdk, &test.account, proof, 100, Epoch(10), false, &input_pricing())
+                .unwrap();
 
         assert!(local_price(&transaction) > 100);
         assert_eq!(revealed_fee(&transaction), Amount::from(100u64));

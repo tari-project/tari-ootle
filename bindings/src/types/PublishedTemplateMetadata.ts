@@ -15,7 +15,7 @@ export type PublishedTemplateMetadata = {
    */
   author_public_key: RistrettoPublicKeyBytes;
   /**
-   * SHA-256 hash of the WASM binary.
+   * `hash_template_code` of the WASM binary, as returned by `PublishedTemplate::to_binary_hash`.
    */
   binary_hash: Hash32;
   /**
@@ -23,7 +23,7 @@ export type PublishedTemplateMetadata = {
    */
   at_epoch: bigint;
   /**
-   * The author-provided off-chain metadata hash
+   * The author-provided reference to off-chain metadata (opaque to the protocol)
    */
   metadata_hash: string | null;
 };

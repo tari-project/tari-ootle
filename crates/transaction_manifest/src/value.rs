@@ -3,6 +3,7 @@
 
 use std::str::FromStr;
 
+use proc_macro2::{TokenStream, TokenTree};
 use syn::{Lit, parse2};
 use tari_bor::{BorError, Serialize};
 use tari_engine_types::substate::SubstateId;
@@ -33,19 +34,7 @@ impl ManifestValue {
 
     pub fn to_arg(&self) -> Result<InstructionArg, ManifestError> {
         match self {
-            ManifestValue::SubstateId(addr) => match addr {
-                SubstateId::Component(addr) => Ok(call_arg!(*addr)),
-                SubstateId::Resource(addr) => Ok(call_arg!(*addr)),
-                // TODO: should tx receipt addresses be allowed to be referenced?
-                SubstateId::TransactionReceipt(addr) => Ok(call_arg!(*addr)),
-                SubstateId::Vault(addr) => Ok(call_arg!(*addr)),
-                SubstateId::NonFungible(addr) => Ok(call_arg!(addr)),
-                SubstateId::ClaimedOutputTombstone(addr) => Ok(call_arg!(*addr)),
-                SubstateId::Template(addr) => Ok(call_arg!(*addr)),
-                SubstateId::ValidatorFeePool(addr) => Ok(call_arg!(*addr)),
-                SubstateId::Utxo(addr) => Ok(call_arg!(*addr)),
-                SubstateId::ConfidentialOutput(addr) => Ok(call_arg!(addr)),
-            },
+            ManifestValue::SubstateId(addr) => Ok(InstructionArg::literal(address_value(addr)?)?),
             ManifestValue::Literal(lit) => lit_to_arg(lit),
             ManifestValue::NonFungibleId(id) => Ok(call_arg!(id.clone())),
             ManifestValue::Value(blob) => Ok(InstructionArg::literal(blob.clone())?),
@@ -72,7 +61,8 @@ pub(crate) fn arg_to_value(arg: InstructionArg) -> Result<tari_bor::Value, Manif
 }
 
 /// The CBOR value `address!` writes for `id`: the typed address it holds, which is what a template
-/// parameter of that address type decodes.
+/// parameter of that address type decodes. A template parameter takes a `TemplateAddress`, which is plain
+/// `Hash32` bytes, so a template address is written untagged.
 pub(crate) fn address_value(id: &SubstateId) -> Result<tari_bor::Value, BorError> {
     match id {
         SubstateId::Component(addr) => tari_bor::to_value(addr),
@@ -81,7 +71,7 @@ pub(crate) fn address_value(id: &SubstateId) -> Result<tari_bor::Value, BorError
         SubstateId::Vault(addr) => tari_bor::to_value(addr),
         SubstateId::NonFungible(addr) => tari_bor::to_value(addr),
         SubstateId::ClaimedOutputTombstone(addr) => tari_bor::to_value(addr),
-        SubstateId::Template(addr) => tari_bor::to_value(addr),
+        SubstateId::Template(addr) => tari_bor::to_value(&addr.as_template_address()),
         SubstateId::ValidatorFeePool(addr) => tari_bor::to_value(addr),
         SubstateId::Utxo(addr) => tari_bor::to_value(addr),
         SubstateId::ConfidentialOutput(addr) => tari_bor::to_value(addr),
@@ -197,7 +187,11 @@ fn parse_value(s: &str, depth: usize) -> Result<ManifestValue, ManifestParseErro
             Some(ManifestValue::NonFungibleId(id))
         })
         .or_else(|| {
-            let tokens = s.parse().ok()?;
+            let tokens: TokenStream = s.parse().ok()?;
+            // A literal holds no group. Rejecting groups first keeps `syn` from recursing into them.
+            if tokens.clone().into_iter().any(|tt| matches!(tt, TokenTree::Group(_))) {
+                return None;
+            }
             let lit: Lit = parse2(tokens).ok()?;
             // Reject literals that are not supported or have unrecognized suffixes (e.g. hex strings
             // like "044bccd4..." that syn misinterprets as integer + suffix, or "1e23" as float).
@@ -267,7 +261,7 @@ pub struct ManifestParseError(String);
 
 #[cfg(test)]
 mod tests {
-    use tari_template_lib_types::{ComponentAddress, ResourceAddress, VaultId};
+    use tari_template_lib_types::{ComponentAddress, ResourceAddress, TemplateAddress, VaultId};
 
     use super::*;
 
@@ -317,6 +311,37 @@ mod tests {
         for invalid in ["[1,,2]", "[,]", "[1", "[[1]", "[\"a]", "[1]]", "[nope]"] {
             assert!(invalid.parse::<ManifestValue>().is_err(), "{invalid} parsed");
         }
+    }
+
+    #[test]
+    fn deeply_grouped_variable_is_rejected() {
+        let depth = 1_000_000;
+        let s = format!("{}1{}", "(".repeat(depth), ")".repeat(depth));
+        let parsed = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || s.parse::<ManifestValue>().is_ok())
+            .unwrap()
+            .join()
+            .unwrap();
+        assert!(!parsed);
+    }
+
+    /// A template parameter takes a `TemplateAddress`, so a template address passed by `address!` or by a variable
+    /// must decode as one.
+    #[test]
+    fn a_template_address_decodes_as_a_template_address() {
+        let hex = "0101010101010101010101010101010101010101010101010101010101010101";
+        let template_address = TemplateAddress::from_hex(hex).unwrap();
+        let id = format!("template_{hex}").parse::<SubstateId>().unwrap();
+
+        let from_macro = address_value(&id).unwrap();
+        assert_eq!(
+            tari_bor::from_value::<TemplateAddress>(&from_macro).unwrap(),
+            template_address
+        );
+
+        let from_variable = ManifestValue::from(id).to_value().unwrap();
+        assert_eq!(from_variable, from_macro);
     }
 
     #[test]

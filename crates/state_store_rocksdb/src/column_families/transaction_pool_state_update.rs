@@ -64,10 +64,10 @@ pub struct TransactionPoolStateUpdateData {
     pub locked_epoch: Option<LockedEpoch>,
     #[n(10)]
     pub is_ready: bool,
-    #[cbor(default)]
-    #[serde(default)]
     #[n(11)]
     pub exhaust_burn: u64,
+    #[n(12)]
+    pub fee_intent_only: bool,
 }
 
 impl TransactionPoolStateUpdateData {
@@ -75,6 +75,7 @@ impl TransactionPoolStateUpdateData {
         other.set_evidence(self.evidence);
         other.set_transaction_fee(self.transaction_fee);
         other.set_exhaust_burn(self.exhaust_burn);
+        other.set_fee_intent_only(self.fee_intent_only);
         if let Some(leader_fee) = self.leader_fee {
             other.set_leader_fee(leader_fee);
         }

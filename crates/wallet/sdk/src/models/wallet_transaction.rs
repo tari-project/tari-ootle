@@ -32,6 +32,9 @@ pub struct WalletTransaction {
     pub finalized_time: Option<Duration>,
     pub new_account_info: Option<NewAccountData>,
     pub is_dry_run: bool,
+    /// When the wallet's indexer accepted the transaction, or `None` before it did.
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    pub submitted_at: Option<PrimitiveDateTime>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub last_update_time: PrimitiveDateTime,
 }
@@ -62,7 +65,6 @@ pub enum TransactionStatus {
     #[default]
     New,
     DryRun,
-    DryRunFailed,
     Pending,
     Accepted,
     Rejected,
@@ -83,7 +85,6 @@ impl TransactionStatus {
         match self {
             TransactionStatus::New => "New",
             TransactionStatus::DryRun => "DryRun",
-            TransactionStatus::DryRunFailed => "DryRunFailed",
             TransactionStatus::Pending => "Pending",
             TransactionStatus::Accepted => "Accepted",
             TransactionStatus::Rejected => "Rejected",
@@ -100,7 +101,6 @@ impl FromStr for TransactionStatus {
         match s {
             "New" => Ok(TransactionStatus::New),
             "DryRun" => Ok(TransactionStatus::DryRun),
-            "DryRunFailed" => Ok(TransactionStatus::DryRunFailed),
             "Pending" => Ok(TransactionStatus::Pending),
             "Accepted" => Ok(TransactionStatus::Accepted),
             "Rejected" => Ok(TransactionStatus::Rejected),
@@ -127,6 +127,8 @@ pub struct WalletTransactionUpdate<'a> {
     pub invalid_reason: Option<&'a str>,
     pub execution_time: Option<Duration>,
     pub finalized_time: Option<PrimitiveDateTime>,
+    /// Recorded once: an update without it leaves the stored submission time as it is.
+    pub submitted_at: Option<PrimitiveDateTime>,
 }
 
 impl<'a> WalletTransactionUpdate<'a> {
@@ -140,6 +142,7 @@ impl<'a> WalletTransactionUpdate<'a> {
             invalid_reason: None,
             execution_time: None,
             finalized_time: None,
+            submitted_at: None,
         }
     }
 
@@ -175,6 +178,11 @@ impl<'a> WalletTransactionUpdate<'a> {
 
     pub fn with_finalized_time(mut self, finalized_time: PrimitiveDateTime) -> Self {
         self.finalized_time = Some(finalized_time);
+        self
+    }
+
+    pub fn with_submitted_at(mut self, submitted_at: PrimitiveDateTime) -> Self {
+        self.submitted_at = Some(submitted_at);
         self
     }
 }

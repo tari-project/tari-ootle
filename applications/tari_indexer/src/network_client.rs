@@ -332,7 +332,16 @@ impl ResultAnswer {
 
         // A member derives its decision from its execution result, so an answer where the two
         // disagree cannot have come from an honest member.
-        let execute_result = finalized.execute_result.as_ref();
+        let execute_result = finalized
+            .execute_result
+            .as_ref()
+            .map(|r| r.decode())
+            .transpose()
+            .map_err(|e| {
+                ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+                    "Node returned an undecodable execution result: {e}"
+                ))
+            })?;
         let is_commit = finalized.final_decision.is_commit();
         match execute_result {
             Some(r) if r.finalize.result.is_any_accept() != is_commit => {
@@ -352,7 +361,7 @@ impl ResultAnswer {
         let mut hasher = TariHasher32::new_with_label("IndexerFinalizedResult");
         hasher.update(&finalized.final_decision);
         hasher.update(&finalized.abort_details);
-        if let Some(r) = execute_result {
+        if let Some(r) = &execute_result {
             let finalize =
                 tari_bor::encode(&r.finalize).map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!(e)))?;
             hasher.update(&finalize);
@@ -521,20 +530,22 @@ impl NetworkClientError {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use tari_common_types::types::FixedHash;
     use tari_engine_types::{
         commit_result::{ExecuteResult, RejectReason, TransactionResult},
+        encoded::Encoded,
         substate::SubstateId,
     };
     use tari_epoch_manager::EpochManagerEvent;
     use tari_ootle_common_types::{
         SubstateRequirementRef,
+        ValidatorSetHash,
         committee::{CommitteeInfo, CommitteeMember},
     };
     use tari_ootle_storage::{global::models::ValidatorNode, time::PrimitiveDateTime};
+    use tari_sidechain::FixedHash;
     use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
     use tari_validator_node_rpc::client::{FinalizedResult, SubstateBatch, SubstateProofData, SubstateResult};
     use tokio::sync::broadcast;
@@ -544,7 +555,7 @@ mod tests {
     type Addr = String;
 
     #[derive(Clone)]
-    enum Answer {
+    pub(crate) enum Answer {
         Pending,
         Finalized(Box<FinalizedResult>),
         Unreachable,
@@ -552,9 +563,9 @@ mod tests {
 
     /// Answers for each committee member, by address, and how many requests they have served.
     #[derive(Clone)]
-    struct FakeCommittee(Arc<HashMap<Addr, Answer>>, Arc<AtomicUsize>);
+    pub(crate) struct FakeCommittee(Arc<HashMap<Addr, Answer>>, Arc<AtomicUsize>);
 
-    struct FakeMember {
+    pub(crate) struct FakeMember {
         committee: FakeCommittee,
         address: Addr,
     }
@@ -571,8 +582,11 @@ mod tests {
     }
 
     impl ValidatorNodeRpcClient<Addr> for FakeMember {
-        async fn submit_transaction(&mut self, _: Transaction) -> Result<TransactionId, ValidatorNodeRpcClientError> {
-            unimplemented!()
+        async fn submit_transaction(
+            &mut self,
+            transaction: Transaction,
+        ) -> Result<TransactionId, ValidatorNodeRpcClientError> {
+            Ok(transaction.calculate_id())
         }
 
         async fn get_finalized_transaction_result(
@@ -612,7 +626,7 @@ mod tests {
         }
     }
 
-    struct FakeEpochManager(Arc<Committee<Addr>>);
+    pub(crate) struct FakeEpochManager(Arc<Committee<Addr>>);
 
     impl EpochManagerReader for FakeEpochManager {
         type Addr = Addr;
@@ -685,6 +699,18 @@ mod tests {
             unimplemented!()
         }
 
+        async fn get_validator_set_hash(&self, _: Epoch) -> Result<ValidatorSetHash, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_validator_set_committee_proof(
+            &self,
+            _: Epoch,
+            _: ShardGroup,
+        ) -> Result<tari_state_tree::ValidatorSetCommitteeProof, EpochManagerError> {
+            unimplemented!()
+        }
+
         async fn get_num_committees(&self, _: Epoch) -> Result<u32, EpochManagerError> {
             Ok(1)
         }
@@ -741,7 +767,7 @@ mod tests {
         execute_result.finalize.total_fees_required = total_fees_required;
         Answer::Finalized(Box::new(FinalizedResult {
             final_decision: (&execute_result.finalize.result).into(),
-            execute_result: Some(execute_result),
+            execute_result: Some(Encoded::encode(&execute_result).unwrap()),
             execution_time: Default::default(),
             finalized_time: PrimitiveDateTime::MIN,
             abort_details: None,
@@ -753,7 +779,7 @@ mod tests {
         finalized(TransactionResult::Accept(Default::default()), tag)
     }
 
-    fn aborted() -> Answer {
+    pub(crate) fn aborted() -> Answer {
         finalized(TransactionResult::Reject(RejectReason::ForeignPledgeInputConflict), 0)
     }
 
@@ -782,7 +808,9 @@ mod tests {
 
     /// A committee of equally weighted members, member `n` answering with `answers[n]`, and a count
     /// of the requests it serves.
-    fn network(answers: Vec<Answer>) -> (TariNetworkClient<FakeEpochManager, FakeCommittee>, Arc<AtomicUsize>) {
+    pub(crate) fn network(
+        answers: Vec<Answer>,
+    ) -> (TariNetworkClient<FakeEpochManager, FakeCommittee>, Arc<AtomicUsize>) {
         let members = (0..answers.len())
             .map(|n| CommitteeMember {
                 address: format!("vn{n}"),
@@ -811,9 +839,15 @@ mod tests {
     /// The tag of a committed answer.
     fn commit_tag(status: &TransactionResultStatus) -> Option<u64> {
         match status {
-            TransactionResultStatus::Finalized(result) if result.final_decision.is_commit() => {
-                Some(result.execute_result.as_ref()?.finalize.total_fees_required)
-            },
+            TransactionResultStatus::Finalized(result) if result.final_decision.is_commit() => Some(
+                result
+                    .execute_result
+                    .as_ref()?
+                    .decode()
+                    .unwrap()
+                    .finalize
+                    .total_fees_required,
+            ),
             _ => None,
         }
     }

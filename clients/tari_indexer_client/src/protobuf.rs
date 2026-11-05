@@ -15,18 +15,36 @@ pub struct UtxoUpdatePayload {
 pub struct StartOfShard {
     #[prost(uint32, tag = "1")]
     pub shard: u32,
+    /// The state version this pass reached, the same value `EndOfShard` carries. See
+    /// [`EndOfShard::max_state_version`].
     #[prost(uint64, tag = "2")]
     pub max_state_version: u64,
+    /// The number of updates in this pass. It can be zero when the pass moved the cursor past rows
+    /// that the request's filters excluded.
     #[prost(uint32, tag = "3")]
     pub num_updates: u32,
-    /// The shard holds further updates beyond this pass. Authoritative: a pass can stop short of
-    /// `per_shard_limit` and still have more to give, so counting `num_updates` cannot answer this.
+    /// The shard holds further rows beyond this pass, which may or may not pass the request's
+    /// filters. Authoritative: a pass can stop short of `per_shard_limit` and still have more to
+    /// give, so counting `num_updates` cannot answer this.
     #[prost(bool, tag = "4")]
     pub has_more: bool,
+    /// This indexer may lack the tombstones of outputs spent in the shard between the request's
+    /// cursor and its tombstone horizon (`utxo_tombstone_horizons` on `/info`), so a held output
+    /// that is not reported spent may still be spent. Set only when the request includes spends.
+    /// Every unspent output is kept, so the pass still delivers each new one. A client checks each
+    /// output it holds in the shard before it stores the shard's cursor. A pass that reaches the
+    /// end of the shard reports at least the horizon as its `max_state_version`, so resuming from
+    /// it clears the flag.
+    #[prost(bool, tag = "5")]
+    #[serde(default)]
+    pub spends_incomplete: bool,
 }
 
 #[derive(::prost::Message, serde::Serialize, serde::Deserialize)]
 pub struct EndOfShard {
+    /// The shard's resume point: the state version this pass reached. Every update of the shard at
+    /// or below it was either delivered or excluded by the request's filters, so the next request
+    /// can resume from it without losing anything. It can be above the last delivered update.
     #[prost(uint64, tag = "1")]
     pub max_state_version: u64,
 }

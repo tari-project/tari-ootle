@@ -42,8 +42,14 @@ use ootle_sdk_ffi_c::{
     ootle_build_stealth_unsigned_with_seed,
     ootle_build_unsigned,
     ootle_build_unsigned_instructions,
+    ootle_decode_event,
+    ootle_decode_execute_result,
+    ootle_decode_resource,
     ootle_decode_stealth_utxo,
     ootle_decode_substate,
+    ootle_decode_substate_value,
+    ootle_decode_transaction_receipt,
+    ootle_decode_utxo,
     ootle_derive_account_address,
     ootle_derive_account_key_from_seed,
     ootle_derive_view_key_from_seed,
@@ -410,6 +416,24 @@ fn generic_build_bad_intent_json_is_a_parse_error() {
     assert_eq!(error_code(&result), "PARSE");
     assert!(result.handle.is_null(), "error envelope carries no handle");
     unsafe { ootle_result_free(result) };
+}
+
+/// A fee payer label that names no component slot (unbound, or carrying a `.offset` suffix) ⇒
+/// `VALIDATION`, no handle.
+#[test]
+fn generic_build_bad_workspace_fee_label_is_a_validation_error() {
+    let fx = load_fixture("generic_build/self_funding_faucet.json");
+    let network = network_byte(&fx["input"]["network"]);
+    for label in ["never_bound", "faucet_account.0"] {
+        let mut intent = fx["input"]["generic_intent"].clone();
+        intent["fee_payment"] = serde_json::json!({ "FromWorkspaceComponent": { "label": label } });
+        let intent = CArg::new(&serde_json::to_string(&intent).unwrap());
+        let result = unsafe { ootle_build_unsigned_instructions(network, intent.ptr()) };
+        assert!(!ok(&result), "fee label '{label}' must not succeed");
+        assert_eq!(error_code(&result), "VALIDATION", "fee label '{label}'");
+        assert!(result.handle.is_null(), "error envelope carries no handle");
+        unsafe { ootle_result_free(result) };
+    }
 }
 
 /// A NULL intent arg ⇒ `INVALID`, never UB.
@@ -933,7 +957,7 @@ fn format_identity_address_round_trips_via_parse() {
     let account = CArg::new(fx["input"]["account_public_key"].as_str().unwrap());
     let view = CArg::new(fx["input"]["view_only_key"].as_str().unwrap());
 
-    // Format: matches the committed bech32m exactly (pay_ref NULL).
+    // Format: matches the committed bech32m exactly (destination_tag NULL).
     let r = unsafe { ootle_format_identity_address(net, account.ptr(), view.ptr(), std::ptr::null()) };
     assert!(ok(&r), "expected success, got {}", error_code(&r));
     assert!(r.handle.is_null(), "format returns no handle");
@@ -957,14 +981,14 @@ fn format_identity_address_round_trips_via_parse() {
 }
 
 #[test]
-fn format_identity_address_with_pay_ref() {
-    let fx = load_fixture("address_codec/identity_localnet_with_pay_ref.json");
+fn format_identity_address_with_destination_tag() {
+    let fx = load_fixture("address_codec/identity_localnet_with_destination_tag.json");
     let net = network_byte(&fx["input"]["network"]);
     let account = CArg::new(fx["input"]["account_public_key"].as_str().unwrap());
     let view = CArg::new(fx["input"]["view_only_key"].as_str().unwrap());
-    let pay_ref = CArg::new(fx["input"]["pay_ref"].as_str().unwrap());
+    let destination_tag = CArg::new(fx["input"]["destination_tag"].as_str().unwrap());
 
-    let r = unsafe { ootle_format_identity_address(net, account.ptr(), view.ptr(), pay_ref.ptr()) };
+    let r = unsafe { ootle_format_identity_address(net, account.ptr(), view.ptr(), destination_tag.ptr()) };
     assert!(ok(&r), "expected success, got {}", error_code(&r));
     let out = data_json(&r);
     assert_eq!(
@@ -974,12 +998,12 @@ fn format_identity_address_with_pay_ref() {
     let bech32m = out["bech32m"].as_str().unwrap().to_string();
     unsafe { ootle_result_free(r) };
 
-    // Parse it back: the pay_ref hex survives.
+    // Parse it back: the destination_tag hex survives.
     let addr = CArg::new(&bech32m);
     let r = unsafe { ootle_parse_address(addr.ptr()) };
     assert!(ok(&r));
     let parsed = data_json(&r);
-    assert_eq!(parsed["pay_ref"], fx["input"]["pay_ref"]);
+    assert_eq!(parsed["destination_tag"], fx["input"]["destination_tag"]);
     unsafe { ootle_result_free(r) };
 }
 
@@ -1039,7 +1063,7 @@ fn format_identity_address_rejects_bad_input() {
     assert_eq!(error_code(&r), "PARSE");
     unsafe { ootle_result_free(r) };
 
-    // pay_ref over 64 bytes → PARSE.
+    // destination_tag over 64 bytes → PARSE.
     let over_cap = CArg::new(&"aa".repeat(65));
     let r = unsafe { ootle_format_identity_address(0x26, account.ptr(), view.ptr(), over_cap.ptr()) };
     assert!(!ok(&r));
@@ -1073,6 +1097,10 @@ fn cosign_round_trip_seals_a_validating_transaction() {
     let keys = CArg::new(&serde_json::to_string(&fx["input"]["keys"]).unwrap());
     let seal_pk = CArg::new(fx["input"]["cosign_seal_pk"].as_str().unwrap());
     let signer_secret = CArg::new(fx["input"]["cosign_signer_secret"].as_str().unwrap());
+    let signer_pk = fx["expected"]["sealed_transaction_semantic"]["V1"]["body"]["signatures"][0]["public_key"]
+        .as_str()
+        .unwrap();
+    let main_signer = CArg::new(signer_pk);
 
     // A: build + resolve.
     let built = unsafe { ootle_build_unsigned(net, intent.ptr()) };
@@ -1084,9 +1112,13 @@ fn cosign_round_trip_seals_a_validating_transaction() {
     let h = applied.handle;
     unsafe { ootle_result_free(applied) };
 
-    // A: extract the unsigned record to ship (does NOT consume the handle).
-    let rec = unsafe { ootle_unsigned_record_for_cosign(h) };
+    // A: extract the unsigned record to ship, naming B as the main signer (does NOT consume the handle).
+    let rec = unsafe { ootle_unsigned_record_for_cosign(h, main_signer.ptr()) };
     assert!(ok(&rec));
+    assert_eq!(
+        data_json(&rec)["unsigned"]["V1"]["main_signer"],
+        serde_json::json!({ "Authorizer": signer_pk })
+    );
     let record_json = serde_json::to_string(&data_json(&rec)).unwrap();
     unsafe { ootle_result_free(rec) };
 
@@ -1095,12 +1127,13 @@ fn cosign_round_trip_seals_a_validating_transaction() {
     let auth = unsafe { ootle_add_signature(net, unsigned.ptr(), seal_pk.ptr(), signer_secret.ptr()) };
     assert!(ok(&auth));
     let auth_obj = data_json(&auth)["authorization"].clone();
-    assert!(auth_obj["public_key"].is_string() && auth_obj["signature"].is_string());
+    assert_eq!(auth_obj["public_key"], signer_pk);
+    assert!(auth_obj["signature"].is_string());
     unsafe { ootle_result_free(auth) };
 
     // A: attach + seal (consumes the handle).
     let auths = CArg::new(&serde_json::to_string(&serde_json::json!([auth_obj])).unwrap());
-    let sealed = unsafe { ootle_seal_and_encode_with_auth(h, keys.ptr(), auths.ptr()) };
+    let sealed = unsafe { ootle_seal_and_encode_with_auth(h, keys.ptr(), auths.ptr(), main_signer.ptr()) };
     assert!(ok(&sealed));
     let encoded_hex = data_json(&sealed)["encoded_transaction"]
         .as_str()
@@ -1126,7 +1159,12 @@ fn cosign_add_signature_bad_secret_hex_is_a_key_error() {
     let applied = unsafe { ootle_apply_fetched_substates(h, fetched.ptr()) };
     let h = applied.handle;
     unsafe { ootle_result_free(applied) };
-    let rec = unsafe { ootle_unsigned_record_for_cosign(h) };
+    let bad_main_signer = CArg::new("zz");
+    let r = unsafe { ootle_unsigned_record_for_cosign(h, bad_main_signer.ptr()) };
+    assert!(!ok(&r));
+    assert_eq!(error_code(&r), "PARSE");
+    unsafe { ootle_result_free(r) };
+    let rec = unsafe { ootle_unsigned_record_for_cosign(h, std::ptr::null()) };
     let record_json = serde_json::to_string(&data_json(&rec)).unwrap();
     unsafe { ootle_result_free(rec) };
     unsafe { ootle_partial_transaction_free(h) };
@@ -1167,7 +1205,7 @@ fn cosign_seal_with_auth_rejects_wrong_kind_handle() {
     unsafe { ootle_result_free(sbuilt) };
 
     let _ = net; // network is not an arg to the seal-with-auth fn; keep symmetry with other tests.
-    let r = unsafe { ootle_seal_and_encode_with_auth(sh, keys.ptr(), auths.ptr()) };
+    let r = unsafe { ootle_seal_and_encode_with_auth(sh, keys.ptr(), auths.ptr(), std::ptr::null()) };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "INVALID");
     unsafe { ootle_result_free(r) };
@@ -1185,9 +1223,9 @@ fn abi_version_is_the_stable_tag() {
     assert!(!p.is_null());
     let s = unsafe { CStr::from_ptr(p) }.to_str().unwrap();
     assert_eq!(
-        s, "ootle-sdk-ffi-c/17",
-        "the ABI tag every host binding asserts against (bumped when the stealth assembly and outputs-statement \
-         exports gained the revealed output's receiver)"
+        s, "ootle-sdk-ffi-c/19",
+        "the ABI tag every host binding asserts against (bumped when the stealth key bundles gained `view_secret` and \
+         the scan exports took `account_public_key`)"
     );
     // Static pointer — explicitly NOT freed (freeing it would be UB).
 }
@@ -1202,7 +1240,7 @@ struct StealthSendArgs {
     fetched: CArg,
     spend_secrets: CArg,
     keys: CArg,
-    /// The `{account_secret}`-only keys mirror for the random-nonce default symbols.
+    /// The `{account_secret, view_secret}` keys mirror (no seed) for the random-nonce default symbols.
     account_only_keys: CArg,
     /// The fixture's build seed (lowercase hex) for the `_with_seed` build symbols.
     seed_hex: CArg,
@@ -1215,7 +1253,10 @@ fn stealth_send_args(fx: &serde_json::Value) -> StealthSendArgs {
     let empty = serde_json::Value::Array(vec![]);
     let fetched = input.get("fetched").unwrap_or(&empty);
     let spend_secrets = input.get("spend_secrets").unwrap_or(&empty);
-    let account_only = serde_json::json!({ "account_secret": input["stealth_keys"]["account_secret"] });
+    let account_only = serde_json::json!({
+        "account_secret": input["stealth_keys"]["account_secret"],
+        "view_secret": input["stealth_keys"]["view_secret"],
+    });
     StealthSendArgs {
         network: network_byte(&input["network"]),
         intent: CArg::new(&serde_json::to_string(&input["stealth_intent"]).unwrap()),
@@ -1227,22 +1268,33 @@ fn stealth_send_args(fx: &serde_json::Value) -> StealthSendArgs {
     }
 }
 
-/// The from-account component + its vault, as the indexer returns them. The two-phase live driver
+/// The from-account component + its vault, each value in its engine JSON form. The two-phase live driver
 /// declares both as wants (the fee + any revealed input draw on the account), so a test must serve
 /// them before a transfer resolves. The addresses match the stealth fixtures (`component_aa..` /
 /// `resource_01..`, vault `vault_cc..`); the JSON was captured from the core's looped-resolution helpers.
-const ACCOUNT_SUBSTATES: &str = r#"[{"substate_id":"component_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","substate_value":{"Component":{"body":{"state":[{"@cbor":"tag","tag":132,"value":{"@cbor":"bytes","hex":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}]},"header":{"access_rules":{"default":"DenyAll","method_access":{}},"entity_id":"00","owner_rule":"None","template_address":"0000000000000000000000000000000000000000000000000000000000000000"}}},"version":0},{"substate_id":"vault_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","substate_value":{"Vault":{"freeze_flags":0,"resource_container":{"Fungible":{"address":"resource_0101010101010101010101010101010101010101010101010101010101010101","amount":"1000000","locked_amount":"0"}}}},"version":0}]"#;
+const ACCOUNT_SUBSTATES_JSON: &str = r#"[{"substate_id":"component_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","substate_value":{"Component":{"body":{"state":[{"@cbor":"tag","tag":132,"value":{"@cbor":"bytes","hex":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}]},"header":{"access_rules":{"default":"DenyAll","method_access":{}},"entity_id":"00","owner_rule":"None","template_address":"0000000000000000000000000000000000000000000000000000000000000000","upgrade_rule":"Locked"}}},"version":0},{"substate_id":"vault_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","substate_value":{"Vault":{"freeze_flags":0,"resource_container":{"Fungible":{"address":"resource_0101010101010101010101010101010101010101010101010101010101010101","amount":"1000000","locked_amount":"0"}}}},"version":0}]"#;
 
 /// The from-account component + vault batch alone (no stealth UTXO) — resolves the account wants while
 /// any required stealth UTXO stays unsupplied (drives the missing-UTXO error path).
 fn account_substates_batch() -> CArg {
-    CArg::new(ACCOUNT_SUBSTATES)
+    CArg::new(&serde_json::to_string(&account_substates()).unwrap())
+}
+
+/// [`ACCOUNT_SUBSTATES_JSON`] as the indexer serves it: each value in its CBOR encoding, base64.
+fn account_substates() -> Vec<serde_json::Value> {
+    use tari_engine_types::{encoded::Encoded, substate::SubstateValue};
+    let mut batch: Vec<serde_json::Value> = serde_json::from_str(ACCOUNT_SUBSTATES_JSON).unwrap();
+    for fetched in &mut batch {
+        let value: SubstateValue = serde_json::from_value(fetched["substate_value"].take()).unwrap();
+        fetched["substate_value"] = serde_json::to_value(Encoded::encode(&value).unwrap()).unwrap();
+    }
+    batch
 }
 
 /// The from-account component + vault PLUS the fixture's own fetched substates (the stealth input
 /// UTXO, if any) — everything the live two-phase driver needs to resolve the transfer.
 fn account_plus_fixture_batch(fx: &serde_json::Value) -> CArg {
-    let mut batch: Vec<serde_json::Value> = serde_json::from_str(ACCOUNT_SUBSTATES).unwrap();
+    let mut batch = account_substates();
     if let Some(arr) = fx["input"].get("fetched").and_then(|v| v.as_array()) {
         batch.extend(arr.iter().cloned());
     }
@@ -1508,10 +1560,10 @@ fn stealth_scan_mine_round_trips() {
     let fx = load_fixture("stealth_scan/mine_basic.json");
     let scan_input = &fx["input"]["stealth_scan_input"];
     let network = network_byte(&scan_input["network"]);
-    // The scan-keys bundle the facade expects: {view_secret, account_secret?, skip_memo?}.
+    // The scan-keys bundle the facade expects: {view_secret, account_public_key, skip_memo?}.
     let scan_keys = serde_json::json!({
         "view_secret": scan_input["view_secret"],
-        "account_secret": scan_input["account_secret"],
+        "account_public_key": scan_input["account_public_key"],
         "skip_memo": scan_input["skip_memo"],
     });
     let keys = CArg::new(&serde_json::to_string(&scan_keys).unwrap());
@@ -1542,6 +1594,7 @@ fn stealth_scan_not_mine_is_success_false() {
     let network = network_byte(&scan_input["network"]);
     let scan_keys = serde_json::json!({
         "view_secret": scan_input["view_secret"],
+        "account_public_key": scan_input["account_public_key"],
         "skip_memo": scan_input["skip_memo"],
     });
     let keys = CArg::new(&serde_json::to_string(&scan_keys).unwrap());
@@ -1556,6 +1609,27 @@ fn stealth_scan_not_mine_is_success_false() {
     assert!(result.handle.is_null(), "scan is stateless — no handle");
     let out = data_json(&result);
     assert_eq!(out["is_mine"], false, "a not-mine output reports is_mine=false");
+    unsafe { ootle_result_free(result) };
+}
+
+/// (c) stealth receive: an output that decrypts under the scanner's view key but pays a spend key the
+/// scanner's account cannot spend yields `{"is_mine":false}`.
+#[test]
+fn stealth_scan_foreign_spend_key_is_not_mine() {
+    let fx = load_fixture("stealth_scan/foreign_spend_key.json");
+    let scan_input = &fx["input"]["stealth_scan_input"];
+    let network = network_byte(&scan_input["network"]);
+    let scan_keys = serde_json::json!({
+        "view_secret": scan_input["view_secret"],
+        "account_public_key": scan_input["account_public_key"],
+        "skip_memo": scan_input["skip_memo"],
+    });
+    let keys = CArg::new(&serde_json::to_string(&scan_keys).unwrap());
+    let output = CArg::new(&serde_json::to_string(&scan_input["output"]).unwrap());
+
+    let result = unsafe { ootle_scan_stealth_output(network, keys.ptr(), output.ptr()) };
+    assert!(ok(&result), "scan failed: {}", error_code(&result));
+    assert_eq!(data_json(&result)["is_mine"], false, "a foreign spend key is not mine");
     unsafe { ootle_result_free(result) };
 }
 
@@ -1584,7 +1658,7 @@ fn stealth_decode_utxo_round_trips() {
     let network = network_byte(&scan_input["network"]);
     let scan_keys = serde_json::json!({
         "view_secret": scan_input["view_secret"],
-        "account_secret": scan_input["account_secret"],
+        "account_public_key": scan_input["account_public_key"],
         "skip_memo": true,
     });
     let keys = CArg::new(&serde_json::to_string(&scan_keys).unwrap());
@@ -1612,6 +1686,7 @@ fn stealth_scan_substate_not_mine_and_bad_json() {
     let foreign_keys = CArg::new(
         &serde_json::to_string(&serde_json::json!({
             "view_secret": "ff".repeat(31) + "0f",
+            "account_public_key": load_fixture("stealth_scan/mine_basic.json")["input"]["stealth_scan_input"]["account_public_key"],
             "skip_memo": true,
         }))
         .unwrap(),
@@ -1685,6 +1760,181 @@ fn decode_substate_round_trips() {
     let r = unsafe { ootle_decode_substate(std::ptr::null()) };
     assert!(!ok(&r) && error_code(&r) == "INVALID");
     unsafe { ootle_result_free(r) };
+}
+
+/// `ootle_decode_event` turns the indexer's base64 CBOR event (a `/transactions/events/stream` message's `event`) into
+/// the engine `Event`'s JSON; a value of another type ⇒ PARSE; bad JSON ⇒ PARSE; null arg ⇒ INVALID.
+#[test]
+fn decode_event_round_trips() {
+    use tari_engine_types::{encoded::Encoded, events::Event};
+
+    let event = Event::new(
+        None,
+        Default::default(),
+        "std.vault.deposit".to_string(),
+        [("amount", "100".to_string())].into_iter().collect(),
+    );
+    let served = serde_json::to_string(&Encoded::encode(&event).unwrap()).unwrap();
+    let event_json = CArg::new(&served);
+
+    let result = unsafe { ootle_decode_event(event_json.ptr()) };
+    assert!(ok(&result), "decode failed: {}", error_code(&result));
+    assert!(result.handle.is_null(), "decode is stateless — no handle");
+    let decoded = data_json(&result);
+    assert_eq!(decoded, serde_json::to_value(&event).unwrap());
+    assert_eq!(decoded["topic"], "std.vault.deposit");
+    unsafe { ootle_result_free(result) };
+
+    // A served value of another type ⇒ PARSE.
+    let r = unsafe { ootle_decode_execute_result(event_json.ptr()) };
+    assert!(!ok(&r) && error_code(&r) == "PARSE");
+    unsafe { ootle_result_free(r) };
+
+    // Bad JSON ⇒ PARSE.
+    let bad = CArg::new("{ not json");
+    let r = unsafe { ootle_decode_event(bad.ptr()) };
+    assert!(!ok(&r) && error_code(&r) == "PARSE");
+    unsafe { ootle_result_free(r) };
+
+    // Null arg ⇒ INVALID.
+    let r = unsafe { ootle_decode_event(std::ptr::null()) };
+    assert!(!ok(&r) && error_code(&r) == "INVALID");
+    unsafe { ootle_result_free(r) };
+}
+
+type FfiDecode = unsafe extern "C" fn(*const c_char) -> OotleResult;
+type WasmDecode = fn(&str) -> Result<String, ootle_wasm_core::error::OotleWasmError>;
+
+/// `value` as the indexer serves it: its CBOR encoding in base64.
+fn base64_of<T: tari_bor::Encode<()>>(value: &T) -> String {
+    serde_json::to_value(tari_engine_types::encoded::Encoded::encode(value).unwrap())
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// One served value per full decoder, as `(what, base64, C ABI decoder, ootle-wasm-bor decoder)`.
+fn served_decode_cases() -> [(&'static str, String, FfiDecode, WasmDecode); 6] {
+    use std::time::Duration;
+
+    use ootle_network::Network;
+    use tari_engine_types::{
+        Epoch,
+        Utxo,
+        commit_result::{ExecuteResult, FinalizeResult, TransactionResult},
+        events::Event,
+        fees::FeeReceipt,
+        resource::Resource,
+        resource_container::ResourceContainer,
+        substate::{SubstateDiff, SubstateValue},
+        transaction_receipt::{DiffSummary, FinalizeOutcome, TransactionReceipt},
+        vault::Vault,
+    };
+    use tari_template_lib_types::{Hash32, ResourceType, SubstateOwnerRule, constants::TARI_TOKEN};
+
+    let event = Event::new(
+        None,
+        Default::default(),
+        "std.vault.deposit".to_string(),
+        [("amount", "100".to_string())].into_iter().collect(),
+    );
+    let substate_value = SubstateValue::Vault(Vault::new(ResourceContainer::public_fungible(TARI_TOKEN, 100u64)));
+    let execute_result = ExecuteResult {
+        finalize: FinalizeResult::new(
+            Hash32::from_array([7; 32]),
+            vec![],
+            vec![],
+            TransactionResult::Accept(SubstateDiff::new()),
+            FeeReceipt::default(),
+        ),
+        execution_time: Duration::from_secs(1),
+        execute_epoch: None,
+        wasm_execution_points: 3,
+        native_execution_points: 4,
+    };
+    let receipt = TransactionReceipt {
+        outcome: FinalizeOutcome::Commit,
+        diff_summary: DiffSummary::from_diff(Network::LocalNet, &SubstateDiff::new(), Epoch(5)),
+        fee_withdrawals: Box::new([]),
+        events: Box::new([event.clone()]),
+        fee_receipt: FeeReceipt::default(),
+        epoch: Epoch(5),
+        intent_commitment: Hash32::from_array([3; 32]),
+    };
+    let resource = Resource::new(
+        ResourceType::Fungible,
+        SubstateOwnerRule::None,
+        Default::default(),
+        Default::default(),
+        None,
+        None,
+        6,
+        true,
+    );
+    let utxo = Utxo {
+        output: None,
+        is_frozen: true,
+    };
+
+    [
+        (
+            "event",
+            base64_of(&event),
+            ootle_decode_event,
+            ootle_wasm_core::encoded::decode_event_json,
+        ),
+        (
+            "substate value",
+            base64_of(&substate_value),
+            ootle_decode_substate_value,
+            ootle_wasm_core::encoded::decode_substate_value_json,
+        ),
+        (
+            "execute result",
+            base64_of(&execute_result),
+            ootle_decode_execute_result,
+            ootle_wasm_core::encoded::decode_execute_result_json,
+        ),
+        (
+            "transaction receipt",
+            base64_of(&receipt),
+            ootle_decode_transaction_receipt,
+            ootle_wasm_core::encoded::decode_transaction_receipt_json,
+        ),
+        (
+            "resource",
+            base64_of(&resource),
+            ootle_decode_resource,
+            ootle_wasm_core::encoded::decode_resource_json,
+        ),
+        (
+            "UTXO",
+            base64_of(&utxo),
+            ootle_decode_utxo,
+            ootle_wasm_core::encoded::decode_utxo_json,
+        ),
+    ]
+}
+
+/// Each full decoder turns a served value (a JSON base64 CBOR string) into the same JSON `ootle-wasm-bor` returns for
+/// it, and rejects the bare base64.
+#[test]
+fn encoded_decoders_match_wasm_bor() {
+    for (what, base64, ffi_decode, wasm_decode) in served_decode_cases() {
+        let served = CArg::new(&serde_json::Value::String(base64.clone()).to_string());
+        let result = unsafe { ffi_decode(served.ptr()) };
+        assert!(ok(&result), "{what}: decode failed: {}", error_code(&result));
+        assert!(result.handle.is_null(), "{what}: decode is stateless — no handle");
+        let wasm_json: serde_json::Value = serde_json::from_str(&wasm_decode(&base64).unwrap()).unwrap();
+        assert_eq!(data_json(&result), wasm_json, "{what}: matches ootle-wasm-bor");
+        unsafe { ootle_result_free(result) };
+
+        let bare = CArg::new(&base64);
+        let r = unsafe { ffi_decode(bare.ptr()) };
+        assert!(!ok(&r) && error_code(&r) == "PARSE", "{what}: bare base64 ⇒ PARSE");
+        unsafe { ootle_result_free(r) };
+    }
 }
 
 /// `ootle_account_balances` over the committed account-balances vector reproduces the per-resource
@@ -2104,11 +2354,11 @@ fn no_leaks_over_many_round_trips() {
     let addr_pk_hex = CArg::new(addr_fx["input"]["account_public_key"].as_str().unwrap());
 
     // Address codec (format identity + parse), driven from the committed address_codec vectors.
-    let id_fx = load_fixture("address_codec/identity_localnet_with_pay_ref.json");
+    let id_fx = load_fixture("address_codec/identity_localnet_with_destination_tag.json");
     let id_net = network_byte(&id_fx["input"]["network"]);
     let id_account = CArg::new(id_fx["input"]["account_public_key"].as_str().unwrap());
     let id_view = CArg::new(id_fx["input"]["view_only_key"].as_str().unwrap());
-    let id_pay_ref = CArg::new(id_fx["input"]["pay_ref"].as_str().unwrap());
+    let id_destination_tag = CArg::new(id_fx["input"]["destination_tag"].as_str().unwrap());
     let parse_id_fx = load_fixture("address_codec/parse_identity_esmeralda.json");
     let parse_addr = CArg::new(parse_id_fx["input"]["address"].as_str().unwrap());
     let parse_comp_fx = load_fixture("address_codec/parse_component.json");
@@ -2128,7 +2378,7 @@ fn no_leaks_over_many_round_trips() {
     let scan_keys = CArg::new(
         &serde_json::to_string(&serde_json::json!({
             "view_secret": scan_input["view_secret"],
-            "account_secret": scan_input["account_secret"],
+            "account_public_key": scan_input["account_public_key"],
             "skip_memo": scan_input["skip_memo"],
         }))
         .unwrap(),
@@ -2220,8 +2470,9 @@ fn no_leaks_over_many_round_trips() {
         assert!(ok(&addr));
         unsafe { ootle_result_free(addr) };
 
-        // address codec: format identity (with pay_ref) + parse identity + parse substate
-        let fmt = unsafe { ootle_format_identity_address(id_net, id_account.ptr(), id_view.ptr(), id_pay_ref.ptr()) };
+        // address codec: format identity (with destination_tag) + parse identity + parse substate
+        let fmt =
+            unsafe { ootle_format_identity_address(id_net, id_account.ptr(), id_view.ptr(), id_destination_tag.ptr()) };
         assert!(ok(&fmt));
         unsafe { ootle_result_free(fmt) };
         let pid = unsafe { ootle_parse_address(parse_addr.ptr()) };
@@ -2390,7 +2641,7 @@ fn no_leaks_over_many_round_trips() {
         unsafe { ootle_result_free(cs_applied) };
 
         // A extracts the record JSON to ship to B (does NOT consume the handle).
-        let cs_record = unsafe { ootle_unsigned_record_for_cosign(cs_h) };
+        let cs_record = unsafe { ootle_unsigned_record_for_cosign(cs_h, std::ptr::null()) };
         assert!(ok(&cs_record));
         let cs_record_json = serde_json::to_string(&data_json(&cs_record)).unwrap();
         unsafe { ootle_result_free(cs_record) };
@@ -2405,7 +2656,8 @@ fn no_leaks_over_many_round_trips() {
 
         // A attaches + seals (consuming the handle).
         let cs_auths = CArg::new(&serde_json::to_string(&serde_json::json!([cs_auth_obj])).unwrap());
-        let cs_sealed = unsafe { ootle_seal_and_encode_with_auth(cs_h, cs_keys.ptr(), cs_auths.ptr()) };
+        let cs_sealed =
+            unsafe { ootle_seal_and_encode_with_auth(cs_h, cs_keys.ptr(), cs_auths.ptr(), std::ptr::null()) };
         assert!(ok(&cs_sealed));
         unsafe { ootle_result_free(cs_sealed) };
     }

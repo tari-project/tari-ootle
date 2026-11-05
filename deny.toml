@@ -42,6 +42,7 @@ unmaintained = "workspace"
 # crate the workspace "depends on" can be absent from everything this project ships. Being absent
 # from every binary is a reason to rank an advisory, never on its own a reason to keep it: each
 # entry here also has to say why the fix is out of reach.
+# Every id here is also listed in `.cargo/audit.toml`, which `rustsec/audit-check` reads.
 ignore = [
     { id = "RUSTSEC-2023-0071", reason = """
 Marvin timing sidechannel in RSA private-key operations, with no patched release. Absent from every
@@ -51,6 +52,14 @@ It reaches the graph because `integration_tests` runs those binaries to stand up
 `tari_p2p` does with it is verify detached signatures on release hash files against maintainer
 public keys, which performs no private-key operation and so offers no timing oracle. Revisit if
 `rsa` publishes a fix or the L1 drops `pgp`.""" },
+    { id = "RUSTSEC-2026-0387", reason = """
+crypto-bigint has secret-dependent branches in operations meant to be constant-time, patched only in
+0.7.6. The tree carries 0.5.5, pinned by RustCrypto's `elliptic-curve` 0.13 line, and nothing on that
+line can take 0.7. Of the binaries this project ships, only `tari_ootle_walletd` links it, through
+`webrtc` -> `dtls` -> `p256`/`p384`, which runs only under the opt-in `--enable-webrtc`. `dtls` uses those
+curves for ephemeral ECDH alone: each secret scalar serves one handshake, so an observer gets one
+trace per secret, and DTLS signing goes through `ring`. `pgp` and `cx448` also pull it in, reached
+only through the L1 binaries `integration_tests` runs. Remove once `dtls` moves to `p256` 0.14.""" },
 ]
 
 [licenses]

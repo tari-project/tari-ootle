@@ -88,6 +88,14 @@ impl ErrorResponse {
     }
 
     #[must_use]
+    pub fn gone(msg: impl Into<Box<str>>) -> Self {
+        Self {
+            status: StatusCode::GONE,
+            error: msg.into(),
+        }
+    }
+
+    #[must_use]
     pub fn too_many_requests(msg: impl Into<Box<str>>) -> Self {
         Self {
             status: StatusCode::TOO_MANY_REQUESTS,

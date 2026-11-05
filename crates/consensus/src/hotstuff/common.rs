@@ -5,9 +5,13 @@ use std::{collections::HashMap, iter, ops::ControlFlow};
 
 use indexmap::IndexMap;
 use log::*;
-use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock, PcId, ProposalCertificate, ShardGroupAccumulatedData};
-use tari_engine_types::{ValidatorFeePool, fees::ExhaustBurnRate, substate::SubstateDiff};
+use tari_engine_types::{
+    ValidatorFeePool,
+    commit_result::{AbortReason, RejectReason},
+    fees::ExhaustBurnRate,
+    substate::SubstateDiff,
+};
 use tari_ootle_common_types::{
     Epoch,
     NodeAddressable,
@@ -33,13 +37,15 @@ use tari_ootle_storage::{
         EpochCheckpoint,
         PendingShardStateTreeDiff,
         SubstateChange,
+        TransactionExecution,
         TransactionPoolRecord,
         TransactionRecord,
         TreeRootSummary,
     },
 };
 use tari_ootle_transaction::Network;
-use tari_state_tree::{JellyfishMerkleTree, JmtHashScheme, SPARSE_MERKLE_PLACEHOLDER_HASH, StateTreeError};
+use tari_sidechain::FixedHash;
+use tari_state_tree::{JellyfishMerkleTree, JmtHashScheme, StateTreeError};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
@@ -361,7 +367,7 @@ pub fn calculate_state_merkle_root<'a, TTx: StateStoreReadTransaction, I: IntoIt
     });
     let mut sharded_tree = ShardedStateTree::new(tx).with_pending_diffs(pending_tree_diffs);
     let root_hash =
-        sharded_tree.put_substate_tree_changes(ProtocolVersion::at(network, epoch), shard_group, change_map)?;
+        sharded_tree.put_substate_tree_changes(ProtocolVersion::at(network, epoch), shard_group, epoch, change_map)?;
 
     Ok((
         FixedHash::new(root_hash.into_array()),
@@ -394,21 +400,16 @@ where
         shard_tree_summary.insert(Shard::global(), TreeRootSummary {
             root_hash,
             state_version: version,
+            transition_acc: tx.state_transitions_get_accumulator(Shard::global(), version)?,
         });
     } else {
-        shard_tree_summary.insert(Shard::global(), TreeRootSummary {
-            root_hash: SPARSE_MERKLE_PLACEHOLDER_HASH,
-            state_version: 0,
-        });
+        shard_tree_summary.insert(Shard::global(), TreeRootSummary::empty());
     }
 
     for shard in shard_group.shard_iter() {
         let Some(version) = tx.state_tree_versions_get_latest(shard)? else {
             // At v0 there have been no state changes
-            shard_tree_summary.insert(shard, TreeRootSummary {
-                root_hash: SPARSE_MERKLE_PLACEHOLDER_HASH,
-                state_version: 0,
-            });
+            shard_tree_summary.insert(shard, TreeRootSummary::empty());
             continue;
         };
 
@@ -421,10 +422,11 @@ where
         shard_tree_summary.insert(shard, TreeRootSummary {
             root_hash,
             state_version: version,
+            transition_acc: tx.state_transitions_get_accumulator(shard, version)?,
         });
     }
 
-    let checkpoint = EpochCheckpoint::new(commit_proof, shard_tree_summary);
+    let checkpoint = EpochCheckpoint::new(commit_proof, shard_tree_summary, eoe_block.header().metadata());
     Ok(checkpoint)
 }
 
@@ -527,6 +529,61 @@ pub(crate) fn get_highest_seen_justified_view<TTx: StateStoreReadTransaction>(
         .map(|high_tc| high_tc.height())
         .unwrap_or_default();
     Ok(high_pc.max(high_tc))
+}
+
+/// Moves `tx_rec` to ABORT if, for a block in `epoch`, it has outlived its validity window in `LocalPrepared` (see
+/// [`TransactionPoolRecord::is_local_prepared_expired_at`]). Returns the abort execution the block must record.
+///
+/// The proposer and every replica apply this to the record as the block's foreign proposals leave it, before deciding
+/// the transaction's next command, so they agree on whether the block's LocalAccept is an ABORT.
+pub fn abort_if_local_prepared_expired(
+    tx_rec: &mut TransactionPoolRecord,
+    epoch: Epoch,
+) -> Option<TransactionExecution> {
+    if !tx_rec.is_local_prepared_expired_at(epoch) {
+        return None;
+    }
+
+    info!(
+        target: LOG_TARGET,
+        "⏰ Transaction {} is still waiting on foreign shard groups in {} after its max_epoch {}. Aborting.",
+        tx_rec.id(),
+        epoch,
+        tx_rec.max_epoch(),
+    );
+    Some(abort_local_prepared(tx_rec))
+}
+
+/// Moves `tx_rec` to ABORT if it is in `LocalPrepared` with a COMMIT decision, ahead of an end of epoch that changes
+/// the number of committees (see [`EpochEndDrain`](crate::hotstuff::EpochEndDrain)). Returns the abort execution the
+/// block must record.
+///
+/// CONSENSUS RULE: a replica accepts this abort, when the leader proposes it, in a block it evaluates while its own
+/// oracle reports such a next epoch. The abort is safe for the reason given at
+/// [`TransactionPoolRecord::is_local_prepared_expired_at`]: the local shard group has not sent its LocalAccept.
+pub fn abort_local_prepared_for_epoch_end(tx_rec: &mut TransactionPoolRecord) -> Option<TransactionExecution> {
+    if !tx_rec.current_stage().is_local_prepared() || !tx_rec.current_decision().is_commit() {
+        return None;
+    }
+
+    info!(
+        target: LOG_TARGET,
+        "⏰ Transaction {} is still in LocalPrepared at an end of epoch that changes the committees. Aborting.",
+        tx_rec.id(),
+    );
+    Some(abort_local_prepared(tx_rec))
+}
+
+fn abort_local_prepared(tx_rec: &mut TransactionPoolRecord) -> TransactionExecution {
+    let execution = TransactionExecution::abort(tx_rec.id(), RejectReason::Abort {
+        reason: AbortReason::EpochExpired,
+    });
+    tx_rec
+        .set_local_decision(execution.decision())
+        .set_transaction_fee(0)
+        .set_exhaust_burn(0)
+        .no_leader_fee();
+    execution
 }
 
 /// Records the prepare/accept evidence for the commands in `new_leaf_block` and its not-yet-justified ancestors,

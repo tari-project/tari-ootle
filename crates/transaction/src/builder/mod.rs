@@ -18,13 +18,13 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, InputDeclaration, declare_input, declare_inputs};
-use tari_ootle_template_metadata::MetadataHash;
 use tari_template_lib_types::{
     Amount,
     FunctionName,
     OwnerRule,
     ResourceAddress,
     TemplateAddress,
+    TemplateMetadataHash,
     ValidatorFeePoolAddress,
     access_rules::ComponentAccessRules,
     constants::TARI_TOKEN,
@@ -41,6 +41,7 @@ use crate::{
     ComponentReference,
     Instruction,
     IntoSigned,
+    MainSigner,
     MigrateFunction,
     NftAssertVec,
     NftCheck,
@@ -311,13 +312,13 @@ impl TransactionBuilder<MainIntent> {
         self
     }
 
-    /// Set whether the seal signature also authorises the transaction (defaults to `true`).
+    /// Sets the transaction's main signer (defaults to [`MainSigner::SealSigner`]).
     ///
     /// The value is final: neither the builder nor sealing changes it afterwards, so a
     /// transaction whose seal signer must not carry authority (e.g. a co-signed spend) can
-    /// settle the flag here before any signing message is computed.
-    pub fn with_seal_signer_authorized(mut self, authorized: bool) -> Self {
-        self.unsigned_transaction.set_seal_signer_authorized(authorized);
+    /// settle it here before any signing message is computed.
+    pub fn with_main_signer(mut self, main_signer: MainSigner) -> Self {
+        self.unsigned_transaction.set_main_signer(main_signer);
         self
     }
 
@@ -600,6 +601,27 @@ impl<D> TransactionBuilder<D> {
         self.add_instruction(Instruction::DropAllProofsInWorkspace)
     }
 
+    /// Opens an authorization window over the workspace proof `label` for the instructions that follow.
+    pub fn authorize_proof<T: Into<BuilderWorkspaceKey>>(self, label: T) -> Self {
+        let proof = self.get_workspace_offset_id_from_named_arg(label.into());
+        self.add_instruction(Instruction::AuthorizeProof { proof })
+    }
+
+    /// Closes the authorization window over the workspace proof `label`.
+    pub fn drop_proof_authorization<T: Into<BuilderWorkspaceKey>>(self, label: T) -> Self {
+        let proof = self.get_workspace_offset_id_from_named_arg(label.into());
+        self.add_instruction(Instruction::DropProofAuthorization { proof })
+    }
+
+    /// Adds the instructions built by `f` inside an authorization window over the workspace proof `label`, so the
+    /// window covers exactly those instructions.
+    pub fn with_authorized_proof<T: Into<BuilderWorkspaceKey>, F: FnOnce(Self) -> Self>(self, label: T, f: F) -> Self {
+        // Resolved once: the closure may rebind `label` to another workspace item.
+        let proof = self.get_workspace_offset_id_from_named_arg(label.into());
+        f(self.add_instruction(Instruction::AuthorizeProof { proof }))
+            .add_instruction(Instruction::DropProofAuthorization { proof })
+    }
+
     pub fn put_last_instruction_output_on_workspace<T: Into<BuilderWorkspaceKey>>(mut self, label: T) -> Self {
         let key = self.workspace_ids.insert(label.into());
         self.add_instruction(Instruction::PutLastInstructionOutputOnWorkspace { key })
@@ -817,14 +839,18 @@ impl<D> TransactionBuilder<D> {
     /// # Panics
     ///
     /// Panics if the transaction's blob count would exceed the `BlobIndex` range.
-    pub fn publish_template_with_metadata<B: Into<Blob>>(mut self, binary: B, metadata_hash: MetadataHash) -> Self {
+    pub fn publish_template_with_metadata<B: Into<Blob>, H: Into<TemplateMetadataHash>>(
+        mut self,
+        binary: B,
+        metadata_hash: H,
+    ) -> Self {
         let idx = self
             .unsigned_transaction
             .add_blob(binary.into())
             .expect("transaction blob count exceeds BlobIndex range");
         self.add_instruction(Instruction::PublishTemplate {
             binary: idx,
-            metadata_hash: Some(metadata_hash),
+            metadata_hash: Some(metadata_hash.into()),
         })
     }
 
@@ -842,11 +868,15 @@ impl<D> TransactionBuilder<D> {
     /// # Panics
     ///
     /// Panics if no blob has been registered under `name`.
-    pub fn publish_template_from_blob_with_metadata<N: AsRef<str>>(self, name: N, metadata_hash: MetadataHash) -> Self {
-        self.publish_template_from_blob_inner(name.as_ref(), Some(metadata_hash))
+    pub fn publish_template_from_blob_with_metadata<N: AsRef<str>, H: Into<TemplateMetadataHash>>(
+        self,
+        name: N,
+        metadata_hash: H,
+    ) -> Self {
+        self.publish_template_from_blob_inner(name.as_ref(), Some(metadata_hash.into()))
     }
 
-    fn publish_template_from_blob_inner(self, name: &str, metadata_hash: Option<MetadataHash>) -> Self {
+    fn publish_template_from_blob_inner(self, name: &str, metadata_hash: Option<TemplateMetadataHash>) -> Self {
         let idx = self
             .blob_ids
             .get(name)
@@ -964,6 +994,22 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
+    fn add_inputs_for_args(&mut self, args: &[InstructionArg]) {
+        for arg in args {
+            if let Some(bytes) = arg.as_literal_bytes() &&
+                let Ok(indexed) = IndexedValue::from_raw(bytes)
+            {
+                declare_inputs(
+                    self.unsigned_transaction.inputs_mut(),
+                    indexed
+                        .referenced_substates()
+                        .filter(SubstateId::is_declarable_input)
+                        .map(InputDeclaration::write),
+                );
+            }
+        }
+    }
+
     fn add_inputs_for_instruction(&mut self, instruction: &Instruction) {
         if !self.fill_inputs {
             return;
@@ -971,29 +1017,11 @@ impl<D> TransactionBuilder<D> {
 
         match instruction {
             Instruction::CallFunction { args, .. } => {
-                for arg in args {
-                    if let InstructionArg::Literal(bytes) = arg &&
-                        let Ok(indexed) = IndexedValue::from_raw(bytes)
-                    {
-                        declare_inputs(
-                            self.unsigned_transaction.inputs_mut(),
-                            indexed.referenced_substates().map(InputDeclaration::write),
-                        );
-                    }
-                }
+                self.add_inputs_for_args(args);
             },
             Instruction::CallMethod { call, args, .. } => {
                 self.add_input_for_component_ref(call);
-                for arg in args {
-                    if let InstructionArg::Literal(bytes) = arg &&
-                        let Ok(indexed) = IndexedValue::from_raw(bytes)
-                    {
-                        declare_inputs(
-                            self.unsigned_transaction.inputs_mut(),
-                            indexed.referenced_substates().map(InputDeclaration::write),
-                        );
-                    }
-                }
+                self.add_inputs_for_args(args);
             },
             Instruction::StealthTransfer {
                 resource_address_ref, ..
@@ -1018,8 +1046,11 @@ impl<D> TransactionBuilder<D> {
                         .insert((*resource_address).into());
                 }
             },
-            Instruction::UpdateComponentTemplate { component, .. } => {
+            Instruction::UpdateComponentTemplate { component, migrate, .. } => {
                 self.add_input_for_component_ref(component);
+                if let Some(migrate) = migrate {
+                    self.add_inputs_for_args(&migrate.args);
+                }
             },
             Instruction::Assert {
                 assertion: Assertion::IsNotNull,
@@ -1033,7 +1064,9 @@ impl<D> TransactionBuilder<D> {
             Instruction::PutIntoBucket { .. } |
             Instruction::PublishTemplate { .. } |
             Instruction::AllocateAddress { .. } |
-            Instruction::PayFeeFromBucket { .. } => {},
+            Instruction::PayFeeFromBucket { .. } |
+            Instruction::AuthorizeProof { .. } |
+            Instruction::DropProofAuthorization { .. } => {},
         }
     }
 
@@ -1099,12 +1132,11 @@ impl<D> TransactionBuilder<D> {
 }
 
 impl Signable<&RistrettoPublicKeyBytes> for TransactionBuilder<MainIntent> {
-    type MessageOutput = [u8; 64];
     type Signature = TransactionSignature;
 
     /// The message covers the body [`IntoSigned::into_signed`] produces, so it is taken over a copy with the fee
     /// instructions applied.
-    fn to_signing_message(&self, sealed_signer: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
+    fn to_signing_message(&self, sealed_signer: &RistrettoPublicKeyBytes) -> crate::TransactionMessage {
         self.clone().build_unsigned().to_signing_message(sealed_signer)
     }
 }

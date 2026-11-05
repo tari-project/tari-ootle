@@ -5,7 +5,6 @@ use std::{collections::BTreeMap, io::Write, ops::Deref};
 
 use rand::{Rng, RngExt};
 use tari_bor::cbor;
-use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, Decision, LeafBlock, PcId, ProposalCertificate, ShardGroupAccumulatedData};
 use tari_engine_types::{
     component::{Component, ComponentBody, ComponentHeader},
@@ -38,6 +37,7 @@ use tari_ootle_storage::{
         CommandsCommitProof,
         ForeignProposal,
         ForeignProposalRecord,
+        LockedEpoch,
         MultiShardAtom,
         SubstateCreated,
         SubstateRecord,
@@ -46,7 +46,7 @@ use tari_ootle_storage::{
     },
 };
 use tari_ootle_transaction::{Network, TransactionId};
-use tari_sidechain::{CommitProofElement, QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
+use tari_sidechain::{CommitProofElement, FixedHash, QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 use tari_state_tree::{SpreadPrefixStateTree, SubstateTreeChange, Version};
 use tari_template_lib::types::{
@@ -90,6 +90,8 @@ pub fn create_tx_atom() -> MultiShardAtom {
         evidence: Default::default(),
         transaction_fee: 0,
         leader_fee: None,
+        fee_intent_only: false,
+        locked_epoch: LockedEpoch::new(Epoch(1), Default::default(), Default::default()),
     }
 }
 
@@ -150,6 +152,7 @@ pub fn build_substate_value(entity_id: Option<EntityId>) -> SubstateValue {
             owner_rule: SubstateOwnerRule::None,
             access_rules: ComponentAccessRules::allow_all(),
             entity_id,
+            upgrade_rule: Default::default(),
         },
         body: ComponentBody {
             state: cbor!({
@@ -236,6 +239,7 @@ pub fn substate_value_for_entity(entity_id: EntityId) -> SubstateValue {
             owner_rule: SubstateOwnerRule::None,
             access_rules: ComponentAccessRules::allow_all(),
             entity_id,
+            upgrade_rule: Default::default(),
         },
         body: ComponentBody {
             state: cbor!({
@@ -385,7 +389,7 @@ pub fn create_qc(block: &LeafBlock) -> ProposalCertificate {
         block.height(),
         block.epoch(),
         ShardGroup::all_shards(num_preshards()),
-        vec![],
+        ProposalCertificate::genesis_signatures(),
         QuorumDecision::Accept,
     )
 }
@@ -451,7 +455,7 @@ pub fn create_foreign_proposal(parent_id: BlockId, epoch: Epoch) -> ForeignPropo
         NodeHeight(1),
         epoch,
         shard_group,
-        vec![],
+        ProposalCertificate::genesis_signatures(),
         QuorumDecision::Accept,
     );
 
@@ -492,7 +496,7 @@ pub fn create_foreign_proposal(parent_id: BlockId, epoch: Epoch) -> ForeignPropo
             proposed_by: Default::default(),
             state_merkle_root: Default::default(),
             command_merkle_root: Default::default(),
-            transaction_merkle_root: None,
+            transaction_merkle_root: Default::default(),
             signature: Default::default(),
             accumulated_data: Default::default(),
             metadata_hash: Default::default(),
@@ -504,13 +508,17 @@ pub fn create_foreign_proposal(parent_id: BlockId, epoch: Epoch) -> ForeignPropo
                 epoch: foreign_block.epoch().as_u64(),
                 height: foreign_block.height().as_u64(),
                 protocol_version: foreign_block.header().protocol_version().as_u32(),
-                signatures: vec![],
+                signatures: ProposalCertificate::genesis_signatures(),
                 decision: QuorumDecision::Accept,
             },
         )],
     });
 
-    ForeignProposalRecord::new(ForeignProposal::new(commit_proof, BlockPledge::default()))
+    ForeignProposalRecord::new(ForeignProposal::new(
+        commit_proof,
+        BlockPledge::default(),
+        foreign_block.header().metadata(),
+    ))
 }
 
 /// The state-tree version the substates committed by [`commit_substates`] land at.

@@ -6,27 +6,30 @@
 
 mod support;
 
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
 use futures::StreamExt;
 use tari_consensus_types::Decision;
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{
     Epoch,
-    Utxo,
     commit_result::{ExecuteResult, FinalizeResult, TransactionResult},
     component::{Component, ComponentBody, ComponentHeader},
+    encoded::Encoded,
     fees::FeeReceipt,
     resource_container::ResourceContainer,
     substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
     vault::Vault,
 };
-use tari_indexer_client::types::WatchedSubstateItem;
+use tari_indexer_client::types::{EpochCheckpointEntry, SubstateState, ValidatorSetCommittee, WatchedSubstateItem};
 use tari_ootle_common_types::{StateVersion, SubstateVersion, shard::Shard};
 use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId, args};
 use tari_ootle_wallet_sdk::{
     models::TransactionStatus,
     network::{
+        FetchedSubstates,
+        FetchedUtxos,
+        PlacedTagAndNoncePair,
         SubstateQueryResult,
         TransactionFinalizedResult,
         TransactionFinalizedStream,
@@ -34,7 +37,7 @@ use tari_ootle_wallet_sdk::{
         UtxoUpdateStream,
         WalletNetworkInterface,
     },
-    storage::{ReadableWalletStore, TagAndPublicNoncePair, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
+    storage::{ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 use tari_ootle_wallet_sdk_services::{account_monitor::AccountScanner, notify::Notify};
 use tari_template_abi::TemplateDef;
@@ -62,7 +65,7 @@ fn build_transaction() -> Transaction {
         .allocate_component_address("component")
         .put_last_instruction_output_on_workspace("bucket")
         .call_method("component", "new", args!["bucket"])
-        .build_and_seal(&RistrettoSecretKey::from(1))
+        .build_and_seal(&RistrettoSecretKey::from(1u64))
 }
 
 fn vault_value() -> SubstateValue {
@@ -80,6 +83,7 @@ fn account_component_value() -> SubstateValue {
             owner_rule: SubstateOwnerRule::None,
             access_rules: ComponentAccessRules::new(),
             entity_id: Default::default(),
+            upgrade_rule: Default::default(),
         },
         body: ComponentBody::empty(),
     }
@@ -120,6 +124,8 @@ fn committed_result(transaction_id: TransactionId, diff: SubstateDiff) -> Transa
             finalized_time: now(),
             abort_details: None,
         },
+        receipt: None,
+        encoded_execution_result: None,
     }
 }
 
@@ -205,14 +211,18 @@ impl WalletNetworkInterface for FixedSubstateNetwork {
         _address: &SubstateId,
         _version: Option<SubstateVersion>,
         _local_search_only: bool,
+        _include_proof: bool,
     ) -> Result<SubstateQueryResult, Self::Error> {
         Ok(SubstateQueryResult {
             version: SubstateVersion::new(1),
-            substate: self.substate.clone(),
+            state: SubstateState::Up {
+                substate: Encoded::encode(&self.substate).unwrap(),
+            },
+            proof: None,
         })
     }
 
-    async fn get_substates(&self, _: Vec<SubstateId>) -> Result<HashMap<SubstateId, Substate>, Self::Error> {
+    async fn get_substates(&self, _: &[SubstateId], _: bool) -> Result<FetchedSubstates, Self::Error> {
         panic!("FixedSubstateNetwork called")
     }
 
@@ -237,6 +247,7 @@ impl WalletNetworkInterface for FixedSubstateNetwork {
     async fn query_transaction_result(
         &self,
         _transaction_id: TransactionId,
+        _include_proof: bool,
     ) -> Result<TransactionQueryResult, Self::Error> {
         panic!("FixedSubstateNetwork called")
     }
@@ -268,15 +279,44 @@ impl WalletNetworkInterface for FixedSubstateNetwork {
         panic!("FixedSubstateNetwork called")
     }
 
-    async fn get_unspent_utxos(
+    async fn fetch_utxos(
         &self,
         _resource_address: ResourceAddress,
-        _tag_and_nonce_pairs: Vec<TagAndPublicNoncePair>,
-    ) -> Result<Vec<(UtxoId, Utxo)>, Self::Error> {
+        _tag_and_nonce_pairs: Vec<PlacedTagAndNoncePair>,
+    ) -> Result<FetchedUtxos, Self::Error> {
+        panic!("FixedSubstateNetwork called")
+    }
+
+    async fn get_latest_epoch_checkpoint(&self, _shard: Shard) -> Result<EpochCheckpointEntry, Self::Error> {
+        panic!("FixedSubstateNetwork called")
+    }
+
+    async fn get_latest_shard_group_checkpoints(&self) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        panic!("FixedSubstateNetwork called")
+    }
+
+    async fn list_epoch_checkpoints(
+        &self,
+        _from_epoch: tari_ootle_common_types::Epoch,
+        _limit: u32,
+        _shard: Shard,
+    ) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        panic!("FixedSubstateNetwork called")
+    }
+
+    async fn get_committee(
+        &self,
+        _epoch: tari_ootle_common_types::Epoch,
+        _shard: Shard,
+    ) -> Result<ValidatorSetCommittee, Self::Error> {
         panic!("FixedSubstateNetwork called")
     }
 
     async fn get_current_epoch(&self) -> Result<tari_ootle_common_types::Epoch, Self::Error> {
+        panic!("FixedSubstateNetwork called")
+    }
+
+    async fn get_consensus_epoch(&self) -> Result<Option<tari_ootle_common_types::Epoch>, Self::Error> {
         panic!("FixedSubstateNetwork called")
     }
 

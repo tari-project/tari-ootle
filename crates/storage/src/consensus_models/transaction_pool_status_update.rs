@@ -65,6 +65,10 @@ impl TransactionPoolStatusUpdate {
         self.transaction.exhaust_burn()
     }
 
+    pub fn is_fee_intent_only(&self) -> bool {
+        self.transaction.is_fee_intent_only()
+    }
+
     pub fn leader_fee(&self) -> Option<&LeaderFee> {
         self.transaction.leader_fee()
     }
@@ -80,6 +84,9 @@ impl TransactionPoolStatusUpdate {
         tx_rec_mut.set_locked_epoch(self.locked_epoch().cloned());
         if let Some(decision) = self.transaction().remote_decision() {
             tx_rec_mut.set_remote_decision(decision);
+        }
+        if self.is_fee_intent_only() {
+            tx_rec_mut.set_fee_intent_only(true);
         }
     }
 }

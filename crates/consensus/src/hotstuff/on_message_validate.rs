@@ -5,18 +5,26 @@ use std::collections::{HashSet, VecDeque};
 
 use log::*;
 use tari_bor::BorError;
-use tari_consensus_types::BlockId;
+use tari_consensus_types::{BlockId, LockedBlock};
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     Epoch,
     NodeHeight,
     committee::{Committee, CommitteeInfo},
+    optional::Optional,
 };
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
-    consensus_models::{Block, ForeignParkedProposal, ForeignProposal, TransactionRecord},
+    consensus_models::{
+        Block,
+        BookkeepingModel,
+        ForeignParkedProposal,
+        ForeignProposal,
+        ProposalOrigin,
+        TransactionRecord,
+    },
 };
 use tari_ootle_transaction::{Transaction, TransactionId};
 use tokio::sync::broadcast;
@@ -29,7 +37,7 @@ use crate::{
         ProposalValidationError,
         epoch_state::EpochState,
         error::HotStuffError,
-        on_receive_foreign_proposal::validate_evidence_and_pledges_match,
+        on_receive_foreign_proposal::{OnReceiveForeignProposalHandler, validate_foreign_proposal_contents},
         on_receive_new_transaction::OnReceiveNewTransaction,
     },
     messages::{
@@ -39,6 +47,7 @@ use crate::{
         HotstuffMessage,
         MAX_REQUESTED_TRANSACTIONS,
         MissingTransactionsRequest,
+        MissingTransactionsResponse,
         ProposalMessage,
     },
     tracing::TraceTimer,
@@ -47,6 +56,11 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_message_validate";
+
+/// How many blocks waiting on transactions one proposer may have parked at one height. An honest leader proposes once
+/// per height, so the allowance leaves room for a re-proposal. Slots are counted per proposer so that one member's
+/// blocks cannot take another member's.
+pub const MAX_PARKED_BLOCKS_PER_PROPOSER_PER_HEIGHT: usize = 2;
 
 pub struct OnMessageValidate<TConsensusSpec: ConsensusSpec> {
     config: HotstuffConfig,
@@ -91,6 +105,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         from: TConsensusSpec::Addr,
         msg: HotstuffMessage,
         new_transactions: &OnReceiveNewTransaction<TConsensusSpec>,
+        foreign_proposals: &mut OnReceiveForeignProposalHandler<TConsensusSpec>,
     ) -> Result<MessageValidationResult<TConsensusSpec::Addr>, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "on_message_validate");
         match msg {
@@ -118,29 +133,17 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 self.process_catch_up_response(from, epoch_state, *msg, new_transactions)
                     .await
             },
-            HotstuffMessage::ForeignProposal(proposal) => {
-                self.process_foreign_proposal(epoch_state, from, proposal).await
+            HotstuffMessage::ForeignProposal(msg) => {
+                // Honest late replies to a request another peer already answered also land here, so this logs at debug.
+                let block_id = msg.proposal.calculate_block_id();
+                if !foreign_proposals.take_reply(&block_id, &from) {
+                    debug!(target: LOG_TARGET, "❓Received foreign proposal {block_id} from {from}, who has no open request for it. Discarding message");
+                    return Ok(MessageValidationResult::Discard);
+                }
+                self.process_foreign_proposal(epoch_state, from, msg).await
             },
             HotstuffMessage::MissingTransactionsResponse(msg) => {
-                let Some(request) = self.active_missing_transaction_requests.take(msg.request_id, &from) else {
-                    warn!(target: LOG_TARGET, "❓Received missing transactions (req_id = {}) from {} that we did not request. Discarding message", msg.request_id, from);
-                    return Ok(MessageValidationResult::Discard);
-                };
-
-                match request.decode_response(
-                    msg.transactions,
-                    self.config.consensus_constants.max_transaction_size_bytes,
-                ) {
-                    Ok(transactions) => Ok(MessageValidationResult::RequestedTransactions {
-                        from,
-                        block_id: msg.block_id,
-                        transactions,
-                    }),
-                    Err(err) => {
-                        warn!(target: LOG_TARGET, "⚠️Peer {from} sent an invalid response to req_id = {}: {err}. Discarding message", msg.request_id);
-                        Ok(MessageValidationResult::Discard)
-                    },
-                }
+                Ok(self.process_missing_transactions_response(from, msg))
             },
             HotstuffMessage::MissingTransactionsRequest(msg) => {
                 if !self
@@ -182,6 +185,37 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 Ok(MessageValidationResult::Ready { from, message: msg })
             },
             msg => Ok(MessageValidationResult::Ready { from, message: msg }),
+        }
+    }
+
+    fn process_missing_transactions_response(
+        &mut self,
+        from: TConsensusSpec::Addr,
+        msg: MissingTransactionsResponse,
+    ) -> MessageValidationResult<TConsensusSpec::Addr> {
+        let Some(request) = self.active_missing_transaction_requests.take(msg.request_id, &from) else {
+            warn!(target: LOG_TARGET, "❓Received missing transactions (req_id = {}) from {} that we did not request. Discarding message", msg.request_id, from);
+            return MessageValidationResult::Discard;
+        };
+
+        match request.decode_response(
+            msg.transactions,
+            self.config.consensus_constants.max_transaction_size_bytes,
+        ) {
+            Ok(transactions) => {
+                let remaining = request.remaining_after(&transactions);
+                MessageValidationResult::RequestedTransactions {
+                    from,
+                    block_id: request.block_id,
+                    epoch: request.epoch,
+                    transactions,
+                    remaining,
+                }
+            },
+            Err(err) => {
+                warn!(target: LOG_TARGET, "⚠️Peer {from} sent an invalid response to req_id = {}: {err}. Discarding message", msg.request_id);
+                MessageValidationResult::Discard
+            },
         }
     }
 
@@ -292,7 +326,13 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             .await?;
         // Only a request that went out holds one of the few slots a response can be matched against.
         self.active_missing_transaction_requests
-            .insert(request_id, to, missing_txs);
+            .insert(PendingMissingTransactionsRequest {
+                request_id,
+                to,
+                block_id,
+                epoch,
+                transactions: missing_txs,
+            });
         Ok(())
     }
 
@@ -342,7 +382,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             epoch_state,
             proposal,
             new_transactions,
-            HotstuffMessage::new_proposal,
+            ProposalOrigin::Live,
         )
         .await
     }
@@ -378,16 +418,15 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             epoch_state,
             proposal,
             new_transactions,
-            HotstuffMessage::new_catch_up_sync_response,
+            ProposalOrigin::CatchUp,
         )
         .await
     }
 
     pub fn update_parked_blocks<'a, I: IntoIterator<Item = &'a TransactionId> + ExactSizeIterator>(
         &self,
-        current_height: NodeHeight,
         transaction_ids: I,
-    ) -> Result<(Vec<ProposalMessage>, Vec<ForeignProposalMessage>), HotStuffError> {
+    ) -> Result<(UnparkedLocalBlocks, Vec<ForeignProposalMessage>), HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "update_local_parked_blocks").with_iterations(transaction_ids.len());
         self.store.with_write_tx(|tx| {
             // TODO(perf)
@@ -395,8 +434,8 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             let mut foreign_unparked_blocks = Vec::new();
             for transaction_id in transaction_ids {
                 debug!(target: LOG_TARGET, "🔍 Checking if transaction {} unparks any blocks", transaction_id);
-                if let Some((unparked_block, foreign_proposals)) =
-                    tx.parked_block_remove_missing_transaction(current_height + NodeHeight(1), transaction_id)?
+                if let Some((unparked_block, foreign_proposals, origin)) =
+                    tx.parked_block_remove_missing_transaction(transaction_id)?
                 {
                     info!(target: LOG_TARGET, "♻️ all transactions for local block {unparked_block} are ready for consensus");
 
@@ -404,10 +443,13 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                         block: unparked_block.as_leaf(),
                     });
 
-                    unparked_blocks.push(ProposalMessage {
-                        block: unparked_block,
-                        foreign_proposals,
-                    });
+                    unparked_blocks.push((
+                        ProposalMessage {
+                            block: unparked_block,
+                            foreign_proposals,
+                        },
+                        origin,
+                    ));
                 } else {
                     debug!(target: LOG_TARGET, "🔍 Transaction {} did not unpark any blocks", transaction_id);
                 }
@@ -457,7 +499,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         proposal: ProposalMessage,
         new_transactions: &OnReceiveNewTransaction<TConsensusSpec>,
-        to_message: fn(ProposalMessage) -> HotstuffMessage,
+        origin: ProposalOrigin,
     ) -> Result<MessageValidationResult<TConsensusSpec::Addr>, HotStuffError> {
         let has_missing_transactions = self.store.with_write_tx(|tx| {
             self.resequence_unpooled_transactions(tx, epoch_state, &proposal, new_transactions)?;
@@ -468,8 +510,12 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         if !has_missing_transactions {
             return Ok(MessageValidationResult::Ready {
                 from,
-                message: to_message(proposal),
+                message: proposal_message(origin, proposal),
             });
+        }
+
+        if !self.has_parking_slot(&from, epoch_state, &proposal.block)? {
+            return Ok(MessageValidationResult::Discard);
         }
 
         if !self
@@ -480,13 +526,13 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         }
 
         let missing_tx_ids = self.store.with_write_tx(|tx| {
-            self.check_for_missing_transactions(tx, epoch_state.local_committee_info(), &proposal)
+            self.check_for_missing_transactions(tx, epoch_state.local_committee_info(), &proposal, origin)
         })?;
 
         if missing_tx_ids.is_empty() {
             return Ok(MessageValidationResult::Ready {
                 from,
-                message: to_message(proposal),
+                message: proposal_message(origin, proposal),
             });
         }
 
@@ -532,7 +578,13 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             return Ok(());
         }
 
-        new_transactions.resequence_known_transactions(tx, epoch_state.epoch(), ids, epoch_state.local_committee_info())
+        new_transactions.resequence_known_transactions(
+            tx,
+            epoch_state.epoch(),
+            ids,
+            epoch_state.local_committee_info(),
+        )?;
+        Ok(())
     }
 
     fn get_missing_transactions<TTx: StateStoreReadTransaction>(
@@ -558,10 +610,58 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         Ok(missing_tx_ids)
     }
 
-    /// The first parked copy of a block holds its slot until it is unparked, so a block is only parked if every
-    /// embedded foreign proposal whose commit proof is not already stored is authenticated by its committee and
-    /// pledges the values its evidence commits to. A copy that fails is turned away, leaving the slot for the genuine
-    /// block.
+    /// Parked blocks are kept until their transactions arrive or the chain locks past them, so a block is only parked
+    /// if a local committee member proposed it above the locked block, and that member has a slot left at its height.
+    /// A block already parked keeps its slot.
+    fn has_parking_slot(
+        &self,
+        from: &TConsensusSpec::Addr,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        block: &Block,
+    ) -> Result<bool, HotStuffError> {
+        if !epoch_state.local_committee().contains_public_key(block.proposed_by()) {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️ Not parking block {block} from {from}: proposer {} is not a local committee member",
+                block.proposed_by(),
+            );
+            return Ok(false);
+        }
+
+        self.store.with_read_tx(|tx| {
+            if tx.parked_block_exists(block.id())? {
+                return Ok(true);
+            }
+
+            if let Some(locked) = LockedBlock::get(tx, block.epoch()).optional()? &&
+                block.height() <= locked.height()
+            {
+                warn!(
+                    target: LOG_TARGET,
+                    "⚠️ Not parking block {block} from {from}: it is at or below the locked block {locked}",
+                );
+                return Ok(false);
+            }
+
+            let num_parked = tx.parked_blocks_count_by_proposer(block.epoch(), block.height(), block.proposed_by())?;
+            if num_parked >= MAX_PARKED_BLOCKS_PER_PROPOSER_PER_HEIGHT {
+                warn!(
+                    target: LOG_TARGET,
+                    "⚠️ Not parking block {block} from {from}: proposer {} already has {num_parked} parked block(s) at \
+                     this height",
+                    block.proposed_by(),
+                );
+                return Ok(false);
+            }
+
+            Ok(true)
+        })
+    }
+
+    /// The first parked message carrying a block holds its slot until it is unparked, so a block is only parked if
+    /// every embedded foreign proposal whose commit proof is not already stored is authenticated by its committee,
+    /// pledges the values its evidence commits to and carries in full every command the local shard group needs. A
+    /// message that fails is turned away, leaving the slot for another delivery of the block.
     async fn are_embedded_foreign_proposals_parkable(
         &self,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
@@ -582,12 +682,12 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             )
             .await
             {
-                Ok(()) => validate_evidence_and_pledges_match(
+                Ok(()) => validate_foreign_proposal_contents(
                     foreign_proposal,
                     epoch_state.local_committee_info().shard_group(),
                 )
                 .err()
-                .filter(|err| matches!(err, ProposalValidationError::ForeignPledgesNotCommitted { .. })),
+                .filter(|err| err.rejects_message_not_block()),
                 Err(HotStuffError::ProposalValidationError(err)) => Some(err),
                 Err(err) => return Err(err),
             };
@@ -610,6 +710,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
         local_committee_info: &CommitteeInfo,
         proposal: &ProposalMessage,
+        origin: ProposalOrigin,
     ) -> Result<HashSet<TransactionId>, HotStuffError> {
         let missing_tx_ids = self.get_missing_transactions(&**tx, local_committee_info, proposal)?;
 
@@ -626,7 +727,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             "⏳ Block {} has {} missing transactions", proposal.block, missing_tx_ids.len(),
         );
 
-        tx.parked_block_insert(&proposal.block, &proposal.foreign_proposals, &missing_tx_ids)?;
+        tx.parked_block_insert(&proposal.block, &proposal.foreign_proposals, origin, &missing_tx_ids)?;
 
         Ok(missing_tx_ids)
     }
@@ -720,10 +821,12 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 "⏳ Foreign Block {} has {} missing transactions", msg.proposal, missing_tx_ids.len(),
             );
 
-            // The first parked copy of a block holds its slot until unparked, so a copy whose pledges its evidence does
-            // not commit to is turned away here, leaving the slot for the genuine proposal.
-            if let Err(err @ ProposalValidationError::ForeignPledgesNotCommitted { .. }) =
-                validate_evidence_and_pledges_match(&msg.proposal, epoch_state.local_committee_info().shard_group())
+            // The first parked message carrying a block holds its slot until unparked, so a message that withholds a
+            // command or whose pledges its evidence does not commit to is turned away here, leaving the slot for
+            // another delivery of the block.
+            if let Err(err) =
+                validate_foreign_proposal_contents(&msg.proposal, epoch_state.local_committee_info().shard_group()) &&
+                err.rejects_message_not_block()
             {
                 warn!(target: LOG_TARGET, "⚠️ Discarding foreign proposal from {from}: {err}");
                 return Ok(MessageValidationResult::Discard);
@@ -778,7 +881,10 @@ pub enum MessageValidationResult<TAddr> {
     RequestedTransactions {
         from: TAddr,
         block_id: BlockId,
+        epoch: Epoch,
         transactions: Vec<Transaction>,
+        /// The requested transactions the response did not carry.
+        remaining: HashSet<TransactionId>,
     },
     ParkedProposal {
         block_id: BlockId,
@@ -799,6 +905,8 @@ struct PendingMissingTransactionsRequest<TAddr> {
     request_id: u32,
     /// The peer the request went to. A response only counts when it comes back from this peer.
     to: TAddr,
+    block_id: BlockId,
+    epoch: Epoch,
     transactions: HashSet<TransactionId>,
 }
 
@@ -840,6 +948,15 @@ impl<TAddr> PendingMissingTransactionsRequest<TAddr> {
         }
         Ok(decoded)
     }
+
+    /// The requested transactions that `returned` does not include.
+    fn remaining_after(&self, returned: &[Transaction]) -> HashSet<TransactionId> {
+        let mut remaining = self.transactions.clone();
+        for transaction in returned {
+            remaining.remove(&transaction.calculate_id());
+        }
+        remaining
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -873,15 +990,11 @@ impl<TAddr: PartialEq> MissingTransactionRequests<TAddr> {
         }
     }
 
-    pub fn insert(&mut self, request_id: u32, to: TAddr, transactions: HashSet<TransactionId>) {
+    pub fn insert(&mut self, request: PendingMissingTransactionsRequest<TAddr>) {
         if self.requests.len() == Self::CAPACITY {
             self.requests.pop_front();
         }
-        self.requests.push_back(PendingMissingTransactionsRequest {
-            request_id,
-            to,
-            transactions,
-        });
+        self.requests.push_back(request);
     }
 
     /// Removes and returns the request with this id that was sent to `from`, if any.
@@ -894,6 +1007,15 @@ impl<TAddr: PartialEq> MissingTransactionRequests<TAddr> {
     }
 }
 
+type UnparkedLocalBlocks = Vec<(ProposalMessage, ProposalOrigin)>;
+
+fn proposal_message(origin: ProposalOrigin, proposal: ProposalMessage) -> HotstuffMessage {
+    match origin {
+        ProposalOrigin::Live => HotstuffMessage::new_proposal(proposal),
+        ProposalOrigin::CatchUp => HotstuffMessage::new_catch_up_sync_response(proposal),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -902,10 +1024,24 @@ mod tests {
         [TransactionId::new([n; 32])].into_iter().collect()
     }
 
+    fn pending(
+        request_id: u32,
+        to: &'static str,
+        transactions: HashSet<TransactionId>,
+    ) -> PendingMissingTransactionsRequest<&'static str> {
+        PendingMissingTransactionsRequest {
+            request_id,
+            to,
+            block_id: BlockId::zero(),
+            epoch: Epoch(1),
+            transactions,
+        }
+    }
+
     #[test]
     fn a_response_from_a_peer_we_did_not_ask_is_not_matched() {
         let mut requests = MissingTransactionRequests::new();
-        requests.insert(1, "alice", req(1));
+        requests.insert(pending(1, "alice", req(1)));
 
         assert!(requests.take(1, &"bob").is_none());
         assert!(requests.take(1, &"alice").is_some());
@@ -914,8 +1050,8 @@ mod tests {
     #[test]
     fn the_same_id_to_two_peers_matches_each_peer_once() {
         let mut requests = MissingTransactionRequests::new();
-        requests.insert(1, "alice", req(1));
-        requests.insert(1, "bob", req(2));
+        requests.insert(pending(1, "alice", req(1)));
+        requests.insert(pending(1, "bob", req(2)));
 
         assert_eq!(requests.take(1, &"bob").unwrap().transactions, req(2));
         assert_eq!(requests.take(1, &"alice").unwrap().transactions, req(1));
@@ -926,7 +1062,7 @@ mod tests {
     fn the_oldest_request_is_evicted_once_capacity_is_reached() {
         let mut requests = MissingTransactionRequests::new();
         for i in 0..=MissingTransactionRequests::<&str>::CAPACITY {
-            requests.insert(i as u32, "alice", req(0));
+            requests.insert(pending(i as u32, "alice", req(0)));
         }
 
         assert!(requests.take(0, &"alice").is_none());
@@ -952,11 +1088,7 @@ mod tests {
     }
 
     fn request_for(transactions: &[&Transaction]) -> PendingMissingTransactionsRequest<&'static str> {
-        PendingMissingTransactionsRequest {
-            request_id: 1,
-            to: "alice",
-            transactions: transactions.iter().map(|t| t.calculate_id()).collect(),
-        }
+        pending(1, "alice", transactions.iter().map(|t| t.calculate_id()).collect())
     }
 
     #[test]
@@ -970,6 +1102,20 @@ mod tests {
 
         let ids = decoded.iter().map(|t| t.calculate_id()).collect::<Vec<_>>();
         assert_eq!(ids, vec![b.calculate_id(), a.calculate_id()]);
+        assert!(request.remaining_after(&decoded).is_empty());
+    }
+
+    #[test]
+    fn a_partial_response_leaves_the_transactions_it_did_not_carry() {
+        let (a, b, c) = (transaction(1), transaction(2), transaction(3));
+        let request = request_for(&[&a, &b, &c]);
+
+        let decoded = request.decode_response(vec![encoded(&b)], MAX_SIZE).unwrap();
+
+        assert_eq!(
+            request.remaining_after(&decoded),
+            HashSet::from([a.calculate_id(), c.calculate_id()])
+        );
     }
 
     #[test]

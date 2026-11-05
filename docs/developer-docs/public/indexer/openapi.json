@@ -10,15 +10,90 @@
       "name": "BSD-3-Clause",
       "identifier": "BSD-3-Clause"
     },
-    "version": "0.43.0"
+    "version": "0.47.0"
   },
   "paths": {
+    "/committees": {
+      "get": {
+        "tags": [
+          "handlers::committees"
+        ],
+        "description": "Get one shard group's committee in an epoch, with its proof against the epoch's validator set hash",
+        "operationId": "get_committee",
+        "parameters": [
+          {
+            "name": "epoch",
+            "in": "query",
+            "description": "The epoch of the committee",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "shard",
+            "in": "query",
+            "description": "Any shard of the shard group whose committee to return",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The committee and its proof",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetCommitteeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The epoch has not occurred yet, or the shard is in no shard group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "This indexer holds no validator set for the epoch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/epoch-checkpoints": {
       "get": {
         "tags": [
           "handlers::epoch_checkpoints"
         ],
-        "description": "List epoch checkpoints from storage",
+        "description": "List epoch checkpoints from storage, ascending by epoch",
         "operationId": "list_epoch_checkpoints",
         "parameters": [
           {
@@ -42,6 +117,26 @@
               "format": "int32",
               "minimum": 0
             }
+          },
+          {
+            "name": "shard",
+            "in": "query",
+            "description": "Only the checkpoints of the shard group containing this shard",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "include_committees",
+            "in": "query",
+            "description": "Include the next epoch's committee for the shard group containing `shard`, with its proof against the next epoch's validator set hash. Requires `shard`",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -51,6 +146,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ListEpochCheckpointsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`include_committees` without `shard`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -75,6 +180,28 @@
         ],
         "description": "Get the latest epoch checkpoint",
         "operationId": "get_latest_epoch_checkpoint",
+        "parameters": [
+          {
+            "name": "shard",
+            "in": "query",
+            "description": "The latest checkpoint of the shard group containing this shard",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "include_committees",
+            "in": "query",
+            "description": "Include the next epoch's committee for the shard group containing `shard`, with its proof against the next epoch's validator set hash. Requires `shard`",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "The latest epoch checkpoint",
@@ -82,6 +209,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GetLatestEpochCheckpointResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`include_committees` without `shard`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -109,6 +246,37 @@
         }
       }
     },
+    "/epoch-checkpoints/latest/shard-groups": {
+      "get": {
+        "tags": [
+          "handlers::epoch_checkpoints"
+        ],
+        "description": "Get the latest epoch checkpoint of the shard group holding each shard, without committees",
+        "operationId": "get_latest_shard_group_checkpoints",
+        "responses": {
+          "200": {
+            "description": "The latest epoch checkpoint of each shard group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetLatestShardGroupCheckpointsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/epoch-manager/stats": {
       "get": {
         "tags": [
@@ -118,7 +286,7 @@
         "operationId": "get_epoch_manager_stats",
         "responses": {
           "200": {
-            "description": "",
+            "description": "Epoch manager stats",
             "content": {
               "application/json": {
                 "schema": {
@@ -128,7 +296,7 @@
             }
           },
           "500": {
-            "description": "",
+            "description": "Failed to fetch epoch manager stats",
             "content": {
               "application/json": {
                 "schema": {
@@ -221,7 +389,7 @@
         "operationId": "get_connections",
         "responses": {
           "200": {
-            "description": "",
+            "description": "Active peer connections",
             "content": {
               "application/json": {
                 "schema": {
@@ -231,7 +399,7 @@
             }
           },
           "500": {
-            "description": "",
+            "description": "Failed to fetch peer connections",
             "content": {
               "application/json": {
                 "schema": {
@@ -252,7 +420,7 @@
         "operationId": "get_economics",
         "responses": {
           "200": {
-            "description": "",
+            "description": "Network economic totals",
             "content": {
               "application/json": {
                 "schema": {
@@ -262,7 +430,7 @@
             }
           },
           "500": {
-            "description": "",
+            "description": "Failed to fetch network economics",
             "content": {
               "application/json": {
                 "schema": {
@@ -283,7 +451,7 @@
         "operationId": "get_network_sync_stats",
         "responses": {
           "200": {
-            "description": "",
+            "description": "Network sync stats",
             "content": {
               "application/json": {
                 "schema": {
@@ -293,7 +461,7 @@
             }
           },
           "500": {
-            "description": "",
+            "description": "Failed to fetch network sync stats",
             "content": {
               "application/json": {
                 "schema": {
@@ -412,7 +580,7 @@
         "tags": [
           "handlers::substates"
         ],
-        "description": "Fetches several substates by their IDs",
+        "description": "Fetches several substates by their IDs. Each value is served in its CBOR encoding, base64 in the JSON body.",
         "operationId": "fetch_substates",
         "responses": {
           "200": {
@@ -463,7 +631,7 @@
         "tags": [
           "handlers::substates"
         ],
-        "description": "Fetches a substate by ID",
+        "description": "Fetches a substate by ID. The value is served in its CBOR encoding, base64 in the JSON body.",
         "operationId": "get_substate",
         "parameters": [
           {
@@ -498,7 +666,7 @@
           {
             "name": "include_proof",
             "in": "query",
-            "description": "If true, include the proof the substate was verified with",
+            "description": "If true, include the proof the substate was verified with. A spent version named by `version` is then answered with its down proof",
             "required": false,
             "schema": {
               "type": "boolean"
@@ -507,7 +675,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Substate details",
+            "description": "Substate details, or with include_proof, the proof that the version asked for has been spent",
             "content": {
               "application/json": {
                 "schema": {
@@ -527,7 +695,7 @@
             }
           },
           "404": {
-            "description": "No such substate, or the version asked for has been spent",
+            "description": "No such substate, or the version asked for has been spent and no down proof was requested or verified",
             "content": {
               "application/json": {
                 "schema": {
@@ -912,7 +1080,7 @@
         "tags": [
           "handlers::transaction_events"
         ],
-        "description": "SSE stream of template-emitted transaction events. Supports catch-up via the `after_id` query parameter or `Last-Event-ID` header.",
+        "description": "SSE stream of template-emitted transaction events. Supports catch-up via the `after_id` query parameter or `Last-Event-ID` header. A cursor older than the indexer's event retention window (see `event_retention_epochs` on /info) is refused with 410, and a stream whose catch-up reaches pruned events ends, so the reconnect is refused the same way.",
         "operationId": "sse_transaction_events",
         "parameters": [
           {
@@ -962,7 +1130,21 @@
             }
           }
         ],
-        "responses": {}
+        "responses": {
+          "200": {
+            "description": "SSE stream of transaction events"
+          },
+          "410": {
+            "description": "Events after the resume cursor have been pruned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/transactions/recent": {
@@ -1052,7 +1234,7 @@
         "tags": [
           "handlers::transactions"
         ],
-        "description": "Get the result of a submitted transaction (by transaction ID)",
+        "description": "Get the result of a submitted transaction (by transaction ID). The execution result, and the receipt when a proof is requested, are served in their CBOR encoding, base64 in the JSON body.",
         "operationId": "get_transaction_result",
         "parameters": [
           {
@@ -1128,53 +1310,12 @@
         }
       }
     },
-    "/utxos": {
-      "get": {
-        "tags": [
-          "handlers::utxos"
-        ],
-        "description": "List full UTXO data",
-        "operationId": "list_utxos",
-        "responses": {
-          "200": {
-            "description": "List of UTXOs",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListUtxosResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request parameters",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Failed to list UTXOs",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/utxos/fetch": {
       "post": {
         "tags": [
           "handlers::utxos"
         ],
-        "description": "Gets full UTXO data for a list of UTXO IDs",
+        "description": "Gets full UTXO data for a list of tag and nonce pairs, and which of the pairs are spent or burnt",
         "operationId": "fetch_utxos",
         "requestBody": {
           "content": {
@@ -1331,6 +1472,39 @@
   },
   "components": {
     "schemas": {
+      "BatchedSubstateProof": {
+        "type": "object",
+        "description": "A [`SubstateProof`] served in a [`GetSubstatesResponse`], whose commit proof the response serves once for every\nproof anchored at the same block.",
+        "required": [
+          "anchor",
+          "value_proof",
+          "value_hash_epoch"
+        ],
+        "properties": {
+          "anchor": {
+            "$ref": "#/components/schemas/SubstateProofAnchor",
+            "description": "The committed block the proof is anchored at. The response's `commit_proofs` holds its commit proof under\n`anchor.block_id`."
+          },
+          "down_proof": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "byte",
+            "description": "CBOR-encoded `SubstateDownProof`, as in [`SubstateProof::down_proof`]."
+          },
+          "value_hash_epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "value_proof": {
+            "type": "string",
+            "format": "byte",
+            "description": "CBOR-encoded `SubstateValueProof`, as in [`SubstateProof::value_proof`]."
+          }
+        }
+      },
       "Connection": {
         "type": "object",
         "required": [
@@ -1366,6 +1540,49 @@
           }
         }
       },
+      "EpochCheckpointEntry": {
+        "type": "object",
+        "description": "A shard group's checkpoint of the end of an epoch: the commit proof of its end-of-epoch block, which the\ncommittee of `epoch` signed.\n\nEvery field but `checkpoint` is read out of `checkpoint` for convenience, and is untrusted until the checkpoint\nverifies against that committee.",
+        "required": [
+          "epoch",
+          "shard_group",
+          "checkpoint"
+        ],
+        "properties": {
+          "checkpoint": {
+            "type": "string",
+            "format": "byte",
+            "description": "CBOR-encoded `EpochCheckpoint`."
+          },
+          "epoch": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The epoch the checkpoint ends.",
+            "minimum": 0
+          },
+          "next_epoch_committee": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ValidatorSetCommittee",
+                "description": "The next epoch's committee for the requested shard, when `include_committees` was set and this indexer holds\nthat epoch's validator set."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "next_epoch_validator_set_hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The validator set hash of the next epoch that the end-of-epoch block names, read from the header metadata\npreimage the checkpoint carries. Absent if the block names none."
+          },
+          "shard_group": {
+            "type": "object"
+          }
+        }
+      },
       "ErrorResponse": {
         "type": "object",
         "required": [
@@ -1374,6 +1591,17 @@
         "properties": {
           "error": {
             "type": "string"
+          }
+        }
+      },
+      "GetCommitteeResponse": {
+        "type": "object",
+        "required": [
+          "committee"
+        ],
+        "properties": {
+          "committee": {
+            "$ref": "#/components/schemas/ValidatorSetCommittee"
           }
         }
       },
@@ -1457,7 +1685,8 @@
           "index_gossiped_transactions",
           "verify_substate_proofs",
           "substate_cache_max_serve_lag_secs",
-          "indexes_all_events"
+          "indexes_all_events",
+          "utxo_tombstone_horizons"
         ],
         "properties": {
           "current_epoch": {
@@ -1466,9 +1695,18 @@
             "description": "The current epoch, so a client can resolve the epoch-denominated fields below against a clock\nwithout a second request.",
             "minimum": 0
           },
+          "event_retention_epochs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many epochs past the epoch its transaction committed in this indexer retains an event\nbefore pruning it. `None` means events are retained indefinitely. Event queries answer no\nfurther back than this, and the event stream refuses with 410 to resume from a cursor older\nthan the newest pruned event.",
+            "minimum": 0
+          },
           "index_gossiped_transactions": {
             "type": "boolean",
-            "description": "Whether this indexer stores transactions observed on the network gossip topic in addition to\nthose submitted directly to it. When false, a transaction submitted elsewhere is unknown to\nthis indexer until its receipt is synced.\n\nEven when true the stored set of transactions is best effort: an indexer misses whatever was\ngossiped while it was offline or while its inbound queue was full, and there is no backfill.\nTransaction receipts carry no such caveat — they are synced from network state and are\ncomplete back to `transaction_receipt_retention_epochs` — so a committed transaction always\nhas a receipt even when its body is missing here. Transactions that never committed get no receipt, so gossip is the only source\nfor them."
+            "description": "Whether this indexer stores transactions observed on the network gossip topic in addition to\nthose submitted directly to it. When false, a transaction submitted elsewhere is unknown to\nthis indexer until its receipt is synced.\n\nEven when true the stored set of transactions is best effort: an indexer misses whatever was\ngossiped while it was offline or while its inbound queue was full, and there is no backfill.\nTransaction receipts carry no such caveat — they are synced from network state and are\ncomplete back to `transaction_receipt_retention_epochs` — so a committed transaction always\nhas a receipt even when its body is missing here. Transactions that never committed get no receipt, so gossip\nis the only source for them."
           },
           "indexes_all_events": {
             "type": "boolean",
@@ -1495,15 +1733,6 @@
             "description": "How long after a shard was last confirmed synced this indexer keeps serving cached substates\nfor it, in seconds. Cached values are invalidated by the state transitions this indexer syncs\nrather than expired on a timer, so a served value trails the chain by the sync interval rather\nthan by this bound - which is what stops a validator that has stopped serving transitions from\nholding a stale value open indefinitely.",
             "minimum": 0
           },
-          "transaction_retention_epochs": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "How many epochs past its terminal epoch this indexer retains a transaction before pruning the\nrecord. `None` means transactions are retained indefinitely. A client paginating transaction\nhistory hits this floor rather than the start of the chain.",
-            "minimum": 0
-          },
           "transaction_receipt_retention_epochs": {
             "type": [
               "integer",
@@ -1513,13 +1742,42 @@
             "description": "How many epochs past the epoch its transaction committed in this indexer retains a transaction\nreceipt before pruning it. `None` means receipts are retained indefinitely. Longer than\n`transaction_retention_epochs`, so a retained transaction always has its receipt.",
             "minimum": 0
           },
-          "event_retention_epochs": {
+          "transaction_retention_epochs": {
             "type": [
               "integer",
               "null"
             ],
             "format": "int64",
-            "description": "How many epochs past the epoch its transaction committed in this indexer retains an event\nbefore pruning it. `None` means events are retained indefinitely. Event queries and the event\nstream's catch-up answer no further back than this.",
+            "description": "How many epochs past its terminal epoch this indexer retains a transaction before pruning the\nrecord. `None` means transactions are retained indefinitely. A client paginating transaction\nhistory hits this floor rather than the start of the chain.",
+            "minimum": 0
+          },
+          "utxo_tombstone_horizons": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": false,
+              "prefixItems": [
+                {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                }
+              ]
+            },
+            "description": "Per shard, the state version at and below which this indexer may lack the tombstone of a spent\nUTXO, ascending by shard. A shard's first sync fetches only its live substates, so a spend\nbefore it is not seen, and pruning a tombstone raises the horizon over it. A shard not listed\nhas every tombstone. The UTXO stream sets `StartOfShard::spends_incomplete` for a shard whose\ncursor is below its horizon. This is sync state, and rises while the indexer runs."
+          },
+          "utxo_tombstone_retention_epochs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many epochs past the epoch a UTXO was spent in this indexer retains its tombstone before\npruning it. `None` means tombstones are retained indefinitely. Pruning raises the shard's\nentry in `utxo_tombstone_horizons`, so a UTXO stream resuming from further back is told its\nspends are incomplete.",
             "minimum": 0
           },
           "verify_substate_proofs": {
@@ -1539,7 +1797,22 @@
         ],
         "properties": {
           "checkpoint": {
-            "type": "object"
+            "$ref": "#/components/schemas/EpochCheckpointEntry"
+          }
+        }
+      },
+      "GetLatestShardGroupCheckpointsResponse": {
+        "type": "object",
+        "required": [
+          "checkpoints"
+        ],
+        "properties": {
+          "checkpoints": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EpochCheckpointEntry"
+            },
+            "description": "The latest checkpoint of the shard group holding each shard, each listed once, in shard order and without\ncommittees. Each group is at its own latest epoch, so where the shard group layout changed and this indexer\nholds the new layout's checkpoints of only some groups, two listed groups can share shards. Empty while this\nindexer holds no checkpoint."
           }
         }
       },
@@ -1627,10 +1900,10 @@
           "sync_progress": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SyncProgress"
               },
               {
-                "$ref": "#/components/schemas/SyncProgress"
+                "type": "null"
               }
             ]
           },
@@ -1651,7 +1924,9 @@
         ],
         "properties": {
           "resource": {
-            "type": "object"
+            "type": "string",
+            "format": "byte",
+            "description": "The CBOR-encoded `Resource`."
           },
           "total_supply": {
             "type": [
@@ -1670,27 +1945,28 @@
         "type": "object",
         "required": [
           "version",
-          "substate",
+          "state",
           "verified"
         ],
         "properties": {
           "proof": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SubstateProof",
+                "description": "The proof the indexer verified this answer with. Present only when `include_proof` was set\nand a committee member could prove the answer. A down answer always carries one."
               },
               {
-                "$ref": "#/components/schemas/SubstateProof",
-                "description": "The proof the indexer verified this substate with. Present only when `include_proof` was set\nand a committee member could prove the substate."
+                "type": "null"
               }
             ]
           },
-          "substate": {
-            "type": "object"
+          "state": {
+            "$ref": "#/components/schemas/SubstateState",
+            "description": "What the shard group holds for `version`. Only a request with `include_proof` that names the version is\nanswered with [`SubstateState::Down`], and only with a proof the indexer verified for it: a down proof, or an\nexclusion when more than `f` committee members agree the version is down. Any other down is a 404."
           },
           "verified": {
             "type": "boolean",
-            "description": "True when the indexer verified this substate's value against the shard group committee (via a\nmerkle proof). False when proofs are disabled, or when no committee member could supply a\nproof yet (e.g. nothing committed since an epoch change) and the value was served unverified."
+            "description": "True when the indexer verified this answer against the shard group committee (via a merkle\nproof). False when proofs are disabled, or when no committee member could supply a proof yet\n(e.g. nothing committed since an epoch change) and the value was served unverified. A down answer\nis verified only with a down proof: an exclusion alone does not show the version was ever up."
           },
           "version": {
             "type": "integer",
@@ -1705,11 +1981,21 @@
           "substates"
         ],
         "properties": {
+          "commit_proofs": {
+            "type": "object",
+            "description": "The commit proof of each block a proof in `proofs` is anchored at, by block id. Proofs anchored at the same\nblock share it.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
           "proofs": {
             "type": "object",
-            "description": "The proof each substate was verified with, when `include_proofs` was set. A substate no\ncommittee member could prove has no entry.",
+            "description": "The proof each substate was verified with, when `include_proofs` was set, less the commit proof of the block\nit is anchored at, which is in `commit_proofs`. A substate no committee member could prove has no entry.",
             "additionalProperties": {
-              "$ref": "#/components/schemas/SubstateProof"
+              "$ref": "#/components/schemas/BatchedSubstateProof"
             },
             "propertyNames": {
               "type": "string"
@@ -1717,6 +2003,7 @@
           },
           "substates": {
             "type": "object",
+            "description": "Each live substate's version and CBOR-encoded value, as in [`SubstateState::Up`].",
             "additionalProperties": {
               "type": "object"
             },
@@ -1753,7 +2040,9 @@
         ],
         "properties": {
           "receipt": {
-            "type": "object"
+            "type": "string",
+            "format": "byte",
+            "description": "The CBOR-encoded `TransactionReceipt`."
           }
         }
       },
@@ -1778,11 +2067,11 @@
           "receipt": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ProvenTransactionReceipt",
                 "description": "The committed transaction receipt and its proof, when `include_proof` was set and the\ntransaction committed. An aborted transaction commits no receipt."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -1808,6 +2097,7 @@
           "per_shard_limit": {
             "type": "integer",
             "format": "int32",
+            "description": "The number of UTXO rows to read per shard in this pass, from 1 to 1000. `from_epoch` and\n`unspent_only` are applied to the rows read, so a shard can return fewer updates than this,\nor none, and still have more: `StartOfShard::has_more` says whether it does. A state version\nwider than the limit is returned whole, overrunning it.",
             "minimum": 0
           },
           "resource_address": {
@@ -1841,6 +2131,13 @@
           "resource_address"
         ],
         "properties": {
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Resume after the previous page: pass its `next_cursor`. UTXOs are paged in the order of their ids, which every\nindexer shares, so any indexer can resume a page another returned. A UTXO created or spent while the pages are\nread may or may not be returned."
+          },
           "resource_address": {
             "type": "string"
           },
@@ -1860,6 +2157,29 @@
                 }
               ]
             }
+          },
+          "unspent_at": {
+            "type": "array",
+            "items": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": false,
+              "prefixItems": [
+                {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                }
+              ]
+            },
+            "description": "Empty, or for each pair of `tag_and_nonce_pairs` in order, the shard and state version the client saw its UTXO\nunspent at, or `null` when it does not know them. A pair with no unspent UTXO is reported in `spent` once this\nindexer has indexed its shard through that state version, as this indexer keeps every unspent UTXO."
           }
         }
       },
@@ -1869,6 +2189,31 @@
           "utxos"
         ],
         "properties": {
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `cursor` for the next page, or `None` once `utxos` holds the last matching UTXO."
+          },
+          "spent": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": false,
+              "prefixItems": [
+                {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The requested tag and nonce pairs this indexer holds as spent or burnt. A requested pair in neither list is\nunknown to this indexer, which may not yet have indexed it, or may have pruned its tombstone."
+          },
           "utxos": {
             "type": "array",
             "items": {
@@ -1879,10 +2224,11 @@
                   "type": "string"
                 },
                 {
-                  "type": "object"
+                  "type": "string"
                 }
               ]
-            }
+            },
+            "description": "The unspent UTXOs matching a requested tag and nonce pair, each a CBOR-encoded `Utxo`, in id order. Any number\nof UTXOs may share a pair."
           }
         }
       },
@@ -1895,8 +2241,9 @@
           "checkpoints": {
             "type": "array",
             "items": {
-              "type": "object"
-            }
+              "$ref": "#/components/schemas/EpochCheckpointEntry"
+            },
+            "description": "Ascending by epoch. Only checkpoints that carry their end-of-epoch header's metadata preimage are listed."
           }
         }
       },
@@ -1944,33 +2291,11 @@
                   "type": "string"
                 },
                 {
-                  "type": "object"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "ListUtxosResponse": {
-        "type": "object",
-        "required": [
-          "utxos"
-        ],
-        "properties": {
-          "utxos": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": false,
-              "prefixItems": [
-                {
                   "type": "string"
-                },
-                {
-                  "type": "object"
                 }
               ]
-            }
+            },
+            "description": "Each receipt's address and its CBOR-encoded `TransactionReceipt`."
           }
         }
       },
@@ -2036,22 +2361,24 @@
         "description": "A committed transaction's receipt substate, with the proof it was verified with.",
         "required": [
           "version",
-          "receipt"
+          "value"
         ],
         "properties": {
           "proof": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/SubstateProof",
                 "description": "`None` when no committee member could prove the receipt, e.g. when nothing has been committed\nsince an epoch change."
+              },
+              {
+                "type": "null"
               }
             ]
           },
-          "receipt": {
-            "type": "object"
+          "value": {
+            "type": "string",
+            "format": "byte",
+            "description": "The receipt substate's CBOR-encoded `SubstateValue`, as in [`SubstateState::Up`]. It decodes to\n`SubstateValue::TransactionReceipt`."
           },
           "version": {
             "type": "integer",
@@ -2088,8 +2415,9 @@
         ],
         "properties": {
           "result": {
-            "type": "object",
-            "description": "The result of the dry-run execution, including any emitted events and state changes, but without a final\ndecision or commitment to the ledger"
+            "type": "string",
+            "format": "byte",
+            "description": "The CBOR-encoded `ExecuteResult` of the dry run, including any emitted events and state changes, but without\na final decision or commitment to the ledger."
           },
           "transaction_id": {
             "type": "string",
@@ -2127,6 +2455,14 @@
             "type": "string",
             "format": "byte",
             "description": "CBOR-encoded `SidechainBlockCommitProof`: the anchor block's header and the chain of quorum\ncertificates that committed it."
+          },
+          "down_proof": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "byte",
+            "description": "CBOR-encoded `SubstateDownProof`, present when the substate version is down and the committee still holds it:\nan inclusion proof that the version was committed, anchored at a block of its own, and an exclusion proof\nunder `anchor.state_merkle_root` that it is no longer in the state tree. `value_proof` is that exclusion\nproof.\n\nA down version without one is served with `value_proof` alone. A version that never existed also satisfies\nit, as does one committed after the anchor, so it shows the version gone only to a reader that has proven the\nversion up at a block of an earlier epoch than the anchor's."
           },
           "value_hash_epoch": {
             "type": "integer",
@@ -2173,6 +2509,47 @@
             "description": "The shard group state root the block header commits."
           }
         }
+      },
+      "SubstateState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "The version is live, holding `substate`.",
+            "required": [
+              "up"
+            ],
+            "properties": {
+              "up": {
+                "type": "object",
+                "description": "The version is live, holding `substate`.",
+                "required": [
+                  "substate"
+                ],
+                "properties": {
+                  "substate": {
+                    "type": "string",
+                    "format": "byte",
+                    "description": "The CBOR-encoded `SubstateValue`, as the validator that answered the indexer served it. A proof is checked\nagainst the value these bytes decode to."
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The version was live and has been spent. The proof's `down_proof` shows both.",
+            "required": [
+              "down"
+            ],
+            "properties": {
+              "down": {
+                "type": "object",
+                "description": "The version was live and has been spent. The proof's `down_proof` shows both."
+              }
+            }
+          }
+        ],
+        "description": "What the shard group holds for a substate version."
       },
       "SyncProgress": {
         "type": "object",
@@ -2298,11 +2675,11 @@
           "summary": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/TransactionResultSummary",
                 "description": "Result summary from the locally indexed transaction receipt. None when no receipt has been\nindexed yet (pending or aborted)."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -2430,6 +2807,59 @@
           "InvalidProof"
         ]
       },
+      "ValidatorSetCommittee": {
+        "type": "object",
+        "description": "One shard group's committee in an epoch, with the proof that it is that shard group's committee in the validator\nset `validator_set_hash` commits to.\n\nThe proof is only as good as the hash it is checked against: a verifier checks it against a validator set hash it\ntrusts, such as one a verified end-of-epoch checkpoint names, never against `validator_set_hash` alone.",
+        "required": [
+          "epoch",
+          "shard_group",
+          "validator_set_hash",
+          "members",
+          "proof"
+        ],
+        "properties": {
+          "epoch": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ValidatorSetCommitteeMember"
+            },
+            "description": "Ascending by public key."
+          },
+          "proof": {
+            "type": "string",
+            "format": "byte",
+            "description": "CBOR-encoded `ValidatorSetCommitteeProof`. It carries the members, and a verifier reads them from it."
+          },
+          "shard_group": {
+            "type": "object"
+          },
+          "validator_set_hash": {
+            "type": "string"
+          }
+        }
+      },
+      "ValidatorSetCommitteeMember": {
+        "type": "object",
+        "required": [
+          "public_key",
+          "vote_power"
+        ],
+        "properties": {
+          "public_key": {
+            "type": "string"
+          },
+          "vote_power": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "ValidatorStatus": {
         "type": "object",
         "description": "The latest probe of one validator's consensus pacemaker state, made by the indexer when it\nopened a sync stream from that validator.",
@@ -2446,11 +2876,11 @@
           "probe_error": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ValidatorProbeError",
                 "description": "Why the latest probe produced no snapshot, or `None` when it produced `snapshot`. While this\nis set, `snapshot` is stale: it is the last one an earlier probe produced."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -2466,11 +2896,11 @@
           "snapshot": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ValidatorStatusSnapshot",
                 "description": "The last snapshot any probe of this validator produced, or `None` if none has succeeded."
+              },
+              {
+                "type": "null"
               }
             ]
           }

@@ -41,6 +41,8 @@ import {
   IoReceiptOutline,
   IoServer,
   IoServerOutline,
+  IoSync,
+  IoSyncOutline,
 } from "react-icons/io5";
 import { PiPuzzlePiece } from "react-icons/pi";
 import { TbTemplate, TbTimelineEventText } from "react-icons/tb";
@@ -107,6 +109,12 @@ const mainItems = [
     icon: <IoServerOutline style={iconStyle} />,
     activeIcon: <IoServer style={activeIconStyle} />,
     link: "validators",
+  },
+  {
+    title: "Sync",
+    icon: <IoSyncOutline style={iconStyle} />,
+    activeIcon: <IoSync style={activeIconStyle} />,
+    link: "sync",
   },
   {
     title: "Connections",

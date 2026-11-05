@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use tari_template_lib::prelude::*;
+use tari_template_lib::{prelude::*, types::crypto::NoSignatureDomain};
 
 custom_signature_domain!(MyCustomDomain, b"tari.test.signature domain for tests");
 
@@ -42,6 +42,25 @@ mod template {
         pub fn check_sig(public_key: PublicKey, spend_signature: Signature<MyCustomDomain>) -> bool {
             // Mainly checking the conditional API works i.e. does not panic and returns the expected result.
             spend_signature.verify(&public_key, SOME_MESSAGE)
+        }
+
+        pub fn check_sig_for_template(public_key: PublicKey, signature: Signature<MyCustomDomain>) -> bool {
+            signature.verify_for_template(&public_key, SOME_MESSAGE)
+        }
+
+        pub fn check_sig_for_component_outside_a_component(
+            public_key: PublicKey,
+            signature: Signature<MyCustomDomain>,
+        ) -> bool {
+            signature.verify_for_component(&public_key, SOME_MESSAGE)
+        }
+
+        pub fn check_sig_without_domain(public_key: PublicKey, signature: Signature<NoSignatureDomain>) -> bool {
+            signature.verify(&public_key, SOME_MESSAGE)
+        }
+
+        pub fn check_sig_for_component(&self, public_key: PublicKey, signature: Signature<MyCustomDomain>) -> bool {
+            signature.verify_for_component(&public_key, SOME_MESSAGE)
         }
 
         pub fn claim_funds(

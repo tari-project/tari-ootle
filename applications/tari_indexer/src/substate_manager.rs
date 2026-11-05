@@ -29,13 +29,12 @@ use std::{
 use async_trait::async_trait;
 use ootle_network::Network;
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::FixedHash;
 use tari_engine_types::{
     Utxo,
-    substate::{Substate, SubstateId, SubstateValue},
+    encoded::Encoded,
+    substate::{EncodedSubstate, Substate, SubstateId, SubstateValue},
 };
 use tari_epoch_manager::service::EpochManagerHandle;
-use tari_indexer_client::types::UtxoStateUpdateSet;
 use tari_indexer_lib::{
     cached_substate_manager::{
         CachedSubstateManager,
@@ -54,11 +53,12 @@ use tari_ootle_common_types::{
     StateVersion,
     SubstateRequirementRef,
     SubstateVersion,
-    optional::IsNotFoundError,
+    optional::{IsNotFoundError, Optional},
     shard::Shard,
 };
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::{StorageError, consensus_models::VerifiedBlockTip};
+use tari_sidechain::FixedHash;
 use tari_template_lib_types::{
     ResourceAddress,
     UtxoId,
@@ -67,16 +67,100 @@ use tari_template_lib_types::{
 use tari_validator_node_rpc::client::{SubstateProofData, SubstateResult, TariValidatorNodeRpcClientFactory};
 
 use crate::{
-    storage_sqlite::{SqliteIndexerStore, models::VerifiedStateRoot},
+    network_state_sync::SyncProgress,
+    storage_sqlite::{
+        SqliteIndexerStore,
+        models::{Key, VerifiedStateRoot},
+    },
     store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreReader, IndexerStoreWriteTransaction},
     substate_cache::SqliteSubstateCache,
 };
+
+/// A page of the unspent UTXOs matching a lookup's tag and nonce pairs, and the pairs that are spent or burnt.
+#[derive(Debug)]
+pub struct FetchedUtxos {
+    pub utxos: Vec<(UtxoId, Encoded<Utxo>)>,
+    pub spent: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
+    /// The UTXO after which more unspent UTXOs match, or `None` once `utxos` holds the last of them.
+    pub next_cursor: Option<UtxoId>,
+}
+
+/// Up to `limit` of the unspent UTXOs matching `public_nonce_and_tag` in id order, after `cursor` when given,
+/// and the pairs of `public_nonce_and_tag` that are spent or burnt.
+///
+/// `unspent_at` is empty, or holds for each pair of `public_nonce_and_tag` the shard and state version its UTXO was
+/// unspent at, if known. A pair with no unspent UTXO is spent when its shard is promoted through that state version,
+/// whether or not its tombstone is kept: promotion writes every UTXO of a version with the shard's verified version, in
+/// one transaction, and an unspent UTXO is never pruned.
+fn read_utxos<TTx: IndexerStoreReadTransaction>(
+    tx: &mut TTx,
+    resource_address: &ResourceAddress,
+    public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
+    unspent_at: &[Option<(Shard, StateVersion)>],
+    cursor: Option<UtxoId>,
+    limit: u32,
+) -> Result<FetchedUtxos, StorageError> {
+    let mut utxos =
+        tx.utxos_get_unspent_by_public_nonce_and_tag(resource_address, public_nonce_and_tag, cursor, limit + 1)?;
+    let next_cursor = if utxos.len() > limit as usize {
+        utxos.truncate(limit as usize);
+        utxos.last().map(|(id, _)| *id)
+    } else {
+        None
+    };
+    let mut spent = tx.utxos_get_spent_public_nonce_and_tag(resource_address, public_nonce_and_tag)?;
+    if unspent_at.iter().all(Option::is_none) {
+        return Ok(FetchedUtxos {
+            utxos,
+            spent,
+            next_cursor,
+        });
+    }
+
+    let progress = tx
+        .key_value_get_value::<_, SyncProgress>(Key::SyncProgress)
+        .optional()?
+        .unwrap_or_default();
+    let reported = spent.iter().copied().collect::<HashSet<_>>();
+    let promoted = public_nonce_and_tag
+        .iter()
+        .zip(unspent_at)
+        .filter(|(pair, unspent_at)| {
+            !reported.contains(*pair) &&
+                unspent_at.is_some_and(|(shard, state_version)| {
+                    // A shard nothing is promoted of has no entry
+                    progress
+                        .verified
+                        .get(&shard)
+                        .is_some_and(|verified| verified.state_version >= state_version)
+                })
+        })
+        .map(|(pair, _)| *pair)
+        .collect::<Vec<_>>();
+    if promoted.is_empty() {
+        return Ok(FetchedUtxos {
+            utxos,
+            spent,
+            next_cursor,
+        });
+    }
+    let held = tx
+        .utxos_get_unspent_public_nonce_and_tag(resource_address, &promoted)?
+        .into_iter()
+        .collect::<HashSet<_>>();
+    spent.extend(promoted.into_iter().filter(|pair| !held.contains(pair)));
+    Ok(FetchedUtxos {
+        utxos,
+        spent,
+        next_cursor,
+    })
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubstateResponse {
     pub id: SubstateId,
     pub version: SubstateVersion,
-    pub substate: SubstateValue,
+    pub substate: Encoded<SubstateValue>,
 }
 
 /// A substate returned by a lookup together with whether it was committee-verified. `verified` is
@@ -84,10 +168,22 @@ pub struct SubstateResponse {
 /// (e.g. nothing has been committed since an epoch change).
 #[derive(Debug, Clone)]
 pub struct FetchedSubstate {
-    pub substate: Substate,
+    pub substate: EncodedSubstate,
     pub verified: bool,
     /// The proof `substate` was verified with, when it was fetched from the committee and proven.
     pub proof: Option<SubstateProofData>,
+}
+
+/// What a lookup with proofs found for a substate that exists.
+#[derive(Debug, Clone)]
+pub enum ProvenLookup {
+    Up(Box<FetchedSubstate>),
+    /// The version the lookup named is down. A verified `substate_down_proof` proves it. Without one, `proof` is an
+    /// exclusion verified at its anchor, and more than `f` members agreed the version is down.
+    Down {
+        version: SubstateVersion,
+        proof: SubstateProofData,
+    },
 }
 
 /// Adapts the indexer's sqlite store to [`TrustedRootStore`], which the read path consults to skip
@@ -205,70 +301,24 @@ impl SubstateManager {
         }
     }
 
-    pub async fn get_utxo_updates(
-        &self,
-        resource_address: ResourceAddress,
-        from_epoch: Epoch,
-        shard: Shard,
-        from_state_version: StateVersion,
-        unspent_only: bool,
-        limit: u32,
-    ) -> Result<UtxoStateUpdateSet, SubstateManagerError> {
-        let updates = self
-            .substate_store
-            .with_read_tx(move |tx| {
-                tx.utxos_get_updates(
-                    resource_address,
-                    from_epoch,
-                    shard,
-                    from_state_version,
-                    unspent_only,
-                    limit,
-                )
-            })
-            .await?;
-        Ok(updates)
-    }
-
-    pub async fn get_max_state_version(
-        &self,
-        resource_address: &ResourceAddress,
-        shard: Shard,
-    ) -> Result<StateVersion, SubstateManagerError> {
-        let resource_address = *resource_address;
-        let max_version = self
-            .substate_store
-            .with_read_tx(move |tx| tx.utxos_get_max_state_version(resource_address, shard))
-            .await?;
-        Ok(max_version)
-    }
-
-    pub async fn get_unspent_utxos(
+    /// A page of the unspent UTXOs matching `public_nonce_and_tag`, and the pairs of `public_nonce_and_tag` that are
+    /// spent or burnt, read in one transaction. See [`read_utxos`].
+    pub async fn fetch_utxos(
         &self,
         resource_address: &ResourceAddress,
         public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
-    ) -> Result<Vec<(UtxoId, Utxo)>, SubstateManagerError> {
+        unspent_at: &[Option<(Shard, StateVersion)>],
+        cursor: Option<UtxoId>,
+        limit: u32,
+    ) -> Result<FetchedUtxos, SubstateManagerError> {
         let resource_address = *resource_address;
         let public_nonce_and_tag = public_nonce_and_tag.to_vec();
+        let unspent_at = unspent_at.to_vec();
         let utxos = self
             .substate_store
             .with_read_tx(move |tx| {
-                tx.utxos_get_unspent_by_public_nonce_and_tag(&resource_address, &public_nonce_and_tag)
+                read_utxos(tx, &resource_address, &public_nonce_and_tag, &unspent_at, cursor, limit)
             })
-            .await?;
-        Ok(utxos)
-    }
-
-    pub async fn list_utxos(
-        &self,
-        resource_address: &ResourceAddress,
-        from_id: Option<UtxoId>,
-        limit: u32,
-    ) -> Result<Vec<(UtxoId, Utxo)>, SubstateManagerError> {
-        let resource_address = *resource_address;
-        let utxos = self
-            .substate_store
-            .with_read_tx(move |tx| tx.utxos_list(&resource_address, from_id, limit))
             .await?;
         Ok(utxos)
     }
@@ -279,7 +329,7 @@ impl SubstateManager {
             .get_substate(req.substate_id(), req.version())
             .await?;
         match lookup_result.result {
-            SubstateResult::Up { substate } => Ok(*substate),
+            SubstateResult::Up { substate } => Ok(decode_substate(req.substate_id(), &substate)?),
             SubstateResult::Down { version } => Err(SubstateManagerError::InputSubstateIsDown {
                 substate_id: req.substate_id().clone(),
                 version,
@@ -308,17 +358,36 @@ impl SubstateManager {
     /// Looks up one substate from the committee, with the proof it was verified with. `None` when the
     /// committee agrees it does not exist.
     ///
+    /// A down version is answered with the proof the indexer verified for it, a down proof or an exclusion, which only
+    /// a lookup naming that version can return; any other down is [`SubstateManagerError::InputSubstateIsDown`].
+    ///
     /// The local substate store holds no proofs, so it is not consulted. A cached head is served with
     /// the proof held for it, and anything else is fetched from the committee.
     pub async fn fetch_substate_with_proof(
         &self,
         req: SubstateRequirementRef<'_>,
-    ) -> Result<Option<FetchedSubstate>, SubstateManagerError> {
+    ) -> Result<Option<ProvenLookup>, SubstateManagerError> {
         let lookup_result = self
             .cache_manager
             .get_substate_with_proof(req.substate_id(), req.version())
             .await?;
-        Self::to_fetched_substate(req, lookup_result)
+        Self::to_proven_lookup(req, lookup_result)
+    }
+
+    fn to_proven_lookup(
+        req: SubstateRequirementRef<'_>,
+        lookup_result: SubstateLookupResult,
+    ) -> Result<Option<ProvenLookup>, SubstateManagerError> {
+        match lookup_result {
+            SubstateLookupResult {
+                result: SubstateResult::Down { version },
+                proof: Some(proof),
+                ..
+            } => Ok(Some(ProvenLookup::Down { version, proof })),
+            lookup_result => {
+                Ok(Self::to_fetched_substate(req, lookup_result)?.map(|fetched| ProvenLookup::Up(Box::new(fetched))))
+            },
+        }
     }
 
     fn to_fetched_substate(
@@ -328,7 +397,7 @@ impl SubstateManager {
         match lookup_result.result {
             SubstateResult::DoesNotExist => Ok(None),
             SubstateResult::Up { substate } => Ok(Some(FetchedSubstate {
-                substate: Substate::new(substate.version(), substate.into_substate_value()),
+                substate,
                 verified: lookup_result.verified,
                 proof: lookup_result.proof,
             })),
@@ -365,7 +434,7 @@ impl SubstateManager {
                         continue;
                     };
                     results.insert(id, FetchedSubstate {
-                        substate: Substate::new(substate.version(), substate.into_substate_value()),
+                        substate,
                         verified: lookup_result.verified,
                         proof: lookup_result.proof,
                     });
@@ -393,7 +462,7 @@ impl SubstateManager {
             return Ok(None);
         };
         Ok(Some(FetchedSubstate {
-            substate: Substate::new(substate.version, substate.substate),
+            substate: EncodedSubstate::new(substate.version, substate.substate),
             // Locally-stored substates were verified when ingested iff verification is on.
             verified: self.cache_manager.verifies_substates(),
             proof: None,
@@ -403,7 +472,7 @@ impl SubstateManager {
     pub async fn get_cached_substates(
         &self,
         substates: &[SubstateId],
-    ) -> Result<HashMap<SubstateId, Substate>, SubstateManagerError> {
+    ) -> Result<HashMap<SubstateId, EncodedSubstate>, SubstateManagerError> {
         let mut substate_set = substates.iter().collect::<HashSet<_>>();
 
         let substates_arg = substates.to_vec();
@@ -458,6 +527,16 @@ impl SubstateManager {
     }
 }
 
+pub fn decode_substate(substate_id: &SubstateId, substate: &EncodedSubstate) -> Result<Substate, SubstateManagerError> {
+    substate
+        .decode()
+        .map_err(|e| SubstateManagerError::UndecodableSubstate {
+            substate_id: substate_id.clone(),
+            version: substate.version(),
+            details: e.to_string(),
+        })
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum SubstateManagerError {
     #[error("Indexer error: {0}")]
@@ -471,11 +550,273 @@ pub enum SubstateManagerError {
     },
     #[error("Input substate {substate_id} does not exist")]
     InputSubstateDoesNotExist { substate_id: SubstateId },
+    #[error("The value served for {substate_id} v{version} does not decode: {details}")]
+    UndecodableSubstate {
+        substate_id: SubstateId,
+        version: SubstateVersion,
+        details: String,
+    },
 }
 
 impl IsNotFoundError for SubstateManagerError {
     fn is_not_found_error(&self) -> bool {
         matches!(self, Self::InputSubstateDoesNotExist { .. }) ||
             matches!(self, Self::StorageError(e) if e.is_not_found_error())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn substate() -> SubstateId {
+        format!("component_{:064x}", 1).parse().unwrap()
+    }
+
+    fn down(proof: Option<SubstateProofData>) -> SubstateLookupResult {
+        SubstateLookupResult {
+            result: SubstateResult::Down {
+                version: SubstateVersion::new(3),
+            },
+            verified: proof.is_some(),
+            proof,
+        }
+    }
+
+    fn proof_data(substate_down_proof: Option<Vec<u8>>) -> SubstateProofData {
+        SubstateProofData {
+            substate_value_proof: vec![1],
+            commit_proof: vec![2],
+            proof_epoch: 0,
+            substate_down_proof,
+            destroyed_at_state_version: Some(4),
+        }
+    }
+
+    #[test]
+    fn a_proven_down_is_answered_with_its_proof() {
+        let id = substate();
+        let lookup = SubstateManager::to_proven_lookup(
+            SubstateRequirementRef::new(&id, Some(SubstateVersion::new(3))),
+            down(Some(proof_data(Some(vec![7])))),
+        )
+        .unwrap();
+
+        let Some(ProvenLookup::Down { version, proof }) = lookup else {
+            panic!("expected a proven down, got {lookup:?}");
+        };
+        assert_eq!(version, SubstateVersion::new(3));
+        assert_eq!(proof.substate_down_proof, Some(vec![7]));
+    }
+
+    #[test]
+    fn a_down_settled_with_an_exclusion_is_answered_with_it() {
+        let id = substate();
+        let lookup_result = SubstateLookupResult {
+            verified: false,
+            ..down(Some(proof_data(None)))
+        };
+        let lookup = SubstateManager::to_proven_lookup(
+            SubstateRequirementRef::new(&id, Some(SubstateVersion::new(3))),
+            lookup_result,
+        )
+        .unwrap();
+
+        let Some(ProvenLookup::Down { version, proof }) = lookup else {
+            panic!("expected a proven down, got {lookup:?}");
+        };
+        assert_eq!(version, SubstateVersion::new(3));
+        assert_eq!(proof.substate_down_proof, None);
+    }
+
+    fn pair(seq: u8) -> (UtxoTag, RistrettoPublicKeyBytes) {
+        (
+            UtxoTag::from(0u32),
+            RistrettoPublicKeyBytes::from_bytes(&[seq; 32]).unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_placed_pair_with_no_unspent_utxo_is_spent_once_its_shard_is_promoted_through_its_version() {
+        use tari_state_tree::TransitionAccumulator;
+
+        use crate::network_state_sync::VerifiedShardVersion;
+
+        let (_dir, store) = crate::storage_sqlite::temp_store().await;
+        let mut progress = SyncProgress::default();
+        progress.record_verified(Shard::from(1u32), VerifiedShardVersion {
+            state_version: StateVersion::new(10),
+            epoch: Epoch(1),
+            transition_acc: TransitionAccumulator::zero(),
+        });
+        store
+            .with_write_tx(move |tx| {
+                tx.batch_insert_utxo_updates(Epoch(1), [crate::storage_sqlite::unspent_at(1, 5)])?;
+                tx.key_value_set(Key::SyncProgress, progress)
+            })
+            .await
+            .unwrap();
+
+        let pairs = [pair(1), pair(2), pair(3), pair(4), pair(5), pair(6)];
+        let unspent_at = [
+            Some((Shard::from(1u32), StateVersion::new(5))),
+            Some((Shard::from(1u32), StateVersion::new(10))),
+            Some((Shard::from(1u32), StateVersion::new(11))),
+            None,
+            Some((Shard::from(2u32), StateVersion::new(1))),
+            Some((Shard::from(1u32), StateVersion::new(1))),
+        ];
+        let fetched = store
+            .with_read_tx(move |tx| {
+                read_utxos(
+                    tx,
+                    &crate::storage_sqlite::utxo_resource(),
+                    &pairs,
+                    &unspent_at,
+                    None,
+                    10,
+                )
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(fetched.utxos.len(), 1, "the unspent UTXO is returned");
+        assert_eq!(
+            fetched.spent,
+            [pair(2), pair(6)],
+            "only absent pairs promoted through are spent"
+        );
+
+        let fetched = store
+            .with_read_tx(move |tx| read_utxos(tx, &crate::storage_sqlite::utxo_resource(), &pairs, &[], None, 10))
+            .await
+            .unwrap();
+        assert!(
+            fetched.spent.is_empty(),
+            "a pair without a placement is not known to be spent"
+        );
+    }
+
+    #[tokio::test]
+    async fn every_unspent_utxo_sharing_a_pair_is_fetched_a_page_at_a_time() {
+        use tari_template_lib_types::{UtxoAddress, UtxoId};
+
+        use crate::storage_sqlite::models::UtxoUpdateRecord;
+
+        let (_dir, store) = crate::storage_sqlite::temp_store().await;
+        let copies = [2u8, 3].map(|seq| {
+            let UtxoUpdateRecord::Unspent(mut copy) = crate::storage_sqlite::unspent_at(1, 5) else {
+                unreachable!()
+            };
+            copy.address = UtxoAddress::new(crate::storage_sqlite::utxo_resource(), UtxoId::from_array([seq; 32]));
+            UtxoUpdateRecord::Unspent(copy)
+        });
+        let skipped = store
+            .with_write_tx(move |tx| {
+                tx.batch_insert_utxo_updates(
+                    Epoch(1),
+                    [crate::storage_sqlite::unspent_at(1, 5)].into_iter().chain(copies),
+                )
+            })
+            .await
+            .unwrap();
+        assert!(skipped.is_empty(), "UTXOs sharing a nonce and tag are all indexed");
+
+        let page = |cursor: Option<UtxoId>| {
+            let store = store.clone();
+            async move {
+                store
+                    .with_read_tx(move |tx| {
+                        read_utxos(tx, &crate::storage_sqlite::utxo_resource(), &[pair(1)], &[], cursor, 2)
+                    })
+                    .await
+                    .unwrap()
+            }
+        };
+        let first = page(None).await;
+        assert!(first.next_cursor.is_some());
+        let ids = first.utxos.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+        assert_eq!(ids, [UtxoId::from_array([1; 32]), UtxoId::from_array([2; 32])]);
+
+        // A re-version of the last UTXO served stores a later row, which the cursor does not skip to
+        store
+            .with_write_tx(move |tx| {
+                let UtxoUpdateRecord::Unspent(mut refrozen) = crate::storage_sqlite::unspent_at(2, 6) else {
+                    unreachable!()
+                };
+                refrozen.address =
+                    UtxoAddress::new(crate::storage_sqlite::utxo_resource(), UtxoId::from_array([2; 32]));
+                refrozen.version = SubstateVersion::new(1);
+                refrozen.utxo_output.output.public_nonce = pair(1).1;
+                tx.batch_insert_utxo_updates(Epoch(1), [
+                    crate::storage_sqlite::spent_at(2, 6),
+                    UtxoUpdateRecord::Unspent(refrozen),
+                ])
+            })
+            .await
+            .unwrap();
+
+        let second = page(first.next_cursor).await;
+        assert_eq!(second.next_cursor, None);
+        let ids = second.utxos.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+        assert_eq!(ids, [UtxoId::from_array([3; 32])]);
+    }
+
+    /// Indexers behind one address store the same outputs in different orders and at different state versions: a
+    /// follower at each output's own version, an indexer synced from a snapshot at the snapshot's. A page from one
+    /// resumes on the other without skipping an output.
+    #[tokio::test]
+    async fn a_fetch_resumes_on_an_indexer_that_stored_its_utxos_in_another_order() {
+        use tari_template_lib_types::{UtxoAddress, UtxoId};
+
+        use crate::storage_sqlite::models::UtxoUpdateRecord;
+
+        // Output `seq` with the nonce and tag of `pair(1)`
+        let sharing = |seq: u8, state_version: u64| {
+            let UtxoUpdateRecord::Unspent(mut copy) = crate::storage_sqlite::unspent_at(1, state_version) else {
+                unreachable!()
+            };
+            copy.address = UtxoAddress::new(crate::storage_sqlite::utxo_resource(), UtxoId::from_array([seq; 32]));
+            UtxoUpdateRecord::Unspent(copy)
+        };
+        let (_follower_dir, follower) = crate::storage_sqlite::temp_store().await;
+        follower
+            .with_write_tx(move |tx| {
+                tx.batch_insert_utxo_updates(Epoch(1), [1u8, 2, 3, 4].map(|seq| sharing(seq, 10 + u64::from(seq))))
+            })
+            .await
+            .unwrap();
+        let (_snapshot_dir, snapshot) = crate::storage_sqlite::temp_store().await;
+        snapshot
+            .with_write_tx(move |tx| tx.batch_insert_utxo_updates(Epoch(1), [4u8, 3, 2, 1].map(|seq| sharing(seq, 50))))
+            .await
+            .unwrap();
+        let page = |store: SqliteIndexerStore, cursor: Option<UtxoId>| async move {
+            store
+                .with_read_tx(move |tx| {
+                    read_utxos(tx, &crate::storage_sqlite::utxo_resource(), &[pair(1)], &[], cursor, 2)
+                })
+                .await
+                .unwrap()
+        };
+        let ids = |fetched: &FetchedUtxos| fetched.utxos.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+
+        let first = page(follower.clone(), None).await;
+        assert_eq!(ids(&first), [UtxoId::from_array([1; 32]), UtxoId::from_array([2; 32])]);
+        let second = page(snapshot.clone(), first.next_cursor).await;
+        assert_eq!(ids(&second), [UtxoId::from_array([3; 32]), UtxoId::from_array([4; 32])]);
+        assert_eq!(second.next_cursor, None);
+    }
+
+    #[test]
+    fn an_unproven_down_is_an_error() {
+        let id = substate();
+        let req = SubstateRequirementRef::new(&id, Some(SubstateVersion::new(3)));
+
+        let err = SubstateManager::to_proven_lookup(req, down(None)).unwrap_err();
+        assert!(
+            matches!(err, SubstateManagerError::InputSubstateIsDown { version, .. } if version == SubstateVersion::new(3)),
+            "{err}"
+        );
     }
 }

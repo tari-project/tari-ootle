@@ -20,6 +20,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
+from pathlib import Path
 
 # Version tiers (concern domains). Tier 3 is the only workspace-versioned cohort;
 # every other tier is independently versioned (each crate carries its own version):
@@ -37,24 +38,33 @@ CRATES = [
     ("tari_template_abi", "crates/template_abi", 2),
     ("tari_template_lib_types", "crates/template_lib_types", 2),
     ("ootle_byte_type", "crates/ootle_byte_type", 1),
+    ("tari_ootle_sr25519", "crates/sr25519", 1),
     ("tari_template_macros", "crates/template_macros", 2),
     ("tari_template_lib", "crates/template_lib", 2),
     ("tari_ootle_template_metadata", "crates/template_metadata", 2),
     ("tari_ootle_template_build", "crates/template_build", 2),
+    # Also consumed by the Minotari base layer, whose wallet writes burn claim proofs with tari_sidechain.
+    # Both keep the version lines they had in the base layer repo.
+    ("tari_jellyfish", "crates/jellyfish", 1),
+    ("tari_sidechain", "crates/sidechain", 1),
     ("tari_engine_types", "crates/engine_types", 3),
     ("tari_ootle_common_types", "crates/common_types", 3),
-    ("tari_ootle_wallet_crypto", "crates/wallet/crypto", 4),
+    ("tari_state_tree", "crates/state_tree", 3),
     ("tari_ootle_address", "crates/ootle_address", 1),
     ("tari_ootle_transaction", "crates/transaction", 3),
+    ("tari_ootle_wallet_crypto", "crates/wallet/crypto", 4),
     # Tier 2, not tier 3: its only build dependency is tari_template_lib_types, so it has no build-time coupling to
     # the core cohort (its tari_engine_types / tari_ootle_transaction deps are dev-only) and carries its own version.
     ("tari_template_builtin", "crates/template_builtin", 2),
     ("tari_transaction_manifest", "crates/transaction_manifest", 3),
     ("tari_engine", "crates/engine", 3),
     ("tari_consensus_types", "crates/consensus_types", 3),
+    ("tari_ootle_storage", "crates/storage", 3),
     ("tari_indexer_client", "clients/tari_indexer_client", 4),
+    ("tari_ootle_light_client", "crates/wallet/light_client", 4),
     ("ootle-wasm-core", "crates/ootle_wasm/core", 3),
     ("ootle-wasm", "crates/ootle_wasm/wasm", 3),
+    ("ootle-wasm-bor", "crates/ootle_wasm/bor", 3),
     ("tari_template_test_tooling", "crates/template_test_tooling", 3),
     ("ootle_ledger_common", "crates/wallet/ledger/common", 4),
     ("ootle_ledger_client", "crates/wallet/ledger/client", 4),
@@ -67,6 +77,9 @@ CRATES = [
 TIER_LABELS = {1: "stable", 2: "template", 3: "core", 4: "wallet"}
 
 WAIT_SECS = 20
+
+LOCKFILE = Path(__file__).resolve().parent.parent / "Cargo.lock"
+CRATES_IO_SOURCE = "registry+https://github.com/rust-lang/crates.io-index"
 
 # Colors
 RED = "\033[0;31m"
@@ -175,6 +188,70 @@ def is_published(crate_name: str, version: str) -> bool:
     return any(v == version for v, _ in published_versions(crate_name) or ())
 
 
+def version_key(version: str) -> tuple:
+    return tuple(int(part) for part in version.split("+")[0].split("-")[0].split("."))
+
+
+def caret_compatible(a: str, b: str) -> bool:
+    """Would one caret requirement accept both versions? Cargo resolves such a pair from one source to one version."""
+    ka, kb = version_key(a), version_key(b)
+    if ka[0] != kb[0]:
+        return False
+    if ka[0] > 0:
+        return True
+    if ka[1] != kb[1]:
+        return False
+    return ka[1] > 0 or ka[2] == kb[2]
+
+
+def lock_packages(lock_text: str) -> list:
+    """[(name, version, source)] for each [[package]] in a Cargo.lock; source is None for path packages."""
+    packages = []
+    for block in lock_text.split("[[package]]")[1:]:
+        fields = {}
+        for line in block.splitlines():
+            key, sep, value = line.partition(" = ")
+            if sep and key in ("name", "version", "source"):
+                fields[key] = value.strip().strip('"')
+        if "name" in fields and "version" in fields:
+            packages.append((fields["name"], fields["version"], fields.get("source")))
+    return packages
+
+
+def stale_registry_locks(lock_text: str = None) -> list:
+    """[(crate, locked, local)] for each publish-set crate that Cargo.lock also holds as a crates.io copy at an older
+    version within the in-tree version's caret range.
+
+    A crates.io dependent pulls that copy in: the minotari crates depend on the published tari_sidechain, which pins
+    tari_jellyfish. In the workspace the path and crates.io copies are separate packages, so both resolve. `cargo
+    publish` resolves a crate's path deps from crates.io too, where one caret range gets one version, so publishing
+    anything that reaches both copies fails against the older lock entry until it moves to the in-tree version.
+    """
+    if lock_text is None:
+        lock_text = LOCKFILE.read_text()
+    names = {name for name, _, _ in CRATES}
+    packages = [p for p in lock_packages(lock_text) if p[0] in names]
+    local = {name: version for name, version, source in packages if source is None}
+    stale = []
+    for name, version, source in packages:
+        if source != CRATES_IO_SOURCE or name not in local:
+            continue
+        if version_key(version) < version_key(local[name]) and caret_compatible(version, local[name]):
+            stale.append((name, version, local[name]))
+    return sorted(stale)
+
+
+def relock(crate_name: str, locked: str, version: str, attempts: int = 6) -> bool:
+    """Move Cargo.lock's crates.io copy of a crate from `locked` to `version`, retrying while the index catches up."""
+    cmd = ["cargo", "update", "-p", f"{crate_name}@{locked}", "--precise", version]
+    for attempt in range(attempts):
+        if subprocess.run(cmd).returncode == 0:
+            return True
+        if attempt + 1 < attempts:
+            time.sleep(WAIT_SECS)
+    return False
+
+
 def cargo_publish(crate_name: str, dry_run: bool = False) -> bool:
     """Publish a crate using cargo publish."""
     cmd = ["cargo", "publish", "-p", crate_name, "--no-verify", "--allow-dirty"]
@@ -264,6 +341,7 @@ def main():
 
     published_crates = []
     failed_crates = []
+    relocked = []
     skipped = 0
     last_name = crates_to_publish[-1][0] if crates_to_publish else ""
 
@@ -277,6 +355,17 @@ def main():
             continue
 
         if args.execute:
+            for crate, locked, local in stale_registry_locks():
+                if not is_published(crate, local):
+                    continue
+                print(f"  {YELLOW}▶{NC} Relocking crates.io {crate} {locked} -> {local} ...")
+                if not relock(crate, locked, local):
+                    print(f"  {RED}✗{NC} cargo update -p {crate}@{locked} --precise {local} failed")
+                    print()
+                    print(f"{RED}Fix the issue and resume with:{NC}")
+                    print(f"  ./scripts/publish_crates.py --from {name} --execute")
+                    sys.exit(1)
+                relocked.append((crate, locked, local))
             print(f"  {YELLOW}▶{NC} Publishing {name} {ver} [{label}] ...")
             if cargo_publish(name):
                 print(f"  {GREEN}✓{NC} {name} {ver} [{label}] — published")
@@ -313,6 +402,11 @@ def main():
         print("Would publish:" if not args.execute else "Published crates:")
         for name, ver in published_crates:
             print(f"  - {name} {ver}")
+    if relocked:
+        print()
+        print(f"{YELLOW}Cargo.lock changed — commit it in a PR to development:{NC}")
+        for crate, locked, local in relocked:
+            print(f"  - crates.io {crate} {locked} -> {local}")
     if failed_crates:
         print()
         print(f"{RED}Failed crates:{NC}")

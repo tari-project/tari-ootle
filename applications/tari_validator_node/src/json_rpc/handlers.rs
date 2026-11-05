@@ -20,6 +20,8 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::sync::Arc;
+
 use axum_jrpc::{
     JrpcResult,
     JsonRpcExtractor,
@@ -72,6 +74,7 @@ use tari_validator_node_client::types::{
     ClearDiagnosticEventsRequest,
     ClearDiagnosticEventsResponse,
     ConnectionDirection,
+    CreateBackupSnapshotResponse,
     FunctionDef,
     GetAllVnsRequest,
     GetAllVnsResponse,
@@ -112,9 +115,11 @@ use tari_validator_node_client::types::{
     TemplateAbi,
     TemplateMetadata,
 };
+use time::OffsetDateTime;
 
 use crate::{
     ApplicationConfig,
+    backup_snapshot,
     bootstrap::Services,
     consensus::{
         ConsensusHandle,
@@ -130,6 +135,9 @@ const LOG_TARGET: &str = "tari::validator_node::json_rpc::handlers";
 
 const DEFAULT_DIAGNOSTIC_EVENT_LIMIT: usize = 100;
 const MAX_DIAGNOSTIC_EVENT_LIMIT: usize = 1000;
+/// Every block in a page is loaded from storage and serialized into a single response, so the page size is capped
+/// whatever limit the caller requests.
+const MAX_BLOCKS_PAGE_LIMIT: usize = 100;
 
 pub struct JsonRpcHandlers {
     config: ApplicationConfig,
@@ -144,6 +152,7 @@ pub struct JsonRpcHandlers {
     networking: NetworkingHandle<TariMessagingSpec>,
     state_store: ValidatorNodeStateStore,
     diagnostics: DiagnosticsHandle,
+    backup_in_progress: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl JsonRpcHandlers {
@@ -161,11 +170,23 @@ impl JsonRpcHandlers {
             networking: services.networking.clone(),
             state_store: services.state_store.clone(),
             diagnostics: services.diagnostics.clone(),
+            backup_in_progress: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
     pub fn sidechain_id(&self) -> Option<&RistrettoPublicKey> {
         self.config.validator_node.sidechain_id.as_ref()
+    }
+
+    fn compressed_sidechain_id(&self) -> Option<CompressedPublicKey> {
+        self.sidechain_id().map(|s| {
+            // The following is guaranteed to be infallible (invariant), more of a shortcoming of the
+            // CompressedPublicKey API. new_from_pk requires a clone
+            CompressedPublicKey::from_canonical_bytes(s.as_bytes()).expect(
+                "INVARIANT VIOLATION: CompressedPublicKey::from_canonical_bytes(sidechain_id.as_bytes()) returned an \
+                 error",
+            )
+        })
     }
 
     pub fn networking_is_active(&self) -> bool {
@@ -252,7 +273,10 @@ impl JsonRpcHandlers {
         let answer_id = value.get_answer_id();
         let request: GetStateRequest = value.parse_params()?;
 
-        let tx = self.state_store.create_read_tx().unwrap();
+        let tx = self
+            .state_store
+            .create_read_tx()
+            .map_err(internal_error(answer_id.clone()))?;
         let state = SubstateRecord::get(&tx, &request.address)
             .optional()
             .map_err(internal_error(answer_id.clone()))?
@@ -302,7 +326,7 @@ impl JsonRpcHandlers {
             },
         };
         let blocks = tx
-            .blocks_get_parent_chain(start_block.id(), req.limit)
+            .blocks_get_parent_chain(start_block.id(), blocks_page_limit(req.limit))
             .map_err(internal_error(answer_id.clone()))?;
 
         let res = ListBlocksResponse { blocks };
@@ -457,7 +481,7 @@ impl JsonRpcHandlers {
             .state_store
             .with_read_tx(|tx| {
                 tx.blocks_get_paginated(
-                    req.limit.into(),
+                    blocks_page_limit(req.limit as usize) as u64,
                     req.offset.into(),
                     req.filter_index,
                     req.filter,
@@ -493,9 +517,9 @@ impl JsonRpcHandlers {
                 .iter()
                 .map(|f| FunctionDef {
                     name: f.name.clone(),
+                    kind: f.kind.clone(),
                     arguments: f.arguments.to_vec(),
                     output: f.output.to_string(),
-                    is_mut: f.is_mut,
                 })
                 .collect(),
             version: loaded.template_def().abi_version(),
@@ -828,6 +852,39 @@ impl JsonRpcHandlers {
         }))
     }
 
+    pub async fn create_backup_snapshot(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        // The guard moves into the blocking task, so a client that disconnects mid-snapshot does not let a second
+        // request start while the first is still writing.
+        let guard = self.backup_in_progress.clone().try_lock_owned().map_err(|_| {
+            invalid_operation(
+                answer_id.clone(),
+                "A backup snapshot is already being taken. Wait for it to finish before requesting another.",
+            )
+        })?;
+        let state_store = self.state_store.clone();
+        let global_db = self.global_db.clone();
+        let backups_dir = self.config.validator_node.backups_dir();
+
+        let path = tokio::task::spawn_blocking(move || {
+            let _guard = guard;
+            backup_snapshot::create_backup_snapshot(&state_store, &global_db, &backups_dir, OffsetDateTime::now_utc())
+        })
+        .await
+        .map_err(internal_error(answer_id.clone()))?
+        .map_err(|e| match e {
+            e @ backup_snapshot::BackupSnapshotError::SnapshotAlreadyExists { .. } => {
+                invalid_operation(answer_id.clone(), e.to_string())
+            },
+            e => general_error(answer_id.clone(), e.to_string()),
+        })?;
+
+        info!(target: LOG_TARGET, "💾 Backup snapshot written to {}", path.display());
+        Ok(JsonRpcResponse::success(answer_id, CreateBackupSnapshotResponse {
+            path,
+        }))
+    }
+
     pub async fn get_consensus_status(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
         let epoch = self.consensus.current_epoch();
@@ -883,14 +940,7 @@ impl JsonRpcHandlers {
 
                 // Use the currently configured fee claim public key
                 let fee_claim_public_key = self.config.validator_node.fee_claim_public_key.to_byte_type();
-                let sidechain_id = self.sidechain_id().map(|s| {
-                    // The following is guaranteed to be infallible (invariant), more of a shortcoming of the
-                    // CompressedPublicKey API. new_from_pk requires a clone
-                    CompressedPublicKey::from_canonical_bytes(s.as_bytes()).expect(
-                        "INVARIANT VIOLATION: \
-                         CompressedPublicKey::from_canonical_bytes(fee_claim_public_key.as_bytes()) returned an error",
-                    )
-                });
+                let sidechain_id = self.compressed_sidechain_id();
                 // TODO: we permit the registration within the next 3 epochs. Since we scan behind the chain, this
                 // should be set according to the number of epochs behind (consensus constants) rather than arbitrarily.
                 let max_epoch = current_epoch + Epoch(3);
@@ -954,12 +1004,12 @@ impl JsonRpcHandlers {
                     .get_our_validator_node(current_epoch)
                     .await
                     .map_err(internal_error(answer_id.clone()))?;
+                let sidechain_id = self.compressed_sidechain_id();
                 let max_epoch = current_epoch + Epoch(3);
                 let signature = ValidatorNodeSignature::sign_for_exit(
                     self.keypair.secret_key(),
                     self.config.network.as_byte(),
-                    // TODO: sidechain support
-                    None,
+                    sidechain_id.as_ref(),
                     registration.start_epoch.as_u64().into(),
                     max_epoch.as_u64().into(),
                 );
@@ -1017,4 +1067,34 @@ fn sum_block_execution_weight<TTx: StateStoreReadTransaction>(tx: &TTx, block: &
         total = total.saturating_add(weight.saturating_mul(cmd.execution_weight_percent()) / 100);
     }
     Ok(total)
+}
+
+/// The floor of one block matters: `blocks_get_parent_chain` stops only once it holds exactly `limit` blocks, so a
+/// zero limit would never stop it.
+fn blocks_page_limit(requested: usize) -> usize {
+    requested.clamp(1, MAX_BLOCKS_PAGE_LIMIT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blocks_page_limit_caps_oversized_requests() {
+        assert_eq!(blocks_page_limit(usize::MAX), MAX_BLOCKS_PAGE_LIMIT);
+        assert_eq!(blocks_page_limit(u32::MAX as usize), MAX_BLOCKS_PAGE_LIMIT);
+        assert_eq!(blocks_page_limit(MAX_BLOCKS_PAGE_LIMIT + 1), MAX_BLOCKS_PAGE_LIMIT);
+    }
+
+    #[test]
+    fn blocks_page_limit_raises_a_zero_limit_to_one() {
+        assert_eq!(blocks_page_limit(0), 1);
+    }
+
+    #[test]
+    fn blocks_page_limit_keeps_requests_within_the_cap() {
+        assert_eq!(blocks_page_limit(1), 1);
+        assert_eq!(blocks_page_limit(10), 10);
+        assert_eq!(blocks_page_limit(MAX_BLOCKS_PAGE_LIMIT), MAX_BLOCKS_PAGE_LIMIT);
+    }
 }

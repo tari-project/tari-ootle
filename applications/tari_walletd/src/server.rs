@@ -6,8 +6,10 @@ use std::{net::SocketAddr, sync::Arc};
 use axum::{
     Router,
     extract::{DefaultBodyLimit, Extension},
+    http::StatusCode,
+    middleware,
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
 };
 use axum_extra::{TypedHeader, extract::CookieJar, headers, headers::authorization::Bearer};
 use axum_jrpc::{
@@ -19,29 +21,36 @@ use axum_jrpc::{
 use log::*;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
-use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
+use tari_ootle_app_utilities::{
+    allowed_hosts::{AllowedHosts, check_host},
+    tcp::try_bind_with_fallback,
+};
 use tokio::task;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 use super::handlers::{HandlerContext, HandlerWithCookie, auth, stealth_utxos, substates, templates, wallet, webauthn};
-use crate::handlers::{
-    Handler,
-    accounts,
-    address_book,
-    auth::jwt::AuthError,
-    burn_proofs,
-    confidential,
-    error::HandlerError,
-    keys,
-    nfts,
-    resources,
-    settings,
-    signing_requests,
-    swap_pools,
-    transaction,
-    transaction_requests,
-    validator,
-    webrtc,
+use crate::{
+    config::WalletDaemonConfig,
+    handlers::{
+        Handler,
+        accounts,
+        address_book,
+        auth::jwt::AuthError,
+        burn_proofs,
+        confidential,
+        error::HandlerError,
+        keys,
+        nfts,
+        resources,
+        settings,
+        signing_requests,
+        swap_pools,
+        transaction,
+        transaction_requests,
+        validator,
+        validator_set,
+        webrtc,
+    },
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::json_rpc";
@@ -51,23 +60,8 @@ pub async fn spawn_listener(
     signaling_server_address: SocketAddr,
     context: HandlerContext,
 ) -> anyhow::Result<(SocketAddr, task::JoinHandle<anyhow::Result<()>>)> {
-    let enable_permissive_cors = context.config().enable_permissive_cors;
     let shutdown_signal = context.shutdown_signal().clone();
-    let router = Router::new()
-        .route("/json_rpc", post(handler))
-        .route("/json-rpc", post(handler))
-        // TODO: Get these traces to work
-        .layer(TraceLayer::new_for_http())
-        .layer(Extension(Arc::new(context)))
-        .layer(Extension((preferred_address,signaling_server_address)))
-        .layer(if enable_permissive_cors { CorsLayer::permissive() } else { CorsLayer::new() })
-        // Limit the body size to 5MB to allow for wasm uploads
-        .layer(DefaultBodyLimit::max(5*1024*1024));
-
-    #[cfg(feature = "web_ui")]
-    let router = router.fallback(crate::handlers::web_ui::handler);
-    #[cfg(not(feature = "web_ui"))]
-    let router = router.fallback(crate::handlers::web_ui::feature_disabled_handler);
+    let router = router(preferred_address, signaling_server_address, context);
 
     let listener = try_bind_with_fallback(preferred_address).await?;
     let server = axum::serve(listener, router);
@@ -83,6 +77,45 @@ pub async fn spawn_listener(
     });
 
     Ok((listen_addr, task))
+}
+
+fn router(preferred_address: SocketAddr, signaling_server_address: SocketAddr, context: HandlerContext) -> Router {
+    let enable_permissive_cors = context.config().enable_permissive_cors;
+    let allowed_hosts = allowed_hosts(context.config());
+    let router = Router::new()
+        .route("/json_rpc", post(handler))
+        .route("/json-rpc", post(handler))
+        .route("/health", get(health))
+        // TODO: Get these traces to work
+        .layer(TraceLayer::new_for_http())
+        .layer(Extension(Arc::new(context)))
+        .layer(Extension((preferred_address,signaling_server_address)))
+        .layer(if enable_permissive_cors { CorsLayer::permissive() } else { CorsLayer::new() })
+        // Limit the body size to 5MB to allow for wasm uploads
+        .layer(DefaultBodyLimit::max(5*1024*1024));
+
+    #[cfg(feature = "web_ui")]
+    let router = router.fallback(crate::handlers::web_ui::handler);
+    #[cfg(not(feature = "web_ui"))]
+    let router = router.fallback(crate::handlers::web_ui::feature_disabled_handler);
+
+    // Layered last so that it guards the fallback as well as the routes.
+    router.layer(middleware::from_fn_with_state(allowed_hosts, check_host))
+}
+
+/// Liveness probe for container health checks. Needs no authentication. The listener only starts once the wallet has
+/// opened its database and loaded its cipher seed, so a response means the daemon is up.
+async fn health() -> StatusCode {
+    StatusCode::OK
+}
+
+/// The names listed in `allowed_hosts` and the host of the WebAuthn relying-party origin.
+fn allowed_hosts(config: &WalletDaemonConfig) -> AllowedHosts {
+    let rp_host = config.webauthn.rp_origin.as_ref().and_then(|origin| origin.host_str());
+    AllowedHosts::new(
+        "ootle_wallet_daemon.allowed_hosts",
+        config.allowed_hosts.iter().map(String::as_str).chain(rp_host),
+    )
 }
 
 /// Renders the part of a JSON-RPC request that may be written to a log: the request id, the method,
@@ -144,6 +177,9 @@ async fn handler(
                 call_handler_any_response(context, value, token, webauthn::handle_finish_registration).await
             },
             "auth_start" => call_handler(context, value, token, webauthn::handle_start_auth).await,
+            "list_passkeys" => call_handler(context, value, token, webauthn::handle_list_passkeys).await,
+            "rename_passkey" => call_handler(context, value, token, webauthn::handle_rename_passkey).await,
+            "remove_passkey" => call_handler(context, value, token, webauthn::handle_remove_passkey).await,
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("settings", method)) => match method {
@@ -169,7 +205,7 @@ async fn handler(
             "get" => call_handler(context, value, token, transaction::handle_get).await,
             "get_result" => call_handler(context, value, token, transaction::handle_get_result).await,
             "wait_result" => call_handler(context, value, token, transaction::handle_wait_result).await,
-            "list" | "get_all" => call_handler(context, value, token, transaction::handle_get_all).await,
+            "list" => call_handler(context, value, token, transaction::handle_list).await,
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("transaction_requests", method)) => match method {
@@ -193,6 +229,8 @@ async fn handler(
             "claim_burn" => call_handler(context, value, token, accounts::handle_claim_burn).await,
             "create" => call_handler(context, value, token, accounts::handle_create).await,
             "create_or_get" => call_handler(context, value, token, accounts::handle_create_or_get).await,
+            "import_view_only" => call_handler(context, value, token, accounts::handle_import_view_only).await,
+            "export_view_key" => call_handler(context, value, token, accounts::handle_export_view_key).await,
             "list" => call_handler(context, value, token, accounts::handle_list).await,
             "get_balance_changes" => call_handler(context, value, token, accounts::handle_get_balance_changes).await,
             "get_balances" => call_handler(context, value, token, accounts::handle_get_balances).await,
@@ -292,6 +330,9 @@ async fn handler(
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("wallet", "get_info")) => call_handler(context, value, token, wallet::handle_get_info).await,
+        Some(("validator_set", "get_status")) => {
+            call_handler(context, value, token, validator_set::handle_get_status).await
+        },
         _ => value.method_not_found(&value.method).into_response(),
     }
 }
@@ -427,14 +468,40 @@ pub enum ApplicationErrorCode {
     TransactionRejected = 1000,
     FaucetAlreadyClaimed = 1001,
     FaucetEmpty = 1002,
+    TransactionPending = 1003,
     GeneralError = 500,
 }
 
 #[cfg(test)]
 mod tests {
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode, header},
+    };
     use axum_jrpc::Id;
+    use tari_ootle_walletd_client::{
+        permissions::Permission,
+        types::{AuthCredentials, AuthLoginRequest},
+    };
+    use tower::ServiceExt;
 
     use super::*;
+    use crate::handlers::test_support::TestDaemon;
+
+    #[tokio::test]
+    async fn health_answers_without_authentication() {
+        let daemon = TestDaemon::start().await;
+        let address = SocketAddr::from(([127, 0, 0, 1], 5100));
+        let router = router(address, SocketAddr::from(([127, 0, 0, 1], 9100)), daemon.context);
+        let request = Request::get("/health")
+            .header(header::HOST, "127.0.0.1:5100")
+            .body(Body::empty())
+            .unwrap();
+        let response = router.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        // The web UI fallback also answers 200, with a page; only the health route answers with an empty body.
+        assert!(to_bytes(response.into_body(), usize::MAX).await.unwrap().is_empty());
+    }
 
     fn keys_import(secret_key: &str) -> JsonRpcExtractor {
         JsonRpcExtractor {
@@ -462,5 +529,60 @@ mod tests {
         assert!(described.contains("keys.import"));
         assert!(described.contains('7'));
         assert!(described.contains("2 named"));
+    }
+
+    /// Sends an anonymous admin `auth.request` to a no-auth daemon's router, addressed to `host`.
+    async fn login_as(host: &str) -> Response {
+        let daemon = TestDaemon::start().await;
+        let address = SocketAddr::from(([127, 0, 0, 1], 5100));
+        let router = router(address, SocketAddr::from(([127, 0, 0, 1], 9100)), daemon.context);
+        let body = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "auth.request",
+            "params": AuthLoginRequest {
+                permissions: vec![Permission::Admin],
+                credentials: AuthCredentials::None,
+            },
+        });
+        let request = Request::post("/json_rpc")
+            .header(header::HOST, host)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        router.oneshot(request).await.unwrap()
+    }
+
+    async fn issues_token(response: Response) -> bool {
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+        body["result"]["token"].is_string()
+    }
+
+    #[test]
+    fn configured_names_and_the_rp_origin_host_are_allowed() {
+        let mut config = WalletDaemonConfig::default();
+        config.allowed_hosts = vec!["wallet.internal".to_string()];
+        config.webauthn.rp_origin = Some("https://wallet.example.com".parse().unwrap());
+        let allowed = allowed_hosts(&config);
+        assert!(allowed.permits("wallet.internal"));
+        assert!(allowed.permits("wallet.example.com"));
+        assert!(!allowed.permits("other.example.com"));
+    }
+
+    #[tokio::test]
+    async fn a_request_addressed_to_a_foreign_host_name_is_refused() {
+        let response = login_as("wallet.example.com:5100").await;
+        assert_eq!(response.status(), StatusCode::MISDIRECTED_REQUEST);
+        assert!(!issues_token(response).await);
+    }
+
+    #[tokio::test]
+    async fn a_request_addressed_to_a_local_name_is_served() {
+        for host in ["127.0.0.1:5100", "localhost:5100", "[::1]:5100", "localhost"] {
+            let response = login_as(host).await;
+            assert_eq!(response.status(), StatusCode::OK, "{host}");
+            assert!(issues_token(response).await, "{host}");
+        }
     }
 }

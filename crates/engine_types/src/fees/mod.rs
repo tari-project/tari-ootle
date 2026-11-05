@@ -5,8 +5,10 @@ use indexmap::{IndexMap, map::Entry};
 use serde::{Deserialize, Serialize};
 
 mod burn_rate_schedule;
+mod fee_scale;
 mod fee_table;
 pub use burn_rate_schedule::{ExhaustBurnRateSchedule, ExhaustBurnRateSource, resolve_exhaust_burn_rate};
+pub use fee_scale::{FeeScale, FeeScaleSchedule};
 pub use fee_table::{FeeTable, WasmMeteringRate};
 
 /// Inline literal args carry their bytes directly in the instruction, so they are priced by size,
@@ -73,8 +75,10 @@ impl ExhaustBurnRate {
 ///
 /// The value is derived rather than chosen: [`FeeTable::fee_estimate_allowance`] computes it from
 /// `per_transaction_weight_cost`, `per_byte_storage_cost`, `storage_cost_divisor` and
-/// [`LITERAL_BYTE_DIVISOR`]. `fee_estimate_allowance_covers_every_shipped_network`, which sits with
-/// the shipped tables, asserts this value covers every one of them.
+/// [`LITERAL_BYTE_DIVISOR`], and [`FeeTable::fee_estimate_allowance_at`] at a fee scale.
+/// `fee_estimate_allowance_covers_every_shipped_network`, which sits with the shipped tables, asserts
+/// this value covers every one of them at every fee scale its network is scheduled at, so a release
+/// that schedules a higher scale raises this value with it.
 pub const FEE_ESTIMATE_ALLOWANCE: u64 = 12;
 
 /// The rates a transaction's fee charges are computed from, as a fee estimator needs them.
@@ -93,6 +97,12 @@ pub struct FeeRates {
     pub storage_cost_divisor: u64,
     /// Must be non-zero; a zero divisor reads as `1`, matching `FeeTable`.
     pub wasm_points_cost_divisor: u64,
+    /// Must be non-zero; a zero divisor reads as `1`, matching `FeeTable`.
+    pub input_load_bytes_cost_divisor: u64,
+    /// Must be non-zero; a zero divisor reads as `1`, matching `FeeTable`.
+    pub input_fanout_bytes_cost_divisor: u64,
+    /// The multiplier the engine applies to every charge priced from the rates above.
+    pub fee_scale: FeeScale,
 }
 
 impl FeeRates {
@@ -121,6 +131,26 @@ impl FeeRates {
     /// WASM or from native verification.
     pub fn execution_cost(&self, points: u64) -> u64 {
         (points / non_zero(self.wasm_points_cost_divisor)).saturating_mul(self.per_wasm_point_cost)
+    }
+
+    /// The charge for loading `input_bytes` of declared inputs, the encoded size of their values
+    /// summed.
+    pub fn input_load_cost(&self, input_bytes: u64) -> u64 {
+        self.per_byte_storage_cost.saturating_mul(input_bytes) / non_zero(self.input_load_bytes_cost_divisor)
+    }
+
+    /// The charge for pledging `input_bytes` of declared inputs to `input_fanout` other shard groups.
+    pub fn input_fanout_cost(&self, input_bytes: u64, input_fanout: u32) -> u64 {
+        self.per_byte_storage_cost
+            .saturating_mul(input_bytes)
+            .saturating_mul(u64::from(input_fanout)) /
+            non_zero(self.input_fanout_bytes_cost_divisor)
+    }
+
+    /// `unscaled`, a sum of charges priced from these rates, at [`Self::fee_scale`]. Rounds up, so it
+    /// is never below what the engine charges for the same terms.
+    pub fn scale_total(&self, unscaled: u64) -> u64 {
+        self.fee_scale.apply_ceil(unscaled)
     }
 }
 
@@ -181,7 +211,16 @@ impl FeeReceiptBuilder {
 }
 
 #[derive(
-    Debug, Clone, minicbor::Encode, minicbor::Decode, minicbor::CborLen, Serialize, Deserialize, borsh::BorshSerialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    minicbor::Encode,
+    minicbor::Decode,
+    minicbor::CborLen,
+    Serialize,
+    Deserialize,
+    borsh::BorshSerialize,
 )]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FeeReceipt {
@@ -260,9 +299,10 @@ impl FeeReceipt {
     /// caller with a vault to refund to loses nothing by submitting above it — and one paying purely
     /// by stealth reveal, where the overpayment is not refundable, has reason to sit on it.
     ///
-    /// Reads what this receipt was charged. When only the fee intent committed, that is the fee
-    /// intent's own cost rather than what the transaction needed, so anything telling a caller what
-    /// to resubmit with wants [`crate::commit_result::FinalizeResult::required_fees`] instead.
+    /// Reads what this receipt was charged. When only the fee intent committed, that is the whole
+    /// transaction's metered charges with storage priced over the fee checkpoint, which can be less
+    /// than the transaction needed (and may still exceed what was paid). Anything telling a caller
+    /// what to resubmit with wants [`crate::commit_result::FinalizeResult::required_fees`] instead.
     pub fn required_fees(&self) -> u64 {
         self.total_fees_charged().saturating_add(FEE_ESTIMATE_ALLOWANCE)
     }
@@ -377,12 +417,19 @@ pub enum FeeSource {
     /// breakdown the per-point rate already makes comparable.
     #[n(8)]
     NativeExecution = 8,
+    /// Loading the transaction's declared inputs, priced by the encoded size of their values.
+    #[n(9)]
+    InputLoad = 9,
+    /// Pledging the transaction's declared inputs to the other shard groups it involves, priced by
+    /// their encoded size times the number of those groups.
+    #[n(10)]
+    InputFanout = 10,
 }
 
 impl FeeSource {
     /// Every variant. `fee_source_all_is_exhaustive` fails to compile if a variant is added without
     /// being listed here.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 11] = [
         Self::Initial,
         Self::RuntimeCall,
         Self::Storage,
@@ -392,6 +439,8 @@ impl FeeSource {
         Self::WasmExecution,
         Self::TemplatePublish,
         Self::NativeExecution,
+        Self::InputLoad,
+        Self::InputFanout,
     ];
 }
 
@@ -404,6 +453,8 @@ impl FeeSource {
     Serialize,
     Deserialize,
     Default,
+    PartialEq,
+    Eq,
     borsh::BorshSerialize,
 )]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -472,6 +523,19 @@ impl FeeBreakdown {
     pub fn get(&self, source: FeeSource) -> u64 {
         self.breakdown.get(&source).copied().unwrap_or_default()
     }
+
+    /// This breakdown with each source's charge at `scale`, rounded down. A source that scales to
+    /// zero is left absent, as [`Self::set`] leaves it.
+    pub fn scaled(&self, scale: FeeScale) -> Self {
+        if scale.is_one() {
+            return self.clone();
+        }
+        let mut scaled = Self::default();
+        for (source, amount) in self.iter() {
+            scaled.set(*source, scale.apply(*amount));
+        }
+        scaled
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -514,7 +578,9 @@ mod tests {
                 FeeSource::SubstateCreate |
                 FeeSource::WasmExecution |
                 FeeSource::TemplatePublish |
-                FeeSource::NativeExecution => {},
+                FeeSource::NativeExecution |
+                FeeSource::InputLoad |
+                FeeSource::InputFanout => {},
             }
         }
     }

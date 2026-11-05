@@ -67,14 +67,15 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::templates::list_template_catalogue,
     handlers::templates::get_template_catalogue_entry,
     handlers::utxos::fetch_utxos,
-    handlers::utxos::list_utxos,
     handlers::utxos::stream_utxo_updates,
     handlers::transaction_receipts::list_transaction_receipts,
     handlers::transaction_receipts::get_transaction_receipt,
     handlers::transaction_events::sse_transaction_events,
     handlers::epoch_checkpoints::list_epoch_checkpoints,
     handlers::epoch_checkpoints::get_latest_epoch_checkpoint,
-    handlers::validators::list_validators
+    handlers::epoch_checkpoints::get_latest_shard_group_checkpoints,
+    handlers::validators::list_validators,
+    handlers::committees::get_committee
 ))]
 pub struct ApiDoc;
 
@@ -218,6 +219,9 @@ fn api_routes(rate_limits: &IndexerRateLimitsConfig, sse_metrics: &SseConnection
             // GET /validators – per-IP rate limit (rate_limits.reads_rate)
             .route("/validators", get(handlers::validators::list_validators)
                 .route_layer(middleware::from_fn_with_state(reads_limiter.clone(), rate_limit_middleware)))
+            // GET /committees – per-IP rate limit (rate_limits.reads_rate)
+            .route("/committees", get(handlers::committees::get_committee)
+                .route_layer(middleware::from_fn_with_state(reads_limiter.clone(), rate_limit_middleware)))
             // ----------------------------------------------------------------
             // /substates/* – per-IP rate limit (rate_limits.substates_rate)
             // ----------------------------------------------------------------
@@ -279,9 +283,6 @@ fn api_routes(rate_limits: &IndexerRateLimitsConfig, sse_metrics: &SseConnection
                 .route_layer(middleware::from_fn_with_state(reads_limiter.clone(), rate_limit_middleware))
             )
             .nest("/utxos", Router::new()
-                // GET /utxos – per-IP rate limit (rate_limits.utxos_fetch_rate)
-                .route("/", get(handlers::utxos::list_utxos)
-                .route_layer(middleware::from_fn_with_state(utxos_fetch_limiter.clone(), rate_limit_middleware)))
                 // POST /utxos/fetch – per-IP rate limit (rate_limits.utxos_fetch_rate)
                 .route("/fetch", post(handlers::utxos::fetch_utxos)
                     .route_layer(middleware::from_fn_with_state(utxos_fetch_limiter, rate_limit_middleware)))
@@ -310,6 +311,7 @@ fn api_routes(rate_limits: &IndexerRateLimitsConfig, sse_metrics: &SseConnection
             .nest("/epoch-checkpoints", Router::new()
                 .route("/", get(handlers::epoch_checkpoints::list_epoch_checkpoints))
                 .route("/latest", get(handlers::epoch_checkpoints::get_latest_epoch_checkpoint))
+                .route("/latest/shard-groups", get(handlers::epoch_checkpoints::get_latest_shard_group_checkpoints))
                 .route_layer(middleware::from_fn_with_state(epoch_checkpoints_limiter, rate_limit_middleware))
             )
             // SSE /events – per-IP concurrent connection limit
@@ -364,9 +366,11 @@ mod tests {
         for path in [
             "/epoch-checkpoints?limit=100",
             "/epoch-checkpoints/latest",
+            "/epoch-checkpoints/latest/shard-groups",
             "/resources/tari",
             "/templates/catalogue",
             "/validators",
+            "/committees?epoch=1&shard=1",
         ] {
             let mut limited = false;
             for _ in 0..ATTEMPTS {

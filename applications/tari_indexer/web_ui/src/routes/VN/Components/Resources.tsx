@@ -27,10 +27,12 @@ import { useParams } from "react-router-dom";
 import { useGetSubstate } from "../../../api/hooks/useSubstates";
 import CopyToClipboard from "../../../Components/CopyToClipboard";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
+import { useDecoder } from "../../../utils/encoded";
 import { formatCurrency } from "../../../utils/helpers";
 
 function Resources() {
   const { resourceAddress } = useParams();
+  const { decodeSubstateValue } = useDecoder();
 
   const {
     data: substateData,
@@ -45,11 +47,13 @@ function Resources() {
   });
 
   const resource = useMemo(() => {
-    if (!substateData?.substate || !("Resource" in substateData.substate)) {
+    const substate =
+      substateData && "up" in substateData.state ? decodeSubstateValue(substateData.state.up.substate) : undefined;
+    if (!substate || !("Resource" in substate)) {
       return null;
     }
-    return substateData.substate.Resource;
-  }, [substateData]);
+    return substate.Resource;
+  }, [substateData, decodeSubstateValue]);
 
   return (
     <FetchStatusCheck

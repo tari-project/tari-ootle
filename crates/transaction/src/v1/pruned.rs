@@ -20,6 +20,7 @@ use crate::{
     BlobHashes,
     Blobs,
     Instruction,
+    MainSigner,
     TransactionId,
     TransactionIntent,
     TransactionSealSignature,
@@ -63,7 +64,7 @@ pub struct PrunedUnsignedTransactionV1 {
     #[n(5)]
     pub max_epoch: Epoch,
     #[n(6)]
-    pub is_seal_signer_authorized: bool,
+    pub main_signer: MainSigner,
     #[n(7)]
     pub dry_run: bool,
     /// Per-blob commitments. Mirrors `UnsignedTransactionV1::blobs.hashes()` of the full form.
@@ -71,17 +72,12 @@ pub struct PrunedUnsignedTransactionV1 {
     pub blob_hashes: BlobHashes,
     /// Byte size of each blob, parallel to `blob_hashes`. **Not part of the signing/id domain**
     /// — populated at conversion time from `Blobs` so that API consumers and UIs can show
-    /// blob sizes without downloading payloads. May be empty when deserialised from older
-    /// archives that didn't record sizes.
+    /// blob sizes without downloading payloads.
     #[n(9)]
-    #[cfg_attr(feature = "serde", serde(default))]
-    #[cbor(default)]
     #[borsh(skip)]
     pub blob_sizes: Vec<u32>,
     /// Mirrors `UnsignedTransactionV1::nonce` of the full form.
     #[n(10)]
-    #[cfg_attr(feature = "serde", serde(default))]
-    #[cbor(default)]
     pub nonce: u64,
 }
 
@@ -118,7 +114,7 @@ impl From<UnsignedTransactionV1> for PrunedUnsignedTransactionV1 {
             inputs: t.inputs,
             min_epoch: t.min_epoch,
             max_epoch: t.max_epoch,
-            is_seal_signer_authorized: t.is_seal_signer_authorized,
+            main_signer: t.main_signer,
             dry_run: t.dry_run,
             blob_hashes,
             blob_sizes,
@@ -168,6 +164,7 @@ impl PrunedUnsealedTransactionV1 {
     }
 
     /// Verify all extra signatures against the seal signer.
+    #[must_use]
     pub fn verify_all_signatures(&self, seal_signer: &RistrettoPublicKeyBytes) -> bool {
         if self.signatures.is_empty() {
             return true;
@@ -269,8 +266,12 @@ impl PrunedTransactionV1 {
         self.body.transaction.max_epoch
     }
 
+    pub fn declared_main_signer(&self) -> &MainSigner {
+        &self.body.transaction.main_signer
+    }
+
     pub fn is_seal_signer_authorized(&self) -> bool {
-        self.body.transaction.is_seal_signer_authorized
+        self.declared_main_signer().is_seal_signer_authorized()
     }
 
     pub fn is_dry_run(&self) -> bool {
@@ -290,6 +291,7 @@ impl PrunedTransactionV1 {
     }
 
     /// Verify the seal and all extra signatures.
+    #[must_use]
     pub fn verify_all_signatures(&self) -> bool {
         let seal_message = TransactionSealSignature::create_message_v1_pruned(&self.body);
         let authorization_message = TransactionSignature::create_message_v1_pruned(
@@ -343,7 +345,7 @@ impl PrunedTransactionV1 {
             inputs,
             min_epoch,
             max_epoch,
-            is_seal_signer_authorized,
+            main_signer,
             dry_run,
             blob_hashes: _,
             blob_sizes: _,
@@ -357,7 +359,7 @@ impl PrunedTransactionV1 {
             inputs,
             min_epoch,
             max_epoch,
-            is_seal_signer_authorized,
+            main_signer,
             dry_run,
             blobs,
             nonce,
@@ -403,7 +405,7 @@ mod tests {
             inputs,
             min_epoch: Some(Epoch(100)),
             max_epoch: Epoch(200),
-            is_seal_signer_authorized: false,
+            main_signer: MainSigner::None,
             dry_run: true,
             blobs,
             nonce: 7,

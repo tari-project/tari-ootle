@@ -20,6 +20,8 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+mod exit_signals;
+
 use std::{fs, panic, process};
 
 use anyhow::Context;
@@ -36,9 +38,12 @@ use tari_ootle_walletd::{
     init_os_keyring_store,
     init_wallet_store,
     initialize_wallet_sdk,
+    reset_wallet_passkeys,
     run_tari_ootle_walletd,
 };
 use tari_shutdown::Shutdown;
+
+use crate::exit_signals::ExitSignals;
 
 const LOG_TARGET: &str = "tari::wallet_daemon";
 
@@ -69,6 +74,14 @@ async fn main() -> Result<(), anyhow::Error> {
 
     match &cli.command {
         Some(Subcommand::Run) | None => run(cli, config).await?,
+        Some(Subcommand::ResetPasskeys) => {
+            let deleted = reset_wallet_passkeys(&config)?;
+            println!(
+                "Removed {deleted} WebAuthn passkey(s). Restart the wallet daemon to invalidate any active sessions \
+                 and generate a new setup token."
+            );
+            return Ok(());
+        },
         Some(Subcommand::CreateAccount {
             name,
             key_index,
@@ -94,7 +107,7 @@ async fn main() -> Result<(), anyhow::Error> {
             let public_key = account_address.address.account_key().to_byte_type();
             let view_only_public_key = account_address.address.view_only_key().to_byte_type();
             let account_addr = sdk.accounts_api().derive_account_address_from_public_key(&public_key);
-            let is_default = !sdk.accounts_api().any_accounts_exist()?;
+            let is_default = !sdk.accounts_api().has_default_account()?;
             let birthday_epoch = sdk.calculate_birthday_epoch();
             sdk.accounts_api().add_account(
                 name.as_deref(),
@@ -208,17 +221,15 @@ async fn main() -> Result<(), anyhow::Error> {
                 .context("System time is before the UNIX epoch")?
                 .as_secs();
             let bak_path = db_path.with_extension(format!("sqlite.{timestamp}.bak"));
-            match tokio::fs::rename(&db_path, &bak_path).await {
-                Ok(()) => println!(
+            let moved = tari_ootle_wallet_storage_sqlite::move_database(&db_path, &bak_path)
+                .context("Failed to move wallet database")?;
+            if moved {
+                println!(
                     "Wallet database moved to '{}'.\nThe wallet will be recreated on next startup.",
                     bak_path.display()
-                ),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    println!("No wallet database found at '{}'. Nothing to reset.", db_path.display());
-                },
-                Err(e) => {
-                    anyhow::bail!("Failed to move wallet database: {}", e);
-                },
+                );
+            } else {
+                println!("No wallet database found at '{}'. Nothing to reset.", db_path.display());
             }
 
             return Ok(());
@@ -265,5 +276,26 @@ async fn run(cli: Cli, config: ApplicationConfig) -> Result<(), anyhow::Error> {
         config.common.base_path().display()
     );
 
+    let mut exit_signals = ExitSignals::register().context("Failed to listen for exit signals")?;
+    tokio::spawn(async move {
+        let signal = exit_signals.recv().await;
+        info!(target: LOG_TARGET, "🛑 Received {signal}. Shutting down. Send it again to exit at once.");
+        shutdown.trigger();
+        let signal = exit_signals.recv().await;
+        warn!(target: LOG_TARGET, "🛑 Received {signal} again. Exiting without waiting for the shutdown.");
+        process::exit(1);
+    });
+
     run_tari_ootle_walletd(config, cli.wallet_restore.seed_words.as_ref(), shutdown_signal).await
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn log4rs_sample_config_builds_with_enabled_features() {
+        let log_dir = tempfile::tempdir().unwrap();
+        let yaml = include_str!("../log4rs_sample.yml").replace("{{log_dir}}", log_dir.path().to_str().unwrap());
+        let config: log4rs::config::RawConfig = serde_saphyr::from_str(&yaml).unwrap();
+        log4rs::config::create_raw_config(config).unwrap();
+    }
 }

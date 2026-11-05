@@ -34,6 +34,7 @@ impl<'a> JwtApi<'a> {
             permissions,
             exp: exp.as_secs(),
             delegated: false,
+            delegation_id: None,
         })
     }
 
@@ -65,12 +66,11 @@ impl<'a> JwtApi<'a> {
         Ok(token_data.claims.permissions)
     }
 
-    /// Validate the bearer JWT and return its permissions and whether it is a
-    /// delegated token.
-    pub fn check_auth_delegation(&self, token: Option<&Bearer>) -> Result<(Permissions, bool), AuthError> {
+    /// Validate the bearer JWT and return all of its claims, including
+    /// whether it is a delegated token.
+    pub fn check_auth_claims(&self, token: Option<&Bearer>) -> Result<Claims, AuthError> {
         let token = token.ok_or(AuthError::AccessDeniedNoBearerToken)?;
-        let claims = self.decode_jwt(token.token())?.claims;
-        Ok((claims.permissions, claims.delegated))
+        Ok(self.decode_jwt(token.token())?.claims)
     }
 
     /// Like [`Self::check_auth`], but refuses a delegated token: only a token
@@ -112,13 +112,22 @@ pub enum AuthError {
     #[error("Access denied. API key is invalid or revoked")]
     ApiKeyInvalidOrRevoked,
     // The endpoint requires an interactive user session (WebAuthn) — API
-    // keys are deliberately excluded so a leaked Admin key cannot mint or
-    // revoke further keys, limiting blast radius of a compromise to the
-    // lifetime of that single key.
-    #[error("Access denied. This endpoint requires an interactive user session, not an API key or a delegated token")]
+    // keys, delegated tokens, and the local cookie are deliberately excluded so
+    // a leaked Admin key or local `.cookie` cannot mint or revoke further keys,
+    // export secret keys, or approve requests.
+    #[error(
+        "Access denied. This endpoint requires an interactive user session, not an API key, delegated token, or local \
+         cookie"
+    )]
     UserAuthOnly,
     #[error("Insufficient permissions. Required '{required:?}'")]
     InsufficientPermissions { required: Permission },
+    #[error(
+        "Access denied. The transaction replaces the template of component {component} with {new_template}, and only \
+         an admin credential may submit a component upgrade. Review the upgrade and submit it from an admin session, \
+         or remove the UpdateComponentTemplate instruction"
+    )]
+    ComponentUpgradeRequiresAdmin { component: String, new_template: String },
     #[error("Invalid expiry")]
     InvalidExpiry,
 }

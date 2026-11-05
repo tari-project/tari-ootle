@@ -1,10 +1,12 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::{fmt::Display, hash::Hash};
+
 use log::*;
 use tari_consensus_types::{ProposalCertificate, Vote};
 use tari_epoch_manager::EpochManagerReader;
-use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, optional::Optional};
+use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, committee::Committee, optional::Optional};
 use tari_ootle_transaction::Network;
 
 use crate::{
@@ -115,9 +117,26 @@ const FIXED_MESSAGE_SIZE: usize = 64 * 1024;
 /// importing blocks, not from a buffer.
 const MAX_VIEW_LOOKAHEAD: NodeHeight = NodeHeight(20);
 
+/// Whose share of the buffer a message is charged to. Senders outside our committee all draw on one share:
+/// their identities cost nothing to multiply, so a share each would let enough of them fill the buffer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum BufferShare<TAddr> {
+    Member(TAddr),
+    Outsider,
+}
+
+/// What each share may hold of [`MAX_BUFFERED_BYTES`] at most: an even split between the `committee_size`
+/// members and the outsiders' share, and never less than one message of the largest charge.
+fn max_buffered_bytes_per_share(committee_size: usize) -> usize {
+    (MAX_BUFFERED_BYTES / committee_size.saturating_add(1)).max(UNBOUNDED_MESSAGE_SIZE)
+}
+
+/// Messages held for views we have not reached yet, each with its sender.
+type FutureMessageBuffer<TAddr> = ViewBuffer<BufferShare<TAddr>, (TAddr, HotstuffMessage)>;
+
 pub struct MessageBuffer<TConsensusSpec: ConsensusSpec> {
     network: Network,
-    buffer: ViewBuffer<(TConsensusSpec::Addr, HotstuffMessage)>,
+    buffer: FutureMessageBuffer<TConsensusSpec::Addr>,
     /// The highest justify certificate already reported as [`InboundMessage::ProposalAhead`], so that each
     /// certificate's signatures are checked and reported at most once.
     highest_reported_ahead: Option<View>,
@@ -165,7 +184,7 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
         );
         if has_processed_first_block {
             // Drain all buffered messages for the current view
-            if let Some((from, message)) = self.buffer.pop_front(&next_view) {
+            if let Some((_, (from, message))) = self.buffer.pop_front(&next_view) {
                 return Ok(Some(InboundMessage::Ready { from, message }));
             }
         }
@@ -220,10 +239,11 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
                         info!(target: LOG_TARGET, "🔮 Message {msg} is for future view {height} (Current view: {current_epoch}, {current_height})");
                     }
                     let justify_ahead = self.verified_justify_ahead(&from, &msg, epoch_state, current_height);
-                    self.push_to_buffer(
+                    push_to_buffer(
+                        &mut self.buffer,
+                        epoch_state.local_committee(),
                         View::new(current_epoch, current_height),
-                        epoch,
-                        height,
+                        View::new(epoch, height),
                         from.clone(),
                         msg,
                     );
@@ -320,6 +340,8 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
     /// - the QC certifies another shard group's chain, or this node has no shard group in the QC's epoch;
     /// - the QC is empty / justifies the zero block (no signatures to verify, so unforgeability doesn't hold — must not
     ///   promote on this);
+    /// - the QC carries a Reject decision (defensive: the decision is part of every signed vote, which honest
+    ///   validators cast only as Accept);
     /// - signature verification fails (likely spam or a malicious peer trying to wedge us into sync mode — drop
     ///   silently and buffer normally).
     async fn probe_future_epoch_qc(
@@ -332,7 +354,7 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
         };
 
         let qc_epoch = qc.epoch();
-        if qc_epoch <= current_epoch || qc.justifies_zero_block() {
+        if qc_epoch <= current_epoch || qc.justifies_zero_block() || !qc.decision().is_accept() {
             return Ok(None);
         }
 
@@ -383,7 +405,7 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
                     "Received valid 2f+1 QC for {} ({} signatures) while consensus view is still in {}: network \
                      rolled over without us — escalating to state sync.",
                     qc_epoch,
-                    qc.signatures().len(),
+                    qc.signatures().num_signatures(),
                     current_epoch,
                 );
                 warn!(target: LOG_TARGET, "🚨 {reason}");
@@ -400,56 +422,83 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
             },
         }
     }
+}
 
-    fn push_to_buffer(
-        &mut self,
-        current_view: View,
-        epoch: Epoch,
-        height: NodeHeight,
-        from: TConsensusSpec::Addr,
-        msg: HotstuffMessage,
-    ) {
-        let view = View::new(epoch, height);
-        if exceeds_view_lookahead(current_view, view) {
-            debug!(
-                target: LOG_TARGET,
-                "🗑️ Discarding message {} for view {} as it is more than {} views ahead of our current view {}",
-                msg,
-                view,
-                MAX_VIEW_LOOKAHEAD,
-                current_view
-            );
-            return;
-        }
+/// Buffers `msg` from `from`, which names `view` ahead of `current_view`. Returns whether it was buffered.
+///
+/// A message for our epoch is buffered only from a member of our committee, the only senders whose messages
+/// for a view of ours consensus can use. A message for the next epoch is bounded by its [`BufferShare`] alone;
+/// it is further than every view of ours, so it never displaces one.
+fn push_to_buffer<TAddr: Eq + Hash + Clone + Display>(
+    buffer: &mut FutureMessageBuffer<TAddr>,
+    local_committee: &Committee<TAddr>,
+    current_view: View,
+    view: View,
+    from: TAddr,
+    msg: HotstuffMessage,
+) -> bool {
+    let share = if local_committee.contains(&from) {
+        BufferShare::Member(from.clone())
+    } else {
+        BufferShare::Outsider
+    };
+    if view.epoch == current_view.epoch && share == BufferShare::Outsider {
+        debug!(
+            target: LOG_TARGET,
+            "🗑️ Discarding message {} for view {} from {}, who is not a member of our committee",
+            msg,
+            view,
+            from
+        );
+        return false;
+    }
 
-        let size = buffered_message_size(&msg);
-        match self.buffer.insert(view, (from, msg), size) {
-            Ok(inserted) if inserted.num_evicted > 0 => {
+    if exceeds_view_lookahead(current_view, view) {
+        debug!(
+            target: LOG_TARGET,
+            "🗑️ Discarding message {} for view {} as it is more than {} views ahead of our current view {}",
+            msg,
+            view,
+            MAX_VIEW_LOOKAHEAD,
+            current_view
+        );
+        return false;
+    }
+
+    let size = buffered_message_size(&msg);
+    let max_share_size = max_buffered_bytes_per_share(local_committee.len());
+    match buffer.insert(view, share.clone(), (from.clone(), msg), size, max_share_size) {
+        Ok(inserted) => {
+            if inserted.num_evicted > 0 {
                 debug!(
                     target: LOG_TARGET,
                     "🗑️ Buffered a message for view {}, evicting {} message(s) for further views ({} of {} bytes, {} of {} messages held)",
                     view,
                     inserted.num_evicted,
-                    self.buffer.size(),
-                    self.buffer.max_size(),
-                    self.buffer.len(),
-                    self.buffer.max_items()
+                    buffer.size(),
+                    buffer.max_size(),
+                    buffer.len(),
+                    buffer.max_items()
                 );
-            },
-            Ok(_) => {},
-            Err((_, msg)) => {
-                debug!(
-                    target: LOG_TARGET,
-                    "🗑️ Discarding message {} for view {}: the buffer is full of messages for views at or nearer than it ({} of {} bytes, {} of {} messages)",
-                    msg,
-                    view,
-                    self.buffer.size(),
-                    self.buffer.max_size(),
-                    self.buffer.len(),
-                    self.buffer.max_items()
-                );
-            },
-        }
+            }
+            true
+        },
+        Err((_, msg)) => {
+            debug!(
+                target: LOG_TARGET,
+                "🗑️ Discarding message {} for view {} from {}: the buffer is full of messages for views at or nearer than it ({} of {} bytes held for the sender's share, {} of {} bytes, {} of {} messages)",
+                msg,
+                view,
+                from,
+                buffer.share_size(&share),
+                max_share_size,
+                buffer.size(),
+                buffer.max_size(),
+                buffer.len(),
+                buffer.max_items()
+            );
+            false
+        },
     }
 }
 
@@ -565,22 +614,9 @@ fn msg_relative_view(
 
             if has_processed_first_block {
                 if pc_height > next_height {
-                    let msg_height = if msg.block.timeout_certificate().is_some() {
-                        let Some(height) = pc_height.checked_add(NodeHeight(1)) else {
-                            warn!(
-                                target: LOG_TARGET,
-                                "❗️ Proposal {} has an out-of-range justify height {}. Discarding.", msg.block, pc_height
-                            );
-                            return MessageRelativeView::Discard;
-                        };
-                        height
-                    } else {
-                        pc_height
-                    };
-
                     return MessageRelativeView::Future {
                         epoch,
-                        height: msg_height,
+                        height: pc_height,
                     };
                 }
             } else {
@@ -694,9 +730,8 @@ mod tests {
     use super::*;
 
     mod is_own_chain_ahead {
-        use tari_common_types::types::FixedHash;
         use tari_consensus_types::BlockId;
-        use tari_sidechain::QuorumDecision;
+        use tari_sidechain::{FixedHash, QuorumDecision};
 
         use super::*;
 
@@ -711,7 +746,7 @@ mod tests {
                 NodeHeight(height),
                 Epoch(epoch),
                 shard_group,
-                vec![],
+                ProposalCertificate::genesis_signatures(),
                 QuorumDecision::Accept,
             )
         }
@@ -758,6 +793,92 @@ mod tests {
         }
     }
 
+    mod msg_relative_view {
+        use tari_consensus_types::{
+            BlockId,
+            ShardGroupAccumulatedData,
+            SignedTimeout,
+            TcSignatures,
+            TimeoutCertificate,
+        };
+        use tari_ootle_common_types::{ExtraData, NumPreshards, ProtocolVersion};
+        use tari_ootle_storage::consensus_models::{Block, BlockCommands, BlockHeader};
+        use tari_sidechain::{FixedHash, QuorumDecision, SignerBitmap};
+        use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
+
+        use super::*;
+        use crate::messages::ProposalMessage;
+
+        const NETWORK: Network = Network::LocalNet;
+        const EPOCH: Epoch = Epoch(1);
+
+        /// A proposal justified at `justify_height` that skips the failed view `justify_height + 1` on a timeout
+        /// certificate.
+        fn timeout_recovery_proposal(justify_height: NodeHeight) -> HotstuffMessage {
+            let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+            let justify = ProposalCertificate::new(
+                FixedHash::zero(),
+                BlockId::zero(),
+                justify_height,
+                EPOCH,
+                shard_group,
+                ProposalCertificate::genesis_signatures(),
+                QuorumDecision::Accept,
+            );
+            let tc = TimeoutCertificate::new(EPOCH, justify_height + NodeHeight(1), TcSignatures::Schnorr {
+                signers: SignerBitmap::from_indices(1, 0..1).unwrap(),
+                timeouts: vec![SignedTimeout {
+                    high_pc_height: justify_height,
+                    signature: SchnorrSignatureBytes::zero(),
+                }],
+            });
+            let header = BlockHeader::create_unsigned(
+                NETWORK,
+                ProtocolVersion::at(NETWORK, EPOCH),
+                BlockId::zero(),
+                justify.calculate_id(),
+                Some(tc.calculate_id()),
+                tc.height() + NodeHeight(1),
+                EPOCH,
+                shard_group,
+                RistrettoPublicKeyBytes::default(),
+                FixedHash::zero(),
+                &BlockCommands::empty(),
+                0,
+                0,
+                FixedHash::zero(),
+                ShardGroupAccumulatedData::default(),
+                ExtraData::new(),
+            )
+            .unwrap();
+            HotstuffMessage::new_proposal(ProposalMessage {
+                block: Block::new(header, justify, BlockCommands::empty(), Some(tc)),
+                foreign_proposals: vec![],
+            })
+        }
+
+        /// `MessageBuffer::next` releases a message buffered at view `h` once the node reaches height `h - 1`, so a
+        /// future proposal must be buffered at the view after the first height at which it is current.
+        #[test]
+        fn a_future_timeout_recovery_proposal_is_released_at_the_first_view_it_is_current() {
+            let justify_height = NodeHeight(10);
+            let msg = timeout_recovery_proposal(justify_height);
+
+            let MessageRelativeView::Future { epoch, height } = msg_relative_view(&msg, EPOCH, NodeHeight(8), true)
+            else {
+                panic!("expected the proposal to be buffered as a future message");
+            };
+            assert_eq!(epoch, EPOCH);
+            assert_eq!(height, justify_height);
+
+            let release_height = height - NodeHeight(1);
+            assert!(matches!(
+                msg_relative_view(&msg, EPOCH, release_height, true),
+                MessageRelativeView::Current
+            ));
+        }
+    }
+
     mod exceeds_view_lookahead {
         use super::*;
 
@@ -790,6 +911,110 @@ mod tests {
             let current = view(1, 10);
             assert!(!exceeds_view_lookahead(current, view(2, 1)));
             assert!(!exceeds_view_lookahead(current, view(2, u64::MAX)));
+        }
+    }
+
+    mod push_to_buffer {
+        use tari_consensus_types::BlockId;
+        use tari_ootle_common_types::committee::CommitteeMember;
+
+        use super::*;
+        use crate::messages::MissingTransactionsResponse;
+
+        const CURRENT_VIEW: View = View {
+            epoch: Epoch(1),
+            height: NodeHeight(10),
+        };
+        const NEXT_VIEW: View = View {
+            epoch: Epoch(1),
+            height: NodeHeight(11),
+        };
+        const NEXT_EPOCH_VIEW: View = View {
+            epoch: Epoch(2),
+            height: NodeHeight(1),
+        };
+
+        fn committee() -> Committee<String> {
+            Committee::new(
+                ["1", "2", "3", "4"]
+                    .into_iter()
+                    .map(|address| CommitteeMember {
+                        address: address.to_string(),
+                        ..Default::default()
+                    })
+                    .collect(),
+            )
+        }
+
+        type Buffer = FutureMessageBuffer<String>;
+
+        fn new_buffer() -> Buffer {
+            ViewBuffer::new(MAX_BUFFERED_MESSAGES, MAX_BUFFERED_BYTES)
+        }
+
+        /// A message charged the largest size, as a proposal is.
+        fn large_message(epoch: Epoch) -> HotstuffMessage {
+            HotstuffMessage::MissingTransactionsResponse(MissingTransactionsResponse {
+                request_id: 0,
+                epoch,
+                block_id: BlockId::zero(),
+                transactions: vec![],
+            })
+        }
+
+        fn push(buffer: &mut Buffer, view: View, from: &str) -> bool {
+            push_to_buffer(
+                buffer,
+                &committee(),
+                CURRENT_VIEW,
+                view,
+                from.to_string(),
+                large_message(view.epoch),
+            )
+        }
+
+        fn flood(buffer: &mut Buffer, view: View, from: &str) {
+            for _ in 0..MAX_BUFFERED_BYTES / UNBOUNDED_MESSAGE_SIZE * 2 {
+                push(buffer, view, from);
+            }
+        }
+
+        fn drain_senders(buffer: &mut Buffer, view: View) -> Vec<String> {
+            std::iter::from_fn(|| buffer.pop_front(&view).map(|(_, (from, _))| from)).collect()
+        }
+
+        #[test]
+        fn a_message_from_a_member_for_the_current_epoch_is_buffered() {
+            let mut buffer = new_buffer();
+            assert!(push(&mut buffer, NEXT_VIEW, "1"));
+            assert_eq!(drain_senders(&mut buffer, NEXT_VIEW), ["1"]);
+        }
+
+        #[test]
+        fn a_message_from_outside_the_committee_for_the_current_epoch_is_not_buffered() {
+            let mut buffer = new_buffer();
+            assert!(!push(&mut buffer, NEXT_VIEW, "outsider"));
+            assert_eq!(buffer.len(), 0);
+        }
+
+        #[test]
+        fn one_member_cannot_fill_the_buffer_for_a_view() {
+            let mut buffer = new_buffer();
+            flood(&mut buffer, NEXT_VIEW, "1");
+
+            assert!(push(&mut buffer, NEXT_VIEW, "2"));
+            assert!(drain_senders(&mut buffer, NEXT_VIEW).contains(&"2".to_string()));
+        }
+
+        #[test]
+        fn many_outsiders_cannot_fill_the_buffer_for_the_next_epoch() {
+            let mut buffer = new_buffer();
+            for i in 0..MAX_BUFFERED_BYTES / UNBOUNDED_MESSAGE_SIZE {
+                flood(&mut buffer, NEXT_EPOCH_VIEW, &format!("outsider-{i}"));
+            }
+
+            assert!(push(&mut buffer, NEXT_EPOCH_VIEW, "2"));
+            assert!(drain_senders(&mut buffer, NEXT_EPOCH_VIEW).contains(&"2".to_string()));
         }
     }
 }

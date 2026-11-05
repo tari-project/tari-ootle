@@ -8,7 +8,6 @@ use std::{
 };
 
 use tari_bor::{BorTag, Deserialize, Serialize, Tagged};
-use tari_ootle_template_metadata::MetadataHash;
 use tari_template_lib::types::{
     BinaryTag,
     Hash32,
@@ -17,6 +16,7 @@ use tari_template_lib::types::{
     MaxString,
     ObjectKey,
     TemplateAddress,
+    TemplateMetadataHash,
     address_prefixes,
     crypto::RistrettoPublicKeyBytes,
     newtype_struct_serde_impl,
@@ -48,16 +48,16 @@ pub struct PublishedTemplateMetadata {
     /// Author's public key.
     #[n(1)]
     pub author_public_key: RistrettoPublicKeyBytes,
-    /// SHA-256 hash of the WASM binary.
+    /// `hash_template_code` of the WASM binary, as returned by `PublishedTemplate::to_binary_hash`.
     #[n(2)]
     pub binary_hash: Hash32,
     /// Epoch at which the template was published.
     #[n(3)]
     pub at_epoch: u64,
-    /// The author-provided off-chain metadata hash
+    /// The author-provided reference to off-chain metadata (opaque to the protocol)
     #[n(4)]
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-    pub metadata_hash: Option<MetadataHash>,
+    pub metadata_hash: Option<TemplateMetadataHash>,
 }
 
 const TAG: u64 = BinaryTag::TemplateAddress.as_u64();
@@ -181,8 +181,6 @@ pub type TemplateName = MaxString<{ limits::ENGINE_LIMITS.max_template_name_leng
 pub struct PublishedTemplate {
     /// Human-readable template name extracted from the WASM ABI.
     #[n(0)]
-    #[cbor(default)]
-    #[serde(default)]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub template_name: TemplateName,
     /// Author's public key
@@ -196,17 +194,20 @@ pub struct PublishedTemplate {
     /// Epoch at which the template was published
     #[n(3)]
     pub at_epoch: u64,
-    /// Optional multihash of off-chain CBOR metadata
+    /// Optional author-provided reference to off-chain metadata (opaque to the protocol)
     #[n(4)]
-    #[cbor(default)]
-    #[serde(default)]
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-    pub metadata_hash: Option<MetadataHash>,
+    pub metadata_hash: Option<TemplateMetadataHash>,
 }
 
 impl PublishedTemplate {
     pub fn to_binary_hash(&self) -> Hash32 {
         hash_template_code(&self.binary)
+    }
+
+    pub fn to_template_address(&self) -> PublishedTemplateAddress {
+        let binary_hash = self.to_binary_hash();
+        PublishedTemplateAddress::from_author_and_binary_hash(&self.author, &binary_hash)
     }
 
     pub fn into_template_metadata(self) -> PublishedTemplateMetadata {

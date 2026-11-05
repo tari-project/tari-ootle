@@ -19,29 +19,34 @@ use tokio::{
 };
 
 use crate::{
-    consensus::{leader_selection::RoundRobinLeaderStrategy, spec::TariConsensusSpec},
+    consensus::spec::TariConsensusSpec,
     event_subscription::EventSubscription,
     p2p::services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
 };
 
 mod block_transaction_executor;
 mod block_transaction_validator;
+mod chain_template_provider;
 mod handle;
-mod leader_selection;
 mod signer_service;
 pub mod spec;
 
 pub use block_transaction_executor::*;
 pub use block_transaction_validator::*;
+pub use chain_template_provider::*;
 pub use handle::*;
 pub use signer_service::*;
-use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::HotstuffEvent};
+use tari_consensus::{
+    consensus_constants::ConsensusConstants,
+    hotstuff::HotstuffEvent,
+    leader_selection::SmoothWeightedRoundRobin,
+};
 use tari_ootle_p2p::PeerAddress;
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     config::ConsensusConfig,
-    consensus::spec::{ValidatorNodeStateStore, ValidatorTransactionProcessor},
+    consensus::spec::{ValidatorNodeStateStore, ValidatorTemplateProvider, ValidatorTransactionProcessor},
     p2p::NopLogger,
 };
 
@@ -58,15 +63,16 @@ pub async fn spawn(
     client_factory: TariValidatorNodeRpcClientFactory,
     hooks: <TariConsensusSpec as ConsensusSpec>::Hooks,
     shutdown_signal: ShutdownSignal,
-    transaction_executor: TariBlockTransactionExecutor<ValidatorTransactionProcessor>,
+    transaction_executor: TariBlockTransactionExecutor<ValidatorTransactionProcessor, ValidatorTemplateProvider>,
     transaction_validator: TariBlockTransactionValidator,
     tx_hotstuff_events: broadcast::Sender<HotstuffEvent>,
     consensus_constants: ConsensusConstants,
     state_history_length: u64,
+    pinned_checkpoint_epochs: u64,
 ) -> (JoinHandle<Result<(), anyhow::Error>>, ConsensusHandle) {
     let (tx_new_transaction, rx_new_transactions) = mpsc::channel(10);
 
-    let leader_strategy = RoundRobinLeaderStrategy::new();
+    let leader_strategy = SmoothWeightedRoundRobin::new();
     let transaction_pool = TransactionPool::new();
 
     let hs_config = HotstuffConfig {
@@ -74,12 +80,14 @@ pub async fn spawn(
         sidechain_id,
         consensus_constants: consensus_constants.clone(),
         state_history_length,
-        // TODO: make these configurable (defaults should probably be longer than 1 hour)
-        state_tree_cleanup_interval: Duration::from_secs(60 * 60),
+        pinned_checkpoint_epochs,
+        state_tree_cleanup_interval: Duration::from_secs(consensus_config.state_tree_cleanup_interval_secs.max(1)),
+        // TODO: make this configurable (default should probably be longer than 1 hour)
         epoch_gc_interval: Duration::from_secs(60 * 60),
         // NOTE: This value should be greater than the epoch oracle's scanning interval to avoid leader failure by race
         // condition.
         epoch_end_grace_period: Duration::from_secs(10),
+        epoch_end_drain_period: Duration::from_secs(60),
         catch_up_request_timeout: Duration::from_secs(20),
     };
 

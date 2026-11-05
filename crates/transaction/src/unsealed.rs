@@ -45,6 +45,7 @@ impl UnsealedTransaction {
         }
     }
 
+    #[must_use]
     pub fn verify_all_signatures(&self, seal_signer: &RistrettoPublicKeyBytes) -> bool {
         match self {
             Self::V1(t) => t.verify_all_signatures(seal_signer),
@@ -69,19 +70,17 @@ impl From<UnsealedTransactionV1> for UnsealedTransaction {
 }
 
 impl Signable for UnsealedTransaction {
-    type MessageOutput = [u8; 64];
     type Signature = TransactionSealSignature;
 
-    fn to_signing_message(&self, _context: ()) -> Self::MessageOutput {
+    fn to_signing_message(&self, _context: ()) -> crate::TransactionMessage {
         TransactionSealSignature::create_message(self)
     }
 }
 
 impl Signable<&RistrettoPublicKeyBytes> for UnsealedTransaction {
-    type MessageOutput = [u8; 64];
     type Signature = TransactionSignature;
 
-    fn to_signing_message(&self, context: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
+    fn to_signing_message(&self, context: &RistrettoPublicKeyBytes) -> crate::TransactionMessage {
         match self {
             Self::V1(t) => t.to_signing_message(context),
         }

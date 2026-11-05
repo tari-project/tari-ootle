@@ -6,7 +6,6 @@ use std::fmt::{Debug, Display, Formatter};
 use borsh::BorshSerialize;
 use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::FixedHash;
 use tari_consensus_types::{
     BlockId,
     LastExecuted,
@@ -21,7 +20,7 @@ use tari_consensus_types::{
     ToSignatureMessage,
 };
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
-use tari_engine_types::fees::ExhaustBurnRate;
+use tari_engine_types::fees::{ExhaustBurnRate, FeeScale};
 use tari_ootle_common_types::{
     Epoch,
     ExtraData,
@@ -30,10 +29,11 @@ use tari_ootle_common_types::{
     NumPreshards,
     ProtocolVersion,
     ShardGroup,
+    ValidatorSetHash,
     hashing,
 };
 use tari_ootle_transaction::Network;
-use tari_sidechain::{BlockHeaderHashFields, BlockHeaderHashFieldsV1, BlockHeaderHashFieldsV2};
+use tari_sidechain::{BlockHeaderHashFields, BlockHeaderHashFieldsV1, FixedHash};
 use tari_state_tree::{TreeHash, compute_merkle_root_for_hashes};
 use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
@@ -119,13 +119,12 @@ pub struct BlockHeader {
     #[n(17)]
     timeout_certificate_id: Option<TcId>,
     /// A Merkle root over the outcome of each transaction this block finalizes, keyed by transaction id (see
-    /// [`FinalizedTransactionLeaf`](super::FinalizedTransactionLeaf)). Present from protocol version 2, where the
-    /// block id commits to it.
-    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-    #[serde(default, with = "ootle_serde::hex::option")]
+    /// [`FinalizedTransactionLeaf`](super::FinalizedTransactionLeaf)). The block id commits to it.
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "ootle_serde::hex")]
     #[n(18)]
     #[cbor(with = "tari_bor::adapters::serde_bridge")]
-    transaction_merkle_root: Option<FixedHash>,
+    transaction_merkle_root: FixedHash,
 }
 
 impl BlockHeader {
@@ -282,7 +281,11 @@ impl BlockHeader {
             accumulated_data: ShardGroupAccumulatedData::default(),
             extra_data: ExtraData::new(),
             timeout_certificate_id: None,
-            transaction_merkle_root: None,
+            transaction_merkle_root: BlockHeader::compute_transaction_merkle_root(
+                ProtocolVersion::at(network, Epoch::zero()),
+                &BlockCommands::empty(),
+            )
+            .expect("compute_transaction_merkle_root is infallible for empty commands"),
         }
     }
 
@@ -362,7 +365,7 @@ impl BlockHeader {
             return BlockId::zero();
         }
 
-        hashing::block_hasher()
+        hashing::block_id_hasher()
             .chain(parent_id)
             .chain(header_hash)
             .finalize_into_array()
@@ -378,14 +381,27 @@ impl BlockHeader {
     }
 
     fn calculate_metadata_hash_as(&self, is_dummy: bool) -> FixedHash {
-        let fields = MetadataHashFields::V1(MetadataHashFieldsV1 {
+        MetadataHashFields::V1(MetadataHashFieldsV1 {
             total_leader_fee: self.total_leader_fee,
             timestamp: self.timestamp,
             extra_data: &self.extra_data,
             timeout_certificate_id: self.timeout_certificate_id.as_ref().map(TcId::hash),
             is_dummy,
-        });
-        hashing::block_metadata_hasher().chain(&fields).finalize().into()
+        })
+        .calculate_hash()
+    }
+
+    /// The fields this header commits to through its metadata hash. With them, a holder of the L1-shaped header
+    /// (which carries only the hash) can recompute that hash and read the fields it covers, such as
+    /// [`Self::extra_data`].
+    pub fn metadata(&self) -> BlockHeaderMetadata {
+        BlockHeaderMetadata {
+            total_leader_fee: self.total_leader_fee,
+            timestamp: self.timestamp,
+            extra_data: self.extra_data.clone(),
+            timeout_certificate_id: self.timeout_certificate_id.as_ref().map(|id| *id.hash()),
+            is_dummy: self.is_dummy(),
+        }
     }
 
     pub fn calculate_hash(&self) -> FixedHash {
@@ -403,27 +419,11 @@ impl BlockHeader {
             end_inclusive: self.shard_group.end().as_u32(),
         };
 
-        // This selection must stay identical to `tari_sidechain::SidechainBlockHeader::calculate_hash`, which is what
-        // the base layer uses to verify a commit proof against the block ID a committee signed.
+        // This selection must stay identical to `tari_sidechain::SidechainBlockHeader::calculate_hash`, which hashes
+        // the header a commit proof carries to the block ID its committee signed.
         let fields = match self.protocol_version {
-            // `tari_sidechain` maps version 0 to the preimage that carries no version. A later version must commit
-            // to itself through `BlockHeaderHashFields::V2`, so that two versions sharing a preimage shape still
-            // produce distinct block IDs and the version a block claims cannot be altered without invalidating it.
-            ProtocolVersion::V0 => BlockHeaderHashFields::V1(BlockHeaderHashFieldsV1 {
-                network: self.network.as_byte(),
-                justify_id: self.justify_id.hash(),
-                height: self.height.as_u64(),
-                epoch: self.epoch.as_u64(),
-                epoch_hash: &self.epoch_hash,
-                shard_group,
-                proposed_by: self.proposed_by.as_bytes(),
-                state_merkle_root: &self.state_merkle_root,
-                command_merkle_root: &self.command_merkle_root,
-                accumulated_data: &accumulated_data,
-                metadata_hash: &metadata_hash,
-            }),
-            protocol_version @ (ProtocolVersion::V1 | ProtocolVersion::V2) => {
-                BlockHeaderHashFields::V2(BlockHeaderHashFieldsV2 {
+            protocol_version @ (ProtocolVersion::V0 | ProtocolVersion::V1) => {
+                BlockHeaderHashFields::V1(BlockHeaderHashFieldsV1 {
                     network: self.network.as_byte(),
                     protocol_version: protocol_version.as_u32(),
                     justify_id: self.justify_id.hash(),
@@ -435,13 +435,13 @@ impl BlockHeader {
                     state_merkle_root: &self.state_merkle_root,
                     command_merkle_root: &self.command_merkle_root,
                     accumulated_data: &accumulated_data,
-                    transaction_merkle_root: self.transaction_merkle_root.as_ref(),
+                    transaction_merkle_root: &self.transaction_merkle_root,
                     metadata_hash: &metadata_hash,
                 })
             },
         };
 
-        hashing::block_hasher().chain(&fields).finalize().into()
+        hashing::block_header_hasher().chain(&fields).finalize().into()
     }
 
     pub fn is_genesis(&self) -> bool {
@@ -546,8 +546,8 @@ impl BlockHeader {
         &self.command_merkle_root
     }
 
-    pub fn transaction_merkle_root(&self) -> Option<&FixedHash> {
-        self.transaction_merkle_root.as_ref()
+    pub fn transaction_merkle_root(&self) -> &FixedHash {
+        &self.transaction_merkle_root
     }
 
     pub fn is_dummy(&self) -> bool {
@@ -606,6 +606,19 @@ impl BlockHeader {
             .and_then(ExhaustBurnRate::try_new)
     }
 
+    /// The fee scale the next epoch charges at, which only an end-of-epoch block names.
+    pub fn next_epoch_fee_scale(&self) -> Option<FeeScale> {
+        self.extra_data
+            .get_bps(&ExtraFieldKey::NextEpochFeeScale)
+            .and_then(FeeScale::try_new)
+    }
+
+    /// The [`ValidatorSetHash`] of the next epoch's committees, which only an end-of-epoch block names.
+    pub fn next_epoch_validator_set_hash(&self) -> Option<ValidatorSetHash> {
+        self.extra_data
+            .get_validator_set_hash(&ExtraFieldKey::NextEpochValidatorSetHash)
+    }
+
     pub fn extra_data(&self) -> &ExtraData {
         &self.extra_data
     }
@@ -616,21 +629,20 @@ impl BlockHeader {
     ) -> Result<FixedHash, BlockError> {
         let hashes = commands
             .iter()
-            .map(|cmd| TreeHash::from(cmd.hash(protocol_version).into_array()));
+            .map(|cmd| TreeHash::from(cmd.merkle_leaf(protocol_version).into_array()));
         let hash = compute_merkle_root_for_hashes(hashes).map_err(BlockError::StateTreeError)?;
         Ok(FixedHash::from(hash.into_array()))
     }
 
-    /// The root over the transactions `commands` finalize, which a header carries from protocol version 2.
+    /// The root over the transactions `commands` finalize, which a header carries.
     pub fn compute_transaction_merkle_root(
         protocol_version: ProtocolVersion,
         commands: &BlockCommands,
-    ) -> Result<Option<FixedHash>, BlockError> {
+    ) -> Result<FixedHash, BlockError> {
         match protocol_version {
-            ProtocolVersion::V0 | ProtocolVersion::V1 => Ok(None),
-            ProtocolVersion::V2 => {
+            ProtocolVersion::V0 | ProtocolVersion::V1 => {
                 let root = build_finalized_transaction_tree(commands)?.root();
-                Ok(Some(FixedHash::from(root.into_array())))
+                Ok(FixedHash::from(root.into_array()))
             },
         }
     }
@@ -674,6 +686,63 @@ impl SignedMessage for BlockHeader {
 #[derive(Debug, BorshSerialize)]
 enum MetadataHashFields<'a> {
     V1(MetadataHashFieldsV1<'a>),
+}
+
+impl MetadataHashFields<'_> {
+    fn calculate_hash(&self) -> FixedHash {
+        hashing::block_metadata_hasher().chain(self).finalize().into()
+    }
+}
+
+/// The preimage of a block header's metadata hash. See [`BlockHeader::metadata`].
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
+pub struct BlockHeaderMetadata {
+    #[n(0)]
+    pub total_leader_fee: u64,
+    #[n(1)]
+    pub timestamp: u64,
+    #[n(2)]
+    pub extra_data: ExtraData,
+    #[serde(default, with = "ootle_serde::hex::option")]
+    #[n(3)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
+    pub timeout_certificate_id: Option<FixedHash>,
+    #[n(4)]
+    pub is_dummy: bool,
+}
+
+impl BlockHeaderMetadata {
+    /// The metadata hash these fields form, which equals the header's when they are that header's fields.
+    pub fn calculate_hash(&self) -> FixedHash {
+        MetadataHashFields::V1(MetadataHashFieldsV1 {
+            total_leader_fee: self.total_leader_fee,
+            timestamp: self.timestamp,
+            extra_data: &self.extra_data,
+            timeout_certificate_id: self.timeout_certificate_id.as_ref(),
+            is_dummy: self.is_dummy,
+        })
+        .calculate_hash()
+    }
+
+    /// The [`ValidatorSetHash`] of the next epoch's committees, which only an end-of-epoch block names.
+    pub fn next_epoch_validator_set_hash(&self) -> Option<ValidatorSetHash> {
+        self.extra_data
+            .get_validator_set_hash(&ExtraFieldKey::NextEpochValidatorSetHash)
+    }
+
+    /// The exhaust burn rate the block names for its epoch, or `None` if it names none or one above the ceiling.
+    pub fn try_exhaust_burn_rate(&self) -> Option<ExhaustBurnRate> {
+        self.extra_data
+            .get_bps(&ExtraFieldKey::ExhaustBurnRate)
+            .and_then(ExhaustBurnRate::try_new)
+    }
+
+    /// The fee scale the next epoch charges at, which only an end-of-epoch block names.
+    pub fn next_epoch_fee_scale(&self) -> Option<FeeScale> {
+        self.extra_data
+            .get_bps(&ExtraFieldKey::NextEpochFeeScale)
+            .and_then(FeeScale::try_new)
+    }
 }
 
 #[derive(Debug, BorshSerialize)]
@@ -725,17 +794,90 @@ mod tests {
         .unwrap()
     }
 
-    #[test]
-    fn a_header_without_a_transaction_merkle_root_encodes_as_before_the_field_existed() {
-        let header = header_with_timeout_certificate(ProtocolVersion::V0, Some(TcId::from([4u8; 32])));
-        let bytes = tari_bor::encode(&header).unwrap();
+    fn header_with_extra_data(extra_data: ExtraData, timeout_certificate_id: Option<TcId>) -> BlockHeader {
+        let shard_group = ShardGroup::all_shards(NumPreshards::P64);
+        BlockHeader::create(
+            Network::LocalNet,
+            ProtocolVersion::V0,
+            BlockId::zero(),
+            ProposalCertificate::genesis(Epoch(1), shard_group).calculate_id(),
+            timeout_certificate_id,
+            NodeHeight(2),
+            Epoch(1),
+            shard_group,
+            RistrettoPublicKeyBytes::default(),
+            FixedHash::zero(),
+            &BlockCommands::empty(),
+            7,
+            SchnorrSignatureBytes::zero(),
+            1234,
+            FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
+            extra_data,
+        )
+        .unwrap()
+    }
 
-        // Fields 0 to 17, so a header stored before field 18 existed has this shape and decodes to the same header.
-        let len = minicbor::Decoder::new(&bytes).array().unwrap();
-        assert_eq!(len, Some(18));
-        let decoded: BlockHeader = tari_bor::decode(&bytes).unwrap();
-        assert_eq!(decoded.transaction_merkle_root(), None);
-        assert_eq!(decoded.calculate_hash(), header.calculate_hash());
+    fn eoe_extra_data() -> ExtraData {
+        let mut extra_data = ExtraData::new();
+        extra_data
+            .insert_bps(ExtraFieldKey::ExhaustBurnRate, 500)
+            .insert_bps(ExtraFieldKey::NextEpochExhaustBurnRate, 600)
+            .insert_bps(ExtraFieldKey::NextEpochFeeScale, 12_000)
+            .insert_validator_set_hash(
+                ExtraFieldKey::NextEpochValidatorSetHash,
+                &ValidatorSetHash::from_array([9; 32]),
+            );
+        extra_data
+    }
+
+    #[test]
+    fn the_metadata_preimage_hashes_to_the_header_metadata_hash() {
+        for header in [
+            header(ProtocolVersion::V0),
+            header_with_extra_data(eoe_extra_data(), None),
+            header_with_extra_data(eoe_extra_data(), Some(TcId::from([4u8; 32]))),
+        ] {
+            assert_eq!(header.metadata().calculate_hash(), header.calculate_metadata_hash());
+        }
+
+        let header = header_with_extra_data(eoe_extra_data(), None);
+        let mut as_dummy = header.metadata();
+        as_dummy.is_dummy = true;
+        assert_eq!(as_dummy.calculate_hash(), header.calculate_metadata_hash_as(true));
+    }
+
+    #[test]
+    fn the_metadata_preimage_names_the_next_epoch_validator_set_hash() {
+        let eoe = header_with_extra_data(eoe_extra_data(), None);
+        let expected = Some(ValidatorSetHash::from_array([9; 32]));
+        assert_eq!(eoe.next_epoch_validator_set_hash(), expected);
+        assert_eq!(eoe.metadata().next_epoch_validator_set_hash(), expected);
+        assert_eq!(
+            header(ProtocolVersion::V0).metadata().next_epoch_validator_set_hash(),
+            None
+        );
+    }
+
+    #[test]
+    fn the_metadata_preimage_names_the_next_epoch_fee_scale() {
+        let eoe = header_with_extra_data(eoe_extra_data(), None);
+        let expected = Some(FeeScale::new(12_000));
+        assert_eq!(eoe.next_epoch_fee_scale(), expected);
+        assert_eq!(eoe.metadata().next_epoch_fee_scale(), expected);
+        assert_eq!(header(ProtocolVersion::V0).metadata().next_epoch_fee_scale(), None);
+    }
+
+    #[test]
+    fn the_metadata_preimage_round_trips_through_cbor_and_json() {
+        let header = header_with_extra_data(eoe_extra_data(), Some(TcId::from([4u8; 32])));
+        let metadata = header.metadata();
+
+        let from_cbor: BlockHeaderMetadata = tari_bor::decode(&tari_bor::encode(&metadata).unwrap()).unwrap();
+        assert_eq!(from_cbor.calculate_hash(), header.calculate_metadata_hash());
+
+        let from_json: BlockHeaderMetadata = serde_json::from_str(&serde_json::to_string(&metadata).unwrap()).unwrap();
+        assert_eq!(from_json.calculate_hash(), header.calculate_metadata_hash());
     }
 
     #[test]

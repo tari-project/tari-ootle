@@ -7,7 +7,11 @@ use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{Epoch, shard::Shard};
 use tari_state_tree::Version;
 
-use crate::{StateStoreReadTransaction, StorageError, consensus_models::SubstateUpdateProof};
+use crate::{
+    StateStoreReadTransaction,
+    StorageError,
+    consensus_models::{SubstateData, SubstateRecord, SubstateUpdateProof, SubstateValueOrHash},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateVersionTransitions {
@@ -103,5 +107,41 @@ impl SubstateValueFilterFlags {
             SubstateId::ConfidentialOutput(_) => self.contains(Self::CONFIDENTIAL_OUTPUT),
             SubstateId::ClaimedOutputTombstone(_) => self.contains(Self::CLAIMED_OUTPUT_TOMBSTONE),
         }
+    }
+
+    /// `substate` as these filters serve it, or `None` if they serve it in neither form.
+    ///
+    /// A substate the filters select carries its value while it still holds one, and its state hash once its value is
+    /// pruned. A template carries its metadata under `TEMPLATE_METADATA`, and its value only under `TEMPLATE` too. A
+    /// substate the filters do not select carries its state hash under `ALL_HASHES`.
+    pub fn serve(&self, substate: SubstateRecord) -> Option<SubstateData> {
+        let metadata_mode = self.contains(Self::TEMPLATE_METADATA);
+        let template_metadata = if metadata_mode && substate.substate_id.is_template() {
+            substate
+                .substate_value
+                .as_ref()
+                .and_then(|v| v.as_template())
+                .map(|t| t.clone().into_template_metadata())
+        } else {
+            None
+        };
+        let is_metadata_only = metadata_mode && !self.contains(Self::TEMPLATE) && substate.substate_id.is_template();
+        let value = if self.contains_substate(&substate.substate_id) {
+            substate
+                .substate_value
+                .filter(|_| !is_metadata_only)
+                .map(|v| SubstateValueOrHash::Value(Box::new(v)))
+                .unwrap_or(SubstateValueOrHash::Hash(substate.state_hash))
+        } else if self.include_filtered_hashes() {
+            SubstateValueOrHash::Hash(substate.state_hash)
+        } else {
+            return None;
+        };
+        Some(SubstateData {
+            substate_id: substate.substate_id,
+            version: substate.version,
+            value,
+            template_metadata,
+        })
     }
 }

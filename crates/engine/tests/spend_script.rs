@@ -5,23 +5,25 @@
 //! (`condition_root` + `SpendWitness::ScriptPath` revealing a `SpendCondition` leaf).
 
 use ootle_byte_type::ToByteType;
-use tari_crypto::{
-    keys::{PublicKey as _, SecretKey as _},
-    ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
-};
+use ootle_network::Network;
+use tari_crypto::{keys::SecretKey as _, ristretto::RistrettoSecretKey};
+use tari_engine::runtime::RuntimeError;
 use tari_engine_types::{
+    commit_result::FinalizeResult,
     crypto::covenant_balance_proof_native_points,
+    fees::FeeSource,
     limits::{self, STEALTH_LIMITS},
     stealth::{MerkleTree, hashlock_digest},
 };
 use tari_ootle_common_types::{
-    RistrettoSchnorrBlake2bVerifier,
+    TemplateSignatureBinding,
     crypto::create_key_pair_from_seed,
+    sign_template_message_schnorr,
     substate_type::SubstateType,
 };
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::{
-    args::{SpendContextAction, SpendContextInvokeArg},
+    args::{InvokeResult, SpendContextAction, SpendContextInvokeArg},
     types::{
         AccessRule,
         Amount,
@@ -196,6 +198,45 @@ fn script_path_access_rule_leaf_allows_spend() {
             .seal(test.secret_key()),
         vec![],
     );
+}
+
+/// A predicate frame keeps the signer badges of the instruction that reached it: a spend from a `StealthTransfer`
+/// instruction carries them, while a spend made from inside a component's frame carries that component's caller
+/// badges and no signer badge.
+#[test]
+fn script_path_predicate_sees_the_signer_badge_only_from_a_top_level_instruction() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let faucet_template = test.get_template_address(FAUCET_TEMPLATE);
+    let signer = test.to_public_key_bytes();
+    let condition = conditions(vec![script_condition(script_template, "require_signer_badge", vec![
+        encode_arg(&signer),
+    ])]);
+    let (resx, mint) = mint_utxos(&mut test, vec![condition.clone(), condition]);
+
+    let transfer =
+        stealth::generate_transfer_data([mint.input_spec_for(0, 100)], 0u64, [out(100, key_path(signer))], 0u64);
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    let transfer =
+        stealth::generate_transfer_data([mint.input_spec_for(1, 100)], 0u64, [out(100, key_path(signer))], 0u64);
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(faucet_template, "static_programmatic_transfer", args![
+                resx,
+                transfer.statement
+            ])
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "This call does not carry the badge");
 }
 
 #[test]
@@ -786,6 +827,65 @@ fn sandbox_denies_cross_template_call() {
     assert_reject_reason(&reason, "call_invoke");
 }
 
+#[test]
+fn sandbox_denies_address_allocation() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let (resx, mint) = mint_utxo(
+        &mut test,
+        script_condition(script_template, "try_allocate_address", vec![]),
+    );
+
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "Spend script rejected the spend");
+    assert_reject_reason(&reason, RuntimeError::ForbiddenInReadOnlyContext {
+        operation: "allocate_address_invoke",
+    });
+}
+
+#[test]
+fn sandbox_denies_minting_into_a_bucket() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let (account, _proof, _key) = test.create_empty_account();
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(script_template, "create_untracked_mintable_resource", args![])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    let resource = test
+        .get_previous_output_address(SubstateType::Resource)
+        .as_resource_address()
+        .unwrap();
+    let (resx, mint) = mint_utxo(
+        &mut test,
+        script_condition(script_template, "try_mint", vec![encode_arg(&resource)]),
+    );
+
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "Spend script rejected the spend");
+    assert_reject_reason(&reason, RuntimeError::ForbiddenInReadOnlyContext {
+        operation: "new_bucket",
+    });
+}
+
 // -------------------------------- Compute budget -------------------------------- //
 
 #[test]
@@ -814,16 +914,13 @@ const SPEND_SIG_DOMAIN: &[u8] = b"tari.test.spend_script signature domain";
 const SPEND_SIG_MESSAGE: &[u8] = b"spend authorisation";
 
 fn sign_spend(secret: &RistrettoSecretKey, message: &[u8]) -> Signature<NoSignatureDomain> {
-    let (nonce, nonce_pub) = RistrettoPublicKey::random_keypair(&mut rand::rng());
-    let public_key = RistrettoPublicKey::from_secret_key(secret);
-    let challenge = RistrettoSchnorrBlake2bVerifier::compute_challenge(
+    sign_template_message_schnorr(
+        secret,
+        &TemplateSignatureBinding::shared(Network::LocalNet),
         SPEND_SIG_DOMAIN,
         message,
-        &public_key.to_byte_type(),
-        &nonce_pub.to_byte_type(),
-    );
-    let sig = RistrettoSchnorr::sign_raw_uniform(secret, nonce, &challenge).unwrap();
-    sig.to_byte_type().into()
+    )
+    .into()
 }
 
 #[test]
@@ -906,8 +1003,13 @@ fn spend_rejects_unknown_function() {
 }
 
 #[test]
-fn spend_rejects_mutable_function() {
-    assert_spend_rejected("bad_mutable", vec![], "must not be mutable");
+fn spend_rejects_mutable_method() {
+    assert_spend_rejected("bad_mutable", vec![], "must be a template function, not a method");
+}
+
+#[test]
+fn spend_rejects_method() {
+    assert_spend_rejected("bad_receiver", vec![], "must be a template function, not a method");
 }
 
 #[test]
@@ -930,6 +1032,48 @@ fn spend_rejects_wrong_bound_arg_count() {
 fn spend_rejects_malformed_bound_arg() {
     // `timelock` expects one bound argument; provide one whose bytes are not well-formed CBOR (trailing data).
     assert_spend_rejected("timelock", vec![Bytes::from_vec(vec![0x00, 0x00])], "well-formed CBOR");
+}
+
+/// Mints a UTXO gated by a single no-argument `function` leaf, then spends it revealing that leaf with fees enabled,
+/// paying from a funded account. Returns the finalize result.
+fn spend_leaf_paying_fees(function: &str) -> FinalizeResult {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, owner_token, key) = test.create_funded_account();
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let (resx, mint) = mint_utxo(&mut test, script_condition(script_template, function, vec![]));
+
+    test.enable_fees();
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    test.try_execute(
+        Transaction::builder_localnet(Epoch(1))
+            .pay_fee_from_component(account, 20_000u64)
+            .stealth_transfer(resx, transfer.statement)
+            .build_and_seal(&key),
+        vec![owner_token],
+    )
+    .unwrap()
+    .finalize
+}
+
+#[test]
+fn rejected_leaf_is_charged_the_template_load() {
+    let accepted = spend_leaf_paying_fees("always_ok");
+    assert!(accepted.result.is_accept(), "{:?}", accepted.result.any_reject());
+    let accepted_load = accepted.fee_receipt.fee_breakdown().get(FeeSource::TemplateLoad);
+    assert!(
+        accepted_load > 0,
+        "the accepted spend must be charged the template load"
+    );
+
+    // Leaf validation loads the template before it can find that the function is missing, so the rejected spend pays
+    // the same load as the accepted one.
+    let rejected = spend_leaf_paying_fees("does_not_exist");
+    assert!(rejected.is_fee_only(), "{:?}", rejected.result);
+    assert_reject_reason(rejected.result.any_reject().unwrap(), "not found");
+    assert_eq!(
+        rejected.fee_receipt.fee_breakdown().get(FeeSource::TemplateLoad),
+        accepted_load
+    );
 }
 
 // -------------------------------- Creation-time (T1) validation -------------------------------- //
@@ -1525,14 +1669,17 @@ fn repeated_covenant_balance_atoms_are_charged_once() {
     assert_eq!(repeated, once);
 }
 
-/// The engine argument charge for the `AssertCovenantBalanced` call the `preserve_balance` script
-/// makes and `always_ok` does not.
+/// The engine call charges for the `AssertCovenantBalanced` call the `preserve_balance` script makes
+/// and `always_ok` does not: the flat cost, the argument and the response.
 fn covenant_balanced_call_native_points() -> u64 {
     let arg = tari_bor::encode(&SpendContextInvokeArg {
         action: SpendContextAction::AssertCovenantBalanced { max_revealed: 0 },
     })
     .unwrap();
-    limits::engine_arg_points(arg.len() as u64, tari_bor::count_data_items(&arg).unwrap())
+    let response = tari_bor::encode(&InvokeResult::encode(&true).unwrap()).unwrap();
+    limits::NativeExecutionPoints::PER_ENGINE_CALL +
+        limits::engine_arg_points(arg.len() as u64, tari_bor::count_data_items(&arg).unwrap()) +
+        limits::engine_response_points(response.len() as u64, tari_bor::count_data_items(&response).unwrap())
 }
 
 #[test]

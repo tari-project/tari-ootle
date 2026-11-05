@@ -628,3 +628,33 @@ async fn a_transaction_is_not_stored_when_its_lock_cannot_be_linked() {
     );
     assert_eq!(network.submit_count(), 0);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lock_stays_free_when_its_transaction_cannot_be_stored() {
+    let (network, _notifications) = ScriptedNetwork::new(vec![TransactionFinalizedResult::Pending]);
+    let running = start(fast_config(), network.clone()).await;
+    let transaction = build_transaction();
+    let sdk = running.test.sdk();
+    // Storing a transaction id twice fails, after the lock is linked in the same write.
+    sdk.transaction_api()
+        .insert_new_transaction(transaction.clone(), None, &[], false, &[])
+        .unwrap();
+    let lock_id = running.test.new_lock().keep_locked();
+
+    running
+        .handle
+        .submit_transaction_with_opts(transaction, None, Some(lock_id))
+        .await
+        .unwrap_err();
+
+    // A retry seals a new transaction, which takes the same lock.
+    let retry = build_transaction_valid_to(Epoch(101));
+    let retry_id = running
+        .handle
+        .submit_transaction_with_opts(retry, None, Some(lock_id))
+        .await
+        .unwrap();
+    assert_eq!(sdk.locks_api().get_locks_by_transaction_id(retry_id).unwrap(), [
+        lock_id
+    ]);
+}

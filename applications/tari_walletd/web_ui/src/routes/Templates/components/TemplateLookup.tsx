@@ -32,7 +32,7 @@ export default function TemplateLookup() {
     { enabled: !!templateAddress },
   );
 
-  const functions = data?.template_definition?.V1?.functions || [];
+  const functions = data?.template_definition?.V2?.functions || [];
 
   function handleLookup() {
     const trimmed = input.trim();

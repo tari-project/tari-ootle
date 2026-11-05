@@ -11,7 +11,7 @@ use std::{
 use anyhow::Context as _;
 use log::*;
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle, ValidatorNodeChange};
-use tari_ootle_common_types::{Epoch, SubstateAddress, displayable::Displayable};
+use tari_ootle_common_types::{Epoch, SubstateAddress, VotePower, displayable::Displayable};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 use super::config::Config;
@@ -31,6 +31,7 @@ struct QueuedActivation {
     public_key: RistrettoPublicKeyBytes,
     claim_key: RistrettoPublicKeyBytes,
     shard_key: SubstateAddress,
+    vote_power: VotePower,
     kind: ActivationKind,
 }
 
@@ -171,6 +172,7 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
                     public_key: vn.public_key,
                     claim_key,
                     shard_key,
+                    vote_power: vn.vote_power(),
                     kind,
                 });
             }
@@ -260,6 +262,7 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
                             validator_node_public_key: vn.public_key,
                             activation_epoch: epoch,
                             minimum_value_promise: 0,
+                            vote_power: vn.vote_power,
                             shard_key: vn.shard_key,
                         })
                         .collect(),
@@ -333,6 +336,7 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker + Send> EpochEventOra
 mod tests {
     use std::{
         collections::{HashMap, VecDeque},
+        num::NonZeroU64,
         sync::Mutex,
         task::{Context, Poll, Waker},
         time::Duration,
@@ -340,7 +344,7 @@ mod tests {
 
     use serde::{Serialize, de::DeserializeOwned};
     use tari_epoch_manager::epoch_event_oracle::{EpochEvent, ValidatorNodeChange};
-    use tari_ootle_common_types::{Epoch, ShardGroup, SubstateAddress};
+    use tari_ootle_common_types::{Epoch, ShardGroup, SubstateAddress, VotePower};
     use tari_sidechain::FixedHash;
     use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
@@ -398,6 +402,7 @@ mod tests {
             shard_group: ShardGroup::new(1, 256),
             registration_epoch,
             claim_key_changes: vec![],
+            power: NonZeroU64::MIN,
         }
     }
 
@@ -782,5 +787,47 @@ mod tests {
             vec![(v1.claim_key, Epoch(3)), (v2.claim_key, Epoch(5))],
             "validators activated across skipped epochs must retain their configured activation_epoch"
         );
+    }
+
+    #[test]
+    fn registration_and_rotation_carry_the_configured_power() {
+        let heavy = Validator {
+            power: NonZeroU64::new(5).unwrap(),
+            ..mk_validator_with_rotation(Epoch(10), Epoch(20))
+        };
+        let light = mk_validator(3, Epoch(10));
+        let mut oracle = ConfiguredEpochOracle::with_custom_ticker(
+            mk_config(vec![heavy, light]),
+            TestStore::default(),
+            ticker_through(20),
+        );
+
+        let events = drive_events(&mut oracle);
+
+        let mut powers = events
+            .iter()
+            .filter_map(|e| match e {
+                EpochEvent::ActiveValidatorNodeSetChanged { node_changes, .. } => Some(node_changes),
+                _ => None,
+            })
+            .flatten()
+            .map(|change| match change {
+                ValidatorNodeChange::Add {
+                    validator_node_public_key,
+                    activation_epoch,
+                    vote_power,
+                    ..
+                } => (*activation_epoch, *validator_node_public_key, *vote_power),
+                ValidatorNodeChange::Remove { .. } => panic!("unexpected Remove change"),
+            })
+            .collect::<Vec<_>>();
+        powers.sort();
+        let mut expected = vec![
+            (Epoch(11), mk_key(1), VotePower::of(5)),
+            (Epoch(11), mk_key(3), VotePower::of(1)),
+            (Epoch(20), mk_key(1), VotePower::of(5)),
+        ];
+        expected.sort();
+        assert_eq!(powers, expected);
     }
 }

@@ -43,7 +43,7 @@ const EPOCH_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 /// Validity window for an unattended claim: a few epochs is ample for the submit itself, and a
 /// claim that does not land in that time is retried with a fresh window.
 const CLAIM_TRANSACTION_VALIDITY_EPOCHS: u64 = 3;
-/// Maximum retries for a failed wallet database read.
+/// Maximum retries for a failed wallet database read or write.
 const MAX_RETRIES_STORE: u32 = 10;
 /// Maximum retries for file read/parse errors (file still being written on macOS).
 const MAX_RETRIES_FILE_READ: u32 = 1;
@@ -75,10 +75,10 @@ fn is_burn_not_yet_claimable(reject_reason: &RejectReason) -> bool {
 ///
 /// ## Network availability
 /// A burn proof does not expire, so a claim the network has not taken stays queued for as long as the
-/// daemon runs: while the indexer is unreachable no claim is attempted, and a claim that fails on a
-/// network read or submission, or is not yet claimable, is attempted again after a delay that doubles
-/// up to `MAX_RETRY_DELAY`. A claim leaves the queue only once it is accepted, the network rejects
-/// it, or its proof file cannot be read or claimed by this wallet.
+/// daemon runs: while the indexer is unreachable no claim is attempted, and a claim whose indexer
+/// read or dry run fails, or that is not yet claimable, is attempted again after a delay that doubles
+/// up to `MAX_RETRY_DELAY`. A claim leaves the queue only once it is accepted, the dry run or the
+/// network rejects it, or its proof file cannot be read or claimed by this wallet.
 ///
 /// ## Crash safety
 /// Pending state is held in memory only. On restart the service re-scans the directory and
@@ -666,7 +666,7 @@ fn settle_claim(
 enum BackOffCause<'a> {
     /// The burn's L1 block has not been synced by validators yet.
     NotYetClaimable,
-    /// A network read or submission failed.
+    /// An indexer read or dry run failed.
     Network(&'a anyhow::Error),
 }
 
@@ -729,8 +729,8 @@ struct PendingClaim {
     /// Number of transient errors encountered so far. The per-error `max_retries` limit determines
     /// when the claim is dropped from the queue (the file remains on disk for manual retry).
     retries: u32,
-    /// Consecutive attempts the network did not take, because the burn was not yet claimable or a
-    /// network read or submission failed. Sets the delay before `retry_at`.
+    /// Consecutive attempts the network did not take, because the burn was not yet claimable or an
+    /// indexer read or dry run failed. Sets the delay before `retry_at`.
     failed_attempts: u32,
     /// The claim is not attempted before this.
     retry_at: Option<Instant>,
@@ -784,7 +784,7 @@ enum ClaimError {
     /// A local failure that may clear (wallet database read, file still being written). Leave in
     /// queue and retry on the next epoch check interval, up to `max_retries` times.
     Transient { error: anyhow::Error, max_retries: u32 },
-    /// A network read or submission failed (indexer unreachable or timed out, a substate served
+    /// An indexer read or dry run failed (indexer unreachable or timed out, a substate served
     /// without a proof). Keep the claim queued and back off.
     Network(anyhow::Error),
     /// The burn is valid but not yet claimable: validators have not synced the L1 block containing
@@ -802,7 +802,8 @@ impl From<ClaimBurnError> for ClaimError {
     fn from(error: ClaimBurnError) -> Self {
         match error {
             ClaimBurnError::Network(error) => Self::Network(error),
-            ClaimBurnError::Build(error) => Self::Permanent(error),
+            ClaimBurnError::Wallet(error) => Self::transient(error, MAX_RETRIES_STORE),
+            ClaimBurnError::Invalid(error) => Self::Permanent(error),
         }
     }
 }
@@ -814,7 +815,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_network_failure_keeps_the_claim_queued() {
+    fn claim_burn_errors_map_to_network_transient_and_permanent() {
         let unproven = SubstateApiError::SubstateUnproven {
             substate_id: tari_template_lib_types::constants::TARI_TOKEN.into(),
         };
@@ -823,13 +824,17 @@ mod tests {
             ClaimError::Network(_)
         ));
         assert!(matches!(
-            ClaimError::from(ClaimBurnError::Build(anyhow::anyhow!("the claim proof is invalid"))),
+            ClaimError::from(ClaimBurnError::Wallet(anyhow::anyhow!("database is locked"))),
+            ClaimError::Transient { .. }
+        ));
+        assert!(matches!(
+            ClaimError::from(ClaimBurnError::Invalid(anyhow::anyhow!("the claim proof is invalid"))),
             ClaimError::Permanent(_)
         ));
     }
 
     #[test]
-    fn a_claim_stays_queued_however_long_the_network_does_not_take_it() {
+    fn back_off_caps_at_max_retry_delay() {
         let mut queue = HashMap::from([("burn.json".to_string(), PendingClaim::new())]);
         let now = Instant::now();
         let error = anyhow::anyhow!("indexer unreachable");

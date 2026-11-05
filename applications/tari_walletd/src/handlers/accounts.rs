@@ -30,6 +30,7 @@ use tari_ootle_common_types::{
     ShardGroup,
     SubstateRequirement,
     optional::Optional,
+    response_status::ResponseErrorStatus,
     shard::Shard,
 };
 use tari_ootle_transaction::{Transaction, TransactionBuilder, args};
@@ -49,6 +50,7 @@ use tari_ootle_wallet_sdk::{
         stealth_outputs::StealthOutputsApiError,
         stealth_transfer::{StealthTransferApiError, StealthTransferParams, TransferOutput, TransferStatementSpec},
         substate::{SubstateApiError, ValidatorScanResult},
+        transaction::TransactionApiError,
     },
     models::{
         AccountWithAddress,
@@ -60,7 +62,7 @@ use tari_ootle_wallet_sdk::{
     },
     network::WalletNetworkInterface,
 };
-use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceHandle;
+use tari_ootle_wallet_sdk_services::transaction_service::{TransactionServiceError, TransactionServiceHandle};
 use tari_ootle_walletd_client::{
     ComponentAddressOrName,
     permissions::{Crud, Permission, ReadOnly},
@@ -651,21 +653,41 @@ pub async fn handle_claim_burn(
 }
 
 /// Why [`execute_claim_burn`] could not dry run or submit a claim. The split lets an unattended caller tell a
-/// network that has not taken the claim yet from a proof that cannot be claimed.
+/// network that has not taken the claim yet from a claim that cannot succeed.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ClaimBurnError {
-    /// The network could not be read, or did not take the transaction.
+    /// The indexer could not be read, or did not answer the dry run.
     #[error(transparent)]
     Network(anyhow::Error),
-    /// The claim transaction could not be built from the proof.
+    /// The wallet could not store or lock the claim transaction for submission.
     #[error(transparent)]
-    Build(anyhow::Error),
+    Wallet(anyhow::Error),
+    /// The claim cannot succeed: it could not be built from the proof, or the dry run rejected it.
+    #[error(transparent)]
+    Invalid(anyhow::Error),
 }
 
 impl ClaimBurnError {
     pub(crate) fn into_inner(self) -> anyhow::Error {
         match self {
-            Self::Network(error) | Self::Build(error) => error,
+            Self::Network(error) | Self::Wallet(error) | Self::Invalid(error) => error,
+        }
+    }
+
+    /// Classifies a failed dry run. The indexer answers a transaction it finds invalid with
+    /// [`ResponseErrorStatus::TransactionRejected`], and an executed but rejected one as a rejected query result;
+    /// those claims cannot succeed. Any other failure is the indexer not answering.
+    fn from_dry_run(error: TransactionServiceError) -> Self {
+        match error {
+            TransactionServiceError::TransactionApiError(
+                TransactionApiError::NetworkInterfaceError {
+                    status: ResponseErrorStatus::TransactionRejected { .. },
+                    ..
+                } |
+                TransactionApiError::InvalidTransactionQueryResponse { .. } |
+                TransactionApiError::DryRunMismatchError { .. },
+            ) => Self::Invalid(error.into()),
+            error => Self::Network(error.into()),
         }
     }
 }
@@ -696,14 +718,14 @@ pub(crate) async fn execute_claim_burn(
         is_dry_run,
         &input_pricing,
     )
-    .map_err(ClaimBurnError::Build)?;
+    .map_err(ClaimBurnError::Invalid)?;
 
     if is_dry_run {
         let transaction_id = transaction.calculate_id();
         let result = transaction_service
             .submit_dry_run_transaction(transaction)
             .await
-            .map_err(|e| ClaimBurnError::Network(e.into()))?;
+            .map_err(ClaimBurnError::from_dry_run)?;
         let required_fees = result.finalize.required_fees();
         return Ok(ClaimBurnResponse {
             transaction_id,
@@ -713,7 +735,8 @@ pub(crate) async fn execute_claim_burn(
     }
 
     // Link the transaction to the account the burn is claimed into, and (if present) carry the proof
-    // file name so the claim-burn monitor can track it.
+    // file name so the claim-burn monitor can track it. A failed network submission leaves the transaction
+    // stored for the transaction service's poll to submit again, so an error here is the wallet's own.
     let mut tx_context = TransactionContext::with_accounts([*account.component_address()]);
     if let Some(file_name) = proof_file_name {
         tx_context = tx_context.with_kind(TransactionContextKind::ClaimBurn { file_name });
@@ -721,7 +744,7 @@ pub(crate) async fn execute_claim_burn(
     let tx_id = transaction_service
         .submit_transaction_with_opts(transaction, Some(tx_context), None)
         .await
-        .map_err(|e| ClaimBurnError::Network(e.into()))?;
+        .map_err(|e| ClaimBurnError::Wallet(e.into()))?;
 
     Ok(ClaimBurnResponse {
         transaction_id: tx_id,
@@ -4135,5 +4158,51 @@ mod claim_burn_fee_tests {
 
         assert!(local_price(&transaction) > 100);
         assert_eq!(revealed_fee(&transaction), Amount::from(100u64));
+    }
+}
+
+#[cfg(test)]
+mod claim_burn_dry_run_failure_tests {
+    use super::*;
+
+    fn network_interface_error(status: ResponseErrorStatus) -> TransactionServiceError {
+        TransactionApiError::NetworkInterfaceError {
+            message: status.to_string(),
+            status,
+        }
+        .into()
+    }
+
+    #[test]
+    fn a_dry_run_the_indexer_rejects_is_an_invalid_claim() {
+        let rejected = network_interface_error(ResponseErrorStatus::TransactionRejected {
+            message: "input substate is down".to_string(),
+        });
+        assert!(matches!(
+            ClaimBurnError::from_dry_run(rejected),
+            ClaimBurnError::Invalid(_)
+        ));
+        let rejected_result = TransactionApiError::InvalidTransactionQueryResponse {
+            details: "Transaction rejected by dry run: invalid proof".to_string(),
+        };
+        assert!(matches!(
+            ClaimBurnError::from_dry_run(rejected_result.into()),
+            ClaimBurnError::Invalid(_)
+        ));
+    }
+
+    #[test]
+    fn a_dry_run_the_indexer_does_not_answer_is_a_network_failure() {
+        let unavailable = network_interface_error(ResponseErrorStatus::InternalError {
+            message: "Indexer request failed with status 503: no committee".to_string(),
+        });
+        assert!(matches!(
+            ClaimBurnError::from_dry_run(unavailable),
+            ClaimBurnError::Network(_)
+        ));
+        assert!(matches!(
+            ClaimBurnError::from_dry_run(TransactionServiceError::ServiceShutdown),
+            ClaimBurnError::Network(_)
+        ));
     }
 }

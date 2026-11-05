@@ -387,11 +387,25 @@ impl Replica {
         script: Script,
         is_ready: bool,
     ) -> TransactionId {
+        let requirements = inputs
+            .iter()
+            .map(|id| SubstateRequirement::unversioned((*id).clone()))
+            .collect::<Vec<_>>();
+        self.pool_transaction_with_requirements(seed, &requirements, script, is_ready)
+    }
+
+    fn pool_transaction_with_requirements(
+        &self,
+        seed: u64,
+        inputs: &[SubstateRequirement],
+        script: Script,
+        is_ready: bool,
+    ) -> TransactionId {
         let transaction = (0..)
             .map(|attempt| {
                 let mut builder = Transaction::builder_localnet(Epoch(100));
                 for input in inputs {
-                    builder = builder.add_input(SubstateRequirement::unversioned((*input).clone()));
+                    builder = builder.add_input(input.clone());
                 }
                 builder.build_and_seal(&PrivateKey::from(seed * 1_000 + attempt))
             })
@@ -828,6 +842,74 @@ fn local_and_foreign_halves() -> (ShardGroup, ShardGroup) {
 
 mod local_only {
     use super::*;
+
+    #[test]
+    fn a_hard_input_conflict_with_foreign_outputs_is_a_local_abort_even_when_cached() {
+        let (local, foreign) = local_and_foreign_halves();
+        let replica = Replica::in_committee(local, 2);
+        let input = component_id_in(local);
+        replica.add_substate(&input);
+        let blocker = replica.pool_transaction(1, &[&input, &component_id_in(foreign)], commits());
+        let command = replica.honest_new_multishard_command(&blocker);
+        replica.prepare_in_parent(&multishard_atom(&command));
+        let id = replica.pool_transaction_with_requirements(
+            2,
+            &[SubstateRequirement::versioned(input, SubstateVersion::ZERO)],
+            Script {
+                commit: true,
+                new_outputs: vec![component_id_in(foreign)],
+                ..Default::default()
+            },
+            true,
+        );
+        let derived = replica
+            .store
+            .with_read_tx(|tx| {
+                let block = replica.candidate.as_leaf();
+                let mut store = PendingSubstateStore::init(tx, block, NUM_PRESHARDS)?;
+                let changes = ProposedBlockChangeSet::new(block);
+                let mut rec = changes
+                    .get_transaction_pool_record(tx, store.parent_chain(), &id)
+                    .unwrap();
+                pin_new_transaction(&mut rec, &replica.candidate.to_locked_epoch(), local).unwrap();
+                let prepared = replica
+                    .manager
+                    .prepare_for_proposal(&mut store, &replica.committee, &rec, block, &changes)
+                    .unwrap();
+                let PreparedTransaction::LocalOnly(prepared) = prepared else {
+                    panic!("expected a local abort, got {prepared:?}");
+                };
+                assert!(
+                    store
+                        .new_locks()
+                        .iter()
+                        .all(|(_, locks)| locks.iter().all(|lock| lock.transaction_id() != &id))
+                );
+                assert_eq!(store.pledge_bytes(), 0);
+                Ok::<_, StorageError>(
+                    crate::hotstuff::command_derivation::derive_local_only_command(rec, *prepared, &replica.committee)
+                        .unwrap(),
+                )
+            })
+            .unwrap();
+        assert!(
+            matches!(&derived.command, Command::LocalOnly(atom) if atom.decision == Decision::Abort(AbortReason::LockInputsFailed))
+        );
+        let uncached = replica.evaluate(std::slice::from_ref(&derived.command));
+        assert_voted(&uncached, TransactionPoolStage::LocalOnly, true);
+        replica
+            .store
+            .with_write_tx(|tx| {
+                derived
+                    .execution
+                    .unwrap()
+                    .for_block(replica.candidate.as_leaf(), id)
+                    .insert_if_required(tx)
+            })
+            .unwrap();
+        let cached = replica.evaluate(&[derived.command]);
+        assert_voted(&cached, TransactionPoolStage::LocalOnly, true);
+    }
 
     #[test]
     fn an_honest_commit_is_voted_for() {
@@ -2494,7 +2576,7 @@ mod some_accept {
     }
 }
 
-/// A replica that has prepared [`executing_cross_shard`]'s transaction, which fails to lock its local outputs in the
+/// A replica that has prepared [`pledging_cross_shard`]'s transaction, which fails to lock its local outputs in the
 /// candidate block because another transaction has locked its receipt as an output there.
 struct LockFailure {
     replica: Replica,
@@ -2507,11 +2589,25 @@ struct LockFailure {
 
 impl LockFailure {
     fn new() -> Self {
-        let (replica, id) = executing_cross_shard();
+        let (replica, id) = pledging_cross_shard();
         let prepare = multishard_atom(&replica.honest_new_multishard_command(&id));
         replica.prepare_in_parent(&prepare);
-        let prepared_evidence = prepare.evidence.clone();
-        let mut evidence = prepare.evidence.clone();
+        let (_, foreign) = local_and_foreign_halves();
+        replica.receive_input_pledges(&id, foreign, &[&component_id_in(foreign)]);
+        let mut rec = replica.pending_record(&id);
+        rec.evidence_mut().add_shard_group(foreign).set_prepare_qc(PcId::zero());
+        rec.set_ready(true);
+        replica
+            .store
+            .with_write_tx(|tx| {
+                tx.transaction_pool_add_pending_update(
+                    &replica.parent.as_leaf(),
+                    &TransactionPoolStatusUpdate::new(rec.clone(), false),
+                )
+            })
+            .unwrap();
+        let prepared_evidence = rec.evidence().clone();
+        let mut evidence = prepared_evidence.clone();
         evidence.abort();
         let accept = MultiShardAtom {
             decision: Decision::Abort(AbortReason::LockOutputsFailed),

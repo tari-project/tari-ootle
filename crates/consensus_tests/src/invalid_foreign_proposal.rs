@@ -24,9 +24,8 @@ use tari_sidechain::{SidechainBlockCommitProof, SidechainBlockHeader};
 
 use crate::support::{Test, logging::setup_logger};
 
-/// A foreign proposal in epoch 1 whose block names no exhaust burn rate, which fails validation wherever it is
-/// processed.
-fn foreign_proposal_naming_no_burn_rate() -> ForeignProposalRecord {
+/// A foreign proposal whose protocol version cannot be decoded by the processor.
+fn foreign_proposal_with_unsupported_protocol_version() -> ForeignProposalRecord {
     let metadata = BlockHeaderMetadata {
         total_leader_fee: 0,
         timestamp: 0,
@@ -36,7 +35,7 @@ fn foreign_proposal_naming_no_burn_rate() -> ForeignProposalRecord {
     };
     let header = SidechainBlockHeader {
         network: Network::LocalNet.as_byte(),
-        protocol_version: 0,
+        protocol_version: 255,
         parent_id: Default::default(),
         justify_id: Default::default(),
         height: 1,
@@ -76,7 +75,7 @@ async fn an_invalid_foreign_proposal_is_dropped_from_a_block_without_transaction
     test.wait_for_all_validators_to_start_consensus().await;
     let (_, _, _, seeded_at) = test.on_block_committed().await;
 
-    let foreign_proposal = foreign_proposal_naming_no_burn_rate();
+    let foreign_proposal = foreign_proposal_with_unsupported_protocol_version();
     test.with_all_validators(|validator| {
         validator
             .state_store

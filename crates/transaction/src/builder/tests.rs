@@ -441,7 +441,7 @@ fn auto_filled_inputs_and_referenced_substates_include_stealth_script_path_args(
 
 #[test]
 fn builder_upgrades_read_inputs_to_write_across_calls_fees_and_merges() {
-    use tari_engine_types::substate::SubstateId;
+    use tari_engine_types::{SubstateVersion, substate::SubstateId};
     use tari_ootle_common_types::InputDeclaration;
     use tari_template_lib_types::ObjectKey;
 
@@ -449,7 +449,7 @@ fn builder_upgrades_read_inputs_to_write_across_calls_fees_and_merges() {
     let comp_fee = ComponentAddress::new(ObjectKey::from_array([2; 32]));
     let comp_merge = ComponentAddress::new(ObjectKey::from_array([3; 32]));
 
-    let write_merge = InputDeclaration::write_versioned(comp_merge, 7u32);
+    let write_merge = InputDeclaration::write_versioned(comp_merge, 7u64);
     let other = Transaction::builder_localnet(Epoch(1)).add_input(write_merge);
 
     let tx = Transaction::builder_localnet(Epoch(1))
@@ -470,5 +470,5 @@ fn builder_upgrades_read_inputs_to_write_across_calls_fees_and_merges() {
 
     let merge_decl = tx.inputs().get(&SubstateId::from(comp_merge)).unwrap();
     assert!(merge_decl.is_write());
-    assert_eq!(merge_decl.version(), Some(7));
+    assert_eq!(merge_decl.version(), Some(SubstateVersion::new(7)));
 }

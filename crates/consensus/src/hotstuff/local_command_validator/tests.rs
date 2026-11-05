@@ -2245,9 +2245,7 @@ mod local_accept_from_local_prepared {
                 .evidence_mut()
                 .insert_from_lock_intent(NUM_PRESHARDS, replica.committee.num_committees(), lock);
         }
-        expected
-            .set_transaction_fee(FEE)
-            .set_exhaust_burn(exhaust_burn());
+        expected.set_transaction_fee(FEE).set_exhaust_burn(exhaust_burn());
         let involved = NonZeroU64::new(expected.evidence().num_shard_groups() as u64).unwrap();
         expected.set_leader_fee(expected.calculate_leader_fee(involved));
         let accept = expected.get_current_multi_shard_atom().unwrap();

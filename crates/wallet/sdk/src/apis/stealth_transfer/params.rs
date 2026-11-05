@@ -15,7 +15,7 @@ use tari_template_lib::types::{
     NonFungibleAddress,
     ResourceAddress,
     UtxoAddress,
-    stealth::{AtomicCondition, SpendCondition, TemplateFunction},
+    stealth::{AtomicCondition, TemplateFunction},
 };
 
 use crate::{
@@ -194,26 +194,18 @@ impl TransferOutput {
             );
         }
 
-        match &self.pay_to {
-            PayTo::StealthPublicKey => {},
-            PayTo::AccessRule(rule) => validate_access_rule_condition(rule)?,
-            PayTo::TemplateFunction(tf) => {
-                validate_template_function_condition(tf)?;
-                validated_condition_root(&[SpendCondition::template_function(tf.clone())])
-                    .map_err(|e| e.to_string())?;
-            },
-            PayTo::Conditions(conditions) => {
-                validated_condition_root(conditions).map_err(|e| e.to_string())?;
-                for leaf in conditions {
-                    for atom in leaf.conditions() {
-                        match atom {
-                            AtomicCondition::AccessRule(rule) => validate_access_rule_condition(rule)?,
-                            AtomicCondition::TemplateFunction(tf) => validate_template_function_condition(tf)?,
-                            AtomicCondition::Builtin(_) | AtomicCondition::Covenant(_) => {},
-                        }
-                    }
+        let Some(conditions) = self.pay_to.conditions() else {
+            return Ok(());
+        };
+        validated_condition_root(&conditions).map_err(|e| e.to_string())?;
+        for leaf in conditions.iter() {
+            for atom in leaf.conditions() {
+                match atom {
+                    AtomicCondition::AccessRule(rule) => validate_access_rule_condition(rule)?,
+                    AtomicCondition::TemplateFunction(tf) => validate_template_function_condition(tf)?,
+                    AtomicCondition::Builtin(_) | AtomicCondition::Covenant(_) => {},
                 }
-            },
+            }
         }
 
         Ok(())
@@ -389,7 +381,8 @@ mod tests {
     use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
     use tari_engine_types::limits::STEALTH_LIMITS;
     use tari_template_lib::types::{
-        access_rules::MAX_ACCESS_RULE_NODES,
+        Hash32,
+        access_rules::{MAX_ACCESS_RULE_NODES, RequireRule, RestrictedAccessRule, RuleRequirement},
         constants::STEALTH_TARI_RESOURCE_ADDRESS,
         stealth::{AtomicCondition, BuiltinPredicate, SpendCondition, TemplateFunction},
     };
@@ -478,6 +471,18 @@ mod tests {
             function: "predicate".try_into().unwrap(),
             args: vec![Default::default(); MAX_ACCESS_RULE_NODES],
         }));
+
+        // The rule decodes on its own at the limit; the leaf wrapping it is one node over.
+        let requirements = (0..MAX_ACCESS_RULE_NODES - 1)
+            .map(|i| {
+                let mut bytes = [0u8; 32];
+                bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
+                RuleRequirement::ScopedToTemplate(Hash32::from_array(bytes))
+            })
+            .collect();
+        let rule = AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::AnyOf(requirements)));
+        assert_eq!(rule.num_nodes(), MAX_ACCESS_RULE_NODES);
+        assert_rejects_pay_to(PayTo::AccessRule(rule));
     }
 
     /// `pay_to` gates the blinded output, which a revealed-only transfer never produces. Silently depositing the
@@ -588,11 +593,7 @@ mod tests {
 
     #[test]
     fn rejects_deny_all_and_invalid_m_of_n_access_rules() {
-        use tari_template_lib::types::{
-            TemplateAddress,
-            access_rules::{RequireRule, RestrictedAccessRule, RuleRequirement},
-            bytes::Bytes,
-        };
+        use tari_template_lib::types::{TemplateAddress, bytes::Bytes};
 
         assert_rejects_pay_to(PayTo::AccessRule(AccessRule::DenyAll));
         assert_rejects_pay_to(PayTo::Conditions(vec![SpendCondition::access_rule(

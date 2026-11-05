@@ -174,6 +174,12 @@ mod tests {
         let bytes_cbor = encode(&tari_bor::Value::Bytes(neg.to_le_bytes().to_vec())).unwrap();
         let from_bytes: Amount = tari_bor::serde_codec::from_slice(&bytes_cbor).unwrap();
         assert_eq!(from_bytes, neg);
+
+        let sign_extended = encode(&tari_bor::Value::Bytes(vec![0xff])).unwrap();
+        let decoded_bytes: Amount = tari_bor::serde_codec::from_slice(&sign_extended).unwrap();
+        assert_eq!(decoded_bytes, Amount::from(-1i64));
+        let overlong_bytes = encode(&tari_bor::Value::Bytes(vec![0u8; 25])).unwrap();
+        tari_bor::serde_codec::from_slice::<Amount>(&overlong_bytes).unwrap_err();
     }
 
     #[test]

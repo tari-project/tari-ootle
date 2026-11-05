@@ -258,7 +258,7 @@ impl ResourceContainer {
             });
         }
         if other.has_locked_funds() {
-            return Err(ResourceError::OperationNotAllowed(
+            return Err(ResourceError::InvariantError(
                 "Cannot deposit a container with locked funds".to_string(),
             ));
         }
@@ -768,10 +768,10 @@ impl ResourceContainer {
                             "unlock: tried to unlock token {token} that was not locked",
                         ))
                     })?;
-                    if !token_ids.insert(token) {
-                        return Err(ResourceError::InvariantError(
-                            "unlock: container contained duplicate token".to_string(),
-                        ));
+                    if !token_ids.insert(token.clone()) {
+                        return Err(ResourceError::InvariantError(format!(
+                            "unlock: token {token} is already held unlocked"
+                        )));
                     }
                 }
             },
@@ -1134,7 +1134,7 @@ mod tests {
         let mut other = ResourceContainer::public_fungible(PUBLIC_IDENTITY_RESOURCE_ADDRESS, Amount::from(5u64));
         let _locked = other.lock_by_amount(Amount::from(2u64)).unwrap();
         let err = dest.deposit(other).unwrap_err();
-        assert!(matches!(err, ResourceError::OperationNotAllowed(_)));
+        assert!(matches!(err, ResourceError::InvariantError(_)));
         assert_eq!(dest.unlocked_amount(), Amount::from(10u64));
 
         // Duplicate NFT in unlocked or locked set must be rejected without partial mutation.
@@ -1165,6 +1165,16 @@ mod tests {
         let dup_conf = ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c1], Amount::from(0u64));
         let err = conf_dest.deposit(dup_conf).unwrap_err();
         assert!(matches!(err, ResourceError::InvariantError(_)));
+
+        // Confidential deposit whose revealed sum overflows leaves the destination commitment set unchanged.
+        let c2 = PedersenCommitmentBytes::from([2u8; 32]);
+        let mut overflow_dest =
+            ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c1], Amount::MAX);
+        let incoming =
+            ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c2], Amount::from(1u64));
+        let err = overflow_dest.deposit(incoming).unwrap_err();
+        assert!(matches!(err, ResourceError::BalanceOverflow { operate: "deposit", .. }));
+        assert_eq!(overflow_dest.get_commitment_count(), 1);
     }
 
     #[test]

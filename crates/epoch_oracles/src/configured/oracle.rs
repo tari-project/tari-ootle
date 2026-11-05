@@ -189,20 +189,11 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
     fn prepare_next_epoch(&mut self, epoch_ticker_data: EpochTickerData) -> anyhow::Result<()> {
         let next_epoch = epoch_ticker_data.epoch;
         let epoch_hash = epoch_ticker_data.epoch_hash;
-        if next_epoch.is_zero() {
-            // If at epoch 0, just emit the epoch changed and done for now events
-            self.pending_events.push_back(EpochEvent::EpochChanged {
-                epoch: next_epoch,
-                epoch_hash,
-            });
-
-            return Ok(());
-        }
-
         let done_for_now = epoch_ticker_data.done_for_now;
-        let current_epoch = next_epoch - Epoch(1);
-        self.store
-            .set(StoreKey::ConfiguredCurrentEpoch.as_key_bytes(), &next_epoch)?;
+        if !next_epoch.is_zero() {
+            self.store
+                .set(StoreKey::ConfiguredCurrentEpoch.as_key_bytes(), &next_epoch)?;
+        }
 
         debug!(
             target: LOG_TARGET,
@@ -228,36 +219,38 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             )
         }
 
-        // Activate all validators queued at or before next_epoch (handles skipped epochs).
-        // split_off returns everything > next_epoch, leaving everything <= next_epoch in place.
-        let remaining = self.queued_validators.split_off(&(next_epoch + Epoch(1)));
-        let due = std::mem::replace(&mut self.queued_validators, remaining);
+        if let Some(current_epoch) = next_epoch.checked_sub(Epoch(1)) {
+            // Activate all validators queued at or before next_epoch (handles skipped epochs).
+            // split_off returns everything > next_epoch, leaving everything <= next_epoch in place.
+            let remaining = self.queued_validators.split_off(&(next_epoch + Epoch(1)));
+            let due = std::mem::replace(&mut self.queued_validators, remaining);
 
-        for (epoch, vns) in due {
-            debug!(
-                target: LOG_TARGET,
-                "☘️ {} VNS activated for epoch {epoch} (current: {next_epoch})",
-                vns.len()
-            );
-            // Pin each shard key as it is committed, so that a later edit to the config that derived it is caught on
-            // the next startup even if this node never restarted between the two.
-            for vn in vns.iter().filter(|vn| vn.kind == ActivationKind::Registration) {
-                self.verify_or_record_shard_key(vn.public_key, vn.shard_key)?;
+            for (epoch, vns) in due {
+                debug!(
+                    target: LOG_TARGET,
+                    "☘️ {} VNS activated for epoch {epoch} (current: {next_epoch})",
+                    vns.len()
+                );
+                // Pin each shard key as it is committed, so that a later edit to the config that derived it is
+                // caught on the next startup even if this node never restarted between the two.
+                for vn in vns.iter().filter(|vn| vn.kind == ActivationKind::Registration) {
+                    self.verify_or_record_shard_key(vn.public_key, vn.shard_key)?;
+                }
+                self.pending_events
+                    .push_back(EpochEvent::ActiveValidatorNodeSetChanged {
+                        epoch: current_epoch,
+                        node_changes: vns
+                            .into_iter()
+                            .map(|vn| ValidatorNodeChange::Add {
+                                claim_public_key: vn.claim_key,
+                                validator_node_public_key: vn.public_key,
+                                activation_epoch: next_epoch,
+                                minimum_value_promise: 0,
+                                shard_key: vn.shard_key,
+                            })
+                            .collect(),
+                    });
             }
-            self.pending_events
-                .push_back(EpochEvent::ActiveValidatorNodeSetChanged {
-                    epoch: current_epoch,
-                    node_changes: vns
-                        .into_iter()
-                        .map(|vn| ValidatorNodeChange::Add {
-                            claim_public_key: vn.claim_key,
-                            validator_node_public_key: vn.public_key,
-                            activation_epoch: next_epoch,
-                            minimum_value_promise: 0,
-                            shard_key: vn.shard_key,
-                        })
-                        .collect(),
-                });
         }
 
         self.pending_events.push_back(EpochEvent::EpochChanged {
@@ -738,6 +731,36 @@ mod tests {
         assert!(
             matches!(events.as_slice(), [EpochEvent::Error(_)]),
             "an invalid config must surface as an error, not a partial event stream; got {events:?}"
+        );
+    }
+
+    #[test]
+    fn epoch_zero_announces_genesis_validators_and_emits_done_for_now() {
+        let validator = mk_validator(1, Epoch(0));
+        let config = mk_config(vec![validator.clone()]);
+        let ticker = ScriptedTicker::new(vec![EpochTickerData {
+            epoch: Epoch(0),
+            epoch_hash: FixedHash::zero(),
+            done_for_now: true,
+        }]);
+        let mut oracle = ConfiguredEpochOracle::with_custom_ticker(config, TestStore::default(), ticker);
+
+        let events = drive_events(&mut oracle);
+
+        assert!(
+            matches!(
+                events.as_slice(),
+                [
+                    EpochEvent::NewValidatorRegistered {
+                        epoch: Epoch(0),
+                        claim_public_key,
+                        validator_node_public_key,
+                    },
+                    EpochEvent::EpochChanged { epoch: Epoch(0), .. },
+                    EpochEvent::DoneForNow { epoch: Epoch(0), .. },
+                ] if *claim_public_key == validator.claim_key && *validator_node_public_key == validator.public_key
+            ),
+            "expected NewValidatorRegistered, EpochChanged(0), and DoneForNow(0); got {events:?}"
         );
     }
 }

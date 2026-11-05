@@ -701,47 +701,53 @@ fn setting_the_frozen_flag_reports_whether_it_changed() {
     assert_eq!(outputs.set_utxo_frozen(&address, true).unwrap(), Some(false));
 }
 
+fn add_owned_stealth_output(
+    test: &TestWithNetwork,
+    owner_account: &AccountWithAddress,
+    resource_address: ResourceAddress,
+    amount: u64,
+) {
+    let (utxo_id, utxo) = test.owned_utxo(owner_account, amount);
+    let output = utxo.output().unwrap();
+    test.sdk()
+        .stealth_outputs_api()
+        .add_output(&StealthOutputModel {
+            owner_account: *owner_account.component_address(),
+            resource_address,
+            commitment: utxo_id.into_commitment_bytes(),
+            value: amount,
+            sender_public_nonce: output.output.public_nonce,
+            view_only_key_id: owner_account.view_only_key_id(),
+            owner_key_id: owner_account.owner_key_id(),
+            encrypted_data: output.output.encrypted_data.clone(),
+            tag_byte: output.tag,
+            memo: None,
+            auth: output.auth.clone(),
+            minimum_value_promise: 0,
+            status: OutputStatus::Unspent,
+            is_burnt: false,
+            is_frozen: false,
+            is_on_chain: true,
+            is_condition_spendable: true,
+            lock_id: None,
+            proven_up: None,
+            spent_version: None,
+        })
+        .unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn stealth_transfer_with_badge_or_fee_swap_includes_account_vault_inputs_and_swap_view_key() {
+async fn stealth_transfer_with_badge_declares_account_and_badge_vault_inputs() {
     let sets = [ValidatorSetFixture::new(1)];
     let network = ProvingNetwork::new(&sets, 0);
-    let test = TestWithNetwork::with_network(network.clone());
+    let test = TestWithNetwork::with_network(network);
     let sdk = test.sdk();
     let owner_account = sdk
         .accounts_api()
         .get_account_by_address(&Test::test_account_address())
         .unwrap();
 
-    let add_owned_stealth_output = |resource_address, amount| {
-        let (utxo_id, utxo) = test.owned_utxo(&owner_account, amount);
-        let output = utxo.output().unwrap();
-        sdk.stealth_outputs_api()
-            .add_output(&StealthOutputModel {
-                owner_account: *owner_account.component_address(),
-                resource_address,
-                commitment: utxo_id.into_commitment_bytes(),
-                value: amount,
-                sender_public_nonce: output.output.public_nonce,
-                view_only_key_id: owner_account.view_only_key_id(),
-                owner_key_id: owner_account.owner_key_id(),
-                encrypted_data: output.output.encrypted_data.clone(),
-                tag_byte: output.tag,
-                memo: None,
-                auth: output.auth.clone(),
-                minimum_value_promise: 0,
-                status: OutputStatus::Unspent,
-                is_burnt: false,
-                is_frozen: false,
-                is_on_chain: true,
-                is_condition_spendable: true,
-                lock_id: None,
-                proven_up: None,
-                spent_version: None,
-            })
-            .unwrap();
-    };
-
-    add_owned_stealth_output(STEALTH_TARI_RESOURCE_ADDRESS, 5_000);
+    add_owned_stealth_output(&test, &owner_account, STEALTH_TARI_RESOURCE_ADDRESS, 5_000);
     let badge_resource = resource_address_from_seed(5);
     let badge_vault_id: VaultId = "vault_0dc41b5cc74b36d696c7b140323a40a2f98b71df5d60e5a6bf4c1a07fffffffe"
         .parse()
@@ -764,7 +770,7 @@ async fn stealth_transfer_with_badge_or_fee_swap_includes_account_vault_inputs_a
             fee_params: TransferFeeParams::new(UtxoInputSelection::ConfidentialOnly),
             input_selection: UtxoInputSelection::ConfidentialOnly,
             outputs: vec![TransferOutput {
-                address: owner_account.address.clone(),
+                address: owner_account.address,
                 revealed_amount: Amount::zero(),
                 blinded_amount: 100,
                 memo: None,
@@ -793,7 +799,20 @@ async fn stealth_transfer_with_badge_or_fee_swap_includes_account_vault_inputs_a
         "badge transfer must declare badge vault as write input"
     );
     lock.release();
+}
 
+#[tokio::test(flavor = "multi_thread")]
+async fn stealth_transfer_with_stealth_fee_swap_declares_account_vault_and_swap_view_key() {
+    let sets = [ValidatorSetFixture::new(1)];
+    let network = ProvingNetwork::new(&sets, 0);
+    let test = TestWithNetwork::with_network(network.clone());
+    let sdk = test.sdk();
+    let owner_account = sdk
+        .accounts_api()
+        .get_account_by_address(&Test::test_account_address())
+        .unwrap();
+
+    add_owned_stealth_output(&test, &owner_account, STEALTH_TARI_RESOURCE_ADDRESS, 5_000);
     let swap_resource = resource_address_from_seed(6);
     let (_, swap_view_key) = random_keypair();
     sdk.resources_api()
@@ -830,7 +849,7 @@ async fn stealth_transfer_with_badge_or_fee_swap_includes_account_vault_inputs_a
         .into(),
         None,
     );
-    add_owned_stealth_output(swap_resource, 500);
+    add_owned_stealth_output(&test, &owner_account, swap_resource, 500);
 
     let (lock, swap_tx) = sdk
         .stealth_transfer_api()
@@ -845,7 +864,7 @@ async fn stealth_transfer_with_badge_or_fee_swap_includes_account_vault_inputs_a
             ),
             input_selection: UtxoInputSelection::ConfidentialOnly,
             outputs: vec![TransferOutput {
-                address: owner_account.address.clone(),
+                address: owner_account.address,
                 revealed_amount: Amount::zero(),
                 blinded_amount: 100,
                 memo: None,
@@ -885,12 +904,60 @@ async fn stealth_transfer_with_badge_or_fee_swap_includes_account_vault_inputs_a
     assert!(
         fee_stealth_stmt.outputs_statement.outputs[0]
             .output
-            .viewable_balance
+            .viewable_balance_proof
             .is_some(),
         "fee swap change output must carry viewable balance proof when swap resource has view key"
     );
     lock.release();
+}
 
+#[tokio::test(flavor = "multi_thread")]
+async fn stealth_transfer_with_revealed_fee_swap_declares_swap_vault_input() {
+    let sets = [ValidatorSetFixture::new(1)];
+    let network = ProvingNetwork::new(&sets, 0);
+    let test = TestWithNetwork::with_network(network.clone());
+    let sdk = test.sdk();
+    let owner_account = sdk
+        .accounts_api()
+        .get_account_by_address(&Test::test_account_address())
+        .unwrap();
+
+    add_owned_stealth_output(&test, &owner_account, STEALTH_TARI_RESOURCE_ADDRESS, 5_000);
+    let swap_resource = resource_address_from_seed(6);
+    sdk.resources_api()
+        .upsert_resource(
+            &swap_resource,
+            &Resource::new(
+                ResourceType::Stealth,
+                SubstateOwnerRule::None,
+                ResourceAccessRules::new(),
+                Metadata::new(),
+                None,
+                None,
+                6,
+                false,
+            ),
+        )
+        .unwrap();
+    let pool_address: ComponentAddress = "component_0dc41b5cc74b36d696c7b140323a40a2f98b71df5d60e5a6bf4c1a07fffffffd"
+        .parse()
+        .unwrap();
+    network.serve_substate(
+        SubstateId::Component(pool_address),
+        SubstateVersion::ZERO,
+        Component {
+            header: ComponentHeader {
+                template_address: ACCOUNT_TEMPLATE_ADDRESS,
+                owner_rule: SubstateOwnerRule::None,
+                access_rules: ComponentAccessRules::new(),
+                entity_id: Default::default(),
+                upgrade_rule: Default::default(),
+            },
+            body: ComponentBody::empty(),
+        }
+        .into(),
+        None,
+    );
     let swap_vault_id: VaultId = "vault_0dc41b5cc74b36d696c7b140323a40a2f98b71df5d60e5a6bf4c1a07fffffffc"
         .parse()
         .unwrap();

@@ -358,7 +358,8 @@ async fn prefer_confidential_respects_locked_revealed_balance() {
             is_dry_run: true,
         })
         .await
-        .expect_err("locked revealed funds should not be spent");
+        .err()
+        .expect("locked revealed funds should not be spent");
     assert!(
         matches!(err, ConfidentialTransferApiError::InsufficientFunds),
         "expected InsufficientFunds, got: {err}"

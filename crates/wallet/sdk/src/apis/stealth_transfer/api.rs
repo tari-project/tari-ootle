@@ -731,11 +731,17 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 reason: format!("Invalid resource view key: {e}"),
             })?;
         let resource_has_view_key = resource_view_key.is_some();
-        let fee_resource_view_key = match params.fee_params.pay_fee_with_swap.as_ref() {
-            Some(swap) if swap.input_resource == params.resource_address => resource_view_key.clone(),
-            Some(swap) if swap.input_resource != TARI_TOKEN => self
-                .substate_api
-                .fetch_resource(swap.input_resource)
+        let fee_resource = params
+            .fee_params
+            .pay_fee_with_swap
+            .as_ref()
+            .map(|swap| swap.input_resource)
+            .unwrap_or(TARI_TOKEN);
+        let fee_resource_view_key = if fee_resource == params.resource_address {
+            resource_view_key.clone()
+        } else {
+            self.substate_api
+                .fetch_resource(fee_resource)
                 .await?
                 .view_key()
                 .map(RistrettoPublicKey::convert_from_byte_type)
@@ -743,8 +749,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 .map_err(|e| StealthTransferApiError::InvalidParameter {
                     param: "fee_resource_view_key",
                     reason: format!("Invalid fee resource view key: {e}"),
-                })?,
-            _ => None,
+                })?
         };
 
         // Critical section - TODO: use a DB transaction
@@ -773,7 +778,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                     &params,
                     &owner_address,
                     account_key_id,
-                    fee_resource_view_key,
+                    fee_resource_view_key.clone(),
                 )?)
             };
 
@@ -786,13 +791,6 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             } else {
                 Amount::zero()
             };
-
-            let fee_resource = params
-                .fee_params
-                .pay_fee_with_swap
-                .as_ref()
-                .map(|swap| swap.input_resource)
-                .unwrap_or(TARI_TOKEN);
 
             let inputs_to_spend = self.lock_inputs_for_transfer(
                 lock.id(),
@@ -828,7 +826,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                         &params,
                         &owner_address,
                         account_key_id,
-                        None,
+                        fee_resource_view_key,
                     )?);
                     // The fee is now sourced separately, so the transfer statement must stop revealing it.
                     merged_fee_amount = Amount::zero();
@@ -874,7 +872,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                     .transpose()?
             };
 
-            // If we're spending from the owner account, add the inputs
+            // Declare the owner account and its vaults for every instruction that calls into the account:
+            // revealed withdrawals, badge proofs and the fee-swap deposit.
             let spends_revealed = inputs_to_spend.revealed.is_positive() || fee_inputs_to_spend.revealed.is_positive();
             let has_fee_swap = params.fee_params.pay_fee_with_swap.is_some();
             if spends_revealed || has_fee_swap || !params.badge_usage.is_none() {

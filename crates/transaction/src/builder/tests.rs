@@ -472,3 +472,28 @@ fn builder_upgrades_read_inputs_to_write_across_calls_fees_and_merges() {
     assert!(merge_decl.is_write());
     assert_eq!(merge_decl.version(), Some(SubstateVersion::new(7)));
 }
+
+#[test]
+fn it_preserves_referenced_assert_resources() {
+    use tari_engine_types::substate::SubstateId;
+    use tari_template_lib_types::{NonFungibleId, ObjectKey, ResourceAddress, constants::TARI_TOKEN};
+
+    let fungible_resource = ResourceAddress::new(ObjectKey::from_array([7; 32]));
+    let nft_resource = ResourceAddress::new(ObjectKey::from_array([8; 32]));
+
+    let tx = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .put_last_instruction_output_on_workspace("b")
+        .assert_bucket_contains_any("b", fungible_resource)
+        .assert_bucket_contains_non_fungibles_all("b", nft_resource, vec![NonFungibleId::from_u64(1)])
+        .assert_bucket_contains_any("b", TARI_TOKEN)
+        .build_unsigned();
+
+    assert!(tx.inputs().get(&SubstateId::from(fungible_resource)).unwrap().is_read());
+    assert!(tx.inputs().get(&SubstateId::from(nft_resource)).unwrap().is_read());
+
+    let referenced = tx.to_referenced_substates().unwrap();
+    assert!(referenced.contains(&SubstateId::Resource(fungible_resource)));
+    assert!(referenced.contains(&SubstateId::Resource(nft_resource)));
+    assert!(!referenced.contains(&SubstateId::Resource(TARI_TOKEN)));
+}

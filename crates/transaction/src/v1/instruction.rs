@@ -189,11 +189,9 @@ impl Instruction {
     pub fn referenced_templates(&self) -> impl Iterator<Item = &TemplateAddress> + '_ {
         let single = self.referenced_template();
         let stealth = match self {
-            Self::StealthTransfer { statement, .. } => Some(
-                statement
-                    .script_path_template_functions()
-                    .map(|tf| &tf.template),
-            ),
+            Self::StealthTransfer { statement, .. } => {
+                Some(statement.script_path_template_functions().map(|tf| &tf.template))
+            },
             _ => None,
         };
         single.into_iter().chain(stealth.into_iter().flatten())

@@ -138,10 +138,8 @@ mod tests {
             let leaf = SpendCondition::template_function(func);
             let witness = SpendWitness::script_path(leaf, MerkleProof::empty());
             let input = StealthInput::with_witness(PedersenCommitmentBytes::zero(), witness);
-            let outputs_statement = StealthOutputsStatement::new_revealed_only(
-                Amount::from(10u64),
-                RistrettoPublicKeyBytes::zero(),
-            );
+            let outputs_statement =
+                StealthOutputsStatement::new_revealed_only(Amount::from(10u64), RistrettoPublicKeyBytes::zero());
             let statement = StealthTransferStatement {
                 inputs_statement: StealthInputsStatement::new(vec![input], Amount::ZERO),
                 outputs_statement,

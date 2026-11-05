@@ -384,10 +384,8 @@ fn auto_filled_inputs_and_referenced_substates_include_stealth_script_path_args(
     let commitment = PedersenCommitmentBytes::zero();
     let witness = SpendWitness::script_path(leaf, MerkleProof::empty());
     let input = StealthInput::with_witness(commitment, witness);
-    let outputs_statement = StealthOutputsStatement::new_revealed_only(
-        Amount::from(10u64),
-        RistrettoPublicKeyBytes::zero(),
-    );
+    let outputs_statement =
+        StealthOutputsStatement::new_revealed_only(Amount::from(10u64), RistrettoPublicKeyBytes::zero());
     let statement = StealthTransferStatement {
         inputs_statement: StealthInputsStatement::new(vec![input], Amount::ZERO),
         outputs_statement,
@@ -405,9 +403,18 @@ fn auto_filled_inputs_and_referenced_substates_include_stealth_script_path_args(
         .build_and_seal(&secret);
 
     let bound_decl = transaction.inputs().get(&SubstateId::from(bound_component)).unwrap();
-    assert!(!bound_decl.is_write(), "spend-script bound args run in a ReadOnly frame");
-    let res_decl = transaction.inputs().get(&SubstateId::Resource(custom_resource)).unwrap();
-    assert!(!res_decl.is_write(), "stealth transfer + bucket assert must stay a read");
+    assert!(
+        !bound_decl.is_write(),
+        "spend-script bound args run in a ReadOnly frame"
+    );
+    let res_decl = transaction
+        .inputs()
+        .get(&SubstateId::Resource(custom_resource))
+        .unwrap();
+    assert!(
+        !res_decl.is_write(),
+        "stealth transfer + bucket assert must stay a read"
+    );
 
     let referenced = transaction.to_referenced_substates().unwrap();
     let expected = HashSet::from([

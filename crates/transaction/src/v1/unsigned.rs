@@ -9,11 +9,7 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, InputDeclaration, declare_input};
-use tari_template_lib_types::{
-    ComponentAddress,
-    UtxoAddress,
-    crypto::RistrettoPublicKeyBytes,
-};
+use tari_template_lib_types::{ComponentAddress, UtxoAddress, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
     Blobs,

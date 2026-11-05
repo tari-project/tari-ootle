@@ -412,6 +412,26 @@ async fn recovery_cleans_up_unused_accounts_when_a_key_fails_all_attempts() {
     let address = sdk.key_manager_api().next_account_address().unwrap();
     assert_eq!(address.owner_key_id.derived_index(), Some(2));
     accounts_api.create_account(Some("new"), false, address).unwrap();
+
+    // When key 0 is unused and key 1 fails before any owned account is found, key 0 is kept as the default account
+    // and the key index resets to 0.
+    let (test_none_found, network_none_found) = new_test();
+    network_none_found.fail_utxo_streams_from_call(1);
+    run_recovery(&test_none_found).await;
+
+    let sdk_none = test_none_found.sdk();
+    let accounts_none = sdk_none.accounts_api();
+    let key_0 = accounts_none
+        .get_account_by_address(&account_address_for_key_index(&test_none_found, 0))
+        .unwrap();
+    assert!(key_0.account.is_default());
+    assert!(
+        !accounts_none
+            .exists_by_address(&account_address_for_key_index(&test_none_found, 1))
+            .unwrap()
+    );
+    let next_addr = sdk_none.key_manager_api().next_account_address().unwrap();
+    assert_eq!(next_addr.owner_key_id.derived_index(), Some(1));
 }
 
 #[tokio::test(flavor = "multi_thread")]

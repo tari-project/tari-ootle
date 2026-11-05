@@ -98,7 +98,7 @@ where
                 Ok(key) => key,
                 Err(err) => {
                     error!(target: LOG_TARGET, "Error deriving key {key_index}: {err}. Scanning failed...");
-                    self.cleanup_aborted_scan(&unused_accounts, last_found_key);
+                    self.cleanup_unused_accounts_and_reset_key_index(&unused_accounts, last_found_key);
                     return;
                 },
             };
@@ -119,7 +119,7 @@ where
                         target: LOG_TARGET,
                         "❌ Could not scan the account at key index {key_index}. Recovery will run again when the wallet restarts"
                     );
-                    self.cleanup_aborted_scan(&unused_accounts, last_found_key);
+                    self.cleanup_unused_accounts_and_reset_key_index(&unused_accounts, last_found_key);
                     return;
                 },
             }
@@ -134,17 +134,7 @@ where
         }
         let max_probed_key = key_index;
 
-        let active_key_index = last_found_key.unwrap_or(0);
-
-        // The account at the active key index is kept so that a wallet with nothing to recover still has its first
-        // account.
-        for (_, address) in unused_accounts.iter().filter(|(index, _)| *index != active_key_index) {
-            match self.wallet_sdk.accounts_api().delete_if_unused(address) {
-                Ok(true) => info!(target: LOG_TARGET, "🗑️ Removed unused account {address}"),
-                Ok(false) => info!(target: LOG_TARGET, "Keeping account {address} because it has activity"),
-                Err(err) => warn!(target: LOG_TARGET, "⚠️ Error removing unused account {address}: {err}"),
-            }
-        }
+        self.cleanup_unused_accounts_and_reset_key_index(&unused_accounts, last_found_key);
 
         if let Err(err) = self
             .wallet_sdk
@@ -152,14 +142,6 @@ where
             .set(ConfigKey::RecoveryMaxProbedKeyIndex, &max_probed_key)
         {
             error!(target: LOG_TARGET, "Error setting the highest recovered key index: {err}");
-        }
-
-        info!(target: LOG_TARGET, "Setting active key to {}", active_key_index);
-        if let Err(err) = key_manager_api.reset_key_index_to(KeyBranch::Account, active_key_index) {
-            error!(target: LOG_TARGET, "Error setting active key: {err}");
-        }
-        if let Err(err) = key_manager_api.set_active_key(KeyBranch::Account, active_key_index) {
-            error!(target: LOG_TARGET, "Error setting active key: {err}");
         }
 
         // Set a flag to indicate that the wallet has completed recovery
@@ -188,6 +170,11 @@ where
                     }
                 },
             }
+        }
+        let public_key = RistrettoPublicKey::from_secret_key(&key.key).to_byte_type();
+        let account_addr = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &public_key);
+        if let Err(err) = self.wallet_sdk.accounts_api().delete_if_unused(&account_addr) {
+            warn!(target: LOG_TARGET, "⚠️ Error removing unused account {account_addr}: {err}");
         }
         None
     }
@@ -269,29 +256,15 @@ where
         }
 
         // Update vaults, nfts etc
-        let scan_result = async {
-            self.account_monitor_handle
-                .refresh_account_for_recovery(account_addr)
-                .await?;
+        self.account_monitor_handle
+            .refresh_account_for_recovery(account_addr)
+            .await?;
 
-            let mut num_potential_recoveries = 0;
-            for resource_address in accounts_api.get_associated_stealth_resources(&account_addr)? {
-                let stats = self.utxo_scanner_handle.scan(account_addr, resource_address).await?;
-                num_potential_recoveries += stats.num_potential_recoveries;
-            }
-            Ok::<_, AccountRecoveryError>(num_potential_recoveries)
+        let mut num_potential_recoveries = 0;
+        for resource_address in accounts_api.get_associated_stealth_resources(&account_addr)? {
+            let stats = self.utxo_scanner_handle.scan(account_addr, resource_address).await?;
+            num_potential_recoveries += stats.num_potential_recoveries;
         }
-        .await;
-
-        let num_potential_recoveries = match scan_result {
-            Ok(count) => count,
-            Err(err) => {
-                if let Err(delete_err) = accounts_api.delete_if_unused(&account_addr) {
-                    warn!(target: LOG_TARGET, "⚠️ Error removing unused account {account_addr}: {delete_err}");
-                }
-                return Err(err);
-            },
-        };
 
         if is_on_chain || num_potential_recoveries > 0 || accounts_api.has_activity(&account_addr)? {
             Ok(RecoveredAccount::Found)
@@ -300,22 +273,30 @@ where
         }
     }
 
-    fn cleanup_aborted_scan(&self, unused_accounts: &[(u64, ComponentAddress)], last_found_key: Option<u64>) {
-        for (_, address) in unused_accounts {
+    fn cleanup_unused_accounts_and_reset_key_index(
+        &self,
+        unused_accounts: &[(u64, ComponentAddress)],
+        last_found_key: Option<u64>,
+    ) {
+        let active_key_index = last_found_key.unwrap_or(0);
+
+        // The account at the active key index is kept so that a wallet with nothing to recover still has its first
+        // account.
+        for (_, address) in unused_accounts.iter().filter(|(index, _)| *index != active_key_index) {
             match self.wallet_sdk.accounts_api().delete_if_unused(address) {
                 Ok(true) => info!(target: LOG_TARGET, "🗑️ Removed unused account {address}"),
                 Ok(false) => info!(target: LOG_TARGET, "Keeping account {address} because it has activity"),
                 Err(err) => warn!(target: LOG_TARGET, "⚠️ Error removing unused account {address}: {err}"),
             }
         }
-        if let Some(active_key_index) = last_found_key {
-            let key_manager_api = self.wallet_sdk.key_manager_api();
-            if let Err(err) = key_manager_api.reset_key_index_to(KeyBranch::Account, active_key_index) {
-                error!(target: LOG_TARGET, "Error setting active key: {err}");
-            }
-            if let Err(err) = key_manager_api.set_active_key(KeyBranch::Account, active_key_index) {
-                error!(target: LOG_TARGET, "Error setting active key: {err}");
-            }
+
+        let key_manager_api = self.wallet_sdk.key_manager_api();
+        info!(target: LOG_TARGET, "Setting active key to {}", active_key_index);
+        if let Err(err) = key_manager_api.reset_key_index_to(KeyBranch::Account, active_key_index) {
+            error!(target: LOG_TARGET, "Error resetting account key index: {err}");
+        }
+        if let Err(err) = key_manager_api.set_active_key(KeyBranch::Account, active_key_index) {
+            error!(target: LOG_TARGET, "Error setting active key: {err}");
         }
     }
 }

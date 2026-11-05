@@ -67,7 +67,7 @@ use crate::{
     non_fungible::NonFungibleContainer,
     published_template::{PublishedTemplate, PublishedTemplateAddress, PublishedTemplateMetadata},
     resource::Resource,
-    substate_hasher::{SubstateHashMessage, SubstateValueHashMessage},
+    substate_hasher::SubstateHashMessage,
     transaction_receipt::TransactionReceipt,
     utxo::Utxo,
     vault::Vault,
@@ -186,9 +186,11 @@ pub fn hash_published_template_metadata(
     epoch: Epoch,
 ) -> Hash32 {
     let proto_version = ProtocolVersion::at(network, epoch);
-    let message =
-        SubstateHashMessage::from_value_message(proto_version, SubstateValueHashMessage::Template(metadata.into()));
-    hash_substate_message(message, version, epoch)
+    hash_substate_message(
+        SubstateHashMessage::template_metadata(proto_version, metadata),
+        version,
+        epoch,
+    )
 }
 
 fn hash_substate_message(message: SubstateHashMessage<'_>, version: SubstateVersion, epoch: Epoch) -> Hash32 {

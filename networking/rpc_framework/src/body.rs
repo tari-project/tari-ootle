@@ -16,6 +16,7 @@ use prost::bytes::Buf;
 use tokio::sync::{mpsc, watch};
 
 use super::{Response, RpcStatus};
+use crate::message::ResponseGuard;
 
 pub trait IntoBody {
     fn into_body(self) -> Body;
@@ -34,6 +35,7 @@ pub struct Body {
     kind: BodyKind,
     is_complete: bool,
     is_terminated: bool,
+    guard: Option<ResponseGuard>,
 }
 
 impl Body {
@@ -42,6 +44,7 @@ impl Body {
             kind: BodyKind::Single(Some(body.into())),
             is_complete: false,
             is_terminated: false,
+            guard: None,
         }
     }
 
@@ -51,7 +54,14 @@ impl Body {
             kind: BodyKind::Streaming(stream.boxed()),
             is_complete: false,
             is_terminated: false,
+            guard: None,
         }
+    }
+
+    /// Holds `guard` until this body is dropped, which the server does once it has finished sending it.
+    pub fn with_guard(mut self, guard: ResponseGuard) -> Self {
+        self.guard = Some(guard);
+        self
     }
 
     pub fn is_single(&self) -> bool {

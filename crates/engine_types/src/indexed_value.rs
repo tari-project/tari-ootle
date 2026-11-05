@@ -4,7 +4,7 @@
 use std::{any::type_name, collections::HashSet, hash::Hash, ops::ControlFlow};
 
 use serde::{Deserialize, Serialize};
-use tari_bor::{BorError, FromTagAndValue, ValueVisitor, decode};
+use tari_bor::{BorError, FromTagAndValue, ValueVisitor, decode_exact};
 use tari_template_lib::{
     models::{BucketId, ComponentAddressAllocation, ProofId, ResourceAddressAllocation},
     types::{
@@ -53,7 +53,7 @@ impl IndexedValue {
             return Ok(Self::default());
         }
         let value: tari_bor::Value =
-            decode(bytes).map_err(|e| IndexedValueError::Custom(format!("from_raw: {}", e)))?;
+            decode_exact(bytes).map_err(|e| IndexedValueError::Custom(format!("from_raw: {}", e)))?;
         Self::from_value(value)
     }
 
@@ -691,6 +691,13 @@ mod tests {
     fn it_returns_empty_indexed_value_for_empty_bytes() {
         let value = IndexedValue::from_raw(&[]).unwrap();
         assert_eq!(value, IndexedValue::default());
+    }
+
+    #[test]
+    fn it_rejects_trailing_bytes_in_from_raw() {
+        let mut bytes = tari_bor::encode(&42u64).unwrap();
+        bytes.push(0x00);
+        assert!(IndexedValue::from_raw(&bytes).is_err());
     }
 
     #[test]

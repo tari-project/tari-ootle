@@ -329,12 +329,13 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
         }
 
         let cf = self.db().cf(ParkedBlockCf)?;
-        // Idempotent, except that a catch-up delivery marks the parked block as a catch-up block whatever origin it
-        // was parked with: it shows the committee has certified the block, so it must not be voted on when unparked.
+        // Idempotent, except that a live delivery marks the parked block as live whatever origin it was parked with.
+        // Any committee member can send a catch-up response, so a block is only left unvoted when unparked if every
+        // delivery of it came through catch-up.
         if cf.exists(block.id(), OPERATION)? {
-            if origin.is_catch_up() {
+            if !origin.is_catch_up() {
                 let mut data = cf.get(block.id(), OPERATION)?;
-                if !data.origin.is_catch_up() {
+                if data.origin.is_catch_up() {
                     data.origin = origin;
                     cf.put(block.id(), &data, OPERATION)?;
                 }

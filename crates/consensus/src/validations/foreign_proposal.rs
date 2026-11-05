@@ -103,8 +103,8 @@ pub fn check_foreign_proposal<TConsensusSpec: ConsensusSpec>(
     Ok(())
 }
 
-/// The block metadata is read for the rate every transaction the proposal pins settles at, so it must be the
-/// preimage of the metadata hash the committee signed, and it must name a rate.
+/// The block metadata must be the preimage of the metadata hash the committee signed, and like the metadata of every
+/// block it must name the exhaust burn rate the block's epoch opened at.
 fn check_block_metadata(proposal: &ForeignProposal) -> Result<(), ProposalValidationError> {
     if !proposal.is_block_metadata_proven() {
         return Err(ProposalValidationError::ForeignBlockMetadataNotProven {

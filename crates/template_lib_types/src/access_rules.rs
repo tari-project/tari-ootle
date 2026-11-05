@@ -84,15 +84,18 @@ impl AccessRule {
         })
     }
 
-    /// Returns the first [`RequireRule::MOfN`] whose threshold is zero or larger than its number of
-    /// requirements, or that lists the same requirement more than once. A zero threshold admits every caller and an
-    /// unreachable one admits none, so either one is a miscomputed threshold rather than a rule anyone means to write.
-    /// A repeated requirement counts once per listing, so one party holding it meets more of the threshold than the
-    /// rule appears to grant them.
-    pub fn find_invalid_m_of_n(&self) -> Option<InvalidMOfN> {
+    /// Returns the first node of this rule that the engine refuses to store, at any nesting depth:
+    /// - an `any_of` or `all_of` that lists nothing. An empty `any_of` admits no caller and an empty `all_of` is denied
+    ///   by the evaluator, so neither expresses who may act. `deny_all` is the rule that admits nobody.
+    /// - an `m_of_n` whose threshold is zero or larger than its number of requirements. A zero threshold admits every
+    ///   caller and an unreachable one admits none, so either one is a miscomputed threshold rather than a rule anyone
+    ///   means to write.
+    /// - an `m_of_n` that lists the same requirement more than once. A repeated requirement counts once per listing, so
+    ///   one party holding it meets more of the threshold than the rule appears to grant them.
+    pub fn find_invalid_rule(&self) -> Option<InvalidAccessRule> {
         match self {
             Self::AllowAll | Self::DenyAll => None,
-            Self::Restricted(rule) => rule.find_invalid_m_of_n(),
+            Self::Restricted(rule) => rule.find_invalid_rule(),
         }
     }
 
@@ -106,12 +109,16 @@ impl AccessRule {
     }
 }
 
-/// Why an `m_of_n` rule is rejected.
+/// Why an access rule is rejected. See [`AccessRule::find_invalid_rule`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum InvalidMOfN {
-    /// The threshold `m` is zero or exceeds the `n` requirements.
+pub enum InvalidAccessRule {
+    /// An `any_of` lists no rules or requirements.
+    EmptyAnyOf,
+    /// An `all_of` lists no rules or requirements.
+    EmptyAllOf,
+    /// An `m_of_n` threshold `m` is zero or exceeds the `n` requirements.
     ThresholdOutOfRange { threshold: u16, num_requirements: usize },
-    /// The rule lists `requirement` more than once, directly or through its shorthand.
+    /// An `m_of_n` lists `requirement` more than once, directly or through its shorthand.
     DuplicateRequirement { requirement: RuleRequirement },
 }
 
@@ -157,10 +164,12 @@ impl RestrictedAccessRule {
         }
     }
 
-    fn find_invalid_m_of_n(&self) -> Option<InvalidMOfN> {
+    fn find_invalid_rule(&self) -> Option<InvalidAccessRule> {
         match self {
-            Self::Require(rule) => rule.find_invalid_m_of_n(),
-            Self::AnyOf(rules) | Self::AllOf(rules) => rules.iter().find_map(Self::find_invalid_m_of_n),
+            Self::Require(rule) => rule.find_invalid_rule(),
+            Self::AnyOf(rules) if rules.is_empty() => Some(InvalidAccessRule::EmptyAnyOf),
+            Self::AllOf(rules) if rules.is_empty() => Some(InvalidAccessRule::EmptyAllOf),
+            Self::AnyOf(rules) | Self::AllOf(rules) => rules.iter().find_map(Self::find_invalid_rule),
         }
     }
 
@@ -189,12 +198,15 @@ impl RequireRule {
         }
     }
 
-    fn find_invalid_m_of_n(&self) -> Option<InvalidMOfN> {
-        let Self::MOfN(threshold, requirements) = self else {
-            return None;
+    fn find_invalid_rule(&self) -> Option<InvalidAccessRule> {
+        let (threshold, requirements) = match self {
+            Self::Require(_) => return None,
+            Self::AnyOf(requirements) => return requirements.is_empty().then_some(InvalidAccessRule::EmptyAnyOf),
+            Self::AllOf(requirements) => return requirements.is_empty().then_some(InvalidAccessRule::EmptyAllOf),
+            Self::MOfN(threshold, requirements) => (threshold, requirements),
         };
         if *threshold == 0 || usize::from(*threshold) > requirements.len() {
-            return Some(InvalidMOfN::ThresholdOutOfRange {
+            return Some(InvalidAccessRule::ThresholdOutOfRange {
                 threshold: *threshold,
                 num_requirements: requirements.len(),
             });
@@ -203,7 +215,7 @@ impl RequireRule {
             requirements[..i]
                 .iter()
                 .any(|earlier| earlier.is_same_requirement_as(requirement))
-                .then(|| InvalidMOfN::DuplicateRequirement {
+                .then(|| InvalidAccessRule::DuplicateRequirement {
                     requirement: requirement.clone(),
                 })
         })
@@ -546,12 +558,12 @@ impl ComponentAccessRules {
                 .any(AccessRule::contains_scoped_to_component_or_template)
     }
 
-    /// Returns the first invalid `m_of_n` in the default rule or any method rule. See
-    /// [`AccessRule::find_invalid_m_of_n`].
-    pub fn find_invalid_m_of_n(&self) -> Option<InvalidMOfN> {
+    /// Returns the first invalid node in the default rule or any method rule. See
+    /// [`AccessRule::find_invalid_rule`].
+    pub fn find_invalid_rule(&self) -> Option<InvalidAccessRule> {
         self.default
-            .find_invalid_m_of_n()
-            .or_else(|| self.method_access.values().find_map(AccessRule::find_invalid_m_of_n))
+            .find_invalid_rule()
+            .or_else(|| self.method_access.values().find_map(AccessRule::find_invalid_rule))
     }
 
     /// The number of nodes these rules hold: one for each method rule, plus the nodes of every method rule and of
@@ -898,9 +910,9 @@ impl ResourceAccessRules {
         }
     }
 
-    /// Returns the first invalid `m_of_n` in any access rule or updater rule. See
-    /// [`AccessRule::find_invalid_m_of_n`].
-    pub fn find_invalid_m_of_n(&self) -> Option<InvalidMOfN> {
+    /// Returns the first invalid node in any access rule or updater rule. See
+    /// [`AccessRule::find_invalid_rule`].
+    pub fn find_invalid_rule(&self) -> Option<InvalidAccessRule> {
         // Destructured so that a rule added to the struct fails to compile here rather than going unchecked.
         let Self {
             mint,
@@ -948,7 +960,7 @@ impl ResourceAccessRules {
             UpdateRule::AccessRule(rule) => Some(rule),
             UpdateRule::Locked | UpdateRule::Owner => None,
         }))
-        .find_map(AccessRule::find_invalid_m_of_n)
+        .find_map(AccessRule::find_invalid_rule)
     }
 
     /// Replaces the access rule for the specified action without changing its updater rule.
@@ -1575,46 +1587,85 @@ mod tests {
     }
 
     #[test]
-    fn find_invalid_m_of_n_finds_a_nested_threshold_outside_one_to_n() {
+    fn find_invalid_rule_finds_an_empty_composite_at_any_depth() {
+        let pk = RistrettoPublicKeyBytes::default();
+        let restricted = |rule| AccessRule::Restricted(rule);
+        let empty_any_of = || RestrictedAccessRule::AnyOf(Box::new([]));
+        let empty_all_of = || RestrictedAccessRule::AllOf(Box::new([]));
+        let empty_require_any_of = || RestrictedAccessRule::Require(RequireRule::AnyOf(Box::new([])));
+        let empty_require_all_of = || RestrictedAccessRule::Require(RequireRule::AllOf(Box::new([])));
+        let require_pk = || RestrictedAccessRule::Require(RequireRule::Require(RuleRequirement::from(pk)));
+
+        assert_eq!(rule!(any_of(public_key(pk))).find_invalid_rule(), None);
+        assert_eq!(rule!(all_of(public_key(pk))).find_invalid_rule(), None);
+        assert_eq!(
+            restricted(empty_any_of()).find_invalid_rule(),
+            Some(InvalidAccessRule::EmptyAnyOf)
+        );
+        assert_eq!(
+            restricted(empty_all_of()).find_invalid_rule(),
+            Some(InvalidAccessRule::EmptyAllOf)
+        );
+        assert_eq!(
+            restricted(empty_require_any_of()).find_invalid_rule(),
+            Some(InvalidAccessRule::EmptyAnyOf)
+        );
+        assert_eq!(
+            restricted(empty_require_all_of()).find_invalid_rule(),
+            Some(InvalidAccessRule::EmptyAllOf)
+        );
+
+        // An empty node is rejected even where the rule as a whole stays satisfiable.
+        let nested = restricted(RestrictedAccessRule::AnyOf(Box::new([
+            require_pk(),
+            RestrictedAccessRule::AllOf(Box::new([require_pk(), empty_require_any_of()])),
+        ])));
+        assert_eq!(nested.find_invalid_rule(), Some(InvalidAccessRule::EmptyAnyOf));
+
+        let component_rules = ComponentAccessRules::new().method("foo", restricted(empty_all_of()));
+        assert_eq!(component_rules.find_invalid_rule(), Some(InvalidAccessRule::EmptyAllOf));
+        let resource_rules = ResourceAccessRules::new().burnable(AccessRule::DenyAll, restricted(empty_any_of()));
+        assert_eq!(resource_rules.find_invalid_rule(), Some(InvalidAccessRule::EmptyAnyOf));
+    }
+
+    #[test]
+    fn find_invalid_rule_finds_a_nested_threshold_outside_one_to_n() {
         let pk = RistrettoPublicKeyBytes::default();
         let invalid = |threshold, num_requirements| {
-            Some(InvalidMOfN::ThresholdOutOfRange {
+            Some(InvalidAccessRule::ThresholdOutOfRange {
                 threshold,
                 num_requirements,
             })
         };
 
-        assert_eq!(rule!(m_of_n(1, public_key(pk))).find_invalid_m_of_n(), None);
-        assert_eq!(rule!(m_of_n(0, public_key(pk))).find_invalid_m_of_n(), invalid(0, 1));
+        assert_eq!(rule!(m_of_n(1, public_key(pk))).find_invalid_rule(), None);
+        assert_eq!(rule!(m_of_n(0, public_key(pk))).find_invalid_rule(), invalid(0, 1));
         assert_eq!(
-            rule!(m_of_n(3, public_key(pk), public_key(pk))).find_invalid_m_of_n(),
+            rule!(m_of_n(3, public_key(pk), public_key(pk))).find_invalid_rule(),
             invalid(3, 2)
         );
 
         let nested = rule!(public_key(pk)).and(rule!(m_of_n(0, public_key(pk))).or(rule!(public_key(pk))));
-        assert_eq!(nested.find_invalid_m_of_n(), invalid(0, 1));
+        assert_eq!(nested.find_invalid_rule(), invalid(0, 1));
 
         let resource_rules = ResourceAccessRules::new().burnable(AccessRule::DenyAll, rule!(m_of_n(2, public_key(pk))));
-        assert_eq!(resource_rules.find_invalid_m_of_n(), invalid(2, 1));
+        assert_eq!(resource_rules.find_invalid_rule(), invalid(2, 1));
     }
 
     #[test]
-    fn find_invalid_m_of_n_finds_a_requirement_listed_more_than_once() {
+    fn find_invalid_rule_finds_a_requirement_listed_more_than_once() {
         let a = RistrettoPublicKeyBytes::from_bytes(&[1; 32]).unwrap();
         let b = RistrettoPublicKeyBytes::from_bytes(&[2; 32]).unwrap();
-        let duplicate = |requirement: RuleRequirement| Some(InvalidMOfN::DuplicateRequirement { requirement });
+        let duplicate = |requirement: RuleRequirement| Some(InvalidAccessRule::DuplicateRequirement { requirement });
         let badge_of = |pk| RuleRequirement::NonFungibleAddress(NonFungibleAddress::from_public_key(pk));
 
+        assert_eq!(rule!(m_of_n(2, public_key(a), public_key(b))).find_invalid_rule(), None);
         assert_eq!(
-            rule!(m_of_n(2, public_key(a), public_key(b))).find_invalid_m_of_n(),
-            None
-        );
-        assert_eq!(
-            rule!(m_of_n(2, public_key(a), public_key(a))).find_invalid_m_of_n(),
+            rule!(m_of_n(2, public_key(a), public_key(a))).find_invalid_rule(),
             duplicate(badge_of(a))
         );
         assert_eq!(
-            rule!(m_of_n(2, public_key(a), public_key(b), public_key(a))).find_invalid_m_of_n(),
+            rule!(m_of_n(2, public_key(a), public_key(b), public_key(a))).find_invalid_rule(),
             duplicate(badge_of(a))
         );
 
@@ -1624,15 +1675,15 @@ mod tests {
             public_key(a),
             public_key(b)
         ))));
-        assert_eq!(nested.find_invalid_m_of_n(), duplicate(badge_of(b)));
+        assert_eq!(nested.find_invalid_rule(), duplicate(badge_of(b)));
 
         let resource_rules =
             ResourceAccessRules::new().burnable(AccessRule::DenyAll, rule!(m_of_n(1, public_key(a), public_key(a))));
-        assert_eq!(resource_rules.find_invalid_m_of_n(), duplicate(badge_of(a)));
+        assert_eq!(resource_rules.find_invalid_rule(), duplicate(badge_of(a)));
     }
 
     #[test]
-    fn find_invalid_m_of_n_treats_a_caller_badge_shorthand_as_its_badge() {
+    fn find_invalid_rule_treats_a_caller_badge_shorthand_as_its_badge() {
         let component = ComponentAddress::from_array([1; 32]);
         let template = TemplateAddress::from_array([2; 32]);
         let component_badge =
@@ -1651,14 +1702,14 @@ mod tests {
                 RuleRequirement::CallerComponent(component),
                 component_badge.clone()
             ])
-            .find_invalid_m_of_n(),
-            Some(InvalidMOfN::DuplicateRequirement {
+            .find_invalid_rule(),
+            Some(InvalidAccessRule::DuplicateRequirement {
                 requirement: component_badge
             })
         );
         assert_eq!(
-            m_of_n(vec![template_badge, RuleRequirement::DirectCallerTemplate(template)]).find_invalid_m_of_n(),
-            Some(InvalidMOfN::DuplicateRequirement {
+            m_of_n(vec![template_badge, RuleRequirement::DirectCallerTemplate(template)]).find_invalid_rule(),
+            Some(InvalidAccessRule::DuplicateRequirement {
                 requirement: RuleRequirement::DirectCallerTemplate(template)
             })
         );
@@ -1667,7 +1718,7 @@ mod tests {
                 RuleRequirement::CallerComponent(component),
                 RuleRequirement::ScopedToComponent(component)
             ])
-            .find_invalid_m_of_n(),
+            .find_invalid_rule(),
             None
         );
     }

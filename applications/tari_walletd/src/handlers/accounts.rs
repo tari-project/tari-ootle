@@ -1412,22 +1412,14 @@ pub async fn handle_confidential_transfer(
             })
             .await?;
 
-        // `transfer` links its lock to the transaction, and only a stored transaction resolves a linked lock. A dry
-        // run is never stored, and a failed submission may leave nothing stored.
+        // `transfer` has already released a dry run's lock. Otherwise this handler holds a timed lock that the
+        // submission links in the same write that stores the transaction, so the lock is unlinked exactly when the
+        // wallet stored nothing.
         let transaction_id = transfer.transaction.calculate_id();
         if req.dry_run {
             let result = transaction_service
                 .submit_dry_run_transaction(transfer.transaction)
-                .await;
-            if let Err(err) = &result &&
-                let Err(release_err) = sdk.transaction_api().release_locks_of_unstored_transaction(transaction_id)
-            {
-                warn!(
-                    target: LOG_TARGET,
-                    "Transfer {transaction_id} failed ({err}) and its locked inputs could not be released: {release_err}"
-                );
-            }
-            let result = result?;
+                .await?;
             return Ok(ConfidentialTransferResponse {
                 transaction_id,
                 required_fees: Some(result.finalize.required_fees()),
@@ -1441,11 +1433,12 @@ pub async fn handle_confidential_transfer(
             .submit_transaction_with_opts(
                 transfer.transaction,
                 Some(TransactionContext::with_accounts(linked_accounts)),
-                None,
+                Some(transfer.transaction_proof_id),
             )
             .await;
+        // A submission can fail after the transaction is stored, and the poll then submits it with the lock linked.
         if let Err(err) = &submission &&
-            let Err(release_err) = sdk.transaction_api().release_locks_of_unstored_transaction(transaction_id)
+            let Err(release_err) = sdk.locks_api().release_unlinked_lock(transfer.transaction_proof_id)
         {
             warn!(
                 target: LOG_TARGET,

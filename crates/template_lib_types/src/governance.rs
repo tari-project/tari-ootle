@@ -17,7 +17,7 @@ use minicbor::{CborLen, Decode, Encode};
 use tari_template_abi::rust::prelude::*;
 
 use crate::{
-    access_rules::{AccessRule, InvalidMOfN, RequireRule, RestrictedAccessRule, RuleRequirement},
+    access_rules::{AccessRule, InvalidAccessRule, RequireRule, RestrictedAccessRule, RuleRequirement},
     crypto::RistrettoPublicKeyBytes,
     owner_rule::SubstateOwnerRule,
 };
@@ -114,14 +114,15 @@ pub fn council_owner_rule(threshold: u16, council: &[RistrettoPublicKeyBytes]) -
         council.iter().copied().map(RuleRequirement::from).collect(),
     )));
 
-    match rule.find_invalid_m_of_n() {
-        Some(InvalidMOfN::ThresholdOutOfRange {
+    match rule.find_invalid_rule() {
+        Some(InvalidAccessRule::ThresholdOutOfRange {
             threshold,
             num_requirements,
         }) => panic!("a council of {num_requirements} cannot be seated at a threshold of {threshold}"),
         // The member goes unnamed: formatting a key would put hex encoding into every template that seats a council.
-        Some(InvalidMOfN::DuplicateRequirement { .. }) => panic!("a council lists a member more than once"),
-        None => {},
+        Some(InvalidAccessRule::DuplicateRequirement { .. }) => panic!("a council lists a member more than once"),
+        // A council owner rule is a single m_of_n, which holds no any_of or all_of.
+        Some(InvalidAccessRule::EmptyAnyOf | InvalidAccessRule::EmptyAllOf) | None => {},
     }
 
     SubstateOwnerRule::ByAccessRule(rule)
@@ -273,7 +274,7 @@ mod tests {
         );
     }
 
-    /// The engine rejects these through `find_invalid_m_of_n`, and genesis never reaches the engine,
+    /// The engine rejects these through `find_invalid_rule`, and genesis never reaches the engine,
     /// so the same check has to hold here.
     #[test]
     #[should_panic(expected = "a council of 3 cannot be seated at a threshold of 0")]

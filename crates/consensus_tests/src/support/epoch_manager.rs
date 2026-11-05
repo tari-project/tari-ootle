@@ -10,7 +10,7 @@ use std::{
 use ootle_byte_type::ToByteType;
 use rand::seq::IteratorRandom;
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_epoch_manager::{EpochManagerError, EpochManagerEvent, EpochManagerReader};
+use tari_epoch_manager::{EpochManagerError, EpochManagerEvent, EpochManagerReader, PendingActivation};
 use tari_ootle_common_types::{
     Epoch,
     ShardGroup,
@@ -73,6 +73,11 @@ pub struct TestEpochManager {
     /// from the epoch hash this validator reports. Like the lag fields, a fresh `Arc` is allocated per validator by
     /// `clone_for`.
     validator_set_hash_override: Arc<StdMutex<Option<ValidatorSetHash>>>,
+    /// The epoch at which this validator activates. Before it the validator is registered for no epoch and
+    /// `get_pending_activation` reports its shard group, as the epoch manager does for a validator announced ahead of
+    /// its activation. `None` = registered from the start. Like the lag fields, a fresh `Arc` is allocated per
+    /// validator by `clone_for`.
+    activation_epoch: Arc<StdMutex<Option<Epoch>>>,
 }
 
 impl TestEpochManager {
@@ -87,7 +92,23 @@ impl TestEpochManager {
             oracle_epoch_hash_override: Arc::new(StdMutex::new(None)),
             oracle_observed_boundaries: Arc::new(StdMutex::new(HashSet::new())),
             validator_set_hash_override: Arc::new(StdMutex::new(None)),
+            activation_epoch: Arc::new(StdMutex::new(None)),
         }
+    }
+
+    /// Makes this validator activate at `epoch`. See `activation_epoch`.
+    pub fn set_activation_epoch(&self, epoch: Epoch) {
+        *self.activation_epoch.lock().unwrap() = Some(epoch);
+    }
+
+    fn activation_epoch(&self) -> Option<Epoch> {
+        *self.activation_epoch.lock().unwrap()
+    }
+
+    /// True if this validator activates after the epoch the test last set for it.
+    pub fn is_pending_activation(&self) -> bool {
+        self.activation_epoch()
+            .is_some_and(|activation_epoch| self.current_epoch < activation_epoch)
     }
 
     /// Cap this validator's oracle view to `epoch`. After this, `get_epoch_hash(e)` returns
@@ -205,6 +226,7 @@ impl TestEpochManager {
         copy.oracle_epoch_hash_override = Arc::new(StdMutex::new(None));
         copy.oracle_observed_boundaries = Arc::new(StdMutex::new(HashSet::new()));
         copy.validator_set_hash_override = Arc::new(StdMutex::new(None));
+        copy.activation_epoch = Arc::new(StdMutex::new(None));
         if let Some(our_validator_node) = self.our_validator_node.clone() {
             copy.our_validator_node = Some(ValidatorNode {
                 address,
@@ -314,6 +336,12 @@ impl EpochManagerReader for TestEpochManager {
             return Ok(false);
         }
         if self.current_epoch().await? < epoch {
+            return Ok(false);
+        }
+        if self
+            .activation_epoch()
+            .is_some_and(|activation_epoch| epoch < activation_epoch)
+        {
             return Ok(false);
         }
         match self.get_local_committee_info(epoch).await {
@@ -636,6 +664,24 @@ impl EpochManagerReader for TestEpochManager {
 
     async fn get_birthday_epoch(&self) -> Result<Option<Epoch>, EpochManagerError> {
         Ok(Some(Epoch(0)))
+    }
+
+    async fn get_pending_activation(&self) -> Result<Option<PendingActivation>, EpochManagerError> {
+        if !self.state_lock().await.epoch_started {
+            return Ok(None);
+        }
+        let current_epoch = self.current_epoch().await?;
+        let Some(activation_epoch) = self
+            .activation_epoch()
+            .filter(|activation_epoch| current_epoch < *activation_epoch)
+        else {
+            return Ok(None);
+        };
+        let shard_group = self.get_local_committee_info(current_epoch).await?.shard_group();
+        Ok(Some(PendingActivation {
+            activation_epoch,
+            shard_group,
+        }))
     }
 }
 

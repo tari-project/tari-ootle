@@ -37,6 +37,7 @@ use tari_ootle_storage::{
         CommandsCommitProof,
         ForeignProposal,
         ForeignProposalRecord,
+        LockedEpoch,
         MultiShardAtom,
         SubstateCreated,
         SubstateRecord,
@@ -90,6 +91,7 @@ pub fn create_tx_atom() -> MultiShardAtom {
         transaction_fee: 0,
         leader_fee: None,
         fee_intent_only: false,
+        locked_epoch: LockedEpoch::new(Epoch(1), Default::default(), Default::default()),
     }
 }
 

@@ -345,11 +345,20 @@ pub enum ProposalValidationError {
     )]
     ForeignBlockMetadataNotProven { block_id: BlockId, shard_group: ShardGroup },
 
-    #[error(
-        "Foreign proposal for block {block_id} from {shard_group} names no exhaust burn rate its transactions can \
-         settle at"
-    )]
+    #[error("Foreign proposal for block {block_id} from {shard_group} names no exhaust burn rate for its epoch")]
     ForeignBlockNamesNoExhaustBurnRate { block_id: BlockId, shard_group: ShardGroup },
+
+    #[error(
+        "Foreign proposal for block {block_id} from {shard_group} in {block_epoch} pins transaction {transaction_id} \
+         to the later {locked_epoch}"
+    )]
+    ForeignTransactionPinnedAfterBlock {
+        block_id: BlockId,
+        shard_group: ShardGroup,
+        transaction_id: TransactionId,
+        locked_epoch: Epoch,
+        block_epoch: Epoch,
+    },
 
     #[error("Foreign proposal commit proof error: {0}")]
     ForeignProposalCommitProofError(#[from] ForeignProposalCommitProofError),

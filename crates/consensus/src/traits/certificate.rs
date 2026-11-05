@@ -76,20 +76,41 @@ impl CertificateStore for ProposalCertificate {
                 Ok(high_pc)
             },
             Some(_) | None => {
-                // The certificate id and the block id omit the height and epoch, so the stored block is the authority
-                // for them.
-                if !self.justifies_zero_block() {
-                    let block = Block::get(&**tx, &self.calculate_block_id())?;
-                    if block.height() != self.height() || block.epoch() != self.epoch() {
+                // The certificate id and the block id omit the height, epoch and shard group, and the signed vote
+                // message omits the shard group, so the stored block is the authority for all three. A certificate of
+                // the zero block justifies the epoch's genesis block, which is the authority for its shard group.
+                if self.justifies_zero_block() {
+                    let genesis = Block::get_genesis_for_epoch(&**tx, self.epoch())?;
+                    if genesis.shard_group() != self.shard_group() {
                         return Err(StorageError::DataInconsistency {
                             details: format!(
-                                "Certificate {} claims height {} in epoch {} for block {} at height {} in epoch {}",
+                                "Zero-block certificate for epoch {} claims shard group {}, but genesis block {} is \
+                                 for shard group {}",
+                                self.epoch(),
+                                self.shard_group(),
+                                genesis.id(),
+                                genesis.shard_group(),
+                            ),
+                        });
+                    }
+                } else {
+                    let block = Block::get(&**tx, &self.calculate_block_id())?;
+                    if block.height() != self.height() ||
+                        block.epoch() != self.epoch() ||
+                        block.shard_group() != self.shard_group()
+                    {
+                        return Err(StorageError::DataInconsistency {
+                            details: format!(
+                                "Certificate {} claims height {} in epoch {} for shard group {}, but block {} is at \
+                                 height {} in epoch {} for shard group {}",
                                 self.calculate_id(),
                                 self.height(),
                                 self.epoch(),
+                                self.shard_group(),
                                 block.id(),
                                 block.height(),
                                 block.epoch(),
+                                block.shard_group(),
                             ),
                         });
                     }

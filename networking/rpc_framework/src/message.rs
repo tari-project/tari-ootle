@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{convert::TryFrom, fmt, time::Duration};
+use std::{any::Any, convert::TryFrom, fmt, sync::Arc, time::Duration};
 
 use bitflags::bitflags;
 use bytes::Bytes;
@@ -31,7 +31,7 @@ impl Request<Bytes> {
 }
 
 impl<T> Request<T> {
-    pub(super) fn new(method: RpcMethod, message: T) -> Self {
+    pub fn new(method: RpcMethod, message: T) -> Self {
         Self {
             inner: BaseRequest::new(method, message),
         }
@@ -81,6 +81,26 @@ impl<T> BaseRequest<T> {
 pub struct Response<T> {
     pub flags: RpcMessageFlags,
     pub payload: T,
+    guard: Option<ResponseGuard>,
+}
+
+/// A resource that backs a response, such as a permit for the memory it takes, held until the server has finished
+/// sending the response.
+#[derive(Clone)]
+pub struct ResponseGuard {
+    _held: Arc<dyn Any + Send + Sync>,
+}
+
+impl ResponseGuard {
+    pub fn new<G: Send + Sync + 'static>(guard: G) -> Self {
+        Self { _held: Arc::new(guard) }
+    }
+}
+
+impl fmt::Debug for ResponseGuard {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ResponseGuard")
+    }
 }
 
 impl Response<Body> {
@@ -88,6 +108,15 @@ impl Response<Body> {
         Self {
             flags: Default::default(),
             payload: message.into_body(),
+            guard: None,
+        }
+    }
+
+    /// The body to send, holding this response's guard until the body is dropped.
+    pub fn into_guarded_body(self) -> Body {
+        match self.guard {
+            Some(guard) => self.payload.with_guard(guard),
+            None => self.payload,
         }
     }
 }
@@ -97,7 +126,15 @@ impl<T> Response<T> {
         Self {
             payload: message,
             flags: Default::default(),
+            guard: None,
         }
+    }
+
+    /// Holds `guard` until the server has finished sending this response, so a resource that backs it, such as a
+    /// permit for the memory it takes, lives as long as the response does.
+    pub fn with_guard<G: Send + Sync + 'static>(mut self, guard: G) -> Self {
+        self.guard = Some(ResponseGuard::new(guard));
+        self
     }
 
     pub fn map<F, U>(self, mut f: F) -> Response<U>
@@ -105,6 +142,7 @@ impl<T> Response<T> {
         Response {
             flags: self.flags,
             payload: f(self.payload),
+            guard: self.guard,
         }
     }
 

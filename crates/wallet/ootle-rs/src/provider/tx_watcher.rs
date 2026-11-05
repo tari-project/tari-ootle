@@ -4,7 +4,6 @@
 use std::{
     collections::HashMap,
     future::Future,
-    mem,
     pin::{Pin, pin},
     sync::{Arc, Weak},
     task::{Context, Poll},
@@ -140,21 +139,15 @@ impl TransactionWatcher {
     fn reap_timeouts(&mut self) {
         let now = Instant::now();
         self.pending_requests.retain(|&tx_id, watches| {
-            let mut active = Vec::with_capacity(watches.len());
-            for watch in mem::take(watches) {
-                if watch.reap_at.is_some_and(|reap_at| reap_at <= now) {
-                    tracing::warn!("Transaction watch timed out for tx_id: {}", tx_id);
-                    let _ignore = watch
-                        .reply
-                        .send(Err(PendingTransactionError::Timeout { tx_id }))
-                        .inspect_err(|_| {
-                            tracing::debug!("The watch of tx_id {} was dropped before it timed out", tx_id);
-                        });
-                } else {
-                    active.push(watch);
-                }
+            for watch in watches.extract_if(.., |watch| watch.reap_at.is_some_and(|reap_at| reap_at <= now)) {
+                tracing::warn!("Transaction watch timed out for tx_id: {}", tx_id);
+                let _ignore = watch
+                    .reply
+                    .send(Err(PendingTransactionError::Timeout { tx_id }))
+                    .inspect_err(|_| {
+                        tracing::debug!("The watch of tx_id {} was dropped before it timed out", tx_id);
+                    });
             }
-            *watches = active;
             !watches.is_empty()
         });
     }
@@ -935,17 +928,17 @@ mod tests {
 
     #[tokio::test]
     async fn a_dropped_watch_does_not_time_out_a_later_watch_for_the_same_transaction() {
-        let sets = sets();
-        let indexer = TestIndexer::spawn(&sets, 3).await;
-        let (_client, pending) = pending(&indexer, IndexerTrust::Trust);
+        let watcher = TransactionWatcher::new(Box::pin(futures::stream::pending()), Paused::default()).spawn();
 
-        let dropped = pending.register(Duration::from_millis(150)).await.unwrap();
+        let dropped = watcher
+            .watch_transaction(TRANSACTION_ID, Duration::from_millis(150))
+            .await;
         drop(dropped);
 
-        let active = pending.register(Duration::from_secs(2)).await.unwrap();
-        sleep(Duration::from_millis(250)).await;
-        indexer.hint_commit(TRANSACTION_ID);
-
-        assert_eq!(active.await.unwrap(), FinalizeOutcome::Commit);
+        let active = watcher.watch_transaction(TRANSACTION_ID, Duration::from_secs(2)).await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(500), active).await.is_err(),
+            "stale deadline from dropped watch timed out the active watch early"
+        );
     }
 }

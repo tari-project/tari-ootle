@@ -47,9 +47,8 @@ impl Config {
                          `power` of one or more validators."
                     )
                 })?;
-            // A second entry for a validator would activate it twice. Listing it twice at one registration epoch
-            // produces two rows sharing a start_epoch, which `distinct_validators` and `set_committee_shard` resolve
-            // by different tiebreaks; listing it at two registration epochs moves its shard key.
+            // A second entry for a validator would activate it twice; listing it at two registration epochs also
+            // moves its shard key.
             if !seen.insert(validator.public_key) {
                 bail!(
                     "Validator {} is listed more than once. A validator has a single registration; rotate its claim \

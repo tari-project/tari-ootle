@@ -553,3 +553,56 @@ fn same_epoch_reregistration_resolves_to_latest_registration() {
     assert_eq!(vns[0].shard_key, second_shard_key);
     assert_eq!(vns[0].fee_claim_public_key, second_claim_key);
 }
+
+#[test]
+fn set_committee_shard_selects_latest_active_registration() {
+    for (second_start, second_exit, select_second) in [(10, None, false), (20, Some(25), false), (20, None, true)] {
+        let db = create_db();
+        let mut tx = db.create_transaction().unwrap();
+        let mut validator_nodes = db.validator_nodes(&mut tx);
+
+        let first_pk = new_public_key();
+        let second_pk = new_public_key();
+        let shard_key = derived_substate_address(&first_pk);
+        let first_claim_key = new_public_key().to_byte_type();
+        let second_claim_key = new_public_key().to_byte_type();
+        let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+
+        for (pk, start_epoch, claim_key) in [
+            (&first_pk, Epoch(20), first_claim_key),
+            (&second_pk, Epoch(second_start), second_claim_key),
+        ] {
+            validator_nodes
+                .insert_validator_node(
+                    pk.clone().into(),
+                    pk.to_byte_type(),
+                    shard_key,
+                    start_epoch,
+                    claim_key,
+                    VotePower::of(1),
+                )
+                .unwrap();
+        }
+        if let Some(exit_epoch) = second_exit {
+            validator_nodes
+                .deactivate(second_pk.to_byte_type(), Epoch(exit_epoch))
+                .unwrap();
+        }
+
+        validator_nodes
+            .set_committee_shard(shard_key, shard_group, Epoch(30))
+            .unwrap();
+
+        let expected_pk = if select_second { &second_pk } else { &first_pk };
+        let expected_claim_key = if select_second {
+            second_claim_key
+        } else {
+            first_claim_key
+        };
+        let vn = validator_nodes
+            .get_by_public_key(Epoch(30), &expected_pk.to_byte_type())
+            .unwrap();
+        assert_eq!(vn.start_epoch, Epoch(20));
+        assert_eq!(vn.fee_claim_public_key, expected_claim_key);
+    }
+}

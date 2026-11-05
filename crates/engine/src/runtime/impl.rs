@@ -4843,11 +4843,11 @@ mod tests {
             .unwrap()
             .into(),
         ]);
+        // The statement decoder bounds inputs at `MAX_STEALTH_INPUTS`, which is `STEALTH_LIMITS.max_inputs`, so an
+        // over-limit `PayFeeArg` is refused while decoding, before the vault is read.
         assert!(matches!(
             runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args),
-            Err(RuntimeError::ArgumentValidationError(
-                ArgumentValidationError::MaxStealthInputsExceeded { .. }
-            ))
+            Err(RuntimeError::InvalidArgument { argument, .. }) if argument.ends_with("PayFeeArg")
         ));
     }
 }

@@ -41,9 +41,8 @@ use crate::{
     value::address_value,
 };
 
-/// A bound on how deeply one literal nests, so that parsing stays shallow. A nested `cbor!` or
-/// `metadata!` starts its own count, and the engine rejects any metadata value nested past
-/// [`tari_bor::MAX_DECODE_DEPTH`] in all.
+/// A bound on how deeply one literal nests, so that parsing stays shallow and the engine can
+/// decode the resulting value within [`tari_bor::MAX_DECODE_DEPTH`].
 const MAX_DEPTH: usize = tari_bor::MAX_DECODE_DEPTH;
 
 /// The value a `cbor!` invocation writes.
@@ -51,10 +50,22 @@ const MAX_DEPTH: usize = tari_bor::MAX_DECODE_DEPTH;
 /// A brace-delimited invocation, `cbor!{"a": 1}`, is the object itself; any other delimiter holds
 /// one value, `cbor!({"a": 1})` or `cbor!([1, 2])`.
 pub(crate) fn cbor_from_macro(mac: &Macro) -> syn::Result<Value> {
+    cbor_from_macro_at_depth(mac, 0)
+}
+
+fn cbor_from_macro_at_depth(mac: &Macro, depth: usize) -> syn::Result<Value> {
     match mac.delimiter {
-        MacroDelimiter::Brace(_) => (|input: ParseStream| parse_object_body(input, 1)).parse2(mac.tokens.clone()),
+        MacroDelimiter::Brace(_) => {
+            if depth >= MAX_DEPTH {
+                return Err(syn::Error::new_spanned(
+                    &mac.tokens,
+                    format!("value nested deeper than {MAX_DEPTH} levels"),
+                ));
+            }
+            (|input: ParseStream| parse_object_body(input, depth + 1)).parse2(mac.tokens.clone())
+        },
         MacroDelimiter::Paren(_) | MacroDelimiter::Bracket(_) => {
-            (|input: ParseStream| parse_value(input, 0)).parse2(mac.tokens.clone())
+            (|input: ParseStream| parse_value(input, depth)).parse2(mac.tokens.clone())
         },
     }
 }
@@ -63,6 +74,16 @@ pub(crate) fn cbor_from_macro(mac: &Macro) -> syn::Result<Value> {
 /// value stored as its own CBOR encoding. An empty invocation is empty metadata, and a single
 /// string literal is read as `key=value` pairs, each value a text string.
 pub(crate) fn metadata_from_macro(mac: &Macro) -> syn::Result<Metadata> {
+    metadata_from_macro_at_depth(mac, 0)
+}
+
+fn metadata_from_macro_at_depth(mac: &Macro, depth: usize) -> syn::Result<Metadata> {
+    if depth >= MAX_DEPTH {
+        return Err(syn::Error::new_spanned(
+            &mac.tokens,
+            format!("value nested deeper than {MAX_DEPTH} levels"),
+        ));
+    }
     if mac.tokens.is_empty() {
         return Ok(Metadata::new());
     }
@@ -75,7 +96,7 @@ pub(crate) fn metadata_from_macro(mac: &Macro) -> syn::Result<Metadata> {
             .map_err(|e| syn::Error::new_spanned(&lit, format!("Failed to parse metadata key=value pairs: {e}")));
     }
 
-    let Value::Map(entries) = cbor_from_macro(mac)? else {
+    let Value::Map(entries) = cbor_from_macro_at_depth(mac, depth)? else {
         return Err(syn::Error::new_spanned(
             &mac.tokens,
             r#"metadata! takes an object, e.g. metadata!({"name": "My NFT"})"#,
@@ -124,7 +145,7 @@ fn parse_value(input: ParseStream, depth: usize) -> syn::Result<Value> {
         };
     }
     if input.peek(Ident) && input.peek2(Token![!]) {
-        return nested_macro_value(input.parse()?);
+        return nested_macro_value(input.parse()?, depth);
     }
     if input.peek(Ident) {
         let ident = input.parse::<Ident>()?;
@@ -227,7 +248,7 @@ fn check_int_suffix(lit: &LitInt, value: i128) -> syn::Result<()> {
 }
 
 /// The value of an argument macro written in value position, e.g. `address!("resource_..")`.
-fn nested_macro_value(mac: Macro) -> syn::Result<Value> {
+fn nested_macro_value(mac: Macro, depth: usize) -> syn::Result<Value> {
     let span = mac.span();
     let to_value_err = |e: tari_bor::BorError| syn::Error::new(span, e);
     let workspace_err = || {
@@ -237,6 +258,17 @@ fn nested_macro_value(mac: Macro) -> syn::Result<Value> {
              literal",
         )
     };
+
+    if let Some(ident) = mac.path.get_ident() {
+        match ident.to_string().as_str() {
+            "cbor" => return cbor_from_macro_at_depth(&mac, depth),
+            "metadata" => {
+                let metadata = metadata_from_macro_at_depth(&mac, depth)?;
+                return tari_bor::to_value(&metadata).map_err(to_value_err);
+            },
+            _ => {},
+        }
+    }
 
     match handle_macro_argument(mac)? {
         ManifestLiteral::Special(special) => match special {

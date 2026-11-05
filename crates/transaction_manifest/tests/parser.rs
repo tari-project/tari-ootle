@@ -1625,3 +1625,131 @@ fn zero_arg_macros_reject_arguments() {
         assert!(err.to_string().contains("takes no arguments"), "{err}");
     }
 }
+
+#[test]
+fn main_bindings_do_not_leak_into_fee_main() {
+    let manifest = r#"
+        fn main() {
+            let account = new_component_addr!();
+            let main_only = new_component_addr!();
+            account.deposit(main_only);
+        }
+
+        fn fee_main() {
+            let fee_comp = new_component_addr!();
+            account.pay_fee(fee_comp);
+        }
+    "#;
+    let globals = HashMap::from([("account".to_string(), caller_component())]);
+    let ManifestInstructions {
+        instructions,
+        fee_instructions,
+        ..
+    } = parse_manifest(manifest, globals.clone(), Default::default(), Default::default()).unwrap();
+
+    // In `main()`, `account` is bound to workspace 0 and `main_only` to workspace 1.
+    assert_eq!(instructions[0], Instruction::AllocateAddress {
+        allocatable_type: AllocatableAddressType::Component,
+        workspace_id: 0,
+    });
+    assert_eq!(instructions[1], Instruction::AllocateAddress {
+        allocatable_type: AllocatableAddressType::Component,
+        workspace_id: 1,
+    });
+    let Instruction::CallMethod { call, .. } = &instructions[2] else {
+        panic!("expected a method call in main");
+    };
+    assert_eq!(*call, ComponentReference::Workspace(0));
+
+    // In `fee_main()`, `account` must resolve to the caller-supplied global (not `main()`'s workspace 0),
+    // and `fee_comp` starts at workspace 0 (since the runtime clears the workspace at the fee checkpoint).
+    assert_eq!(fee_instructions[0], Instruction::AllocateAddress {
+        allocatable_type: AllocatableAddressType::Component,
+        workspace_id: 0,
+    });
+    let Instruction::CallMethod { call, args, .. } = &fee_instructions[1] else {
+        panic!("expected a method call in fee_main");
+    };
+    assert_eq!(
+        *call,
+        ComponentReference::Address(ComponentAddress::new([9u8; ObjectKey::LENGTH].into()))
+    );
+    assert_eq!(*args, vec![InstructionArg::Workspace(WorkspaceOffsetId::new(0))]);
+
+    // Referencing a binding defined only in `main()` from `fee_main()` must fail as undefined.
+    let leaked_manifest = r#"
+        fn main() {
+            let main_only = new_component_addr!();
+        }
+
+        fn fee_main() {
+            main_only.pay_fee(100);
+        }
+    "#;
+    let err = parse_manifest(leaked_manifest, globals, Default::default(), Default::default())
+        .err()
+        .expect("a binding from main() must not be visible in fee_main()");
+    assert!(err.to_string().contains("Undefined variable `main_only`"), "{err}");
+}
+
+#[test]
+fn nested_cbor_and_metadata_macros_enforce_cumulative_depth() {
+    let half = tari_bor::MAX_DECODE_DEPTH / 2 + 1;
+    let open = "[".repeat(half);
+    let close = "]".repeat(half);
+
+    let nested_cbor = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+        fn main() {{
+            MyTemplate::create(cbor!({open}cbor!({open}1{close}){close}));
+        }}
+    "#
+    );
+    let err = parse_manifest(&nested_cbor, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("nested cbor! exceeding cumulative MAX_DECODE_DEPTH must fail");
+    assert!(err.to_string().contains("nested deeper than"), "{err}");
+
+    let nested_metadata = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+        fn main() {{
+            MyTemplate::create(cbor!({open}metadata!({{"k": {open}1{close}}}){close}));
+        }}
+    "#
+    );
+    let err = parse_manifest(&nested_metadata, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("nested metadata! inside cbor! exceeding cumulative MAX_DECODE_DEPTH must fail");
+    assert!(err.to_string().contains("nested deeper than"), "{err}");
+}
+
+#[test]
+fn duplicate_keyword_args_in_create_account_and_publish_template_are_rejected() {
+    let cases = [
+        (
+            "fn main() { create_account!(pk, owner_rule = r1, owner_rule = r2); }",
+            "duplicate `owner_rule` argument in create_account!",
+        ),
+        (
+            "fn main() { create_account!(pk, access_rules = a1, access_rules = a2); }",
+            "duplicate `access_rules` argument in create_account!",
+        ),
+        (
+            "fn main() { create_account!(pk, bucket = b1, bucket = b2); }",
+            "duplicate `bucket` argument in create_account!",
+        ),
+        (
+            r#"fn main() { publish_template!(wasm, metadata = "00", metadata = "11"); }"#,
+            "duplicate `metadata` argument in publish_template!",
+        ),
+    ];
+
+    for (manifest, expected) in cases {
+        let err = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default())
+            .err()
+            .unwrap_or_else(|| panic!("expected duplicate keyword error for {manifest}"));
+        assert!(err.to_string().contains(expected), "unexpected error: {err}");
+    }
+}

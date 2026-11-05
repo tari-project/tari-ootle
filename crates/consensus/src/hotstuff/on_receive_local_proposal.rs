@@ -206,6 +206,9 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         // to the stored tip: the node buffers all higher proposals as "future" and re-requests
         // catch-up forever. Making the re-entry idempotent — advancing to the view the stored block
         // justifies — lets the node recover. `enter_view` is monotonic, so this never rewinds.
+        //
+        // A proposal for a block first processed from a catch-up delivery also gets the vote that
+        // delivery withheld.
         let already_processed = self.store.with_read_tx(|tx| {
             if Block::record_exists(tx, block.id())? {
                 Ok::<_, HotStuffError>(Some(Block::get(tx, block.id())?))

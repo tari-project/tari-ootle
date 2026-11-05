@@ -22,7 +22,6 @@ use tari_ootle_wallet_sdk::{
     models::{
         KeyId,
         LockOwner,
-        OutputStatus,
         StealthUtxoSpendKeyId,
         TransactionContext,
         TransactionStatus,
@@ -362,32 +361,21 @@ fn derive_stealth_signers(
 ) -> Result<Vec<StealthUtxoSpendKeyId>, anyhow::Error> {
     let mut signers = IndexSet::new();
 
-    for lock_id in lock_ids {
-        let Some(outputs) = sdk.stealth_outputs_api().get_locked_by_lock_id(*lock_id).optional()? else {
-            continue;
-        };
-
-        for output in outputs {
-            // Only inputs being spent need a spend signature. The same lock
-            // also holds the change outputs it created (`LockedUnconfirmed`),
-            // which are not being spent by this transaction.
-            if !matches!(output.status, OutputStatus::LockedForSpend) {
-                continue;
-            }
-            // A view-only output has no spend key: the wallet can see it but
-            // cannot spend it, so a transaction that tries is malformed.
-            let account_key_id = output.owner_key_id.ok_or_else(|| {
-                invalid_request(format!(
-                    "Cannot spend view-only stealth output {} (lock {lock_id}): no owner key",
-                    output.commitment
-                ))
-            })?;
-            signers.insert(StealthUtxoSpendKeyId {
-                account_key_id,
-                view_key_id: output.view_only_key_id,
-                public_nonce: output.sender_public_nonce,
-            });
-        }
+    for output in sdk.stealth_outputs_api().get_locked_for_spend(lock_ids)? {
+        // A view-only output has no spend key: the wallet can see it but
+        // cannot spend it, so a transaction that tries is malformed.
+        let account_key_id = output.owner_key_id.ok_or_else(|| {
+            invalid_request(format!(
+                "Cannot spend view-only stealth output {}{}: no owner key",
+                output.commitment,
+                output.lock_id.map(|id| format!(" (lock {id})")).unwrap_or_default()
+            ))
+        })?;
+        signers.insert(StealthUtxoSpendKeyId {
+            account_key_id,
+            view_key_id: output.view_only_key_id,
+            public_nonce: output.sender_public_nonce,
+        });
     }
 
     Ok(signers.into_iter().collect())

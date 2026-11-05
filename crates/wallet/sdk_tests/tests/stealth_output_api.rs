@@ -26,7 +26,15 @@ use tari_ootle_wallet_sdk::{
         },
     },
     crypto::pay_to::PayTo,
-    models::{BalanceChangeSource, KeyBranch, KeyId, OutputStatus, StealthOutputModel, WalletLockId},
+    models::{
+        AccountWithAddress,
+        BalanceChangeSource,
+        KeyBranch,
+        KeyId,
+        OutputStatus,
+        StealthOutputModel,
+        WalletLockId,
+    },
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::types::{
@@ -35,6 +43,7 @@ use tari_template_lib::types::{
     EncryptedData,
     Hash32,
     Metadata,
+    ResourceAddress,
     ResourceType,
     SubstateOwnerRule,
     UtxoAddress,
@@ -702,7 +711,7 @@ fn setting_the_frozen_flag_reports_whether_it_changed() {
 }
 
 fn add_owned_stealth_output(
-    test: &TestWithNetwork,
+    test: &TestWithNetwork<ProvingNetwork>,
     owner_account: &AccountWithAddress,
     resource_address: ResourceAddress,
     amount: u64,

@@ -5,7 +5,13 @@
 //! instructions a person can verify by reading them. Everything else falls back
 //! to the generic instruction list.
 
-import type { Blobs, Instruction, InstructionArg } from "@tari-project/ootle-ts-bindings";
+import type {
+  Blobs,
+  ComponentReference,
+  Instruction,
+  InstructionArg,
+  WorkspaceOffsetId,
+} from "@tari-project/ootle-ts-bindings";
 import { blobBytes, toHexString } from "@utils/helpers";
 import { decode } from "cbor2";
 
@@ -221,33 +227,100 @@ function withdrawnValue(method: string, args: InstructionArg[], blobs: Blobs): W
   }
 }
 
-function workspaceKeyWritten(instruction: Instruction): number | null {
-  if (typeof instruction !== "object") {
-    return null;
-  }
-  if ("PutLastInstructionOutputOnWorkspace" in instruction) {
-    return instruction.PutLastInstructionOutputOnWorkspace.key;
-  }
-  if ("TakeFromBucket" in instruction) {
-    return instruction.TakeFromBucket.output_bucket;
-  }
-  if ("AllocateAddress" in instruction) {
-    return instruction.AllocateAddress.workspace_id;
-  }
-  return null;
+function argKeys(args: InstructionArg[]): number[] {
+  return args.flatMap((arg) => (typeof arg === "object" && "Workspace" in arg ? [arg.Workspace.id] : []));
 }
 
-function wholeWorkspaceItem(arg: InstructionArg | undefined): number | null {
-  if (arg && typeof arg === "object" && "Workspace" in arg && arg.Workspace.offset == null) {
-    return arg.Workspace.id;
+function componentKeys(component: ComponentReference): number[] {
+  return "Workspace" in component ? [component.Workspace] : [];
+}
+
+/// Every workspace key an instruction reads. A read leaves a bucket on the
+/// workspace, so value can leave it by any of these, e.g. `TakeFromBucket`.
+function workspaceKeysRead(instruction: Instruction): number[] {
+  if (typeof instruction !== "object") {
+    return [];
   }
-  return null;
+  if ("CallMethod" in instruction) {
+    const { call, args } = instruction.CallMethod;
+    return [...componentKeys(call), ...argKeys(args)];
+  }
+  if ("CallFunction" in instruction) {
+    return argKeys(instruction.CallFunction.args);
+  }
+  if ("CreateAccount" in instruction) {
+    const bucket = instruction.CreateAccount.bucket_workspace_id;
+    return bucket ? [bucket.id] : [];
+  }
+  if ("Assert" in instruction) {
+    return [instruction.Assert.key.id];
+  }
+  if ("TakeFromBucket" in instruction) {
+    return [instruction.TakeFromBucket.input_bucket.id];
+  }
+  if ("PutIntoBucket" in instruction) {
+    const { src, dest } = instruction.PutIntoBucket;
+    return [src.id, dest.id];
+  }
+  if ("PayFeeFromBucket" in instruction) {
+    return [instruction.PayFeeFromBucket.bucket.id];
+  }
+  if ("StealthTransfer" in instruction) {
+    const { resource_address_ref, revealed_input_bucket } = instruction.StealthTransfer;
+    return [
+      ...("Workspace" in resource_address_ref ? [resource_address_ref.Workspace.id] : []),
+      ...(revealed_input_bucket ? [revealed_input_bucket.id] : []),
+    ];
+  }
+  if ("AuthorizeProof" in instruction) {
+    return [instruction.AuthorizeProof.proof.id];
+  }
+  if ("DropProofAuthorization" in instruction) {
+    return [instruction.DropProofAuthorization.proof.id];
+  }
+  if ("UpdateComponentTemplate" in instruction) {
+    const { component, migrate } = instruction.UpdateComponentTemplate;
+    return [...componentKeys(component), ...(migrate ? argKeys(migrate.args) : [])];
+  }
+  return [];
+}
+
+function wholeItem({ id, offset }: WorkspaceOffsetId): number | null {
+  return offset == null ? id : null;
+}
+
+/// The bucket an instruction consumes whole, and where it goes, when the
+/// instruction is a `deposit` of one workspace bucket or a fee payment from one.
+function bucketConsumer(
+  instruction: Instruction,
+  ownAccounts: ReadonlySet<string>,
+): { key: number; destination: WithdrawalDestination } | null {
+  if (typeof instruction === "object" && "PayFeeFromBucket" in instruction) {
+    const key = wholeItem(instruction.PayFeeFromBucket.bucket);
+    return key == null ? null : { key, destination: { kind: "fee" } };
+  }
+  const target = callTarget(instruction);
+  const [arg] = target?.args ?? [];
+  if (!target || target.method !== "deposit" || target.args.length !== 1 || typeof arg !== "object") {
+    return null;
+  }
+  const key = "Workspace" in arg ? wholeItem(arg.Workspace) : null;
+  if (key == null) {
+    return null;
+  }
+  const destination: WithdrawalDestination = {
+    kind: "deposit",
+    component: target.address,
+    isOwnAccount: ownAccounts.has(target.address),
+  };
+  return { key, destination };
 }
 
 /// Describes the withdrawals from the wallet's own accounts and the fee
 /// payments in one instruction list (a transaction's instructions or its fee
 /// instructions), following each withdrawn bucket to the `deposit` or fee
-/// payment that consumes it. Every other instruction is counted as
+/// payment that consumes it. A withdrawal whose bucket any other instruction
+/// reads keeps an `unknown` destination. Every other instruction is counted as
 /// undescribed, so a caller can tell when the summary is not the whole story.
 export function describeInstructions(
   instructions: Instruction[],
@@ -257,32 +330,35 @@ export function describeInstructions(
   const withdrawals: AccountWithdrawal[] = [];
   const fees: FeePayment[] = [];
   let undescribed = 0;
-  // Workspace key -> the withdrawal whose bucket it holds.
+  // Workspace key -> the withdrawal whose bucket it holds, until something
+  // other than a whole-bucket deposit or fee payment touches it.
   const buckets = new Map<number, AccountWithdrawal>();
 
   for (let i = 0; i < instructions.length; i++) {
     const instruction = instructions[i];
-    const written = workspaceKeyWritten(instruction);
-    if (written != null) {
-      buckets.delete(written);
+
+    const consumer = bucketConsumer(instruction, ownAccounts);
+    for (const key of workspaceKeysRead(instruction)) {
+      if (key !== consumer?.key) {
+        buckets.delete(key);
+      }
+    }
+    const consumed = consumer ? buckets.get(consumer.key) : undefined;
+    if (consumer && consumed) {
+      consumed.destination = consumer.destination;
+      buckets.delete(consumer.key);
+      continue;
     }
 
     if (typeof instruction === "object" && "StealthTransfer" in instruction) {
       const next = instructions[i + 1];
       if (next && typeof next === "object" && "PutLastInstructionOutputOnWorkspace" in next) {
-        buckets.delete(next.PutLastInstructionOutputOnWorkspace.key);
         i++;
       }
       continue;
     }
 
     if (typeof instruction === "object" && "PayFeeFromBucket" in instruction) {
-      const { id, offset } = instruction.PayFeeFromBucket.bucket;
-      const withdrawal = offset == null ? buckets.get(id) : undefined;
-      if (withdrawal) {
-        withdrawal.destination = { kind: "fee" };
-        buckets.delete(id);
-      }
       continue;
     }
 
@@ -313,20 +389,6 @@ export function describeInstructions(
         }
       } catch {
         // An argument that cannot be read leaves the call undescribed.
-      }
-    }
-
-    if (target && target.method === "deposit" && target.args.length === 1) {
-      const key = wholeWorkspaceItem(target.args[0]);
-      const withdrawal = key != null ? buckets.get(key) : undefined;
-      if (key != null && withdrawal) {
-        withdrawal.destination = {
-          kind: "deposit",
-          component: target.address,
-          isOwnAccount: ownAccounts.has(target.address),
-        };
-        buckets.delete(key);
-        continue;
       }
     }
 

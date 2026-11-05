@@ -73,19 +73,46 @@ describe("describeInstructions", () => {
     expect(describeInstructions(instructions, [], OWN)).toEqual({ withdrawals: [], fees: [], undescribed: 3 });
   });
 
-  it("leaves the destination unknown when the bucket is replaced before the deposit", () => {
-    const instructions = [
-      call(OWN_ACCOUNT, "withdraw", [resourceArg(), amountArg(5)]),
+  it("leaves the destination unknown when part of the bucket is taken before the deposit", () => {
+    const instructions: Instruction[] = [
+      call(OWN_ACCOUNT, "withdraw", [resourceArg(), amountArg(1_000_000)]),
       putOnWorkspace(0),
-      call(OTHER_ACCOUNT, "something", []),
-      putOnWorkspace(0),
-      call(OTHER_ACCOUNT, "deposit", [bucket(0)]),
+      { TakeFromBucket: { input_bucket: { id: 0, offset: null }, amount: 999_999, output_bucket: 1 } },
+      call(OWN_ACCOUNT, "deposit", [bucket(0)]),
+      call(OTHER_ACCOUNT, "deposit", [bucket(1)]),
     ];
 
     const { withdrawals, undescribed } = describeInstructions(instructions, [], OWN);
 
     expect(withdrawals.map((w) => w.destination)).toEqual([{ kind: "unknown" }]);
     expect(undescribed).toBe(3);
+  });
+
+  it("leaves the destination unknown when another call reads the bucket before the deposit", () => {
+    const instructions = [
+      call(OWN_ACCOUNT, "withdraw", [resourceArg(), amountArg(5)]),
+      putOnWorkspace(0),
+      call(OTHER_ACCOUNT, "inspect", [bucket(0)]),
+      call(OWN_ACCOUNT, "deposit", [bucket(0)]),
+    ];
+
+    const { withdrawals, undescribed } = describeInstructions(instructions, [], OWN);
+
+    expect(withdrawals.map((w) => w.destination)).toEqual([{ kind: "unknown" }]);
+    expect(undescribed).toBe(2);
+  });
+
+  it("describes a withdrawn bucket that pays the fee", () => {
+    const instructions: Instruction[] = [
+      call(OWN_ACCOUNT, "withdraw", [resourceArg(), amountArg(10)]),
+      putOnWorkspace(0),
+      { PayFeeFromBucket: { bucket: { id: 0, offset: null } } },
+    ];
+
+    const { withdrawals, undescribed } = describeInstructions(instructions, [], OWN);
+
+    expect(withdrawals.map((w) => w.destination)).toEqual([{ kind: "fee" }]);
+    expect(undescribed).toBe(0);
   });
 
   it("counts a withdrawal with an unreadable amount as undescribed", () => {

@@ -896,36 +896,120 @@ async fn a_proposal_message_omitting_an_embedded_foreign_proposal_does_not_take_
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_proposal_message_carrying_an_unreferenced_foreign_proposal_does_not_store_it() {
     setup_logger();
-    let (mut test, replica, leader, proposal) = withheld_embedding_proposal(true).await;
-    let group_a = committee_number_to_shard_group(TEST_NUM_PRESHARDS, 0, 2);
+    let replica = TestAddress::new("3");
+    let captured_proposal = Arc::new(Mutex::new(None::<(TestAddress, ProposalMessage)>));
+    let captured_foreign = Arc::new(Mutex::new(Vec::<ForeignProposal>::new()));
+    let mut test = Test::builder()
+        .add_committee(0, vec!["1"])
+        .add_committee(1, vec!["2", "3"])
+        .with_message_filter(Box::new({
+            let replica = replica.clone();
+            let captured_proposal = captured_proposal.clone();
+            let captured_foreign = captured_foreign.clone();
+            move |from, to, msg| {
+                if *to != replica {
+                    return true;
+                }
+                match msg {
+                    HotstuffMessage::ForeignProposal(fp) => {
+                        captured_foreign.lock().unwrap().push((*fp.proposal).clone());
+                        false
+                    },
+                    HotstuffMessage::CatchUpSyncResponse(_) => false,
+                    HotstuffMessage::Proposal(proposal) if !proposal.foreign_proposals.is_empty() => {
+                        captured_proposal
+                            .lock()
+                            .unwrap()
+                            .get_or_insert_with(|| (from.clone(), (**proposal).clone()));
+                        false
+                    },
+                    _ => true,
+                }
+            }
+        }))
+        .start()
+        .await;
 
-    let mut unreferenced = proposal
+    for _ in 0..2 {
+        let inputs = test.create_substates_on_vns(TestVnDestination::Committee(0), 1);
+        let outputs = test.build_outputs_for_committee(1, 1);
+        let tx = build_transaction_from(
+            Transaction::builder_localnet(Epoch(1))
+                .with_inputs(inputs.iter().cloned().map(|i| i.into()))
+                .build_and_seal(&PrivateKey::default()),
+        );
+        test.create_execution_at_destination_for_transaction(
+            TestVnDestination::All,
+            &tx,
+            Decision::Commit,
+            5,
+            inputs
+                .into_iter()
+                .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
+                .collect(),
+            outputs,
+        );
+        test.send_transaction_to_destination(TestVnDestination::All, tx).await;
+    }
+    test.start_epoch(Epoch(1)).await;
+
+    let (leader, proposal) = timeout(Duration::from_secs(60), async {
+        loop {
+            if let Some(captured) = captured_proposal.lock().unwrap().take() {
+                return captured;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("committee 1 never proposed a block carrying a foreign proposal");
+
+    let block_ids = proposal
         .foreign_proposals
-        .first()
-        .expect("the captured proposal embeds a foreign proposal")
-        .clone();
-    let mut header = unreferenced
-        .commit_proof()
-        .sidechain_block_commit_proof()
-        .header
-        .clone();
-    header.height += 100;
-    header.shard_group = to_header_shard_group(group_a);
-    unreferenced = ForeignProposal::new(
-        CommandsCommitProof::new_latest(
-            unreferenced.commit_proof().commands().to_vec(),
-            SidechainBlockCommitProof {
-                header,
-                proof_elements: unreferenced
-                    .commit_proof()
-                    .sidechain_block_commit_proof()
-                    .proof_elements
-                    .clone(),
-            },
-        ),
-        unreferenced.block_pledge().clone(),
-        unreferenced.block_metadata().clone(),
+        .iter()
+        .map(|fp| fp.calculate_block_id())
+        .collect::<Vec<_>>();
+
+    // Sequence a third transaction on committee 0 so it commits another block and produces an authentic foreign
+    // proposal that `proposal.block` does not reference.
+    let extra_inputs = test.create_substates_on_vns(TestVnDestination::Committee(0), 1);
+    let extra_outputs = test.build_outputs_for_committee(1, 1);
+    let extra_tx = build_transaction_from(
+        Transaction::builder_localnet(Epoch(1))
+            .with_inputs(extra_inputs.iter().cloned().map(|i| i.into()))
+            .build_and_seal(&PrivateKey::default()),
     );
+    test.create_execution_at_destination_for_transaction(
+        TestVnDestination::All,
+        &extra_tx,
+        Decision::Commit,
+        5,
+        extra_inputs
+            .into_iter()
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
+            .collect(),
+        extra_outputs,
+    );
+    test.send_transaction_to_destination(TestVnDestination::Committee(0), extra_tx)
+        .await;
+
+    let unreferenced = timeout(Duration::from_secs(60), async {
+        loop {
+            if let Some(fp) = captured_foreign
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|fp| !block_ids.contains(&fp.calculate_block_id()))
+                .cloned()
+            {
+                return fp;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("committee 0 never produced a second authentic foreign proposal");
+
     let unreferenced_id = unreferenced.calculate_block_id();
     let mut foreign_proposals = proposal.foreign_proposals.clone();
     foreign_proposals.push(unreferenced);
@@ -945,11 +1029,6 @@ async fn a_proposal_message_carrying_an_unreferenced_foreign_proposal_does_not_s
         "replica stored a foreign proposal that the block does not reference"
     );
 
-    let block_ids = proposal
-        .foreign_proposals
-        .iter()
-        .map(|fp| fp.calculate_block_id())
-        .collect::<Vec<_>>();
     tx_inbound
         .send((leader, HotstuffMessage::new_proposal(proposal)))
         .await

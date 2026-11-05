@@ -255,9 +255,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         // First validate and save the attached foreign proposals
         let is_all_foreign_proposals_valid = self.store.with_write_tx(|tx| {
-            if !are_block_foreign_proposals_matched(&**tx, valid_block.block(), &foreign_proposals)? {
-                return Ok(false);
-            }
             for foreign_proposal in foreign_proposals {
                 let mut foreign_proposal = ForeignProposalRecord::new(foreign_proposal);
                 if foreign_proposal.exists(&**tx)? {

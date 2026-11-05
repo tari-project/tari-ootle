@@ -23,7 +23,7 @@
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use log::{warn, *};
-use tari_bor::{MaybeTagged, check_value_form, decode_exact};
+use tari_bor::{MaybeTagged, decode_exact};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_engine_types::{
     Utxo,
@@ -870,10 +870,12 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     }
 
     /// Resolves a `TemplateFunction` spend-condition leaf against its template and validates it end-to-end: the
-    /// referenced function exists, has the required signature, and `args` carries exactly one well-formed-CBOR element
-    /// per leading (non-`SpendContext`) parameter. Because a condition tree commits only an opaque root, leaves are
-    /// hidden at creation; this runs at spend time (T2) when the leaf is revealed. Templates are immutable substates,
-    /// so a referenced template must already resolve — there is no "not yet published" skip case.
+    /// referenced function exists, has the required signature, and `args` carries exactly one element per leading
+    /// (non-`SpendContext`) parameter. Each element is charged for and decoded once, when the script is invoked, and
+    /// its type is checked by the dispatcher's `decode_exact::<T>`. Because a condition tree commits only an opaque
+    /// root, leaves are hidden at creation; this runs at spend time (T2) when the leaf is revealed. Templates are
+    /// immutable substates, so a referenced template must already resolve — there is no "not yet published" skip
+    /// case.
     fn validate_template_function(&self, tf: &TemplateFunction) -> Result<(), RuntimeError> {
         let template_def = self.get_template_def(&tf.template)?;
         let func = template_def
@@ -901,28 +903,6 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                 ),
             });
         }
-        // The host can verify each element is well-formed CBOR; full type conformance against the declared parameter
-        // type is enforced at the WASM deserialization boundary (the dispatcher's `decode_exact::<T>`).
-        for (i, arg) in tf.args.iter().enumerate() {
-            self.charge_engine_arg(arg).map_err(|e| match e {
-                EngineArgChargeError::Unreadable(e) => RuntimeError::InvalidArgument {
-                    argument: "TemplateFunction",
-                    reason: format!(
-                        "spend script '{}' bound argument {} is not well-formed CBOR: {}",
-                        tf.function, i, e
-                    ),
-                },
-                EngineArgChargeError::Runtime(e) => e,
-            })?;
-            check_value_form(arg).map_err(|e| RuntimeError::InvalidArgument {
-                argument: "TemplateFunction",
-                reason: format!(
-                    "spend script '{}' bound argument {} is not well-formed CBOR: {}",
-                    tf.function, i, e
-                ),
-            })?;
-        }
-
         Ok(())
     }
 
@@ -1202,7 +1182,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         witness_data: &[u8],
     ) -> Result<(), RuntimeError> {
         // (T2) Authoritative spend-time validation. A revealed leaf is untrusted spender data, so the function shape
-        // and bound-arg encoding are validated immediately before invoking.
+        // and bound-arg count are validated immediately before invoking.
         self.validate_template_function(tf)?;
 
         let exec = SpendScriptExecution {

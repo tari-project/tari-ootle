@@ -1105,6 +1105,11 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     ) -> Result<(), RuntimeError> {
         match condition {
             AtomicCondition::AccessRule(access_rule) => {
+                // The engine rejects an invalid access rule (an empty `any_of`/`all_of`, or an `m_of_n` with an
+                // out-of-range threshold or a duplicate requirement) wherever it stores a rule. A stealth output
+                // commits only to a hash of its spend conditions, so its rules are first seen here and must fail
+                // closed.
+                reject_invalid_rule("spend_condition", access_rule.find_invalid_rule())?;
                 let allowed = self
                     .tracker
                     .write_with_authorization(|state| state.authorization().check_access_rule(access_rule))?;

@@ -57,6 +57,13 @@ impl MempoolHandle {
         Self { tx_mempool_request }
     }
 
+    /// A handle with no mempool behind it: every request fails.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        let (tx_mempool_request, _) = mpsc::channel(1);
+        Self { tx_mempool_request }
+    }
+
     pub async fn submit_transaction(&self, transaction: Transaction) -> Result<(), MempoolError> {
         let (reply, rx) = oneshot::channel();
         self.tx_mempool_request

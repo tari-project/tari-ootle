@@ -15,6 +15,7 @@ use tari_engine_types::{
     limits,
 };
 use tari_ootle_transaction::{Epoch, Transaction, args};
+use tari_template_abi::{ArgDef, FunctionDef, FunctionKind, TemplateDef, TemplateDefV2, Type};
 use tari_template_lib::types::TemplateAddress;
 use tari_template_test_tooling::{Package, TemplateTest};
 
@@ -46,6 +47,11 @@ fn template_module(parts: &str) -> Vec<u8> {
 /// [`template_module`] for a module that also imports host functions, which the text format
 /// requires to come before any definition.
 fn template_module_importing(imports: &str, parts: &str) -> Vec<u8> {
+    template_module_defining(TEMPLATE_DEF, imports, parts)
+}
+
+/// [`template_module_importing`] for a module whose ABI section is `template_def`, length prefix included.
+fn template_module_defining(template_def: &[u8], imports: &str, parts: &str) -> Vec<u8> {
     let wat = format!(
         r#"
         (module
@@ -56,9 +62,32 @@ fn template_module_importing(imports: &str, parts: &str) -> Vec<u8> {
           (@custom "tari_tdef" "{}")
         )
         "#,
-        wat_bytes(TEMPLATE_DEF)
+        wat_bytes(template_def)
     );
     wat::parse_str(&wat).unwrap()
+}
+
+/// The `Buggy` template's ABI section, declaring `main` with one argument of type `arg_type` and returning `output`.
+fn template_def_with(arg_type: Type, output: Type) -> Vec<u8> {
+    TemplateDef::V2(TemplateDefV2 {
+        template_name: "Buggy".to_string(),
+        abi_version: 0,
+        functions: vec![FunctionDef {
+            name: "main".to_string(),
+            kind: FunctionKind::Function,
+            arguments: vec![ArgDef {
+                name: "arg".to_string(),
+                arg_type,
+            }],
+            output,
+        }],
+    })
+    .encode_for_wasm_embedding()
+    .unwrap()
+}
+
+fn other(len: usize) -> Type {
+    Type::Other { name: "A".repeat(len) }
 }
 
 /// The allocator pair and entrypoint a template that only has to load needs.
@@ -981,6 +1010,103 @@ fn an_oversized_panic_message_is_truncated() {
         "{} bytes of the panic logged",
         logged.template_debug_bytes
     );
+}
+
+/// A dispatcher's decode failure is reported with a short marker that the engine expands with the argument's ABI type.
+/// The expansion is held to the same bound as a panic message the template writes out in full.
+#[test]
+fn a_decode_failure_expands_within_the_panic_message_limit() {
+    // Within every admission limit, and still rendering to far more than a panic message may carry.
+    let arg_type = Type::Tuple(vec![Type::Tuple(vec![other(256); 7]); 31]);
+    let marker = b"\x01A0: x";
+    let code = template_module_defining(
+        &template_def_with(arg_type, Type::Unit),
+        ON_PANIC_IMPORT,
+        &format!(
+            r#"
+        (data (i32.const 4096) "{}")
+        (func (export "tari_alloc") (param i32) (result i32) (i32.const 1024))
+        (func (export "tari_free") (param i32))
+        (func (export "Buggy_main") (param i32 i32) (result i32)
+          (call $on_panic (i32.const 4096) (i32.const {}) (i32.const 1) (i32.const 1))
+          unreachable)
+        "#,
+            wat_bytes(marker),
+            marker.len()
+        ),
+    );
+
+    let (mut test, address) = load(code);
+    let result = test
+        .try_execute(
+            Transaction::builder_localnet(Epoch(1))
+                .call_function(address, "main", args![0u8])
+                .build_and_seal(test.secret_key()),
+            vec![],
+        )
+        .expect("execution failed");
+    let reason = match result.finalize.result {
+        TransactionResult::Reject(reason) | TransactionResult::AcceptFeeRejectRest(_, reason) => reason,
+        TransactionResult::Accept(_) => panic!("a trapping call was accepted"),
+    };
+    let RejectReason::ExecutionFailure { message, .. } = reason else {
+        panic!("expected an execution failure, got {reason:?}");
+    };
+    assert!(
+        message.contains("failed to decode tuple argument at position 0"),
+        "the marker was not expanded: {message:.200}"
+    );
+    let limit = limits::ENGINE_LIMITS.max_panic_message_size;
+    assert!(
+        message.len() <= limit + 1024,
+        "a {}-byte panic marker expanded to a {}-byte reject reason",
+        marker.len(),
+        message.len()
+    );
+}
+
+/// Every ABI type a template declares, at every depth, is held to the limits its outermost level is.
+#[test]
+fn rejects_an_abi_type_past_the_limits_at_any_depth() {
+    let max_width = limits::WASM_LIMITS.max_function_arguments;
+    let max_name = limits::WASM_LIMITS.max_function_name_length;
+    let max_depth = limits::WASM_LIMITS.max_abi_type_depth;
+    let max_nodes = limits::WASM_LIMITS.max_abi_type_nodes;
+
+    let nested = |mut ty: Type, levels: usize| {
+        for _ in 0..levels {
+            ty = Type::Vec(Box::new(ty));
+        }
+        ty
+    };
+    let past_the_node_limit = Type::Tuple(vec![Type::Tuple(vec![Type::U8; max_width]); max_nodes / max_width + 1]);
+
+    let cases = [
+        ("a nested name", nested(other(max_name + 1), 1), Type::Unit),
+        (
+            "a nested tuple",
+            Type::Option(Box::new(Type::Tuple(vec![Type::U8; max_width + 1]))),
+            Type::Unit,
+        ),
+        ("a deep type", nested(Type::U8, max_depth), Type::Unit),
+        ("a type of many parts", past_the_node_limit, Type::Unit),
+        ("an output name", Type::U8, other(max_name + 1)),
+        ("a nested output", Type::U8, nested(other(max_name + 1), 2)),
+    ];
+    for (case, arg_type, output) in cases {
+        let code = template_module_defining(&template_def_with(arg_type, output), "", ABI_EXPORTS);
+        let error = WasmModule::validate_code(&code)
+            .err()
+            .unwrap_or_else(|| panic!("{case} past the limits was admitted"))
+            .to_string();
+        // The error names the function, and none of the type, which is the template's to size.
+        assert!(error.contains("main"), "{case}: {error}");
+        assert!(error.len() < 512, "{case}: a {}-byte error", error.len());
+    }
+
+    let at_the_limits = Type::Tuple(vec![nested(other(max_name), max_depth - 2); 2]);
+    let code = template_module_defining(&template_def_with(at_the_limits, other(max_name)), "", ABI_EXPORTS);
+    WasmModule::validate_code(&code).expect("a type at the limits was rejected");
 }
 
 /// A panic report is logged only once the trap it announces ends the call, so a template that

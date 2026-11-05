@@ -6,12 +6,13 @@ use std::{collections::HashSet, fmt::Display, path::Path, time::Duration};
 use anyhow::anyhow;
 use ootle_byte_type::ToByteType;
 use tari_engine_types::component::derive_component_address_from_public_key;
+use tari_ootle_address::Network;
 use tari_ootle_app_utilities::burn_claim_proof::claim_proof_from_l1;
 use tari_ootle_common_types::{
     SubstateRequirement,
     optional::{IsNotFoundError, Optional},
 };
-use tari_ootle_transaction::TransactionId;
+use tari_ootle_transaction::{Instruction, ResourceAddressRef, TransactionId, UnsignedTransaction};
 use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkSpec,
@@ -21,7 +22,7 @@ use tari_ootle_wallet_sdk::{
 use tari_ootle_walletd_client::{ComponentAddressOrName, types::ClaimBurnProofContents};
 use tari_sidechain::CompleteClaimBurnProof;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib_types::{ComponentAddress, EncryptedData};
+use tari_template_lib_types::{ComponentAddress, EncryptedData, ResourceAddress, stealth::StealthTransferStatement};
 use tokio::{sync::broadcast, time};
 
 use crate::server::ApplicationErrorCode;
@@ -221,6 +222,65 @@ pub(super) fn ensure_signing_key<TSpec: WalletSdkSpec>(
              sign"
         )),
     ))
+}
+
+/// Checks a transaction submitted for approval is committable on this wallet's network: its blob references resolve,
+/// its network byte is `network`, and it is not a dry run. Transaction requests and signing requests share these rules.
+pub(super) fn validate_transaction_for_approval(
+    network: Network,
+    transaction: &UnsignedTransaction,
+) -> Result<(), anyhow::Error> {
+    transaction
+        .validate_blob_references()
+        .map_err(|e| invalid_params("transaction.blobs", Some(e.to_string())))?;
+
+    if transaction.network() != network.as_byte() {
+        return Err(invalid_params(
+            "transaction.network",
+            Some(format!(
+                "the transaction is for network byte {:#04x}, but this wallet is on {network} ({:#04x})",
+                transaction.network(),
+                network.as_byte()
+            )),
+        ));
+    }
+
+    if transaction.is_dry_run() {
+        return Err(invalid_params(
+            "transaction.dry_run",
+            Some("a dry-run transaction cannot be committed, so this wallet never signs it"),
+        ));
+    }
+
+    Ok(())
+}
+
+/// The statements of the transaction's `Instruction::StealthTransfer`s, each paired with its resource address when
+/// the instruction names one. The engine executes these statements as written, so the outputs they list are the
+/// outputs the transaction creates.
+pub(super) fn extract_stealth_statements(
+    transaction: &UnsignedTransaction,
+) -> Vec<(Option<ResourceAddress>, &StealthTransferStatement)> {
+    transaction
+        .fee_instructions()
+        .iter()
+        .chain(transaction.instructions())
+        .filter_map(|instruction| {
+            let Instruction::StealthTransfer {
+                resource_address_ref,
+                statement,
+                ..
+            } = instruction
+            else {
+                return None;
+            };
+            let resource = match resource_address_ref {
+                ResourceAddressRef::Address(address) => Some(*address),
+                ResourceAddressRef::Workspace(_) => None,
+            };
+            Some((resource, statement))
+        })
+        .collect()
 }
 
 /// [`ensure_signing_key`] for a transaction's `seal_signer` and each of its `other_signers`.

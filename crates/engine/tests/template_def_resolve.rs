@@ -54,8 +54,12 @@ fn allocations() -> u64 {
 /// Component creations each call to the template performs.
 const CREATES: u32 = 32;
 
-/// Depth of the `Type::Tuple` binary tree; a copy of it makes `2^TREE_DEPTH - 1` allocations.
-const TREE_DEPTH: usize = 10;
+/// Depth of the `Type::Tuple` binary tree; a copy of it makes `2^TREE_DEPTH - 1` allocations. The tree is made of
+/// `2^(TREE_DEPTH + 1) - 1` types, the most publish admission allows one declared type.
+const TREE_DEPTH: usize = 7;
+
+/// Functions of the large definition that each declare a tree, so that a copy of the definition copies every one.
+const TREES: usize = 8;
 
 fn tuple_tree(depth: usize) -> Type {
     if depth == 0 {
@@ -65,25 +69,33 @@ fn tuple_tree(depth: usize) -> Type {
     }
 }
 
-/// A definition with a function `run` and a component method `poke`, both returning `output`.
-fn template_def(template_name: &str, output: Type) -> TemplateDef {
+/// A definition with a function `run` and a component method `poke`, both returning `output`, and `extra` further
+/// functions that also return it.
+fn template_def(template_name: &str, output: Type, extra: usize) -> TemplateDef {
+    let mut functions = vec![
+        FunctionDef {
+            name: "run".to_string(),
+            kind: FunctionKind::Function,
+            arguments: vec![],
+            output: output.clone(),
+        },
+        FunctionDef {
+            name: "poke".to_string(),
+            kind: FunctionKind::Method(Receiver::Ref),
+            arguments: vec![],
+            output: output.clone(),
+        },
+    ];
+    functions.extend((0..extra).map(|i| FunctionDef {
+        name: format!("extra_{i}"),
+        kind: FunctionKind::Function,
+        arguments: vec![],
+        output: output.clone(),
+    }));
     TemplateDef::V2(TemplateDefV2 {
         template_name: template_name.to_string(),
         abi_version: 0,
-        functions: vec![
-            FunctionDef {
-                name: "run".to_string(),
-                kind: FunctionKind::Function,
-                arguments: vec![],
-                output: output.clone(),
-            },
-            FunctionDef {
-                name: "poke".to_string(),
-                kind: FunctionKind::Method(Receiver::Ref),
-                arguments: vec![],
-                output,
-            },
-        ],
+        functions,
     })
 }
 
@@ -182,8 +194,8 @@ fn measure(test: &mut TemplateTest, template: TemplateAddress) -> Measured {
 
 #[test]
 fn resolving_a_template_definition_does_not_copy_it() {
-    let small_code = creator_module("Small", &template_def("Small", Type::Unit));
-    let big_code = creator_module("Big", &template_def("Big", tuple_tree(TREE_DEPTH)));
+    let small_code = creator_module("Small", &template_def("Small", Type::Unit, 0));
+    let big_code = creator_module("Big", &template_def("Big", tuple_tree(TREE_DEPTH), TREES - 2));
 
     let small_addr = hash_template_code(&small_code);
     let big_addr = hash_template_code(&big_code);
@@ -198,7 +210,7 @@ fn resolving_a_template_definition_does_not_copy_it() {
     let big = measure(&mut test, big_addr);
 
     // A single copy of the definition makes at least one allocation per tuple node.
-    let one_copy = (1u64 << TREE_DEPTH) - 1;
+    let one_copy = u64::try_from(TREES).unwrap() * ((1u64 << TREE_DEPTH) - 1);
     let run_excess = big.run.saturating_sub(small.run);
     let poke_excess = big.poke.saturating_sub(small.poke);
     assert!(

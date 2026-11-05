@@ -1029,7 +1029,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
             // through here and resumes the sync.
             let maybe_checkpoint = self
                 .state_store
-                .with_read_tx(EpochCheckpoint::get_last_checkpoint)
+                .with_read_tx(|tx| EpochCheckpoint::get_last_checkpoint(tx))
                 .optional()?;
             if let Some(cp) = maybe_checkpoint &&
                 checkpoint_admits_leafless_join(cp.epoch(), oracle_epoch) &&

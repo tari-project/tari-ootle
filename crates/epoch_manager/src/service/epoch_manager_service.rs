@@ -186,6 +186,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     self.inner.set_birthday_epoch_if_unset(activation_epoch)?;
                 }
 
+                let mut invalidate_committee_cache = false;
                 for node_change in node_changes {
                     match node_change {
                         ValidatorNodeChange::Add {
@@ -211,6 +212,9 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                                 // All validators currently get a vote power of 1
                                 VotePower::of(1),
                             )?;
+                            if activation_epoch <= self.current_epoch() {
+                                invalidate_committee_cache = true;
+                            }
                         },
                         ValidatorNodeChange::Remove { public_key } => {
                             info!(
@@ -220,8 +224,14 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                             );
 
                             self.inner.deactivate_validator_node(public_key, epoch)?;
+                            if epoch <= self.current_epoch() {
+                                invalidate_committee_cache = true;
+                            }
                         },
                     }
+                }
+                if invalidate_committee_cache {
+                    self.committee_cache.clear().await;
                 }
             },
             EpochEvent::NewValidatorRegistered {

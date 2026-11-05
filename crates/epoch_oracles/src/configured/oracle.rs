@@ -189,17 +189,23 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
     fn prepare_next_epoch(&mut self, epoch_ticker_data: EpochTickerData) -> anyhow::Result<()> {
         let next_epoch = epoch_ticker_data.epoch;
         let epoch_hash = epoch_ticker_data.epoch_hash;
+        let done_for_now = epoch_ticker_data.done_for_now;
         if next_epoch.is_zero() {
             // If at epoch 0, just emit the epoch changed and done for now events
             self.pending_events.push_back(EpochEvent::EpochChanged {
                 epoch: next_epoch,
                 epoch_hash,
             });
+            if done_for_now {
+                self.pending_events.push_back(EpochEvent::DoneForNow {
+                    epoch: next_epoch,
+                    epoch_hash,
+                });
+            }
 
             return Ok(());
         }
 
-        let done_for_now = epoch_ticker_data.done_for_now;
         let current_epoch = next_epoch - Epoch(1);
         self.store
             .set(StoreKey::ConfiguredCurrentEpoch.as_key_bytes(), &next_epoch)?;
@@ -252,7 +258,7 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
                         .map(|vn| ValidatorNodeChange::Add {
                             claim_public_key: vn.claim_key,
                             validator_node_public_key: vn.public_key,
-                            activation_epoch: next_epoch,
+                            activation_epoch: epoch,
                             minimum_value_promise: 0,
                             shard_key: vn.shard_key,
                         })
@@ -738,6 +744,43 @@ mod tests {
         assert!(
             matches!(events.as_slice(), [EpochEvent::Error(_)]),
             "an invalid config must surface as an error, not a partial event stream; got {events:?}"
+        );
+    }
+
+    #[test]
+    fn skipped_epochs_preserve_configured_activation_epoch_and_epoch_zero_emits_done_for_now() {
+        let v1 = mk_validator(1, Epoch(2));
+        let v2 = mk_validator(2, Epoch(4));
+        let config = mk_config(vec![v1.clone(), v2.clone()]);
+        let ticker = ScriptedTicker::new(vec![
+            EpochTickerData {
+                epoch: Epoch(0),
+                epoch_hash: FixedHash::zero(),
+                done_for_now: true,
+            },
+            EpochTickerData {
+                epoch: Epoch(10),
+                epoch_hash: FixedHash::zero(),
+                done_for_now: true,
+            },
+        ]);
+        let mut oracle = ConfiguredEpochOracle::with_custom_ticker(config, TestStore::default(), ticker);
+
+        let events = drive_events(&mut oracle);
+
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, EpochEvent::DoneForNow { epoch, .. } if *epoch == Epoch(0))),
+            "epoch 0 with done_for_now=true must emit DoneForNow; got {events:?}"
+        );
+        assert_eq!(
+            added_validators(&events)
+                .into_iter()
+                .map(|(_, claim_key, activation_epoch, _)| (claim_key, activation_epoch))
+                .collect::<Vec<_>>(),
+            vec![(v1.claim_key, Epoch(3)), (v2.claim_key, Epoch(5))],
+            "validators activated across skipped epochs must retain their configured activation_epoch"
         );
     }
 }

@@ -59,13 +59,13 @@ fn missing_transactions_operations(db: impl StateStore) {
 
     // missing_transactions_insert
     let missing_transaction_ids = vec![&atom1.id, &atom2.id];
-    tx.parked_block_insert(&block1, &[], ProposalOrigin::Live, missing_transaction_ids.clone())
-        .unwrap();
-    // The block arrives again through catch-up, which marks it as certified
     tx.parked_block_insert(&block1, &[], ProposalOrigin::CatchUp, missing_transaction_ids.clone())
         .unwrap();
-    // and a later live delivery leaves it so
-    tx.parked_block_insert(&block1, &[], ProposalOrigin::Live, missing_transaction_ids)
+    // A live delivery marks the block as live
+    tx.parked_block_insert(&block1, &[], ProposalOrigin::Live, missing_transaction_ids.clone())
+        .unwrap();
+    // and a later catch-up delivery leaves it so
+    tx.parked_block_insert(&block1, &[], ProposalOrigin::CatchUp, missing_transaction_ids)
         .unwrap();
 
     // The block stays parked while it is still waiting on atom2
@@ -79,6 +79,31 @@ fn missing_transactions_operations(db: impl StateStore) {
         .expect("block should be unparked once no transactions are missing");
     assert_eq!(unparked.id(), block1.id());
     assert!(foreign_proposals.is_empty());
+    assert_eq!(origin, ProposalOrigin::Live);
+
+    tx.rollback().unwrap();
+}
+
+#[test]
+fn a_block_parked_only_through_catch_up_unparks_as_catch_up() {
+    let (db, _tmp) = create_rocksdb();
+    let mut tx = db.create_write_tx().unwrap();
+
+    let genesis = create_block(None);
+    genesis.insert(&mut tx).unwrap();
+
+    let atom = create_tx_atom();
+    let block = parked_block_at(&genesis, Epoch(0), NodeHeight(1), Command::LocalPrepare(atom.clone()));
+    tx.parked_block_insert(&block, &[], ProposalOrigin::CatchUp, [&atom.id])
+        .unwrap();
+    tx.parked_block_insert(&block, &[], ProposalOrigin::CatchUp, [&atom.id])
+        .unwrap();
+
+    let (unparked, _, origin) = tx
+        .parked_block_remove_missing_transaction(atom.id())
+        .unwrap()
+        .expect("block should be unparked once no transactions are missing");
+    assert_eq!(unparked.id(), block.id());
     assert_eq!(origin, ProposalOrigin::CatchUp);
 
     tx.rollback().unwrap();

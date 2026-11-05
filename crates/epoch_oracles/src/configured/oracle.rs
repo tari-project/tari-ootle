@@ -190,32 +190,6 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
         let next_epoch = epoch_ticker_data.epoch;
         let epoch_hash = epoch_ticker_data.epoch_hash;
         let done_for_now = epoch_ticker_data.done_for_now;
-        if next_epoch.is_zero() {
-            if let Some(vns) = self.queued_validators.get(&Epoch(1)) {
-                self.pending_events.extend(
-                    vns.iter()
-                        .filter(|vn| vn.kind == ActivationKind::Registration)
-                        .map(|vn| EpochEvent::NewValidatorRegistered {
-                            epoch: next_epoch,
-                            claim_public_key: vn.claim_key,
-                            validator_node_public_key: vn.public_key,
-                        }),
-                );
-            }
-            // If at epoch 0, just emit the epoch changed and done for now events
-            self.pending_events.push_back(EpochEvent::EpochChanged {
-                epoch: next_epoch,
-                epoch_hash,
-            });
-            if done_for_now {
-                self.pending_events.push_back(EpochEvent::DoneForNow {
-                    epoch: next_epoch,
-                    epoch_hash,
-                });
-            }
-
-            return Ok(());
-        }
 
         self.store
             .set(StoreKey::ConfiguredCurrentEpoch.as_key_bytes(), &next_epoch)?;

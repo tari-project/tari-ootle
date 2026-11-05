@@ -10,6 +10,14 @@ pub struct WasmLimits {
     pub max_function_name_length: usize,
     /// Maximum number of functions a template's ABI definition may list.
     pub max_functions: usize,
+    /// Maximum depth of an ABI type a template declares for an argument or return value, the type itself at depth 1.
+    /// The engine renders a declared type into the message of a dispatcher's decode failure, so every ABI type is
+    /// bounded in depth, in parts ([`WasmLimits::max_abi_type_nodes`]), in tuple width
+    /// ([`WasmLimits::max_function_arguments`]) and in name length ([`WasmLimits::max_function_name_length`]) at
+    /// every level.
+    pub max_abi_type_depth: usize,
+    /// Maximum number of types, counting every nested one, in an ABI type a template declares.
+    pub max_abi_type_nodes: usize,
     /// Maximum number of functions a module may contain, imported and defined together. Every one
     /// of them is Cranelift-compiled at publish, at a cost per function that its bytes do not
     /// reflect: an empty function is four bytes of binary. `rustc`'s wasm32 output for the
@@ -74,6 +82,8 @@ pub const WASM_LIMITS: WasmLimits = WasmLimits {
     max_function_arguments: 32,
     max_function_name_length: 256,
     max_functions: 8192,
+    max_abi_type_depth: 16,
+    max_abi_type_nodes: 256,
     max_module_functions: 2048,
     max_module_variables: 512 * 1024,
     max_function_metering_checks: 8192,

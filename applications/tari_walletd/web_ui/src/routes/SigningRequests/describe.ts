@@ -206,14 +206,31 @@ export interface InstructionsDescription {
 function withdrawnValue(method: string, args: InstructionArg[], blobs: Blobs): WithdrawnValue | null {
   switch (method) {
     case "withdraw":
+      if (args.length !== 2) {
+        return null;
+      }
       return { kind: "amount", amount: amount(argValue(args[1], blobs)) };
     case "withdraw_approved":
+      if (args.length !== 3) {
+        return null;
+      }
+      argValue(args[0], blobs);
       return { kind: "amount", amount: amount(argValue(args[2], blobs)) };
     case "withdraw_all":
+      if (args.length !== 1) {
+        return null;
+      }
       return { kind: "all" };
     case "withdraw_non_fungible":
+      if (args.length !== 2) {
+        return null;
+      }
+      argValue(args[1], blobs);
       return { kind: "non_fungibles", count: 1 };
     case "withdraw_many_non_fungibles": {
+      if (args.length !== 2) {
+        return null;
+      }
       const ids = argValue(args[1], blobs);
       if (!Array.isArray(ids)) {
         throw new Error("non-fungible ids are not a list");
@@ -221,6 +238,10 @@ function withdrawnValue(method: string, args: InstructionArg[], blobs: Blobs): W
       return { kind: "non_fungibles", count: ids.length };
     }
     case "withdraw_confidential":
+      if (args.length !== 2) {
+        return null;
+      }
+      argValue(args[1], blobs);
       return { kind: "confidential" };
     default:
       return null;
@@ -285,6 +306,22 @@ function workspaceKeysRead(instruction: Instruction): number[] {
   return [];
 }
 
+function workspaceKeysWritten(instruction: Instruction): number[] {
+  if (typeof instruction !== "object") {
+    return [];
+  }
+  if ("PutLastInstructionOutputOnWorkspace" in instruction) {
+    return [instruction.PutLastInstructionOutputOnWorkspace.key];
+  }
+  if ("TakeFromBucket" in instruction) {
+    return [instruction.TakeFromBucket.output_bucket];
+  }
+  if ("AllocateAddress" in instruction) {
+    return [instruction.AllocateAddress.workspace_id];
+  }
+  return [];
+}
+
 function wholeItem({ id, offset }: WorkspaceOffsetId): number | null {
   return offset == null ? id : null;
 }
@@ -333,6 +370,9 @@ export function describeInstructions(
   // Workspace key -> the withdrawal whose bucket it holds, until something
   // other than a whole-bucket deposit or fee payment touches it.
   const buckets = new Map<number, AccountWithdrawal>();
+  // Workspace keys holding an untouched bucket produced by a `StealthTransfer`,
+  // which can pay the transaction fee via `PayFeeFromBucket`.
+  const stealthBuckets = new Set<number>();
 
   for (let i = 0; i < instructions.length; i++) {
     const instruction = instructions[i];
@@ -341,24 +381,35 @@ export function describeInstructions(
     for (const key of workspaceKeysRead(instruction)) {
       if (key !== consumer?.key) {
         buckets.delete(key);
+        stealthBuckets.delete(key);
+      } else if (consumer.destination.kind !== "fee") {
+        stealthBuckets.delete(key);
       }
     }
-    const consumed = consumer ? buckets.get(consumer.key) : undefined;
-    if (consumer && consumed) {
-      consumed.destination = consumer.destination;
-      buckets.delete(consumer.key);
-      continue;
+    for (const key of workspaceKeysWritten(instruction)) {
+      buckets.delete(key);
+      stealthBuckets.delete(key);
+    }
+    if (consumer) {
+      const consumed = buckets.get(consumer.key);
+      if (consumed) {
+        consumed.destination = consumer.destination;
+        buckets.delete(consumer.key);
+        continue;
+      }
+      if (consumer.destination.kind === "fee" && stealthBuckets.delete(consumer.key)) {
+        continue;
+      }
     }
 
     if (typeof instruction === "object" && "StealthTransfer" in instruction) {
       const next = instructions[i + 1];
       if (next && typeof next === "object" && "PutLastInstructionOutputOnWorkspace" in next) {
+        const { key } = next.PutLastInstructionOutputOnWorkspace;
+        buckets.delete(key);
+        stealthBuckets.add(key);
         i++;
       }
-      continue;
-    }
-
-    if (typeof instruction === "object" && "PayFeeFromBucket" in instruction) {
       continue;
     }
 
@@ -366,7 +417,7 @@ export function describeInstructions(
     if (target && ownAccounts.has(target.address)) {
       const { address, method, args } = target;
       try {
-        if (method === "pay_fee") {
+        if (method === "pay_fee" && args.length === 1) {
           fees.push({ account: address, amount: amount(argValue(args[0], blobs)) });
           continue;
         }
@@ -382,7 +433,9 @@ export function describeInstructions(
           withdrawals.push(withdrawal);
           const next = instructions[i + 1];
           if (next && typeof next === "object" && "PutLastInstructionOutputOnWorkspace" in next) {
-            buckets.set(next.PutLastInstructionOutputOnWorkspace.key, withdrawal);
+            const { key } = next.PutLastInstructionOutputOnWorkspace;
+            stealthBuckets.delete(key);
+            buckets.set(key, withdrawal);
             i++;
           }
           continue;
@@ -402,7 +455,7 @@ export function describeInstructions(
 /// amount is a literal or a blob.
 export function describeFee(instruction: Instruction, blobs: Blobs): string | null {
   const target = callTarget(instruction);
-  if (!target || target.method !== "pay_fee") {
+  if (!target || target.method !== "pay_fee" || target.args.length !== 1) {
     return null;
   }
   try {

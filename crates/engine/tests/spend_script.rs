@@ -1061,7 +1061,11 @@ fn spend_rejects_wrong_bound_arg_count() {
 #[test]
 fn spend_rejects_malformed_bound_arg() {
     // `timelock` expects one bound argument; provide one whose bytes are not well-formed CBOR (trailing data).
-    assert_spend_rejected("timelock", vec![Bytes::from_vec(vec![0x00, 0x00])], "well-formed CBOR");
+    assert_spend_rejected(
+        "timelock",
+        vec![Bytes::from_vec(vec![0x00, 0x00])],
+        "bytes remaining on input",
+    );
 }
 
 #[test]

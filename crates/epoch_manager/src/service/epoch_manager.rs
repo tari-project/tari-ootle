@@ -43,7 +43,11 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::{
     AtomicDb,
-    global::{GlobalDb, MetadataKey, models::ValidatorNode},
+    global::{
+        GlobalDb,
+        MetadataKey,
+        models::{ShardGroupSize, ValidatorNode},
+    },
 };
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_sidechain::FixedHash;
@@ -472,9 +476,11 @@ where TSpec: EpochManagerSpec
         let num_committees = self.get_number_of_committees(epoch)?;
         let mut tx = self.global_db.create_transaction()?;
         let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
-        let num_validators = validator_node_db.count_in_shard_group(epoch, shard_group)?;
-        let total_vote_power = validator_node_db.total_power_in_shard_group(epoch, shard_group)?;
-        let num_validators = u32::try_from(num_validators).map_err(|_| EpochManagerError::IntegerOverflow {
+        let ShardGroupSize {
+            num_members,
+            total_power,
+        } = validator_node_db.size_of_shard_group(epoch, shard_group)?;
+        let num_validators = u32::try_from(num_members).map_err(|_| EpochManagerError::IntegerOverflow {
             func: "get_committee_info",
         })?;
         Ok(CommitteeInfo::new(
@@ -483,7 +489,7 @@ where TSpec: EpochManagerSpec
             num_committees,
             shard_group,
             epoch,
-            total_vote_power,
+            total_power,
         ))
     }
 

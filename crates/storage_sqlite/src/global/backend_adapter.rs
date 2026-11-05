@@ -54,7 +54,12 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::{
     AtomicDb,
-    global::{BlockHeaderModel, EpochData, GlobalDbAdapter, models::ValidatorNode},
+    global::{
+        BlockHeaderModel,
+        EpochData,
+        GlobalDbAdapter,
+        models::{ShardGroupSize, ValidatorNode},
+    },
 };
 use tari_sidechain::FixedHash;
 use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
@@ -396,12 +401,12 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         Ok(count as u64)
     }
 
-    fn validator_nodes_total_power_for_shard_group(
+    fn validator_nodes_size_of_shard_group(
         &self,
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
         shard_group: ShardGroup,
-    ) -> Result<VotePower, Self::Error> {
+    ) -> Result<ShardGroupSize, Self::Error> {
         use crate::global::schema::{committees, validator_nodes};
 
         let powers = committees::table
@@ -413,15 +418,20 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .get_results::<(i32, i64)>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "validator_nodes_total_power_for_shard_group",
+                operation: "validator_nodes_size_of_shard_group",
             })?;
 
-        powers.into_iter().try_fold(VotePower::zero(), |total, (id, power)| {
+        let num_members = powers.len() as u64;
+        let total_power = powers.into_iter().try_fold(VotePower::zero(), |total, (id, power)| {
             total
                 .checked_add(models::power_from_db(power, id)?)
                 .ok_or_else(|| SqliteStorageError::ConversionError {
                     reason: format!("Total vote power of shard group {shard_group} in epoch {epoch} overflows u64"),
                 })
+        })?;
+        Ok(ShardGroupSize {
+            num_members,
+            total_power,
         })
     }
 

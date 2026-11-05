@@ -13,6 +13,10 @@ use anyhow::bail;
 use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, SubstateAddress, VotePower, displayable::Displayable};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
+/// The most vote power the configured validators may hold between them. Leader selection simulates up to
+/// `total_power × committee size` steps per call, so every committee's total power must stay a small integer.
+pub const MAX_TOTAL_VOTE_POWER: u64 = 1 << 16;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {
     #[serde(with = "ootle_serde::duration::optional_seconds")]
@@ -31,17 +35,16 @@ impl Config {
     pub fn validate(&self) -> anyhow::Result<()> {
         let mut seen = HashSet::with_capacity(self.validators.len());
         // Every committee's total power is a sum over a subset of these validators, so bounding the network-wide sum
-        // to the i64 storage range bounds every stored power and every committee total.
+        // bounds every committee total.
         let mut total_power = 0u64;
         for validator in &self.validators {
             total_power = total_power
                 .checked_add(validator.power.get())
-                .filter(|total| i64::try_from(*total).is_ok())
+                .filter(|total| *total <= MAX_TOTAL_VOTE_POWER)
                 .ok_or_else(|| {
                     anyhow::anyhow!(
-                        "The configured validators' vote power sums to more than {}. Lower the `power` of one or more \
-                         validators.",
-                        i64::MAX
+                        "The configured validators' vote power sums to more than {MAX_TOTAL_VOTE_POWER}. Lower the \
+                         `power` of one or more validators."
                     )
                 })?;
             // A second entry for a validator would activate it twice. Listing it twice at one registration epoch
@@ -99,7 +102,8 @@ pub struct Validator {
     /// key is unaffected by a rotation.
     #[serde(default)]
     pub claim_key_changes: Vec<ClaimKeyChange>,
-    /// The validator's vote power in stake units.
+    /// The validator's vote power: a small integer count of stake units. The power of all configured validators
+    /// together is capped at [`MAX_TOTAL_VOTE_POWER`].
     ///
     /// Power is fixed for the life of the registration: a claim key rotation re-registers the validator with this
     /// same power. Shard key derivation excludes it, so a validator's place in its committee is independent of stake.
@@ -397,18 +401,18 @@ mod tests {
     }
 
     #[test]
-    fn total_power_beyond_the_storage_range_is_rejected() {
+    fn total_power_beyond_the_cap_is_rejected() {
         let with_power = |seed, power| Validator {
             public_key: mk_key(seed),
             power: NonZeroU64::new(power).unwrap(),
             ..mk_validator(vec![])
         };
-        let at_limit = mk_config(vec![with_power(1, i64::MAX as u64 - 1), with_power(9, 1)]);
+        let at_limit = mk_config(vec![with_power(1, MAX_TOTAL_VOTE_POWER - 1), with_power(9, 1)]);
         at_limit.validate().unwrap();
 
         for validators in [
-            vec![with_power(1, i64::MAX as u64 + 1)],
-            vec![with_power(1, i64::MAX as u64), with_power(9, 1)],
+            vec![with_power(1, MAX_TOTAL_VOTE_POWER + 1)],
+            vec![with_power(1, MAX_TOTAL_VOTE_POWER), with_power(9, 1)],
             vec![with_power(1, u64::MAX), with_power(9, u64::MAX)],
         ] {
             let err = mk_config(validators).validate().unwrap_err().to_string();

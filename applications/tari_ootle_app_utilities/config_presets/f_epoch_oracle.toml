@@ -40,8 +40,8 @@
 #    "claim_key": "04efea68c9bff8f9c25fe89310abf91955e33344f4b77bb0d31ea80a80128e67",
 #    "shard_group": {"start": 1,"end_inclusive": 256},
 #    "registration_epoch": 5,
-#    // Optional, defaults to 1. Vote power in stake units. Must be at least 1, and is fixed once the validator has
-#    // activated.
+#    // Optional, defaults to 1. Vote power: a small integer count of stake units. Must be at least 1,
+#    // all validators' power together must not exceed 65536, and it is fixed once the validator has activated.
 #    "power": 1,
 #    // Optional. Rotates the validator's claim key from the start of each `effective_epoch`.
 #    "claim_key_changes": [

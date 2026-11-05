@@ -794,9 +794,9 @@ impl ResourceContainer {
                         )));
                     }
                     if token_ids.contains(token) {
-                        return Err(ResourceError::InvariantError(
-                            "unlock: container contained duplicate token".to_string(),
-                        ));
+                        return Err(ResourceError::InvariantError(format!(
+                            "unlock: token {token} is already held unlocked"
+                        )));
                     }
                 }
                 for token in container.non_fungible_token_ids() {
@@ -1320,6 +1320,16 @@ mod tests {
         let dup_conf = ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c1], Amount::from(0u64));
         let err = conf_dest.deposit(dup_conf).unwrap_err();
         assert!(matches!(err, ResourceError::InvariantError(_)));
+
+        // Confidential deposit whose revealed sum overflows leaves the destination commitment set unchanged.
+        let c2 = PedersenCommitmentBytes::from([2u8; 32]);
+        let mut overflow_dest =
+            ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c1], Amount::MAX);
+        let incoming =
+            ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c2], Amount::from(1u64));
+        let err = overflow_dest.deposit(incoming).unwrap_err();
+        assert!(matches!(err, ResourceError::BalanceOverflow { operate: "deposit", .. }));
+        assert_eq!(overflow_dest.get_commitment_count(), 1);
     }
 
     #[test]

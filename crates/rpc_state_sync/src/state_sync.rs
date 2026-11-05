@@ -13,7 +13,7 @@ use ootle_network::Network;
 use rand::seq::SliceRandom;
 use tari_consensus::{
     check_quorum_certificate_signatures,
-    traits::{ConsensusSpec, SyncManager, SyncStatus},
+    traits::{ConsensusSpec, PresyncStatus, SyncManager, SyncStatus, ValidatorSignerService},
 };
 use tari_consensus_types::{LeafBlock, ProposalCertificate};
 use tari_epoch_manager::EpochManagerReader;
@@ -299,6 +299,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
     async fn get_sync_sources(
         &self,
         local_shard_group: ShardGroup,
+        local_committee: &Committee<PeerAddress>,
         current_epoch: Epoch,
         our_vn_addr: &PeerAddress,
         skipped_peers: &HashSet<PeerAddress>,
@@ -320,16 +321,15 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             return Err(RpcStateSyncError::NoCommittees(prev_epoch));
         }
 
-        // Every shard this sync requests lies in local_shard_group, and every member of our current committee
+        // Every shard this sync requests lies in local_shard_group, and every member of its current committee
         // holds the previous epoch's state for exactly that range. After a split, members of other current
         // committees hold only their own sub-range of the previous shard group.
-        let local_committee = self.epoch_manager.get_local_committee(current_epoch).await?;
         let sources = prev_committees
             .into_iter()
             .map(|(shard_group, signing_committee)| {
                 (
                     shard_group,
-                    SyncSource::new(signing_committee, &local_committee, our_vn_addr, skipped_peers),
+                    SyncSource::new(signing_committee, local_committee, our_vn_addr, skipped_peers),
                 )
             })
             .collect::<HashMap<_, _>>();
@@ -531,10 +531,16 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         })
     }
 
+    fn report_sync(&mut self, kind: &str, result: Result<(), RpcStateSyncError>) -> Result<(), RpcStateSyncError> {
+        match &result {
+            Ok(()) => info!(target: LOG_TARGET, "🛜{kind} completed successfully: {}", self.stats),
+            Err(err) => warn!(target: LOG_TARGET, "🛜{kind} failed: {err} (stats: {})", self.stats),
+        }
+        self.stats = StateSyncStats::default();
+        result
+    }
+
     async fn sync_inner(&mut self, target_epoch: Option<Epoch>) -> Result<(), RpcStateSyncError> {
-        let timer = Instant::now();
-        self.unsaved_checkpoints.clear();
-        discard_all_unverified_state(&self.state_store)?;
         // Use the caller-provided target if any (typically the highest epoch resolved by a
         // stall-recovery probe), otherwise fall back to the oracle's current epoch.
         let current_epoch = match target_epoch {
@@ -549,9 +555,62 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         };
         let our_vn = self.epoch_manager.get_our_validator_node(current_epoch).await?;
         let local_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
+        let local_committee = self.epoch_manager.get_local_committee(current_epoch).await?;
+        self.sync_shard_group(
+            current_epoch,
+            local_info.shard_group(),
+            local_info.num_preshards(),
+            &local_committee,
+            &our_vn.address,
+        )
+        .await
+    }
+
+    /// Syncs `shard_group` to the checkpoint ending the epoch before `current_epoch`, for a node outside its
+    /// committee that joins it at a later epoch. A later presync or the member sync at activation extends the state.
+    async fn presync_inner(&mut self, shard_group: ShardGroup, current_epoch: Epoch) -> Result<(), RpcStateSyncError> {
+        info!(target: LOG_TARGET, "🛜 Presyncing {shard_group} at epoch {current_epoch}");
+        let our_address = PeerAddress::from(self.signer_service.public_key().clone());
+        let committee_info = self
+            .epoch_manager
+            .get_committee_info(current_epoch, shard_group)
+            .await?;
+        let committee = self
+            .epoch_manager
+            .get_committee_by_shard_group(current_epoch, shard_group)
+            .await?;
+        self.sync_shard_group(
+            current_epoch,
+            shard_group,
+            committee_info.num_preshards(),
+            &committee,
+            &our_address,
+        )
+        .await
+    }
+
+    /// Syncs `local_shard_group` and the global shard to the checkpoint of the epoch before `current_epoch`.
+    /// `local_committee` is `local_shard_group`'s committee at `current_epoch`, whose members serve state first.
+    async fn sync_shard_group(
+        &mut self,
+        current_epoch: Epoch,
+        local_shard_group: ShardGroup,
+        num_preshards: NumPreshards,
+        local_committee: &Committee<PeerAddress>,
+        our_address: &PeerAddress,
+    ) -> Result<(), RpcStateSyncError> {
+        let timer = Instant::now();
+        self.unsaved_checkpoints.clear();
+        discard_all_unverified_state(&self.state_store)?;
         let skipped_peers = self.skipped_peers.start_run(current_epoch);
         let sync_sources = match self
-            .get_sync_sources(local_info.shard_group(), current_epoch, &our_vn.address, &skipped_peers)
+            .get_sync_sources(
+                local_shard_group,
+                local_committee,
+                current_epoch,
+                our_address,
+                &skipped_peers,
+            )
             .await
         {
             Ok(sources) => sources,
@@ -566,18 +625,12 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         if sync_sources.len() == 1 &&
             sync_sources.values().all(|source| {
                 source.signing_committee.len() == 1 &&
-                    source
-                        .signing_committee
-                        .address_iter()
-                        .all(|addr| *addr == our_vn.address)
+                    source.signing_committee.address_iter().all(|addr| addr == our_address)
             })
         {
             info!(target: LOG_TARGET, "This node is the only Validator in the previous committee - no need to sync.");
             return Ok(());
         }
-
-        let local_shard_group = local_info.shard_group();
-        let num_preshards = local_info.num_preshards();
 
         self.sync_global_shard(current_epoch, num_preshards, &sync_sources)
             .await?;
@@ -988,7 +1041,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
                 .with_read_tx(|tx| EpochCheckpoint::get_last_checkpoint(tx))
                 .optional()?;
             if let Some(checkpoint) = maybe_checkpoint &&
-                checkpoint.epoch() + Epoch(1) >= oracle_epoch &&
+                checkpoint_admits_leafless_join(checkpoint.epoch(), oracle_epoch) &&
                 self.local_state_matches_checkpoint(&checkpoint, oracle_epoch).await?
             {
                 return Ok(SyncStatus::UpToDate);
@@ -1095,16 +1148,28 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
     }
 
     async fn sync(&mut self, target_epoch: Option<Epoch>) -> Result<(), Self::Error> {
-        if let Err(err) = self.sync_inner(target_epoch).await {
-            warn!(target: LOG_TARGET, "🛜State sync failed: {err} (stats: {})", self.stats);
-            self.stats = StateSyncStats::default();
-            return Err(err);
+        let result = self.sync_inner(target_epoch).await;
+        self.report_sync("State sync", result)
+    }
+
+    async fn presync(&mut self, shard_group: ShardGroup, epoch: Epoch) -> Result<PresyncStatus, Self::Error> {
+        if self.skip_sync {
+            warn!(target: LOG_TARGET, "🛜 State sync is disabled (--skip-sync). Not presyncing {shard_group}.");
+            return Ok(PresyncStatus::Synced);
         }
-
-        info!(target: LOG_TARGET, "🛜State sync completed successfully: {}", self.stats);
-
-        self.stats = StateSyncStats::default();
-        Ok(())
+        match self.presync_inner(shard_group, epoch).await {
+            Err(RpcStateSyncError::CheckpointNotAvailable {
+                epoch: checkpoint_epoch,
+            }) => {
+                info!(
+                    target: LOG_TARGET,
+                    "🛜 No peer holds the checkpoint for epoch {checkpoint_epoch} yet. Presync of {shard_group} will retry."
+                );
+                self.stats = StateSyncStats::default();
+                Ok(PresyncStatus::CheckpointNotAvailable)
+            },
+            result => self.report_sync("Presync", result).map(|()| PresyncStatus::Synced),
+        }
     }
 }
 
@@ -1138,6 +1203,15 @@ impl LaterGenesisReports {
             None
         }
     }
+}
+
+/// True if a node with no leaf block whose latest stored checkpoint ends `checkpoint_epoch` may join consensus at
+/// `oracle_epoch` from its local state, provided that state matches the checkpoint. The checkpoint must end no earlier
+/// than the epoch before `oracle_epoch`, whose state the committee starts `oracle_epoch` from. A presync runs while the
+/// node's activation epoch is still in the future, so the checkpoint it stores ends two or more epochs before
+/// activation and never admits the join: the node syncs the remaining epochs first.
+fn checkpoint_admits_leafless_join(checkpoint_epoch: Epoch, oracle_epoch: Epoch) -> bool {
+    checkpoint_epoch + Epoch(1) >= oracle_epoch
 }
 
 /// True if the peer could not supply the `prev_epoch` checkpoint yet, which another peer or a later attempt
@@ -1299,6 +1373,22 @@ mod tests {
         store
             .with_read_tx(|tx| local_state_matches_checkpoints(tx, CHECKPOINT_EPOCH, shard_group))
             .unwrap()
+    }
+
+    #[test]
+    fn a_presynced_checkpoint_does_not_admit_a_join_at_activation() {
+        let activation_epoch = Epoch(10);
+        // The latest presync ran while activation_epoch - 1 was current, syncing to the checkpoint before it.
+        let presynced_checkpoint_epoch = activation_epoch - Epoch(2);
+        assert!(!checkpoint_admits_leafless_join(
+            presynced_checkpoint_epoch,
+            activation_epoch
+        ));
+    }
+
+    #[test]
+    fn the_previous_epochs_checkpoint_admits_a_leafless_join() {
+        assert!(checkpoint_admits_leafless_join(Epoch(9), Epoch(10)));
     }
 
     #[test]

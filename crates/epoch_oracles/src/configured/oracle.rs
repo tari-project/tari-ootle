@@ -185,6 +185,24 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             self.queued_validators.values().map(|vns| vns.len()).sum::<usize>(),
         );
 
+        // Every pending registration is announced on each start, as far ahead of its activation as the config
+        // allows, so that a validator scheduled to join can sync its shard group's state before it activates and can
+        // resume doing so after a restart. A claim key rotation is not a new registration, so it is not announced.
+        let announcements = self
+            .queued_validators
+            .iter()
+            .flat_map(|(activation_epoch, vns)| vns.iter().map(move |vn| (*activation_epoch, vn)))
+            .filter(|(_, vn)| vn.kind == ActivationKind::Registration)
+            .map(|(activation_epoch, vn)| EpochEvent::NewValidatorRegistered {
+                epoch,
+                claim_public_key: vn.claim_key,
+                validator_node_public_key: vn.public_key,
+                activation_epoch,
+                shard_key: vn.shard_key,
+            })
+            .collect::<Vec<_>>();
+        self.pending_events.extend(announcements);
+
         Ok(())
     }
 
@@ -216,26 +234,6 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             target: LOG_TARGET,
             "☘️ Preparing next epoch {next_epoch}",
         );
-        let next_next_epoch = next_epoch + Epoch(1);
-        if let Some(vns) = self.queued_validators.get(&next_next_epoch) {
-            debug!(
-                target: LOG_TARGET,
-                "☘️ {} VNS registered for epoch {next_next_epoch}",
-                vns.len()
-            );
-            // Emit these one epoch before a VN becomes active. A claim key rotation is not a new registration, so
-            // it is not announced.
-            self.pending_events.extend(
-                vns.iter()
-                    .filter(|vn| vn.kind == ActivationKind::Registration)
-                    .map(|vn| EpochEvent::NewValidatorRegistered {
-                        epoch: next_epoch,
-                        claim_public_key: vn.claim_key,
-                        validator_node_public_key: vn.public_key,
-                    }),
-            )
-        }
-
         // Activate all validators queued at or before next_epoch (handles skipped epochs).
         // split_off returns everything > next_epoch, leaving everything <= next_epoch in place.
         let remaining = self.queued_validators.split_off(&(next_epoch + Epoch(1)));
@@ -495,6 +493,60 @@ mod tests {
         );
     }
 
+    /// The (activation epoch, shard key) of each `NewValidatorRegistered` in `events`.
+    fn announced_registrations(events: &[EpochEvent]) -> Vec<(Epoch, SubstateAddress)> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                EpochEvent::NewValidatorRegistered {
+                    activation_epoch,
+                    shard_key,
+                    ..
+                } => Some((*activation_epoch, *shard_key)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_pending_registration_is_announced_before_the_first_tick() {
+        let validator = mk_validator(1, Epoch(10));
+        let shard_key = validator.calculate_shard_key();
+        let mut oracle = ConfiguredEpochOracle::with_custom_ticker(
+            mk_config(vec![validator]),
+            TestStore::default(),
+            ticker_through(0),
+        );
+
+        let events = drive_events(&mut oracle);
+
+        assert!(
+            matches!(events.first(), Some(EpochEvent::NewValidatorRegistered { .. })),
+            "the registration must be announced ahead of every epoch change; got {events:?}"
+        );
+        assert_eq!(announced_registrations(&events), vec![(Epoch(11), shard_key)]);
+    }
+
+    #[test]
+    fn restart_before_activation_announces_the_pending_registration_again() {
+        let validator = mk_validator(1, Epoch(10));
+        let shard_key = validator.calculate_shard_key();
+        let store = TestStore::default();
+        store
+            .set(StoreKey::ConfiguredCurrentEpoch.as_key_bytes(), &Epoch(5))
+            .unwrap();
+        let ticker = ScriptedTicker::new(vec![EpochTickerData {
+            epoch: Epoch(5),
+            epoch_hash: FixedHash::zero(),
+            done_for_now: true,
+        }]);
+        let mut oracle = ConfiguredEpochOracle::with_custom_ticker(mk_config(vec![validator]), store, ticker);
+
+        let events = drive_events(&mut oracle);
+
+        assert_eq!(announced_registrations(&events), vec![(Epoch(11), shard_key)]);
+    }
+
     #[test]
     fn fresh_start_activates_validators_at_activation_epoch() {
         let config = mk_config(vec![mk_validator(1, Epoch(10))]);
@@ -749,6 +801,22 @@ mod tests {
         assert!(
             matches!(events.as_slice(), [EpochEvent::Error(_)]),
             "an invalid config must surface as an error, not a partial event stream; got {events:?}"
+        );
+    }
+
+    #[test]
+    fn epoch_zero_emits_done_for_now_when_ticker_is_done() {
+        let config = mk_config(vec![]);
+        let mut oracle = ConfiguredEpochOracle::with_custom_ticker(config, TestStore::default(), ticker_through(0));
+
+        let events = drive_events(&mut oracle);
+
+        assert!(
+            matches!(events.as_slice(), [
+                EpochEvent::EpochChanged { epoch: Epoch(0), .. },
+                EpochEvent::DoneForNow { epoch: Epoch(0), .. }
+            ]),
+            "epoch 0 must emit DoneForNow when done_for_now is true; got {events:?}"
         );
     }
 

@@ -276,7 +276,37 @@ fn script_path_zero_of_n_access_rule_leaf_denies_spend() {
             .seal(test.secret_key()),
         vec![],
     );
-    assert_reject_reason(&reason, "Access Denied");
+    assert_reject_reason(
+        &reason,
+        "spend_condition has an m_of_n rule requiring 0 of 1 requirements",
+    );
+}
+
+#[test]
+fn script_path_duplicate_m_of_n_access_rule_leaf_denies_spend() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let signer = test.to_public_key_bytes();
+    let (_secret, other_pk) = create_key_pair_from_seed(99);
+    let other = other_pk.to_byte_type();
+    let (resx, mint) = mint_utxo(
+        &mut test,
+        conditions(vec![SpendCondition::access_rule(rule!(m_of_n(
+            2,
+            public_key(signer),
+            public_key(signer),
+            public_key(other)
+        )))]),
+    );
+
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "spend_condition has an m_of_n rule that lists");
 }
 
 // -------------------------------- Script path: multi-leaf tree -------------------------------- //

@@ -4025,10 +4025,13 @@ mod tests {
                 .unwrap();
             assert_eq!(utxo_updates.max_epoch, Epoch(2));
             assert_eq!(utxo_updates.max_state_version, v(50));
-            assert_eq!(utxo_updates.updates, [WalletUtxoUpdate::Burnt(UtxoBurnt {
-                id: burnt_id,
-                version: 0,
-            })]);
+            assert_eq!(utxo_updates.updates.len(), 1);
+            assert!(
+                matches!(&utxo_updates.updates[0], WalletUtxoUpdate::Burnt(UtxoBurnt { id, version })
+                    if *id == burnt_id && *version == SubstateVersion::ZERO),
+                "{:?}",
+                utxo_updates.updates[0]
+            );
             let after_epoch = store
                 .with_read_tx(move |tx| tx.utxos_get_updates(resource, Epoch(3), SHARD, v(0), false, 10))
                 .await

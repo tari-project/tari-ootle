@@ -242,6 +242,8 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         Ok(())
     }
 
+    /// Marks the registration row of `public_key` that is active at `deactivation_epoch` as ending at
+    /// `deactivation_epoch`. Rows whose `start_epoch` is after `deactivation_epoch` are left untouched.
     fn deactivate_validator_node(
         &self,
         tx: &mut Self::DbTransaction<'_>,
@@ -849,7 +851,7 @@ impl<TAddr> Clone for SqliteGlobalDbAdapter<TAddr> {
 fn distinct_validators<TAddr: NodeAddressable>(
     mut sqlite_vns: Vec<DbValidatorNode>,
 ) -> Result<Vec<ValidatorNode<TAddr>>, SqliteStorageError> {
-    // first, sort by registration block height so that we get newer registrations first
+    // Sort newest registration first: latest start epoch, then latest inserted row.
     let mut db_vns = Vec::with_capacity(sqlite_vns.len());
     sqlite_vns.sort_by(|a, b| (b.start_epoch, b.id).cmp(&(a.start_epoch, a.id)));
     let mut dedup_map = HashSet::<Vec<u8>>::with_capacity(sqlite_vns.len());

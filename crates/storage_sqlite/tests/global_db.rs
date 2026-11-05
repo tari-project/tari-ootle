@@ -428,6 +428,9 @@ fn deactivating_a_reregistered_validator_preserves_prior_exit_epoch() {
             VotePower::of(1),
         )
         .unwrap();
+    // Re-applying the earlier exit after the re-registration row exists must not close the future registration.
+    validator_nodes.deactivate(pk_bytes, Epoch(3)).unwrap();
+    assert_eq!(validator_nodes.count(Epoch(6)).unwrap(), 1);
     validator_nodes.deactivate(pk_bytes, Epoch(8)).unwrap();
 
     for epoch in [1, 2, 5, 6, 7] {
@@ -481,7 +484,7 @@ fn duplicate_start_epoch_rows_resolve_consistently_to_latest_row() {
     let first_claim_key = new_public_key().to_byte_type();
     let second_claim_key = new_public_key().to_byte_type();
 
-    for claim_key in [first_claim_key, second_claim_key] {
+    for (claim_key, power) in [(first_claim_key, VotePower::of(1)), (second_claim_key, VotePower::of(2))] {
         validator_nodes
             .insert_validator_node(
                 pk.clone().into(),
@@ -489,23 +492,20 @@ fn duplicate_start_epoch_rows_resolve_consistently_to_latest_row() {
                 shard_key,
                 Epoch(10),
                 claim_key,
-                VotePower::of(1),
+                power,
             )
             .unwrap();
     }
 
-    set_committee_shard_group(
-        &mut validator_nodes,
-        &pk,
-        ShardGroup::all_shards(NumPreshards::P256),
-        Epoch(10),
-    );
+    let all_shards = ShardGroup::all_shards(NumPreshards::P256);
+    set_committee_shard_group(&mut validator_nodes, &pk, all_shards, Epoch(10));
 
     let registered = validator_nodes
         .get_all_registered_within_start_epoch(Epoch(10))
         .unwrap();
     assert_eq!(registered.len(), 1);
     assert_eq!(registered[0].fee_claim_public_key, second_claim_key);
+    assert_eq!(registered[0].power, VotePower::of(2));
     assert_eq!(
         validator_nodes
             .get_by_public_key(Epoch(10), &pk_bytes)
@@ -513,4 +513,9 @@ fn duplicate_start_epoch_rows_resolve_consistently_to_latest_row() {
             .fee_claim_public_key,
         second_claim_key
     );
+    let committee = validator_nodes
+        .get_committee_for_shard_group(Epoch(10), all_shards, 100)
+        .unwrap();
+    assert_eq!(committee.members().len(), 1);
+    assert_eq!(committee.members()[0].vote_power, VotePower::of(2));
 }

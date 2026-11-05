@@ -67,6 +67,7 @@ pub struct Handler<TStore> {
     /// The want list the in-flight outbound sync sent. When that sync succeeds and `current_want_list` is still this
     /// list, `current_want_list` is cleared, so a follow-up sync carries only work that arrived after it started.
     in_flight_want_list: Option<Arc<WantList>>,
+    in_flight_local_peer_record: Option<Arc<SignedPeerRecord>>,
     pending_events: VecDeque<Event>,
     outbound_tasks: futures_bounded::FuturesSet<Event>,
     inbound_tasks: futures_bounded::FuturesSet<Event>,
@@ -97,6 +98,7 @@ impl<TStore: PeerStore> Handler<TStore> {
             failed_attempts: 0,
             current_want_list: Arc::new(want_list),
             in_flight_want_list: None,
+            in_flight_local_peer_record: None,
             pending_events: VecDeque::new(),
             must_request_substream: true,
             outbound_tasks: futures_bounded::FuturesSet::new(config.sync_timeout, 1),
@@ -128,6 +130,9 @@ where TStore: PeerStore
     where F: Future<Output = Event> + Send + 'static {
         if self.outbound_tasks.try_push(fut).is_err() {
             self.aquired = None;
+            if let Some(record) = self.in_flight_local_peer_record.take() {
+                self.pending_local_peer_record.get_or_insert(record);
+            }
             tracing::warn!("Dropping outbound peer sync because we are at capacity");
             return;
         }
@@ -139,6 +144,7 @@ where TStore: PeerStore
     fn on_outbound_sync_succeeded(&mut self) {
         self.aquired = None;
         self.failed_attempts = 0;
+        self.in_flight_local_peer_record = None;
         if let Some(synced) = self.in_flight_want_list.take() &&
             Arc::ptr_eq(&synced, &self.current_want_list)
         {
@@ -156,6 +162,9 @@ where TStore: PeerStore
     fn on_outbound_sync_failed(&mut self) -> Option<Error> {
         self.aquired = None;
         self.in_flight_want_list = None;
+        if let Some(record) = self.in_flight_local_peer_record.take() {
+            self.pending_local_peer_record.get_or_insert(record);
+        }
         self.failed_attempts += 1;
         if self.failed_attempts > self.config.max_failure_retries {
             self.is_complete = true;
@@ -216,6 +225,7 @@ where TStore: PeerStore
         let config = self.config.clone();
 
         let pending_local_peer_record = self.pending_local_peer_record.take();
+        self.in_flight_local_peer_record.clone_from(&pending_local_peer_record);
         let fut = outbound_request_want_list_task(
             self.peer_id,
             framed,
@@ -271,7 +281,7 @@ where TStore: PeerStore
             },
             Poll::Ready(Ok(event)) => {
                 if let Some(err) = self.on_outbound_sync_failed() {
-                    return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::Error(err)));
+                    self.pending_events.push_back(Event::Error(err));
                 }
                 return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(event));
             },
@@ -689,5 +699,58 @@ mod tests {
         handler.failed_attempts = 1;
         assert!(complete_outbound_sync(&mut handler, peer_batch(0)).is_ready());
         assert_eq!(handler.failed_attempts, 0);
+    }
+
+    #[test]
+    fn failed_outbound_sync_restores_in_flight_local_peer_record_for_retry() {
+        let semaphore = Arc::new(Semaphore::new(1));
+        let mut handler = new_handler(&Config::default(), WantList::new(), semaphore);
+        let initial_record = local_record();
+        handler.on_behaviour_event(HandlerAction::PushLocalRecord(initial_record.clone()));
+        assert!(is_substream_request(&poll_once(&mut handler)));
+
+        handler.in_flight_local_peer_record = handler.pending_local_peer_record.take();
+        let peer_id = handler.peer_id;
+        assert!(matches!(
+            complete_outbound_sync(&mut handler, Event::OutboundStreamInterrupted { peer_id }),
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(
+                Event::OutboundStreamInterrupted { .. }
+            ))
+        ));
+        assert_eq!(handler.failed_attempts, 1);
+        assert!(
+            handler
+                .pending_local_peer_record
+                .as_ref()
+                .is_some_and(|rec| Arc::ptr_eq(rec, &initial_record))
+        );
+        assert!(is_substream_request(&poll_once(&mut handler)));
+    }
+
+    #[test]
+    fn outbound_task_failure_on_final_retry_emits_task_event_before_max_attempts_error() {
+        let config = Config {
+            max_failure_retries: 0,
+            ..Config::default()
+        };
+        let semaphore = Arc::new(Semaphore::new(1));
+        let mut handler = new_handler(&config, [PeerId::random()].into_iter().collect(), semaphore);
+        assert!(is_substream_request(&poll_once(&mut handler)));
+
+        let peer_id = handler.peer_id;
+        assert!(matches!(
+            complete_outbound_sync(&mut handler, Event::OutboundStreamInterrupted { peer_id }),
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(
+                Event::OutboundStreamInterrupted { .. }
+            ))
+        ));
+        assert!(handler.is_complete);
+        assert!(matches!(
+            poll_once(&mut handler),
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::Error(
+                Error::MaxFailedAttemptsReached
+            )))
+        ));
+        assert!(poll_once(&mut handler).is_pending());
     }
 }

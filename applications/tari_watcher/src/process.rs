@@ -180,11 +180,17 @@ async fn check_existing_node_os(base_dir: PathBuf) -> Option<u32> {
         return None;
     }
 
-    if let Ok(pid_str) = fs::read_to_string(DEFAULT_VALIDATOR_PID_PATH).await {
+    if let Ok(pid_str) = fs::read_to_string(base_dir.join(DEFAULT_VALIDATOR_PID_PATH)).await {
         debug!("Found PID file: {}", pid_str);
 
         if let Ok(pid) = pid_str.trim().parse::<u32>() {
-            if (TokioCommand::new("ps").arg("-p").arg(pid.to_string()).status().await).is_ok() {
+            if TokioCommand::new("ps")
+                .arg("-p")
+                .arg(pid.to_string())
+                .status()
+                .await
+                .is_ok_and(|s| s.success())
+            {
                 info!("Founding existing running validator process with PID: {}", pid);
                 return Some(pid);
             }

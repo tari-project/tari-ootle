@@ -249,19 +249,25 @@ impl UnsignedTransactionV1 {
                     substates.insert(SubstateId::ValidatorFeePool(*address));
                 },
                 Instruction::StealthTransfer {
-                    resource_address_ref: ResourceAddressRef::Address(addr),
+                    resource_address_ref,
                     statement,
                     ..
                 } => {
-                    substates.insert(SubstateId::Resource(*addr));
-                    substates.extend(
-                        statement
-                            .inputs_statement
-                            .inputs
-                            .iter()
-                            .map(|i| UtxoAddress::new(*addr, i.commitment.into()))
-                            .map(SubstateId::Utxo),
-                    );
+                    if let ResourceAddressRef::Address(addr) = resource_address_ref {
+                        substates.insert(SubstateId::Resource(*addr));
+                        substates.extend(
+                            statement
+                                .inputs_statement
+                                .inputs
+                                .iter()
+                                .map(|i| UtxoAddress::new(*addr, i.commitment.into()))
+                                .map(SubstateId::Utxo),
+                        );
+                    }
+                    for arg in statement.script_path_template_functions().flat_map(|tf| &tf.args) {
+                        let value = IndexedValue::from_raw(arg)?;
+                        substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
+                    }
                 },
                 Instruction::UpdateComponentTemplate { component, migrate, .. } => {
                     if let Some(component_address) = component.address() {

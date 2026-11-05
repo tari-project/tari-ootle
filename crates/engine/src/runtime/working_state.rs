@@ -2332,17 +2332,23 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
+    /// Enforces the stealth-transfer limits and accounts this transfer against the per-transaction totals. Must be
+    /// called before the transfer's input authorization, hooks and proof crypto run, so an over-limit transaction is
+    /// rejected before that work is done.
+    pub fn account_stealth_transfer(&mut self, statement: &StealthTransferStatement) -> Result<(), RuntimeError> {
+        check_stealth_transfer_limits(&limits::STEALTH_LIMITS, statement)?;
+        self.stealth_totals
+            .account_transfer(&limits::STEALTH_LIMITS, statement)?;
+        Ok(())
+    }
+
+    /// Executes a stealth transfer. The caller has admitted `statement` with [`Self::account_stealth_transfer`].
     pub fn execute_stealth_transfer(
         &mut self,
         resource_address: ResourceAddressRef,
         statement: StealthTransferStatement,
         revealed_funds_bucket_id: Option<BucketId>,
     ) -> Result<Option<ResourceContainer>, RuntimeError> {
-        check_stealth_transfer_limits(&limits::STEALTH_LIMITS, &statement)?;
-        // Bound the aggregate stealth work across the whole transaction before doing this transfer's crypto, so a
-        // single transaction cannot stack enough native verification to stall the proposing leader.
-        self.stealth_totals
-            .account_transfer(&limits::STEALTH_LIMITS, &statement)?;
         let resource_address = self.resolve_resource_address_ref(resource_address)?;
 
         let resource_lock = self.read_lock_substate(SubstateId::Resource(resource_address))?;
@@ -2526,11 +2532,15 @@ mod tests {
             ObjectKey,
             SubstateOwnerRule,
             access_rules::{ComponentAccessRules, UpdateRule},
+            crypto::RistrettoPublicKeyBytes,
         },
     };
 
     use super::*;
-    use crate::{runtime::scope::PushCallFrame, state_store::memory::MemoryStateStore};
+    use crate::{
+        runtime::{error::ArgumentValidationError, scope::PushCallFrame},
+        state_store::memory::MemoryStateStore,
+    };
 
     fn test_working_state() -> WorkingState<MemoryStateStore> {
         WorkingState::new(
@@ -2664,5 +2674,33 @@ mod tests {
         }
         assert_eq!(exhaust_burn_share(100, ExhaustBurnRate::new(500)), 5);
         assert_eq!(exhaust_burn_share(105, ExhaustBurnRate::new(500)), 5);
+    }
+
+    #[test]
+    fn account_stealth_transfer_enforces_statement_and_transaction_limits() {
+        let mut state = test_working_state();
+        let valid =
+            StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
+
+        let mut too_many_inputs = valid.clone();
+        too_many_inputs.inputs_statement.inputs = (0..=limits::STEALTH_LIMITS.max_inputs)
+            .map(|_| StealthInput::new(PedersenCommitmentBytes::from_bytes(&[0u8; 32]).unwrap()))
+            .collect();
+        assert!(matches!(
+            state.account_stealth_transfer(&too_many_inputs),
+            Err(RuntimeError::ArgumentValidationError(
+                ArgumentValidationError::MaxStealthInputsExceeded { .. }
+            ))
+        ));
+
+        for _ in 0..limits::STEALTH_LIMITS.max_transfers_per_transaction {
+            state.account_stealth_transfer(&valid).unwrap();
+        }
+        assert!(matches!(
+            state.account_stealth_transfer(&valid),
+            Err(RuntimeError::ArgumentValidationError(
+                ArgumentValidationError::MaxStealthTransfersPerTransactionExceeded { .. }
+            ))
+        ));
     }
 }

@@ -311,10 +311,6 @@ impl proto::RpcResponse {
         ))
     }
 
-    pub fn is_fin(&self) -> bool {
-        u8::try_from(self.flags).unwrap() & RpcMessageFlags::FIN.bits() != 0
-    }
-
     /// True if this is a keepalive frame: ACK-flagged and not terminating the stream.
     pub fn is_keepalive(&self) -> bool {
         self.flags()

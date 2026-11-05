@@ -203,8 +203,8 @@ impl EpochCheckpoint {
         if self.epoch() != epoch {
             return Err(EpochCheckpointValidationError::InvalidEpochCheckpoint(anyhow!(
                 "Expected checkpoint epoch {} but proof epoch is {}",
-                self.epoch(),
-                self.proof.header().epoch
+                epoch,
+                self.epoch()
             )));
         }
 
@@ -221,6 +221,7 @@ impl EpochCheckpoint {
     /// This includes basic sanity checks such as:
     /// - The shard group is valid (start < end + 1)
     /// - The number of shard state roots does not exceed the number of shards in the group
+    /// - Every shard in `shard_tree_summary` belongs to the checkpoint's shard group or is the global shard
     /// - The state root matches the provided header
     ///
     /// Use EpochCheckpoint::validate() to validate the entire proof (including well-formedness).
@@ -243,6 +244,17 @@ impl EpochCheckpoint {
                     num_shards,
                 },
             );
+        }
+
+        if let Some(&shard) = self
+            .shard_tree_summary
+            .keys()
+            .find(|shard| !header_shard_group.contains_or_global(shard))
+        {
+            return Err(EpochCheckpointValidationError::ShardOutOfRange {
+                shard,
+                shard_group: header_shard_group,
+            });
         }
 
         // TODO: more basic checks?
@@ -328,6 +340,8 @@ pub enum EpochCheckpointValidationError {
         num_shard_state_roots: usize,
         num_shards: usize,
     },
+    #[error("Shard {shard} in checkpoint summary is outside checkpoint shard group {shard_group}")]
+    ShardOutOfRange { shard: Shard, shard_group: ShardGroup },
     #[error(
         "Checkpoint header metadata hashes to {computed} but the end-of-epoch header commits to {header_metadata_hash}"
     )]
@@ -474,5 +488,27 @@ mod tests {
         let decoded: EpochCheckpoint = serde_json::from_str(&serde_json::to_string(&checkpoint).unwrap()).unwrap();
         decoded.validate_well_formed().unwrap();
         assert_eq!(decoded.next_epoch_validator_set_hash(), Some(set_hash));
+    }
+
+    #[test]
+    fn a_checkpoint_summarising_a_shard_outside_its_group_is_rejected() {
+        let committed = metadata(ValidatorSetHash::from_array([9; 32]));
+        let mut cp = checkpoint(&committed, committed);
+        cp.shard_tree_summary.insert(Shard::from(3u32), TreeRootSummary {
+            root_hash: TreeHash::new([5; 32]),
+            state_version: 42,
+            transition_acc: TransitionAccumulator::new([6; 32]),
+        });
+        let err = cp.validate_well_formed().unwrap_err();
+        assert!(
+            matches!(
+                err,
+                EpochCheckpointValidationError::ShardOutOfRange {
+                    shard,
+                    shard_group,
+                } if shard == Shard::from(3u32) && shard_group == ShardGroup::new(1, 2)
+            ),
+            "{err}"
+        );
     }
 }

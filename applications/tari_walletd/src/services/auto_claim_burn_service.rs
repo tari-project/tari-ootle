@@ -300,7 +300,7 @@ impl AutoClaimBurnService {
                     let pending = self.pending_claims.get_mut(&file_name).expect("just iterated");
                     pending.retries += 1;
                     let retries = pending.retries;
-                    if retries >= MAX_RETRIES_FILE_READ {
+                    if retries > MAX_RETRIES_FILE_READ {
                         error!(
                             target: LOG_TARGET,
                             "Failed to read burn proof '{}' to resolve its claim epoch after {} attempts: {}. \
@@ -325,6 +325,7 @@ impl AutoClaimBurnService {
             };
             if let Some(pending) = self.pending_claims.get_mut(&file_name) {
                 pending.claim_after_epoch = Some(after);
+                pending.retries = 0;
             }
         }
     }
@@ -370,6 +371,7 @@ impl AutoClaimBurnService {
                         tx_id,
                     );
                     if let Some(pending) = self.pending_claims.get_mut(&file_name) {
+                        pending.retries = 0;
                         pending.in_flight = Some(InFlightClaim {
                             transaction_id: tx_id,
                             max_epoch: claim_max_epoch(current_epoch),
@@ -389,7 +391,7 @@ impl AutoClaimBurnService {
                 Err(ClaimError::Transient { error: e, max_retries }) => {
                     let pending = self.pending_claims.get_mut(&file_name).expect("just iterated");
                     pending.retries += 1;
-                    if pending.retries >= max_retries {
+                    if pending.retries > max_retries {
                         error!(
                             target: LOG_TARGET,
                             "Giving up on '{}' after {} retries: {}. \

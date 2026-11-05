@@ -973,20 +973,28 @@ where
 
         // We check that the leader decision is the same as our local decision (this will change to ABORT once we've
         // received the foreign LocalAccept).
-        if tx_rec.current_decision().is_commit() {
+        if tx_rec.current_decision() != atom.decision {
             warn!(
                 target: LOG_TARGET,
-                "❌ SomeAccept decision disagreement for transaction {} in block {}. Leader proposed ABORT, we decided COMMIT",
+                "❌ SomeAccept decision disagreement for transaction {} in block {}. Leader proposed {}, we decided \
+                 {}",
                 tx_rec.id(),
                 block,
+                atom.decision,
+                tx_rec.current_decision(),
             );
             return Ok(Some(NoVoteReason::DecisionDisagreement {
-                local: Decision::Commit,
+                local: tx_rec.current_decision(),
                 remote: atom.decision,
             }));
         }
 
         if let Some(reason) = check_ready_to_leave_stage(&tx_rec, block, "SomeAccept") {
+            return Ok(Some(reason));
+        }
+
+        if let Some(reason) = fee_intent_only_disagreement(tx_rec.is_fee_intent_only(), atom) {
+            warn!(target: LOG_TARGET, "❌ NO VOTE SomeAccept in block {block}: {reason}");
             return Ok(Some(reason));
         }
 
@@ -1000,6 +1008,31 @@ where
                 tx_rec.transaction_fee()
             );
             return Ok(Some(NoVoteReason::FeeDisagreement));
+        }
+
+        if atom.leader_fee.is_some() {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NO VOTE: Leader fee in tx {} is set for SomeAccept command in block {}",
+                atom.id,
+                block,
+            );
+            return Ok(Some(NoVoteReason::LeaderFeeDisagreement));
+        }
+
+        if *tx_rec.evidence() != atom.evidence {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NO VOTE: SomeAccept disagreement for transaction {} in block {}. Leader proposed evidence {}, \
+                 but we calculated {}",
+                tx_rec.id(),
+                block,
+                atom.evidence,
+                tx_rec.evidence()
+            );
+            return Ok(Some(NoVoteReason::InvalidEvidence {
+                reason: InvalidEvidenceReason::MismatchedEvidence,
+            }));
         }
 
         if let Some(reason) = locked_epoch_disagreement(tx_rec.locked_epoch(), atom) {

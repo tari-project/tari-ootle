@@ -1892,8 +1892,8 @@ mod some_accept {
             matches!(
                 evaluation.no_vote,
                 Some(NoVoteReason::FeeIntentOnlyDisagreement {
-                    local: false,
-                    remote: true,
+                    local_fee_intent_only: false,
+                    proposed_fee_intent_only: true,
                     ..
                 })
             ),

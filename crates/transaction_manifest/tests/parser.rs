@@ -1694,34 +1694,136 @@ fn main_bindings_do_not_leak_into_fee_main() {
 
 #[test]
 fn nested_cbor_and_metadata_macros_enforce_cumulative_depth() {
-    let half = tari_bor::MAX_DECODE_DEPTH / 2 + 1;
-    let open = "[".repeat(half);
-    let close = "]".repeat(half);
+    let max_depth = tari_bor::MAX_DECODE_DEPTH;
 
-    let nested_cbor = format!(
+    // 1. Plain array nesting at MAX_DECODE_DEPTH - 1 (scalar at depth 63) succeeds; MAX_DECODE_DEPTH fails.
+    let ok_open = "[".repeat(max_depth - 1);
+    let ok_close = "]".repeat(max_depth - 1);
+    let ok_plain = format!(
         r#"
         use template_{LIST_TEMPLATE} as MyTemplate;
         fn main() {{
-            MyTemplate::create(cbor!({open}cbor!({open}1{close}){close}));
+            MyTemplate::create(cbor!({ok_open}1{ok_close}));
         }}
     "#
     );
-    let err = parse_manifest(&nested_cbor, HashMap::new(), Default::default(), Default::default())
+    parse_manifest(&ok_plain, HashMap::new(), Default::default(), Default::default())
+        .expect("array nesting at MAX_DECODE_DEPTH - 1 must succeed");
+
+    let err_open = "[".repeat(max_depth);
+    let err_close = "]".repeat(max_depth);
+    let err_plain = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+        fn main() {{
+            MyTemplate::create(cbor!({err_open}1{err_close}));
+        }}
+    "#
+    );
+    let err = parse_manifest(&err_plain, HashMap::new(), Default::default(), Default::default())
         .err()
-        .expect("nested cbor! exceeding cumulative MAX_DECODE_DEPTH must fail");
+        .expect("array nesting at MAX_DECODE_DEPTH must fail");
     assert!(err.to_string().contains("nested deeper than"), "{err}");
 
-    let nested_metadata = format!(
+    // 2. Nested `cbor!` inside `cbor!`: 31 + 32 = 63 brackets succeeds; 32 + 32 = 64 brackets fails.
+    let open_31 = "[".repeat(31);
+    let close_31 = "]".repeat(31);
+    let open_32 = "[".repeat(32);
+    let close_32 = "]".repeat(32);
+    let ok_nested_cbor = format!(
         r#"
         use template_{LIST_TEMPLATE} as MyTemplate;
         fn main() {{
-            MyTemplate::create(cbor!({open}metadata!({{"k": {open}1{close}}}){close}));
+            MyTemplate::create(cbor!({open_31}cbor!({open_32}1{close_32}){close_31}));
         }}
     "#
     );
-    let err = parse_manifest(&nested_metadata, HashMap::new(), Default::default(), Default::default())
+    parse_manifest(&ok_nested_cbor, HashMap::new(), Default::default(), Default::default())
+        .expect("nested cbor! at MAX_DECODE_DEPTH - 1 must succeed");
+
+    let err_nested_cbor = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+        fn main() {{
+            MyTemplate::create(cbor!({open_32}cbor!({open_32}1{close_32}){close_32}));
+        }}
+    "#
+    );
+    let err = parse_manifest(
+        &err_nested_cbor,
+        HashMap::new(),
+        Default::default(),
+        Default::default(),
+    )
+    .err()
+    .expect("nested cbor! at MAX_DECODE_DEPTH must fail");
+    assert!(err.to_string().contains("nested deeper than"), "{err}");
+
+    // 3. `metadata!({"k": 1})` adds 2 container levels (Tag + Map), so 61 brackets puts the scalar at depth 63
+    // (succeeds) and 62 brackets puts the scalar at depth 64 (fails).
+    let open_61 = "[".repeat(max_depth - 3);
+    let close_61 = "]".repeat(max_depth - 3);
+    let ok_nested_metadata = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+        fn main() {{
+            MyTemplate::create(cbor!({open_61}metadata!({{"k": 1}}){close_61}));
+        }}
+    "#
+    );
+    parse_manifest(
+        &ok_nested_metadata,
+        HashMap::new(),
+        Default::default(),
+        Default::default(),
+    )
+    .expect("metadata! at depth MAX_DECODE_DEPTH - 1 must succeed");
+
+    let open_62 = "[".repeat(max_depth - 2);
+    let close_62 = "]".repeat(max_depth - 2);
+    let err_nested_metadata = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+        fn main() {{
+            MyTemplate::create(cbor!({open_62}metadata!({{"k": 1}}){close_62}));
+        }}
+    "#
+    );
+    let err = parse_manifest(
+        &err_nested_metadata,
+        HashMap::new(),
+        Default::default(),
+        Default::default(),
+    )
+    .err()
+    .expect("metadata! pushing scalar to MAX_DECODE_DEPTH must fail");
+    assert!(err.to_string().contains("nested deeper than"), "{err}");
+
+    // 4. `address!(..)` encodes under a CBOR tag (1 extra level), so 62 brackets puts the bytes at depth 63
+    // (succeeds) and 63 brackets puts the bytes at depth 64 (fails).
+    let addr = "component_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let ok_tagged = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+        fn main() {{
+            MyTemplate::create(cbor!({open_62}address!("{addr}"){close_62}));
+        }}
+    "#
+    );
+    parse_manifest(&ok_tagged, HashMap::new(), Default::default(), Default::default())
+        .expect("tagged address at depth MAX_DECODE_DEPTH - 1 must succeed");
+
+    let err_tagged = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+        fn main() {{
+            MyTemplate::create(cbor!({ok_open}address!("{addr}"){ok_close}));
+        }}
+    "#
+    );
+    let err = parse_manifest(&err_tagged, HashMap::new(), Default::default(), Default::default())
         .err()
-        .expect("nested metadata! inside cbor! exceeding cumulative MAX_DECODE_DEPTH must fail");
+        .expect("tagged address pushing payload to MAX_DECODE_DEPTH must fail");
     assert!(err.to_string().contains("nested deeper than"), "{err}");
 }
 

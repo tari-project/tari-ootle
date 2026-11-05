@@ -525,7 +525,7 @@ where
             )? {
                 warn!(
                     target: LOG_TARGET,
-                    "❌ NO VOTE AllPrepare: transaction {} in block {} has not received all foreign input pledges",
+                    "❌ NO VOTE LocalAccept: transaction {} in block {} has not received all foreign input pledges",
                     tx_rec.id(),
                     block,
                 );

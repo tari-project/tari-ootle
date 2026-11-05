@@ -1197,20 +1197,6 @@ impl TransactionPoolRecord {
         self.has_foreign_pledges_for_objects(tx, local_committee_info, involved_objects, additional_foreign_pledges)
     }
 
-    pub fn has_all_required_foreign_input_pledges<TTx: StateStoreReadTransaction>(
-        &self,
-        tx: &TTx,
-        local_committee_info: &CommitteeInfo,
-    ) -> Result<bool, StorageError> {
-        let involved_objects = self
-            .evidence()
-            .all_inputs_iter()
-            .map(|(_, substate_id, evidence)| (substate_id, evidence.map(|e| (e.version, e.as_lock_type()))))
-            .filter(|(substate_id, _)| !local_committee_info.includes_substate_id(substate_id));
-
-        self.has_foreign_pledges_for_objects(tx, local_committee_info, involved_objects, std::iter::empty())
-    }
-
     fn has_foreign_pledges_for_objects<'a, 'p, TTx, TObj, IPledges>(
         &self,
         tx: &TTx,

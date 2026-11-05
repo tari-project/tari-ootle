@@ -279,15 +279,14 @@ impl TransactionRecord {
     ) -> Result<bool, StorageError>
     where
         TTx: StateStoreReadTransaction,
-        I: IntoIterator<Item = &'p SubstatePledge>,
+        I: IntoIterator<Item = &'p SubstatePledge> + Clone,
     {
         let inputs = self
             .transaction()
             .all_inputs_iter()
             .map(|req| (local_committee_info.includes_substate_id(req.substate_id()), req));
         let locks = LockedSubstateValue::get_all_for_transaction(tx, leaf_block, self.id())?;
-        let mut pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.id())?;
-        pledges.extend(additional_foreign_pledges.into_iter().cloned());
+        let pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.id())?;
         for (is_local, input) in inputs {
             if is_local {
                 if locks.iter().all(|i| !i.satisfies_requirements(input)) {
@@ -306,7 +305,11 @@ impl TransactionRecord {
                     );
                     return Ok(false);
                 }
-            } else if pledges.iter().all(|p| !p.satisfies_requirement(input)) {
+            } else if pledges
+                .iter()
+                .chain(additional_foreign_pledges.clone())
+                .all(|p| !p.satisfies_requirement(input))
+            {
                 let remote_shard_group = input.or_zero_version().to_substate_address().to_shard_group(
                     local_committee_info.num_preshards(),
                     local_committee_info.num_committees(),

@@ -62,7 +62,12 @@ use crate::{
     messages::{ForeignProposalNotificationMessage, HotstuffMessage, ProposalMessage, VoteMessage},
     tracing::TraceTimer,
     traits::{CertificateStore, ConsensusSpec, OutboundMessaging, ValidatorSignerService, hooks::ConsensusHooks},
-    validations::{authenticate_foreign_proposal, check_proposed_by_leader, is_authenticated_commit_proof_stored},
+    validations::{
+        are_block_foreign_proposals_matched,
+        authenticate_foreign_proposal,
+        check_proposed_by_leader,
+        is_authenticated_commit_proof_stored,
+    },
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_receive_local_proposal";
@@ -230,6 +235,18 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             return Ok(None);
         };
 
+        if !self.store.with_read_tx(|tx| {
+            are_block_foreign_proposals_matched(tx, valid_block.block(), &foreign_proposals)
+        })? {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️❌ Rejecting proposal for block {}: embedded foreign proposals do not match the block's \
+                 foreign proposal commands",
+                valid_block,
+            );
+            return Ok(None);
+        }
+
         if !self.are_foreign_proposals_authentic(&foreign_proposals).await? {
             // An unauthenticated proposal says nothing about its block id, so nothing is recorded against it, leaving
             // the block id free for the genuine proposal
@@ -238,6 +255,9 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         // First validate and save the attached foreign proposals
         let is_all_foreign_proposals_valid = self.store.with_write_tx(|tx| {
+            if !are_block_foreign_proposals_matched(&**tx, valid_block.block(), &foreign_proposals)? {
+                return Ok(false);
+            }
             for foreign_proposal in foreign_proposals {
                 let mut foreign_proposal = ForeignProposalRecord::new(foreign_proposal);
                 if foreign_proposal.exists(&**tx)? {

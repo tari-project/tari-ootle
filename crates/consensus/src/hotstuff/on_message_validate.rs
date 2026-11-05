@@ -501,11 +501,23 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         new_transactions: &OnReceiveNewTransaction<TConsensusSpec>,
         origin: ProposalOrigin,
     ) -> Result<MessageValidationResult<TConsensusSpec::Addr>, HotStuffError> {
-        let has_missing_transactions = self.store.with_write_tx(|tx| {
+        let Some(has_missing_transactions) = self.store.with_write_tx(|tx| {
+            if !validations::are_block_foreign_proposals_matched(&**tx, &proposal.block, &proposal.foreign_proposals)? {
+                return Ok::<_, HotStuffError>(None);
+            }
             self.resequence_unpooled_transactions(tx, epoch_state, &proposal, new_transactions)?;
             let missing = self.get_missing_transactions(&**tx, epoch_state.local_committee_info(), &proposal)?;
-            Ok::<_, HotStuffError>(!missing.is_empty())
-        })?;
+            Ok(Some(!missing.is_empty()))
+        })?
+        else {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️ Discarding proposal for block {} from {from}: embedded foreign proposals do not match the \
+                 block's foreign proposal commands",
+                proposal.block,
+            );
+            return Ok(MessageValidationResult::Discard);
+        };
 
         if !has_missing_transactions {
             return Ok(MessageValidationResult::Ready {

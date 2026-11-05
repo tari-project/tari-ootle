@@ -843,3 +843,127 @@ async fn it_rejects_a_shard_group_with_invalid_bounds() {
         "unexpected error: {err}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_proposal_message_omitting_an_embedded_foreign_proposal_does_not_take_its_slot() {
+    a_proposal_message_omitting_an_embedded_foreign_proposal_does_not_take_its_slot_when(true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_parked_block_omitting_an_embedded_foreign_proposal_does_not_take_its_slot() {
+    a_proposal_message_omitting_an_embedded_foreign_proposal_does_not_take_its_slot_when(false).await;
+}
+
+async fn a_proposal_message_omitting_an_embedded_foreign_proposal_does_not_take_its_slot_when(
+    replica_has_transaction: bool,
+) {
+    setup_logger();
+    let (mut test, replica, leader, proposal) = withheld_embedding_proposal(replica_has_transaction).await;
+
+    let block_ids = proposal
+        .foreign_proposals
+        .iter()
+        .map(|fp| fp.calculate_block_id())
+        .collect::<Vec<_>>();
+    let tampered = ProposalMessage {
+        block: proposal.block.clone(),
+        foreign_proposals: vec![],
+    };
+    let tx_inbound = test.get_validator(&replica).tx_inbound_message.clone();
+    tx_inbound
+        .send((leader.clone(), HotstuffMessage::new_proposal(tampered)))
+        .await
+        .unwrap();
+    tx_inbound
+        .send((leader, HotstuffMessage::new_proposal(proposal)))
+        .await
+        .unwrap();
+
+    let stored = timeout(Duration::from_secs(15), async {
+        while !is_foreign_proposal_stored(&test, &replica, &block_ids) {
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .is_ok();
+    test.stop();
+    assert!(
+        stored,
+        "the genuine block was not processed after a delivery that omitted its embedded foreign proposal"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_proposal_message_carrying_an_unreferenced_foreign_proposal_does_not_store_it() {
+    setup_logger();
+    let (mut test, replica, leader, proposal) = withheld_embedding_proposal(true).await;
+    let group_a = committee_number_to_shard_group(TEST_NUM_PRESHARDS, 0, 2);
+
+    let mut unreferenced = proposal
+        .foreign_proposals
+        .first()
+        .expect("the captured proposal embeds a foreign proposal")
+        .clone();
+    let mut header = unreferenced
+        .commit_proof()
+        .sidechain_block_commit_proof()
+        .header
+        .clone();
+    header.height += 100;
+    header.shard_group = to_header_shard_group(group_a);
+    unreferenced = ForeignProposal::new(
+        CommandsCommitProof::new_latest(
+            unreferenced.commit_proof().commands().to_vec(),
+            SidechainBlockCommitProof {
+                header,
+                proof_elements: unreferenced
+                    .commit_proof()
+                    .sidechain_block_commit_proof()
+                    .proof_elements
+                    .clone(),
+            },
+        ),
+        unreferenced.block_pledge().clone(),
+        unreferenced.block_metadata().clone(),
+    );
+    let unreferenced_id = unreferenced.calculate_block_id();
+    let mut foreign_proposals = proposal.foreign_proposals.clone();
+    foreign_proposals.push(unreferenced);
+
+    let tampered = ProposalMessage {
+        block: proposal.block.clone(),
+        foreign_proposals,
+    };
+    let tx_inbound = test.get_validator(&replica).tx_inbound_message.clone();
+    tx_inbound
+        .send((leader.clone(), HotstuffMessage::new_proposal(tampered)))
+        .await
+        .unwrap();
+    sleep(Duration::from_secs(2)).await;
+    assert!(
+        !is_foreign_proposal_stored(&test, &replica, &[unreferenced_id]),
+        "replica stored a foreign proposal that the block does not reference"
+    );
+
+    let block_ids = proposal
+        .foreign_proposals
+        .iter()
+        .map(|fp| fp.calculate_block_id())
+        .collect::<Vec<_>>();
+    tx_inbound
+        .send((leader, HotstuffMessage::new_proposal(proposal)))
+        .await
+        .unwrap();
+    let stored = timeout(Duration::from_secs(15), async {
+        while !is_foreign_proposal_stored(&test, &replica, &block_ids) {
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .is_ok();
+    test.stop();
+    assert!(
+        stored,
+        "the genuine block was not processed after a delivery carrying an unreferenced foreign proposal"
+    );
+}

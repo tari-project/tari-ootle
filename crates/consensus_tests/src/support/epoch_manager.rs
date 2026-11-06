@@ -428,8 +428,8 @@ impl EpochManagerReader for TestEpochManager {
     }
 
     async fn get_validator_set_hash(&self, epoch: Epoch) -> Result<ValidatorSetHash, EpochManagerError> {
-        // Committees are assigned when an epoch activates, so the set is unknown until the epoch is.
-        if epoch > self.current_epoch().await? {
+        // Committees belong to activated epochs, independently of a lagging current-epoch oracle.
+        if epoch > self.inner.lock().await.current_epoch {
             return Err(EpochManagerError::NoValidatorSet { epoch });
         }
         let Some(epoch_hash) = self.get_epoch_hash(epoch).await.optional()? else {

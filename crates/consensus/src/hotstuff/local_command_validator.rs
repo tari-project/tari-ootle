@@ -139,6 +139,22 @@ where
             )
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
+        if prepared.lock_status().is_deferrable_conflict() &&
+            let Some(err) = prepared.lock_status().failures().first()
+        {
+            warn!(
+                target: LOG_TARGET,
+                "❌ LocalOnly transaction {} in block {} has a deferrable lock conflict that an honest proposer skips: {}. Not voting on block.",
+                atom.id(),
+                block,
+                err,
+            );
+            return Ok(Some(NoVoteReason::ConflictingTransactionProposed {
+                transaction_id: *atom.id(),
+                details: err.to_string(),
+            }));
+        }
+
         let local = match prepared {
             PreparedTransaction::LocalOnly(local) => *local,
             PreparedTransaction::PledgeBudgetReached { .. } => {
@@ -243,6 +259,7 @@ where
     }
 
     /// Evaluates a `proposed_kind` command proposed for a transaction at the New stage.
+    #[allow(clippy::too_many_lines)]
     fn evaluate_new_multishard_command<TTx: StateStoreReadTransaction>(
         &self,
         mut tx_rec: TransactionPoolRecord,
@@ -299,6 +316,22 @@ where
                 )
                 .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?
         };
+
+        if prepared.lock_status().is_deferrable_conflict() &&
+            let Some(err) = prepared.lock_status().failures().first()
+        {
+            warn!(
+                target: LOG_TARGET,
+                "❌ {proposed_kind} transaction {} in block {} has a deferrable lock conflict that an honest proposer skips: {}. Not voting on block.",
+                atom.id(),
+                block,
+                err,
+            );
+            return Ok(Some(NoVoteReason::ConflictingTransactionProposed {
+                transaction_id: *atom.id(),
+                details: err.to_string(),
+            }));
+        }
 
         let multishard = match prepared {
             PreparedTransaction::MultiShard(multishard) => multishard,

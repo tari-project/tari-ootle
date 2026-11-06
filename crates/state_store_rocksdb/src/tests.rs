@@ -337,3 +337,229 @@ fn multi_get_exact_returns_values_in_key_order_and_rejects_a_missing_key() {
         "{err}"
     );
 }
+
+#[test]
+#[expect(clippy::too_many_lines)]
+fn foreign_proposals_clear_proposed_in_does_not_reset_confirmed_or_invalid_status() {
+    use tari_common_types::types::CompressedPublicKey;
+    use tari_consensus_types::{PcId, ProposalCertificate, ShardGroupAccumulatedData};
+    use tari_ootle_common_types::{ExtraData, NumPreshards, ProtocolVersion, ShardGroup};
+    use tari_ootle_storage::{
+        StateStore,
+        StateStoreReadTransaction,
+        StateStoreWriteTransaction,
+        consensus_models::{
+            Block,
+            BlockCommands,
+            BlockHeader,
+            BlockHeaderMetadata,
+            BlockPledge,
+            CommandsCommitProof,
+            ForeignProposal,
+            ForeignProposalRecord,
+            ForeignProposalStatus,
+        },
+    };
+    use tari_ootle_transaction::Network;
+    use tari_sidechain::{QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
+    use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+
+    use crate::{DatabaseOptions, RocksDbStateStore};
+
+    fn make_fp(height: u64) -> ForeignProposalRecord {
+        let metadata = BlockHeaderMetadata {
+            total_leader_fee: 0,
+            timestamp: 0,
+            extra_data: Default::default(),
+            timeout_certificate_id: None,
+            is_dummy: false,
+        };
+        let proof = CommandsCommitProof::new_latest(vec![], SidechainBlockCommitProof {
+            header: SidechainBlockHeader {
+                network: 0,
+                protocol_version: 0,
+                parent_id: Default::default(),
+                justify_id: Default::default(),
+                height,
+                epoch: 0,
+                epoch_hash: Default::default(),
+                shard_group: tari_sidechain::ShardGroup {
+                    start: 0,
+                    end_inclusive: 127,
+                },
+                proposed_by: CompressedPublicKey::default(),
+                state_merkle_root: Default::default(),
+                command_merkle_root: Default::default(),
+                transaction_merkle_root: Default::default(),
+                signature: Default::default(),
+                accumulated_data: Default::default(),
+                metadata_hash: metadata.calculate_hash(),
+            },
+            proof_elements: vec![],
+        });
+        ForeignProposalRecord::new(ForeignProposal::new(proof, BlockPledge::default(), metadata))
+    }
+
+    fn make_fork_block(parent: &Block, timestamp: u64) -> Block {
+        let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+        let justify = ProposalCertificate::new(
+            *parent.id().hash(),
+            *parent.id(),
+            parent.height(),
+            parent.epoch(),
+            shard_group,
+            ProposalCertificate::genesis_signatures(),
+            QuorumDecision::Accept,
+        );
+        let commands = BlockCommands::empty();
+        let header = BlockHeader::create_unsigned(
+            Network::LocalNet,
+            ProtocolVersion::V0,
+            *parent.id(),
+            justify.calculate_id(),
+            None,
+            parent.height() + NodeHeight(1),
+            parent.epoch(),
+            shard_group,
+            RistrettoPublicKeyBytes::default(),
+            FixedHash::zero(),
+            &commands,
+            0,
+            timestamp,
+            FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
+            ExtraData::new(),
+        )
+        .unwrap();
+        Block::new(header, justify, commands, None)
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    let store = RocksDbStateStore::<String>::open(tmp.path().join("db"), DatabaseOptions::default()).unwrap();
+
+    let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
+    let block_a = make_fork_block(&zero, 1);
+    let block_b = make_fork_block(&zero, 2);
+    assert_ne!(block_a.id(), block_b.id());
+
+    let fp_confirmed = make_fp(1);
+    let fp_invalid = make_fp(2);
+    let fp_proposed = make_fp(3);
+
+    store
+        .with_write_tx(|tx| {
+            zero.insert(tx)?;
+            tx.blocks_set_qcs(zero.id(), Some(&PcId::zero()), Some(&PcId::zero()))?;
+            tx.locked_block_set(&zero.as_locked())?;
+            block_a.insert(tx)?;
+            block_b.insert(tx)?;
+
+            tx.foreign_proposals_save(&fp_confirmed)?;
+            tx.foreign_proposals_set_status(
+                fp_confirmed.block_id(),
+                ForeignProposalStatus::Confirmed,
+                Some(block_a.id()),
+            )?;
+
+            tx.foreign_proposals_save(&fp_invalid)?;
+            tx.foreign_proposals_set_status(
+                fp_invalid.block_id(),
+                ForeignProposalStatus::Invalid,
+                Some(block_a.id()),
+            )?;
+
+            tx.foreign_proposals_save(&fp_proposed)?;
+            tx.foreign_proposals_set_status(
+                fp_proposed.block_id(),
+                ForeignProposalStatus::Proposed,
+                Some(block_a.id()),
+            )?;
+            // Propose in a competing fork block_b; index for block_a must remain until block_a is cleared
+            tx.foreign_proposals_set_status(
+                fp_proposed.block_id(),
+                ForeignProposalStatus::Proposed,
+                Some(block_b.id()),
+            )?;
+            Ok::<_, StorageError>(())
+        })
+        .unwrap();
+
+    // Before clearing either fork block, `fp_proposed` must not be returned as new on `block_a`'s chain
+    // even though `proposed_in_block` on the record was overwritten with `block_b`.
+    store
+        .with_read_tx(|tx| {
+            let new_on_a = tx.foreign_proposals_get_all_new(block_a.id(), usize::MAX)?;
+            assert!(
+                new_on_a.is_empty(),
+                "expected no new FPs on block_a chain, got {new_on_a:?}"
+            );
+            let new_on_b = tx.foreign_proposals_get_all_new(block_b.id(), usize::MAX)?;
+            assert!(
+                new_on_b.is_empty(),
+                "expected no new FPs on block_b chain, got {new_on_b:?}"
+            );
+            Ok::<_, StorageError>(())
+        })
+        .unwrap();
+
+    // Clearing `block_b` resets `fp_proposed` to `New` (available again on `block_b`'s branch), while
+    // `block_a`'s preserved `ProposedInBlockIndex` entry still suppresses `get_all_new` on `block_a`'s chain.
+    store
+        .with_write_tx(|tx| tx.foreign_proposals_clear_proposed_in(block_b.id()))
+        .unwrap();
+
+    store
+        .with_read_tx(|tx| {
+            let new_on_a = tx.foreign_proposals_get_all_new(block_a.id(), usize::MAX)?;
+            assert!(
+                new_on_a.is_empty(),
+                "expected block_a index to still suppress fp_proposed, got {new_on_a:?}"
+            );
+            let new_on_b = tx.foreign_proposals_get_all_new(block_b.id(), usize::MAX)?;
+            assert_eq!(new_on_b.len(), 1);
+            assert_eq!(new_on_b[0].block_id(), fp_proposed.block_id());
+            assert_eq!(new_on_b[0].status(), ForeignProposalStatus::New);
+            Ok::<_, StorageError>(())
+        })
+        .unwrap();
+
+    // Re-propose in `block_b`, then clear `block_a` and verify `Confirmed`/`Invalid` are untouched and
+    // `fp_proposed` remains `Proposed` in `block_b`.
+    store
+        .with_write_tx(|tx| {
+            tx.foreign_proposals_set_status(
+                fp_proposed.block_id(),
+                ForeignProposalStatus::Proposed,
+                Some(block_b.id()),
+            )?;
+            tx.foreign_proposals_clear_proposed_in(block_a.id())?;
+            Ok::<_, StorageError>(())
+        })
+        .unwrap();
+
+    store
+        .with_read_tx(|tx| {
+            let records =
+                tx.foreign_proposals_get_any([fp_confirmed.block_id(), fp_invalid.block_id(), fp_proposed.block_id()])?;
+            assert_eq!(records.len(), 3);
+            for rec in &records {
+                if rec.block_id() == fp_confirmed.block_id() {
+                    assert_eq!(rec.status(), ForeignProposalStatus::Confirmed);
+                } else if rec.block_id() == fp_invalid.block_id() {
+                    assert_eq!(rec.status(), ForeignProposalStatus::Invalid);
+                } else {
+                    assert_eq!(rec.block_id(), fp_proposed.block_id());
+                    // Still Proposed in block_b after clearing block_a
+                    assert_eq!(rec.status(), ForeignProposalStatus::Proposed);
+                    assert_eq!(rec.proposed_in_block(), Some(block_b.id()));
+                }
+            }
+            let new_on_a = tx.foreign_proposals_get_all_new(block_a.id(), usize::MAX)?;
+            assert_eq!(new_on_a.len(), 1);
+            assert_eq!(new_on_a[0].block_id(), fp_proposed.block_id());
+            let new_on_b = tx.foreign_proposals_get_all_new(block_b.id(), usize::MAX)?;
+            assert!(new_on_b.is_empty());
+            Ok::<_, StorageError>(())
+        })
+        .unwrap();
+}

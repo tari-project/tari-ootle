@@ -519,6 +519,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     can_propose_epoch_end,
                     local_next_epoch,
                     next_epoch_changes_layout,
+                    origin,
                     &mut change_set,
                 )?;
 

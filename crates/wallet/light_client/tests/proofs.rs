@@ -394,10 +394,14 @@ fn a_diff_that_differs_from_the_receipt_is_rejected() {
     }
 }
 
-/// A committed transaction's diff, the receipt it committed and its result, with an event and fees in both.
-fn committed(transaction_id: TransactionId) -> (SubstateDiff, TransactionReceipt, FinalizeResult) {
+/// A transaction's diff, the receipt it committed with `outcome` and its result, with an event and fees in both.
+fn committed(
+    transaction_id: TransactionId,
+    outcome: FinalizeOutcome,
+) -> (SubstateDiff, TransactionReceipt, FinalizeResult) {
     let raw_diff = diff_of(&[tombstone(1)], &[(tombstone(3).0, 4)]);
     let mut receipt = receipt(DiffSummary::from_diff(NETWORK, &raw_diff, EPOCH));
+    receipt.outcome = outcome;
     receipt.events = Box::new([event("std.vault.deposit")]);
     receipt.fee_receipt = FeeReceipt::builder()
         .with_total_fee_payment(800)
@@ -433,10 +437,10 @@ fn rejection() -> RejectReason {
 #[test]
 fn a_result_matches_the_receipt_committed_with_it() {
     let transaction_id = TransactionId::new([9; 32]);
-    let (diff, mut receipt, mut result) = committed(transaction_id);
+    let (_, receipt, result) = committed(transaction_id, FinalizeOutcome::Commit);
     check_result_matches_receipt(NETWORK, transaction_id, &receipt, &result).unwrap();
 
-    receipt.outcome = FinalizeOutcome::FeeIntentCommit;
+    let (diff, receipt, mut result) = committed(transaction_id, FinalizeOutcome::FeeIntentCommit);
     result.result = TransactionResult::AcceptFeeRejectRest(diff, rejection());
     check_result_matches_receipt(NETWORK, transaction_id, &receipt, &result).unwrap();
 }
@@ -444,7 +448,7 @@ fn a_result_matches_the_receipt_committed_with_it() {
 #[test]
 fn a_result_that_differs_from_the_receipt_is_rejected() {
     let transaction_id = TransactionId::new([9; 32]);
-    let (diff, receipt, result) = committed(transaction_id);
+    let (diff, receipt, result) = committed(transaction_id, FinalizeOutcome::Commit);
 
     type Change = fn(&mut FinalizeResult, &SubstateDiff);
     let cases: [(&str, Change); 6] = [

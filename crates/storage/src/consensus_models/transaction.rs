@@ -270,12 +270,17 @@ impl TransactionRecord {
         tx.transactions_finalize_all(epoch, transactions)
     }
 
-    pub fn has_all_required_input_pledges<TTx: StateStoreReadTransaction>(
+    pub fn has_all_required_input_pledges<'p, TTx, I>(
         &self,
         tx: &TTx,
         leaf_block: &LeafBlock,
         local_committee_info: &CommitteeInfo,
-    ) -> Result<bool, StorageError> {
+        additional_foreign_pledges: I,
+    ) -> Result<bool, StorageError>
+    where
+        TTx: StateStoreReadTransaction,
+        I: IntoIterator<Item = &'p SubstatePledge> + Clone,
+    {
         let inputs = self
             .transaction()
             .all_inputs_iter()
@@ -300,25 +305,34 @@ impl TransactionRecord {
                     );
                     return Ok(false);
                 }
-            } else if pledges.iter().all(|p| !p.satisfies_requirement(input)) {
-                let remote_shard_group = input.or_zero_version().to_substate_address().to_shard_group(
-                    local_committee_info.num_preshards(),
-                    local_committee_info.num_committees(),
-                );
-                debug!(
-                    target: LOG_TARGET,
-                    "Pledges: {}",
-                    pledges.display(),
-                );
-                debug!(
-                    target: LOG_TARGET,
-                    "{} Transaction {} is missing a pledge for input {} from {} ({} pledge(s) found)",
-                    local_committee_info.shard_group(),
-                    self.id(),
-                    input.substate_id(),
-                    remote_shard_group,
-                    pledges.len(),
-                );
+            } else if pledges.iter().all(|p| !p.satisfies_requirement(input)) &&
+                additional_foreign_pledges
+                    .clone()
+                    .into_iter()
+                    .all(|p| !p.satisfies_requirement(input))
+            {
+                if log_enabled!(Level::Debug) {
+                    let additional_pledges = additional_foreign_pledges.clone().into_iter().collect::<Vec<_>>();
+                    let remote_shard_group = input.or_zero_version().to_substate_address().to_shard_group(
+                        local_committee_info.num_preshards(),
+                        local_committee_info.num_committees(),
+                    );
+                    debug!(
+                        target: LOG_TARGET,
+                        "Persisted pledges: {}. In-block pledges: {}",
+                        pledges.display(),
+                        additional_pledges.display(),
+                    );
+                    debug!(
+                        target: LOG_TARGET,
+                        "{} Transaction {} is missing a pledge for input {} from {} ({} pledge(s) found)",
+                        local_committee_info.shard_group(),
+                        self.id(),
+                        input.substate_id(),
+                        remote_shard_group,
+                        pledges.len() + additional_pledges.len(),
+                    );
+                }
                 return Ok(false);
             } else {
                 // We have a lock/pledge for the input, continue

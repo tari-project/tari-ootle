@@ -140,6 +140,21 @@ impl TransactionV1 {
         &self.body.unsigned_transaction().main_signer
     }
 
+    /// The public key of the transaction's main signer (`MainSigner::SealSigner` or a declared
+    /// `MainSigner::Authorizer` whose signature is present on the transaction), or `None` when the transaction has no
+    /// main signer (`MainSigner::None` or an unsigned `MainSigner::Authorizer`).
+    pub fn main_signer(&self) -> Option<RistrettoPublicKeyBytes> {
+        match self.declared_main_signer() {
+            MainSigner::None => None,
+            MainSigner::SealSigner => Some(*self.seal_signature.public_key()),
+            MainSigner::Authorizer(public_key) => self
+                .signatures()
+                .iter()
+                .any(|sig| sig.public_key() == public_key)
+                .then_some(*public_key),
+        }
+    }
+
     pub fn is_seal_signer_authorized(&self) -> bool {
         self.declared_main_signer().is_seal_signer_authorized()
     }
@@ -267,17 +282,18 @@ impl TransactionV1 {
     }
 
     pub fn all_published_templates_iter(&self) -> impl Iterator<Item = (PublishedTemplateAddress, &[u8])> + '_ {
-        let sealed_pk = self.seal_signature.public_key();
+        let author = self.main_signer();
         let blobs = self.body.unsigned_transaction().blobs();
         self.instructions()
             .iter()
             .chain(self.fee_instructions())
             .filter_map(move |instruction| {
+                let author = author?;
                 if let Instruction::PublishTemplate { binary, .. } = instruction {
                     let bytes = blobs.get(*binary)?.as_bytes();
                     let binary_hash = hash_template_code(bytes);
                     Some((
-                        PublishedTemplateAddress::from_author_and_binary_hash(sealed_pk, &binary_hash),
+                        PublishedTemplateAddress::from_author_and_binary_hash(&author, &binary_hash),
                         bytes,
                     ))
                 } else {
@@ -831,6 +847,41 @@ mod transaction_id_tests {
         );
 
         assert_ne!(a.calculate_id(), b.calculate_id());
+    }
+
+    #[test]
+    fn published_templates_use_main_signer() {
+        let (sealer_sk, sealer_pk) = random_key();
+        let (author_sk, author_pk) = random_key();
+        let binary = vec![1u8, 2, 3, 4];
+        let binary_hash = hash_template_code(&binary);
+        let expected_address = PublishedTemplateAddress::from_author_and_binary_hash(&author_pk, &binary_hash);
+
+        let mut unsigned = sample_unsigned();
+        unsigned.main_signer = MainSigner::Authorizer(author_pk);
+        unsigned.blobs = Blobs::from_vec(vec![crate::Blob::from(binary.clone())]);
+        unsigned.instructions = vec![Instruction::PublishTemplate {
+            binary: 0,
+            metadata_hash: None,
+        }];
+        let sig = TransactionSignature::sign_v1(&author_sk, &sealer_pk, &unsigned);
+        let unsealed = UnsealedTransactionV1::new(unsigned.clone(), vec![sig]);
+        let tx = TransactionV1::new(
+            unsealed.clone(),
+            TransactionSealSignature::sign_v1(&sealer_sk, &unsealed),
+        );
+
+        let published: Vec<_> = tx.all_published_templates_iter().collect();
+        assert_eq!(published, vec![(expected_address, binary.as_slice())]);
+
+        let mut no_signer_unsigned = unsigned;
+        no_signer_unsigned.main_signer = MainSigner::None;
+        let no_signer_unsealed = UnsealedTransactionV1::new(no_signer_unsigned, vec![]);
+        let no_signer_tx = TransactionV1::new(
+            no_signer_unsealed.clone(),
+            TransactionSealSignature::sign_v1(&sealer_sk, &no_signer_unsealed),
+        );
+        assert!(no_signer_tx.all_published_templates_iter().next().is_none());
     }
 }
 

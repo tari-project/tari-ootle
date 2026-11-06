@@ -428,7 +428,7 @@ impl<D> TransactionBuilder<D> {
         // `BlobIndex`; only an offset a blob is actually placed at has to.
         let own_blob_count = self.unsigned_transaction.blobs().len();
         let other_blob_count = other.unsigned_transaction.blobs().len();
-        let combined = own_blob_count + other_blob_count;
+        let combined = self.blobs_spoken_for_elsewhere() + own_blob_count + other_blob_count;
         assert!(
             combined <= BlobIndex::MAX as usize + 1,
             "merged blob count {combined} exceeds BlobIndex range",
@@ -811,12 +811,16 @@ impl<D> TransactionBuilder<D> {
         name: N,
         bytes: B,
     ) -> Result<Self, BlobIndexOverflow> {
+        let idx = self.push_blob_checked(bytes.into())?;
+        self.blob_ids.insert(name.into(), idx);
+        Ok(self)
+    }
+
+    fn push_blob_checked(&mut self, blob: Blob) -> Result<BlobIndex, BlobIndexOverflow> {
         if self.blobs_spoken_for_elsewhere() + self.unsigned_transaction.blobs().len() >= Blobs::MAX_BLOBS {
             return Err(BlobIndexOverflow { max: Blobs::MAX_BLOBS });
         }
-        let idx = self.unsigned_transaction.add_blob(bytes.into())?;
-        self.blob_ids.insert(name.into(), idx);
-        Ok(self)
+        self.unsigned_transaction.add_blob(blob)
     }
 
     /// Blobs the other half of the transaction already holds, which this half's additions share a
@@ -840,8 +844,7 @@ impl<D> TransactionBuilder<D> {
     /// Panics if the transaction's blob count would exceed the `BlobIndex` range.
     pub fn publish_template<B: Into<Blob>>(mut self, binary: B) -> Self {
         let idx = self
-            .unsigned_transaction
-            .add_blob(binary.into())
+            .push_blob_checked(binary.into())
             .expect("transaction blob count exceeds BlobIndex range");
         self.add_instruction(Instruction::PublishTemplate {
             binary: idx,
@@ -861,8 +864,7 @@ impl<D> TransactionBuilder<D> {
         metadata_hash: H,
     ) -> Self {
         let idx = self
-            .unsigned_transaction
-            .add_blob(binary.into())
+            .push_blob_checked(binary.into())
             .expect("transaction blob count exceeds BlobIndex range");
         self.add_instruction(Instruction::PublishTemplate {
             binary: idx,
@@ -1062,12 +1064,7 @@ impl<D> TransactionBuilder<D> {
                     Assertion::BucketContainsNonFungibles { resource_address, .. },
                 ..
             } => {
-                if *resource_address != TARI_TOKEN {
-                    declare_input(
-                        self.unsigned_transaction.inputs_mut(),
-                        InputDeclaration::read(*resource_address),
-                    );
-                }
+                self.add_resource_input(*resource_address);
             },
             Instruction::UpdateComponentTemplate { component, migrate, .. } => {
                 self.add_input_for_component_ref(component);

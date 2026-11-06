@@ -118,6 +118,11 @@ impl ManifestInstructionGenerator {
             instructions.extend(self.translate_intent(intent)?);
         }
 
+        // `fee_main()` runs in its own phase before `main()` and the runtime clears the workspace at the fee
+        // checkpoint, so bindings and workspace IDs from `main()` must not bleed into `fee_main()`.
+        self.bindings.clear();
+        self.current_workspace_id = WorkspaceId::default();
+
         let mut fee_instructions = Vec::with_capacity(ast.parsed.fee_instruction_intents.len());
         for intent in ast.parsed.fee_instruction_intents {
             fee_instructions.extend(self.translate_intent(intent)?);

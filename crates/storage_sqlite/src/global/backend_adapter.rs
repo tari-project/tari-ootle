@@ -883,7 +883,12 @@ fn distinct_validators<TAddr: NodeAddressable>(
 ) -> Result<Vec<ValidatorNode<TAddr>>, SqliteStorageError> {
     // first, sort by registration block height so that we get newer registrations first
     let mut db_vns = Vec::with_capacity(sqlite_vns.len());
-    sqlite_vns.sort_by(|a, b| a.start_epoch.cmp(&b.start_epoch).reverse());
+    sqlite_vns.sort_by(|a, b| {
+        a.start_epoch
+            .cmp(&b.start_epoch)
+            .then_with(|| a.id.cmp(&b.id))
+            .reverse()
+    });
     let mut dedup_map = HashSet::<Vec<u8>>::with_capacity(sqlite_vns.len());
     for vn in sqlite_vns {
         if !dedup_map.contains(&vn.public_key) {

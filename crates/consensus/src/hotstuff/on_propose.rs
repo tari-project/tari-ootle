@@ -505,8 +505,7 @@ where TConsensusSpec: ConsensusSpec
         let mut invalid_foreign_proposals = Vec::new();
         let mut dropped_foreign_proposals = false;
 
-        // No need to include evidence from justified block if no transactions are included in the next block
-        if !batch.transactions.is_empty() {
+        if !batch.transactions.is_empty() || !batch.foreign_proposals.is_empty() {
             // A replica evaluates this block as: the newly justified block, then the commands in block order
             // (foreign proposals sort before the transaction commands, see `BlockCommands`), all against
             // a single change set. The commands generated below must be derived from that same sequence, or

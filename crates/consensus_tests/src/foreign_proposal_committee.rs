@@ -42,6 +42,8 @@ use tari_ootle_storage::{
         CommandsCommitProof,
         ForeignProposal,
         ForeignProposalRecord,
+        ForeignProposalStatus,
+        LockedEpoch,
         PrunedCommand,
     },
 };
@@ -841,5 +843,149 @@ async fn it_rejects_a_shard_group_with_invalid_bounds() {
             HotStuffError::ProposalValidationError(ProposalValidationError::InvalidShardGroup { .. })
         ),
         "unexpected error: {err}"
+    );
+}
+
+/// A copy of `proposal` under a distinct block id whose transaction commands are pinned to `locked_epoch`.
+fn with_locked_epoch(proposal: &ForeignProposal, locked_epoch: Epoch) -> ForeignProposal {
+    let mut header = proposal.commit_proof().sidechain_block_commit_proof().header.clone();
+    header.parent_id = FixedHash::from([0xff; 32]);
+    let commands = proposal
+        .commands()
+        .iter()
+        .map(|entry| match entry {
+            CommandOrHash::Command(Command::LocalPrepare(atom)) => {
+                let mut atom = atom.clone();
+                atom.locked_epoch = LockedEpoch::new(
+                    locked_epoch,
+                    *atom.locked_epoch.epoch_hash(),
+                    atom.locked_epoch.exhaust_burn_rate(),
+                );
+                CommandOrHash::Command(Command::LocalPrepare(atom))
+            },
+            CommandOrHash::Command(Command::LocalAccept(atom)) => {
+                let mut atom = atom.clone();
+                atom.locked_epoch = LockedEpoch::new(
+                    locked_epoch,
+                    *atom.locked_epoch.epoch_hash(),
+                    atom.locked_epoch.exhaust_burn_rate(),
+                );
+                CommandOrHash::Command(Command::LocalAccept(atom))
+            },
+            entry => entry.clone(),
+        })
+        .collect();
+    let commit_proof = CommandsCommitProof::new_latest(commands, SidechainBlockCommitProof {
+        header,
+        proof_elements: proposal
+            .commit_proof()
+            .sidechain_block_commit_proof()
+            .proof_elements
+            .clone(),
+    });
+    ForeignProposal::new(
+        commit_proof,
+        proposal.block_pledge().clone(),
+        proposal.block_metadata().clone(),
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_foreign_proposal_that_fails_to_process_is_rejected_when_no_transactions_are_ready() {
+    setup_logger();
+    let output_member = TestAddress::new("2");
+    let captured = Arc::new(Mutex::new(None::<(TestAddress, ForeignProposal)>));
+    let mut test = Test::builder()
+        .add_committee(0, vec!["1"])
+        .add_committee(1, vec!["2"])
+        .with_message_filter(Box::new({
+            let output_member = output_member.clone();
+            let captured = captured.clone();
+            move |from, to, msg| match msg {
+                HotstuffMessage::ForeignProposal(msg) if *to == output_member => {
+                    let mut captured = captured.lock().unwrap();
+                    if captured.is_some() {
+                        return true;
+                    }
+                    *captured = Some((from.clone(), (*msg.proposal).clone()));
+                    false
+                },
+                _ => true,
+            }
+        }))
+        .start()
+        .await;
+
+    let inputs = test.create_substates_on_vns(TestVnDestination::Committee(0), 1);
+    let outputs = test.build_outputs_for_committee(1, 1);
+    let tx = build_transaction_from(
+        Transaction::builder_localnet(Epoch(1))
+            .with_inputs(inputs.iter().cloned().map(|i| i.into()))
+            .build_and_seal(&PrivateKey::default()),
+    );
+    test.create_execution_at_destination_for_transaction(
+        TestVnDestination::All,
+        &tx,
+        Decision::Commit,
+        5,
+        inputs
+            .into_iter()
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
+            .collect(),
+        outputs,
+    );
+    test.send_transaction_to_destination(TestVnDestination::All, tx.clone())
+        .await;
+    test.start_epoch(Epoch(1)).await;
+
+    let (sender, genuine) = timeout(Duration::from_secs(60), async {
+        loop {
+            if let Some(captured) = captured.lock().unwrap().clone() {
+                return captured;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("committee 0 never sent a foreign proposal");
+
+    // Inject directly into the store because `with_locked_epoch` alters the command and header without re-signing the
+    // commit proof, which inbound message validation would reject before `on_propose` runs.
+    let invalid = with_locked_epoch(&genuine, Epoch(2));
+    let invalid_id = invalid.calculate_block_id();
+    test.get_validator(&output_member)
+        .state_store()
+        .with_write_tx(|tx| ForeignProposalRecord::new(invalid).save(tx))
+        .unwrap();
+
+    let tx_inbound = test.get_validator(&output_member).tx_inbound_message.clone();
+    tx_inbound
+        .send((sender, HotstuffMessage::ForeignProposal(genuine.into())))
+        .await
+        .unwrap();
+
+    let rejected_and_finalized = timeout(Duration::from_secs(30), async {
+        loop {
+            let status = test
+                .get_validator(&output_member)
+                .state_store()
+                .with_read_tx(|tx| ForeignProposalRecord::get_any(tx, [&invalid_id]))
+                .unwrap()
+                .pop()
+                .map(|record| record.status());
+            if status == Some(ForeignProposalStatus::Invalid) &&
+                test.get_validator(&output_member).has_finalized(tx.id())
+            {
+                return true;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    test.stop();
+    assert_eq!(
+        rejected_and_finalized,
+        Ok(true),
+        "proposer with no ready transactions did not reject the invalid foreign proposal and finalize the transaction"
     );
 }

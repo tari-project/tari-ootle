@@ -210,8 +210,9 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst, stateless: bool
             parse_quote! { component_manager.set_state(rtn); },
         ]);
     } else {
-        // Handle "Self" (if present) in the return position by creating a new component
-        stmts.extend(replace_self_in_output(ast));
+        if !stateless {
+            stmts.extend(replace_self_in_output(ast));
+        }
 
         // encode the result value
         stmts.push(parse_quote! {
@@ -244,8 +245,7 @@ fn replace_self_in_output(ast: &FunctionAst) -> Vec<Stmt> {
                 }
             },
             TypeAst::Tuple { type_tuple, .. } => {
-                let stmt = replace_self_in_tuple(type_tuple);
-                return vec![stmt];
+                return replace_self_in_tuple(type_tuple);
             },
             _ => todo!("replace_self_in_output only supports typed and tuple"),
         }
@@ -273,7 +273,17 @@ fn replace_self_in_single_value(type_path: &TypePath) -> Option<Stmt> {
     None
 }
 
-fn replace_self_in_tuple(type_tuple: &TypeTuple) -> Stmt {
+fn replace_self_in_tuple(type_tuple: &TypeTuple) -> Vec<Stmt> {
+    let has_self = type_tuple.elems.iter().any(|t| {
+        matches!(
+            t,
+            syn::Type::Path(path) if path.path.segments.first().is_some_and(|s| s.ident == "Self")
+        )
+    });
+    if !has_self {
+        return vec![];
+    }
+
     // build the expressions for each element in the tuple
     let elems: Vec<Expr> = type_tuple
         .elems
@@ -305,13 +315,13 @@ fn replace_self_in_tuple(type_tuple: &TypeTuple) -> Stmt {
                     field_expr
                 }
             },
-            _ => todo!("replace_self_in_tuple only supports paths"),
+            _ => build_tuple_field_expr("rtn".to_string(), i as u32),
         })
         .collect();
 
-    parse_quote! {
+    vec![parse_quote! {
         let rtn = (#(#elems),*);
-    }
+    }]
 }
 
 fn build_tuple_field_expr(name: String, i: u32) -> Expr {

@@ -203,6 +203,16 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             .collect::<Vec<_>>();
         self.pending_events.extend(announcements);
 
+        if self.config.epoch_time.is_none() && epoch > self.config.initial_epoch {
+            // When ticks are disabled and the store has already progressed past `initial_epoch`,
+            // `RealTimeEpochTicker` immediately returns `Poll::Pending` without emitting `DoneForNow`.
+            // Queue `DoneForNow` after any initial announcements so initial sync completes.
+            self.pending_events.push_back(EpochEvent::DoneForNow {
+                epoch,
+                epoch_hash: crate::configured::real_time_ticker::calc_static_epoch_hash(epoch),
+            });
+        }
+
         Ok(())
     }
 
@@ -897,5 +907,27 @@ mod tests {
         ];
         expected.sort();
         assert_eq!(powers, expected);
+    }
+
+    #[tokio::test]
+    async fn create_with_disabled_ticks_and_persisted_epoch_emits_done_for_now() {
+        let store = TestStore::default();
+        store
+            .set(StoreKey::ConfiguredCurrentEpoch.as_key_bytes(), &Epoch(5))
+            .unwrap();
+        let config = Config {
+            epoch_time: None,
+            initial_epoch: Epoch(3),
+            base_time: time::OffsetDateTime::now_utc(),
+            validators: vec![],
+        };
+        let mut oracle = ConfiguredEpochOracle::create(config, store).unwrap();
+        let events = drive_events(&mut oracle);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, EpochEvent::DoneForNow { epoch, .. } if *epoch == Epoch(5))),
+            "disabled-tick oracle resumed past initial_epoch must still emit DoneForNow(5); got {events:?}"
+        );
     }
 }

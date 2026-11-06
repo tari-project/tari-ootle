@@ -19,7 +19,7 @@ use tari_ootle_common_types::{
 };
 use tari_template_lib_types::Hash32;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct VersionedSubstateIdLockIntent {
     #[n(0)]
@@ -32,6 +32,14 @@ pub struct VersionedSubstateIdLockIntent {
     #[n(3)]
     pledged_value_hash: Option<Hash32>,
 }
+
+impl PartialEq for VersionedSubstateIdLockIntent {
+    fn eq(&self, other: &Self) -> bool {
+        self.versioned_substate_id == other.versioned_substate_id
+    }
+}
+
+impl Eq for VersionedSubstateIdLockIntent {}
 
 impl VersionedSubstateIdLockIntent {
     pub fn new(versioned_substate_id: VersionedSubstateId, lock: SubstateLockType, require_version: bool) -> Self {
@@ -273,8 +281,8 @@ impl SubstateRequirementLockIntent {
         Self::new(substate_id, version_to_lock, SubstateLockType::Output)
     }
 
-    pub fn to_substate_address(&self) -> Option<SubstateAddress> {
-        self.substate_requirement.to_substate_address()
+    pub fn to_substate_address(&self) -> SubstateAddress {
+        SubstateAddress::from_substate_id(self.substate_id(), self.version_to_lock)
     }
 
     pub fn substate_requirement(&self) -> &SubstateRequirement {
@@ -383,5 +391,58 @@ impl Hash for SubstateRequirementLockIntent {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         // A SubstateRequirementLockIntent is uniquely identified by the SubstateRequirement
         self.substate_requirement.hash(state);
+    }
+}
+
+impl PartialEq for SubstateRequirementLockIntent {
+    fn eq(&self, other: &Self) -> bool {
+        self.substate_requirement == other.substate_requirement
+    }
+}
+
+impl Eq for SubstateRequirementLockIntent {}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::{HashSet, hash_map::DefaultHasher},
+        hash::Hasher,
+    };
+
+    use tari_template_lib_types::ComponentAddress;
+
+    use super::*;
+
+    #[test]
+    fn versioned_lock_intent_eq_and_hash_depend_only_on_versioned_substate_id() {
+        let id = VersionedSubstateId::new(
+            SubstateId::Component(ComponentAddress::from_array([1u8; 32])),
+            SubstateVersion::new(2),
+        );
+        let a = VersionedSubstateIdLockIntent::read(id.clone(), false);
+        let b = VersionedSubstateIdLockIntent::write(id, true);
+
+        assert_eq!(a, b);
+        let mut h1 = DefaultHasher::new();
+        let mut h2 = DefaultHasher::new();
+        a.hash(&mut h1);
+        b.hash(&mut h2);
+        assert_eq!(h1.finish(), h2.finish());
+
+        let mut set = HashSet::new();
+        set.insert(a);
+        assert!(set.contains(&b));
+    }
+
+    #[test]
+    fn requirement_lock_intent_to_substate_address_uses_version_to_lock() {
+        let substate_id = SubstateId::Component(ComponentAddress::from_array([2u8; 32]));
+        let req = SubstateRequirement::unversioned(substate_id.clone());
+        let intent = SubstateRequirementLockIntent::read(req, SubstateVersion::new(5));
+
+        assert_eq!(
+            intent.to_substate_address(),
+            SubstateAddress::from_substate_id(&substate_id, SubstateVersion::new(5))
+        );
     }
 }

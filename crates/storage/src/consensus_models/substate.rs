@@ -224,9 +224,11 @@ impl SubstateRecord {
     ) -> Result<(Vec<SubstateRecord>, HashSet<VersionedSubstateIdRef<'a>>), StorageError> {
         let mut substate_ids = requirements.into_iter().collect::<HashSet<_>>();
         let found = tx.substates_get_any(&substate_ids)?;
-        for f in &found {
-            substate_ids.remove(f.substate_id());
-        }
+        substate_ids.retain(|req| {
+            !found
+                .iter()
+                .any(|f| f.substate_id() == req.substate_id && f.version() == req.version)
+        });
 
         Ok((found, substate_ids))
     }

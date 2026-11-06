@@ -964,7 +964,7 @@ impl TransactionPoolRecord {
     /// different rates. The lower rate wins the tie, which leaves every shard group holding the same pin whatever
     /// order the proposals carrying them arrive in.
     pub fn update_locked_epoch(&mut self, new_epoch: LockedEpoch) -> bool {
-        let pin_order = |pin: &LockedEpoch| (pin.epoch(), pin.exhaust_burn_rate().as_bps());
+        let pin_order = |pin: &LockedEpoch| (pin.epoch(), pin.exhaust_burn_rate().as_bps(), *pin.hash());
         if self
             .locked_epoch
             .as_ref()
@@ -1833,6 +1833,17 @@ mod tests {
         fn pins_in_the_same_epoch_settle_at_one_rate_whatever_the_arrival_order() {
             assert_eq!(pinned_after(&[pin(5, 700), pin(5, 500)]), Some(pin(5, 500)));
             assert_eq!(pinned_after(&[pin(5, 500), pin(5, 700)]), Some(pin(5, 500)));
+        }
+
+        #[test]
+        fn pins_with_identical_epoch_and_rate_settle_by_hash_regardless_of_order() {
+            let lower_hash = LockedEpoch::new(Epoch(5), [1u8; 32].into(), ExhaustBurnRate::new(500));
+            let higher_hash = LockedEpoch::new(Epoch(5), [2u8; 32].into(), ExhaustBurnRate::new(500));
+            assert_eq!(
+                pinned_after(&[higher_hash.clone(), lower_hash.clone()]),
+                Some(lower_hash.clone())
+            );
+            assert_eq!(pinned_after(&[lower_hash.clone(), higher_hash]), Some(lower_hash));
         }
     }
 }

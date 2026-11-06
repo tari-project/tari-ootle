@@ -1689,7 +1689,7 @@ fn main_bindings_do_not_leak_into_fee_main() {
     let err = parse_manifest(leaked_manifest, globals, Default::default(), Default::default())
         .err()
         .expect("a binding from main() must not be visible in fee_main()");
-    assert!(err.to_string().contains("Undefined variable `main_only`"), "{err}");
+    assert_eq!(err.to_string(), "Variable 'main_only' is not defined");
 }
 
 #[test]

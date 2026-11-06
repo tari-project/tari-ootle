@@ -53,7 +53,11 @@ pub struct PrunedUnsignedTransactionV1 {
     #[cbor(decode_with = "crate::v1::unsigned::decode_instructions")]
     pub instructions: Vec<Instruction>,
     #[n(3)]
-    #[cbor(with = "tari_bor::adapters::indexset_codec")]
+    #[cbor(
+        encode_with = "tari_bor::adapters::indexset_codec::encode",
+        decode_with = "crate::v1::unsigned::decode_inputs",
+        cbor_len = "tari_bor::adapters::indexset_codec::cbor_len"
+    )]
     #[cfg_attr(
         feature = "serde",
         serde(deserialize_with = "tari_ootle_common_types::deserialize_input_declarations")
@@ -74,11 +78,16 @@ pub struct PrunedUnsignedTransactionV1 {
     /// — populated at conversion time from `Blobs` so that API consumers and UIs can show
     /// blob sizes without downloading payloads.
     #[n(9)]
+    #[cbor(decode_with = "decode_blob_sizes")]
     #[borsh(skip)]
     pub blob_sizes: Vec<u32>,
     /// Mirrors `UnsignedTransactionV1::nonce` of the full form.
     #[n(10)]
     pub nonce: u64,
+}
+
+fn decode_blob_sizes<'b, C>(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Vec<u32>, minicbor::decode::Error> {
+    tari_bor::adapters::bounded_vec::decode(d, ctx, Blobs::MAX_BLOBS)
 }
 
 impl PrunedUnsignedTransactionV1 {
@@ -131,6 +140,7 @@ pub struct PrunedUnsealedTransactionV1 {
     #[n(0)]
     transaction: PrunedUnsignedTransactionV1,
     #[n(1)]
+    #[cbor(decode_with = "crate::v1::unsealed::decode_signatures")]
     signatures: Vec<TransactionSignature>,
 }
 

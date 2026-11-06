@@ -17,6 +17,7 @@ use crate::{
     ComponentReference,
     Instruction,
     InstructionLimitTracker,
+    MAX_TRANSACTION_INPUTS,
     MAX_TRANSACTION_INSTRUCTIONS,
     MainSigner,
     ResourceAddressRef,
@@ -38,6 +39,13 @@ pub(crate) fn decode_instructions<'b, C>(
     })
 }
 
+pub(crate) fn decode_inputs<'b, C>(
+    d: &mut minicbor::Decoder<'b>,
+    ctx: &mut C,
+) -> Result<IndexSet<InputDeclaration>, minicbor::decode::Error> {
+    tari_bor::adapters::indexset_codec::decode_bounded(d, ctx, MAX_TRANSACTION_INPUTS)
+}
+
 #[derive(Debug, Clone, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -53,7 +61,11 @@ pub struct UnsignedTransactionV1 {
 
     /// Input objects that may be read/write
     #[n(3)]
-    #[cbor(with = "tari_bor::adapters::indexset_codec")]
+    #[cbor(
+        encode_with = "tari_bor::adapters::indexset_codec::encode",
+        decode_with = "decode_inputs",
+        cbor_len = "tari_bor::adapters::indexset_codec::cbor_len"
+    )]
     #[cfg_attr(
         feature = "serde",
         serde(deserialize_with = "tari_ootle_common_types::deserialize_input_declarations")

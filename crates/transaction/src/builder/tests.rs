@@ -497,3 +497,97 @@ fn it_preserves_referenced_assert_resources() {
     assert!(referenced.contains(&SubstateId::Resource(nft_resource)));
     assert!(!referenced.contains(&SubstateId::Resource(TARI_TOKEN)));
 }
+
+#[test]
+fn from_unsigned_advances_workspace_ids_past_existing_instructions() {
+    let initial = Transaction::builder_localnet(Epoch(1))
+        .put_last_instruction_output_on_workspace("first")
+        .allocate_component_address("second")
+        .with_fee_instructions_builder(|b| b.put_last_instruction_output_on_workspace("fee_first"))
+        .build_unsigned();
+
+    let rebuilt = crate::TransactionBuilder::from_unsigned(initial)
+        .put_last_instruction_output_on_workspace("third")
+        .call_function(TemplateAddress::default(), "use_third", args![Workspace("third")])
+        .with_fee_instructions_builder(|b| b.put_last_instruction_output_on_workspace("fee_second"))
+        .build_unsigned();
+
+    assert_eq!(
+        rebuilt.instructions()[0],
+        Instruction::PutLastInstructionOutputOnWorkspace { key: 0 }
+    );
+    assert_eq!(
+        rebuilt.instructions()[1],
+        Instruction::AllocateAddress {
+            allocatable_type: AllocatableAddressType::Component,
+            workspace_id: 1,
+        }
+    );
+    assert_eq!(
+        rebuilt.instructions()[2],
+        Instruction::PutLastInstructionOutputOnWorkspace { key: 2 }
+    );
+    assert_eq!(
+        rebuilt.instructions()[3],
+        Instruction::CallFunction {
+            address: TemplateAddress::default(),
+            function: "use_third".try_into().unwrap(),
+            args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(2))],
+        }
+    );
+    assert_eq!(
+        rebuilt.fee_instructions()[0],
+        Instruction::PutLastInstructionOutputOnWorkspace { key: 0 }
+    );
+    assert_eq!(
+        rebuilt.fee_instructions()[1],
+        Instruction::PutLastInstructionOutputOnWorkspace { key: 2 }
+    );
+}
+
+#[test]
+fn cbor_decode_rejects_oversized_inputs_signatures_and_blob_hashes() {
+    use tari_ootle_common_types::InputDeclaration;
+    use tari_template_lib_types::{Hash32, ObjectKey};
+    use crate::{
+        Blobs,
+        v1::{MAX_SIGNATURES_PER_TRANSACTION, MAX_TRANSACTION_INPUTS, UnsealedTransactionV1, UnsignedTransactionV1},
+    };
+
+    // 1. Oversized inputs on UnsignedTransactionV1 must fail at CBOR decode.
+    let mut builder = Transaction::builder_localnet(Epoch(1));
+    for i in 0..=MAX_TRANSACTION_INPUTS {
+        let mut bytes = [0u8; 32];
+        bytes[0..8].copy_from_slice(&(i as u64).to_le_bytes());
+        let comp = ComponentAddress::new(ObjectKey::from_array(bytes));
+        builder = builder.add_input(InputDeclaration::read(comp));
+    }
+    let unsigned = builder.build_unsigned();
+    let encoded_unsigned = tari_bor::encode(&unsigned).unwrap();
+    assert!(
+        tari_bor::decode::< crate::UnsignedTransaction >(&encoded_unsigned).is_err(),
+        "decoding > MAX_TRANSACTION_INPUTS inputs must be rejected"
+    );
+
+    // 2. Oversized signatures on UnsealedTransactionV1 must fail at CBOR decode.
+    let base_unsigned = UnsignedTransactionV1::new_default(0x10u8, Epoch(1));
+    let dummy_sig = TransactionSignature::new(
+        tari_template_lib_types::crypto::RistrettoPublicKeyBytes::zero(),
+        TRANSACTION_SIGNING_CONTEXT.sign(&RistrettoSecretKey::default(), &base_unsigned.to_signing_message(&tari_template_lib_types::crypto::RistrettoPublicKeyBytes::zero())),
+    );
+    let sigs = vec![dummy_sig; MAX_SIGNATURES_PER_TRANSACTION + 1];
+    let unsealed = UnsealedTransactionV1::new(base_unsigned, sigs);
+    let encoded_unsealed = tari_bor::encode(&unsealed).unwrap();
+    assert!(
+        tari_bor::decode::<UnsealedTransactionV1>(&encoded_unsealed).is_err(),
+        "decoding > MAX_SIGNATURES_PER_TRANSACTION signatures must be rejected"
+    );
+
+    // 3. Oversized BlobHashes must fail at CBOR decode.
+    let hashes = vec![Hash32::zero(); Blobs::MAX_BLOBS + 1];
+    let encoded_hashes = tari_bor::encode(&hashes).unwrap();
+    assert!(
+        tari_bor::decode::<crate::BlobHashes>(&encoded_hashes).is_err(),
+        "decoding > Blobs::MAX_BLOBS blob hashes must be rejected"
+    );
+}

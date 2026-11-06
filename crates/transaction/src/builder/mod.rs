@@ -112,14 +112,26 @@ impl TransactionBuilder<MainIntent> {
     /// prior builder and — unlike [`Transaction::builder`] — no `max_epoch` decided up front.
     pub fn from_unsigned<T: Into<UnsignedTransaction>>(unsigned_transaction: T) -> Self {
         let unsigned_transaction = unsigned_transaction.into();
+        let mut workspace_ids = WorkspaceIds::new();
+        for instruction in unsigned_transaction
+            .instructions()
+            .iter()
+            .chain(unsigned_transaction.fee_instructions())
+        {
+            if let Some(id) = instruction.allocated_workspace_id() {
+                let next_id = id.checked_add(1).expect("Workspace ID overflow");
+                if next_id > workspace_ids.next_id() {
+                    workspace_ids.set_next_id(next_id);
+                }
+            }
+        }
+        let mut fee_builder = Self::new_fee_builder(unsigned_transaction.network(), unsigned_transaction.max_epoch());
+        fee_builder.workspace_ids.set_next_id(workspace_ids.next_id());
         Self {
-            fee_instruction_builder: Some(Box::new(Self::new_fee_builder(
-                unsigned_transaction.network(),
-                unsigned_transaction.max_epoch(),
-            ))),
+            fee_instruction_builder: Some(Box::new(fee_builder)),
             reserved_blob_slots: 0,
             unsigned_transaction,
-            workspace_ids: WorkspaceIds::new(),
+            workspace_ids,
             blob_ids: BlobIds::new(),
             _discriminator: std::marker::PhantomData,
             fill_inputs: false,

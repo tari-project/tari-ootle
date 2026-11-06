@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn passthrough_hasher_accumulates_multiple_writes_for_composite_keys() {
-        use core::hash::{BuildHasher, Hash};
+        use core::hash::BuildHasher;
 
         use crate::{NonFungibleAddress, NonFungibleId, ObjectKey, ResourceAddress};
 
@@ -150,11 +150,7 @@ mod tests {
         let str_badge_1 = NonFungibleAddress::new(badge_res, NonFungibleId::from_string("spender_alpha"));
         let str_badge_2 = NonFungibleAddress::new(badge_res, NonFungibleId::from_string("spender_beta"));
 
-        let hash_of = |key: &(ResourceAddress, NonFungibleAddress)| {
-            let mut hasher = hasher_builder.build_hasher();
-            key.hash(&mut hasher);
-            hasher.finish()
-        };
+        let hash_of = |key: &(ResourceAddress, NonFungibleAddress)| hasher_builder.hash_one(key);
 
         let h_a1 = hash_of(&(res_a, str_badge_1.clone()));
         let h_a2 = hash_of(&(res_a, str_badge_2));

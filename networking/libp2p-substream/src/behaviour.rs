@@ -343,7 +343,7 @@ impl Connection {
 
 #[cfg(test)]
 mod tests {
-    use std::task::Waker;
+    use std::{slice, task::Waker};
 
     use libp2p::{core::ConnectedPoint, swarm::ConnectionHandlerEvent};
 
@@ -478,7 +478,7 @@ mod tests {
         let peer_id = PeerId::random();
         let protocol = StreamProtocol::new("/test/1");
         let mut behaviour = Behaviour::new([protocol.clone(), protocol.clone()], Config::default());
-        assert_eq!(behaviour.supported_protocols(), [protocol.clone()]);
+        assert_eq!(behaviour.supported_protocols(), slice::from_ref(&protocol));
 
         let _handler = connect(&mut behaviour, peer_id, ConnectionId::new_unchecked(1));
         behaviour.add_protocol(protocol.clone());

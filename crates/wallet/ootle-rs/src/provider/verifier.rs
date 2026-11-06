@@ -1275,14 +1275,61 @@ mod tests {
         }
 
         let (sets, indexer, provider) = walked_provider(IndexerTrust::Verify).await;
-        serve_proven(&sets, &indexer, &account.into(), account_component(&[vault]));
+        let vault2 = VaultId::from_hex(&"55".repeat(32)).unwrap();
+        serve_proven(&sets, &indexer, &account.into(), account_component(&[vault, vault2]));
         serve_proven(&sets, &indexer, &vault.into(), tari_vault(100));
+        serve_proven(&sets, &indexer, &vault2.into(), tari_vault(250));
         assert_eq!(
             provider.get_account_balance(account, TARI_TOKEN).await.unwrap(),
-            Amount::from(100u64)
+            Amount::from(350u64)
         );
         let balances = provider.get_account_balances(account).await.unwrap();
-        assert_eq!(balances, HashMap::from([(TARI_TOKEN, Amount::from(100u64))]));
+        assert_eq!(balances, HashMap::from([(TARI_TOKEN, Amount::from(350u64))]));
+    }
+
+    #[tokio::test]
+    async fn resolving_all_component_vaults_does_not_duplicate_cached_vault_inputs() {
+        let component_address = ComponentAddress::from_hex(&"22".repeat(32)).unwrap();
+        let vault_a = SubstateId::Vault(VaultId::from_hex(&"33".repeat(32)).unwrap());
+        let vault_b = SubstateId::Vault(VaultId::from_hex(&"44".repeat(32)).unwrap());
+        let custom_resource = tari_template_lib_types::ResourceAddress::from_hex(&"66".repeat(32)).unwrap();
+        let custom_vault = Vault::new(ResourceContainer::public_fungible(custom_resource, 50u64)).into();
+
+        let (sets, indexer, provider) = walked_provider(IndexerTrust::Verify).await;
+        serve_proven(
+            &sets,
+            &indexer,
+            &component_address.into(),
+            account_component(&[vault_a.as_vault_id().unwrap(), vault_b.as_vault_id().unwrap()]),
+        );
+        serve_proven(&sets, &indexer, &vault_a, custom_vault);
+        serve_proven(&sets, &indexer, &vault_b, tari_vault(100));
+
+        // Pre-cache `vault_a` in pass 1 while `vault_b` is fetched in pass 2.
+        let wants = HashSet::from([
+            WantInput::SpecificSubstate {
+                substate_id: vault_a.clone(),
+                required: false,
+            },
+            WantInput::AllComponentVaults { component_address },
+        ]);
+        let mut transaction = Transaction::builder(NETWORK, Epoch(5)).build_unsigned();
+        TransactionInputResolver::new(provider.verifier().clone())
+            .resolve_inputs(&mut transaction, &wants)
+            .await
+            .unwrap();
+
+        let inputs: Vec<_> = transaction.inputs().iter().map(|i| i.substate_id.clone()).collect();
+        assert_eq!(
+            inputs
+                .iter()
+                .filter(|id| **id == SubstateId::Resource(custom_resource))
+                .count(),
+            1,
+            "AllComponentVaults must add each vault/resource once after all vaults are cached: {inputs:?}"
+        );
+        assert!(inputs.contains(&vault_a));
+        assert!(inputs.contains(&vault_b));
     }
 
     #[tokio::test]

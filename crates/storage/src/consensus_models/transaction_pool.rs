@@ -4,6 +4,7 @@
 use std::{
     clone::Clone,
     fmt::{Display, Formatter},
+    iter,
     marker::PhantomData,
     num::NonZeroU64,
     str::FromStr,
@@ -42,6 +43,7 @@ use crate::{
         LocalOnlyAtom,
         LockedEpoch,
         MultiShardAtom,
+        SubstatePledge,
         TransactionExecution,
         TransactionRecord,
         calculate_leader_fee,
@@ -1172,11 +1174,16 @@ impl TransactionPoolRecord {
             .is_some_and(|e| !e.inputs().is_empty())
     }
 
-    pub fn has_all_required_foreign_pledges<TTx: StateStoreReadTransaction>(
+    pub fn has_all_required_foreign_pledges<'a, TTx, TPledges>(
         &self,
         tx: &TTx,
         local_committee_info: &CommitteeInfo,
-    ) -> Result<bool, StorageError> {
+        additional_pledges: TPledges,
+    ) -> Result<bool, StorageError>
+    where
+        TTx: StateStoreReadTransaction,
+        TPledges: IntoIterator<Item = &'a SubstatePledge> + Clone,
+    {
         let involved_objects = self
             .evidence()
             .all_inputs_iter()
@@ -1188,32 +1195,20 @@ impl TransactionPoolRecord {
             )
             .filter(|(substate_id, _)| !local_committee_info.includes_substate_id(substate_id));
 
-        self.has_foreign_pledges_for_objects(tx, local_committee_info, involved_objects)
+        self.has_foreign_pledges_for_objects(tx, local_committee_info, involved_objects, additional_pledges)
     }
 
-    pub fn has_all_required_foreign_input_pledges<TTx: StateStoreReadTransaction>(
-        &self,
-        tx: &TTx,
-        local_committee_info: &CommitteeInfo,
-    ) -> Result<bool, StorageError> {
-        let involved_objects = self
-            .evidence()
-            .all_inputs_iter()
-            .map(|(_, substate_id, evidence)| (substate_id, evidence.map(|e| (e.version, e.as_lock_type()))))
-            .filter(|(substate_id, _)| !local_committee_info.includes_substate_id(substate_id));
-
-        self.has_foreign_pledges_for_objects(tx, local_committee_info, involved_objects)
-    }
-
-    fn has_foreign_pledges_for_objects<'a, TTx, TObj>(
+    fn has_foreign_pledges_for_objects<'a, 'p, TTx, TObj, TPledges>(
         &self,
         tx: &TTx,
         local_committee_info: &CommitteeInfo,
         involved_objects: TObj,
+        additional_pledges: TPledges,
     ) -> Result<bool, StorageError>
     where
         TTx: StateStoreReadTransaction,
         TObj: IntoIterator<Item = (&'a SubstateId, Option<(SubstateVersion, SubstateLockType)>)>,
+        TPledges: IntoIterator<Item = &'p SubstatePledge> + Clone,
     {
         for (substate_id, data) in involved_objects {
             let Some((version, lock_type)) = data else {
@@ -1226,6 +1221,13 @@ impl TransactionPoolRecord {
                 return Ok(false);
             };
             let address = SubstateAddress::from_substate_id(substate_id, version);
+            if additional_pledges
+                .clone()
+                .into_iter()
+                .any(|p| p.satisfies_substate_and_version(substate_id, version))
+            {
+                continue;
+            }
             // TODO(perf): O(n) queries
             if tx.foreign_substate_pledges_exists_for_transaction_and_address(self.id(), address)? {
                 continue;
@@ -1233,7 +1235,8 @@ impl TransactionPoolRecord {
 
             if log_enabled!(Level::Debug) {
                 // Load them for debugging purposes
-                let pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.id())?;
+                let mut pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.id())?;
+                pledges.extend(additional_pledges.into_iter().cloned());
                 let remote_shard_group = address.to_shard_group(
                     local_committee_info.num_preshards(),
                     local_committee_info.num_committees(),

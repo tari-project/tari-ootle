@@ -23,7 +23,7 @@
 use tari_template_lib::prelude::*;
 
 type VaultMap = PrehashedMap<ResourceAddress, Vault>;
-type ApprovalMap = PrehashedMap<(ResourceAddress, NonFungibleAddress), Amount>;
+type ApprovalMap = FastMap<(ResourceAddress, NonFungibleAddress), Amount>;
 
 /// The maximum number of vaults an account may hold. Anyone may deposit into an account and vaults can never be
 /// removed, while every call on the account decodes its whole vault map, and every `&mut self` call re-encodes it,

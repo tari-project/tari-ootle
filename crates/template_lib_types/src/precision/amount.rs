@@ -47,7 +47,7 @@ impl<'b, C> minicbor::Decode<'b, C> for PrecisionAmount {
                 let mut digits = [0u64; Self::NUM_DIGITS];
                 match n {
                     Some(len) => {
-                        if len as usize != Self::NUM_DIGITS {
+                        if len != Self::NUM_DIGITS as u64 {
                             return Err(minicbor::decode::Error::message(
                                 "PrecisionAmount: unexpected array length",
                             ));
@@ -317,7 +317,7 @@ impl PrecisionAmount {
         };
 
         // If the remainder is zero or the result is negative, we round down
-        if rem.is_zero() || div.is_negative() {
+        if rem.is_zero() || (n.is_negative() != d.is_negative()) {
             Some(Self(div))
         } else {
             // Otherwise, we round up
@@ -787,6 +787,20 @@ mod tests {
         let g = Amount::from(7);
         let h = g.checked_div_ceil(Amount::from(2)).unwrap();
         assert_eq!(h, 4);
+        assert_eq!(Amount::from(-1).checked_div_ceil(Amount::from(2)), Some(Amount::ZERO));
+        assert_eq!(Amount::from(1).checked_div_ceil(Amount::from(-2)), Some(Amount::ZERO));
+        assert_eq!(
+            Amount::from(-7).checked_div_ceil(Amount::from(2)),
+            Some(Amount::from(-3))
+        );
+        assert_eq!(
+            Amount::from(7).checked_div_ceil(Amount::from(-2)),
+            Some(Amount::from(-3))
+        );
+        assert_eq!(
+            Amount::from(-7).checked_div_ceil(Amount::from(-2)),
+            Some(Amount::from(4))
+        );
         let i = Amount::from(8);
         let j = i.checked_pow(3).unwrap();
         assert_eq!(j, Amount::from(512));
@@ -880,6 +894,10 @@ mod tests {
         let encoded = tari_bor::encode(&a).unwrap();
         let decoded = tari_bor::decode::<Amount>(&encoded).unwrap();
         assert_eq!(a, decoded);
+
+        // Indefinite-length CBOR array with fewer than 3 digits (`[_ 1, 2]`) must be rejected.
+        let short_indef = [0x9f, 0x01, 0x02, 0xff];
+        tari_bor::decode::<Amount>(&short_indef).unwrap_err();
     }
 
     #[test]

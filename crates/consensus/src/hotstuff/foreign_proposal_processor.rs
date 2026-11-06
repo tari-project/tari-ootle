@@ -61,7 +61,6 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
     let local_leaf = &substate_store.parent_block();
 
     let foreign_shard_group = proposal.shard_group_unchecked();
-    let foreign_locked_epoch = foreign_locked_epoch(proposal)?;
     info!(
         target: LOG_TARGET,
         "🧩 Processing FOREIGN PROPOSAL {}",
@@ -138,13 +137,13 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                     continue;
                 }
 
-                if tx_rec.update_locked_epoch(foreign_locked_epoch.clone()) {
+                if tx_rec.update_locked_epoch(foreign_locked_epoch(proposal, atom)?) {
                     debug!(
                         target: LOG_TARGET,
                         "🔒 Foreign proposal {} updated locked epoch for transaction {} to {}",
                         proposal,
                         tx_rec.id(),
-                        proposal.epoch()
+                        atom.locked_epoch
                     );
                 } else {
                     debug!(
@@ -425,9 +424,10 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                     continue;
                 }
 
-                // We update this in the foreign Accept phase because we may be output-only and not yet performed the
-                // prepare phase. (therefore locked_epoch is None)
-                tx_rec.update_locked_epoch(foreign_locked_epoch.clone());
+                // An output-only shard group never receives a LocalPrepare, so this is where it first pins the
+                // transaction. Every input shard group settled on one pin before sending its LocalAccept, and executed
+                // the transaction under it.
+                tx_rec.update_locked_epoch(foreign_locked_epoch(proposal, atom)?);
 
                 let remote_decision = atom.decision;
                 let local_decision = tx_rec.current_decision();
@@ -868,26 +868,32 @@ fn foreign_justify_qc_id(proposal: &ForeignProposal) -> Option<PcId> {
     Some(id.into())
 }
 
-/// What a transaction is pinned to by `proposal`: its epoch, at the exhaust burn rate the proposing block names.
+/// The pin the foreign shard group holds for the transaction of `atom`, as its committee certified it in `proposal`.
 ///
-/// Shard groups can open the same epoch at different rates, so the rate comes from the proposing block. Every shard
-/// group that pins a transaction to this proposal then pins the same value, and `update_locked_epoch` settles pins
-/// that tie on epoch the same way everywhere.
-fn foreign_locked_epoch(proposal: &ForeignProposal) -> Result<LockedEpoch, ProposalValidationError> {
-    let exhaust_burn_rate =
-        proposal
-            .exhaust_burn_rate()
-            .ok_or_else(|| ProposalValidationError::ForeignBlockNamesNoExhaustBurnRate {
-                block_id: proposal.calculate_block_id(),
-                shard_group: proposal.shard_group_unchecked(),
-            })?;
-    Ok(proposal.to_locked_epoch(exhaust_burn_rate))
+/// The block that carries the atom can be in a later epoch than the pin: a transaction prepared in one epoch may be
+/// accepted in the next. No shard group sequences a transaction in a block of an earlier epoch than the transaction's
+/// pin, so a pin in a later epoch than the block carrying it is invalid.
+fn foreign_locked_epoch(
+    proposal: &ForeignProposal,
+    atom: &MultiShardAtom,
+) -> Result<LockedEpoch, ProposalValidationError> {
+    if atom.locked_epoch.epoch() > proposal.epoch() {
+        return Err(ProposalValidationError::ForeignTransactionPinnedAfterBlock {
+            block_id: proposal.calculate_block_id(),
+            shard_group: proposal.shard_group_unchecked(),
+            transaction_id: atom.id,
+            locked_epoch: atom.locked_epoch.epoch(),
+            block_epoch: proposal.epoch(),
+        });
+    }
+    Ok(atom.locked_epoch.clone())
 }
 
 #[cfg(test)]
 mod tests {
     use tari_common_types::types::PrivateKey;
     use tari_crypto::{keys::SecretKey, tari_utilities::ByteArray};
+    use tari_engine_types::fees::ExhaustBurnRate;
     use tari_ootle_common_types::{
         Epoch,
         ExtraData,
@@ -1098,6 +1104,22 @@ mod tests {
         TransactionPoolRecord::new_from_transaction(&transaction, Evidence::empty())
     }
 
+    fn atom_pinned_to(epoch: u64, rate_bps: u16) -> MultiShardAtom {
+        MultiShardAtom {
+            id: TransactionId::new([1; 32]),
+            decision: Decision::Commit,
+            evidence: Evidence::empty(),
+            transaction_fee: 0,
+            leader_fee: None,
+            fee_intent_only: false,
+            locked_epoch: LockedEpoch::new(
+                Epoch(epoch),
+                Default::default(),
+                ExhaustBurnRate::try_new(rate_bps).unwrap(),
+            ),
+        }
+    }
+
     /// Shard groups A and B opened epoch 5 at different rates, and a transaction spanning both is prepared in each.
     /// Every shard group processing the two LocalPrepares pins it at one rate named by a proposing block, whichever
     /// arrives first.
@@ -1106,8 +1128,8 @@ mod tests {
         let num_preshards = NumPreshards::P256;
         let group_a = ShardGroup::new(0u32, num_preshards.as_u32() / 2 - 1);
         let group_b = ShardGroup::new(num_preshards.as_u32() / 2, num_preshards.as_u32() - 1);
-        let from_a = foreign_locked_epoch(&proposal_naming(group_a, 5, 500)).unwrap();
-        let from_b = foreign_locked_epoch(&proposal_naming(group_b, 5, 700)).unwrap();
+        let from_a = foreign_locked_epoch(&proposal_naming(group_a, 5, 500), &atom_pinned_to(5, 500)).unwrap();
+        let from_b = foreign_locked_epoch(&proposal_naming(group_b, 5, 700), &atom_pinned_to(5, 700)).unwrap();
         assert_eq!(from_a.exhaust_burn_rate().as_bps(), 500);
         assert_eq!(from_b.exhaust_burn_rate().as_bps(), 700);
 
@@ -1120,5 +1142,272 @@ mod tests {
 
         assert_eq!(a_then_b.locked_epoch(), Some(&from_a));
         assert_eq!(b_then_a.locked_epoch(), Some(&from_a));
+    }
+
+    /// A transaction accepted in epoch 6 may have been prepared, and pinned, in epoch 5. No block carries a transaction
+    /// pinned to a later epoch than its own.
+    #[test]
+    fn a_foreign_atom_pinned_after_its_block_is_rejected() {
+        let num_preshards = NumPreshards::P256;
+        let group_a = ShardGroup::new(0u32, num_preshards.as_u32() / 2 - 1);
+        let proposal = proposal_naming(group_a, 6, 700);
+
+        let earlier = foreign_locked_epoch(&proposal, &atom_pinned_to(5, 500)).unwrap();
+        assert_eq!(earlier.epoch(), Epoch(5));
+        assert_eq!(earlier.exhaust_burn_rate().as_bps(), 500);
+        assert!(foreign_locked_epoch(&proposal, &atom_pinned_to(6, 900)).is_ok());
+
+        let err = foreign_locked_epoch(&proposal, &atom_pinned_to(7, 500)).unwrap_err();
+        assert!(
+            matches!(err, ProposalValidationError::ForeignTransactionPinnedAfterBlock {
+                locked_epoch: Epoch(7),
+                block_epoch: Epoch(6),
+                ..
+            }),
+            "{err}"
+        );
+    }
+
+    /// Shard group A holds every input of a transaction, so it executes the transaction when it prepares it in epoch 5,
+    /// and commits its LocalAccept in epoch 6. Output-only shard group C first learns of the transaction from that
+    /// LocalAccept, and must execute it under the epoch A executed it under.
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn an_output_only_group_pins_the_epoch_the_input_group_executed_in() {
+        use tari_consensus_types::{PcId, ProposalCertificate, ShardGroupAccumulatedData};
+        use tari_engine_types::{
+            SubstateVersion,
+            component::{Component, ComponentBody, ComponentHeader},
+            substate::{SubstateId, SubstateValue},
+        };
+        use tari_ootle_common_types::{NodeHeight, SubstateLockType, SubstateRequirement, VersionedSubstateId};
+        use tari_ootle_storage::{
+            StateStore,
+            StateStoreWriteTransaction,
+            consensus_models::{
+                Block,
+                BlockCommands,
+                BlockHeader,
+                CommandOrHash,
+                SubstateRecord,
+                SubstateTransition,
+                SubstateUpdateBatch,
+                VersionedSubstateIdLockIntent,
+            },
+        };
+        use tari_sidechain::QuorumDecision;
+        use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+        use tari_template_lib_types::{
+            ComponentAddress,
+            EntityId,
+            ObjectKey,
+            SubstateOwnerRule,
+            TransactionReceiptAddress,
+            access_rules::ComponentAccessRules,
+        };
+
+        use crate::{hotstuff::substate_store::PendingSubstateStore, traits::CertificateStore};
+
+        let network = Network::MainNet;
+        let num_preshards = NumPreshards::P256;
+        let mut groups = num_preshards.all_shard_groups_iter(2);
+        let group_a = groups.next().unwrap();
+        let group_c = groups.next().unwrap();
+
+        let component_in = |group: ShardGroup| -> SubstateId {
+            (0x20..=u8::MAX)
+                .map(|seed| SubstateId::Component(ComponentAddress::from_array([seed; ObjectKey::LENGTH])))
+                .find(|id| {
+                    let shard = VersionedSubstateId::new(id.clone(), SubstateVersion::ZERO).to_shard(num_preshards);
+                    group.contains(&shard)
+                })
+                .unwrap()
+        };
+        let input_a = component_in(group_a);
+        let output_c = component_in(group_c);
+        let input_a_value = SubstateValue::Component(Component {
+            header: ComponentHeader {
+                template_address: Default::default(),
+                owner_rule: SubstateOwnerRule::None,
+                access_rules: ComponentAccessRules::allow_all(),
+                entity_id: EntityId::default(),
+                upgrade_rule: Default::default(),
+            },
+            body: ComponentBody::empty(),
+        });
+
+        let transaction = Transaction::builder(network, Epoch(100))
+            .add_input(SubstateRequirement::unversioned(input_a.clone()))
+            .build_and_seal(&PrivateKey::from(1u64));
+        let tx_id = transaction.calculate_id();
+        let receipt = SubstateId::TransactionReceipt(TransactionReceiptAddress::from(tx_id));
+
+        let mut evidence = Evidence::empty();
+        let ev_a = evidence.add_shard_group(group_a);
+        ev_a.insert_from_lock_intent(
+            VersionedSubstateIdLockIntent::write(
+                VersionedSubstateId::new(input_a.clone(), SubstateVersion::ZERO),
+                true,
+            )
+            .with_pledged_value(&input_a_value),
+        );
+        ev_a.insert(receipt, SubstateVersion::ZERO, SubstateLockType::Output, None);
+        evidence
+            .add_shard_group(group_c)
+            .insert(output_c, SubstateVersion::ZERO, SubstateLockType::Output, None);
+
+        // Group A executed the transaction when it prepared it, in a block of epoch 5 at a 500 bps burn rate
+        let atom = MultiShardAtom {
+            id: tx_id,
+            decision: Decision::Commit,
+            evidence,
+            transaction_fee: 100,
+            leader_fee: None,
+            fee_intent_only: false,
+            locked_epoch: LockedEpoch::new(Epoch(5), Default::default(), ExhaustBurnRate::try_new(500).unwrap()),
+        };
+
+        let tmp_a = tempfile::tempdir().unwrap();
+        let store_a = RocksDbStateStore::<String>::open(tmp_a.path(), DatabaseOptions::default()).unwrap();
+        store_a
+            .with_write_tx(|tx| {
+                let shard_a = VersionedSubstateId::new(input_a.clone(), SubstateVersion::ZERO).to_shard(num_preshards);
+                let mut batch = SubstateUpdateBatch::new(network, Epoch::zero());
+                batch.with_transition(shard_a, 0).push(SubstateTransition::Up {
+                    id: input_a.clone(),
+                    version: SubstateVersion::ZERO,
+                    substate_or_hash: input_a_value.clone().into(),
+                });
+                SubstateRecord::commit_batch(tx, batch)
+            })
+            .unwrap();
+
+        let make_block = |parent: &Block, shard_group: ShardGroup, epoch: Epoch, cmds: BlockCommands| -> Block {
+            let justify = ProposalCertificate::new(
+                *parent.id().hash(),
+                *parent.parent(),
+                parent.height(),
+                parent.epoch(),
+                shard_group,
+                ProposalCertificate::genesis_signatures(),
+                QuorumDecision::Accept,
+            );
+            let mut extra = ExtraData::new();
+            extra.insert_bps(ExtraFieldKey::ExhaustBurnRate, 500);
+            let header = BlockHeader::create_unsigned(
+                network,
+                ProtocolVersion::V0,
+                *parent.id(),
+                justify.calculate_id(),
+                None,
+                parent.height() + NodeHeight(1),
+                epoch,
+                shard_group,
+                RistrettoPublicKeyBytes::default(),
+                FixedHash::zero(),
+                &cmds,
+                0,
+                0,
+                FixedHash::zero(),
+                ShardGroupAccumulatedData::default(),
+                extra,
+            )
+            .unwrap();
+            Block::new(header, justify, cmds, None)
+        };
+
+        // Group A's LocalAccept, committed in an epoch 6 block that opened epoch 6 at a 700 bps burn rate
+        let secrets = committee_secrets();
+        let committee = committee_of(&secrets);
+        let local_accept = Command::LocalAccept(atom);
+        let zero_a = Block::zero_block(network, num_preshards);
+        let block_a = make_block(
+            &zero_a,
+            group_a,
+            Epoch(6),
+            BlockCommands::init([local_accept.clone()]).unwrap(),
+        );
+        let block_pledge = store_a
+            .with_read_tx(|tx| block_a.get_block_pledge(tx, group_c))
+            .unwrap();
+        let mut extra_data = ExtraData::new();
+        extra_data.insert_bps(ExtraFieldKey::ExhaustBurnRate, 700);
+        let metadata = BlockHeaderMetadata {
+            total_leader_fee: 0,
+            timestamp: 0,
+            extra_data,
+            timeout_certificate_id: None,
+            is_dummy: false,
+        };
+        let header = SidechainBlockHeader {
+            network: network.as_byte(),
+            protocol_version: 0,
+            parent_id: Default::default(),
+            justify_id: Default::default(),
+            height: 1,
+            epoch: 6,
+            epoch_hash: Default::default(),
+            shard_group: tari_sidechain::ShardGroup {
+                start: group_a.start().as_u32(),
+                end_inclusive: group_a.end().as_u32(),
+            },
+            proposed_by: Default::default(),
+            state_merkle_root: Default::default(),
+            command_merkle_root: *block_a.command_merkle_root(),
+            transaction_merkle_root: Default::default(),
+            signature: Default::default(),
+            accumulated_data: Default::default(),
+            metadata_hash: metadata.calculate_hash(),
+        };
+        let proof_elements = committing_qcs(&header, &secrets, &[0, 1, 2, 3]);
+        let commit_proof =
+            CommandsCommitProof::new_latest(vec![CommandOrHash::Command(local_accept)], SidechainBlockCommitProof {
+                header,
+                proof_elements,
+            });
+        commit_proof
+            .validate_committed(network, VotePower::of(3), &committee)
+            .unwrap();
+        let foreign_accept = ForeignProposal::new(commit_proof, block_pledge, metadata);
+
+        let tmp_c = tempfile::tempdir().unwrap();
+        let store_c = RocksDbStateStore::<String>::open(tmp_c.path(), DatabaseOptions::default()).unwrap();
+        let zero_c = Block::zero_block(network, num_preshards);
+        let block_c = make_block(&zero_c, group_c, Epoch(6), BlockCommands::empty());
+        store_c
+            .with_write_tx(|tx| {
+                zero_c.justify().save(tx)?;
+                zero_c.insert(tx)?;
+                tx.blocks_set_qcs(zero_c.id(), Some(&PcId::zero()), Some(&PcId::zero()))?;
+                block_c.justify().save(tx)?;
+                block_c.insert(tx)?;
+                TransactionRecord::new(transaction).insert(tx)
+            })
+            .unwrap();
+        store_c
+            .with_write_tx(|tx| {
+                let committee_c = CommitteeInfo::new(num_preshards, 4, 2, group_c, Epoch(6), VotePower::of(1));
+                let mut substate_store = PendingSubstateStore::init(&**tx, block_c.as_leaf(), num_preshards)?;
+                let mut change_set = ProposedBlockChangeSet::new(block_c.as_leaf());
+                process_foreign_block(
+                    &**tx,
+                    &foreign_accept,
+                    &committee_c,
+                    &mut substate_store,
+                    &mut change_set,
+                )
+                .unwrap();
+                change_set.save(tx)
+            })
+            .unwrap();
+        let pinned = store_c
+            .with_read_tx(|tx| {
+                let rec = tx.transaction_pool_get_for_blocks(block_c.id(), &tx_id)?;
+                Ok::<_, tari_ootle_storage::StorageError>(rec.locked_epoch().cloned().unwrap())
+            })
+            .unwrap();
+
+        assert_eq!(pinned.epoch(), Epoch(5));
+        assert_eq!(pinned.exhaust_burn_rate().as_bps(), 500);
     }
 }

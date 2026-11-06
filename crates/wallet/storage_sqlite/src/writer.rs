@@ -369,39 +369,43 @@ impl<'a> WriteTransaction<'a> {
         self.confidential_outputs_release_by_lock_id(lock_id)
     }
 
-    /// Reads the vault and revealed amount reserved by `lock_id` before the lock is finalized, so the
-    /// resulting revealed-balance decrease can be recorded. Returns `(vault, revealed_before, amount)`.
+    /// Reads the vaults and revealed amounts reserved by `lock_id` before the lock is finalized, so the
+    /// resulting revealed-balance decreases can be recorded. Returns `(vault, revealed_before, amount)`.
     fn locked_revealed_spend(
         &mut self,
         lock_id: WalletLockId,
-    ) -> Result<Option<(VaultId, Amount, Amount)>, WalletStorageError> {
+    ) -> Result<Vec<(VaultId, Amount, Amount)>, WalletStorageError> {
         const OPERATION: &str = "locked_revealed_spend";
         use crate::schema::{vault_locks, vaults};
 
-        let row = vault_locks::table
+        let rows = vault_locks::table
             .inner_join(vaults::table.on(vaults::id.eq(vault_locks::vault_id)))
             .select((vaults::address, vaults::revealed_balance, vault_locks::amount))
             .filter(vault_locks::lock_id.eq(lock_id))
-            .first::<(String, String, String)>(self.connection())
-            .optional()
+            .load::<(String, String, String)>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-        let Some((vault_address, revealed_before, amount)) = row else {
-            return Ok(None);
-        };
-        let vault_address = VaultId::from_str(&vault_address).map_err(|e| WalletStorageError::DecodingError {
-            operation: OPERATION,
-            item: "vault.address",
-            details: e.to_string(),
-        })?;
-        let revealed_before = Amount::from_str(&revealed_before).map_err(|e| WalletStorageError::DataInconsistent {
-            operation: OPERATION,
-            details: format!("Corrupt db: invalid revealed balance '{revealed_before}' for lock {lock_id}: {e}"),
-        })?;
-        let amount = Amount::from_str(&amount).map_err(|e| WalletStorageError::DataInconsistent {
-            operation: OPERATION,
-            details: format!("Corrupt db: invalid lock amount '{amount}' for lock {lock_id}: {e}"),
-        })?;
-        Ok(Some((vault_address, revealed_before, amount)))
+
+        let mut spends = Vec::with_capacity(rows.len());
+        for (vault_address, revealed_before, amount) in rows {
+            let vault_address = VaultId::from_str(&vault_address).map_err(|e| WalletStorageError::DecodingError {
+                operation: OPERATION,
+                item: "vault.address",
+                details: e.to_string(),
+            })?;
+            let revealed_before =
+                Amount::from_str(&revealed_before).map_err(|e| WalletStorageError::DataInconsistent {
+                    operation: OPERATION,
+                    details: format!(
+                        "Corrupt db: invalid revealed balance '{revealed_before}' for lock {lock_id}: {e}"
+                    ),
+                })?;
+            let amount = Amount::from_str(&amount).map_err(|e| WalletStorageError::DataInconsistent {
+                operation: OPERATION,
+                details: format!("Corrupt db: invalid lock amount '{amount}' for lock {lock_id}: {e}"),
+            })?;
+            spends.push((vault_address, revealed_before, amount));
+        }
+        Ok(spends)
     }
 
     fn lock_transaction_id(&mut self, lock_id: WalletLockId) -> Result<Option<TransactionId>, WalletStorageError> {
@@ -1634,62 +1638,67 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         const OPERATION: &str = "vaults_finalized_locked_revealed_funds";
         use crate::schema::{vault_locks, vaults};
 
-        // Fetch the vault locked by this lock_id
-        let (vault_id, amount, revealed_balance) = vault_locks::table
+        // Fetch the vaults locked by this lock_id
+        let rows = vault_locks::table
             .inner_join(vaults::table.on(vaults::id.eq(vault_locks::vault_id)))
             .select((vault_locks::vault_id, vault_locks::amount, vaults::revealed_balance))
             .filter(vault_locks::lock_id.eq(lock_id))
-            .first::<(i32, String, String)>(self.connection())
-            .optional()
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?
-            .ok_or_else(|| WalletStorageError::NotFound {
+            .load::<(i32, String, String)>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        if rows.is_empty() {
+            return Err(WalletStorageError::NotFound {
                 operation: OPERATION,
                 entity: "vault lock".to_string(),
                 key: lock_id.to_string(),
-            })?;
-        let amount = Amount::from_str(&amount).map_err(|e| WalletStorageError::DataInconsistent {
-            operation: OPERATION,
-            details: format!(
-                "Corrupt db: unable to convert lock amount '{amount}' to Amount for lock_id {lock_id}: {e}"
-            ),
-        })?;
+            });
+        }
 
-        // Delete the lock record
+        // Delete the lock records
         diesel::delete(vault_locks::table)
             .filter(vault_locks::lock_id.eq(lock_id))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
-        let revealed_amount =
-            Amount::from_str(&revealed_balance).map_err(|e| WalletStorageError::DataInconsistent {
+        for (vault_id, amount, revealed_balance) in rows {
+            let amount = Amount::from_str(&amount).map_err(|e| WalletStorageError::DataInconsistent {
                 operation: OPERATION,
                 details: format!(
-                    "Corrupt db: unable to convert revealed balance '{revealed_balance}' to Amount for vault_id \
-                     {vault_id}: {e}"
+                    "Corrupt db: unable to convert lock amount '{amount}' to Amount for lock_id {lock_id}: {e}"
                 ),
             })?;
-        let new_balance = revealed_amount
-            .checked_sub(amount)
-            .ok_or_else(|| WalletStorageError::OperationError {
-                operation: OPERATION,
-                details: format!(
-                    "Corrupt db: revealed balance {revealed_balance} is less than locked amount {amount} for vault_id \
-                     {vault_id}"
-                ),
-            })?;
+            let revealed_amount =
+                Amount::from_str(&revealed_balance).map_err(|e| WalletStorageError::DataInconsistent {
+                    operation: OPERATION,
+                    details: format!(
+                        "Corrupt db: unable to convert revealed balance '{revealed_balance}' to Amount for vault_id \
+                         {vault_id}: {e}"
+                    ),
+                })?;
+            let new_balance =
+                revealed_amount
+                    .checked_sub(amount)
+                    .ok_or_else(|| WalletStorageError::OperationError {
+                        operation: OPERATION,
+                        details: format!(
+                            "Corrupt db: revealed balance {revealed_balance} is less than locked amount {amount} for \
+                             vault_id {vault_id}"
+                        ),
+                    })?;
 
-        let num_rows = diesel::update(vaults::table)
-            .set(vaults::revealed_balance.eq(new_balance.to_string()))
-            .filter(vaults::id.eq(vault_id))
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+            let num_rows = diesel::update(vaults::table)
+                .set(vaults::revealed_balance.eq(new_balance.to_string()))
+                .filter(vaults::id.eq(vault_id))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
-        if num_rows == 0 {
-            return Err(WalletStorageError::NotFound {
-                operation: OPERATION,
-                entity: "lock on vault".to_string(),
-                key: lock_id.to_string(),
-            });
+            if num_rows == 0 {
+                return Err(WalletStorageError::NotFound {
+                    operation: OPERATION,
+                    entity: "lock on vault".to_string(),
+                    key: lock_id.to_string(),
+                });
+            }
         }
 
         Ok(())
@@ -2686,11 +2695,11 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     fn locks_unlock_finalized(&mut self, lock_id: WalletLockId, diff: &SubstateDiff) -> Result<(), WalletStorageError> {
         let affected_stealth_balances = self.stealth_outputs_finalize_by_lock_id(lock_id, diff)?;
         self.confidential_outputs_finalize_by_lock_id(lock_id, diff)?;
-        // Capture the revealed spend before vaults_finalized_locked_revealed_funds deletes the vault lock
-        // and decrements the vault's revealed balance, so the decrease can be recorded as a balance change.
-        let revealed_spend = self.locked_revealed_spend(lock_id)?;
+        // Capture the revealed spends before vaults_finalized_locked_revealed_funds deletes the vault locks
+        // and decrements the vaults' revealed balances, so the decreases can be recorded as balance changes.
+        let revealed_spends = self.locked_revealed_spend(lock_id)?;
         self.vaults_finalized_locked_revealed_funds(lock_id).optional()?;
-        if let Some((vault_address, revealed_before, amount)) = revealed_spend {
+        for (vault_address, revealed_before, amount) in revealed_spends {
             self.record_finalized_revealed_spend(lock_id, vault_address, revealed_before, amount, diff)?;
         }
         self.record_finalized_stealth_spends(lock_id, affected_stealth_balances, diff)?;

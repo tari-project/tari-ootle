@@ -2,15 +2,16 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_consensus_types::{HighPc, LeafBlock, ProposalCertificate, Vote};
-use tari_ootle_common_types::{NodeHeight, optional::Optional};
+use tari_consensus_types::{HighPc, LeafBlock, ProposalCertificate, SignedMessage, Vote};
+use tari_ootle_common_types::{NodeHeight, committee::Committee, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
     StateStoreWriteTransaction,
     consensus_models::{Block, BookkeepingModel},
 };
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
-use super::vote_collector::{ProposalVoteCollector, TimeoutVoteCollector};
+use super::vote_collector::{ProposalVoteCollector, TimeoutVoteCollector, exceeds_vote_lookahead};
 use crate::{
     hotstuff::{
         HotstuffConfig,
@@ -91,13 +92,38 @@ where TConsensusSpec: ConsensusSpec
             target: LOG_TARGET,
             "🌟 NEWVIEW from {from} with timeout height {timeout_height} with qc {high_pc}",
         );
-        if high_pc.epoch() != epoch_state.epoch() {
-            warn!(target: LOG_TARGET, "❌ NEWVIEW from {from} with epoch {} but current epoch is {}", high_pc.epoch(), epoch_state.epoch());
+        if high_pc.epoch() != epoch_state.epoch() || timeout.epoch() != epoch_state.epoch() {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NEWVIEW from {from} with qc epoch {} / timeout epoch {} but current epoch is {}",
+                high_pc.epoch(),
+                timeout.epoch(),
+                epoch_state.epoch()
+            );
             return Ok(());
         }
 
         if timeout_height < current_height {
             warn!(target: LOG_TARGET, "❌ Ignoring NEWVIEW for {timeout_height} less than the current {current_height}.");
+            return Ok(());
+        }
+
+        if exceeds_vote_lookahead(current_height, timeout_height) {
+            warn!(
+                target: LOG_TARGET,
+                "🗑️ Discarding NEWVIEW for {timeout_height} from {from}: it is too far ahead of our current view {}/{current_height}",
+                epoch_state.epoch()
+            );
+            return Ok(());
+        }
+
+        // The timeout collector verifies the vote's signature. This binds the signer to the sender.
+        if !is_signed_by_sender(epoch_state.local_committee(), &from, timeout.public_key()) {
+            warn!(
+                target: LOG_TARGET,
+                "❌ Ignoring NEWVIEW from {from}: its timeout vote names signer {}, which is not the sender's key",
+                timeout.public_key()
+            );
             return Ok(());
         }
 
@@ -224,6 +250,18 @@ where TConsensusSpec: ConsensusSpec
                 current_epoch: epoch_state.epoch(),
             });
         }
+        let local_shard_group = epoch_state.local_committee_info().shard_group();
+        if qc.shard_group() != local_shard_group {
+            return Err(ProposalValidationError::InvalidShardGroup {
+                block_id: qc.calculate_block_id(),
+                shard_group: qc.shard_group(),
+                details: format!(
+                    "QC shard group {} does not match local shard group {}",
+                    qc.shard_group(),
+                    local_shard_group
+                ),
+            });
+        }
         check_quorum_certificate_signatures::<TConsensusSpec>(
             self.proposal_vote_collector.network(),
             qc.into(),
@@ -231,5 +269,55 @@ where TConsensusSpec: ConsensusSpec
             vote_signing_service,
         )?;
         Ok(())
+    }
+}
+
+/// Whether `public_key` is the key of the local committee member at address `from`.
+fn is_signed_by_sender<TAddr: PartialEq>(
+    committee: &Committee<TAddr>,
+    from: &TAddr,
+    public_key: &RistrettoPublicKeyBytes,
+) -> bool {
+    committee
+        .index_of_public_key(public_key)
+        .and_then(|index| committee.get(index))
+        .is_some_and(|member| member.address == *from)
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_common_types::{VotePower, committee::CommitteeMember};
+
+    use super::*;
+
+    fn key(byte: u8) -> RistrettoPublicKeyBytes {
+        RistrettoPublicKeyBytes::from_bytes(&[byte; 32]).unwrap()
+    }
+
+    /// A committee whose member at address `key(n)` has public key `key(n + 10)`.
+    fn committee() -> Committee<RistrettoPublicKeyBytes> {
+        [1u8, 2, 3]
+            .into_iter()
+            .map(|n| CommitteeMember {
+                address: key(n),
+                public_key: key(n + 10),
+                vote_power: VotePower::of(1),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_timeout_signed_with_the_senders_key_is_accepted() {
+        assert!(is_signed_by_sender(&committee(), &key(2), &key(12)));
+    }
+
+    #[test]
+    fn a_timeout_signed_by_another_member_is_rejected() {
+        assert!(!is_signed_by_sender(&committee(), &key(2), &key(13)));
+    }
+
+    #[test]
+    fn a_timeout_signed_by_a_non_member_is_rejected() {
+        assert!(!is_signed_by_sender(&committee(), &key(2), &key(14)));
     }
 }

@@ -48,7 +48,7 @@ use tari_ootle_transaction::{
     call_arg,
     call_args,
 };
-use tari_template_abi::FunctionDef;
+use tari_template_abi::{FunctionDef, FunctionKind, Receiver};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args::{BucketAction, BucketGetAmountArg, BucketRef, WorkspaceAction},
@@ -82,6 +82,7 @@ use crate::{
         RuntimeInterfaceImpl,
         RuntimeModule,
         StateTracker,
+        reject_transient_values,
         scope::{CallScope, FrameWriteMode, PushCallFrame},
     },
     state_store::StateReader,
@@ -595,7 +596,7 @@ where
                         name: f.name.to_string(),
                     })
                     .and_then(|f| {
-                        if f.is_migration {
+                        if f.is_migration() {
                             Ok(f)
                         } else {
                             Err(TransactionErrorKind::NotAMigrationFunction { name: f.name.clone() })
@@ -925,19 +926,21 @@ where
                     name: function.to_string(),
                 })?;
 
-        if function_def.is_migration {
-            return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
-                name: function_def.name.clone(),
-            });
-        }
-
-        // A method runs only in its component's frame, after the component's access rules. A static frame has
-        // neither, and carries the template's identity.
-        if function_def.has_receiver() {
-            return Err(TransactionErrorKind::MethodCalledAsFunction {
-                template_address: *template_address,
-                name: function_def.name.clone(),
-            });
+        match function_def.kind {
+            FunctionKind::Function => {},
+            FunctionKind::Migration { .. } => {
+                return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
+                    name: function_def.name.clone(),
+                });
+            },
+            // A method runs only in its component's frame, after the component's access rules. A static frame has
+            // neither, and carries the template's identity.
+            FunctionKind::Method(_) => {
+                return Err(TransactionErrorKind::MethodCalledAsFunction {
+                    template_address: *template_address,
+                    name: function_def.name.clone(),
+                });
+            },
         }
 
         let resolved_args = runtime.interface().resolve_args(None, &args)?;
@@ -945,6 +948,12 @@ where
             .iter()
             .map(IndexedWellKnownTypes::from_value)
             .collect::<Result<_, _>>()?;
+        // A read-only frame can neither use nor return a bucket, proof or address allocation. Its only caller is a
+        // spend script, whose bound arguments are committed in a UTXO's condition root and evaluated in a later
+        // transaction, so a transient handle in them can only name an object of the spending transaction.
+        if restrict_frame_to == Some(FrameWriteMode::ReadOnly) {
+            reject_transient_values("Read-only call arguments", &arg_scope)?;
+        }
         let frame = PushCallFrame::Static {
             template_address: *template_address,
             module_name: template.template_name().to_string(),
@@ -1011,23 +1020,20 @@ where
                 name: method.to_string(),
             })?;
 
-        if function_def.is_migration {
-            return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
-                name: function_def.name.clone(),
-            });
-        }
-
-        if !function_def.has_receiver() {
-            return Err(TransactionErrorKind::FunctionCalledAsMethod {
-                component_address: component.address,
-                name: function_def.name.clone(),
-            });
-        }
-
-        let lock_flag = if function_def.is_mut {
-            LockFlag::Write
-        } else {
-            LockFlag::Read
+        let lock_flag = match function_def.kind {
+            FunctionKind::Method(Receiver::RefMut) => LockFlag::Write,
+            FunctionKind::Method(Receiver::Ref) => LockFlag::Read,
+            FunctionKind::Migration { .. } => {
+                return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
+                    name: function_def.name.clone(),
+                });
+            },
+            FunctionKind::Function => {
+                return Err(TransactionErrorKind::FunctionCalledAsMethod {
+                    component_address: component.address,
+                    name: function_def.name.clone(),
+                });
+            },
         };
 
         let component_lock = runtime.interface().lock_component(component.address, lock_flag)?;

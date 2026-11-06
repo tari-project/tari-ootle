@@ -384,6 +384,8 @@ enum ConsensusState {
   Shutdown = 5;
   // The node has not scanned the base layer far enough to know its own registration or committee.
   Initialising = 6;
+  // The node is syncing the state of a committee it joins at a later epoch, outside consensus.
+  Presyncing = 7;
 }
 
 message GetHighQcRequest {

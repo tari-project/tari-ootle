@@ -26,6 +26,10 @@ import { defineConfig } from "vite";
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  build: {
+    // dist/.gitkeep is tracked so the directory include_dir! reads exists in every checkout.
+    emptyOutDir: false,
+  },
   server: {
     port: 1420,
   },

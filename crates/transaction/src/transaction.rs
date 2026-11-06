@@ -174,14 +174,8 @@ impl Transaction {
     /// Returns the public key of the main signer the transaction declares, or `None` if it declares none. A declared
     /// [`MainSigner::Authorizer`] counts only if that key signed the transaction.
     pub fn main_signer(&self) -> Option<RistrettoPublicKeyBytes> {
-        match self.declared_main_signer() {
-            MainSigner::None => None,
-            MainSigner::SealSigner => Some(*self.seal_signature().public_key()),
-            MainSigner::Authorizer(public_key) => self
-                .signatures()
-                .iter()
-                .any(|sig| sig.public_key() == public_key)
-                .then_some(*public_key),
+        match self {
+            Self::V1(tx) => tx.main_signer(),
         }
     }
 
@@ -383,7 +377,7 @@ impl Transaction {
         self.instructions()
             .iter()
             .chain(self.fee_instructions())
-            .filter_map(|instruction| instruction.referenced_template())
+            .flat_map(Instruction::referenced_templates)
     }
 
     /// Returns all substates addresses referenced by this transaction

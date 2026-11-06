@@ -30,7 +30,6 @@ use log::*;
 use tari_ootle_common_types::{
     Epoch,
     SubstateAddress,
-    VotePower,
     committee::Committee,
     diag_event,
     diagnostics::DiagnosticSink,
@@ -49,6 +48,7 @@ use tokio::{
 
 use crate::{
     EpochManagerEvent,
+    PendingActivation,
     epoch_event_oracle::{EpochEvent, EpochEventOracle, ValidatorNodeChange},
     error::EpochManagerError,
     service::{
@@ -79,7 +79,20 @@ pub struct EpochManagerService<TSpec: EpochManagerSpec> {
 
     diagnostics: Arc<dyn DiagnosticSink>,
 
+    /// The local validator's earliest announced registration that activates after the current epoch. The oracle
+    /// announces pending registrations again on every start, so this is held in memory only.
+    pending_activation: Option<AnnouncedActivation>,
+    /// True while `pending_activation` holds a registration not yet published as
+    /// [`EpochManagerEvent::PendingActivation`].
+    has_unpublished_pending_activation: bool,
+
     shutdown: ShutdownSignal,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AnnouncedActivation {
+    activation_epoch: Epoch,
+    shard_key: SubstateAddress,
 }
 
 impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
@@ -113,6 +126,8 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                 epoch_events,
                 committee_cache,
                 diagnostics,
+                pending_activation: None,
+                has_unpublished_pending_activation: false,
                 shutdown,
             }
             .run()
@@ -186,31 +201,36 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     self.inner.set_birthday_epoch_if_unset(activation_epoch)?;
                 }
 
+                let mut invalidate_committee_cache = false;
                 for node_change in node_changes {
                     match node_change {
                         ValidatorNodeChange::Add {
                             claim_public_key,
                             validator_node_public_key,
                             activation_epoch,
-                            minimum_value_promise: _minimum_value_promise,
+                            minimum_value_promise: _,
+                            vote_power,
                             shard_key,
                         } => {
                             info!(
                                 target: LOG_TARGET,
-                                "⛓️ Validator node {} activated at {}",
+                                "⛓️ Validator node {} activated at {} with vote power {}",
                                 validator_node_public_key,
                                 activation_epoch,
+                                vote_power.value(),
                             );
+                            self.record_pending_activation(validator_node_public_key, activation_epoch, shard_key);
 
                             self.inner.add_validator_node_registration(
                                 activation_epoch,
                                 validator_node_public_key,
                                 claim_public_key,
                                 shard_key,
-                                // minimum_value_promise,
-                                // All validators currently get a vote power of 1
-                                VotePower::of(1),
+                                vote_power,
                             )?;
+                            if activation_epoch <= self.current_epoch() {
+                                invalidate_committee_cache = true;
+                            }
                         },
                         ValidatorNodeChange::Remove { public_key } => {
                             info!(
@@ -220,21 +240,28 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                             );
 
                             self.inner.deactivate_validator_node(public_key, epoch)?;
+                            if epoch <= self.current_epoch() {
+                                invalidate_committee_cache = true;
+                            }
                         },
                     }
+                }
+                if invalidate_committee_cache {
+                    self.committee_cache.clear().await;
                 }
             },
             EpochEvent::NewValidatorRegistered {
                 epoch,
                 validator_node_public_key,
+                activation_epoch,
+                shard_key,
                 ..
             } => {
-                // TODO: This occurs when a registration is detected, before the VN is activated and could be a good
-                // time to start state sync
                 info!(
                     target: LOG_TARGET,
-                    "🖥️ New validator registered in {epoch} with public key {validator_node_public_key}",
+                    "🖥️ New validator registered in {epoch} with public key {validator_node_public_key}, activating at {activation_epoch}",
                 );
+                self.record_pending_activation(validator_node_public_key, activation_epoch, shard_key);
             },
             EpochEvent::NewValidatorNodeExit {
                 epoch,
@@ -309,6 +336,13 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
             },
             Ordering::Greater => {
                 self.has_epoch_changed = true;
+                if self
+                    .pending_activation
+                    .is_some_and(|pending| pending.activation_epoch <= epoch)
+                {
+                    self.pending_activation = None;
+                    self.has_unpublished_pending_activation = false;
+                }
                 self.diagnostics.emit(diag_event!(
                     info,
                     "epoch.changed",
@@ -329,6 +363,51 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
 
     fn current_epoch(&self) -> Epoch {
         self.inner.current_epoch()
+    }
+
+    /// Holds the registration of `validator_public_key` as pending if it is the local validator's and activates
+    /// after the current epoch. Only the earliest pending registration is held.
+    fn record_pending_activation(
+        &mut self,
+        validator_public_key: RistrettoPublicKeyBytes,
+        activation_epoch: Epoch,
+        shard_key: SubstateAddress,
+    ) {
+        if validator_public_key != *self.inner.node_public_key() || activation_epoch <= self.current_epoch() {
+            return;
+        }
+        if self
+            .pending_activation
+            .is_some_and(|pending| pending.activation_epoch <= activation_epoch)
+        {
+            return;
+        }
+        info!(
+            target: LOG_TARGET,
+            "🖥️ This validator activates at {activation_epoch} (current epoch {})", self.current_epoch()
+        );
+        self.pending_activation = Some(AnnouncedActivation {
+            activation_epoch,
+            shard_key,
+        });
+        self.has_unpublished_pending_activation = true;
+    }
+
+    fn get_pending_activation(&self) -> Result<Option<PendingActivation>, EpochManagerError> {
+        let current_epoch = self.current_epoch();
+        let Some(pending) = self
+            .pending_activation
+            .filter(|pending| pending.activation_epoch > current_epoch)
+        else {
+            return Ok(None);
+        };
+        let num_committees = self.inner.get_number_of_committees(current_epoch)?;
+        Ok(Some(PendingActivation {
+            activation_epoch: pending.activation_epoch,
+            shard_group: pending
+                .shard_key
+                .to_shard_group(self.inner.config().num_preshards, num_committees),
+        }))
     }
 
     fn on_scanning_complete(&mut self) -> Result<(), EpochManagerError> {
@@ -363,6 +442,16 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                 activated_at: Instant::now(),
             });
             self.has_epoch_changed = false;
+        }
+
+        // Published once the scan settles, so that a registration announced and then activated within the same scan
+        // is never published.
+        if mem::take(&mut self.has_unpublished_pending_activation) &&
+            let Some(pending) = self.pending_activation
+        {
+            self.publish_event(EpochManagerEvent::PendingActivation {
+                activation_epoch: pending.activation_epoch,
+            });
         }
 
         Ok(())
@@ -573,6 +662,9 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
             EpochManagerRequest::GetBirthdayEpoch { reply } => {
                 handle(reply, Ok(self.inner.birthday_epoch()), context);
             },
+            EpochManagerRequest::GetPendingActivation { reply } => {
+                handle(reply, self.get_pending_activation(), context);
+            },
         }
     }
 }
@@ -598,7 +690,7 @@ mod tests {
     use std::num::NonZeroU32;
 
     use diesel::{Connection, SqliteConnection};
-    use tari_ootle_common_types::{NumPreshards, ShardGroup, diagnostics::NoopSink};
+    use tari_ootle_common_types::{NumPreshards, ShardGroup, VotePower, diagnostics::NoopSink};
     use tari_shutdown::Shutdown;
 
     use super::*;
@@ -666,6 +758,8 @@ mod tests {
             waiting_for_scanning_complete: Vec::new(),
             committee_cache: CommitteeCache::new(),
             diagnostics: Arc::new(NoopSink),
+            pending_activation: None,
+            has_unpublished_pending_activation: false,
             shutdown: shutdown.to_signal(),
         }
     }
@@ -689,6 +783,54 @@ mod tests {
         let mut keys = committee.public_keys().copied().collect::<Vec<_>>();
         keys.sort();
         keys
+    }
+
+    #[tokio::test]
+    async fn validator_node_add_stores_the_event_vote_power() {
+        let shutdown = Shutdown::new();
+        let all_shards = ShardGroup::all_shards(NumPreshards::P256);
+        let global_db = GlobalDb::new(SqliteGlobalDbAdapter::new(
+            SqliteConnection::establish(":memory:").unwrap(),
+        ));
+        global_db.adapter().migrate().unwrap();
+        let mut service = create_service(global_db, &shutdown);
+
+        // Registration derives the node address from the public key, so these must be valid points: B and 2B.
+        let heavy =
+            RistrettoPublicKeyBytes::from_hex("e2f2ae0a6abc4e71a884a961c500515f58e30b6aa582dd8db6a65945e08d2d76")
+                .unwrap();
+        let light =
+            RistrettoPublicKeyBytes::from_hex("6a493210f7499cd17fecb510ae0cea23a110e8d5b901f8acadd3095c73a3b919")
+                .unwrap();
+        let add = |public_key: RistrettoPublicKeyBytes, shard_byte: u8, power: u64| ValidatorNodeChange::Add {
+            claim_public_key: public_key,
+            validator_node_public_key: public_key,
+            activation_epoch: Epoch(5),
+            minimum_value_promise: 0,
+            vote_power: VotePower::of(power),
+            shard_key: SubstateAddress::from_array([shard_byte; SubstateAddress::LENGTH]),
+        };
+        service
+            .handle_epoch_event(EpochEvent::ActiveValidatorNodeSetChanged {
+                epoch: Epoch(4),
+                node_changes: vec![add(heavy, 1, 4), add(light, 2, 1)],
+            })
+            .await
+            .unwrap();
+        service
+            .activate_epoch(Epoch(5), FixedHash::from([1; 32]))
+            .await
+            .unwrap();
+
+        let stored = service
+            .inner
+            .get_validator_node_by_public_key(Epoch(5), &heavy)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.vote_power, VotePower::of(4));
+        let info = service.inner.get_committee_info(Epoch(5), all_shards).unwrap();
+        assert_eq!(info.num_shard_group_members(), 2);
+        assert_eq!(info.total_power(), VotePower::of(5));
     }
 
     /// When the oracle corrects the hash of the current, unlocked epoch, the epoch's committees must be
@@ -762,5 +904,113 @@ mod tests {
         assert_eq!(service.inner.current_epoch_hash(), FixedHash::from([1; 32]));
         let committee_info = service.inner.get_committee_info(Epoch(5), all_shards).unwrap();
         assert_eq!(committee_info.num_shard_group_members(), 1);
+    }
+
+    fn in_memory_service(shutdown: &Shutdown) -> EpochManagerService<TestSpec> {
+        let global_db = GlobalDb::new(SqliteGlobalDbAdapter::new(
+            SqliteConnection::establish(":memory:").unwrap(),
+        ));
+        global_db.adapter().migrate().unwrap();
+        create_service(global_db, shutdown)
+    }
+
+    /// `create_service` runs the service as the validator with the zero public key.
+    fn announce(validator_public_key: RistrettoPublicKeyBytes, activation_epoch: Epoch) -> EpochEvent {
+        EpochEvent::NewValidatorRegistered {
+            epoch: Epoch(1),
+            claim_public_key: public_key(9),
+            validator_node_public_key: validator_public_key,
+            activation_epoch,
+            shard_key: SubstateAddress::zero(),
+        }
+    }
+
+    fn published_pending_activations(rx: &mut broadcast::Receiver<EpochManagerEvent>) -> Vec<Epoch> {
+        let mut epochs = vec![];
+        loop {
+            match rx.try_recv() {
+                Ok(EpochManagerEvent::PendingActivation { activation_epoch }) => epochs.push(activation_epoch),
+                Ok(_) | Err(broadcast::error::TryRecvError::Lagged(_)) => {},
+                Err(_) => return epochs,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn the_local_validators_announced_registration_is_pending_until_its_epoch() {
+        let shutdown = Shutdown::new();
+        let mut service = in_memory_service(&shutdown);
+        service.activate_epoch(Epoch(1), FixedHash::zero()).await.unwrap();
+
+        service
+            .handle_epoch_event(announce(RistrettoPublicKeyBytes::zero(), Epoch(4)))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            service.get_pending_activation().unwrap(),
+            Some(PendingActivation {
+                activation_epoch: Epoch(4),
+                shard_group: ShardGroup::all_shards(NumPreshards::P256),
+            })
+        );
+        service.activate_epoch(Epoch(3), FixedHash::zero()).await.unwrap();
+        assert!(service.get_pending_activation().unwrap().is_some());
+        service.activate_epoch(Epoch(4), FixedHash::zero()).await.unwrap();
+        assert_eq!(service.get_pending_activation().unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn another_validators_registration_is_not_pending() {
+        let shutdown = Shutdown::new();
+        let mut service = in_memory_service(&shutdown);
+        service.activate_epoch(Epoch(1), FixedHash::zero()).await.unwrap();
+
+        service
+            .handle_epoch_event(announce(public_key(1), Epoch(4)))
+            .await
+            .unwrap();
+
+        assert_eq!(service.get_pending_activation().unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn a_pending_activation_is_published_once_the_scan_settles() {
+        let shutdown = Shutdown::new();
+        let mut service = in_memory_service(&shutdown);
+        let mut rx = service.tx_events.subscribe();
+        service.activate_epoch(Epoch(1), FixedHash::zero()).await.unwrap();
+
+        service
+            .handle_epoch_event(announce(RistrettoPublicKeyBytes::zero(), Epoch(4)))
+            .await
+            .unwrap();
+        assert!(published_pending_activations(&mut rx).is_empty());
+
+        service.on_scanning_complete().unwrap();
+        assert_eq!(published_pending_activations(&mut rx), vec![Epoch(4)]);
+
+        service.on_scanning_complete().unwrap();
+        assert!(
+            published_pending_activations(&mut rx).is_empty(),
+            "an unchanged pending activation is published once"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_activation_reached_within_the_scan_that_announced_it_is_not_published() {
+        let shutdown = Shutdown::new();
+        let mut service = in_memory_service(&shutdown);
+        let mut rx = service.tx_events.subscribe();
+        service.activate_epoch(Epoch(1), FixedHash::zero()).await.unwrap();
+
+        service
+            .handle_epoch_event(announce(RistrettoPublicKeyBytes::zero(), Epoch(2)))
+            .await
+            .unwrap();
+        service.activate_epoch(Epoch(2), FixedHash::zero()).await.unwrap();
+        service.on_scanning_complete().unwrap();
+
+        assert!(published_pending_activations(&mut rx).is_empty());
     }
 }

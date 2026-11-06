@@ -1,7 +1,7 @@
 // Copyright 2026 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! Length-aware metering for the bulk memory operators and `table.init`.
+//! Length-aware metering for the bulk memory operators.
 //!
 //! The static cost function in [`super::metering`] prices one operator at one constant, which is
 //! the wrong shape for an operator whose work is a runtime operand: `memory.copy` moves between 0
@@ -37,13 +37,6 @@ use super::metering::CostFunction;
 /// order of 10 GB/s, i.e. ~10M bytes/ms, so cost-neutral pricing is ~0.84 points/byte. Rounded up:
 /// a bulk copy is never cheaper per byte than the meter believes.
 const POINTS_PER_MEMORY_BYTE: i64 = 1;
-
-/// Points charged per element touched by `table.init`.
-///
-/// A table element is a host-side function reference, 8 to 16 bytes, and writing one costs more
-/// than a byte of `memcpy` because each write goes through the reference representation rather than
-/// a vectorised block move. Priced at the per-byte rate times the widest element.
-const POINTS_PER_TABLE_ELEMENT: i64 = 16;
 
 /// Indexes of the two globals this middleware appends to every module.
 ///
@@ -147,11 +140,8 @@ pub fn charge_for(operator: &Operator) -> Option<Charge> {
         Operator::MemoryCopy { .. } | Operator::MemoryFill { .. } | Operator::MemoryInit { .. } => Some(Charge {
             rate: POINTS_PER_MEMORY_BYTE,
         }),
-        // `[dst, offset, len]`: table elements. The other table-writing operators are refused at
-        // compile (see `instance_reset`), so a table never changes after instantiation.
-        Operator::TableInit { .. } => Some(Charge {
-            rate: POINTS_PER_TABLE_ELEMENT,
-        }),
+        // Every table-writing operator, `table.init` among them, is refused at compile (see
+        // `instance_reset`), so a table never changes after instantiation.
         _ => None,
     }
 }

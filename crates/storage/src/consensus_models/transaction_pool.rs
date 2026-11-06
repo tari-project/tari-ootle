@@ -42,6 +42,7 @@ use crate::{
         LocalOnlyAtom,
         LockedEpoch,
         MultiShardAtom,
+        SubstatePledge,
         TransactionExecution,
         TransactionRecord,
         calculate_leader_fee,
@@ -851,15 +852,24 @@ impl TransactionPoolRecord {
         (*self.id()).into()
     }
 
-    pub fn get_current_multi_shard_atom(&self) -> MultiShardAtom {
-        MultiShardAtom {
+    /// The multi-shard atom for this transaction as it currently stands. It carries the transaction's pin, so a record
+    /// that is not pinned yet has no atom.
+    pub fn get_current_multi_shard_atom(&self) -> Result<MultiShardAtom, TransactionPoolError> {
+        let locked_epoch = self
+            .locked_epoch
+            .clone()
+            .ok_or(TransactionPoolError::MultiShardAtomWithoutLockedEpoch {
+                transaction_id: self.transaction_id,
+            })?;
+        Ok(MultiShardAtom {
             id: self.transaction_id,
             decision: self.current_decision(),
             evidence: self.evidence.clone(),
             transaction_fee: self.transaction_fee,
             leader_fee: self.leader_fee().cloned(),
             fee_intent_only: self.is_fee_intent_only(),
-        }
+            locked_epoch,
+        })
     }
 
     pub fn get_local_only_atom(&self) -> LocalOnlyAtom {
@@ -868,28 +878,6 @@ impl TransactionPoolRecord {
             decision: self.current_decision(),
             transaction_fee: self.transaction_fee,
             leader_fee: self.leader_fee().cloned(),
-        }
-    }
-
-    pub fn get_local_multi_shard_atom(&self) -> MultiShardAtom {
-        MultiShardAtom {
-            id: self.transaction_id,
-            decision: self.current_local_decision(),
-            evidence: self.evidence.clone(),
-            transaction_fee: self.transaction_fee,
-            leader_fee: self.leader_fee().cloned(),
-            fee_intent_only: self.is_fee_intent_only(),
-        }
-    }
-
-    pub fn into_current_multi_shard_atom(self) -> MultiShardAtom {
-        MultiShardAtom {
-            id: self.transaction_id,
-            decision: self.current_decision(),
-            leader_fee: self.leader_fee().cloned(),
-            fee_intent_only: self.is_fee_intent_only(),
-            evidence: self.evidence,
-            transaction_fee: self.transaction_fee,
         }
     }
 
@@ -1185,11 +1173,16 @@ impl TransactionPoolRecord {
             .is_some_and(|e| !e.inputs().is_empty())
     }
 
-    pub fn has_all_required_foreign_pledges<TTx: StateStoreReadTransaction>(
+    pub fn has_all_required_foreign_pledges<'p, TTx, I>(
         &self,
         tx: &TTx,
         local_committee_info: &CommitteeInfo,
-    ) -> Result<bool, StorageError> {
+        additional_foreign_pledges: I,
+    ) -> Result<bool, StorageError>
+    where
+        TTx: StateStoreReadTransaction,
+        I: IntoIterator<Item = &'p SubstatePledge> + Clone,
+    {
         let involved_objects = self
             .evidence()
             .all_inputs_iter()
@@ -1201,32 +1194,20 @@ impl TransactionPoolRecord {
             )
             .filter(|(substate_id, _)| !local_committee_info.includes_substate_id(substate_id));
 
-        self.has_foreign_pledges_for_objects(tx, local_committee_info, involved_objects)
+        self.has_foreign_pledges_for_objects(tx, local_committee_info, involved_objects, additional_foreign_pledges)
     }
 
-    pub fn has_all_required_foreign_input_pledges<TTx: StateStoreReadTransaction>(
-        &self,
-        tx: &TTx,
-        local_committee_info: &CommitteeInfo,
-    ) -> Result<bool, StorageError> {
-        let involved_objects = self
-            .evidence()
-            .all_inputs_iter()
-            .map(|(_, substate_id, evidence)| (substate_id, evidence.map(|e| (e.version, e.as_lock_type()))))
-            .filter(|(substate_id, _)| !local_committee_info.includes_substate_id(substate_id));
-
-        self.has_foreign_pledges_for_objects(tx, local_committee_info, involved_objects)
-    }
-
-    fn has_foreign_pledges_for_objects<'a, TTx, TObj>(
+    fn has_foreign_pledges_for_objects<'a, 'p, TTx, TObj, IPledges>(
         &self,
         tx: &TTx,
         local_committee_info: &CommitteeInfo,
         involved_objects: TObj,
+        additional_foreign_pledges: IPledges,
     ) -> Result<bool, StorageError>
     where
         TTx: StateStoreReadTransaction,
         TObj: IntoIterator<Item = (&'a SubstateId, Option<(SubstateVersion, SubstateLockType)>)>,
+        IPledges: IntoIterator<Item = &'p SubstatePledge> + Clone,
     {
         for (substate_id, data) in involved_objects {
             let Some((version, lock_type)) = data else {
@@ -1238,6 +1219,13 @@ impl TransactionPoolRecord {
                 );
                 return Ok(false);
             };
+            if additional_foreign_pledges
+                .clone()
+                .into_iter()
+                .any(|pledge| pledge.satisfies_substate_and_version(substate_id, version))
+            {
+                continue;
+            }
             let address = SubstateAddress::from_substate_id(substate_id, version);
             // TODO(perf): O(n) queries
             if tx.foreign_substate_pledges_exists_for_transaction_and_address(self.id(), address)? {
@@ -1298,6 +1286,8 @@ pub enum TransactionPoolError {
         transaction_id: TransactionId,
         block_id: BlockId,
     },
+    #[error("Transaction {transaction_id} was sequenced as a multi-shard command before it was pinned to an epoch")]
+    MultiShardAtomWithoutLockedEpoch { transaction_id: TransactionId },
 }
 
 impl IsNotFoundError for TransactionPoolError {

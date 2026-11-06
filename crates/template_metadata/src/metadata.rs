@@ -204,7 +204,7 @@ impl TemplateMetadata {
 
     /// Decode metadata from CBOR bytes.
     pub fn from_cbor(bytes: &[u8]) -> Result<Self, TemplateMetadataError> {
-        tari_bor::decode(bytes).map_err(TemplateMetadataError::CborDecode)
+        tari_bor::decode_exact(bytes).map_err(TemplateMetadataError::CborDecode)
     }
 
     /// Serialize this metadata as a JSON string.
@@ -398,5 +398,15 @@ mod tests {
         let bytes = std::fs::read(tmp.path()).unwrap();
         let decoded = TemplateMetadata::from_cbor(&bytes).unwrap();
         assert_eq!(metadata, decoded);
+    }
+
+    #[test]
+    fn rejects_from_cbor_with_trailing_bytes() {
+        let metadata = TemplateMetadata::new("trailing-test".to_string(), "0.1.0".to_string());
+        let mut cbor = metadata.to_cbor().unwrap();
+        cbor.extend_from_slice(b"malicious_trailing_payload");
+        let err = TemplateMetadata::from_cbor(&cbor).unwrap_err();
+        assert!(matches!(err, TemplateMetadataError::CborDecode(_)));
+        assert!(err.to_string().contains("remaining on input"));
     }
 }

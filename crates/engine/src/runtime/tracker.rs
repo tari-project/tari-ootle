@@ -37,7 +37,7 @@ use tari_engine_types::{
     limits,
     lock::LockFlag,
     logs::LogEntry,
-    substate::{Substate, SubstateId, SubstateValue},
+    substate::{Substate, SubstateId},
     transaction_receipt::FinalizeOutcome,
     virtual_substate::VirtualSubstates,
 };
@@ -339,6 +339,15 @@ impl<TStore: StateReader> StateTracker<TStore> {
             let component_address = match address_allocation {
                 Some(address_allocation) => {
                     let alloc = state.use_allocated_address(address_allocation.id())?;
+                    if let Some(allocated_template) = alloc.template_address() &&
+                        *allocated_template != template_address
+                    {
+                        return Err(RuntimeError::AddressAllocationTemplateMismatch {
+                            id: address_allocation.id(),
+                            allocated_by: *allocated_template,
+                            used_by: template_address,
+                        });
+                    }
                     alloc.substate_id().as_component_address().ok_or_else(|| {
                         RuntimeError::AddressAllocationTypeMismatch {
                             id: alloc.substate_id().clone(),
@@ -367,10 +376,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 });
             }
 
-            let indexed = IndexedWellKnownTypes::from_value(&component.body.state)?;
-            state.validate_component_state(None, &indexed)?;
-
-            state.new_substate(substate_id.clone(), SubstateValue::Component(component))?;
+            state.new_component_substate(component_address, component)?;
 
             state.push_event(Event::std(
                 Some(substate_id),
@@ -839,6 +845,7 @@ impl<TStore: StateReader + Clone> StateTracker<TStore> {
             let checkpoint_state = state.clone();
 
             // After checkpointing, the main intent has a cleared workspace
+            drop(state.take_last_instruction_output());
             state.workspace_mut().clear_items();
             let proofs = state.workspace_mut().take_all_proofs();
             for proof_id in proofs {
@@ -849,5 +856,45 @@ impl<TStore: StateReader + Clone> StateTracker<TStore> {
 
         *self.fee_checkpoint.borrow_mut() = Some(state);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_engine_types::virtual_substate::{VirtualSubstate, VirtualSubstateId};
+
+    use super::*;
+    use crate::state_store::memory::MemoryStateStore;
+
+    #[test]
+    fn fee_checkpoint_clears_last_instruction_output_and_workspace() {
+        let tracker = StateTracker::new(
+            MemoryStateStore::new(),
+            [(VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(0))]
+                .into_iter()
+                .collect(),
+            CallScope::new(),
+            HashSet::new(),
+            Hash32::zero(),
+            Hash32::zero(),
+            TransactionWeight::new(0),
+            DeclaredInputLoad::default(),
+            WasmMeteringRate::unmetered(),
+            ExhaustBurnRate::new(0),
+            FeeScale::default(),
+            Network::LocalNet,
+            true,
+        );
+
+        let output = IndexedValue::from_type(&123u64).unwrap();
+        let item = IndexedValue::from_type(&456u64).unwrap();
+        tracker.write_with(|state| {
+            state.set_last_instruction_output(output);
+            state.workspace_mut().insert(1, item).unwrap();
+        });
+        tracker.fee_checkpoint().unwrap();
+
+        assert!(tracker.take_last_instruction_output().is_none());
+        tracker.read_with(|state| assert_eq!(state.workspace().all_ids_iter().count(), 0));
     }
 }

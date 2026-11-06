@@ -683,3 +683,26 @@ fn cbor_decode_rejects_oversized_inputs_signatures_and_blob_hashes() {
         "decoding > Blobs::MAX_BLOBS blob hashes must be rejected"
     );
 }
+
+#[test]
+fn fee_and_merged_inputs_widen_read_declarations_to_writes() {
+    use tari_ootle_common_types::InputDeclaration;
+
+    let account = ComponentAddress::from_array([1; 32]);
+    let target = ComponentAddress::from_array([2; 32]);
+
+    let tx = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .add_input(InputDeclaration::read(account))
+        .add_input(InputDeclaration::read(target))
+        .call_method(target, "mutate", args![])
+        .pay_fee_from_component(account, 1000u64)
+        .build_unsigned();
+
+    assert!(tx.inputs().iter().all(InputDeclaration::is_write));
+
+    let read_builder = Transaction::builder_localnet(Epoch(1)).add_input(InputDeclaration::read(account));
+    let write_builder = Transaction::builder_localnet(Epoch(1)).add_input(InputDeclaration::write(account));
+    let merged = read_builder.merge(write_builder).build_unsigned();
+    assert!(merged.inputs()[0].is_write());
+}

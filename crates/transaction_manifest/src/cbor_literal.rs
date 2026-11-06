@@ -41,22 +41,29 @@ use crate::{
     value::address_value,
 };
 
-/// A bound on how deeply one literal nests, so that parsing stays shallow. A nested `cbor!` or
-/// `metadata!` starts its own count, and the engine rejects any metadata value nested past
-/// [`tari_bor::MAX_DECODE_DEPTH`] in all.
+/// Bounds how deeply a single literal's syntax may nest during parsing.
 const MAX_DEPTH: usize = tari_bor::MAX_DECODE_DEPTH;
+
+fn check_encoded_depth<T: tari_bor::Encode<()>>(tokens: &impl Spanned, value: &T) -> syn::Result<()> {
+    let bytes = tari_bor::encode(value).map_err(|e| syn::Error::new(tokens.span(), e))?;
+    tari_bor::decode::<Value>(&bytes)
+        .map(|_| ())
+        .map_err(|_| syn::Error::new(tokens.span(), format!("value nested deeper than {MAX_DEPTH} levels")))
+}
 
 /// The value a `cbor!` invocation writes.
 ///
 /// A brace-delimited invocation, `cbor!{"a": 1}`, is the object itself; any other delimiter holds
 /// one value, `cbor!({"a": 1})` or `cbor!([1, 2])`.
 pub(crate) fn cbor_from_macro(mac: &Macro) -> syn::Result<Value> {
-    match mac.delimiter {
-        MacroDelimiter::Brace(_) => (|input: ParseStream| parse_object_body(input, 1)).parse2(mac.tokens.clone()),
+    let value = match mac.delimiter {
+        MacroDelimiter::Brace(_) => (|input: ParseStream| parse_object_body(input, 1)).parse2(mac.tokens.clone())?,
         MacroDelimiter::Paren(_) | MacroDelimiter::Bracket(_) => {
-            (|input: ParseStream| parse_value(input, 0)).parse2(mac.tokens.clone())
+            (|input: ParseStream| parse_value(input, 0)).parse2(mac.tokens.clone())?
         },
-    }
+    };
+    check_encoded_depth(&mac.tokens, &value)?;
+    Ok(value)
 }
 
 /// The metadata a `metadata!` invocation writes: an object whose keys are the metadata keys, each
@@ -90,11 +97,12 @@ pub(crate) fn metadata_from_macro(mac: &Macro) -> syn::Result<Metadata> {
             .map_err(|e| syn::Error::new_spanned(&mac.tokens, format!("Failed to encode metadata value: {e}")))?;
         metadata.insert_raw(key, value);
     }
+    check_encoded_depth(&mac.tokens, &metadata)?;
     Ok(metadata)
 }
 
 fn parse_value(input: ParseStream, depth: usize) -> syn::Result<Value> {
-    if depth > MAX_DEPTH {
+    if depth >= MAX_DEPTH {
         return Err(input.error(format!("value nested deeper than {MAX_DEPTH} levels")));
     }
 

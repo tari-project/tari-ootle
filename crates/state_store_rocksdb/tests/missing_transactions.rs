@@ -139,13 +139,8 @@ fn shared_missing_transaction_unparks_all_waiting_blocks() {
 
     tx.parked_block_insert(&block1, &[], ProposalOrigin::CatchUp, [&shared_atom.id])
         .unwrap();
-    tx.parked_block_insert(
-        &block2,
-        &[],
-        ProposalOrigin::CatchUp,
-        [&shared_atom.id, &extra_atom.id],
-    )
-    .unwrap();
+    tx.parked_block_insert(&block2, &[], ProposalOrigin::CatchUp, [&shared_atom.id, &extra_atom.id])
+        .unwrap();
     tx.parked_block_insert(&block3, &[], ProposalOrigin::CatchUp, [&shared_atom.id])
         .unwrap();
 
@@ -233,7 +228,11 @@ fn parked_blocks_are_removed_up_to_a_height() {
     }
     // Their missing-transaction records went with them, so the transactions arriving unpark nothing
     for atom in &atoms[..2] {
-        assert!(tx.parked_block_remove_missing_transaction(atom.id()).unwrap().is_empty());
+        assert!(
+            tx.parked_block_remove_missing_transaction(atom.id())
+                .unwrap()
+                .is_empty()
+        );
     }
 
     // Unparking a block releases its proposer's slot at that height

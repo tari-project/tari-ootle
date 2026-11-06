@@ -438,6 +438,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 if unparked.is_empty() {
                     debug!(target: LOG_TARGET, "🔍 Transaction {} did not unpark any blocks", transaction_id);
                 } else {
+                    unparked_blocks.reserve(unparked.len());
                     for (unparked_block, foreign_proposals, origin) in unparked {
                         info!(
                             target: LOG_TARGET,
@@ -1178,10 +1179,11 @@ mod tests {
 
     #[test]
     fn sort_unparked_local_blocks_orders_parents_before_children_by_epoch_and_height() {
-        use tari_common_types::types::FixedHash;
-        use tari_consensus_types::{ProposalCertificate, QuorumDecision, ShardGroupAccumulatedData};
+        use tari_consensus_types::{ProposalCertificate, ShardGroupAccumulatedData};
         use tari_ootle_common_types::{ExtraData, NumPreshards, ProtocolVersion, ShardGroup};
         use tari_ootle_storage::consensus_models::{BlockCommands, BlockHeader};
+        use tari_ootle_transaction::Network;
+        use tari_sidechain::{FixedHash, QuorumDecision};
         use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
         fn proposal_at(epoch: Epoch, height: NodeHeight) -> (ProposalMessage, ProposalOrigin) {

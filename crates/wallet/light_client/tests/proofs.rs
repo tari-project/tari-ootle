@@ -272,6 +272,7 @@ fn a_diff_matches_the_receipt_built_from_it() {
 }
 
 #[test]
+#[expect(clippy::too_many_lines)]
 fn a_diff_that_differs_from_the_receipt_is_rejected() {
     let transaction_id = TransactionId::new([9; 32]);
     let receipt_id = SubstateId::TransactionReceipt(transaction_id.into_receipt_address());

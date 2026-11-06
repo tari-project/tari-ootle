@@ -137,9 +137,15 @@ mod tests {
         use crate::{NonFungibleAddress, NonFungibleId, ObjectKey, ResourceAddress};
 
         let hasher_builder = BuildHasherDefault::<PassthroughHasher>::default();
-        let res_a = ResourceAddress::new(ObjectKey::from_array([0x11; ObjectKey::LENGTH]));
-        let res_b = ResourceAddress::new(ObjectKey::from_array([0x22; ObjectKey::LENGTH]));
-        let badge_res = ResourceAddress::new(ObjectKey::from_array([0x33; ObjectKey::LENGTH]));
+        // Every 8-byte chunk differs, as in a hash-derived key. A key of four identical chunks XOR-folds to zero.
+        let resource = |seed: u8| {
+            ResourceAddress::new(ObjectKey::from_array(core::array::from_fn(|i| {
+                seed.wrapping_mul(i as u8 + 1)
+            })))
+        };
+        let res_a = resource(0x11);
+        let res_b = resource(0x22);
+        let badge_res = resource(0x33);
 
         let str_badge_1 = NonFungibleAddress::new(badge_res, NonFungibleId::from_string("spender_alpha"));
         let str_badge_2 = NonFungibleAddress::new(badge_res, NonFungibleId::from_string("spender_beta"));

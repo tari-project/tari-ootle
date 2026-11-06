@@ -125,23 +125,25 @@ where TCodec: Codec + Send + Clone + 'static
 
                 sink
             },
-            None => match self.pending_outbound_dials.get(&peer_id) {
-                Some((sink, _)) => {
-                    tracing::debug!("return a pending outbound dial {}", sink.stream_id());
-                    sink.clone()
-                },
-                None => {
-                    let stream_id = self.next_outbound_stream_id();
-                    let (sink, stream) = stream::channel(stream_id, peer_id);
+            None => {
+                if let Some((sink, _)) = self.pending_outbound_dials.get(&peer_id) {
+                    if !sink.is_closed() {
+                        tracing::debug!("return a pending outbound dial {}", sink.stream_id());
+                        return sink.clone();
+                    }
+                    self.pending_outbound_dials.remove(&peer_id);
+                }
 
-                    let opts = DialOpts::peer_id(peer_id).build();
-                    let connection_id = opts.connection_id();
-                    self.pending_events.push_back(ToSwarm::Dial { opts });
-                    tracing::debug!("create a new outbound dial (conn_id={connection_id}, stream {stream_id})");
+                let stream_id = self.next_outbound_stream_id();
+                let (sink, stream) = stream::channel(stream_id, peer_id);
 
-                    self.pending_outbound_dials.insert(peer_id, (sink.clone(), stream));
-                    sink
-                },
+                let opts = DialOpts::peer_id(peer_id).build();
+                let connection_id = opts.connection_id();
+                self.pending_events.push_back(ToSwarm::Dial { opts });
+                tracing::debug!("create a new outbound dial (conn_id={connection_id}, stream {stream_id})");
+
+                self.pending_outbound_dials.insert(peer_id, (sink.clone(), stream));
+                sink
             },
         }
     }
@@ -151,10 +153,14 @@ where TCodec: Codec + Send + Clone + 'static
             connections.clear_closed_streams();
         }
         self.connected.retain(|_, connections| !connections.is_empty());
+        self.pending_outbound_dials.retain(|_, (sink, _)| !sink.is_closed());
 
         // Shrink the capacity of empty queues if they exceed the threshold.
         if self.connected.capacity() > EMPTY_QUEUE_SHRINK_THRESHOLD {
             self.connected.shrink_to_fit();
+        }
+        if self.pending_outbound_dials.capacity() > EMPTY_QUEUE_SHRINK_THRESHOLD {
+            self.pending_outbound_dials.shrink_to_fit();
         }
     }
 
@@ -227,7 +233,10 @@ where TCodec: Codec + Send + Clone + 'static
     }
 
     fn on_dial_failure(&mut self, DialFailure { peer_id, error, .. }: DialFailure) {
-        if matches!(error, DialError::DialPeerConditionFalse(_)) {
+        if matches!(
+            error,
+            DialError::DialPeerConditionFalse(_) | DialError::Aborted | DialError::LocalPeerId { .. }
+        ) {
             return;
         }
 
@@ -572,5 +581,31 @@ mod tests {
             None
         );
         assert_eq!(visited, vec![2, 3, 0, 1]);
+    }
+
+    #[test]
+    fn closed_pending_outbound_dial_is_replaced_and_aborted_dial_is_ignored() {
+        let mut behaviour = Behaviour::<TestCodec>::new(StreamProtocol::new("/test/1"), Config::default());
+        let peer_id = PeerId::random();
+
+        let sink1 = behaviour.obtain_message_channel(peer_id);
+        assert!(matches!(poll_event(&mut behaviour), ToSwarm::Dial { .. }));
+
+        // An aborted concurrent dial while already connected/dialing should not drop the pending dial.
+        behaviour.on_swarm_event(FromSwarm::DialFailure(DialFailure {
+            peer_id: Some(peer_id),
+            error: &DialError::Aborted,
+            connection_id: ConnectionId::new_unchecked(1),
+        }));
+        assert!(behaviour.poll(&mut Context::from_waker(Waker::noop())).is_pending());
+
+        // Close the receiver side of the pending dial entry and ensure obtain_message_channel replaces it.
+        behaviour.pending_outbound_dials.get_mut(&peer_id).unwrap().1.close();
+        assert!(sink1.is_closed());
+
+        let sink2 = behaviour.obtain_message_channel(peer_id);
+        assert!(!sink2.is_closed());
+        assert_ne!(sink1.stream_id(), sink2.stream_id());
+        assert!(matches!(poll_event(&mut behaviour), ToSwarm::Dial { .. }));
     }
 }

@@ -731,6 +731,12 @@ fn parse_publish_template_args(tokens: TokenStream) -> Result<ManifestIntent, sy
                 input.parse::<syn::Token![=]>()?;
                 match key.to_string().as_str() {
                     "metadata" => {
+                        if metadata_hash_hex.is_some() {
+                            return Err(syn::Error::new_spanned(
+                                key,
+                                "duplicate `metadata` argument in publish_template!",
+                            ));
+                        }
                         let value: LitStr = input.parse()?;
                         metadata_hash_hex = Some(value.value());
                     },
@@ -930,9 +936,33 @@ fn parse_create_account_args(tokens: TokenStream) -> Result<CreateAccountArgs, s
                 let value: Ident = input.parse()?;
 
                 match key.to_string().as_str() {
-                    "owner_rule" => owner_rule = Some(value),
-                    "access_rules" => access_rules = Some(value),
-                    "bucket" => bucket = Some(value),
+                    "owner_rule" => {
+                        if owner_rule.is_some() {
+                            return Err(syn::Error::new_spanned(
+                                key,
+                                "duplicate `owner_rule` argument in create_account!",
+                            ));
+                        }
+                        owner_rule = Some(value);
+                    },
+                    "access_rules" => {
+                        if access_rules.is_some() {
+                            return Err(syn::Error::new_spanned(
+                                key,
+                                "duplicate `access_rules` argument in create_account!",
+                            ));
+                        }
+                        access_rules = Some(value);
+                    },
+                    "bucket" => {
+                        if bucket.is_some() {
+                            return Err(syn::Error::new_spanned(
+                                key,
+                                "duplicate `bucket` argument in create_account!",
+                            ));
+                        }
+                        bucket = Some(value);
+                    },
                     _ => {
                         return Err(syn::Error::new_spanned(
                             key,

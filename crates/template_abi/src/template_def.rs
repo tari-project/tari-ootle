@@ -361,8 +361,14 @@ impl std::fmt::Display for Type {
             Type::Vec(t) => write!(f, "Vec<{}>", t),
             Type::Option(t) => write!(f, "Option<{}>", t),
             Type::Tuple(types) => {
-                let type_list = types.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(",");
-                write!(f, "Tuple<{}>", type_list)
+                f.write_str("Tuple<")?;
+                for (i, t) in types.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(",")?;
+                    }
+                    write!(f, "{t}")?;
+                }
+                f.write_str(">")
             },
             Type::Other { name } => write!(f, "{}", name),
         }

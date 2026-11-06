@@ -460,10 +460,11 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                         }
                         .into());
                     }
-                    validate_arg_type(&func.name, &arg.arg_type)?;
+                    validate_abi_type(&func.name, &arg.arg_type)?;
                 }
+                validate_abi_type(&func.name, &func.output)?;
                 if let FunctionKind::Migration { from } = &func.kind {
-                    validate_arg_type(&func.name, from)?;
+                    validate_abi_type(&func.name, from)?;
                     // Note that we are checking the TemplateDef, not the actual return type of the function in Wasm.
                     match &func.output {
                         Type::Other { name } => {
@@ -494,25 +495,49 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
     Ok(())
 }
 
-fn validate_arg_type(function_name: &str, arg_type: &Type) -> Result<(), WasmExecutionError> {
-    match arg_type {
-        Type::Tuple(tuple) if tuple.len() > limits::WASM_LIMITS.max_function_arguments => {
-            Err(WasmValidationError::FunctionTooManyTupleReturn {
-                name: function_name.to_string(),
-                max_tuple_size: limits::WASM_LIMITS.max_function_arguments,
-                tuple_size: tuple.len(),
-            }
-            .into())
-        },
-        Type::Other { name } if name.len() > limits::WASM_LIMITS.max_function_name_length => {
-            Err(WasmValidationError::FunctionNameTooLong {
-                name: name.clone(),
-                max_length: limits::WASM_LIMITS.max_function_name_length,
-            }
-            .into())
-        },
-        _ => Ok(()),
+/// Holds an ABI type `function` declares, and every type nested in it, to the depth, size, tuple width and name
+/// length limits.
+fn validate_abi_type(function: &str, ty: &Type) -> Result<(), WasmValidationError> {
+    let limits = &limits::WASM_LIMITS;
+    let mut num_types = 0usize;
+    let mut pending = vec![(ty, 1usize)];
+    while let Some((ty, depth)) = pending.pop() {
+        num_types += 1;
+        if num_types > limits.max_abi_type_nodes {
+            return Err(WasmValidationError::AbiTypeTooLarge {
+                function: function.to_string(),
+                max_types: limits.max_abi_type_nodes,
+            });
+        }
+        if depth > limits.max_abi_type_depth {
+            return Err(WasmValidationError::AbiTypeTooDeep {
+                function: function.to_string(),
+                max_depth: limits.max_abi_type_depth,
+            });
+        }
+        match ty {
+            Type::Vec(inner) | Type::Option(inner) => pending.push((inner, depth + 1)),
+            Type::Tuple(types) => {
+                if types.len() > limits.max_function_arguments {
+                    return Err(WasmValidationError::FunctionTooManyTupleReturn {
+                        name: function.to_string(),
+                        max_tuple_size: limits.max_function_arguments,
+                        tuple_size: types.len(),
+                    });
+                }
+                pending.extend(types.iter().map(|t| (t, depth + 1)));
+            },
+            Type::Other { name } if name.len() > limits.max_function_name_length => {
+                return Err(WasmValidationError::AbiTypeNameTooLong {
+                    function: function.to_string(),
+                    length: name.len(),
+                    max_length: limits.max_function_name_length,
+                });
+            },
+            _ => {},
+        }
     }
+    Ok(())
 }
 
 #[cfg(test)]

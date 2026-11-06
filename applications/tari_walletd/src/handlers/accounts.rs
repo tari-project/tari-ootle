@@ -30,6 +30,7 @@ use tari_ootle_common_types::{
     ShardGroup,
     SubstateRequirement,
     optional::Optional,
+    response_status::ResponseErrorStatus,
     shard::Shard,
 };
 use tari_ootle_transaction::{Transaction, TransactionBuilder, args};
@@ -49,6 +50,7 @@ use tari_ootle_wallet_sdk::{
         stealth_outputs::StealthOutputsApiError,
         stealth_transfer::{StealthTransferApiError, StealthTransferParams, TransferOutput, TransferStatementSpec},
         substate::{SubstateApiError, ValidatorScanResult},
+        transaction::TransactionApiError,
     },
     models::{
         AccountWithAddress,
@@ -60,7 +62,7 @@ use tari_ootle_wallet_sdk::{
     },
     network::WalletNetworkInterface,
 };
-use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceHandle;
+use tari_ootle_wallet_sdk_services::transaction_service::{TransactionServiceError, TransactionServiceHandle};
 use tari_ootle_walletd_client::{
     ComponentAddressOrName,
     permissions::{Crud, Permission, ReadOnly},
@@ -647,6 +649,47 @@ pub async fn handle_claim_burn(
         proof_file_name,
     )
     .await
+    .map_err(ClaimBurnError::into_inner)
+}
+
+/// Why [`execute_claim_burn`] could not dry run or submit a claim. The split lets an unattended caller tell a
+/// network that has not taken the claim yet from a claim that cannot succeed.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ClaimBurnError {
+    /// The indexer could not be read, or did not answer the dry run.
+    #[error(transparent)]
+    Network(anyhow::Error),
+    /// The wallet could not store or lock the claim transaction for submission.
+    #[error(transparent)]
+    Wallet(anyhow::Error),
+    /// The claim cannot succeed: it could not be built from the proof, or the dry run rejected it.
+    #[error(transparent)]
+    Invalid(anyhow::Error),
+}
+
+impl ClaimBurnError {
+    pub(crate) fn into_inner(self) -> anyhow::Error {
+        match self {
+            Self::Network(error) | Self::Wallet(error) | Self::Invalid(error) => error,
+        }
+    }
+
+    /// Classifies a failed dry run. The indexer answers a transaction it finds invalid with
+    /// [`ResponseErrorStatus::TransactionRejected`], and an executed but rejected one as a rejected query result;
+    /// those claims cannot succeed. Any other failure is the indexer not answering.
+    fn from_dry_run(error: TransactionServiceError) -> Self {
+        match error {
+            TransactionServiceError::TransactionApiError(
+                TransactionApiError::NetworkInterfaceError {
+                    status: ResponseErrorStatus::TransactionRejected { .. },
+                    ..
+                } |
+                TransactionApiError::InvalidTransactionQueryResponse { .. } |
+                TransactionApiError::DryRunMismatchError { .. },
+            ) => Self::Invalid(error.into()),
+            error => Self::Network(error.into()),
+        }
+    }
 }
 
 /// Core claim burn logic: decrypts the burn proof, builds and signs the claim transaction,
@@ -661,9 +704,11 @@ pub(crate) async fn execute_claim_burn(
     max_epoch: Epoch,
     is_dry_run: bool,
     proof_file_name: Option<String>,
-) -> Result<ClaimBurnResponse, anyhow::Error> {
+) -> Result<ClaimBurnResponse, ClaimBurnError> {
     // A claim declares no input of its own; the TARI resource is the one every transaction declares.
-    let input_pricing = DeclaredInputPricing::fetch(sdk, [SubstateId::from(TARI_TOKEN)]).await?;
+    let input_pricing = DeclaredInputPricing::fetch(sdk, [SubstateId::from(TARI_TOKEN)])
+        .await
+        .map_err(ClaimBurnError::Network)?;
     let transaction = build_claim_burn_transaction(
         sdk,
         account,
@@ -672,11 +717,15 @@ pub(crate) async fn execute_claim_burn(
         max_epoch,
         is_dry_run,
         &input_pricing,
-    )?;
+    )
+    .map_err(ClaimBurnError::Invalid)?;
 
     if is_dry_run {
         let transaction_id = transaction.calculate_id();
-        let result = transaction_service.submit_dry_run_transaction(transaction).await?;
+        let result = transaction_service
+            .submit_dry_run_transaction(transaction)
+            .await
+            .map_err(ClaimBurnError::from_dry_run)?;
         let required_fees = result.finalize.required_fees();
         return Ok(ClaimBurnResponse {
             transaction_id,
@@ -686,14 +735,16 @@ pub(crate) async fn execute_claim_burn(
     }
 
     // Link the transaction to the account the burn is claimed into, and (if present) carry the proof
-    // file name so the claim-burn monitor can track it.
+    // file name so the claim-burn monitor can track it. A failed network submission leaves the transaction
+    // stored for the transaction service's poll to submit again, so an error here is the wallet's own.
     let mut tx_context = TransactionContext::with_accounts([*account.component_address()]);
     if let Some(file_name) = proof_file_name {
         tx_context = tx_context.with_kind(TransactionContextKind::ClaimBurn { file_name });
     }
     let tx_id = transaction_service
         .submit_transaction_with_opts(transaction, Some(tx_context), None)
-        .await?;
+        .await
+        .map_err(|e| ClaimBurnError::Wallet(e.into()))?;
 
     Ok(ClaimBurnResponse {
         transaction_id: tx_id,
@@ -1412,22 +1463,14 @@ pub async fn handle_confidential_transfer(
             })
             .await?;
 
-        // `transfer` links its lock to the transaction, and only a stored transaction resolves a linked lock. A dry
-        // run is never stored, and a failed submission may leave nothing stored.
+        // `transfer` has already released a dry run's lock. Otherwise this handler holds a timed lock that the
+        // submission links in the same write that stores the transaction, so the lock is unlinked exactly when the
+        // wallet stored nothing.
         let transaction_id = transfer.transaction.calculate_id();
         if req.dry_run {
             let result = transaction_service
                 .submit_dry_run_transaction(transfer.transaction)
-                .await;
-            if let Err(err) = &result &&
-                let Err(release_err) = sdk.transaction_api().release_locks_of_unstored_transaction(transaction_id)
-            {
-                warn!(
-                    target: LOG_TARGET,
-                    "Transfer {transaction_id} failed ({err}) and its locked inputs could not be released: {release_err}"
-                );
-            }
-            let result = result?;
+                .await?;
             return Ok(ConfidentialTransferResponse {
                 transaction_id,
                 required_fees: Some(result.finalize.required_fees()),
@@ -1441,11 +1484,12 @@ pub async fn handle_confidential_transfer(
             .submit_transaction_with_opts(
                 transfer.transaction,
                 Some(TransactionContext::with_accounts(linked_accounts)),
-                None,
+                Some(transfer.transaction_proof_id),
             )
             .await;
+        // A submission can fail after the transaction is stored, and the poll then submits it with the lock linked.
         if let Err(err) = &submission &&
-            let Err(release_err) = sdk.transaction_api().release_locks_of_unstored_transaction(transaction_id)
+            let Err(release_err) = sdk.locks_api().release_unlinked_lock(transfer.transaction_proof_id)
         {
             warn!(
                 target: LOG_TARGET,
@@ -4107,5 +4151,51 @@ mod claim_burn_fee_tests {
 
         assert!(local_price(&transaction) > 100);
         assert_eq!(revealed_fee(&transaction), Amount::from(100u64));
+    }
+}
+
+#[cfg(test)]
+mod claim_burn_dry_run_failure_tests {
+    use super::*;
+
+    fn network_interface_error(status: ResponseErrorStatus) -> TransactionServiceError {
+        TransactionApiError::NetworkInterfaceError {
+            message: status.to_string(),
+            status,
+        }
+        .into()
+    }
+
+    #[test]
+    fn a_dry_run_the_indexer_rejects_is_an_invalid_claim() {
+        let rejected = network_interface_error(ResponseErrorStatus::TransactionRejected {
+            message: "input substate is down".to_string(),
+        });
+        assert!(matches!(
+            ClaimBurnError::from_dry_run(rejected),
+            ClaimBurnError::Invalid(_)
+        ));
+        let rejected_result = TransactionApiError::InvalidTransactionQueryResponse {
+            details: "Transaction rejected by dry run: invalid proof".to_string(),
+        };
+        assert!(matches!(
+            ClaimBurnError::from_dry_run(rejected_result.into()),
+            ClaimBurnError::Invalid(_)
+        ));
+    }
+
+    #[test]
+    fn a_dry_run_the_indexer_does_not_answer_is_a_network_failure() {
+        let unavailable = network_interface_error(ResponseErrorStatus::InternalError {
+            message: "Indexer request failed with status 503: no committee".to_string(),
+        });
+        assert!(matches!(
+            ClaimBurnError::from_dry_run(unavailable),
+            ClaimBurnError::Network(_)
+        ));
+        assert!(matches!(
+            ClaimBurnError::from_dry_run(TransactionServiceError::ServiceShutdown),
+            ClaimBurnError::Network(_)
+        ));
     }
 }

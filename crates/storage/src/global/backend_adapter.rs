@@ -36,7 +36,10 @@ use tari_sidechain::FixedHash;
 use tari_template_lib_types::{Hash32, crypto::RistrettoPublicKeyBytes};
 
 use super::{BlockHeaderModel, EpochData};
-use crate::{atomic::AtomicDb, global::models::ValidatorNode};
+use crate::{
+    atomic::AtomicDb,
+    global::models::{ShardGroupSize, ValidatorNode},
+};
 
 pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
     type Addr: NodeAddressable;
@@ -103,6 +106,13 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         epoch: Epoch,
         shard_group: ShardGroup,
     ) -> Result<u64, Self::Error>;
+    /// Returns the member count and summed vote power of `shard_group` in `epoch`.
+    fn validator_nodes_size_of_shard_group(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<ShardGroupSize, Self::Error>;
 
     fn validator_nodes_clear_committees(
         &self,

@@ -67,6 +67,7 @@ mod account_template {
                     .add_method_rule("get_balances", rule!(allow_all))
                     .add_method_rule("deposit", rule!(allow_all))
                     .add_method_rule("withdraw_approved", rule!(allow_all))
+                    .add_method_rule("approval", rule!(allow_all))
                     // By default, only the owner of the token will be able to withdraw funds from the account
                     .default(rule!(deny_all)),
             );
@@ -209,8 +210,29 @@ mod account_template {
         }
 
         // Approval methods
-        /// Called by account owner — sets or updates approval. A zero `amount` revokes it.
-        pub fn approve(&mut self, spender_badge: NonFungibleAddress, resource: ResourceAddress, amount: Amount) {
+        /// Returns the amount of `resource` that `spender_badge` may still withdraw, zero when there is no approval.
+        pub fn approval(&self, spender_badge: NonFungibleAddress, resource: ResourceAddress) -> Amount {
+            self.approvals
+                .get(&(resource, spender_badge))
+                .copied()
+                .unwrap_or_else(Amount::zero)
+        }
+
+        /// Called by the account owner. Sets the approval for `spender_badge` on `resource` to `amount`, provided the
+        /// live approval equals `expected_current`, a missing approval counting as zero. Every
+        /// [`Self::withdraw_approved`] lowers the live approval, and exhausting it removes it, so the owner states
+        /// the value its new `amount` replaces and the call fails if a spend has changed it since; the owner then
+        /// reads it again with [`Self::approval`] and decides afresh.
+        ///
+        /// A zero `amount` revokes the approval whatever its current value and whatever `expected_current` is.
+        /// Revocation stops later spends only: anything withdrawn before it is final stays withdrawn.
+        pub fn approve(
+            &mut self,
+            spender_badge: NonFungibleAddress,
+            resource: ResourceAddress,
+            expected_current: Amount,
+            amount: Amount,
+        ) {
             if amount.is_zero() {
                 let key = (resource, spender_badge);
                 if self.approvals.swap_remove(&key).is_some() {
@@ -221,6 +243,16 @@ mod account_template {
                 }
                 // Else no-op
             } else {
+                let current = self.approval(spender_badge.clone(), resource);
+                assert_eq!(
+                    current, expected_current,
+                    "Approval for badge {} on resource {} is {}, not the expected {}; read the current approval and \
+                     retry",
+                    spender_badge,
+                    resource,
+                    current,
+                    expected_current
+                );
                 emit_event(
                     "approve",
                     metadata!(

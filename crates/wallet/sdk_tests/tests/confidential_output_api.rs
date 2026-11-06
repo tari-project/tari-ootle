@@ -12,7 +12,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::SubstateVersion;
 use tari_ootle_wallet_sdk::{
-    models::{ConfidentialOutputModel, KeyBranch, KeyId, OutputStatus},
+    models::{BalanceChangeSource, ConfidentialOutputModel, KeyBranch, KeyId, OutputStatus},
     storage::{ReadableWalletStore, WalletStoreReader},
 };
 use tari_template_lib::types::{ConfidentialOutputAddress, EncryptedData, constants::STEALTH_TARI_RESOURCE_ADDRESS};
@@ -144,4 +144,128 @@ fn outputs_locked_and_finalized() {
             .unwrap();
         assert_eq!(balance, 124);
     }
+}
+
+/// Gives the test account a confidential-resource vault holding 1,000 revealed units, and returns the resource.
+fn add_revealed_confidential_vault(test: &Test) -> tari_template_lib::types::ResourceAddress {
+    use tari_engine_types::resource::Resource;
+    use tari_template_lib::types::{
+        Amount,
+        Metadata,
+        ResourceAddress,
+        ResourceType,
+        SubstateOwnerRule,
+        VaultId,
+        access_rules::ResourceAccessRules,
+        constants::TOKEN_SYMBOL,
+    };
+
+    let sdk = test.sdk();
+    let conf_resource: ResourceAddress = "resource_0000000000000000000000000000000000000000000000000000000000000c0f"
+        .parse()
+        .unwrap();
+    let conf_vault: VaultId = "vault_0000000000000000000000000000000000000000000000000000000000000c0f"
+        .parse()
+        .unwrap();
+    sdk.resources_api()
+        .upsert_resource(
+            &conf_resource,
+            &Resource::new(
+                ResourceType::Confidential,
+                SubstateOwnerRule::None,
+                ResourceAccessRules::new(),
+                Metadata::from([(TOKEN_SYMBOL, "CONF".to_string())]),
+                None,
+                None,
+                6,
+                false,
+            ),
+        )
+        .unwrap();
+    sdk.accounts_api()
+        .add_vault(
+            Test::test_account_address(),
+            conf_vault,
+            SubstateVersion::ZERO,
+            conf_resource,
+            ResourceType::Confidential,
+            Some("CONF".to_string()),
+            6,
+        )
+        .unwrap();
+    sdk.accounts_api()
+        .update_vault_balance_and_record_change(
+            conf_vault,
+            SubstateVersion::ZERO,
+            Amount::from(1_000u64),
+            Amount::zero(),
+            BalanceChangeSource::Scan,
+        )
+        .unwrap();
+    sdk.substate_api()
+        .save_root(
+            tari_ootle_common_types::VersionedSubstateIdRef::new(
+                &SubstateId::Component(Test::test_account_address()),
+                SubstateVersion::ZERO,
+            ),
+            [SubstateId::Vault(conf_vault)],
+        )
+        .unwrap();
+    sdk.substate_api()
+        .save_root(
+            tari_ootle_common_types::VersionedSubstateIdRef::new(&SubstateId::Vault(conf_vault), SubstateVersion::ZERO),
+            [SubstateId::Resource(conf_resource)],
+        )
+        .unwrap();
+    conf_resource
+}
+
+#[tokio::test]
+async fn confidential_transfer_releases_lock_on_dry_run_and_keeps_timed_unlinked_lock_until_submission() {
+    use tari_ootle_common_types::optional::IsNotFoundError;
+    use tari_ootle_wallet_sdk::apis::confidential_transfer::{ConfidentialTransferParams, UtxoInputSelection};
+    use tari_template_lib::types::Amount;
+
+    let test = Test::new();
+    let sdk = test.sdk();
+    // A wallet account whose component derives from its key, so the transfer resolves it without the network. The
+    // harness's test account holds account key index 0.
+    let destination_keys = sdk.key_manager_api().derive_account_address(1).unwrap();
+    let destination = sdk
+        .accounts_api()
+        .create_account(Some("destination"), false, destination_keys)
+        .unwrap();
+    let destination_address = destination.address().clone();
+    let conf_resource = add_revealed_confidential_vault(&test);
+
+    let params = |is_dry_run| ConfidentialTransferParams {
+        from_account: Test::test_account_address(),
+        input_selection: UtxoInputSelection::RevealedOnly,
+        amount: Amount::from(250u64),
+        destination_address: destination_address.clone(),
+        resource_address: conf_resource,
+        max_fee: 100,
+        output_to_revealed: true,
+        proof_from_resource: None,
+        memo: None,
+        max_epoch: tari_ootle_common_types::Epoch(10),
+        is_dry_run,
+    };
+
+    // Dry run releases the lock immediately before returning.
+    let dry_run = sdk.confidential_transfer_api().transfer(params(true)).await.unwrap();
+    let released = test
+        .store()
+        .with_read_tx(|tx| tx.locks_get(dry_run.transaction_proof_id))
+        .unwrap_err();
+    assert!(released.is_not_found_error(), "{released}");
+
+    // Real transfer keeps a timed lock that is not yet linked to a transaction until submission.
+    let real = sdk.confidential_transfer_api().transfer(params(false)).await.unwrap();
+    let held = test
+        .store()
+        .with_read_tx(|tx| tx.locks_get(real.transaction_proof_id))
+        .unwrap();
+    assert!(held.timeout_at.is_some(), "expected a timed lock");
+    assert_eq!(held.transaction_id, None, "lock must not be linked before submission");
 }

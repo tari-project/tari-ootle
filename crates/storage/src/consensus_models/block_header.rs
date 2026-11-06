@@ -422,21 +422,23 @@ impl BlockHeader {
         // This selection must stay identical to `tari_sidechain::SidechainBlockHeader::calculate_hash`, which hashes
         // the header a commit proof carries to the block ID its committee signed.
         let fields = match self.protocol_version {
-            protocol_version @ ProtocolVersion::V0 => BlockHeaderHashFields::V1(BlockHeaderHashFieldsV1 {
-                network: self.network.as_byte(),
-                protocol_version: protocol_version.as_u32(),
-                justify_id: self.justify_id.hash(),
-                height: self.height.as_u64(),
-                epoch: self.epoch.as_u64(),
-                epoch_hash: &self.epoch_hash,
-                shard_group,
-                proposed_by: self.proposed_by.as_bytes(),
-                state_merkle_root: &self.state_merkle_root,
-                command_merkle_root: &self.command_merkle_root,
-                accumulated_data: &accumulated_data,
-                transaction_merkle_root: &self.transaction_merkle_root,
-                metadata_hash: &metadata_hash,
-            }),
+            protocol_version @ (ProtocolVersion::V0 | ProtocolVersion::V1) => {
+                BlockHeaderHashFields::V1(BlockHeaderHashFieldsV1 {
+                    network: self.network.as_byte(),
+                    protocol_version: protocol_version.as_u32(),
+                    justify_id: self.justify_id.hash(),
+                    height: self.height.as_u64(),
+                    epoch: self.epoch.as_u64(),
+                    epoch_hash: &self.epoch_hash,
+                    shard_group,
+                    proposed_by: self.proposed_by.as_bytes(),
+                    state_merkle_root: &self.state_merkle_root,
+                    command_merkle_root: &self.command_merkle_root,
+                    accumulated_data: &accumulated_data,
+                    transaction_merkle_root: &self.transaction_merkle_root,
+                    metadata_hash: &metadata_hash,
+                })
+            },
         };
 
         hashing::block_header_hasher().chain(&fields).finalize().into()
@@ -638,7 +640,7 @@ impl BlockHeader {
         commands: &BlockCommands,
     ) -> Result<FixedHash, BlockError> {
         match protocol_version {
-            ProtocolVersion::V0 => {
+            ProtocolVersion::V0 | ProtocolVersion::V1 => {
                 let root = build_finalized_transaction_tree(commands)?.root();
                 Ok(FixedHash::from(root.into_array()))
             },

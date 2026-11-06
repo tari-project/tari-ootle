@@ -694,7 +694,7 @@ pub trait StateStoreWriteTransaction {
     // -------------------------------- Parked blocks / Missing Transactions -------------------------------- //
 
     /// Parks a block until its missing transactions arrive. Parking a block that is already parked keeps the first
-    /// record, except that a `CatchUp` origin replaces a `Live` one.
+    /// record, except that a `Live` origin replaces a `CatchUp` one.
     fn parked_block_insert<'a, IMissing: IntoIterator<Item = &'a TransactionId>>(
         &mut self,
         park_block: &Block,

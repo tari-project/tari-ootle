@@ -257,10 +257,7 @@ impl PartialTransaction {
     pub fn into_unsigned(self) -> UnsignedTransaction {
         let mut unsigned = self.unsigned;
         for req in self.resolved {
-            // De-dup against anything already present (e.g. explicit inputs).
-            if !unsigned.inputs().contains(&req) {
-                unsigned.add_input(req);
-            }
+            unsigned.add_input(req);
         }
         unsigned
     }
@@ -272,9 +269,7 @@ impl PartialTransaction {
     pub fn cloned_unsigned(&self) -> UnsignedTransaction {
         let mut unsigned = self.unsigned.clone();
         for req in &self.resolved {
-            if !unsigned.inputs().contains(req) {
-                unsigned.add_input(req.clone());
-            }
+            unsigned.add_input(req.clone());
         }
         unsigned
     }
@@ -858,7 +853,7 @@ fn component_vault_ids(component: &tari_engine_types::component::Component) -> R
 
 /// Pushes an input only if not already present (stable `Vec`, `IndexSet`-like de-dup), merging it into an
 /// existing declaration of the same substate as [`tari_ootle_common_types::declare_input`] does.
-fn push_unique(resolved: &mut Vec<InputDeclaration>, req: InputDeclaration) {
+pub(crate) fn push_unique(resolved: &mut Vec<InputDeclaration>, req: InputDeclaration) {
     match resolved
         .iter_mut()
         .find(|existing| existing.substate_id() == req.substate_id())
@@ -908,6 +903,8 @@ mod tests {
         substate::SubstateValue,
         vault::Vault,
     };
+    use tari_ootle_common_types::Epoch;
+    use tari_ootle_transaction::TransactionBuilder;
     use tari_template_lib_types::{
         Amount,
         EntityId,
@@ -1308,5 +1305,24 @@ mod tests {
         // No stealth state accumulated on the public path.
         assert!(partial.stealth_input_witnesses().is_empty());
         assert!(partial.seal_signer().is_none());
+    }
+
+    #[test]
+    fn into_unsigned_and_cloned_unsigned_merge_resolved_into_existing_inputs() {
+        let id = SubstateId::Component(from_component());
+        let mut unsigned = TransactionBuilder::new(Network::Esmeralda.as_byte(), Epoch(1)).build_unsigned();
+        unsigned.add_input(InputDeclaration::read(id.clone()));
+
+        let partial = PartialTransaction::new_with_explicit_inputs(unsigned, vec![InputDeclaration::write_versioned(
+            id.clone(),
+            5,
+        )]);
+        let cloned = partial.cloned_unsigned();
+        let folded = partial.into_unsigned();
+        for tx in [cloned, folded] {
+            let decl = tx.inputs().get(&id).expect("input must be present");
+            assert!(decl.is_write(), "resolved write must upgrade existing read");
+            assert_eq!(decl.version(), Some(SubstateVersion::from(5)));
+        }
     }
 }

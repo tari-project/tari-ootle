@@ -242,13 +242,19 @@ a badge it holds or was lent a proof of — asks the engine without minting anyt
 CallerContext::assert_badge_in_scope(&badge);
 ```
 
-The built-in account's allowances work this way. `approve(spender_badge, resource, amount)` names the badge,
-and `withdraw_approved(spender_badge, resource, amount)` pays out only when the call carries it: a
+The built-in account's allowances work this way. `approve(spender_badge, resource, expected_current, amount)`
+names the badge, and `withdraw_approved(spender_badge, resource, amount)` pays out only when the call carries it: a
 public-key approval is spendable by that key's own top-level call to the account, an approval naming
 `NonFungibleAddress::caller_component_badge(dex)` is spendable by the `dex` component calling the account, and
 one naming `NonFungibleAddress::direct_caller_template_badge(t)` by every component and function of template
 `t`. An approval naming a badge held in a vault is spent by calling `withdraw_approved` inside a window over a
 proof of that badge.
+
+Each spend lowers the live approval, and spending all of it removes it. Setting a new nonzero `amount` therefore
+succeeds only if the live approval still equals `expected_current` (zero when there is none), so a change made
+from a stale reading fails rather than granting the new amount on top of what was spent in between. Read the
+live value with `approval(spender_badge, resource)` and pass `0` for a first grant. An `amount` of zero revokes
+the approval regardless of `expected_current`; it stops later spends but does not undo earlier ones.
 
 #### Resource Access Rules
 

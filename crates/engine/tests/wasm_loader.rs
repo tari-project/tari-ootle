@@ -15,14 +15,22 @@ use tari_engine_types::{
     limits,
 };
 use tari_ootle_transaction::{Epoch, Transaction, args};
+use tari_template_abi::{ArgDef, FunctionDef, FunctionKind, TemplateDef, TemplateDefV2, Type};
 use tari_template_lib::types::TemplateAddress;
 use tari_template_test_tooling::{Package, TemplateTest};
 
-/// Bor-encoded `VersionedTemplateDef::V1(TemplateDefV1 { template_name: "Buggy", abi_version: 0, functions:
-/// [FunctionDefV1 { name: "main", arguments: [], output: Type::Unit, is_mut: false, is_migration:
-/// false }] })`, behind the 4-byte little-endian length prefix `encode_for_wasm_embedding` adds.
-/// Shared with `tests/templates/buggy`, which embeds the same blob.
+/// Bor-encoded `TemplateDef::V2(TemplateDefV2 { template_name: "Buggy", abi_version: 0, functions: [FunctionDef {
+/// name: "main", kind: FunctionKind::Function, arguments: [], output: Type::Unit }] })`, behind the 4-byte
+/// little-endian length prefix `encode_for_wasm_embedding` adds. Shared with `tests/templates/buggy`, which embeds the
+/// same blob.
 const TEMPLATE_DEF: &[u8] = &[
+    29, 0, 0, 0, 130, 1, 129, 131, 101, 66, 117, 103, 103, 121, 0, 129, 132, 100, 109, 97, 105, 110, 130, 0, 128, 128,
+    130, 0, 128,
+];
+
+/// [`TEMPLATE_DEF`] with the V1 layout's index and its `main` in the V1 function layout:
+/// `{ name, arguments, output, is_mut, is_migration }`.
+const V1_TEMPLATE_DEF: &[u8] = &[
     28, 0, 0, 0, 130, 0, 129, 131, 101, 66, 117, 103, 103, 121, 0, 129, 133, 100, 109, 97, 105, 110, 128, 130, 0, 128,
     244, 244,
 ];
@@ -46,6 +54,11 @@ fn template_module(parts: &str) -> Vec<u8> {
 /// [`template_module`] for a module that also imports host functions, which the text format
 /// requires to come before any definition.
 fn template_module_importing(imports: &str, parts: &str) -> Vec<u8> {
+    template_module_defining(TEMPLATE_DEF, imports, parts)
+}
+
+/// [`template_module_importing`] for a module whose ABI section is `template_def`, length prefix included.
+fn template_module_defining(template_def: &[u8], imports: &str, parts: &str) -> Vec<u8> {
     let wat = format!(
         r#"
         (module
@@ -56,9 +69,32 @@ fn template_module_importing(imports: &str, parts: &str) -> Vec<u8> {
           (@custom "tari_tdef" "{}")
         )
         "#,
-        wat_bytes(TEMPLATE_DEF)
+        wat_bytes(template_def)
     );
     wat::parse_str(&wat).unwrap()
+}
+
+/// The `Buggy` template's ABI section, declaring `main` with one argument of type `arg_type` and returning `output`.
+fn template_def_with(arg_type: Type, output: Type) -> Vec<u8> {
+    TemplateDef::V2(TemplateDefV2 {
+        template_name: "Buggy".to_string(),
+        abi_version: 0,
+        functions: vec![FunctionDef {
+            name: "main".to_string(),
+            kind: FunctionKind::Function,
+            arguments: vec![ArgDef {
+                name: "arg".to_string(),
+                arg_type,
+            }],
+            output,
+        }],
+    })
+    .encode_for_wasm_embedding()
+    .unwrap()
+}
+
+fn other(len: usize) -> Type {
+    Type::Other { name: "A".repeat(len) }
 }
 
 /// The allocator pair and entrypoint a template that only has to load needs.
@@ -144,6 +180,29 @@ fn rejects_a_memory_declaring_more_pages_than_the_limit() {
 
     let err = validation_error(&code);
     assert!(err.contains("memory limit"), "unexpected error: {err}");
+}
+
+#[test]
+fn the_template_def_fixture_is_the_encoded_buggy_definition() {
+    let def = TemplateDef::V2(TemplateDefV2 {
+        template_name: "Buggy".to_string(),
+        abi_version: 0,
+        functions: vec![FunctionDef {
+            name: "main".to_string(),
+            kind: FunctionKind::Function,
+            arguments: vec![],
+            output: Type::Unit,
+        }],
+    });
+    assert_eq!(def.encode_for_wasm_embedding().unwrap(), TEMPLATE_DEF);
+}
+
+#[test]
+fn rejects_a_v1_template_definition() {
+    let code = template_module_defining(V1_TEMPLATE_DEF, "", ABI_EXPORTS);
+
+    let err = validation_error(&code);
+    assert!(err.contains("V1 layout"), "unexpected error: {err}");
 }
 
 #[test]
@@ -678,35 +737,78 @@ fn passive_segments_are_refused() {
     }
 }
 
-/// Nothing caps how many element segments a module declares, and several may target one table at
-/// overlapping offsets — each is written out in turn at instantiation. The entry count a charge is
-/// taken on is therefore bounded by the binary, not by the table limits.
+/// Instantiation re-syncs a fixed-size table in full after each active element segment it writes,
+/// empty ones included, so the work grows with segments times table slots while a segment costs a
+/// few bytes. One active segment is what a linker emits for a template's function table.
 #[test]
-fn overlapping_element_segments_each_count() {
-    const SEGMENTS: u64 = 8;
-    const ENTRIES: u64 = 512;
+fn a_second_active_element_segment_is_refused() {
+    let max = limits::WASM_LIMITS.max_element_segments;
+    for (table, segment) in [
+        ("(table 16384 16384 funcref)", "(elem (i32.const 0) func)"),
+        ("(table 1 1 funcref)", "(elem (i32.const 0) func 0)"),
+        ("(table 1 funcref)", "(elem (i32.const 0) func 0)"),
+    ] {
+        let segments = vec![segment; max + 1].join("\n");
+        let code = template_module(&format!(
+            r#"
+            {table}
+            {ABI_EXPORTS}
+            {segments}
+            "#
+        ));
 
-    let funcrefs = vec!["0"; ENTRIES as usize].join(" ");
-    let segments = (0..SEGMENTS)
-        .map(|_| format!("(elem (i32.const 0) func {funcrefs})"))
-        .collect::<Vec<_>>()
-        .join("\n");
+        let err = WasmModule::load_template_from_code(&code).expect_err("a second active element segment was accepted");
+        assert!(
+            matches!(
+                err,
+                tari_engine::template::TemplateLoaderError::WasmModuleError(WasmExecutionError::WasmValidationError(
+                    WasmValidationError::TooManyElementSegments { .. }
+                ))
+            ),
+            "unexpected error for {table}: {err}"
+        );
+    }
+}
+
+/// Declarative segments, which `rustc` emits for functions referenced by `ref.func`, stay out of
+/// every table, so only the active segment counts toward the limit.
+#[test]
+fn declarative_element_segments_load_alongside_the_active_one() {
+    let declarative = vec!["(elem declare func 0)"; 64].join("\n");
     let code = template_module(&format!(
         r#"
-        (table {ENTRIES} {ENTRIES} funcref)
-        (func (export "tari_alloc") (param i32) (result i32) (i32.const 1024))
-        (func (export "tari_free") (param i32))
-        (func (export "Buggy_main") (param i32 i32) (result i32) (i32.const 20))
-        {segments}
+        (table 4 4 funcref)
+        {ABI_EXPORTS}
+        (elem (i32.const 0) func 0 1)
+        {declarative}
         "#
     ));
 
     let shape = match WasmModule::load_template_from_code(&code).expect("module was rejected") {
         tari_engine::template::LoadedTemplate::Wasm(loaded) => loaded.shape(),
     };
+    assert_eq!(shape.element_segment_entries, 2);
+}
 
-    // Every segment is counted, even though the table only ever holds `ENTRIES` of them at once.
-    assert_eq!(shape.element_segment_entries, SEGMENTS * ENTRIES);
+/// Every element segment is active or declarative, and both are dropped at instantiation, so a
+/// `table.init` has nothing to copy: it can only trap or do nothing. A zero-length one still
+/// re-syncs the whole table, so it is refused when the module is loaded.
+#[test]
+fn table_init_is_refused() {
+    let code = template_module(
+        r#"
+        (table 4 4 funcref)
+        (func (export "tari_alloc") (param i32) (result i32) (i32.const 1024))
+        (func (export "tari_free") (param i32))
+        (func (export "Buggy_main") (param i32 i32) (result i32)
+          (table.init 0 0 (i32.const 0) (i32.const 0) (i32.const 0))
+          (i32.const 20))
+        (elem (i32.const 0) func 0)
+        "#,
+    );
+
+    let err = WasmModule::load_template_from_code(&code).expect_err("table.init was accepted");
+    assert!(err.to_string().contains("TableInit"), "unexpected error: {err}");
 }
 
 /// A zero-length active data segment contributes no bytes but is still walked, offset-evaluated and
@@ -938,6 +1040,103 @@ fn an_oversized_panic_message_is_truncated() {
         "{} bytes of the panic logged",
         logged.template_debug_bytes
     );
+}
+
+/// A dispatcher's decode failure is reported with a short marker that the engine expands with the argument's ABI type.
+/// The expansion is held to the same bound as a panic message the template writes out in full.
+#[test]
+fn a_decode_failure_expands_within_the_panic_message_limit() {
+    // Within every admission limit, and still rendering to far more than a panic message may carry.
+    let arg_type = Type::Tuple(vec![Type::Tuple(vec![other(256); 7]); 31]);
+    let marker = b"\x01A0: x";
+    let code = template_module_defining(
+        &template_def_with(arg_type, Type::Unit),
+        ON_PANIC_IMPORT,
+        &format!(
+            r#"
+        (data (i32.const 4096) "{}")
+        (func (export "tari_alloc") (param i32) (result i32) (i32.const 1024))
+        (func (export "tari_free") (param i32))
+        (func (export "Buggy_main") (param i32 i32) (result i32)
+          (call $on_panic (i32.const 4096) (i32.const {}) (i32.const 1) (i32.const 1))
+          unreachable)
+        "#,
+            wat_bytes(marker),
+            marker.len()
+        ),
+    );
+
+    let (mut test, address) = load(code);
+    let result = test
+        .try_execute(
+            Transaction::builder_localnet(Epoch(1))
+                .call_function(address, "main", args![0u8])
+                .build_and_seal(test.secret_key()),
+            vec![],
+        )
+        .expect("execution failed");
+    let reason = match result.finalize.result {
+        TransactionResult::Reject(reason) | TransactionResult::AcceptFeeRejectRest(_, reason) => reason,
+        TransactionResult::Accept(_) => panic!("a trapping call was accepted"),
+    };
+    let RejectReason::ExecutionFailure { message, .. } = reason else {
+        panic!("expected an execution failure, got {reason:?}");
+    };
+    assert!(
+        message.contains("failed to decode tuple argument at position 0"),
+        "the marker was not expanded: {message:.200}"
+    );
+    let limit = limits::ENGINE_LIMITS.max_panic_message_size;
+    assert!(
+        message.len() <= limit + 1024,
+        "a {}-byte panic marker expanded to a {}-byte reject reason",
+        marker.len(),
+        message.len()
+    );
+}
+
+/// Every ABI type a template declares, at every depth, is held to the limits its outermost level is.
+#[test]
+fn rejects_an_abi_type_past_the_limits_at_any_depth() {
+    let max_width = limits::WASM_LIMITS.max_function_arguments;
+    let max_name = limits::WASM_LIMITS.max_function_name_length;
+    let max_depth = limits::WASM_LIMITS.max_abi_type_depth;
+    let max_nodes = limits::WASM_LIMITS.max_abi_type_nodes;
+
+    let nested = |mut ty: Type, levels: usize| {
+        for _ in 0..levels {
+            ty = Type::Vec(Box::new(ty));
+        }
+        ty
+    };
+    let past_the_node_limit = Type::Tuple(vec![Type::Tuple(vec![Type::U8; max_width]); max_nodes / max_width + 1]);
+
+    let cases = [
+        ("a nested name", nested(other(max_name + 1), 1), Type::Unit),
+        (
+            "a nested tuple",
+            Type::Option(Box::new(Type::Tuple(vec![Type::U8; max_width + 1]))),
+            Type::Unit,
+        ),
+        ("a deep type", nested(Type::U8, max_depth), Type::Unit),
+        ("a type of many parts", past_the_node_limit, Type::Unit),
+        ("an output name", Type::U8, other(max_name + 1)),
+        ("a nested output", Type::U8, nested(other(max_name + 1), 2)),
+    ];
+    for (case, arg_type, output) in cases {
+        let code = template_module_defining(&template_def_with(arg_type, output), "", ABI_EXPORTS);
+        let error = WasmModule::validate_code(&code)
+            .err()
+            .unwrap_or_else(|| panic!("{case} past the limits was admitted"))
+            .to_string();
+        // The error names the function, and none of the type, which is the template's to size.
+        assert!(error.contains("main"), "{case}: {error}");
+        assert!(error.len() < 512, "{case}: a {}-byte error", error.len());
+    }
+
+    let at_the_limits = Type::Tuple(vec![nested(other(max_name), max_depth - 2); 2]);
+    let code = template_module_defining(&template_def_with(at_the_limits, other(max_name)), "", ABI_EXPORTS);
+    WasmModule::validate_code(&code).expect("a type at the limits was rejected");
 }
 
 /// A panic report is logged only once the trap it announces ends the call, so a template that

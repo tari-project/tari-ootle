@@ -11,8 +11,9 @@ pub enum ProposalOrigin {
     #[default]
     #[n(0)]
     Live,
-    /// A block imported through catch-up sync. The committee has already certified it, so a vote can never help form
-    /// a certificate and this node does not vote on it.
+    /// A block delivered as a catch-up response. Catch-up sync serves blocks the committee has certified, on which a
+    /// vote can never help form a certificate, so this delivery casts no vote. Any committee member can send a
+    /// catch-up response, so a later proposal for the same block still gets this node's vote.
     #[n(1)]
     CatchUp,
 }

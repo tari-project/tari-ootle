@@ -21,7 +21,6 @@ use tari_ootle_common_types::{
     LockIntent,
     SubstateRequirement,
     SubstateVersion,
-    VersionedSubstateId,
     VersionedSubstateIdRef,
     committee::CommitteeInfo,
     optional::{IsNotFoundError, Optional},
@@ -47,10 +46,17 @@ use super::{PledgedTransaction, PreparedTransaction, UncommittedTemplateStore};
 use crate::{
     hotstuff::{
         block_change_set::ProposedBlockChangeSet,
-        substate_store::{InputPledge, LockFailedError, LockStatus, PendingSubstateStore, SubstateStoreError},
+        substate_store::{
+            InputLoad,
+            InputPledge,
+            LockFailedError,
+            LockStatus,
+            PendingSubstateStore,
+            SubstateStoreError,
+        },
     },
     tracing::TraceTimer,
-    traits::{BlockTransactionExecutor, BlockTransactionExecutorError, ReadableSubstateStore},
+    traits::{BlockTransactionExecutor, BlockTransactionExecutorError},
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::block_transaction_executor";
@@ -61,19 +67,63 @@ pub struct ConsensusTransactionManager<TExecutor, TStateStore> {
     uncommitted_templates: UncommittedTemplateStore,
     max_transaction_validity_epochs: u64,
     max_transaction_pledge_bytes: usize,
+    max_transaction_input_load_bytes: usize,
     _store: PhantomData<TStateStore>,
 }
 
 impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
     ConsensusTransactionManager<TExecutor, TStateStore>
 {
-    pub fn new(executor: TExecutor, max_transaction_validity_epochs: u64, max_transaction_pledge_bytes: usize) -> Self {
+    pub fn new(
+        executor: TExecutor,
+        max_transaction_validity_epochs: u64,
+        max_transaction_pledge_bytes: usize,
+        max_transaction_input_load_bytes: usize,
+    ) -> Self {
         Self {
             executor,
             uncommitted_templates: UncommittedTemplateStore::default(),
             max_transaction_validity_epochs,
             max_transaction_pledge_bytes,
+            max_transaction_input_load_bytes,
             _store: PhantomData,
+        }
+    }
+
+    /// Loads the transaction's local inputs, counting them toward what the block loads. Returns the loaded inputs,
+    /// or what the transaction is prepared as instead: an abort if its inputs alone are more than any transaction
+    /// may have loaded, or a deferral if they only do not fit in this block. Only the shard group holding the inputs
+    /// measures them, so it aborts unilaterally and the other shard groups adopt the abort from its foreign proposal.
+    fn load_local_inputs<TTx: StateStoreReadTransaction, I>(
+        &self,
+        store: &mut PendingSubstateStore<TTx>,
+        transaction_id: &TransactionId,
+        inputs: I,
+        abort_as: fn(TransactionExecution) -> PreparedTransaction,
+    ) -> Result<Result<HashMap<SubstateRequirement, Substate>, PreparedTransaction>, BlockTransactionExecutorError>
+    where
+        I: IntoIterator<Item = (SubstateRequirement, SubstateVersion)>,
+    {
+        match store.load_inputs(inputs, self.max_transaction_input_load_bytes)? {
+            InputLoad::Loaded(inputs) => Ok(Ok(inputs)),
+            InputLoad::TransactionTooLarge { bytes } => {
+                warn!(
+                    target: LOG_TARGET,
+                    "⚠️ PREPARE: Transaction {transaction_id} has more than {} bytes of local inputs ({bytes} loaded \
+                     before stopping), more than a validator loads for one transaction. Aborting.",
+                    self.max_transaction_input_load_bytes,
+                );
+                let execution = TransactionExecution::abort(transaction_id, RejectReason::Abort {
+                    reason: AbortReason::InputLoadTooLarge,
+                });
+                Ok(Err(abort_as(execution)))
+            },
+            InputLoad::BlockBudgetReached { total_bytes, max_bytes } => {
+                Ok(Err(PreparedTransaction::InputLoadBudgetReached {
+                    total_bytes,
+                    max_bytes,
+                }))
+            },
         }
     }
 
@@ -81,10 +131,8 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         &self.uncommitted_templates
     }
 
-    /// Adds the transaction's local inputs to what the block pledges to foreign shard groups. A proposer leaves a
-    /// transaction with a deferrable lock conflict out of the block, so when `is_proposing` its inputs are pledged only
-    /// once `lock_status` shows every lock it requested was granted. A node evaluating a block counts the inputs of
-    /// every command the block carries, since the block pledges them whatever this node could lock.
+    /// Adds the transaction's local inputs to what the block pledges to foreign shard groups once every requested
+    /// lock is granted. Commands with deferrable lock conflicts are skipped by proposers and refused by voters.
     ///
     /// Returns what the transaction is prepared as instead if its inputs cannot be pledged, having released the locks
     /// it took in the block: an abort if they are more than any block may pledge, or a deferral if they only do not
@@ -95,13 +143,12 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         store: &mut PendingSubstateStore<TTx>,
         transaction_id: &TransactionId,
         lock_status: &LockStatus,
-        is_proposing: bool,
         inputs: I,
     ) -> Result<Option<PreparedTransaction>, BlockTransactionExecutorError>
     where
         I: IntoIterator<Item = VersionedSubstateIdRef<'i>>,
     {
-        if is_proposing && lock_status.is_any_failed() {
+        if lock_status.is_any_failed() {
             return Ok(None);
         }
         let pledge = store.pledge_inputs(inputs, self.max_transaction_pledge_bytes)?;
@@ -253,7 +300,6 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 block,
                 execution_epoch.clone(),
                 pool_tx.is_fee_intent_only(),
-                is_proposing,
             ),
             ResolvedTransactionInputs::OnlyForeignInputs { non_local_inputs } => self
                 .prepare_multishard_output_only_transaction(
@@ -265,7 +311,6 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                     change_set,
                     execution_epoch.clone(),
                     pool_tx.is_fee_intent_only(),
-                    is_proposing,
                 ),
             ResolvedTransactionInputs::OnlyTombstones => {
                 // Because we have only local inputs, this shard group unilaterally decides the locked epoch (though
@@ -572,11 +617,17 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             }
         }
 
-        let local_inputs = store.get_many(
+        let local_inputs = match self.load_local_inputs(
+            store,
+            &transaction_id,
             local_versions
                 .iter()
                 .map(|(req, v)| (req.to_substate_requirement_ref().to_owned(), *v)),
-        )?;
+            PreparedTransaction::new_local_early_abort,
+        )? {
+            Ok(inputs) => inputs,
+            Err(prepared) => return Ok(prepared),
+        };
         let execution = self.execute_or_fetch(
             store,
             local_committee_info,
@@ -603,9 +654,8 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
 
             let (execution, lock_status) = lock_local_only_execution(store, transaction_id, execution)?;
             if let Some(err) = lock_status.hard_conflict() {
-                warn!(target: LOG_TARGET, "⚠️ PREPARE: Hard conflict when locking inputs: {err}");
-                let execution =
-                    TransactionExecution::abort(transaction.id(), RejectReason::FailedToLockInputs(err.to_string()));
+                warn!(target: LOG_TARGET, "⚠️ PREPARE: Hard conflict when locking: {err}");
+                let execution = TransactionExecution::abort(transaction.id(), lock_failure_reject_reason(err));
                 return Ok(PreparedTransaction::new_local_accept(execution, lock_status));
             }
 
@@ -617,30 +667,30 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             Decision::Commit => {
                 // CASE: Multishard transaction, all inputs are local, consensus with output shard groups
                 // pending
-                let requested_locks = execution.resolved_inputs();
-                let lock_status = lock_multishard(store, transaction_id, requested_locks)?;
-                if let Some(err) = lock_status.hard_conflict() {
-                    warn!(target: LOG_TARGET, "⚠️ PREPARE: Hard conflict when locking inputs: {err}");
-                    let execution = TransactionExecution::abort(
-                        transaction.id(),
-                        RejectReason::FailedToLockInputs(err.to_string()),
-                    );
-                    return Ok(PreparedTransaction::new_multishard_executed(execution, lock_status));
-                }
-                if let Some(prepared) = self.pledge_local_inputs(
+                let locked = lock_multishard_execution(
                     store,
-                    &transaction_id,
-                    &lock_status,
-                    is_proposing,
-                    requested_locks
-                        .iter()
-                        .filter(|lock| local_committee_info.includes_substate_id(lock.substate_id()))
-                        .map(|lock| lock.to_versioned_substate_id_ref()),
-                )? {
-                    return Ok(prepared);
+                    local_committee_info,
+                    transaction_id,
+                    execution,
+                    MultishardLockScope::Execution,
+                    false,
+                )?;
+                if let Some(err) = locked.lock_status.hard_conflict() {
+                    if !err.is_output_lock() {
+                        let execution = TransactionExecution::abort(&transaction_id, lock_failure_reject_reason(err));
+                        return Ok(PreparedTransaction::new_local_early_abort(execution));
+                    }
+                    // An abort decided here carries none of the transaction's outputs, so it would be read back as
+                    // local-only. The inputs are prepared alone instead, and LocalAccept aborts the transaction
+                    // for the output it cannot lock.
+                    return self.prepare_local_inputs_only(
+                        store,
+                        local_committee_info,
+                        transaction_id,
+                        locked.execution,
+                    );
                 }
-                // We're committing, and one or more of the outputs are foreign
-                Ok(PreparedTransaction::new_multishard_executed(execution, lock_status))
+                self.finish_multishard_prepare(store, local_committee_info, transaction_id, locked)
             },
             Decision::Abort(reason) => {
                 // CASE: We're aborting, so this is a local-only transaction since no outputs need to be
@@ -662,7 +712,6 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         block: LeafBlock,
         execution_locked_epoch: LockedEpoch,
         fee_intent_only: bool,
-        is_proposing: bool,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         // CASE: Multishard transaction, some inputs are local, some are foreign
 
@@ -704,7 +753,6 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 *transaction.id(),
                 exec,
                 fee_intent_only,
-                is_proposing,
             ),
             None => self.prepare_multishard_no_execution(
                 store,
@@ -712,7 +760,6 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 *transaction.id(),
                 local_versions,
                 non_local_inputs,
-                is_proposing,
             ),
         }
     }
@@ -726,7 +773,6 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         transaction_id: TransactionId,
         execution: TransactionExecution,
         fee_intent_only: bool,
-        is_proposing: bool,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         if let Some(reason) = execution.decision().abort_reason() {
             warn!(target: LOG_TARGET, "⚠️ PREPARE: Transaction {transaction_id} is ABORTED before prepare: {reason}");
@@ -734,13 +780,6 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             let lock_status = LockStatus::default();
             return Ok(PreparedTransaction::new_multishard_executed(execution, lock_status));
         }
-
-        let local_inputs = execution
-            .resolved_inputs()
-            .iter()
-            .filter(|lock| local_committee_info.includes_substate_id(lock.substate_id()))
-            .map(|lock| lock.versioned_substate_id().clone())
-            .collect::<Vec<_>>();
 
         let locked = lock_multishard_execution(
             store,
@@ -750,11 +789,22 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             MultishardLockScope::Execution,
             fee_intent_only,
         )?;
+        self.finish_multishard_prepare(store, local_committee_info, transaction_id, locked)
+    }
+
+    /// Prepares the multishard transaction for which `locked` holds the locks just taken: an abort on a hard lock
+    /// conflict, otherwise its local inputs are pledged.
+    fn finish_multishard_prepare<TTx: StateStoreReadTransaction>(
+        &self,
+        store: &mut PendingSubstateStore<TTx>,
+        local_committee_info: &CommitteeInfo,
+        transaction_id: TransactionId,
+        locked: LockedMultishardExecution,
+    ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         if let Some(err) = locked.lock_status.hard_conflict() {
             // CASE: Multishard transaction, will abort due to hard lock conflict
-            warn!(target: LOG_TARGET, "⚠️ PREPARE: Hard conflict when locking inputs: {err}");
-            let execution =
-                TransactionExecution::abort(&transaction_id, RejectReason::FailedToLockInputs(err.to_string()));
+            warn!(target: LOG_TARGET, "⚠️ PREPARE: Hard conflict when locking: {err}");
+            let execution = TransactionExecution::abort(&transaction_id, lock_failure_reject_reason(err));
             return Ok(PreparedTransaction::new_multishard_executed(
                 execution,
                 locked.lock_status,
@@ -765,14 +815,34 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             store,
             &transaction_id,
             &locked.lock_status,
-            is_proposing,
-            local_inputs.iter().map(VersionedSubstateId::as_versioned_ref),
+            locked
+                .execution
+                .resolved_inputs()
+                .iter()
+                .filter(|lock| local_committee_info.includes_substate_id(lock.substate_id()))
+                .map(|lock| lock.to_versioned_substate_id_ref()),
         )? {
             return Ok(prepared);
         }
 
         // CASE: Multishard transaction, executed, no or "soft" (unversioned) lock conflict
         Ok(PreparedTransaction::new_multishard_locked(locked))
+    }
+
+    /// Locks and pledges only the local inputs of the multishard `execution`, leaving its outputs to LocalAccept.
+    fn prepare_local_inputs_only<TTx: StateStoreReadTransaction>(
+        &self,
+        store: &mut PendingSubstateStore<TTx>,
+        local_committee_info: &CommitteeInfo,
+        transaction_id: TransactionId,
+        execution: TransactionExecution,
+    ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
+        let lock_status = store.try_lock_all(transaction_id, execution.resolved_inputs(), false)?;
+        self.finish_multishard_prepare(store, local_committee_info, transaction_id, LockedMultishardExecution {
+            execution,
+            lock_status,
+            fee_intent_only: false,
+        })
     }
 
     fn prepare_multishard_no_execution<TTx: StateStoreReadTransaction>(
@@ -782,17 +852,32 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         transaction_id: TransactionId,
         local_versions: IndexMap<InputDeclarationRef<'_>, SubstateVersion>,
         non_local_inputs: IndexSet<InputDeclarationRef<'_>>,
-        is_proposing: bool,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         // This shard group does not hold every input, so it cannot execute to discover how each one is
         // used and must lock on what the transaction declared.
+        let local_inputs = match self.load_local_inputs(
+            store,
+            &transaction_id,
+            local_versions
+                .iter()
+                .map(|(decl, version)| (decl.to_substate_requirement_ref().to_owned(), *version)),
+            |execution| PreparedTransaction::new_multishard_executed(execution, LockStatus::new()),
+        )? {
+            Ok(inputs) => inputs,
+            Err(prepared) => return Ok(prepared),
+        };
         let requested_locks = local_versions
             .iter()
             .map(|(decl, version)| {
-                let substate = store.get(VersionedSubstateIdRef::new(decl.substate_id(), *version))?;
+                let requirement = decl.to_substate_requirement_ref().to_owned();
+                let substate = local_inputs.get(&requirement).ok_or_else(|| {
+                    BlockTransactionExecutorError::InvariantError(format!(
+                        "Transaction {transaction_id} declared input {requirement} was not loaded"
+                    ))
+                })?;
                 Ok(declared_lock_intent(decl, *version).with_pledged_value(substate.substate_value()))
             })
-            .collect::<Result<Vec<_>, SubstateStoreError>>()?;
+            .collect::<Result<Vec<_>, BlockTransactionExecutorError>>()?;
 
         let lock_status = lock_multishard(store, transaction_id, &requested_locks)?;
         if let Some(err) = lock_status.hard_conflict() {
@@ -806,7 +891,6 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             store,
             &transaction_id,
             &lock_status,
-            is_proposing,
             requested_locks.iter().map(|lock| lock.to_versioned_substate_id_ref()),
         )? {
             return Ok(prepared);
@@ -844,7 +928,6 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         change_set: &ProposedBlockChangeSet,
         execution_locked_epoch: LockedEpoch,
         fee_intent_only: bool,
-        is_proposing: bool,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         let transaction_id = *transaction.id();
         // We're output-only, so only need to gather foreign pledges
@@ -892,14 +975,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             execution.decision()
         );
 
-        self.prepare_multishard_from_execution(
-            store,
-            local_committee_info,
-            transaction_id,
-            execution,
-            fee_intent_only,
-            is_proposing,
-        )
+        self.prepare_multishard_from_execution(store, local_committee_info, transaction_id, execution, fee_intent_only)
     }
 }
 
@@ -968,6 +1044,16 @@ impl<TTx: StateStoreReadTransaction> CreationCheck for LocalCreationCheck<'_, '_
     }
 }
 
+/// The reason a transaction aborts when `err` fails one of its locks: its inputs or its outputs, whichever the
+/// failed lock was requested for.
+fn lock_failure_reject_reason(err: &LockFailedError) -> RejectReason {
+    if err.is_output_lock() {
+        RejectReason::FailedToLockOutputs(err.to_string())
+    } else {
+        RejectReason::FailedToLockInputs(err.to_string())
+    }
+}
+
 /// Locks the inputs and outputs of `execution`, a transaction whose inputs and outputs are all local. A transaction
 /// that cannot create one of its outputs in this or any later block still commits its fee intent, which pays for its
 /// execution, and that is what is locked and returned instead.
@@ -1006,14 +1092,10 @@ fn lock_all_or_none<TTx: StateStoreReadTransaction>(
 ) -> Result<LockStatus, BlockTransactionExecutorError> {
     let requested_locks = execution.resolved_inputs().iter().chain(execution.resulting_outputs());
     let lock_status = store.try_lock_all(transaction_id, requested_locks, true)?;
-    if lock_status.is_any_failed() {
-        store.release_new_locks(&transaction_id);
-    }
     Ok(lock_status)
 }
 
-/// Takes `locks` for the multishard transaction `transaction_id`. A hard conflict aborts the transaction, so it is then
-/// left holding none of the locks it took while preparing the block.
+/// Takes every lock for the multishard transaction `transaction_id`, or none of them.
 fn lock_multishard<TTx, I, L>(
     store: &mut PendingSubstateStore<TTx>,
     transaction_id: TransactionId,
@@ -1024,11 +1106,7 @@ where
     I: IntoIterator<Item = L>,
     L: LockIntent + Display,
 {
-    let lock_status = store.try_lock_all(transaction_id, locks, false)?;
-    if lock_status.is_hard_conflict() {
-        store.release_new_locks(&transaction_id);
-    }
-    Ok(lock_status)
+    store.try_lock_all(transaction_id, locks, false)
 }
 
 /// Whether `err` means an output version cannot be created in this or any later block on this chain: the version
@@ -1127,7 +1205,6 @@ pub fn lock_multishard_execution<TTx: StateStoreReadTransaction>(
         None
     };
     let conflict = err.to_string();
-    store.release_new_locks(&transaction_id);
     let Some(fee_intent_commit) = fee_intent_commit else {
         return Ok(LockedMultishardExecution {
             execution,
@@ -1335,7 +1412,7 @@ mod tests {
     }
 
     fn manager() -> ConsensusTransactionManager<RefusingExecutor, RocksDbStateStore<String>> {
-        ConsensusTransactionManager::new(RefusingExecutor, 2160, usize::MAX)
+        ConsensusTransactionManager::new(RefusingExecutor, 2160, usize::MAX, usize::MAX)
     }
 
     fn calling(component: ComponentAddress) -> PledgedTransaction {
@@ -1602,7 +1679,6 @@ mod tests {
                 block,
                 pinned_to(1),
                 false,
-                false,
             )?
             else {
                 panic!("expected a multishard preparation");
@@ -1783,6 +1859,7 @@ mod tests {
                     FixedExecutor(execution),
                     2160,
                     usize::MAX,
+                    usize::MAX,
                 );
                 let ResolvedTransactionInputs::OnlyLocalInputs { local_versions } =
                     manager.resolve_inputs(&mut store, transaction, &committee)?
@@ -1885,7 +1962,10 @@ mod tests {
             creates: vec![component_id(3), component_id(2)],
             with_fallback: false,
         }]);
-        assert!(prepared[0].execution.decision().is_abort());
+        assert_eq!(
+            prepared[0].execution.decision(),
+            Decision::Abort(AbortReason::LockOutputsFailed)
+        );
         assert!(!prepared[0].is_locked);
         assert!(locks.is_empty(), "{locks:?}");
     }
@@ -2104,7 +2184,12 @@ mod tests {
     #[test]
     fn a_multishard_output_that_exists_without_a_fee_intent_fails_to_lock() {
         let transaction = multishard_transaction(1);
-        let execution = executing_to(&transaction, &component_id(1), &[&component_id(2)], false);
+        let execution = executing_to(
+            &transaction,
+            &component_id(1),
+            &[&component_id(3), &component_id(2)],
+            false,
+        );
 
         let (locked, locked_ids) = lock_local_accept_outputs(&[component_id(2)], &transaction, execution, false);
 
@@ -2112,6 +2197,343 @@ mod tests {
         assert!(locked.lock_status.is_hard_conflict());
         assert!(locked.execution.result().finalize.is_full_accept());
         assert!(locked_ids.is_empty(), "{locked_ids:?}");
+    }
+
+    #[test]
+    fn a_multishard_prepare_deferred_by_the_pledge_budget_releases_its_locks() {
+        let committee = CommitteeInfo::new(
+            NumPreshards::P256,
+            1,
+            2,
+            ShardGroup::new(0u32, 127u32),
+            Epoch(1),
+            VotePower::of(1),
+        );
+        let (local, foreign): (Vec<_>, Vec<_>) = (1..=u8::MAX)
+            .map(component_id)
+            .partition(|id| committee.includes_substate_id(id));
+        let vault = local[0].clone();
+        let foreign_out = foreign[0].clone();
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = RocksDbStateStore::<String>::open(dir.path().join("db"), Default::default()).unwrap();
+        let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
+        db.with_write_tx(|tx| zero.insert(tx)).unwrap();
+        let block = zero.as_leaf();
+
+        db.with_read_tx(|tx| {
+            // Set a tiny block pledge budget (1 byte) so the transaction fits per-tx budget (usize::MAX)
+            // but exceeds the block pledge budget.
+            let mut store = PendingSubstateStore::init(tx, block, NumPreshards::P256)?.with_pledge_budget(1);
+            let transaction = TransactionRecord::new(
+                Transaction::builder_localnet(Epoch(100))
+                    .add_input(SubstateRequirement::unversioned(vault.clone()))
+                    .build_and_seal(&PrivateKey::from(1u64)),
+            );
+            for input in transaction.transaction().all_inputs_iter() {
+                let id = input.substate_id().clone();
+                if committee.includes_substate_id(&id) {
+                    store.put(SubstateChange::Up {
+                        shard: shard_of(&id),
+                        id,
+                        substate: Box::new(substate(0)),
+                    })?;
+                }
+            }
+            let execution = executing_to(&transaction, &vault, &[&foreign_out], false);
+            let manager = ConsensusTransactionManager::<_, RocksDbStateStore<String>>::new(
+                FixedExecutor(execution.clone()),
+                2160,
+                usize::MAX,
+                usize::MAX,
+            );
+            let prepared = manager.prepare_multishard_from_execution(
+                &mut store,
+                &committee,
+                *transaction.id(),
+                execution,
+                false,
+            )?;
+            assert!(
+                matches!(prepared, PreparedTransaction::PledgeBudgetReached { .. }),
+                "{prepared:?}"
+            );
+            assert!(store.new_locks().is_empty(), "{:?}", store.new_locks());
+            assert_eq!(store.pledge_bytes(), 0);
+            Ok::<_, BlockTransactionExecutorError>(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn a_multishard_prepare_that_fails_to_lock_does_not_pledge_inputs() {
+        let committee = CommitteeInfo::new(
+            NumPreshards::P256,
+            1,
+            2,
+            ShardGroup::new(0u32, 127u32),
+            Epoch(1),
+            VotePower::of(1),
+        );
+        let (local, foreign): (Vec<_>, Vec<_>) = (1..=u8::MAX)
+            .map(component_id)
+            .partition(|id| committee.includes_substate_id(id));
+        let vault = local[0].clone();
+        let foreign_out = foreign[0].clone();
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = RocksDbStateStore::<String>::open(dir.path().join("db"), Default::default()).unwrap();
+        let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
+        db.with_write_tx(|tx| zero.insert(tx)).unwrap();
+        let block = zero.as_leaf();
+
+        db.with_read_tx(|tx| {
+            let mut store = PendingSubstateStore::init(tx, block, NumPreshards::P256)?;
+            store.put(SubstateChange::Up {
+                shard: shard_of(&vault),
+                id: vault.clone(),
+                substate: Box::new(substate(0)),
+            })?;
+            // Another transaction already holds a write lock on `vault`.
+            let holder = TransactionId::new([9; 32]);
+            store.try_lock(
+                holder,
+                &VersionedSubstateIdLockIntent::write(versioned(&vault, 0), true),
+                false,
+            )?;
+
+            let transaction = TransactionRecord::new(
+                Transaction::builder_localnet(Epoch(100))
+                    .add_input(SubstateRequirement::unversioned(vault.clone()))
+                    .build_and_seal(&PrivateKey::from(1u64)),
+            );
+            let execution = executing_to(&transaction, &vault, &[&foreign_out], false);
+            let manager = ConsensusTransactionManager::<_, RocksDbStateStore<String>>::new(
+                FixedExecutor(execution.clone()),
+                2160,
+                usize::MAX,
+                usize::MAX,
+            );
+            let prepared = manager.prepare_multishard_from_execution(
+                &mut store,
+                &committee,
+                *transaction.id(),
+                execution,
+                false,
+            )?;
+            assert!(prepared.lock_status().is_any_failed(), "{prepared:?}");
+            // Locking failed before `pledge_local_inputs`, so no pledge budget was consumed.
+            assert_eq!(store.pledge_bytes(), 0);
+
+            // In `prepare_multishard_no_execution`, a hard lock conflict on a versioned local input aborts with
+            // `FailedToLockInputs` before touching the pledge budget, even when the pledge budget is 1 byte.
+            let mut tight_store = PendingSubstateStore::init(tx, block, NumPreshards::P256)?.with_pledge_budget(1);
+            tight_store.put(SubstateChange::Up {
+                shard: shard_of(&vault),
+                id: vault.clone(),
+                substate: Box::new(substate(0)),
+            })?;
+            tight_store.try_lock(
+                holder,
+                &VersionedSubstateIdLockIntent::write(versioned(&vault, 0), true),
+                false,
+            )?;
+            let mut local_versions = IndexMap::new();
+            local_versions.insert(
+                InputDeclarationRef::new(&vault, Some(SubstateVersion::ZERO), true),
+                SubstateVersion::ZERO,
+            );
+            let mut non_local_inputs = IndexSet::new();
+            non_local_inputs.insert(InputDeclarationRef::new(&foreign_out, None, true));
+            let prepared_no_exec = manager.prepare_multishard_no_execution(
+                &mut tight_store,
+                &committee,
+                *transaction.id(),
+                local_versions,
+                non_local_inputs,
+            )?;
+            let PreparedTransaction::MultiShard(multishard) = prepared_no_exec else {
+                panic!("expected MultiShard abort, got {prepared_no_exec:?}");
+            };
+            let EvidenceOrExecution::Execution { execution, .. } = multishard.into_evidence_or_execution() else {
+                panic!("expected execution abort");
+            };
+            assert_eq!(
+                execution.decision(),
+                Decision::Abort(AbortReason::LockInputsFailed),
+                "{execution:?}"
+            );
+            assert_eq!(tight_store.pledge_bytes(), 0);
+            Ok::<_, BlockTransactionExecutorError>(())
+        })
+        .unwrap();
+    }
+
+    /// How a test prepares a multishard transaction.
+    enum PrepareEntry {
+        /// Through [`ConsensusTransactionManager::prepare_local_input_transaction`], executing it.
+        LocalInputs,
+        /// Through [`ConsensusTransactionManager::prepare_multishard_from_execution`], with an execution already
+        /// at hand.
+        FromExecution,
+    }
+
+    /// The result of preparing a transaction whose inputs are all in this shard group and which creates outputs here
+    /// and in another.
+    struct PreparedLocalInputs {
+        vault: SubstateId,
+        local_output: SubstateId,
+        receipt: SubstateId,
+        decision: Decision,
+        locks: Vec<(SubstateId, SubstateLockType)>,
+    }
+
+    /// Prepares, through `entry`, a transaction that writes a local vault and creates one local and one foreign
+    /// output, without a fee-intent fallback. The local output already exists if `local_output_exists`.
+    fn prepare_local_inputs_with_foreign_output(entry: PrepareEntry, local_output_exists: bool) -> PreparedLocalInputs {
+        let committee = CommitteeInfo::new(
+            NumPreshards::P256,
+            1,
+            2,
+            ShardGroup::new(0u32, 127u32),
+            Epoch(1),
+            VotePower::of(1),
+        );
+        let (local, foreign): (Vec<_>, Vec<_>) = (1..=u8::MAX)
+            .map(component_id)
+            .partition(|id| committee.includes_substate_id(id));
+        let vault = local[0].clone();
+        let local_output = local[1].clone();
+        let foreign_output = foreign[0].clone();
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = RocksDbStateStore::<String>::open(dir.path().join("db"), Default::default()).unwrap();
+        let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
+        db.with_write_tx(|tx| zero.insert(tx)).unwrap();
+        let block = zero.as_leaf();
+
+        db.with_read_tx(|tx| {
+            let mut store = PendingSubstateStore::init(tx, block, NumPreshards::P256)?;
+            let transaction = TransactionRecord::new(
+                Transaction::builder_localnet(Epoch(100))
+                    .add_input(SubstateRequirement::unversioned(vault.clone()))
+                    .build_and_seal(&PrivateKey::from(1u64)),
+            );
+            // The builder also declares the fee resource, which may share the local shard group
+            let mut ups = transaction
+                .transaction()
+                .all_inputs_iter()
+                .map(|input| input.substate_id().clone())
+                .filter(|id| committee.includes_substate_id(id))
+                .collect::<Vec<_>>();
+            if local_output_exists {
+                ups.push(local_output.clone());
+            }
+            for id in ups {
+                store.put(SubstateChange::Up {
+                    shard: shard_of(&id),
+                    id,
+                    substate: Box::new(substate(0)),
+                })?;
+            }
+            let execution = executing_to(&transaction, &vault, &[&local_output, &foreign_output], false);
+            let manager = ConsensusTransactionManager::<_, RocksDbStateStore<String>>::new(
+                FixedExecutor(execution),
+                2160,
+                usize::MAX,
+                usize::MAX,
+            );
+            let prepared = match entry {
+                PrepareEntry::LocalInputs => {
+                    let ResolvedTransactionInputs::OnlyLocalInputs { local_versions } =
+                        manager.resolve_inputs(&mut store, &transaction, &committee)?
+                    else {
+                        panic!("expected only local inputs");
+                    };
+                    manager.prepare_local_input_transaction(
+                        &mut store,
+                        &committee,
+                        &transaction,
+                        local_versions,
+                        block,
+                        pinned_to(1),
+                        false,
+                    )?
+                },
+                PrepareEntry::FromExecution => {
+                    let execution = executing_to(&transaction, &vault, &[&local_output, &foreign_output], false);
+                    manager.prepare_multishard_from_execution(
+                        &mut store,
+                        &committee,
+                        *transaction.id(),
+                        execution,
+                        false,
+                    )?
+                },
+            };
+            let PreparedTransaction::MultiShard(multishard) = prepared else {
+                panic!("expected a multishard preparation, got {prepared:?}");
+            };
+            let EvidenceOrExecution::Execution { execution, .. } = multishard.into_evidence_or_execution() else {
+                panic!("expected an execution");
+            };
+            let locks = store
+                .new_locks()
+                .iter()
+                .flat_map(|(id, locks)| locks.iter().map(|lock| (id.clone(), lock.lock_type())))
+                .collect();
+            Ok::<_, BlockTransactionExecutorError>(PreparedLocalInputs {
+                vault,
+                local_output,
+                receipt: SubstateId::TransactionReceipt(transaction.id().as_hash().into()),
+                decision: execution.decision(),
+                locks,
+            })
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn a_local_input_transaction_with_foreign_outputs_locks_its_local_outputs_when_it_prepares() {
+        let prepared = prepare_local_inputs_with_foreign_output(PrepareEntry::LocalInputs, false);
+
+        assert!(prepared.decision.is_commit(), "{:?}", prepared.decision);
+        for id in [&prepared.local_output, &prepared.receipt] {
+            assert!(
+                prepared
+                    .locks
+                    .iter()
+                    .any(|(locked, lock)| locked == id && lock.is_output()),
+                "{id} in {:?}",
+                prepared.locks
+            );
+        }
+    }
+
+    /// An abort decided when preparing carries none of the transaction's outputs, so the shard group would read it
+    /// back as local-only and refuse the LocalAccept that aborts it everywhere.
+    #[test]
+    fn a_local_input_transaction_creating_an_existing_output_prepares_its_inputs_alone() {
+        let prepared = prepare_local_inputs_with_foreign_output(PrepareEntry::LocalInputs, true);
+
+        assert!(prepared.decision.is_commit(), "{:?}", prepared.decision);
+        assert!(
+            prepared
+                .locks
+                .iter()
+                .all(|(locked, lock)| *locked == prepared.vault && !lock.is_output()),
+            "{:?}",
+            prepared.locks
+        );
+        assert!(!prepared.locks.is_empty());
+    }
+
+    #[test]
+    fn a_prepared_execution_creating_an_existing_output_aborts_for_its_outputs() {
+        let prepared = prepare_local_inputs_with_foreign_output(PrepareEntry::FromExecution, true);
+
+        assert_eq!(prepared.decision, Decision::Abort(AbortReason::LockOutputsFailed));
+        assert!(prepared.locks.is_empty(), "{:?}", prepared.locks);
     }
 
     #[test]
@@ -2274,12 +2696,16 @@ mod tests {
 
                 let prepared = prepare(&mut store, block)?;
                 let is_deferrable = prepared.lock_status().is_deferrable_conflict();
-                let PreparedTransaction::MultiShard(prepared) = prepared else {
-                    panic!("expected a multishard preparation");
-                };
-                let decision = match prepared.into_evidence_or_execution() {
-                    EvidenceOrExecution::Execution { execution, .. } => execution.decision(),
-                    EvidenceOrExecution::Evidence { .. } => Decision::Commit,
+                let decision = match prepared {
+                    PreparedTransaction::MultiShard(prepared) => match prepared.into_evidence_or_execution() {
+                        EvidenceOrExecution::Execution { execution, .. } => execution.decision(),
+                        EvidenceOrExecution::Evidence { .. } => Decision::Commit,
+                    },
+                    PreparedTransaction::LocalOnly(local) => match *local {
+                        LocalPreparedTransaction::EarlyAbort { execution } |
+                        LocalPreparedTransaction::Accept { execution, .. } => execution.decision(),
+                    },
+                    other => panic!("unexpected preparation: {other:?}"),
                 };
                 let locked_ids = store
                     .new_locks()
@@ -2329,12 +2755,7 @@ mod tests {
         assert_eq!(prepared.pledge_bytes, 0);
     }
 
-    fn assert_deferrable_still_pledged(prepared: PreparedBehindHeldLock) {
-        assert!(prepared.is_deferrable);
-        assert!(prepared.pledge_bytes > 0);
-    }
-
-    fn prepare_cross_shard_behind_held_lock(requires_held_version: bool, is_proposing: bool) -> PreparedBehindHeldLock {
+    fn prepare_cross_shard_behind_held_lock(requires_held_version: bool) -> PreparedBehindHeldLock {
         let fixture = HeldLockFixture::new();
         let transaction = fixture.transaction(requires_held_version, true);
 
@@ -2356,15 +2777,11 @@ mod tests {
                 block,
                 pinned_to(1),
                 false,
-                is_proposing,
             )
         })
     }
 
-    fn prepare_multishard_execution_behind_held_lock(
-        requires_held_version: bool,
-        is_proposing: bool,
-    ) -> PreparedBehindHeldLock {
+    fn prepare_multishard_execution_behind_held_lock(requires_held_version: bool) -> PreparedBehindHeldLock {
         let fixture = HeldLockFixture::new();
         let transaction = fixture.transaction(requires_held_version, false);
 
@@ -2375,7 +2792,6 @@ mod tests {
                 *transaction.id(),
                 fixture.execution(&transaction, requires_held_version),
                 false,
-                is_proposing,
             )
         })
     }
@@ -2392,6 +2808,7 @@ mod tests {
                 FixedExecutor(fixture.execution(&transaction, requires_held_version)),
                 2160,
                 usize::MAX,
+                usize::MAX,
             );
             manager.prepare_local_input_transaction(
                 store,
@@ -2407,12 +2824,12 @@ mod tests {
 
     #[test]
     fn a_cross_shard_transaction_declaring_a_locked_input_version_aborts_holding_nothing() {
-        assert_aborted_holding_nothing(prepare_cross_shard_behind_held_lock(true, false));
+        assert_aborted_holding_nothing(prepare_cross_shard_behind_held_lock(true));
     }
 
     #[test]
     fn a_multishard_execution_requiring_a_locked_input_version_aborts_holding_nothing() {
-        assert_aborted_holding_nothing(prepare_multishard_execution_behind_held_lock(true, false));
+        assert_aborted_holding_nothing(prepare_multishard_execution_behind_held_lock(true));
     }
 
     #[test]
@@ -2421,13 +2838,13 @@ mod tests {
     }
 
     #[test]
-    fn a_proposer_pledges_nothing_for_a_cross_shard_transaction_using_a_locked_input() {
-        assert_deferrable_pledging_nothing(prepare_cross_shard_behind_held_lock(false, true));
+    fn nothing_is_pledged_for_a_cross_shard_transaction_using_a_locked_input() {
+        assert_deferrable_pledging_nothing(prepare_cross_shard_behind_held_lock(false));
     }
 
     #[test]
-    fn a_proposer_pledges_nothing_for_a_multishard_execution_using_a_locked_input() {
-        assert_deferrable_pledging_nothing(prepare_multishard_execution_behind_held_lock(false, true));
+    fn nothing_is_pledged_for_a_multishard_execution_using_a_locked_input() {
+        assert_deferrable_pledging_nothing(prepare_multishard_execution_behind_held_lock(false));
     }
 
     #[test]
@@ -2435,20 +2852,8 @@ mod tests {
         assert_deferrable_pledging_nothing(prepare_local_inputs_with_foreign_outputs_behind_held_lock(false, true));
     }
 
-    /// A block pledges the inputs of every command it carries, so a node evaluating one counts them all against the
-    /// block's pledge budget
     #[test]
-    fn a_validator_counts_the_pledge_of_a_cross_shard_transaction_using_a_locked_input() {
-        assert_deferrable_still_pledged(prepare_cross_shard_behind_held_lock(false, false));
-    }
-
-    #[test]
-    fn a_validator_counts_the_pledge_of_a_multishard_execution_using_a_locked_input() {
-        assert_deferrable_still_pledged(prepare_multishard_execution_behind_held_lock(false, false));
-    }
-
-    #[test]
-    fn a_validator_counts_the_pledge_of_a_local_input_transaction_with_foreign_outputs_using_a_locked_input() {
-        assert_deferrable_still_pledged(prepare_local_inputs_with_foreign_outputs_behind_held_lock(false, false));
+    fn a_validator_pledges_nothing_for_a_local_input_transaction_with_foreign_outputs_using_a_locked_input() {
+        assert_deferrable_pledging_nothing(prepare_local_inputs_with_foreign_outputs_behind_held_lock(false, false));
     }
 }

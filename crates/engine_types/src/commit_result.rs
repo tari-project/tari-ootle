@@ -704,6 +704,10 @@ pub enum AbortReason {
     /// epoch than the one it was pinned to. The council can resubmit it.
     #[n(11)]
     GovernanceCallAfterPinnedEpoch,
+    /// The transaction's inputs held by one shard group encode to more bytes than a validator loads for any one
+    /// transaction, so no block could execute it.
+    #[n(12)]
+    InputLoadTooLarge,
 }
 
 impl Display for AbortReason {

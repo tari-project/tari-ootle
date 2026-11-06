@@ -101,7 +101,8 @@ impl ChangeLog {
         let pos = *self.head.get(id)?;
         let change = self.changes.get_mut(pos).expect("diff and head are not in sync");
         if let Some(undo) = &mut self.undo &&
-            pos < undo.num_changes
+            pos < undo.num_changes &&
+            !undo.rewritten.iter().any(|(recorded_pos, _)| *recorded_pos == pos)
         {
             undo.rewritten.push((pos, change.clone()));
         }
@@ -484,5 +485,86 @@ impl ChangeLog {
             id: id.into_substate_id(),
         };
         self.insert(up);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_engine_types::{ValidatorFeePool, ValidatorFeeWithdrawal, substate::SubstateValue};
+    use tari_ootle_common_types::SubstateVersion;
+    use tari_template_lib_types::ValidatorFeePoolAddress;
+
+    use super::*;
+
+    struct EmptyLayer;
+
+    impl SubstateLayer for EmptyLayer {
+        fn num_preshards(&self) -> NumPreshards {
+            NumPreshards::P256
+        }
+
+        fn get_substate(&self, id: VersionedSubstateIdRef<'_>) -> Result<Substate, SubstateStoreError> {
+            Err(SubstateStoreError::SubstateNotFound { id: id.to_owned() })
+        }
+
+        fn is_version_up(&self, _id: VersionedSubstateIdRef<'_>) -> Result<Option<bool>, SubstateStoreError> {
+            Ok(None)
+        }
+
+        fn latest_change(&self, id: &SubstateId) -> Result<SubstateChange, SubstateStoreError> {
+            Err(SubstateStoreError::SubstateNotFound {
+                id: VersionedSubstateId::new(id.clone(), SubstateVersion::ZERO),
+            })
+        }
+
+        fn latest_version(&self, id: &SubstateId) -> Result<LatestSubstateVersion, SubstateStoreError> {
+            Err(SubstateStoreError::SubstateNotFound {
+                id: VersionedSubstateId::new(id.clone(), SubstateVersion::ZERO),
+            })
+        }
+
+        fn block_head_change(&self, _id: &SubstateId) -> Option<&SubstateChange> {
+            None
+        }
+    }
+
+    #[test]
+    fn rollback_restores_original_value_after_multiple_in_place_updates_in_one_diff() {
+        let mut log = ChangeLog::new();
+        let pool_addr = ValidatorFeePoolAddress::from_array([7; 32]);
+        let pool_id = SubstateId::ValidatorFeePool(pool_addr);
+        let initial = Substate::new(
+            SubstateVersion::ZERO,
+            SubstateValue::ValidatorFeePool(ValidatorFeePool::new([7; 32].into(), 100)),
+        );
+        log.put(&EmptyLayer, SubstateChange::Up {
+            id: pool_id.clone(),
+            shard: VersionedSubstateId::new(pool_id.clone(), SubstateVersion::ZERO).to_shard(NumPreshards::P256),
+            substate: Box::new(initial),
+        })
+        .unwrap();
+
+        let mut diff = SubstateDiff::new();
+        diff.set_once_fee_withdrawals(vec![
+            ValidatorFeeWithdrawal {
+                address: pool_addr,
+                amount: 30,
+            },
+            ValidatorFeeWithdrawal {
+                address: pool_addr,
+                amount: 80,
+            },
+        ]);
+
+        let err = log.put_diff(&EmptyLayer, &diff, |_| {}).unwrap_err();
+        assert!(matches!(err, SubstateStoreError::InvariantError { .. }), "{err}");
+
+        let restored = log
+            .get(
+                &EmptyLayer,
+                VersionedSubstateIdRef::new(&pool_id, SubstateVersion::ZERO),
+            )
+            .unwrap();
+        assert_eq!(restored.substate_value().as_validator_fee_pool().unwrap().amount(), 100);
     }
 }

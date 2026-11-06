@@ -781,6 +781,7 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
             if let Some(max_bytes) = self.input_load.max_bytes &&
                 total_bytes > max_bytes
             {
+                self.input_load.bytes = total_bytes;
                 return Ok(InputLoad::BlockBudgetReached { total_bytes, max_bytes });
             }
             substates.insert(req, substate);
@@ -968,4 +969,50 @@ impl LatestSubstateVersion {
 
 fn up_encoded_len(id: &SubstateId, substate: &Substate) -> usize {
     tari_bor::encoded_len(id).saturating_add(tari_bor::encoded_len(substate))
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_engine_types::non_fungible::NonFungibleContainer;
+    use tari_ootle_storage::{StateStore, consensus_models::Block};
+    use tari_ootle_transaction::Network;
+    use tari_state_store_rocksdb::RocksDbStateStore;
+    use tari_template_lib_types::{ComponentAddress, ObjectKey};
+
+    use super::*;
+
+    #[test]
+    fn load_inputs_counts_bytes_loaded_before_hitting_block_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = RocksDbStateStore::<String>::open(dir.path().join("db"), Default::default()).unwrap();
+        let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
+        db.with_write_tx(|tx| zero.insert(tx)).unwrap();
+
+        let id = SubstateId::Component(ComponentAddress::new(ObjectKey::from_array([1; 32])));
+        let substate = Substate::new(SubstateVersion::ZERO, NonFungibleContainer::no_data());
+        let single_bytes = up_encoded_len(&id, &substate);
+        assert!(single_bytes > 1);
+
+        db.with_read_tx(|tx| {
+            let mut store = PendingSubstateStore::init(tx, zero.as_leaf(), NumPreshards::P256)?
+                .with_input_load_budget(single_bytes - 1);
+            store.put(SubstateChange::Up {
+                shard: VersionedSubstateIdRef::new(&id, SubstateVersion::ZERO).to_shard(NumPreshards::P256),
+                id: id.clone(),
+                substate: Box::new(substate),
+            })?;
+
+            let res = store.load_inputs(
+                [(SubstateRequirement::unversioned(id.clone()), SubstateVersion::ZERO)],
+                usize::MAX,
+            )?;
+            assert!(
+                matches!(res, InputLoad::BlockBudgetReached { total_bytes, max_bytes } if total_bytes == single_bytes && max_bytes == single_bytes - 1),
+                "{res:?}"
+            );
+            assert_eq!(store.input_load_bytes(), single_bytes);
+            Ok::<_, SubstateStoreError>(())
+        })
+        .unwrap();
+    }
 }

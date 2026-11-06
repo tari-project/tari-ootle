@@ -221,7 +221,9 @@ where
             return Ok(Some(reason));
         }
 
-        if let Some(diff) = derived.committed_diff() &&
+        if derived_atom.decision.is_abort() {
+            substate_store.release_new_locks(atom.id());
+        } else if let Some(diff) = derived.committed_diff() &&
             let Err(err) = substate_store.put_diff(diff)
         {
             // An honest proposer skips a transaction whose diff fails to apply with a lock failure, so a block that

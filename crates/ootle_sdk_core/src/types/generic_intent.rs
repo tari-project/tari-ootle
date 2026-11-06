@@ -1008,7 +1008,10 @@ mod tests {
             ],
             ..intent
         };
-        assert_eq!(too_many_publishes.validate_blob_indices().unwrap_err().code(), "VALIDATION");
+        assert_eq!(
+            too_many_publishes.validate_blob_indices().unwrap_err().code(),
+            "VALIDATION"
+        );
     }
 
     #[test]

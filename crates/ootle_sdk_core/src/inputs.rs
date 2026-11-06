@@ -903,6 +903,8 @@ mod tests {
         substate::SubstateValue,
         vault::Vault,
     };
+    use tari_ootle_common_types::Epoch;
+    use tari_ootle_transaction::TransactionBuilder;
     use tari_template_lib_types::{
         Amount,
         EntityId,

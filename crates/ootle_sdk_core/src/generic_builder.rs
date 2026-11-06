@@ -91,8 +91,8 @@ pub(crate) fn build_unsigned_instructions_with_extra_wants(
     let extra_inputs = extra_inputs_to_internal(intent)?;
 
     // Explicit-input short-circuit: caller supplied an input set, so skip resolution. `extra_inputs`
-    // is still merged in (it is always additive), de-duped by id so the first-seen entry wins —
-    // matching the resolution path's `push_unique`.
+    // is still merged in by id: writes take precedence and an unpinned version adopts a later
+    // declaration's version, matching the resolution path's `push_unique`.
     if !intent.inputs.is_empty() {
         let mut inputs = inputs_to_internal(intent)?;
         for req in extra_inputs {
@@ -140,13 +140,14 @@ fn lower_fee_phase(
 ) -> Result<TransactionBuilder, OotleSdkError> {
     let mut result = Ok(());
     let builder = builder.with_fee_instructions_builder(|mut fee_builder| {
+        let fallback_builder = fee_builder.clone();
         let mut bound_labels: HashSet<String> = HashSet::new();
         for instr in &intent.fee_instructions {
             match lower_instruction(fee_builder, intent, instr, &mut bound_labels) {
                 Ok(b) => fee_builder = b,
                 Err(e) => {
                     result = Err(e);
-                    return TransactionBuilder::new(0, Epoch(0));
+                    return fallback_builder;
                 },
             }
         }
@@ -154,7 +155,7 @@ fn lower_fee_phase(
             Ok(b) => b,
             Err(e) => {
                 result = Err(e);
-                TransactionBuilder::new(0, Epoch(0))
+                fallback_builder
             },
         }
     });

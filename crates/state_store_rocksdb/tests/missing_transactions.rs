@@ -98,10 +98,9 @@ fn a_block_parked_only_through_catch_up_unparks_as_catch_up() {
     tx.parked_block_insert(&block, &[], ProposalOrigin::CatchUp, [&atom.id])
         .unwrap();
 
-    let (unparked, _, origin) = tx
-        .parked_block_remove_missing_transaction(atom.id())
-        .unwrap()
-        .expect("block should be unparked once no transactions are missing");
+    let mut unparked = tx.parked_block_remove_missing_transaction(atom.id()).unwrap();
+    assert_eq!(unparked.len(), 1);
+    let (unparked, _, origin) = unparked.pop().unwrap();
     assert_eq!(unparked.id(), block.id());
     assert_eq!(origin, ProposalOrigin::CatchUp);
 

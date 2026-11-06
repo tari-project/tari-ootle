@@ -233,10 +233,7 @@ pub(crate) fn resolve_one_stealth_utxo(
 
     // Add the UTXO substate as a transaction input.
     // The UTXO is spent, so it is downed rather than read.
-    let req = InputDeclaration::write(utxo_substate_id);
-    if !resolved.contains(&req) {
-        resolved.push(req);
-    }
+    crate::inputs::push_unique(resolved, InputDeclaration::write(utxo_substate_id));
 
     Ok(true)
 }

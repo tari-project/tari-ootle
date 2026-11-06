@@ -305,29 +305,34 @@ impl TransactionRecord {
                     );
                     return Ok(false);
                 }
-            } else if pledges
-                .iter()
-                .chain(additional_foreign_pledges.clone())
-                .all(|p| !p.satisfies_requirement(input))
+            } else if pledges.iter().all(|p| !p.satisfies_requirement(input)) &&
+                additional_foreign_pledges
+                    .clone()
+                    .into_iter()
+                    .all(|p| !p.satisfies_requirement(input))
             {
-                let remote_shard_group = input.or_zero_version().to_substate_address().to_shard_group(
-                    local_committee_info.num_preshards(),
-                    local_committee_info.num_committees(),
-                );
-                debug!(
-                    target: LOG_TARGET,
-                    "Pledges: {}",
-                    pledges.display(),
-                );
-                debug!(
-                    target: LOG_TARGET,
-                    "{} Transaction {} is missing a pledge for input {} from {} ({} pledge(s) found)",
-                    local_committee_info.shard_group(),
-                    self.id(),
-                    input.substate_id(),
-                    remote_shard_group,
-                    pledges.len(),
-                );
+                if log_enabled!(Level::Debug) {
+                    let additional_pledges = additional_foreign_pledges.clone().into_iter().collect::<Vec<_>>();
+                    let remote_shard_group = input.or_zero_version().to_substate_address().to_shard_group(
+                        local_committee_info.num_preshards(),
+                        local_committee_info.num_committees(),
+                    );
+                    debug!(
+                        target: LOG_TARGET,
+                        "Persisted pledges: {}. In-block pledges: {}",
+                        pledges.display(),
+                        additional_pledges.display(),
+                    );
+                    debug!(
+                        target: LOG_TARGET,
+                        "{} Transaction {} is missing a pledge for input {} from {} ({} pledge(s) found)",
+                        local_committee_info.shard_group(),
+                        self.id(),
+                        input.substate_id(),
+                        remote_shard_group,
+                        pledges.len() + additional_pledges.len(),
+                    );
+                }
                 return Ok(false);
             } else {
                 // We have a lock/pledge for the input, continue

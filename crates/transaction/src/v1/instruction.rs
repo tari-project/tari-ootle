@@ -286,31 +286,55 @@ impl Instruction {
     }
 
     pub fn is_pay_fee(&self) -> bool {
+        matches!(self, Self::PayFeeFromBucket { .. })
+    }
+
+    /// Whether this instruction can make a fee payment: `PayFeeFromBucket` directly, or a call into template code,
+    /// which may pay from a vault. Whether the fee intent pays enough is settled at the fee checkpoint.
+    pub fn may_pay_fee(&self) -> bool {
         match self {
-            Self::PayFeeFromBucket { .. } => true,
-            Self::CallMethod { method, .. } => {
-                let method: &str = method;
-                method == "pay_fee" || method == "pay_fee_stealth"
-            },
-            _ => false,
+            Self::PayFeeFromBucket { .. } | Self::CallMethod { .. } | Self::CallFunction { .. } => true,
+            Self::CreateAccount { .. } |
+            Self::PutLastInstructionOutputOnWorkspace { .. } |
+            Self::ClaimBurn { .. } |
+            Self::ClaimValidatorFees { .. } |
+            Self::DropAllProofsInWorkspace |
+            Self::Assert { .. } |
+            Self::TakeFromBucket { .. } |
+            Self::PublishTemplate { .. } |
+            Self::AllocateAddress { .. } |
+            Self::StealthTransfer { .. } |
+            Self::UpdateComponentTemplate { .. } |
+            Self::PutIntoBucket { .. } |
+            Self::AuthorizeProof { .. } |
+            Self::DropProofAuthorization { .. } => false,
         }
     }
 
-    /// Whether this instruction can record a fee payment in the engine (`PayFeeFromBucket`, `CallMethod`, or
-    /// `CallFunction`). A fee intent without at least one such instruction can never pay any fees.
-    pub fn may_pay_fee(&self) -> bool {
-        matches!(
-            self,
-            Self::PayFeeFromBucket { .. } | Self::CallMethod { .. } | Self::CallFunction { .. }
-        )
-    }
-
     /// Whether this instruction is permitted inside a transaction's fee instructions.
+    ///
+    /// The fee intent runs on a flat compute credit and its writes commit even when the main intent fails, so it
+    /// holds only the work of funding the fee. Publishing a template and changing a component's template are main
+    /// intent work, funded by the fee already paid.
     pub fn is_allowed_in_fee_intent(&self) -> bool {
-        !matches!(
-            self,
-            Self::PublishTemplate { .. } | Self::UpdateComponentTemplate { .. }
-        )
+        match self {
+            Self::PublishTemplate { .. } | Self::UpdateComponentTemplate { .. } => false,
+            Self::CreateAccount { .. } |
+            Self::CallFunction { .. } |
+            Self::CallMethod { .. } |
+            Self::PutLastInstructionOutputOnWorkspace { .. } |
+            Self::ClaimBurn { .. } |
+            Self::ClaimValidatorFees { .. } |
+            Self::DropAllProofsInWorkspace |
+            Self::Assert { .. } |
+            Self::TakeFromBucket { .. } |
+            Self::AllocateAddress { .. } |
+            Self::StealthTransfer { .. } |
+            Self::PayFeeFromBucket { .. } |
+            Self::PutIntoBucket { .. } |
+            Self::AuthorizeProof { .. } |
+            Self::DropProofAuthorization { .. } => true,
+        }
     }
 
     /// Shift all workspace IDs in this instruction by the given offset.

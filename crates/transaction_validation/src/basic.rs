@@ -33,14 +33,15 @@ impl Validator<Transaction> for BasicValidations {
             });
         }
 
-        if transaction
+        if let Some(index) = transaction
             .fee_instructions()
             .iter()
-            .any(|instr| !instr.is_allowed_in_fee_intent())
+            .position(|instr| !instr.is_allowed_in_fee_intent())
         {
-            warn!(target: LOG_TARGET, "BasicValidations - FAIL: Disallowed instruction in fee instructions");
+            warn!(target: LOG_TARGET, "BasicValidations - FAIL: Fee instruction {index} is not permitted");
             return Err(TransactionValidationError::DisallowedFeeInstruction {
                 transaction_id: transaction.calculate_id(),
+                index,
             });
         }
 
@@ -112,26 +113,56 @@ mod tests {
             ])
             .build_and_seal(&PrivateKey::from(1u64));
         let err = BasicValidations::new().validate(&(), &tx).unwrap_err();
-        assert!(matches!(
-            err,
-            TransactionValidationError::DisallowedFeeInstruction { .. }
-        ));
+        assert!(matches!(err, TransactionValidationError::DisallowedFeeInstruction {
+            index: 0,
+            ..
+        }));
         assert!(err.is_sender_fault());
     }
 
     #[test]
-    fn rejects_pay_fee_method_call_in_main_instructions() {
+    fn rejects_template_publish_in_fee_instructions() {
+        let tx = Transaction::builder_localnet(Epoch(10))
+            .with_fee_instructions_builder(|builder| {
+                builder
+                    .pay_fee_from_component(account(), Amount::new(1000))
+                    .publish_template(vec![0u8; 8])
+            })
+            .build_and_seal(&PrivateKey::from(1u64));
+        let err = BasicValidations::new().validate(&(), &tx).unwrap_err();
+        assert!(matches!(err, TransactionValidationError::DisallowedFeeInstruction {
+            index: 1,
+            ..
+        }));
+        assert!(err.is_sender_fault());
+    }
+
+    #[test]
+    fn rejects_pay_fee_from_bucket_in_main_instructions() {
+        let tx = Transaction::builder_localnet(Epoch(10))
+            .pay_fee_from_component(account(), Amount::new(1000))
+            .add_instruction(Instruction::PayFeeFromBucket {
+                bucket: WorkspaceOffsetId::new(0),
+            })
+            .build_and_seal(&PrivateKey::from(1u64));
+        let err = BasicValidations::new().validate(&(), &tx).unwrap_err();
+        assert!(matches!(
+            err,
+            TransactionValidationError::ContainsPayFeeInstruction { .. }
+        ));
+        assert!(err.is_sender_fault());
+    }
+
+    /// Method names belong to the template author, so a main-intent call to a method named `pay_fee` is admitted.
+    /// The engine refuses any fee payment made after the fee checkpoint.
+    #[test]
+    fn accepts_pay_fee_named_method_in_main_instructions() {
         for method in ["pay_fee", "pay_fee_stealth"] {
             let tx = Transaction::builder_localnet(Epoch(10))
                 .pay_fee_from_component(account(), Amount::new(1000))
                 .call_method(account(), method, args![Amount::new(100)])
                 .build_and_seal(&PrivateKey::from(1u64));
-            let err = BasicValidations::new().validate(&(), &tx).unwrap_err();
-            assert!(matches!(
-                err,
-                TransactionValidationError::ContainsPayFeeInstruction { .. }
-            ));
-            assert!(err.is_sender_fault());
+            BasicValidations::new().validate(&(), &tx).unwrap();
         }
     }
 }

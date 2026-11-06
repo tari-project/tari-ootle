@@ -471,15 +471,31 @@ mod access_rules_template {
             let _bucket = ResourceManager::get(self.badges.resource_address()).mint_fungible(1u32);
         }
 
-        /// Reads the resource the hook guards. A resource action that write-locks the resource must release that
-        /// lock across the hook call, or this read is refused.
-        pub fn hook_reads_own_resource(&self, action: ResourceAuthAction, _caller: AuthHookCaller) {
+        /// Reads the resource the hook guards and, when the acting component is an account, reads the balance of its
+        /// vault for that resource. Actions that write-lock the resource or vault must release those locks across the
+        /// hook call, or these reads are refused.
+        ///
+        /// Withdrawals and proof creation act on an existing vault, so the account must hold one. A deposit into a
+        /// new vault runs the hook before the account's state records that vault, so a deposit reads the vault only
+        /// when the stored state already holds it.
+        pub fn hook_reads_own_resource(&self, action: ResourceAuthAction, caller: AuthHookCaller) {
             let manager = ResourceManager::get(self.tokens.resource_address());
             assert_eq!(
                 manager.resource_type(),
                 ResourceType::Fungible,
                 "hook read the wrong resource for action {action:?}"
             );
+            if let Some(state) = caller.component_state() {
+                let account = tari_template_lib::models::Account::from_value(state)
+                    .expect("acting component state must decode as an Account");
+                let vault = account.get_vault_by_resource(caller.resource());
+                if action == ResourceAuthAction::Withdraw {
+                    let vault = vault.expect("acting account must hold a vault for the guarded resource");
+                    let _balance = vault.balance();
+                } else if let Some(vault) = vault {
+                    let _balance = vault.balance();
+                }
+            }
         }
 
         /// Asserts that the hook's frame carries `badge`. A hook frame receives no loan of the acting frame's

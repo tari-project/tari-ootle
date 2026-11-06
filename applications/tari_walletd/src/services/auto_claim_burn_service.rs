@@ -18,7 +18,6 @@ use tari_engine_types::commit_result::{ExecutionFailureCode, FinalizeResult, Rej
 use tari_ootle_common_types::{Epoch, optional::Optional};
 use tari_ootle_transaction::TransactionId;
 use tari_ootle_wallet_sdk::{
-    apis::substate::SubstateApiError,
     models::{TransactionStatus, WalletEvent, WalletTransaction},
     network::WalletNetworkInterface,
 };
@@ -33,7 +32,10 @@ use tokio::{
 
 use crate::{
     WalletSdk,
-    handlers::{accounts::execute_claim_burn, helpers::complete_burn_proof_to_contents},
+    handlers::{
+        accounts::{ClaimBurnError, execute_claim_burn},
+        helpers::complete_burn_proof_to_contents,
+    },
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::auto_claim_burn";
@@ -41,16 +43,12 @@ const EPOCH_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 /// Validity window for an unattended claim: a few epochs is ample for the submit itself, and a
 /// claim that does not land in that time is retried with a fresh window.
 const CLAIM_TRANSACTION_VALIDITY_EPOCHS: u64 = 3;
-/// Maximum retries for network/submission errors (indexer unreachable, tx service down).
-const MAX_RETRIES_NETWORK: u32 = 10;
+/// Maximum retries for a failed wallet database read or write.
+const MAX_RETRIES_STORE: u32 = 10;
 /// Maximum retries for file read/parse errors (file still being written on macOS).
 const MAX_RETRIES_FILE_READ: u32 = 1;
-/// Maximum times a claim is deferred (the dry run or the network reports the burn not yet claimable)
-/// before giving up. Proofs carry the L1 mined-in epoch, so a claim is only attempted once the
-/// network is past that epoch and normally succeeds; a deferral is a rare edge (older proof with no
-/// epoch, or an epoch-boundary race), so a modest bound suffices. On give-up the file remains for a
-/// manual claim.
-const MAX_RETRIES_DEFERRED: u32 = 20;
+/// Longest wait between attempts at a claim the network has not taken.
+const MAX_RETRY_DELAY: Duration = Duration::from_secs(10 * 60);
 
 /// True if a rejection indicates the burn is valid but its L1 block is not yet synced into a
 /// claimable epoch, as opposed to a genuinely invalid claim.
@@ -72,9 +70,15 @@ fn is_burn_not_yet_claimable(reject_reason: &RejectReason) -> bool {
 /// mainnet), so submitting too early is rejected. Each proof file records the L1 epoch the burn was
 /// mined in (`mined_in_epoch`); this service reads it and only submits once the network reports a
 /// strictly later epoch. A claim the dry run or the network still finds not yet claimable is queued
-/// again, or dropped after `MAX_RETRIES_DEFERRED` deferrals (the file stays for a manual claim via
-/// the wallet API). A submitted claim stays queued until its transaction is finalized, since only
-/// the network's result says whether it landed or must wait for a later epoch.
+/// again. A submitted claim stays queued until its transaction is finalized, since only the network's
+/// result says whether it landed or must wait for a later epoch.
+///
+/// ## Network availability
+/// A burn proof does not expire, so a claim the network has not taken stays queued for as long as the
+/// daemon runs: while the indexer is unreachable no claim is attempted, and a claim whose indexer
+/// read or dry run fails, or that is not yet claimable, is attempted again after a delay that doubles
+/// up to `MAX_RETRY_DELAY`. A claim leaves the queue only once it is accepted, the dry run or the
+/// network rejects it, or its proof file cannot be read or claimed by this wallet.
 ///
 /// ## Crash safety
 /// Pending state is held in memory only. On restart the service re-scans the directory and
@@ -92,7 +96,7 @@ pub struct AutoClaimBurnService {
     /// The wallet's `max_fee_limit`: the most any claim this service submits may reveal.
     max_fee_limit: u64,
     /// Maps file name → pending claim state: the L1 epoch the burn must be past before claiming
-    /// (resolved from the proof file) plus retry/deferral counters.
+    /// (resolved from the proof file) plus retry and back-off state.
     pending_claims: HashMap<String, PendingClaim>,
     wallet_events: broadcast::Receiver<WalletEvent>,
     shutdown_signal: ShutdownSignal,
@@ -351,11 +355,14 @@ impl AutoClaimBurnService {
         self.refresh_in_flight(Some(current_epoch));
         self.resolve_claim_epochs().await;
 
+        let now = Instant::now();
         let ready: Vec<String> = self
             .pending_claims
             .iter()
             .filter(|&(_, pending)| {
-                pending.in_flight.is_none() && pending.claim_after_epoch.is_some_and(|e| current_epoch > e)
+                pending.in_flight.is_none() &&
+                    pending.is_due(now) &&
+                    pending.claim_after_epoch.is_some_and(|e| current_epoch > e)
             })
             .map(|(name, _)| name.clone())
             .collect();
@@ -410,7 +417,12 @@ impl AutoClaimBurnService {
                         );
                     }
                 },
-                Err(ClaimError::Deferred) => defer_claim(&mut self.pending_claims, &file_name),
+                Err(ClaimError::Network(e)) => {
+                    back_off_claim(&mut self.pending_claims, &file_name, now, BackOffCause::Network(&e));
+                },
+                Err(ClaimError::Deferred) => {
+                    back_off_claim(&mut self.pending_claims, &file_name, now, BackOffCause::NotYetClaimable);
+                },
             }
         }
     }
@@ -423,7 +435,7 @@ impl AutoClaimBurnService {
             },
             _ => return,
         };
-        settle_claim(&mut self.pending_claims, &transaction_id, outcome);
+        settle_claim(&mut self.pending_claims, &transaction_id, outcome, Instant::now());
     }
 
     /// Settles each in-flight claim whose transaction the wallet has stored as final, for a result
@@ -449,7 +461,7 @@ impl AutoClaimBurnService {
                 None if current_epoch.is_some_and(|epoch| epoch > claim.max_epoch) => ClaimOutcome::Expired,
                 None => continue,
             };
-            settle_claim(&mut self.pending_claims, &claim.transaction_id, outcome);
+            settle_claim(&mut self.pending_claims, &claim.transaction_id, outcome, Instant::now());
         }
     }
 
@@ -483,7 +495,7 @@ impl AutoClaimBurnService {
         let account = accounts_api
             .get_account_by_public_key(&burn_public_key)
             .optional()
-            .map_err(|e| ClaimError::transient(e.into(), MAX_RETRIES_NETWORK))?
+            .map_err(|e| ClaimError::transient(e.into(), MAX_RETRIES_STORE))?
             .ok_or_else(|| {
                 ClaimError::Permanent(anyhow::anyhow!(
                     "No account found for burn_public_key '{}'. The burn was not destined for any account in this \
@@ -503,7 +515,7 @@ impl AutoClaimBurnService {
             Some(file_name.to_string()),
         )
         .await
-        .map_err(ClaimError::from_claim_failure)?;
+        .map_err(ClaimError::from)?;
 
         let Some(result) = resp.dry_run_result else {
             return Err(ClaimError::Permanent(anyhow::anyhow!(
@@ -534,9 +546,6 @@ impl AutoClaimBurnService {
         // the indexer's figure, so the handler treats it as a ceiling and reveals no more than its own
         // price for the claim. The wallet's `max_fee_limit` bounds that ceiling in turn.
         let max_fee = required_fees.min(self.max_fee_limit);
-        // By this point the file is readable and the account is known, so a failure here indicates a
-        // bad proof (wrong key, ownership check failed, fee too high, corrupt encrypted data), which
-        // retrying would only repeat, unless it is a read the indexer could not yet prove.
         let resp = execute_claim_burn(
             &self.sdk,
             &self.transaction_service,
@@ -548,7 +557,7 @@ impl AutoClaimBurnService {
             Some(file_name.to_string()),
         )
         .await
-        .map_err(ClaimError::from_claim_failure)?;
+        .map_err(ClaimError::from)?;
 
         Ok(resp.transaction_id)
     }
@@ -603,11 +612,12 @@ fn stored_outcome(transaction: &WalletTransaction) -> Option<ClaimOutcome> {
 
 /// Settles the claim awaiting `transaction_id`: an accepted claim leaves the queue (the
 /// [`ClaimBurnMonitor`](super::claim_burn_monitor::ClaimBurnMonitor) moves its file), one that is not
-/// yet claimable is deferred to be submitted again, and any other is dropped.
+/// yet claimable backs off to be submitted again, and any other is dropped.
 fn settle_claim(
     pending_claims: &mut HashMap<String, PendingClaim>,
     transaction_id: &TransactionId,
     outcome: ClaimOutcome,
+    now: Instant,
 ) {
     let Some(file_name) = pending_claims
         .iter()
@@ -625,7 +635,7 @@ fn settle_claim(
             if let Some(pending) = pending_claims.get_mut(&file_name) {
                 pending.in_flight = None;
             }
-            defer_claim(pending_claims, &file_name);
+            back_off_claim(pending_claims, &file_name, now, BackOffCause::NotYetClaimable);
         },
         ClaimOutcome::Expired => {
             info!(
@@ -652,39 +662,62 @@ fn settle_claim(
     }
 }
 
-/// Keeps a claim that is not yet claimable queued for the next interval, or drops it after
-/// `MAX_RETRIES_DEFERRED` deferrals.
-fn defer_claim(pending_claims: &mut HashMap<String, PendingClaim>, file_name: &str) {
+/// Why a claim waits before it is attempted again.
+enum BackOffCause<'a> {
+    /// The burn's L1 block has not been synced by validators yet.
+    NotYetClaimable,
+    /// An indexer read or dry run failed.
+    Network(&'a anyhow::Error),
+}
+
+/// Keeps a claim the network has not taken queued, to be attempted again once its back-off delay
+/// passes.
+fn back_off_claim(
+    pending_claims: &mut HashMap<String, PendingClaim>,
+    file_name: &str,
+    now: Instant,
+    cause: BackOffCause<'_>,
+) {
     let Some(pending) = pending_claims.get_mut(file_name) else {
         return;
     };
-    pending.deferrals += 1;
-    let deferrals = pending.deferrals;
-    if deferrals >= MAX_RETRIES_DEFERRED {
-        warn!(
+    let delay = pending.back_off(now);
+    let attempts = pending.failed_attempts;
+    match cause {
+        BackOffCause::NotYetClaimable if attempts == 1 => info!(
             target: LOG_TARGET,
-            "Giving up auto-claiming '{}' after {} deferrals: the burn is still not claimable. \
-             The file remains in the burn proof directory; submit the claim manually via the wallet API.",
+            "⏳ Burn claim '{}' is not yet claimable; its L1 burn block has not been synced by validators yet. \
+             Will retry until it is.",
             file_name,
-            deferrals,
-        );
-        pending_claims.remove(file_name);
-    } else if deferrals == 1 {
-        info!(
+        ),
+        BackOffCause::NotYetClaimable => debug!(
             target: LOG_TARGET,
-            "⏳ Burn claim '{}' is not yet claimable; its L1 burn block has not been synced by \
-             validators yet. Will retry each interval (up to {} times).",
+            "Burn claim '{}' still not claimable (attempt {}), will retry in {:.0?}.",
             file_name,
-            MAX_RETRIES_DEFERRED,
-        );
-    } else {
-        debug!(
+            attempts,
+            delay,
+        ),
+        BackOffCause::Network(error) => warn!(
             target: LOG_TARGET,
-            "Burn claim '{}' still not claimable (attempt {}/{}), will retry next interval.",
+            "Network error auto-claiming '{}' (attempt {}), will retry in {:.0?}: {}",
             file_name,
-            deferrals,
-            MAX_RETRIES_DEFERRED,
-        );
+            attempts,
+            delay,
+            error,
+        ),
+    }
+}
+
+/// How long a claim waits after its `failed_attempts`th consecutive failed attempt: none after the
+/// first, so it is attempted at the next check, then doubling from `EPOCH_CHECK_INTERVAL` up to
+/// `MAX_RETRY_DELAY`. The doubling bounds the dry runs a fleet of wallets sends a network that is
+/// not yet taking claims.
+fn retry_delay(failed_attempts: u32) -> Duration {
+    match failed_attempts.checked_sub(2) {
+        None => Duration::ZERO,
+        Some(doublings) => EPOCH_CHECK_INTERVAL
+            .saturating_mul(1u32.checked_shl(doublings).unwrap_or(u32::MAX))
+            .min(MAX_RETRY_DELAY),
     }
 }
 
@@ -696,9 +729,11 @@ struct PendingClaim {
     /// Number of transient errors encountered so far. The per-error `max_retries` limit determines
     /// when the claim is dropped from the queue (the file remains on disk for manual retry).
     retries: u32,
-    /// Number of times submission was deferred because the burn's L1 block is not yet synced.
-    /// The claim is dropped once this reaches `MAX_RETRIES_DEFERRED`.
-    deferrals: u32,
+    /// Consecutive attempts the network did not take, because the burn was not yet claimable or an
+    /// indexer read or dry run failed. Sets the delay before `retry_at`.
+    failed_attempts: u32,
+    /// The claim is not attempted before this.
+    retry_at: Option<Instant>,
     /// The submitted claim transaction whose result has not arrived yet. The claim is not submitted
     /// again while it is set.
     in_flight: Option<InFlightClaim>,
@@ -715,13 +750,25 @@ impl PendingClaim {
         Self {
             claim_after_epoch: None,
             retries: 0,
-            deferrals: 0,
+            failed_attempts: 0,
+            retry_at: None,
             in_flight: None,
         }
     }
+
+    fn is_due(&self, now: Instant) -> bool {
+        self.retry_at.is_none_or(|retry_at| now >= retry_at)
+    }
+
+    /// Records a failed attempt and returns the delay before the next one.
+    fn back_off(&mut self, now: Instant) -> Duration {
+        self.failed_attempts = self.failed_attempts.saturating_add(1);
+        let delay = retry_delay(self.failed_attempts);
+        self.retry_at = Some(now + delay);
+        delay
+    }
 }
 
-/// Categorises errors to determine retry behaviour for auto-claims.
 /// The validity window stamped on claim transactions this service builds. Claims are submitted
 /// unattended, so the window only has to cover the submission itself. Derived from the epoch the
 /// caller already resolved: re-querying it here would turn a momentary indexer outage into a
@@ -734,12 +781,14 @@ enum ClaimError {
     /// A permanent error (account not in this wallet, invalid proof data). Remove from queue; the
     /// proof file remains in `burn_proof_dir` for the user to inspect and retry manually.
     Permanent(anyhow::Error),
-    /// A transient error (network unavailable, indexer unreachable, file still being written).
-    /// Leave in queue and retry on the next epoch check interval, up to `max_retries` times.
+    /// A local failure that may clear (wallet database read, file still being written). Leave in
+    /// queue and retry on the next epoch check interval, up to `max_retries` times.
     Transient { error: anyhow::Error, max_retries: u32 },
+    /// An indexer read or dry run failed (indexer unreachable or timed out, a substate served
+    /// without a proof). Keep the claim queued and back off.
+    Network(anyhow::Error),
     /// The burn is valid but not yet claimable: validators have not synced the L1 block containing
-    /// the burn into an epoch at or before the current L2 epoch. Keep the claim queued and re-check
-    /// each interval, up to `MAX_RETRIES_DEFERRED` times, then give up (the file stays for a manual claim).
+    /// the burn into an epoch at or before the current L2 epoch. Keep the claim queued and back off.
     Deferred,
 }
 
@@ -747,46 +796,70 @@ impl ClaimError {
     fn transient(error: anyhow::Error, max_retries: u32) -> Self {
         Self::Transient { error, max_retries }
     }
+}
 
-    /// Classifies a failure to build or submit a claim. A substate the indexer served without a proof
-    /// is transient: the indexer proves it once consensus commits the epoch it is finishing. Every
-    /// other failure is permanent.
-    fn from_claim_failure(error: anyhow::Error) -> Self {
-        let unproven = error.chain().any(|cause| {
-            matches!(
-                cause.downcast_ref::<SubstateApiError>(),
-                Some(SubstateApiError::SubstateUnproven { .. })
-            )
-        });
-        if unproven {
-            Self::transient(error, MAX_RETRIES_NETWORK)
-        } else {
-            Self::Permanent(error)
+impl From<ClaimBurnError> for ClaimError {
+    fn from(error: ClaimBurnError) -> Self {
+        match error {
+            ClaimBurnError::Network(error) => Self::Network(error),
+            ClaimBurnError::Wallet(error) => Self::transient(error, MAX_RETRIES_STORE),
+            ClaimBurnError::Invalid(error) => Self::Permanent(error),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use tari_ootle_wallet_sdk::apis::substate::SubstateApiError;
+
     use super::*;
 
     #[test]
-    fn an_unproven_read_is_a_transient_claim_failure() {
-        let unproven = || SubstateApiError::SubstateUnproven {
+    fn claim_burn_errors_map_to_network_transient_and_permanent() {
+        let unproven = SubstateApiError::SubstateUnproven {
             substate_id: tari_template_lib_types::constants::TARI_TOKEN.into(),
         };
         assert!(matches!(
-            ClaimError::from_claim_failure(unproven().into()),
+            ClaimError::from(ClaimBurnError::Network(unproven.into())),
+            ClaimError::Network(_)
+        ));
+        assert!(matches!(
+            ClaimError::from(ClaimBurnError::Wallet(anyhow::anyhow!("database is locked"))),
             ClaimError::Transient { .. }
         ));
         assert!(matches!(
-            ClaimError::from_claim_failure(anyhow::Error::from(unproven()).context("pricing the claim")),
-            ClaimError::Transient { .. }
-        ));
-        assert!(matches!(
-            ClaimError::from_claim_failure(anyhow::anyhow!("the claim proof is invalid")),
+            ClaimError::from(ClaimBurnError::Invalid(anyhow::anyhow!("the claim proof is invalid"))),
             ClaimError::Permanent(_)
         ));
+    }
+
+    #[test]
+    fn back_off_caps_at_max_retry_delay() {
+        let mut queue = HashMap::from([("burn.json".to_string(), PendingClaim::new())]);
+        let now = Instant::now();
+        let error = anyhow::anyhow!("indexer unreachable");
+        for attempt in 0..1000 {
+            let cause = if attempt % 2 == 0 {
+                BackOffCause::NotYetClaimable
+            } else {
+                BackOffCause::Network(&error)
+            };
+            back_off_claim(&mut queue, "burn.json", now, cause);
+        }
+        let pending = &queue["burn.json"];
+        assert_eq!(pending.failed_attempts, 1000);
+        assert!(!pending.is_due(now));
+        assert!(pending.is_due(now + MAX_RETRY_DELAY));
+    }
+
+    #[test]
+    fn retry_delay_doubles_from_the_next_check_up_to_the_cap() {
+        assert_eq!(retry_delay(1), Duration::ZERO);
+        assert_eq!(retry_delay(2), EPOCH_CHECK_INTERVAL);
+        assert_eq!(retry_delay(3), EPOCH_CHECK_INTERVAL * 2);
+        assert_eq!(retry_delay(4), EPOCH_CHECK_INTERVAL * 4);
+        assert_eq!(retry_delay(100), MAX_RETRY_DELAY);
+        assert_eq!(retry_delay(u32::MAX), MAX_RETRY_DELAY);
     }
 
     fn execution_failure(code: ExecutionFailureCode) -> RejectReason {
@@ -810,17 +883,19 @@ mod tests {
     fn a_claim_rejected_as_not_yet_claimable_is_submitted_again() {
         let transaction_id = TransactionId::new([1; 32]);
         let mut queue = queue_with_claim_in_flight(transaction_id);
-        settle_claim(&mut queue, &transaction_id, ClaimOutcome::NotYetClaimable);
+        let now = Instant::now();
+        settle_claim(&mut queue, &transaction_id, ClaimOutcome::NotYetClaimable, now);
         let pending = &queue["burn.json"];
         assert_eq!(pending.in_flight, None);
-        assert_eq!(pending.deferrals, 1);
+        assert_eq!(pending.failed_attempts, 1);
+        assert!(pending.is_due(now));
     }
 
     #[test]
     fn an_accepted_or_failed_claim_leaves_the_queue() {
         let transaction_id = TransactionId::new([1; 32]);
         let mut queue = queue_with_claim_in_flight(transaction_id);
-        settle_claim(&mut queue, &transaction_id, ClaimOutcome::Accepted);
+        settle_claim(&mut queue, &transaction_id, ClaimOutcome::Accepted, Instant::now());
         assert!(queue.is_empty());
 
         let mut queue = queue_with_claim_in_flight(transaction_id);
@@ -828,6 +903,7 @@ mod tests {
             &mut queue,
             &transaction_id,
             ClaimOutcome::Failed("invalid proof".to_string()),
+            Instant::now(),
         );
         assert!(queue.is_empty());
     }
@@ -836,7 +912,12 @@ mod tests {
     fn another_transaction_does_not_settle_the_claim() {
         let transaction_id = TransactionId::new([1; 32]);
         let mut queue = queue_with_claim_in_flight(transaction_id);
-        settle_claim(&mut queue, &TransactionId::new([2; 32]), ClaimOutcome::Accepted);
+        settle_claim(
+            &mut queue,
+            &TransactionId::new([2; 32]),
+            ClaimOutcome::Accepted,
+            Instant::now(),
+        );
         assert_eq!(
             queue["burn.json"].in_flight.map(|c| c.transaction_id),
             Some(transaction_id)
@@ -844,13 +925,13 @@ mod tests {
     }
 
     #[test]
-    fn an_expired_claim_is_submitted_again_without_a_deferral() {
+    fn an_expired_claim_is_submitted_again_without_backing_off() {
         let transaction_id = TransactionId::new([1; 32]);
         let mut queue = queue_with_claim_in_flight(transaction_id);
-        settle_claim(&mut queue, &transaction_id, ClaimOutcome::Expired);
+        settle_claim(&mut queue, &transaction_id, ClaimOutcome::Expired, Instant::now());
         let pending = &queue["burn.json"];
         assert_eq!(pending.in_flight, None);
-        assert_eq!(pending.deferrals, 0);
+        assert_eq!(pending.failed_attempts, 0);
     }
 
     #[test]

@@ -69,7 +69,12 @@ use crate::{
         apply_leader_fee_to_substate_store,
         block_change_set::ProposedBlockChangeSet,
         calculate_state_merkle_root,
-        command_derivation::{DerivedCommand, derive_local_only_command, derive_new_multishard_command},
+        command_derivation::{
+            DerivedCommand,
+            derive_local_only_command,
+            derive_new_multishard_command,
+            pin_new_transaction,
+        },
         epoch_state::EpochState,
         error::HotStuffError,
         exceeds_block_foreign_proposal_bytes,
@@ -470,7 +475,8 @@ where TConsensusSpec: ConsensusSpec
 
         let mut substate_store =
             PendingSubstateStore::init(tx, state_anchor_leaf, self.config.consensus_constants.num_preshards)?
-                .with_pledge_budget(self.config.consensus_constants.max_block_pledge_bytes);
+                .with_pledge_budget(self.config.consensus_constants.max_block_pledge_bytes)
+                .with_input_load_budget(self.config.consensus_constants.max_block_input_load_bytes);
 
         let mut executed_transactions = HashMap::new();
 
@@ -945,8 +951,17 @@ where TConsensusSpec: ConsensusSpec
             pool_tx.id(),
         );
 
-        // Update locked epoch if needed
-        pool_tx.update_locked_epoch(locked_epoch.clone());
+        if let Err(pinned_after) = pin_new_transaction(&mut pool_tx, locked_epoch, local_committee_info.shard_group()) {
+            info!(
+                target: LOG_TARGET,
+                "📌 PROPOSE: transaction {} is pinned to {}, after this block's {}. Deferring it until this shard \
+                 group reaches that epoch",
+                pool_tx.id(),
+                pinned_after.locked_epoch,
+                pinned_after.block_epoch,
+            );
+            return Ok(None);
+        }
 
         let prepared = self
             .transaction_manager
@@ -975,6 +990,15 @@ where TConsensusSpec: ConsensusSpec
                 info!(
                     target: LOG_TARGET,
                     "📦 PROPOSE: transaction {} would take the block's pledge to {total_bytes} bytes, past the \
+                     {max_bytes} budget. Deferring it to a later block",
+                    pool_tx.id(),
+                );
+                Ok(None)
+            },
+            PreparedTransaction::InputLoadBudgetReached { total_bytes, max_bytes } => {
+                info!(
+                    target: LOG_TARGET,
+                    "📦 PROPOSE: transaction {} would take the input bytes the block loads to {total_bytes}, past the \
                      {max_bytes} budget. Deferring it to a later block",
                     pool_tx.id(),
                 );
@@ -1059,7 +1083,7 @@ where TConsensusSpec: ConsensusSpec
     ) -> Result<Option<Command>, HotStuffError> {
         // Only set to abort if either the local or one or more foreign shards decided to ABORT
         if tx_rec.current_decision().is_abort() {
-            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom())));
+            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom()?)));
         }
 
         let locked_epoch = tx_rec.locked_epoch().ok_or_else(|| {
@@ -1080,22 +1104,7 @@ where TConsensusSpec: ConsensusSpec
             locked_epoch.clone(),
         )?;
 
-        if execution.decision().is_commit() {
-            // Preparing the transaction bounded what its inputs alone may pledge, so only the block budget applies
-            let pledge = substate_store.pledge_inputs(
-                local_pledged_inputs(&tx_rec, local_committee_info.shard_group()),
-                usize::MAX,
-            )?;
-            if let InputPledge::BlockBudgetReached { total_bytes, max_bytes } = pledge {
-                info!(
-                    target: LOG_TARGET,
-                    "📦 PROPOSE: LocalAccept of transaction {} would take the block's pledge to {total_bytes} bytes, \
-                     past the {max_bytes} budget. Deferring it to a later block",
-                    tx_rec.id(),
-                );
-                return Ok(None);
-            }
-        }
+        let is_commit = execution.decision().is_commit();
 
         // Try to lock all local outputs
         let locked = lock_multishard_execution(
@@ -1124,7 +1133,25 @@ where TConsensusSpec: ConsensusSpec
             );
 
             executed_transactions.insert(*tx_rec.id(), execution);
-            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom())));
+            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom()?)));
+        }
+
+        if is_commit {
+            // Preparing the transaction bounded what its inputs alone may pledge, so only the block budget applies
+            let pledge = substate_store.pledge_inputs(
+                local_pledged_inputs(&tx_rec, local_committee_info.shard_group()),
+                usize::MAX,
+            )?;
+            if let InputPledge::BlockBudgetReached { total_bytes, max_bytes } = pledge {
+                info!(
+                    target: LOG_TARGET,
+                    "📦 PROPOSE: LocalAccept of transaction {} would take the block's pledge to {total_bytes} bytes, \
+                     past the {max_bytes} budget. Deferring it to a later block",
+                    tx_rec.id(),
+                );
+                substate_store.release_new_locks(tx_rec.id());
+                return Ok(None);
+            }
         }
 
         tx_rec.update_from_execution(
@@ -1151,7 +1178,7 @@ where TConsensusSpec: ConsensusSpec
         executed_transactions: &HashMap<TransactionId, TransactionExecution>,
     ) -> Result<Option<Command>, HotStuffError> {
         if tx_rec.current_decision().is_abort() {
-            return Ok(Some(Command::SomeAccept(tx_rec.get_current_multi_shard_atom())));
+            return Ok(Some(Command::SomeAccept(tx_rec.get_current_multi_shard_atom()?)));
         }
 
         // A foreign proposal in this block may have replaced the stored execution with its fee-intent commit
@@ -1210,7 +1237,7 @@ where TConsensusSpec: ConsensusSpec
         &self,
         tx_rec: &TransactionPoolRecord,
     ) -> Result<MultiShardAtom, HotStuffError> {
-        let mut atom = tx_rec.get_current_multi_shard_atom();
+        let mut atom = tx_rec.get_current_multi_shard_atom()?;
         if tx_rec.current_decision().is_commit() {
             let num_involved_shard_groups = tx_rec.evidence().num_shard_groups();
             let involved = NonZeroU64::new(num_involved_shard_groups as u64).ok_or_else(|| {

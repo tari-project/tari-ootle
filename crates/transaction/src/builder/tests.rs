@@ -352,3 +352,148 @@ fn auto_filled_inputs_include_migrate_args() {
     assert_eq!(inputs, expected);
     assert_eq!(transaction.to_referenced_substates().unwrap(), expected);
 }
+
+#[test]
+fn auto_filled_inputs_and_referenced_substates_include_stealth_script_path_args() {
+    use std::collections::HashSet;
+
+    use tari_engine_types::substate::SubstateId;
+    use tari_template_lib_types::{
+        Amount,
+        ObjectKey,
+        ResourceAddress,
+        UtxoAddress,
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+        stealth::{
+            MerkleProof,
+            SpendCondition,
+            SpendWitness,
+            StealthInput,
+            StealthInputsStatement,
+            StealthOutputsStatement,
+            StealthTransferStatement,
+            TemplateFunction,
+        },
+    };
+
+    let bound_component = ComponentAddress::new(ObjectKey::from_array([0x33; 32]));
+    let script_template = TemplateAddress::from_array([0x55; 32]);
+    let encoded_arg = tari_bor::encode(&bound_component).unwrap().into();
+    let func = TemplateFunction::new(script_template, "check".try_into().unwrap(), vec![encoded_arg]);
+    let leaf = SpendCondition::template_function(func);
+    let commitment = PedersenCommitmentBytes::zero();
+    let witness = SpendWitness::script_path(leaf, MerkleProof::empty());
+    let input = StealthInput::with_witness(commitment, witness);
+    let outputs_statement =
+        StealthOutputsStatement::new_revealed_only(Amount::from(10u64), RistrettoPublicKeyBytes::zero());
+    let statement = StealthTransferStatement {
+        inputs_statement: StealthInputsStatement::new(vec![input], Amount::ZERO),
+        outputs_statement,
+        balance_proof: None,
+        covenant_claims: vec![],
+    };
+
+    let secret = RistrettoSecretKey::random(&mut rand::rng());
+    let custom_resource = ResourceAddress::new(ObjectKey::from_array([0x77; 32]));
+    let transaction = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .stealth_transfer(custom_resource, statement.clone())
+        .put_last_instruction_output_on_workspace("revealed_bucket")
+        .assert_bucket_contains_any("revealed_bucket", custom_resource)
+        .build_and_seal(&secret);
+
+    let bound_decl = transaction.inputs().get(&SubstateId::from(bound_component)).unwrap();
+    assert!(
+        !bound_decl.is_write(),
+        "spend-script bound args run in a ReadOnly frame"
+    );
+    let res_decl = transaction
+        .inputs()
+        .get(&SubstateId::Resource(custom_resource))
+        .unwrap();
+    assert!(
+        !res_decl.is_write(),
+        "stealth transfer + bucket assert must stay a read"
+    );
+
+    let referenced = transaction.to_referenced_substates().unwrap();
+    let expected = HashSet::from([
+        SubstateId::Resource(custom_resource),
+        SubstateId::Utxo(UtxoAddress::new(custom_resource, commitment.into())),
+        SubstateId::from(bound_component),
+    ]);
+    assert_eq!(referenced, expected);
+    assert_eq!(
+        transaction.referenced_templates_iter().copied().collect::<Vec<_>>(),
+        vec![script_template]
+    );
+
+    let workspace_tx = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .allocate_resource_address("res")
+        .stealth_transfer("res", statement)
+        .build_and_seal(&secret);
+    assert_eq!(
+        workspace_tx.to_referenced_substates().unwrap(),
+        HashSet::from([SubstateId::from(bound_component)]),
+    );
+}
+
+#[test]
+fn builder_upgrades_read_inputs_to_write_across_calls_fees_and_merges() {
+    use tari_engine_types::{SubstateVersion, substate::SubstateId};
+    use tari_ootle_common_types::InputDeclaration;
+    use tari_template_lib_types::ObjectKey;
+
+    let comp_call = ComponentAddress::new(ObjectKey::from_array([1; 32]));
+    let comp_fee = ComponentAddress::new(ObjectKey::from_array([2; 32]));
+    let comp_merge = ComponentAddress::new(ObjectKey::from_array([3; 32]));
+
+    let write_merge = InputDeclaration::write_versioned(comp_merge, 7u64);
+    let other = Transaction::builder_localnet(Epoch(1)).add_input(write_merge);
+
+    let tx = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .add_input(InputDeclaration::read(comp_call))
+        .add_input(InputDeclaration::read(comp_fee))
+        .add_input(InputDeclaration::read(comp_merge))
+        .call_method(comp_call, "mutate", args![])
+        .pay_fee_from_component(comp_fee, 100u64)
+        .merge(other)
+        .build_unsigned();
+
+    let call_decl = tx.inputs().get(&SubstateId::from(comp_call)).unwrap();
+    assert!(call_decl.is_write());
+
+    let fee_decl = tx.inputs().get(&SubstateId::from(comp_fee)).unwrap();
+    assert!(fee_decl.is_write());
+
+    let merge_decl = tx.inputs().get(&SubstateId::from(comp_merge)).unwrap();
+    assert!(merge_decl.is_write());
+    assert_eq!(merge_decl.version(), Some(SubstateVersion::new(7)));
+}
+
+#[test]
+fn it_preserves_referenced_assert_resources() {
+    use tari_engine_types::substate::SubstateId;
+    use tari_template_lib_types::{NonFungibleId, ObjectKey, ResourceAddress, constants::TARI_TOKEN};
+
+    let fungible_resource = ResourceAddress::new(ObjectKey::from_array([7; 32]));
+    let nft_resource = ResourceAddress::new(ObjectKey::from_array([8; 32]));
+
+    let tx = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .put_last_instruction_output_on_workspace("b")
+        .assert_bucket_contains_any("b", fungible_resource)
+        .assert_bucket_contains_non_fungibles_all("b", nft_resource, vec![NonFungibleId::from_u64(1)])
+        .assert_bucket_contains_any("b", TARI_TOKEN)
+        .build_unsigned();
+
+    assert!(tx.inputs().get(&SubstateId::from(fungible_resource)).unwrap().is_read());
+    assert!(tx.inputs().get(&SubstateId::from(nft_resource)).unwrap().is_read());
+
+    let referenced = tx.to_referenced_substates().unwrap();
+    assert!(referenced.contains(&SubstateId::Resource(fungible_resource)));
+    assert!(referenced.contains(&SubstateId::Resource(nft_resource)));
+    assert!(!referenced.contains(&SubstateId::Resource(TARI_TOKEN)));
+}

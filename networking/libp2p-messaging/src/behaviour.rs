@@ -2,7 +2,6 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    cmp,
     collections::{HashMap, VecDeque},
     task::{Context, Poll},
 };
@@ -202,7 +201,7 @@ where TCodec: Codec + Send + Clone + 'static
 
         if let Some(sink) = connection.pending_sink {
             self.pending_events
-                .push_back(ToSwarm::GenerateEvent(Event::InboundFailure {
+                .push_back(ToSwarm::GenerateEvent(Event::OutboundFailure {
                     peer_id,
                     stream_id: sink.stream_id(),
                     error: Error::ConnectionClosed,
@@ -402,8 +401,8 @@ impl<TMsg> Connections<TMsg> {
     }
 
     pub(self) fn next_active_sink(&mut self) -> Option<&MessageSink<TMsg>> {
-        let initial_last_selected = cmp::min(self.last_selected_index, self.connections.len() - 1);
-        let (last_index, sink) = cycle_once(self.connections.len(), initial_last_selected, |i| {
+        let start = self.sticky_start_index()?;
+        let (last_index, sink) = cycle_once(self.connections.len(), start, |i| {
             let conn = self
                 .connections
                 .get(i)
@@ -416,8 +415,8 @@ impl<TMsg> Connections<TMsg> {
     }
 
     pub(self) fn next_pending_sink(&mut self) -> Option<&MessageSink<TMsg>> {
-        let initial_last_selected = cmp::min(self.last_selected_index, self.connections.len() - 1);
-        let (last_index, sink) = cycle_once(self.connections.len(), initial_last_selected, |i| {
+        let start = self.sticky_start_index()?;
+        let (last_index, sink) = cycle_once(self.connections.len(), start, |i| {
             let conn = self
                 .connections
                 .get(i)
@@ -427,6 +426,13 @@ impl<TMsg> Connections<TMsg> {
 
         self.last_selected_index = last_index;
         Some(sink)
+    }
+
+    /// The search for a sink starts at the last selected connection so that consecutive messages share one stream and
+    /// keep their order. The index is clamped because connections may have closed since it was recorded.
+    fn sticky_start_index(&self) -> Option<usize> {
+        let last = self.connections.len().checked_sub(1)?;
+        Some(self.last_selected_index.min(last))
     }
 
     /// Forgets streams whose handler task has ended so that the next message opens a new stream on the connection.
@@ -452,32 +458,18 @@ impl<TMsg> Default for Connections<TMsg> {
 
 fn cycle_once<T, F>(n: usize, start: usize, mut f: F) -> Option<(usize, T)>
 where F: FnMut(usize) -> Option<T> {
-    let mut did_wrap = false;
-    let mut i = start;
-    if n == 0 {
-        return None;
-    }
-    if i >= n {
+    if n == 0 || start >= n {
         return None;
     }
 
-    loop {
-        // Did we find a value?
+    for offset in 0..n {
+        let i = (start + offset) % n;
         if let Some(t) = f(i) {
             return Some((i, t));
         }
-
-        // Are we back at where we started?
-        if did_wrap && i == start {
-            return None;
-        }
-
-        i = (i + 1) % n;
-        // Did we wrap around?
-        if i == 0 {
-            did_wrap = true;
-        }
     }
+
+    None
 }
 
 #[cfg(test)]
@@ -528,6 +520,35 @@ mod tests {
     }
 
     #[test]
+    fn consecutive_sink_selections_stay_on_one_connection() {
+        let peer_id = PeerId::random();
+        let mut connections = Connections::<Vec<u8>>::new();
+        let mut streams = Vec::new();
+        for id in 0..2 {
+            let mut connection = Connection::new(ConnectionId::new_unchecked(id), None);
+            let (sink, stream) = stream::channel(id as StreamId, peer_id);
+            connection.stream_id = Some(sink.stream_id());
+            connection.message_sink = Some(sink.clone());
+            connection.pending_sink = Some(sink);
+            connections.push(connection);
+            streams.push(stream);
+        }
+
+        let first = connections.next_active_sink().unwrap().stream_id();
+        assert_eq!(connections.next_active_sink().unwrap().stream_id(), first);
+        assert_eq!(connections.next_pending_sink().unwrap().stream_id(), first);
+
+        // The selected connection closes, leaving the recorded index past the end.
+        connections.last_selected_index = 1;
+        connections.connections.pop();
+        assert_eq!(connections.next_active_sink().unwrap().stream_id(), 0);
+
+        connections.connections.clear();
+        assert!(connections.next_active_sink().is_none());
+        assert!(connections.next_pending_sink().is_none());
+    }
+
+    #[test]
     fn cycle_once_works() {
         assert_eq!(cycle_once(0, 0, |_| -> Option<()> { panic!() }), None);
         assert_eq!(cycle_once(1, 0, Some), Some((0, 0)));
@@ -541,5 +562,15 @@ mod tests {
             cycle_once(10, 2, |i| { if i == 1 { Some(()) } else { None } }),
             Some((1, ()))
         );
+
+        let mut visited = Vec::new();
+        assert_eq!(
+            cycle_once(4, 2, |i| {
+                visited.push(i);
+                None::<()>
+            }),
+            None
+        );
+        assert_eq!(visited, vec![2, 3, 0, 1]);
     }
 }

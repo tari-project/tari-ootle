@@ -1,6 +1,7 @@
 //  Copyright 2026 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
+import { useAccountsList } from "@api/hooks/useAccounts";
 import {
   useApproveTransactionRequest,
   useListTransactionRequests,
@@ -28,6 +29,8 @@ import type {
 } from "@tari-project/ootle-ts-bindings";
 import { TARI_TOKEN } from "@tari-project/ootle-ts-bindings";
 import { useEffect, useState } from "react";
+import type { AccountWithdrawal, InstructionsDescription, WithdrawalDestination } from "../SigningRequests/describe";
+import { describeInstructions } from "../SigningRequests/describe";
 import Inputs from "../Transactions/Inputs";
 import Instructions, { BlobContents } from "../Transactions/Instructions";
 
@@ -88,13 +91,12 @@ function Countdown({ expiresAt }: { expiresAt: bigint }) {
 function ValueSummaries({ request }: { request: TransactionRequestInfo }) {
   // A stealth transfer's instructions are commitments and range proofs, so a
   // person cannot read an amount out of them. The wallet owns the masks and is
-  // the only party that can say what of its stealth outputs leaves. Other
-  // instructions are read from the instruction list itself.
+  // the only party that can say what of its stealth outputs leaves. Revealed
+  // amounts are read from the instructions themselves (`InstructionSummary`).
   return (
     <>
       {request.value_summaries.map(({ amount_leaving, inputs_total, change_total, resource_address }) => {
-        // Amounts are in the resource's smallest unit, which is µT only for TARI.
-        const unit = resource_address === TARI_TOKEN ? "µT" : "base units";
+        const unit = unitOf(resource_address);
         return (
           <Alert key={resource_address} severity="warning" icon={false} sx={{ mb: 2 }}>
             <Typography variant="h6" sx={{ fontWeight: 600 }}>
@@ -113,11 +115,108 @@ function ValueSummaries({ request }: { request: TransactionRequestInfo }) {
   );
 }
 
+function unitOf(resource: string): string {
+  // Amounts are in the resource's smallest unit, which is µT only for TARI.
+  return resource === TARI_TOKEN ? "µT" : "base units";
+}
+
+function withdrawnText({ resource, value }: AccountWithdrawal): string {
+  switch (value.kind) {
+    case "amount":
+      return `${value.amount.toLocaleString()} ${unitOf(resource)}`;
+    case "all":
+      return "The entire balance";
+    case "non_fungibles":
+      return `${value.count} non-fungible token(s)`;
+    case "confidential":
+      return "A confidential amount";
+  }
+}
+
+function destinationText(destination: WithdrawalDestination): string {
+  switch (destination.kind) {
+    case "deposit":
+      return destination.isOwnAccount
+        ? `to your account ${destination.component}`
+        : `to ${destination.component}, which is not an account of this wallet`;
+    case "fee":
+      return "to pay the transaction fee";
+    case "unknown":
+      return "to a destination these instructions do not show directly; review them below";
+  }
+}
+
+function needsReview(description: InstructionsDescription): boolean {
+  return description.undescribed > 0 || description.withdrawals.some((w) => w.destination.kind === "unknown");
+}
+
+/// The panel to open for a pending request: the first instruction list the
+/// summary does not fully account for.
+function reviewPanel(main: InstructionsDescription, fee: InstructionsDescription): string | null {
+  if (needsReview(main)) {
+    return "instructions";
+  }
+  if (needsReview(fee)) {
+    return "fees";
+  }
+  return null;
+}
+
+/// What the transaction moves out of this wallet's accounts, for the
+/// instructions this page knows how to read, and how many it does not.
+function InstructionSummary({ main, fee }: { main: InstructionsDescription; fee: InstructionsDescription }) {
+  const withdrawals = [...fee.withdrawals, ...main.withdrawals];
+  const fees = [...fee.fees, ...main.fees];
+  return (
+    <>
+      {withdrawals.map((withdrawal, i) => (
+        <Alert key={`w${i}`} severity="warning" icon={false} sx={{ mb: 2 }}>
+          <Typography variant="h6" sx={{ fontWeight: 600 }}>
+            {withdrawnText(withdrawal)} leaves account {withdrawal.account}
+          </Typography>
+          <Typography variant="body2" sx={{ opacity: 0.85, wordBreak: "break-all" }}>
+            {destinationText(withdrawal.destination)}
+          </Typography>
+          <Typography variant="body2" sx={{ opacity: 0.7, wordBreak: "break-all" }}>
+            {withdrawal.resource}
+          </Typography>
+        </Alert>
+      ))}
+      {fees.length > 0 && (
+        <Alert severity="info" icon={false} sx={{ mb: 2 }}>
+          {fees.map(({ account, amount }, i) => (
+            <Typography key={i} variant="body2" sx={{ wordBreak: "break-all" }}>
+              Fee of up to {amount.toLocaleString()} µT, paid by account {account}
+            </Typography>
+          ))}
+        </Alert>
+      )}
+      {(main.undescribed > 0 || fee.undescribed > 0) && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          {main.undescribed > 0 && (
+            <Typography variant="body2">
+              {main.undescribed} instruction(s) not described above; review them below.
+            </Typography>
+          )}
+          {fee.undescribed > 0 && (
+            <Typography variant="body2">
+              {fee.undescribed} fee instruction(s) not described above; review them below.
+            </Typography>
+          )}
+        </Alert>
+      )}
+    </>
+  );
+}
+
 function RequestCard({ request }: { request: TransactionRequestInfo }) {
   const approve = useApproveTransactionRequest();
   const reject = useRejectTransactionRequest();
   const submit = useSubmitTransactionRequest();
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const { data: accountsData } = useAccountsList(0, 1000);
+  // `undefined` until the user opens or closes a panel; until then the panel
+  // holding instructions this card cannot describe is open.
+  const [expanded, setExpanded] = useState<string | null | undefined>(undefined);
   const isActionable = request.status === "Pending";
   // Approve and submit are separate permissions and separate RPCs, but this UI
   // holds both, so approving chains straight into submitting. If the submit
@@ -141,6 +240,12 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
   const isSealSignerAuthorized = v1?.main_signer === "SealSigner";
   const mainSigner = describeMainSigner(request.main_signer);
 
+  const ownAccounts = new Set((accountsData?.accounts ?? []).map(({ account }) => account.component_address));
+  const mainDescription = describeInstructions(instructions, blobs, ownAccounts);
+  const feeDescription = describeInstructions(feeInstructions, blobs, ownAccounts);
+  const defaultPanel = isActionable ? reviewPanel(mainDescription, feeDescription) : null;
+  const openPanel = expanded === undefined ? defaultPanel : expanded;
+
   const togglePanel = (panel: string) => (_event: React.SyntheticEvent, isExpanded: boolean) =>
     setExpanded(isExpanded ? panel : null);
 
@@ -163,6 +268,7 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
 
       <ComponentUpgradeWarning upgrades={request.component_upgrades} />
       <ValueSummaries request={request} />
+      <InstructionSummary main={mainDescription} fee={feeDescription} />
 
       <Grid container spacing={2} sx={{ mb: 1 }}>
         <Grid size={12}>
@@ -212,7 +318,7 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
         )}
       </Grid>
 
-      <Accordion expanded={expanded === "instructions"} onChange={togglePanel("instructions")}>
+      <Accordion expanded={openPanel === "instructions"} onChange={togglePanel("instructions")}>
         <AccordionSummary aria-controls="request-instructions-content">
           <Typography variant="h6">Instructions ({instructions.length})</Typography>
         </AccordionSummary>
@@ -220,7 +326,7 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
           <Instructions data={instructions} blobs={blobs} />
         </AccordionDetails>
       </Accordion>
-      <Accordion expanded={expanded === "fees"} onChange={togglePanel("fees")}>
+      <Accordion expanded={openPanel === "fees"} onChange={togglePanel("fees")}>
         <AccordionSummary aria-controls="request-fee-instructions-content">
           <Typography variant="h6">Fee Instructions ({feeInstructions.length})</Typography>
         </AccordionSummary>
@@ -228,7 +334,7 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
           <Instructions data={feeInstructions} blobs={blobs} />
         </AccordionDetails>
       </Accordion>
-      <Accordion expanded={expanded === "blobs"} onChange={togglePanel("blobs")}>
+      <Accordion expanded={openPanel === "blobs"} onChange={togglePanel("blobs")}>
         <AccordionSummary aria-controls="request-blobs-content">
           <Typography variant="h6">Blobs ({blobs.length})</Typography>
         </AccordionSummary>
@@ -236,7 +342,7 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
           <BlobContents blobs={blobs} />
         </AccordionDetails>
       </Accordion>
-      <Accordion expanded={expanded === "inputs"} onChange={togglePanel("inputs")}>
+      <Accordion expanded={openPanel === "inputs"} onChange={togglePanel("inputs")}>
         <AccordionSummary aria-controls="request-inputs-content">
           <Typography variant="h6">Inputs ({inputs.length})</Typography>
         </AccordionSummary>

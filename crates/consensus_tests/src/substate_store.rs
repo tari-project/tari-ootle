@@ -3,6 +3,7 @@
 
 use tari_consensus::{
     hotstuff::substate_store::{
+        InputLoad,
         InputPledge,
         LockFailedError,
         PendingSubstateStore,
@@ -25,6 +26,7 @@ use tari_ootle_common_types::{
     ShardGroup,
     SubstateAddress,
     SubstateLockType,
+    SubstateRequirement,
     SubstateVersion,
     VersionedSubstateId,
     optional::IsNotFoundError,
@@ -586,6 +588,79 @@ fn a_put_diff_upping_over_a_live_version_is_fatal() {
 }
 
 #[test]
+fn a_put_diff_that_fails_part_way_leaves_the_store_unchanged() {
+    let (store, _tmp) = create_store();
+    let a = add_substate(&store, 0, SubstateVersion::ZERO);
+    let b = add_substate(&store, 1, SubstateVersion::ZERO);
+
+    let tx = store.create_read_tx().unwrap();
+    let mut store = create_pending_store::<TestStore>(&tx);
+    store.put_diff(&write_diff(&b)).unwrap();
+    let b_v1 = b.to_next_version();
+    let changes = change_addresses(store.changes());
+    let output_bytes = store.max_shard_output_bytes();
+
+    // The first two DOWNs apply, one over a version the block has not touched and one over a version it created.
+    // The third names a version the block already spent.
+    let mut diff = SubstateDiff::new();
+    diff.down(a.substate_id().clone(), a.version());
+    diff.down(b_v1.substate_id().clone(), b_v1.version());
+    diff.down(b.substate_id().clone(), b.version());
+    let err = store.put_diff(&diff).unwrap_err();
+    assert!(matches!(
+        err.ok_lock_failed().unwrap(),
+        LockFailedError::SubstateNotFound { .. }
+    ));
+
+    assert_eq!(change_addresses(store.changes()), changes);
+    assert_eq!(store.max_shard_output_bytes(), output_bytes);
+    for (id, version) in [(&a, a.version()), (&b, b_v1.version())] {
+        let latest = store.get_latest_version(id.substate_id()).unwrap();
+        assert_eq!(latest.version(), version);
+        assert!(latest.is_up());
+    }
+    store.lock_assert_is_up(a.as_versioned_ref()).unwrap();
+    store.lock_assert_is_up(b_v1.as_versioned_ref()).unwrap();
+
+    // The store goes on to apply a diff over the versions the failed one would have spent
+    store.put_diff(&write_diff(&a)).unwrap();
+    store.put_diff(&write_diff(&b_v1)).unwrap();
+}
+
+#[test]
+fn a_put_diff_whose_withdrawal_fails_restores_a_pool_it_withdrew_from() {
+    let (store, _tmp) = create_store();
+    let pool = add_fee_pool(&store, 100);
+    let missing_pool = SubstateId::from(ValidatorFeePoolAddress::from_array([8; ObjectKey::LENGTH]));
+
+    let tx = store.create_read_tx().unwrap();
+    let mut store = create_pending_store::<TestStore>(&tx);
+    store.put_diff(&withdraw_diff(&pool, 10)).unwrap();
+    let changes = change_addresses(store.changes());
+
+    // The first withdrawal rewrites the pool's UP in place. The second names a pool that does not exist.
+    let mut diff = SubstateDiff::new();
+    diff.set_once_fee_withdrawals(vec![
+        ValidatorFeeWithdrawal {
+            address: pool.as_validator_fee_pool_address().unwrap(),
+            amount: 5,
+        },
+        ValidatorFeeWithdrawal {
+            address: missing_pool.as_validator_fee_pool_address().unwrap(),
+            amount: 5,
+        },
+    ]);
+    let err = store.put_diff(&diff).unwrap_err();
+    assert!(matches!(
+        err.ok_lock_failed().unwrap(),
+        LockFailedError::SubstateNotFound { .. }
+    ));
+
+    assert_eq!(change_addresses(store.changes()), changes);
+    assert_eq!(fee_pool_amount(&store.get_latest_change(&pool).unwrap()), 90);
+}
+
+#[test]
 fn an_input_pledged_by_two_commands_is_counted_once() {
     let (store, _tmp) = create_store();
     let a = add_substate(&store, 0, SubstateVersion::ZERO);
@@ -657,6 +732,97 @@ fn inputs_over_the_transaction_limit_are_not_pledged() {
         InputPledge::TransactionTooLarge { bytes: 2 * one_input }
     );
     assert_eq!(store.pledge_bytes(), 0);
+}
+
+/// The requirement each substate is loaded for, as a transaction declares it.
+fn requirement(id: &VersionedSubstateId) -> (SubstateRequirement, SubstateVersion) {
+    (SubstateRequirement::unversioned(id.substate_id().clone()), id.version())
+}
+
+#[test]
+fn every_load_of_an_input_counts_toward_the_block() {
+    let (store, _tmp) = create_store();
+    let a = add_substate(&store, 0, SubstateVersion::ZERO);
+    let b = add_substate(&store, 1, SubstateVersion::ZERO);
+
+    let tx = store.create_read_tx().unwrap();
+    let mut store = create_pending_store::<TestStore>(&tx);
+    let InputLoad::Loaded(loaded) = store.load_inputs([requirement(&a)], usize::MAX).unwrap() else {
+        panic!("expected the input to load");
+    };
+    assert_eq!(loaded.len(), 1);
+    let one_input = store.input_load_bytes();
+    assert!(one_input > 0);
+
+    // Both substates have values of the same size, and a substate loaded again is counted again
+    let InputLoad::Loaded(loaded) = store
+        .load_inputs([requirement(&a), requirement(&b)], usize::MAX)
+        .unwrap()
+    else {
+        panic!("expected the inputs to load");
+    };
+    assert_eq!(loaded.len(), 2);
+    assert_eq!(store.input_load_bytes(), 3 * one_input);
+}
+
+#[test]
+fn inputs_over_the_transaction_load_limit_stop_loading_and_abort() {
+    let (store, _tmp) = create_store();
+    let a = add_substate(&store, 0, SubstateVersion::ZERO);
+    let b = add_substate(&store, 1, SubstateVersion::ZERO);
+    let c = add_substate(&store, 2, SubstateVersion::ZERO);
+
+    let tx = store.create_read_tx().unwrap();
+    let one_input = {
+        let mut store = create_pending_store::<TestStore>(&tx);
+        store.load_inputs([requirement(&a)], usize::MAX).unwrap();
+        store.input_load_bytes()
+    };
+
+    let mut store = create_pending_store::<TestStore>(&tx);
+    let load = store
+        .load_inputs([requirement(&a), requirement(&b), requirement(&c)], one_input)
+        .unwrap();
+    // Loading stops at the second input, which is the first past the limit, so the third is never read
+    assert!(
+        matches!(load, InputLoad::TransactionTooLarge { bytes } if bytes == 2 * one_input),
+        "{load:?}"
+    );
+    // What was loaded still counts toward the block, because validators load it again to reach the same verdict
+    assert_eq!(store.input_load_bytes(), 2 * one_input);
+}
+
+#[test]
+fn a_budgeted_store_refuses_inputs_past_its_load_budget() {
+    let (store, _tmp) = create_store();
+    let a = add_substate(&store, 0, SubstateVersion::ZERO);
+    let b = add_substate(&store, 1, SubstateVersion::ZERO);
+
+    let tx = store.create_read_tx().unwrap();
+    let one_input = {
+        let mut store = create_pending_store::<TestStore>(&tx);
+        store.load_inputs([requirement(&a)], usize::MAX).unwrap();
+        store.input_load_bytes()
+    };
+
+    let mut store = create_pending_store::<TestStore>(&tx).with_input_load_budget(one_input);
+    assert!(matches!(
+        store.load_inputs([requirement(&a)], usize::MAX).unwrap(),
+        InputLoad::Loaded(_)
+    ));
+    // Unlike a pledge, loading the same substate again is more work, so it is refused
+    let load = store.load_inputs([requirement(&a)], usize::MAX).unwrap();
+    assert!(
+        matches!(
+            load,
+            InputLoad::BlockBudgetReached { total_bytes, max_bytes } if total_bytes == 2 * one_input && max_bytes == one_input
+        ),
+        "{load:?}"
+    );
+    let load = store.load_inputs([requirement(&b)], usize::MAX).unwrap();
+    assert!(matches!(load, InputLoad::BlockBudgetReached { .. }), "{load:?}");
+    // A refused transaction adds nothing to the block
+    assert_eq!(store.input_load_bytes(), one_input);
 }
 
 #[test]

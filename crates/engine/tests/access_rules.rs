@@ -538,7 +538,7 @@ mod component_owner_rule {
     }
 }
 
-mod m_of_n_threshold {
+mod invalid_rule_shape {
     use tari_template_lib::types::{NonFungibleAddress, SubstateOwnerRule, crypto::RistrettoPublicKeyBytes};
 
     use super::*;
@@ -692,6 +692,106 @@ mod m_of_n_threshold {
             argument: "owner_rule",
             requirement: RuleRequirement::NonFungibleAddress(badge),
         });
+    }
+
+    fn empty_composite(argument: &'static str, composite: &'static str) -> RuntimeError {
+        RuntimeError::EmptyAccessRuleComposite { argument, composite }
+    }
+
+    fn empty_any_of() -> AccessRule {
+        AccessRule::Restricted(RestrictedAccessRule::AnyOf(Box::new([])))
+    }
+
+    fn empty_require_all_of() -> AccessRule {
+        AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::AllOf(Box::new([]))))
+    }
+
+    /// An `any_of` that the signer satisfies through its first branch, but whose second branch lists nothing.
+    fn satisfiable_with_a_nested_empty_all_of(badge: &NonFungibleAddress) -> AccessRule {
+        AccessRule::Restricted(RestrictedAccessRule::AnyOf(Box::new([
+            RestrictedAccessRule::Require(RequireRule::Require(RuleRequirement::NonFungibleAddress(badge.clone()))),
+            RestrictedAccessRule::AllOf(Box::new([])),
+        ])))
+    }
+
+    #[test]
+    fn creating_a_component_or_resource_with_an_empty_composite_is_rejected() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+        let badge = signer_badge(&test);
+
+        let component_rule = create_component(
+            &test,
+            OwnerRule::OwnedBySigner,
+            ComponentAccessRules::new().default(empty_any_of()),
+            ResourceAccessRules::new(),
+        );
+        let resource_rule = create_component(
+            &test,
+            OwnerRule::OwnedBySigner,
+            ComponentAccessRules::new(),
+            ResourceAccessRules::new().burnable(empty_require_all_of(), UpdateRule::Owner),
+        );
+        let resource_owner_rule = create_component(
+            &test,
+            OwnerRule::ByAccessRule(satisfiable_with_a_nested_empty_all_of(&badge)),
+            ComponentAccessRules::new(),
+            ResourceAccessRules::new(),
+        );
+        let component_owner_rule = Transaction::builder_localnet(Epoch(1))
+            .call_function(
+                test.get_template_address("AccessRulesTest"),
+                "with_component_owner_rule",
+                args![OwnerRule::ByAccessRule(empty_any_of())],
+            )
+            .build_and_seal(test.secret_key());
+
+        let reason = test.execute_expect_failure(component_rule, vec![badge.clone()]);
+        assert_reject_reason(reason, empty_composite("access_rules", "any_of"));
+        let reason = test.execute_expect_failure(resource_rule, vec![badge.clone()]);
+        assert_reject_reason(reason, empty_composite("resource_access_rules", "all_of"));
+        let reason = test.execute_expect_failure(resource_owner_rule, vec![badge.clone()]);
+        assert_reject_reason(reason, empty_composite("resource_owner_rule", "all_of"));
+        let reason = test.execute_expect_failure(component_owner_rule, vec![badge]);
+        assert_reject_reason(reason, empty_composite("owner_rule", "any_of"));
+    }
+
+    #[test]
+    fn changing_a_rule_to_an_empty_composite_is_rejected() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+        let badge = signer_badge(&test);
+        test.execute_expect_success(
+            create_component(
+                &test,
+                OwnerRule::OwnedBySigner,
+                ComponentAccessRules::new().default(AccessRule::AllowAll),
+                ResourceAccessRules::new().mintable(AccessRule::DenyAll, UpdateRule::Owner),
+            ),
+            vec![badge.clone()],
+        );
+        let component = test.return_values()[0].decoded::<ComponentAddress>().unwrap();
+
+        let call = |method: &str, args| {
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(component, method, args)
+                .build_and_seal(test.secret_key())
+        };
+        let set_owner_rule = call("set_component_owner_rule", args![SubstateOwnerRule::ByAccessRule(
+            satisfiable_with_a_nested_empty_all_of(&badge)
+        )]);
+        let set_access_rules = call("set_component_access_rules", args![
+            ComponentAccessRules::new().method("set_value", empty_require_all_of())
+        ]);
+        let update_resource_rule = call("update_tokens_access_rule", args![
+            ResourceAuthAction::Mint,
+            empty_any_of()
+        ]);
+
+        let reason = test.execute_expect_failure(set_owner_rule, vec![badge.clone()]);
+        assert_reject_reason(reason, empty_composite("owner_rule", "all_of"));
+        let reason = test.execute_expect_failure(set_access_rules, vec![badge.clone()]);
+        assert_reject_reason(reason, empty_composite("access_rules", "all_of"));
+        let reason = test.execute_expect_failure(update_resource_rule, vec![badge]);
+        assert_reject_reason(reason, empty_composite("new_rule", "any_of"));
     }
 }
 
@@ -2248,8 +2348,9 @@ mod resource_access_rules {
         });
     }
 
-    /// Mint takes the resource's write lock. The hook guards that resource and may legitimately read it, so the
-    /// lock must not be held across the hook call.
+    /// Mint takes the resource's write lock, and vault withdraw, deposit and proof creation take the vault's write
+    /// lock. The hook guards that resource and may legitimately read both the resource and its vault, so neither lock
+    /// must be held across the hook call.
     #[test]
     fn it_allows_a_hook_to_read_the_resource_it_guards() {
         let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
@@ -2280,7 +2381,8 @@ mod resource_access_rules {
             .unwrap();
 
         // `mint_resource` is a function rather than a method, so the mint acts on the resource from outside the
-        // hook's own component and the hook runs.
+        // hook's own component and the hook runs. This deposit creates the account's vault, so its hook reads stored
+        // account state that holds no vault for the resource yet.
         test.execute_expect_success(
             Transaction::builder_localnet(Epoch(1))
                 .call_function(access_rules_template, "mint_resource", args![token_resource])
@@ -2288,6 +2390,25 @@ mod resource_access_rules {
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&user_key),
             vec![user_proof.clone()],
+        );
+
+        // Once the account holds a vault for the resource, the hook also decodes `caller.component_state()` as an
+        // `Account` and reads `vault.balance()`, exercising vault lock release across withdraw, deposit and proof
+        // creation hooks.
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(user_account, "withdraw", args![token_resource, 1])
+                .put_last_instruction_output_on_workspace("withdrawn")
+                .call_method(user_account, "deposit", args![Workspace("withdrawn")])
+                .call_method(user_account, "create_proof_for_resource", args![token_resource])
+                .put_last_instruction_output_on_workspace("proof_all")
+                // The resource proof locks the whole balance, so it is dropped before an amount is locked.
+                .drop_all_proofs_in_workspace()
+                .call_method(user_account, "create_proof_by_amount", args![token_resource, 1])
+                .put_last_instruction_output_on_workspace("proof_amt")
+                .drop_all_proofs_in_workspace()
+                .build_and_seal(&user_key),
+            vec![user_proof],
         );
     }
 

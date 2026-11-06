@@ -152,6 +152,14 @@ pub enum RuntimeError {
         requirement: RuleRequirement,
     },
     #[error(
+        "{argument} has an {composite} rule that lists nothing; an {composite} rule must list at least one rule or \
+         requirement, and deny_all is the rule that admits nobody"
+    )]
+    EmptyAccessRuleComposite {
+        argument: &'static str,
+        composite: &'static str,
+    },
+    #[error(
         "Intrinsic {intrinsic} is not supported by this validator. The template requires a newer engine — validators \
          and indexers must be upgraded before it can be called."
     )]
@@ -404,6 +412,11 @@ pub enum RuntimeError {
     CallFrameRemainingOnStack { remaining: usize },
     #[error("Duplicate reference to substate {address}")]
     DuplicateReference { address: SubstateId },
+    #[error(
+        "Vault {vault_id} already belongs to a component and cannot be placed in another component's state: a vault \
+         may be added to component state only by the call that created it, and only once"
+    )]
+    VaultAlreadyOwned { vault_id: VaultId },
     #[error("Invalid argument: {0}")]
     ArgumentValidationError(#[from] ArgumentValidationError),
     #[error("Fee payment found in main intent, which is not allowed")]
@@ -438,6 +451,12 @@ pub enum RuntimeError {
     AddressAllocationNotUsed { id: u32 },
     #[error("Address allocation type mismatch: got {id}, expected: {expected}")]
     AddressAllocationTypeMismatch { id: SubstateId, expected: &'static str },
+    #[error("Address allocation {id} was created by template {allocated_by} and cannot be used by template {used_by}")]
+    AddressAllocationTemplateMismatch {
+        id: AddressAllocationId,
+        allocated_by: TemplateAddress,
+        used_by: TemplateAddress,
+    },
     #[error("Allocated address does not have an associated template")]
     AddressAllocationNoTemplate,
 
@@ -550,6 +569,7 @@ impl RuntimeError {
             Self::InvalidNumberOfArguments { .. } |
             Self::InvalidMOfNThreshold { .. } |
             Self::DuplicateMOfNRequirement { .. } |
+            Self::EmptyAccessRuleComposite { .. } |
             Self::InvalidAmount { .. } |
             Self::BucketNotFound { .. } |
             Self::BucketNotInScope { .. } |
@@ -563,10 +583,12 @@ impl RuntimeError {
             Self::NoFeesPaid { .. } |
             Self::InvalidOpLockedBucket { .. } |
             Self::DuplicateReference { .. } |
+            Self::VaultAlreadyOwned { .. } |
             Self::ArgumentValidationError(_) |
             Self::FeePaymentInMainIntent |
             Self::AddressAllocationNotFound { .. } |
             Self::AddressAllocationTypeMismatch { .. } |
+            Self::AddressAllocationTemplateMismatch { .. } |
             Self::AddressAllocationNoTemplate |
             Self::NumericConversionError { .. } |
             Self::WriteToReadDeclaredInput { .. } |

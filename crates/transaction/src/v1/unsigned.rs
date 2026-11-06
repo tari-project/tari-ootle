@@ -9,9 +9,10 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, InputDeclaration, declare_input};
-use tari_template_lib_types::{ComponentAddress, UtxoAddress, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib_types::{ComponentAddress, UtxoAddress, constants::TARI_TOKEN, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
+    Assertion,
     Blobs,
     ComponentReference,
     Instruction,
@@ -248,20 +249,36 @@ impl UnsignedTransactionV1 {
                 Instruction::ClaimValidatorFees { address, .. } => {
                     substates.insert(SubstateId::ValidatorFeePool(*address));
                 },
+                Instruction::Assert {
+                    assertion:
+                        Assertion::BucketAmount { resource_address, .. } |
+                        Assertion::BucketContainsNonFungibles { resource_address, .. },
+                    ..
+                } => {
+                    if *resource_address != TARI_TOKEN {
+                        substates.insert(SubstateId::Resource(*resource_address));
+                    }
+                },
                 Instruction::StealthTransfer {
-                    resource_address_ref: ResourceAddressRef::Address(addr),
+                    resource_address_ref,
                     statement,
                     ..
                 } => {
-                    substates.insert(SubstateId::Resource(*addr));
-                    substates.extend(
-                        statement
-                            .inputs_statement
-                            .inputs
-                            .iter()
-                            .map(|i| UtxoAddress::new(*addr, i.commitment.into()))
-                            .map(SubstateId::Utxo),
-                    );
+                    if let ResourceAddressRef::Address(addr) = resource_address_ref {
+                        substates.insert(SubstateId::Resource(*addr));
+                        substates.extend(
+                            statement
+                                .inputs_statement
+                                .inputs
+                                .iter()
+                                .map(|i| UtxoAddress::new(*addr, i.commitment.into()))
+                                .map(SubstateId::Utxo),
+                        );
+                    }
+                    for arg in statement.script_path_template_functions().flat_map(|tf| &tf.args) {
+                        let value = IndexedValue::from_raw(arg)?;
+                        substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
+                    }
                 },
                 Instruction::UpdateComponentTemplate { component, migrate, .. } => {
                     if let Some(component_address) = component.address() {

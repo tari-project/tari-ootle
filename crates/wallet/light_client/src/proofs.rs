@@ -158,6 +158,13 @@ pub fn verify_down_proof(
     down_committee: &VerifiedCommittee,
     down_commit_proof: &[u8],
 ) -> Result<(), LightClientError> {
+    if up_committee.network() != down_committee.network() {
+        return Err(LightClientError::WrongNetwork {
+            what: "down proof up committee",
+            expected: down_committee.network(),
+            found: up_committee.network().as_byte(),
+        });
+    }
     let decoded = decode_substate_down_proof(down_proof)?;
     let up_tip = up_committee.verify_commit_proof(&decoded.up_commit_proof)?;
     let down_tip = down_committee.verify_commit_proof(down_commit_proof)?;

@@ -57,6 +57,10 @@ fn a_verified_checkpoint_reports_the_state_versions_it_commits() {
         checkpoint.shard_state_version(Shard::from_u32(4)),
         Some(StateVersion::zero())
     );
+    assert_eq!(
+        checkpoint.shard_state_version(Shard::global()),
+        Some(StateVersion::zero())
+    );
     assert_eq!(checkpoint.shard_state_version(Shard::from_u32(1)), None);
 }
 

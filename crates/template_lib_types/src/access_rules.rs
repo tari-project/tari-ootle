@@ -3,7 +3,7 @@
 //! Access control rules for template-related data like component methods and resources
 
 use minicbor::{CborLen, Decode, Decoder, Encode, data::Type, decode};
-use tari_bor::adapters::{bounded_vec, boxed_slice};
+use tari_bor::adapters::bounded_vec;
 use tari_template_abi::rust::{
     collections::BTreeMap,
     fmt::{self, Display},
@@ -133,18 +133,10 @@ pub enum RestrictedAccessRule {
     Require(#[n(0)] RequireRule),
     /// Requires any of the specified conditions to be met (logical OR)
     #[n(1)]
-    AnyOf(
-        #[n(0)]
-        #[cbor(with = "boxed_slice")]
-        Box<[RestrictedAccessRule]>,
-    ),
+    AnyOf(#[n(0)] Box<[RestrictedAccessRule]>),
     /// Requires all of the specified conditions to be met (logical AND)
     #[n(2)]
-    AllOf(
-        #[n(0)]
-        #[cbor(with = "boxed_slice")]
-        Box<[RestrictedAccessRule]>,
-    ),
+    AllOf(#[n(0)] Box<[RestrictedAccessRule]>),
 }
 
 impl RestrictedAccessRule {
@@ -307,15 +299,16 @@ fn decode_restricted_access_rule<'b, C>(
     }
 }
 
-// Decodes one `AnyOf`/`AllOf` boxed slice, recursing at the incremented depth. Reuses the
-// `boxed_slice` adapter's element loop (and its `MAX_PREALLOC` cap) via a depth-threading decoder.
 fn decode_restricted_slice<'b, C>(
     d: &mut Decoder<'b>,
     ctx: &mut C,
     depth: usize,
     num_nodes: &mut usize,
 ) -> Result<Box<[RestrictedAccessRule]>, decode::Error> {
-    boxed_slice::decode_with_fn(d, ctx, |d, ctx| decode_restricted_access_rule(d, ctx, depth, num_nodes))
+    bounded_vec::decode_with_fn(d, ctx, usize::MAX, |d, ctx| {
+        decode_restricted_access_rule(d, ctx, depth, num_nodes)
+    })
+    .map(Vec::into_boxed_slice)
 }
 
 fn decode_requirements<'b, C>(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Box<[RuleRequirement]>, decode::Error> {
@@ -442,22 +435,14 @@ pub enum RequireRule {
     #[n(1)]
     AnyOf(
         #[n(0)]
-        #[cbor(
-            encode_with = "boxed_slice::encode",
-            decode_with = "decode_requirements",
-            cbor_len = "boxed_slice::cbor_len"
-        )]
+        #[cbor(decode_with = "decode_requirements")]
         Box<[RuleRequirement]>,
     ),
     /// Requires all of the specified conditions to be met (logical AND)
     #[n(2)]
     AllOf(
         #[n(0)]
-        #[cbor(
-            encode_with = "boxed_slice::encode",
-            decode_with = "decode_requirements",
-            cbor_len = "boxed_slice::cbor_len"
-        )]
+        #[cbor(decode_with = "decode_requirements")]
         Box<[RuleRequirement]>,
     ),
     /// Requires N of the specified conditions to be met
@@ -465,11 +450,7 @@ pub enum RequireRule {
     MOfN(
         #[n(0)] u16,
         #[n(1)]
-        #[cbor(
-            encode_with = "boxed_slice::encode",
-            decode_with = "decode_requirements",
-            cbor_len = "boxed_slice::cbor_len"
-        )]
+        #[cbor(decode_with = "decode_requirements")]
         Box<[RuleRequirement]>,
     ),
 }

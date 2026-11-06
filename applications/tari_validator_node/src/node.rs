@@ -131,7 +131,9 @@ impl ValidatorNode {
     }
 
     async fn handle_epoch_manager_event(&mut self, event: EpochManagerEvent) -> Result<(), anyhow::Error> {
-        let EpochManagerEvent::EpochChanged { epoch, .. } = event;
+        let EpochManagerEvent::EpochChanged { epoch, .. } = event else {
+            return Ok(());
+        };
         let all_vns = self.services.epoch_manager.get_all_validator_nodes(epoch).await?;
         self.services
             .networking
@@ -152,19 +154,19 @@ impl ValidatorNode {
 
         info!(target: LOG_TARGET, "🏁 Block {} committed", block);
 
-        let committed_transactions = block
+        let finalized_transactions = block
             .commands()
             .iter()
-            .filter_map(|cmd| cmd.committing())
+            .filter_map(|cmd| cmd.finalising())
             .map(|t| *t.id())
             .collect::<Vec<_>>();
 
-        if committed_transactions.is_empty() {
+        if finalized_transactions.is_empty() {
             return Ok(());
         }
 
-        info!(target: LOG_TARGET, "🏁 Removing {} finalized transaction(s) from mempool", committed_transactions.len());
-        if let Err(err) = self.services.mempool.remove_transactions(committed_transactions).await {
+        info!(target: LOG_TARGET, "🏁 Removing {} finalized transaction(s) from mempool", finalized_transactions.len());
+        if let Err(err) = self.services.mempool.remove_transactions(finalized_transactions).await {
             error!(target: LOG_TARGET, "Failed to remove transaction from mempool: {}", err);
         }
 

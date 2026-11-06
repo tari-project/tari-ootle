@@ -45,6 +45,7 @@ impl<TAddr: NodeAddressable> TryFrom<DbValidatorNode> for ValidatorNode<TAddr> {
     type Error = SqliteStorageError;
 
     fn try_from(vn: DbValidatorNode) -> Result<Self, Self::Error> {
+        let vote_power = vn.try_vote_power()?;
         Ok(Self {
             shard_key: SubstateAddress::try_from(vn.shard_key).map_err(|_| {
                 SqliteStorageError::MalformedDbData(format!("Invalid shard id in validator node record id={}", vn.id))
@@ -61,13 +62,23 @@ impl<TAddr: NodeAddressable> TryFrom<DbValidatorNode> for ValidatorNode<TAddr> {
                     vn.id
                 ))
             })?,
-            vote_power: VotePower::of(vn.power as u64),
+            vote_power,
         })
     }
 }
 
 impl DbValidatorNode {
+    pub fn try_vote_power(&self) -> Result<VotePower, SqliteStorageError> {
+        power_from_db(self.power, self.id)
+    }
+
     pub fn try_parse_address<T: serde::de::DeserializeOwned>(address: &str) -> Result<T, SqliteStorageError> {
         deserialize_json(address)
     }
+}
+
+pub(crate) fn power_from_db(power: i64, id: i32) -> Result<VotePower, SqliteStorageError> {
+    u64::try_from(power).map(VotePower::of).map_err(|_| {
+        SqliteStorageError::MalformedDbData(format!("Negative vote power {power} in validator node record id={id}"))
+    })
 }

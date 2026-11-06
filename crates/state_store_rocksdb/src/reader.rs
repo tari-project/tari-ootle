@@ -1621,16 +1621,28 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         let substates_cf = self.db().cf(SubstateCf)?;
         let mut locked_substates = Vec::with_capacity(held.len());
         for (_, substate_id, lock) in held {
-            let substate = substates_cf
-                .get(
-                    &SubstateAddress::from_substate_id(substate_id, lock.version()),
-                    OPERATION,
-                )
-                .optional()?;
+            let pending_value = scope.ancestry().iter().find_map(|block_id| {
+                pending
+                    .block_diffs
+                    .get(block_id)?
+                    .version_up(substate_id, lock.version())?
+                    .up_substate()
+                    .map(|s| s.substate_value().clone())
+            });
+            let value = match pending_value {
+                Some(value) => Some(value),
+                None => substates_cf
+                    .get(
+                        &SubstateAddress::from_substate_id(substate_id, lock.version()),
+                        OPERATION,
+                    )
+                    .optional()?
+                    .and_then(|s| s.into_substate_value()),
+            };
             locked_substates.push(LockedSubstateValue {
                 substate_id: substate_id.clone(),
                 lock,
-                value: substate.and_then(|s| s.into_substate_value()),
+                value,
             });
         }
 

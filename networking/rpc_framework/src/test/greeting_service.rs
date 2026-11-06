@@ -64,6 +64,23 @@ pub struct GreetingService {
     greetings: Vec<String>,
     call_count: Arc<AtomicUsize>,
     live_streams: Arc<AtomicUsize>,
+    guarded_responses: Arc<AtomicUsize>,
+}
+
+/// Counts itself among the guards still held for as long as it lives.
+struct CountedGuard(Arc<AtomicUsize>);
+
+impl CountedGuard {
+    fn new(count: &Arc<AtomicUsize>) -> Self {
+        count.fetch_add(1, Ordering::SeqCst);
+        Self(count.clone())
+    }
+}
+
+impl Drop for CountedGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl GreetingService {
@@ -75,7 +92,13 @@ impl GreetingService {
             greetings: greetings.iter().map(ToString::to_string).collect(),
             call_count: Default::default(),
             live_streams: Default::default(),
+            guarded_responses: Default::default(),
         }
+    }
+
+    /// The number of `reply_with_msg_of_size` responses whose guard the server still holds.
+    pub fn guarded_responses(&self) -> usize {
+        self.guarded_responses.load(Ordering::SeqCst)
     }
 
     pub fn call_count(&self) -> usize {
@@ -151,7 +174,7 @@ impl GreetingRpc for GreetingService {
     async fn reply_with_msg_of_size(&self, request: Request<u64>) -> Result<Response<Vec<u8>>, RpcStatus> {
         self.inc_call_count();
         let size = usize::try_from(request.into_message()).unwrap();
-        Ok(Response::new(iter::repeat_n(0, size).collect()))
+        Ok(Response::new(iter::repeat_n(0, size).collect()).with_guard(CountedGuard::new(&self.guarded_responses)))
     }
 
     async fn slow_stream(&self, request: Request<SlowStreamRequest>) -> Result<Streaming<Vec<u8>>, RpcStatus> {

@@ -19,9 +19,13 @@ use crate::{
 const LOG_TARGET: &str = "tari::ootle::consensus::sm::idle";
 
 /// The state of a node that is registered for no committee in the current epoch: it holds whatever it
-/// committed while it was, and waits for an epoch that puts it back in one.
+/// committed while it was, and waits for an epoch that puts it back in one. While a registration that activates
+/// later is pending, it presyncs that committee's state once per epoch.
 #[derive(Debug, Clone)]
 pub struct Idle<TSpec> {
+    /// The epoch that was current when the last presync started. A presync syncs to the checkpoint before that
+    /// epoch, so repeating it within the same epoch fetches nothing new.
+    presynced_at: Option<Epoch>,
     _spec: PhantomData<TSpec>,
 }
 
@@ -29,7 +33,17 @@ impl<TSpec> Idle<TSpec>
 where TSpec: ConsensusSpec
 {
     pub fn new() -> Self {
-        Self { _spec: PhantomData }
+        Self {
+            presynced_at: None,
+            _spec: PhantomData,
+        }
+    }
+
+    pub fn presynced_at(epoch: Epoch) -> Self {
+        Self {
+            presynced_at: Some(epoch),
+            _spec: PhantomData,
+        }
     }
 
     pub(super) async fn on_enter(
@@ -42,6 +56,9 @@ where TSpec: ConsensusSpec
         if let Some(event) = self.check_registration(context).await? {
             return Ok(event);
         }
+        if let Some(event) = self.check_pending_activation(context).await? {
+            return Ok(event);
+        }
 
         loop {
             tokio::select! {
@@ -50,7 +67,7 @@ where TSpec: ConsensusSpec
                 event = epoch_events.recv() => {
                     match event {
                         Ok(event) => {
-                            if let Some(event) = self.on_epoch_event(event).await? {
+                            if let Some(event) = self.on_epoch_event(context, event).await? {
                                 return Ok(event);
                             }
                         },
@@ -61,6 +78,9 @@ where TSpec: ConsensusSpec
                             // entry has already run, so registration is read again rather than waited
                             // for.
                             if let Some(event) = self.check_registration(context).await? {
+                                return Ok(event);
+                            }
+                            if let Some(event) = self.check_pending_activation(context).await? {
                                 return Ok(event);
                             }
                         },
@@ -103,19 +123,43 @@ where TSpec: ConsensusSpec
         Ok(is_registered)
     }
 
-    async fn on_epoch_event(&self, event: EpochManagerEvent) -> Result<Option<ConsensusStateEvent>, HotStuffError> {
+    /// Emits `PendingActivation` if this node joins a committee at a later epoch and has not presynced in the
+    /// current one.
+    async fn check_pending_activation(
+        &self,
+        context: &mut ConsensusWorkerContext<TSpec>,
+    ) -> Result<Option<ConsensusStateEvent>, HotStuffError> {
+        let Some(pending) = context.epoch_manager.get_pending_activation().await? else {
+            return Ok(None);
+        };
+        let current_epoch = context.epoch_manager.current_epoch().await?;
+        if self.presynced_at == Some(current_epoch) {
+            return Ok(None);
+        }
+        info!(
+            target: LOG_TARGET,
+            "🛜 This node joins {} at {} (current epoch {current_epoch}). Presyncing its state.",
+            pending.shard_group,
+            pending.activation_epoch,
+        );
+        Ok(Some(ConsensusStateEvent::PendingActivation {
+            shard_group: pending.shard_group,
+        }))
+    }
+
+    async fn on_epoch_event(
+        &self,
+        context: &mut ConsensusWorkerContext<TSpec>,
+        event: EpochManagerEvent,
+    ) -> Result<Option<ConsensusStateEvent>, HotStuffError> {
         match event {
-            EpochManagerEvent::EpochChanged {
-                epoch,
-                registered_shard_group,
-                ..
-            } => {
-                if registered_shard_group.is_some() {
-                    Ok(Some(ConsensusStateEvent::RegisteredForEpoch { epoch }))
-                } else {
-                    Ok(None)
+            EpochManagerEvent::EpochChanged { .. } => {
+                if let Some(event) = self.check_registration(context).await? {
+                    return Ok(Some(event));
                 }
+                self.check_pending_activation(context).await
             },
+            EpochManagerEvent::PendingActivation { .. } => self.check_pending_activation(context).await,
         }
     }
 }

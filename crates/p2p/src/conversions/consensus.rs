@@ -1003,6 +1003,7 @@ impl From<AbortReason> for proto::consensus::AbortReason {
             AbortReason::ValidityWindowTooLong => Self::ValidityWindowTooLong,
             AbortReason::InputPledgeTooLarge => Self::InputPledgeTooLarge,
             AbortReason::GovernanceCallAfterPinnedEpoch => Self::GovernanceCallAfterPinnedEpoch,
+            AbortReason::InputLoadTooLarge => Self::InputLoadTooLarge,
         }
     }
 }
@@ -1025,6 +1026,7 @@ impl TryFrom<proto::consensus::AbortReason> for AbortReason {
             proto::consensus::AbortReason::ValidityWindowTooLong => Ok(Self::ValidityWindowTooLong),
             proto::consensus::AbortReason::InputPledgeTooLarge => Ok(Self::InputPledgeTooLarge),
             proto::consensus::AbortReason::GovernanceCallAfterPinnedEpoch => Ok(Self::GovernanceCallAfterPinnedEpoch),
+            proto::consensus::AbortReason::InputLoadTooLarge => Ok(Self::InputLoadTooLarge),
         }
     }
 }

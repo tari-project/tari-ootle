@@ -197,7 +197,7 @@ fn test_composed() {
 fn test_buggy_template() {
     // Uncomment the following lines to print the template definition bytes embedded in the
     // `tari_tdef` custom section
-    // let encoded = tari_bor::encode(&tari_template_abi::VersionedTemplateDef::V1(tari_template_abi::TemplateDefV1 {
+    // let encoded = tari_bor::encode(&tari_template_abi::TemplateDef::V2(tari_template_abi::TemplateDefV2 {
     //     template_name: "Buggy".to_string(),
     //     abi_version: tari_template_abi::version::MINIMUM_SUPPORTED_WASM_ABI_VERSION,
     //     functions: vec![],

@@ -330,6 +330,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     previous => self.inner.current_epoch_hash(),
                     corrected => epoch_hash
                 ));
+                self.has_epoch_changed = true;
                 self.inner.advance_to_epoch(epoch, epoch_hash)?;
                 self.committee_cache.clear().await;
                 Ok(())
@@ -742,7 +743,7 @@ mod tests {
             fee_claim_public_key: RistrettoPublicKeyBytes::zero(),
         };
         let (_, rx_request) = mpsc::channel(1);
-        let (tx_events, _) = broadcast::channel(1);
+        let (tx_events, _) = broadcast::channel(16);
         EpochManagerService {
             rx_request,
             inner: EpochManager::new(
@@ -1012,5 +1013,133 @@ mod tests {
         service.on_scanning_complete().unwrap();
 
         assert!(published_pending_activations(&mut rx).is_empty());
+    }
+
+    #[tokio::test]
+    async fn deactivate_validator_node_preserves_prior_deactivated_registration_epochs() {
+        let shutdown = Shutdown::new();
+        let global_db = GlobalDb::new(SqliteGlobalDbAdapter::new(
+            SqliteConnection::establish(":memory:").unwrap(),
+        ));
+        global_db.adapter().migrate().unwrap();
+        let mut service = create_service(global_db.clone(), &shutdown);
+
+        register(&global_db, 1, Epoch(1));
+        service
+            .inner
+            .deactivate_validator_node(public_key(1), Epoch(3))
+            .unwrap();
+
+        register(&global_db, 1, Epoch(5));
+        service
+            .inner
+            .deactivate_validator_node(public_key(1), Epoch(8))
+            .unwrap();
+
+        assert_eq!(service.inner.get_total_validator_count(Epoch(2)).unwrap(), 1);
+        assert_eq!(service.inner.get_total_validator_count(Epoch(4)).unwrap(), 0);
+        assert_eq!(service.inner.get_total_validator_count(Epoch(6)).unwrap(), 1);
+        assert_eq!(service.inner.get_total_validator_count(Epoch(8)).unwrap(), 0);
+
+        let mut tx = global_db.create_transaction().unwrap();
+        let mut vn_db = global_db.validator_nodes(&mut tx);
+        let vns_epoch_2 = vn_db.get_all_registered_within_start_epoch(Epoch(2)).unwrap();
+        assert_eq!(vns_epoch_2.len(), 1);
+        assert_eq!(vns_epoch_2[0].start_epoch, Epoch(1));
+        assert_eq!(vns_epoch_2[0].end_epoch, Some(Epoch(3)));
+
+        let vns_epoch_4 = vn_db.get_all_registered_within_start_epoch(Epoch(4)).unwrap();
+        assert!(vns_epoch_4.is_empty());
+
+        let vns_epoch_6 = vn_db.get_all_registered_within_start_epoch(Epoch(6)).unwrap();
+        assert_eq!(vns_epoch_6.len(), 1);
+        assert_eq!(vns_epoch_6[0].start_epoch, Epoch(5));
+        assert_eq!(vns_epoch_6[0].end_epoch, Some(Epoch(8)));
+    }
+
+    #[tokio::test]
+    async fn hash_correction_emits_epoch_changed_on_scanning_complete() {
+        let shutdown = Shutdown::new();
+        let global_db = GlobalDb::new(SqliteGlobalDbAdapter::new(
+            SqliteConnection::establish(":memory:").unwrap(),
+        ));
+        global_db.adapter().migrate().unwrap();
+        let mut service = create_service(global_db.clone(), &shutdown);
+        let mut rx = service.tx_events.subscribe();
+
+        register(&global_db, 1, Epoch(5));
+        service
+            .activate_epoch(Epoch(5), FixedHash::from([1; 32]))
+            .await
+            .unwrap();
+        service
+            .handle_epoch_event(EpochEvent::DoneForNow {
+                epoch: Epoch(5),
+                epoch_hash: FixedHash::from([1; 32]),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(rx.try_recv().unwrap(), EpochManagerEvent::EpochChanged {
+            epoch: Epoch(5),
+            ..
+        }));
+        assert!(rx.try_recv().is_err());
+
+        register(&global_db, 2, Epoch(5));
+        service
+            .activate_epoch(Epoch(5), FixedHash::from([2; 32]))
+            .await
+            .unwrap();
+        service
+            .handle_epoch_event(EpochEvent::DoneForNow {
+                epoch: Epoch(5),
+                epoch_hash: FixedHash::from([2; 32]),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(rx.try_recv().unwrap(), EpochManagerEvent::EpochChanged {
+            epoch: Epoch(5),
+            ..
+        }));
+    }
+
+    #[tokio::test]
+    async fn distinct_validators_keeps_latest_registration_within_same_start_epoch() {
+        let global_db: TestGlobalDb = GlobalDb::new(SqliteGlobalDbAdapter::new(
+            SqliteConnection::establish(":memory:").unwrap(),
+        ));
+        global_db.adapter().migrate().unwrap();
+
+        let shard_key_1 = SubstateAddress::from_array([10; SubstateAddress::LENGTH]);
+        let shard_key_2 = SubstateAddress::from_array([20; SubstateAddress::LENGTH]);
+        let mut tx = global_db.create_transaction().unwrap();
+        global_db
+            .validator_nodes(&mut tx)
+            .insert_validator_node(
+                public_key(1),
+                public_key(1),
+                shard_key_1,
+                Epoch(5),
+                public_key(1),
+                VotePower::of(1),
+            )
+            .unwrap();
+        global_db
+            .validator_nodes(&mut tx)
+            .insert_validator_node(
+                public_key(1),
+                public_key(1),
+                shard_key_2,
+                Epoch(5),
+                public_key(1),
+                VotePower::of(1),
+            )
+            .unwrap();
+        let vns = global_db
+            .validator_nodes(&mut tx)
+            .get_all_registered_within_start_epoch(Epoch(5))
+            .unwrap();
+        assert_eq!(vns.len(), 1);
+        assert_eq!(vns[0].shard_key, shard_key_2);
     }
 }

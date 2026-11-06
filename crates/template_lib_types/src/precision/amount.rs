@@ -789,9 +789,18 @@ mod tests {
         assert_eq!(h, 4);
         assert_eq!(Amount::from(-1).checked_div_ceil(Amount::from(2)), Some(Amount::ZERO));
         assert_eq!(Amount::from(1).checked_div_ceil(Amount::from(-2)), Some(Amount::ZERO));
-        assert_eq!(Amount::from(-7).checked_div_ceil(Amount::from(2)), Some(Amount::from(-3)));
-        assert_eq!(Amount::from(7).checked_div_ceil(Amount::from(-2)), Some(Amount::from(-3)));
-        assert_eq!(Amount::from(-7).checked_div_ceil(Amount::from(-2)), Some(Amount::from(4)));
+        assert_eq!(
+            Amount::from(-7).checked_div_ceil(Amount::from(2)),
+            Some(Amount::from(-3))
+        );
+        assert_eq!(
+            Amount::from(7).checked_div_ceil(Amount::from(-2)),
+            Some(Amount::from(-3))
+        );
+        assert_eq!(
+            Amount::from(-7).checked_div_ceil(Amount::from(-2)),
+            Some(Amount::from(4))
+        );
         let i = Amount::from(8);
         let j = i.checked_pow(3).unwrap();
         assert_eq!(j, Amount::from(512));

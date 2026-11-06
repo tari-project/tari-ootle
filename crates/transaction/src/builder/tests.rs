@@ -19,7 +19,7 @@ use crate::{
     Transaction,
     TransactionSignature,
     args,
-    args::{InstructionArg, WorkspaceOffsetId},
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
     builder::named_component_call::CallFromWorkspace,
 };
 
@@ -516,25 +516,19 @@ fn from_unsigned_advances_workspace_ids_past_existing_instructions() {
         rebuilt.instructions()[0],
         Instruction::PutLastInstructionOutputOnWorkspace { key: 0 }
     );
-    assert_eq!(
-        rebuilt.instructions()[1],
-        Instruction::AllocateAddress {
-            allocatable_type: AllocatableAddressType::Component,
-            workspace_id: 1,
-        }
-    );
+    assert_eq!(rebuilt.instructions()[1], Instruction::AllocateAddress {
+        allocatable_type: AllocatableAddressType::Component,
+        workspace_id: 1,
+    });
     assert_eq!(
         rebuilt.instructions()[2],
         Instruction::PutLastInstructionOutputOnWorkspace { key: 2 }
     );
-    assert_eq!(
-        rebuilt.instructions()[3],
-        Instruction::CallFunction {
-            address: TemplateAddress::default(),
-            function: "use_third".try_into().unwrap(),
-            args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(2))],
-        }
-    );
+    assert_eq!(rebuilt.instructions()[3], Instruction::CallFunction {
+        address: TemplateAddress::default(),
+        function: "use_third".try_into().unwrap(),
+        args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(2))],
+    });
     assert_eq!(
         rebuilt.fee_instructions()[0],
         Instruction::PutLastInstructionOutputOnWorkspace { key: 0 }
@@ -546,10 +540,101 @@ fn from_unsigned_advances_workspace_ids_past_existing_instructions() {
 }
 
 #[test]
+fn from_unsigned_preserves_maximum_workspace_ids_when_building_and_signing() {
+    for fee_intent in [false, true] {
+        let mut unsigned = crate::UnsignedTransactionV1::new_default(0x10u8, Epoch(1));
+        let instructions = vec![
+            Instruction::AllocateAddress {
+                allocatable_type: AllocatableAddressType::Component,
+                workspace_id: WorkspaceId::MAX,
+            },
+            Instruction::AllocateAddress {
+                allocatable_type: AllocatableAddressType::Component,
+                workspace_id: 0,
+            },
+        ];
+        if fee_intent {
+            unsigned.fee_instructions = instructions;
+        } else {
+            unsigned.instructions = instructions;
+        }
+        let unsigned = crate::UnsignedTransaction::from(unsigned);
+        let expected = tari_bor::encode(&unsigned).unwrap();
+        let rebuilt = crate::TransactionBuilder::from_unsigned(unsigned).build_unsigned();
+        assert_eq!(tari_bor::encode(&rebuilt).unwrap(), expected);
+
+        let secret = RistrettoSecretKey::random(&mut rand::rng());
+        let transaction = crate::TransactionBuilder::from_unsigned(rebuilt)
+            .add_instruction(Instruction::DropAllProofsInWorkspace)
+            .with_signatures(vec![])
+            .seal(&secret);
+        assert!(transaction.verify_all_signatures());
+    }
+}
+
+#[test]
+fn the_last_workspace_id_can_be_allocated_in_either_intent() {
+    for fee_intent in [false, true] {
+        let mut unsigned = crate::UnsignedTransactionV1::new_default(0x10u8, Epoch(1));
+        let instruction = Instruction::AllocateAddress {
+            allocatable_type: AllocatableAddressType::Component,
+            workspace_id: WorkspaceId::MAX - 1,
+        };
+        if fee_intent {
+            unsigned.fee_instructions.push(instruction);
+        } else {
+            unsigned.instructions.push(instruction);
+        }
+
+        let builder = crate::TransactionBuilder::from_unsigned(unsigned);
+        let rebuilt = if fee_intent {
+            builder.with_fee_instructions_builder(|b| b.allocate_component_address("last"))
+        } else {
+            builder.allocate_component_address("last")
+        }
+        .build_unsigned();
+        let instructions = if fee_intent {
+            rebuilt.fee_instructions()
+        } else {
+            rebuilt.instructions()
+        };
+        assert_eq!(
+            instructions.last().unwrap().allocated_workspace_id(),
+            Some(WorkspaceId::MAX)
+        );
+    }
+}
+
+#[test]
+#[should_panic(expected = "Workspace ID overflow")]
+fn allocating_after_the_maximum_workspace_id_is_rejected() {
+    Transaction::builder_localnet(Epoch(1))
+        .add_instruction(Instruction::AllocateAddress {
+            allocatable_type: AllocatableAddressType::Component,
+            workspace_id: WorkspaceId::MAX,
+        })
+        .allocate_component_address("overflow");
+}
+
+#[test]
+#[should_panic(expected = "Workspace ID overflow")]
+fn allocating_after_the_maximum_fee_workspace_id_is_rejected() {
+    Transaction::builder_localnet(Epoch(1)).with_fee_instructions_builder(|b| {
+        b.add_instruction(Instruction::AllocateAddress {
+            allocatable_type: AllocatableAddressType::Component,
+            workspace_id: WorkspaceId::MAX,
+        })
+        .allocate_component_address("overflow")
+    });
+}
+
+#[test]
 fn cbor_decode_rejects_oversized_inputs_signatures_and_blob_hashes() {
     use tari_ootle_common_types::InputDeclaration;
-    use tari_template_lib_types::{Hash32, ObjectKey};
+    use tari_template_lib_types::ObjectKey;
+
     use crate::{
+        Blob,
         Blobs,
         v1::{MAX_SIGNATURES_PER_TRANSACTION, MAX_TRANSACTION_INPUTS, UnsealedTransactionV1, UnsignedTransactionV1},
     };
@@ -565,7 +650,7 @@ fn cbor_decode_rejects_oversized_inputs_signatures_and_blob_hashes() {
     let unsigned = builder.build_unsigned();
     let encoded_unsigned = tari_bor::encode(&unsigned).unwrap();
     assert!(
-        tari_bor::decode::< crate::UnsignedTransaction >(&encoded_unsigned).is_err(),
+        tari_bor::decode::<crate::UnsignedTransaction>(&encoded_unsigned).is_err(),
         "decoding > MAX_TRANSACTION_INPUTS inputs must be rejected"
     );
 
@@ -573,7 +658,10 @@ fn cbor_decode_rejects_oversized_inputs_signatures_and_blob_hashes() {
     let base_unsigned = UnsignedTransactionV1::new_default(0x10u8, Epoch(1));
     let dummy_sig = TransactionSignature::new(
         tari_template_lib_types::crypto::RistrettoPublicKeyBytes::zero(),
-        TRANSACTION_SIGNING_CONTEXT.sign(&RistrettoSecretKey::default(), &base_unsigned.to_signing_message(&tari_template_lib_types::crypto::RistrettoPublicKeyBytes::zero())),
+        TRANSACTION_SIGNING_CONTEXT.sign(
+            &RistrettoSecretKey::default(),
+            &base_unsigned.to_signing_message(&tari_template_lib_types::crypto::RistrettoPublicKeyBytes::zero()),
+        ),
     );
     let sigs = vec![dummy_sig; MAX_SIGNATURES_PER_TRANSACTION + 1];
     let unsealed = UnsealedTransactionV1::new(base_unsigned, sigs);
@@ -583,9 +671,13 @@ fn cbor_decode_rejects_oversized_inputs_signatures_and_blob_hashes() {
         "decoding > MAX_SIGNATURES_PER_TRANSACTION signatures must be rejected"
     );
 
-    // 3. Oversized BlobHashes must fail at CBOR decode.
-    let hashes = vec![Hash32::zero(); Blobs::MAX_BLOBS + 1];
-    let encoded_hashes = tari_bor::encode(&hashes).unwrap();
+    let hashes_at_limit = Blobs::from_vec(vec![Blob::default(); Blobs::MAX_BLOBS]).hashes();
+    let encoded_hashes = tari_bor::encode(&hashes_at_limit).unwrap();
+    let decoded_hashes: crate::BlobHashes = tari_bor::decode(&encoded_hashes).unwrap();
+    assert_eq!(decoded_hashes, hashes_at_limit);
+
+    let oversized_hashes = Blobs::from_vec(vec![Blob::default(); Blobs::MAX_BLOBS + 1]).hashes();
+    let encoded_hashes = tari_bor::encode(&oversized_hashes).unwrap();
     assert!(
         tari_bor::decode::<crate::BlobHashes>(&encoded_hashes).is_err(),
         "decoding > Blobs::MAX_BLOBS blob hashes must be rejected"

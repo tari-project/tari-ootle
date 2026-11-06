@@ -119,14 +119,11 @@ impl TransactionBuilder<MainIntent> {
             .chain(unsigned_transaction.fee_instructions())
         {
             if let Some(id) = instruction.allocated_workspace_id() {
-                let next_id = id.checked_add(1).expect("Workspace ID overflow");
-                if next_id > workspace_ids.next_id() {
-                    workspace_ids.set_next_id(next_id);
-                }
+                workspace_ids.advance_past(id);
             }
         }
         let mut fee_builder = Self::new_fee_builder(unsigned_transaction.network(), unsigned_transaction.max_epoch());
-        fee_builder.workspace_ids.set_next_id(workspace_ids.next_id());
+        fee_builder.workspace_ids = workspace_ids.clone();
         Self {
             fee_instruction_builder: Some(Box::new(fee_builder)),
             reserved_blob_slots: 0,
@@ -362,6 +359,11 @@ impl TransactionBuilder<FeeIntent> {
 }
 
 impl<D> TransactionBuilder<D> {
+    /// Returns the next workspace ID.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the workspace ID range is exhausted.
     pub fn next_workspace_id(&self) -> args::WorkspaceId {
         self.workspace_ids.next_id()
     }
@@ -940,11 +942,7 @@ impl<D> TransactionBuilder<D> {
     pub fn add_instruction(mut self, instruction: Instruction) -> Self {
         let id = instruction.allocated_workspace_id();
         if let Some(id) = id {
-            // + 1 because the current id counter is the next available id
-            let next_id = id.checked_add(1).expect("Workspace ID overflow");
-            if next_id > self.workspace_ids.next_id() {
-                self.workspace_ids.set_next_id(next_id);
-            }
+            self.workspace_ids.advance_past(id);
         }
         self.add_inputs_for_instruction(&instruction);
         self.unsigned_transaction.instructions_mut().push(instruction);

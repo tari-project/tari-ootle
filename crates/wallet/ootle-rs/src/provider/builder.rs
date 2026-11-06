@@ -33,7 +33,7 @@ impl ProviderBuilder<NoWallet> {
         Self {
             network: Network::MainNet,
             wallet: NoWallet,
-            indexer_trust: IndexerTrust::Verify,
+            indexer_trust: IndexerTrust::default(),
         }
     }
 
@@ -52,7 +52,7 @@ impl<Wallet> ProviderBuilder<Wallet> {
         }
     }
 
-    /// Whether the provider verifies what the indexer serves. Defaults to [`IndexerTrust::Verify`].
+    /// Whether the provider verifies what the indexer serves. Defaults to [`IndexerTrust::Trust`].
     pub fn indexer_trust(mut self, indexer_trust: IndexerTrust) -> Self {
         self.indexer_trust = indexer_trust;
         self

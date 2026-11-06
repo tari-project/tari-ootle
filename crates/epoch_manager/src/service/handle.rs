@@ -23,6 +23,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::{
     EpochManagerEvent,
+    PendingActivation,
     error::EpochManagerError,
     service::{CommitteeCache, NetworkDescription, types::EpochManagerRequest},
     traits::{EpochManagerReader, EpochManagerWriter},
@@ -420,6 +421,15 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
         let (tx, rx) = oneshot::channel();
         self.tx_request
             .send(EpochManagerRequest::GetBirthdayEpoch { reply: tx })
+            .await
+            .map_err(|_| EpochManagerError::SendError)?;
+        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
+    }
+
+    async fn get_pending_activation(&self) -> Result<Option<PendingActivation>, EpochManagerError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx_request
+            .send(EpochManagerRequest::GetPendingActivation { reply: tx })
             .await
             .map_err(|_| EpochManagerError::SendError)?;
         rx.await.map_err(|_| EpochManagerError::ReceiveError)?

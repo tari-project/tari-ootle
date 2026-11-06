@@ -348,28 +348,30 @@ fn assert_substate_in_an_empty_shard_is_provably_absent(protocol_version: Protoc
         .unwrap();
     let (_, _, empty_leaf_proof) = SpreadPrefixStateTree::new(&mut empty).get_proof(1, &substate).unwrap();
 
-    let empty_group = ShardGroupRootTree::build(protocol_version, [
-        (own_shard, SPARSE_MERKLE_PLACEHOLDER_HASH, 0, ZERO_ACC),
-        (sibling_shard, hash_value_from_seed(99), 1, ZERO_ACC),
-    ])
-    .unwrap();
-    let (value, absent_proof) = empty_group.get_proof(own_shard).unwrap();
-    assert!(value.is_none());
-    SubstateValueProof::new(
-        SPARSE_MERKLE_PLACEHOLDER_HASH,
-        0,
-        ZERO_ACC,
-        absent_proof,
-        empty_leaf_proof.clone(),
-    )
-    .verify_exclusion(
-        JmtHashScheme::V1,
-        protocol_version,
-        &empty_group.root(),
-        NUM_PRESHARDS,
-        &substate,
-    )
-    .unwrap();
+    for sibling_state in [(hash_value_from_seed(99), 1), (SPARSE_MERKLE_PLACEHOLDER_HASH, 0)] {
+        let empty_group = ShardGroupRootTree::build(protocol_version, [
+            (own_shard, SPARSE_MERKLE_PLACEHOLDER_HASH, 0, ZERO_ACC),
+            (sibling_shard, sibling_state.0, sibling_state.1, ZERO_ACC),
+        ])
+        .unwrap();
+        let (value, absent_proof) = empty_group.get_proof(own_shard).unwrap();
+        assert!(value.is_none());
+        SubstateValueProof::new(
+            SPARSE_MERKLE_PLACEHOLDER_HASH,
+            0,
+            ZERO_ACC,
+            absent_proof,
+            empty_leaf_proof.clone(),
+        )
+        .verify_exclusion(
+            JmtHashScheme::V1,
+            protocol_version,
+            &empty_group.root(),
+            NUM_PRESHARDS,
+            &substate,
+        )
+        .unwrap();
+    }
 
     // Once the shard holds state, its leaf is present and no state cannot be claimed for it - even
     // when every substate in it has gone down.

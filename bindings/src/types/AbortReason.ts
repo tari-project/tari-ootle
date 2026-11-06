@@ -12,4 +12,5 @@ export type AbortReason =
   | "EpochExpired"
   | "ValidityWindowTooLong"
   | "InputPledgeTooLarge"
-  | "GovernanceCallAfterPinnedEpoch";
+  | "GovernanceCallAfterPinnedEpoch"
+  | "InputLoadTooLarge";

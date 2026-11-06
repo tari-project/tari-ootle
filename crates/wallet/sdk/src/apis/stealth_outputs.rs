@@ -16,7 +16,7 @@ use tari_ootle_common_types::{
     displayable::Displayable,
     optional::{IsNotFoundError, Optional},
 };
-use tari_ootle_transaction::MAX_TRANSACTION_INPUTS;
+use tari_ootle_transaction::{MAX_TRANSACTION_INPUTS, TransactionId};
 use tari_ootle_wallet_crypto::{
     DecryptedData,
     OutputWitness,
@@ -521,6 +521,42 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
             .store
             .with_read_tx(|tx| tx.stealth_outputs_get_locked_by_lock_id(lock_id))?;
         Ok(outputs)
+    }
+
+    /// The stealth outputs a transaction holding `lock_ids` spends: each lock's `LockedForSpend` outputs, in lock
+    /// order. These are the outputs the wallet signs a spend for when it submits under these locks. A lock holding no
+    /// stealth outputs contributes none.
+    pub fn get_locked_for_spend(
+        &self,
+        lock_ids: &[WalletLockId],
+    ) -> Result<Vec<StealthOutputModel>, StealthOutputsApiError> {
+        let outputs = self.store.with_read_tx(|tx| locked_for_spend(tx, lock_ids))?;
+        Ok(outputs)
+    }
+
+    /// The wallet's stealth outputs that a transaction submitted under `lock_ids` spends, each once.
+    ///
+    /// Before the transaction finalizes these are [`Self::get_locked_for_spend`]. Finalizing marks the spent outputs
+    /// `Spent` and takes them out of the lock, so once the wallet stores `transaction_id`'s finalized result, the
+    /// wallet outputs its diff downs are included too. Both are read in one snapshot, so an output that finalizes
+    /// concurrently is found through one source or the other.
+    pub fn get_spent_under_locks(
+        &self,
+        lock_ids: &[WalletLockId],
+        transaction_id: Option<TransactionId>,
+    ) -> Result<Vec<StealthOutputModel>, StealthOutputsApiError> {
+        let outputs = self.store.with_read_tx(|tx| {
+            let mut outputs = locked_for_spend(tx, lock_ids)?;
+            if let Some(transaction_id) = transaction_id {
+                outputs.extend(downed_by_finalized_transaction(tx, transaction_id)?);
+            }
+            Ok::<_, WalletStorageError>(outputs)
+        })?;
+        let mut seen = HashSet::with_capacity(outputs.len());
+        Ok(outputs
+            .into_iter()
+            .filter(|output| seen.insert(output.to_utxo_address()))
+            .collect())
     }
 
     pub fn add_output(&self, output: &StealthOutputModel) -> Result<(), StealthOutputsApiError> {
@@ -1280,6 +1316,57 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
             .encrypt_value_and_mask(amount, &mask.key, public_key, &nonce_secret, memo)?;
         Ok((public_nonce, data))
     }
+}
+
+/// Each lock's `LockedForSpend` outputs. A lock also holds the change its statement creates (`LockedUnconfirmed`),
+/// which its transaction does not spend.
+fn locked_for_spend<R: WalletStoreReader>(
+    reader: &mut R,
+    lock_ids: &[WalletLockId],
+) -> Result<Vec<StealthOutputModel>, WalletStorageError> {
+    let mut outputs = Vec::new();
+    for lock_id in lock_ids {
+        let Some(locked) = reader.stealth_outputs_get_locked_by_lock_id(*lock_id).optional()? else {
+            continue;
+        };
+        outputs.extend(
+            locked
+                .into_iter()
+                .filter(|output| matches!(output.status, OutputStatus::LockedForSpend)),
+        );
+    }
+    Ok(outputs)
+}
+
+/// The wallet's stealth outputs that `transaction_id`'s finalized diff downs. Empty until the wallet stores a
+/// finalized result for the transaction.
+fn downed_by_finalized_transaction<R: WalletStoreReader>(
+    reader: &mut R,
+    transaction_id: TransactionId,
+) -> Result<Vec<StealthOutputModel>, WalletStorageError> {
+    let Some(transaction) = reader.transactions_get(transaction_id).optional()? else {
+        return Ok(Vec::new());
+    };
+    let downed = transaction
+        .finalized_diff()
+        .map(|diff| {
+            diff.down_iter()
+                .filter_map(|(id, _)| id.as_utxo_address())
+                .collect::<HashSet<_>>()
+        })
+        .unwrap_or_default();
+    if downed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let commitments = downed
+        .iter()
+        .map(|address| address.id().into_commitment_bytes())
+        .collect::<Vec<_>>();
+    Ok(reader
+        .stealth_outputs_get_by_commitments(&commitments)?
+        .into_iter()
+        .filter(|output| downed.contains(&output.to_utxo_address()))
+        .collect())
 }
 
 /// What [`StealthOutputsApi::verify_and_update_outputs`] changed.

@@ -125,6 +125,7 @@ impl ProposedBlockChangeSet {
     }
 
     pub fn set_no_vote(&mut self, no_vote_reason: NoVoteReason) -> &mut Self {
+        self.quorum_decision = None;
         self.no_vote_reason = Some(no_vote_reason);
         self
     }
@@ -663,6 +664,23 @@ mod tests {
     use tari_template_lib_types::ComponentAddress;
 
     use super::*;
+
+    #[test]
+    fn a_no_vote_clears_the_quorum_decision() {
+        let leaf = LeafBlock {
+            block_id: BlockId::zero(),
+            height: NodeHeight(1),
+            epoch: Epoch(1),
+            shard_group: ShardGroup::all_shards(NumPreshards::P256),
+        };
+        let mut change_set = ProposedBlockChangeSet::new(leaf);
+        change_set.set_quorum_decision(QuorumDecision::Accept);
+
+        change_set.set_no_vote(NoVoteReason::AlreadyVotedAtHeight);
+
+        assert_eq!(change_set.quorum_decision(), None);
+        assert!(!change_set.is_accept());
+    }
 
     #[test]
     fn taking_executions_keeps_the_pending_transaction_update() {

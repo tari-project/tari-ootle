@@ -460,10 +460,11 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                         }
                         .into());
                     }
-                    validate_arg_type(&func.name, &arg.arg_type)?;
+                    validate_abi_type(&func.name, &arg.arg_type)?;
                 }
+                validate_abi_type(&func.name, &func.output)?;
                 if let FunctionKind::Migration { from } = &func.kind {
-                    validate_arg_type(&func.name, from)?;
+                    validate_abi_type(&func.name, from)?;
                     // Note that we are checking the TemplateDef, not the actual return type of the function in Wasm.
                     match &func.output {
                         Type::Other { name } => {
@@ -494,25 +495,49 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
     Ok(())
 }
 
-fn validate_arg_type(function_name: &str, arg_type: &Type) -> Result<(), WasmExecutionError> {
-    match arg_type {
-        Type::Tuple(tuple) if tuple.len() > limits::WASM_LIMITS.max_function_arguments => {
-            Err(WasmValidationError::FunctionTooManyTupleReturn {
-                name: function_name.to_string(),
-                max_tuple_size: limits::WASM_LIMITS.max_function_arguments,
-                tuple_size: tuple.len(),
-            }
-            .into())
-        },
-        Type::Other { name } if name.len() > limits::WASM_LIMITS.max_function_name_length => {
-            Err(WasmValidationError::FunctionNameTooLong {
-                name: name.clone(),
-                max_length: limits::WASM_LIMITS.max_function_name_length,
-            }
-            .into())
-        },
-        _ => Ok(()),
+/// Holds an ABI type `function` declares, and every type nested in it, to the depth, size, tuple width and name
+/// length limits.
+fn validate_abi_type(function: &str, ty: &Type) -> Result<(), WasmValidationError> {
+    let limits = &limits::WASM_LIMITS;
+    let mut num_types = 0usize;
+    let mut pending = vec![(ty, 1usize)];
+    while let Some((ty, depth)) = pending.pop() {
+        num_types += 1;
+        if num_types > limits.max_abi_type_nodes {
+            return Err(WasmValidationError::AbiTypeTooLarge {
+                function: function.to_string(),
+                max_types: limits.max_abi_type_nodes,
+            });
+        }
+        if depth > limits.max_abi_type_depth {
+            return Err(WasmValidationError::AbiTypeTooDeep {
+                function: function.to_string(),
+                max_depth: limits.max_abi_type_depth,
+            });
+        }
+        match ty {
+            Type::Vec(inner) | Type::Option(inner) => pending.push((inner, depth + 1)),
+            Type::Tuple(types) => {
+                if types.len() > limits.max_function_arguments {
+                    return Err(WasmValidationError::FunctionTooManyTupleReturn {
+                        name: function.to_string(),
+                        max_tuple_size: limits.max_function_arguments,
+                        tuple_size: types.len(),
+                    });
+                }
+                pending.extend(types.iter().map(|t| (t, depth + 1)));
+            },
+            Type::Other { name } if name.len() > limits.max_function_name_length => {
+                return Err(WasmValidationError::AbiTypeNameTooLong {
+                    function: function.to_string(),
+                    length: name.len(),
+                    max_length: limits.max_function_name_length,
+                });
+            },
+            _ => {},
+        }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -587,6 +612,119 @@ mod tests {
         match reject_disallowed_custom_sections(&wasm) {
             Err(WasmValidationError::DisallowedCustomSection { name }) => assert_eq!(name, "producers"),
             other => panic!("expected DisallowedCustomSection, got {other:?}"),
+        }
+    }
+
+    fn template_def_with_func(
+        kind: FunctionKind,
+        arguments: Vec<tari_template_abi::ArgDef>,
+        output: Type,
+    ) -> TemplateDef {
+        TemplateDef::V2(tari_template_abi::TemplateDefV2 {
+            template_name: "Test".to_string(),
+            abi_version: 0,
+            functions: vec![FunctionDef {
+                name: "f".to_string(),
+                kind,
+                arguments,
+                output,
+            }],
+        })
+    }
+
+    #[test]
+    fn rejects_oversized_tuple_in_function_output() {
+        let max = limits::WASM_LIMITS.max_function_arguments;
+        let def = template_def_with_func(FunctionKind::Function, vec![], Type::Tuple(vec![Type::U8; max + 1]));
+        match validate_functions(&def) {
+            Err(WasmExecutionError::WasmValidationError(WasmValidationError::FunctionTooManyTupleReturn {
+                name,
+                max_tuple_size,
+                tuple_size,
+            })) => {
+                assert_eq!(name, "f");
+                assert_eq!(max_tuple_size, max);
+                assert_eq!(tuple_size, max + 1);
+            },
+            other => panic!("expected FunctionTooManyTupleReturn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_oversized_type_name_in_function_output_and_nested_types() {
+        let max_len = limits::WASM_LIMITS.max_function_name_length;
+        let long_name = "T".repeat(max_len + 1);
+        let long_other = Type::Other {
+            name: long_name.clone(),
+        };
+
+        for bad_type in [
+            long_other.clone(),
+            Type::Vec(Box::new(long_other.clone())),
+            Type::Option(Box::new(long_other.clone())),
+            Type::Option(Box::new(Type::Tuple(vec![long_other.clone()]))),
+            Type::Tuple(vec![Type::U8, long_other]),
+        ] {
+            let def = template_def_with_func(FunctionKind::Function, vec![], bad_type.clone());
+            match validate_functions(&def) {
+                Err(WasmExecutionError::WasmValidationError(WasmValidationError::AbiTypeNameTooLong {
+                    function,
+                    length,
+                    max_length,
+                })) => {
+                    assert_eq!(function, "f");
+                    assert_eq!(length, long_name.len());
+                    assert_eq!(max_length, max_len);
+                },
+                other => panic!("expected AbiTypeNameTooLong for output {bad_type:?}, got {other:?}"),
+            }
+
+            let def = template_def_with_func(
+                FunctionKind::Function,
+                vec![tari_template_abi::ArgDef {
+                    name: "x".to_string(),
+                    arg_type: bad_type.clone(),
+                }],
+                Type::Unit,
+            );
+            match validate_functions(&def) {
+                Err(WasmExecutionError::WasmValidationError(WasmValidationError::AbiTypeNameTooLong {
+                    function,
+                    length,
+                    max_length,
+                })) => {
+                    assert_eq!(function, "f");
+                    assert_eq!(length, long_name.len());
+                    assert_eq!(max_length, max_len);
+                },
+                other => panic!("expected AbiTypeNameTooLong for arg {bad_type:?}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn rejects_nested_oversized_tuple_in_arg_and_output() {
+        let max = limits::WASM_LIMITS.max_function_arguments;
+        let nested = Type::Option(Box::new(Type::Vec(Box::new(Type::Tuple(vec![Type::U8; max + 1])))));
+        let def = template_def_with_func(
+            FunctionKind::Function,
+            vec![tari_template_abi::ArgDef {
+                name: "x".to_string(),
+                arg_type: nested,
+            }],
+            Type::Unit,
+        );
+        match validate_functions(&def) {
+            Err(WasmExecutionError::WasmValidationError(WasmValidationError::FunctionTooManyTupleReturn {
+                name,
+                max_tuple_size,
+                tuple_size,
+            })) => {
+                assert_eq!(name, "f");
+                assert_eq!(max_tuple_size, max);
+                assert_eq!(tuple_size, max + 1);
+            },
+            other => panic!("expected FunctionTooManyTupleReturn, got {other:?}"),
         }
     }
 }

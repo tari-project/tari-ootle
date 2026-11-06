@@ -479,20 +479,29 @@ pub struct GenericTransactionIntent {
 
 impl GenericTransactionIntent {
     /// Validates that every [`InstructionSpec::PublishTemplate`] (in either phase) references an
-    /// in-range blob index.
+    /// in-range blob index and that the total number of template publications fits in the
+    /// transaction's `BlobIndex` capacity.
     ///
-    /// A blob index `>= blobs.len()` ⇒ [`OotleSdkError::Validation`] (`"VALIDATION"`). This is the
-    /// cheap structural check the boundary can make standalone, before the full instruction → builder
-    /// lowering.
+    /// A blob index `>= blobs.len()` or a publication count `> Blobs::MAX_BLOBS` ⇒
+    /// [`OotleSdkError::Validation`] (`"VALIDATION"`). This is the cheap structural check the
+    /// boundary can make standalone, before the full instruction → builder lowering.
     pub fn validate_blob_indices(&self) -> Result<(), OotleSdkError> {
         let n = self.blobs.len();
+        let mut publish_count = 0usize;
         for instr in self.fee_instructions.iter().chain(&self.instructions) {
-            if let InstructionSpec::PublishTemplate { blob_index, .. } = instr &&
-                (*blob_index as usize) >= n
-            {
-                return Err(OotleSdkError::Validation(format!(
-                    "publish_template references blob index {blob_index} but only {n} blob(s) are present"
-                )));
+            if let InstructionSpec::PublishTemplate { blob_index, .. } = instr {
+                if (*blob_index as usize) >= n {
+                    return Err(OotleSdkError::Validation(format!(
+                        "publish_template references blob index {blob_index} but only {n} blob(s) are present"
+                    )));
+                }
+                publish_count += 1;
+                if publish_count > tari_ootle_transaction::Blobs::MAX_BLOBS {
+                    return Err(OotleSdkError::Validation(format!(
+                        "transaction publishes more than {} template blobs",
+                        tari_ootle_transaction::Blobs::MAX_BLOBS
+                    )));
+                }
             }
         }
         Ok(())
@@ -985,9 +994,24 @@ mod tests {
                 blob_index: 0,
                 metadata_hash: None,
             }],
-            ..intent
+            ..intent.clone()
         };
         assert!(ok.validate_blob_indices().is_ok());
+
+        let too_many_publishes = GenericTransactionIntent {
+            instructions: vec![
+                InstructionSpec::PublishTemplate {
+                    blob_index: 0,
+                    metadata_hash: None,
+                };
+                tari_ootle_transaction::Blobs::MAX_BLOBS + 1
+            ],
+            ..intent
+        };
+        assert_eq!(
+            too_many_publishes.validate_blob_indices().unwrap_err().code(),
+            "VALIDATION"
+        );
     }
 
     #[test]

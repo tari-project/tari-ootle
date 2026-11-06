@@ -138,6 +138,9 @@ jobs:
       - name: build workspace web UIs
         run: pnpm --recursive run build
 
+      - name: test wallet web UI
+        run: pnpm --filter tari_ootle_wallet_web_ui test
+
       # The swarm daemon web UI is a standalone npm project, not part of the pnpm workspace.
       - name: build swarm daemon web UI
         working-directory: applications/tari_swarm_daemon/webui

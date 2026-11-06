@@ -114,7 +114,15 @@ impl<'de> Deserialize<'de> for Amount {
                 let digit3 = seq
                     .next_element::<u64>()?
                     .ok_or_else(|| Error::invalid_length(2, &self))?;
+                if seq.next_element::<serde::de::IgnoredAny>()?.is_some() {
+                    return Err(Error::invalid_length(Amount::NUM_DIGITS + 1, &self));
+                }
                 Ok(Amount::from_le_digits([digit1, digit2, digit3]))
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where E: Error {
+                Amount::from_le_slice(v).ok_or_else(|| Error::custom("Invalid byte length for PrecisionAmount"))
             }
         }
 
@@ -145,6 +153,39 @@ mod tests {
         let val = json!(123u32);
         let decoded: Amount = serde_json::from_value(val).unwrap();
         assert_eq!(decoded, amount);
+
+        let from_digits: Amount = serde_json::from_value(json!([42u64, 1u64, 0u64])).unwrap();
+        assert_eq!(from_digits, Amount::from_le_digits([42, 1, 0]));
+
+        serde_json::from_value::<Amount>(json!([42u64, 1u64])).unwrap_err();
+        serde_json::from_value::<Amount>(json!([42u64, 1u64, 0u64, 0u64])).unwrap_err();
+
+        let from_cbor_seq: Amount = tari_bor::serde_codec::from_slice(&encode(&[42u64, 1u64, 0u64]).unwrap()).unwrap();
+        assert_eq!(from_cbor_seq, Amount::from_le_digits([42, 1, 0]));
+        tari_bor::serde_codec::from_slice::<Amount>(&encode(&[42u64, 1u64]).unwrap()).unwrap_err();
+        tari_bor::serde_codec::from_slice::<Amount>(&encode(&[42u64, 1u64, 0u64, 0u64]).unwrap()).unwrap_err();
+        // Indefinite-length CBOR arrays through serde_codec: 2 elements (short), 3 elements (valid), 4 elements (long)
+        tari_bor::serde_codec::from_slice::<Amount>(&[0x9f, 0x18, 0x2a, 0x01, 0xff]).unwrap_err();
+        let indef_ok: Amount = tari_bor::serde_codec::from_slice(&[0x9f, 0x18, 0x2a, 0x01, 0x00, 0xff]).unwrap();
+        assert_eq!(indef_ok, Amount::from_le_digits([42, 1, 0]));
+        tari_bor::serde_codec::from_slice::<Amount>(&[0x9f, 0x18, 0x2a, 0x01, 0x00, 0x00, 0xff]).unwrap_err();
+
+        let neg = Amount::from(-1234567890i64);
+        let bytes_cbor = encode(&tari_bor::Value::Bytes(neg.to_le_bytes().to_vec())).unwrap();
+        let from_bytes: Amount = tari_bor::serde_codec::from_slice(&bytes_cbor).unwrap();
+        assert_eq!(from_bytes, neg);
+
+        let sign_extended = encode(&tari_bor::Value::Bytes(vec![0xff])).unwrap();
+        let decoded_bytes: Amount = tari_bor::serde_codec::from_slice(&sign_extended).unwrap();
+        assert_eq!(decoded_bytes, Amount::from(-1i64));
+        // Bytes past `Amount::BYTES` are accepted when they equal the sign fill and rejected otherwise.
+        let zero_extended = encode(&tari_bor::Value::Bytes(vec![0u8; 25])).unwrap();
+        let decoded_bytes: Amount = tari_bor::serde_codec::from_slice(&zero_extended).unwrap();
+        assert_eq!(decoded_bytes, Amount::ZERO);
+        let mut overlong = vec![0u8; 25];
+        overlong[24] = 0x01;
+        let overlong_bytes = encode(&tari_bor::Value::Bytes(overlong)).unwrap();
+        tari_bor::serde_codec::from_slice::<Amount>(&overlong_bytes).unwrap_err();
     }
 
     #[test]

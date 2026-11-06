@@ -59,3 +59,11 @@ impl<TAddr: NodeAddressable> Display for ValidatorNode<TAddr> {
         )
     }
 }
+
+/// The member count and summed vote power of one shard group's committee, read together so the two always describe
+/// the same set of members.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShardGroupSize {
+    pub num_members: u64,
+    pub total_power: VotePower,
+}

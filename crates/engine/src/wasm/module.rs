@@ -428,6 +428,13 @@ fn validate_export_signature(
 fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionError> {
     match template_def {
         TemplateDef::V2(def) => {
+            if def.template_name.len() > limits::ENGINE_LIMITS.max_template_name_length {
+                return Err(WasmValidationError::TemplateNameTooLong {
+                    name: def.template_name.clone(),
+                    max_length: limits::ENGINE_LIMITS.max_template_name_length,
+                }
+                .into());
+            }
             let function_count = def.functions.len();
             if function_count > limits::WASM_LIMITS.max_functions {
                 return Err(WasmValidationError::TooManyFunctions {
@@ -725,6 +732,27 @@ mod tests {
                 assert_eq!(tuple_size, max + 1);
             },
             other => panic!("expected FunctionTooManyTupleReturn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_oversized_template_name() {
+        let max_len = limits::ENGINE_LIMITS.max_template_name_length;
+        let long_name = "T".repeat(max_len + 1);
+        let def = TemplateDef::V2(tari_template_abi::TemplateDefV2 {
+            template_name: long_name.clone(),
+            abi_version: 0,
+            functions: vec![],
+        });
+        match validate_functions(&def) {
+            Err(WasmExecutionError::WasmValidationError(WasmValidationError::TemplateNameTooLong {
+                name,
+                max_length,
+            })) => {
+                assert_eq!(name, long_name);
+                assert_eq!(max_length, max_len);
+            },
+            other => panic!("expected TemplateNameTooLong, got {other:?}"),
         }
     }
 }

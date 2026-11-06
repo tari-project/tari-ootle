@@ -108,9 +108,30 @@ pub mod indexset_codec {
         T: Decode<'b, C> + Hash + Eq,
         S: BuildHasher + Default,
     {
+        decode_bounded(d, ctx, usize::MAX)
+    }
+
+    /// Decodes a set of at most `max_len` elements. A definite-length array over the bound is refused
+    /// from its header, before any element is decoded; an indefinite-length one as soon as it passes it.
+    pub fn decode_bounded<'b, C, T, S>(
+        d: &mut Decoder<'b>,
+        ctx: &mut C,
+        max_len: usize,
+    ) -> Result<IndexSet<T, S>, minicbor::decode::Error>
+    where
+        T: Decode<'b, C> + Hash + Eq,
+        S: BuildHasher + Default,
+    {
+        #[cfg(not(feature = "std"))]
+        use alloc::format;
+
+        let too_many = || minicbor::decode::Error::message(format!("set holds more than {max_len} elements"));
         let len = d.array()?;
         match len {
             Some(n) => {
+                if n > max_len as u64 {
+                    return Err(too_many());
+                }
                 let mut out = IndexSet::with_capacity_and_hasher(n.min(super::MAX_PREALLOC) as usize, S::default());
                 for _ in 0..n {
                     let v = T::decode(d, ctx)?;
@@ -126,6 +147,9 @@ pub mod indexset_codec {
                     if matches!(d.datatype()?, minicbor::data::Type::Break) {
                         d.skip()?;
                         break;
+                    }
+                    if out.len() == max_len {
+                        return Err(too_many());
                     }
                     let v = T::decode(d, ctx)?;
                     if !out.insert(v) {

@@ -664,6 +664,7 @@ fn committed_with_values_json_does_not_carry_exactly(
         "topic".to_string(),
         metadata,
     )]);
+    let diff = with_receipt(diff, transaction_id, &receipt);
     let result = FinalizeResult::new(
         Hash32::from_array(transaction_id.into_array()),
         vec![],

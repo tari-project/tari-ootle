@@ -89,10 +89,50 @@ fn check_withdraw_balance(
     change_statement: Option<&OutputWitness>,
     change_revealed_amount: Amount,
 ) -> Result<(), WalletCryptoError> {
+    if input_revealed_amount.is_negative() {
+        return Err(WalletCryptoError::InvalidArgument {
+            name: "input_revealed_amount",
+            details: format!("Revealed input amount must be non-negative: {input_revealed_amount}"),
+        });
+    }
+    if output_revealed_amount.is_negative() {
+        return Err(WalletCryptoError::InvalidArgument {
+            name: "output_revealed_amount",
+            details: format!("Revealed output amount must be non-negative: {output_revealed_amount}"),
+        });
+    }
+    if change_revealed_amount.is_negative() {
+        return Err(WalletCryptoError::InvalidArgument {
+            name: "change_revealed_amount",
+            details: format!("Revealed change amount must be non-negative: {change_revealed_amount}"),
+        });
+    }
+
+    let mut seen = std::collections::HashSet::with_capacity(inputs.len());
+    for input in inputs {
+        let commitment = input.to_commitment().to_byte_type();
+        if !seen.insert(commitment) {
+            return Err(WalletCryptoError::InvalidArgument {
+                name: "inputs",
+                details: format!("Input commitment {commitment} appears more than once"),
+            });
+        }
+    }
+
     let overflow = || WalletCryptoError::InvalidArgument {
         name: "amounts",
         details: "withdraw amounts overflow".to_string(),
     };
+    let total_output_revealed = output_revealed_amount
+        .checked_add(change_revealed_amount)
+        .ok_or_else(overflow)?;
+    let has_confidential = !inputs.is_empty() || output_statement.is_some() || change_statement.is_some();
+    if has_confidential && (input_revealed_amount > u64::MAX || total_output_revealed > u64::MAX) {
+        return Err(WalletCryptoError::InvalidArgument {
+            name: "amounts",
+            details: "revealed amount in a confidential withdraw exceeds u64::MAX".to_string(),
+        });
+    }
     let total_in = inputs
         .iter()
         .map(|input| Amount::from(input.value))

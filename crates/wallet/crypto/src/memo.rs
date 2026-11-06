@@ -138,7 +138,7 @@ impl Memo {
         if mb.len() + tag.len() > Self::MAX_BYTES_LENGTH - 1 {
             return None;
         }
-        let mut combined = Vec::with_capacity(mb.len() + tag.len());
+        let mut combined = Vec::with_capacity(1 + tag.len() + mb.len());
         combined.push(u8::try_from(tag.len()).expect("new_destination_tag_and_bytes: length checked"));
         combined.extend_from_slice(tag);
         combined.extend_from_slice(mb);

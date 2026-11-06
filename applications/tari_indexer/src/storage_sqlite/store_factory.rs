@@ -3058,6 +3058,75 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn earlier_stream_invalidation_does_not_lower_a_higher_retire_ahead_watermark() {
+        let (_d, store) = temp_store().await;
+        let id = substate(1);
+
+        // A finalized transaction retires `id` ahead of the stream at watermark 101 (creates v1).
+        let ahead = StateVersion::new(101);
+        store
+            .with_write_tx({
+                let id = id.clone();
+                move |tx| {
+                    tx.substate_cache_retire_ahead([(
+                        SubstateCacheInvalidation::created(&id, SubstateVersion::new(1)).unwrap(),
+                        ahead,
+                    )])
+                }
+            })
+            .await
+            .unwrap();
+
+        // Next, the stream promotes an earlier state_version (100) that touched `id` (created v0).
+        // This must NOT lower the journal's `state_version` from 101 back to 100.
+        invalidate(
+            &store,
+            SubstateCacheInvalidation::created(&id, SubstateVersion::ZERO).unwrap(),
+            100,
+        )
+        .await;
+
+        // An in-flight fetch that started at watermark 100 (before the v1 commit at 101) must still be vetoed.
+        assert!(!put(&store, &id, SubstateVersion::new(1), 100).await);
+        assert_eq!(read(&store, &id).await, None);
+
+        // Once the watermark reaches 101, the write is accepted.
+        assert!(put(&store, &id, SubstateVersion::new(1), 101).await);
+        assert_eq!(read(&store, &id).await, Some(SubstateVersion::new(1)));
+    }
+
+    #[tokio::test]
+    async fn substate_cache_handles_versions_stored_negative() {
+        let (_d, store) = temp_store().await;
+        let id = substate(2);
+        let high_v = SubstateVersion::new((1u64 << 63) + 10);
+        let higher_v = SubstateVersion::new((1u64 << 63) + 20);
+        let low_v = SubstateVersion::new(5);
+
+        // Cache `high_v` (which is stored as a negative i64 in SQLite).
+        assert!(put(&store, &id, high_v, 100).await);
+        assert_eq!(read(&store, &id).await, Some(high_v));
+
+        // A lower positive version must not displace `high_v`.
+        assert!(!put(&store, &id, low_v, 100).await);
+        assert_eq!(read(&store, &id).await, Some(high_v));
+
+        // Invalidating a lower positive version must not delete `high_v` or lower the journal floor.
+        invalidate(&store, SubstateCacheInvalidation::destroyed(id.clone(), low_v), 100).await;
+        assert_eq!(read(&store, &id).await, Some(high_v));
+
+        // Invalidating `higher_v` retires `high_v` and raises the journal floor to `higher_v`.
+        invalidate(&store, SubstateCacheInvalidation::created(&id, higher_v).unwrap(), 101).await;
+        assert_eq!(read(&store, &id).await, None);
+
+        // Subsequent invalidation at `low_v` does not lower the floor below `higher_v`.
+        invalidate(&store, SubstateCacheInvalidation::destroyed(id.clone(), low_v), 102).await;
+        assert!(!put(&store, &id, high_v, 102).await);
+        assert!(put(&store, &id, higher_v, 102).await);
+        assert_eq!(read(&store, &id).await, Some(higher_v));
+    }
+
+    #[tokio::test]
     async fn pruning_evicts_down_to_the_cap_and_expires_the_journal() {
         let (_d, store) = temp_store().await;
         // Descending `cached_at`, so the substates with the lowest n are the oldest and evicted first.

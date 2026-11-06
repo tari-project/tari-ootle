@@ -832,7 +832,7 @@ where TConsensusSpec: ConsensusSpec
 
         for atom in block.all_foreign_proposals() {
             // TODO: we need to keep these ATM to send them if a node needs to catch up
-            atom.set_status(tx, ForeignProposalStatus::Confirmed, None)?;
+            atom.set_status(tx, ForeignProposalStatus::Confirmed, Some(block.id()))?;
         }
 
         // NOTE: this must happen before we commit the substate diff because the state transitions use this version

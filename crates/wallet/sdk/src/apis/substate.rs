@@ -251,9 +251,8 @@ where
                         },
                         SubstateValue::ValidatorFeePool(_) => {
                             let resx_addr = SubstateId::Resource(TARI_TOKEN);
-                            if substate_ids.contains(&resx_addr) {
-                                continue;
-                            }
+                            self.insert_substate_if_absent(&resx_addr, unversioned, &mut substate_ids)
+                                .await?;
                         },
                         SubstateValue::ClaimedOutputTombstone(_) => {},
                         SubstateValue::Template(_) => {},
@@ -357,6 +356,8 @@ where
         }
         if unversioned {
             substate_ids.insert(substate_id.clone().into());
+        } else if let Some(substate) = self.store.with_read_tx(|tx| tx.substates_get(substate_id)).optional()? {
+            substate_ids.insert(substate.substate_id.into());
         } else {
             let ValidatorScanResult { id, .. } = self.fetch_substate_from_network(substate_id, None).await?;
             substate_ids.insert(id.into());
@@ -788,6 +789,9 @@ fn get_dependent_substates<TTx: WalletStoreReader>(
     // time should be taken to improve this.
     substate_ids.insert(parent.substate_id.clone().into());
     for child in parent.referenced_substates {
+        if let Some(addr) = child.as_non_fungible_address() {
+            substate_ids.insert(SubstateRequirement::unversioned(*addr.resource_address()));
+        }
         get_dependent_substates_inner(tx, &child, substate_ids)?;
     }
 
@@ -803,7 +807,7 @@ fn get_dependent_substates<TTx: WalletStoreReader>(
             child.substate_id,
             parent.substate_id
         );
-        substate_ids.insert(child.substate_id.into());
+        substate_ids.replace(child.substate_id.into());
         for child in child.referenced_substates {
             get_dependent_substates_inner(tx, &child, substate_ids)?;
         }
@@ -824,7 +828,7 @@ fn get_dependent_substates_inner<TTx: WalletStoreReader>(
         "Getting dependent substates for {}",
         substate.substate_id,
     );
-    substate_ids.insert(substate.substate_id.into());
+    substate_ids.replace(substate.substate_id.into());
 
     for child in substate.referenced_substates {
         if let Some(addr) = child.as_non_fungible_address() {

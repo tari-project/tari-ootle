@@ -160,7 +160,7 @@ where
                             tx.transactions_update(
                                 WalletTransactionUpdate::new(transaction_id)
                                     .with_new_status(TransactionStatus::InvalidTransaction)
-                                    .with_invalid_reason(&message),
+                                    .with_invalid_reason(Some(&message)),
                             )?;
                             self.release_all_locks_for_transaction_internal(tx, transaction_id)
                         })?;
@@ -263,7 +263,13 @@ where
         // Multithreaded considerations: The transaction result could be requested more than once because db
         // transactions cannot be used around await points.
         let transaction = self.store.with_read_tx(|tx| tx.transactions_get(transaction_id))?;
-        if transaction.finalize.is_some() {
+        if matches!(
+            transaction.status,
+            TransactionStatus::Accepted |
+                TransactionStatus::Rejected |
+                TransactionStatus::OnlyFeeAccepted |
+                TransactionStatus::InvalidTransaction
+        ) {
             return Ok(Some(transaction));
         }
 
@@ -285,7 +291,7 @@ where
                     tx.transactions_update(
                         WalletTransactionUpdate::new(transaction_id)
                             .with_new_status(TransactionStatus::InvalidTransaction)
-                            .with_invalid_reason(&details)
+                            .with_invalid_reason(Some(&details))
                             .with_finalized_time(rejected_time),
                     )?;
                     self.release_all_locks_for_transaction_internal(tx, transaction_id)?;
@@ -300,7 +306,7 @@ where
                 execution_result,
                 execution_time,
                 finalized_time,
-                ..
+                abort_details,
             } => {
                 let mut execution_result = execution_result;
                 if self.indexer_trust.is_verify() && !transaction.is_dry_run && final_decision.is_commit() {
@@ -337,6 +343,9 @@ where
                 } else {
                     TransactionStatus::Rejected
                 };
+                let abort_details = (!final_decision.is_commit())
+                    .then_some(abort_details.as_deref())
+                    .flatten();
 
                 let transaction = self.store.with_write_tx(|tx| {
                     if !transaction.is_dry_run && final_decision.is_commit() {
@@ -355,13 +364,16 @@ where
 
                     let final_fee = execution_result
                         .as_ref()
-                        .map(|e| e.finalize.fee_receipt.total_fees_paid());
+                        .filter(|_| final_decision.is_commit())
+                        .map(|e| e.finalize.fee_receipt.total_fees_paid())
+                        .or(Some(0));
 
                     tx.transactions_update(
                         WalletTransactionUpdate::new(transaction_id)
                             .with_result(execution_result.as_ref().map(|e| &e.finalize))
                             .with_final_fee(final_fee)
                             .with_new_status(new_status)
+                            .with_invalid_reason(abort_details)
                             .with_execution_time(execution_time)
                             .with_finalized_time(finalized_time),
                     )?;
@@ -427,7 +439,7 @@ where
             tx.transactions_update(
                 WalletTransactionUpdate::new(transaction_id)
                     .with_new_status(TransactionStatus::InvalidTransaction)
-                    .with_invalid_reason(&reason),
+                    .with_invalid_reason(Some(&reason)),
             )?;
             self.release_all_locks_for_transaction_internal(tx, transaction_id)?;
             let transaction = tx.transactions_get(transaction_id)?;

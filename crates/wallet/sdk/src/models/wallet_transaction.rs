@@ -166,8 +166,8 @@ impl<'a> WalletTransactionUpdate<'a> {
         self
     }
 
-    pub fn with_invalid_reason(mut self, invalid_reason: &'a str) -> Self {
-        self.invalid_reason = Some(invalid_reason);
+    pub fn with_invalid_reason(mut self, invalid_reason: Option<&'a str>) -> Self {
+        self.invalid_reason = invalid_reason;
         self
     }
 

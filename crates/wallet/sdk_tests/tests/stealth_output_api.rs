@@ -811,6 +811,7 @@ async fn stealth_transfer_with_badge_declares_account_and_badge_vault_inputs() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::too_many_lines)]
 async fn stealth_transfer_with_stealth_fee_swap_declares_account_vault_and_swap_view_key() {
     let sets = [ValidatorSetFixture::new(1)];
     let network = ProvingNetwork::new(&sets, 0);
@@ -921,6 +922,7 @@ async fn stealth_transfer_with_stealth_fee_swap_declares_account_vault_and_swap_
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::too_many_lines)]
 async fn stealth_transfer_with_revealed_fee_swap_declares_swap_vault_input() {
     let sets = [ValidatorSetFixture::new(1)];
     let network = ProvingNetwork::new(&sets, 0);

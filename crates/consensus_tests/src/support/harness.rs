@@ -749,6 +749,8 @@ impl TestBuilder {
                     max_block_validation_shard_output_bytes:
                         tari_ootle_common_types::MAX_BLOCK_VALIDATION_SHARD_OUTPUT_BYTES,
                     max_block_pledge_bytes: ConsensusConstants::DEVNET.max_block_pledge_bytes,
+                    max_transaction_input_load_bytes: ConsensusConstants::DEVNET.max_transaction_input_load_bytes,
+                    max_block_input_load_bytes: ConsensusConstants::DEVNET.max_block_input_load_bytes,
                     max_block_foreign_proposal_bytes: ConsensusConstants::DEVNET.max_block_foreign_proposal_bytes,
                     max_block_validation_foreign_proposal_bytes: ConsensusConstants::DEVNET
                         .max_block_validation_foreign_proposal_bytes,

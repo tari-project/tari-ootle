@@ -338,7 +338,7 @@ impl Replica {
         let executor = ScriptedExecutor::default();
         let replica = Self {
             store,
-            manager: ConsensusTransactionManager::new(executor.clone(), 2160, usize::MAX),
+            manager: ConsensusTransactionManager::new(executor.clone(), 2160, usize::MAX, usize::MAX),
             executor,
             committee: CommitteeInfo::new(
                 NUM_PRESHARDS,

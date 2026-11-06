@@ -306,9 +306,13 @@ where TConsensusSpec: ConsensusSpec
         }
 
         // Store used for transactions that have inputs without specific versions.
-        // It lives through the entire block so multiple transactions can be sequenced together in the same block
+        // It lives through the entire block so multiple transactions can be sequenced together in the same block.
+        // CONSENSUS RULE: a block may not have this shard group load more than `max_block_input_load_bytes` of input
+        // substates for its transactions. The budget is checked as each transaction's inputs load, so evaluation
+        // stops (no-vote) at the first input past it rather than after the whole block has been loaded.
         let mut substate_store =
-            PendingSubstateStore::init(tx, block.as_leaf(), self.config.consensus_constants.num_preshards)?;
+            PendingSubstateStore::init(tx, block.as_leaf(), self.config.consensus_constants.num_preshards)?
+                .with_input_load_budget(self.config.consensus_constants.max_block_input_load_bytes);
         let mut total_leader_fee = 0;
         let mut total_exhaust_burn = parent.header().total_accumulated_exhaust_burn();
         let max_validation_execution_points = self.config.consensus_constants.max_block_validation_execution_points;

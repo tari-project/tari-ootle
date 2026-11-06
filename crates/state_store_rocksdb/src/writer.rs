@@ -1094,6 +1094,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             pool.set_fee_intent_only(update.fee_intent_only);
             if let Some(leader_fee) = update.leader_fee {
                 pool.set_leader_fee(leader_fee);
+            } else {
+                pool.no_leader_fee();
             }
             pool.set_evidence(update.evidence.clone());
             pool.set_is_ready(update.is_ready);

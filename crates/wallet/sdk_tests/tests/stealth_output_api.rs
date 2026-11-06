@@ -675,3 +675,286 @@ fn setting_the_frozen_flag_reports_whether_it_changed() {
     assert!(stored_output(&test, &Test::test_account_address(), &output.commitment).is_frozen);
     assert_eq!(outputs.set_utxo_frozen(&address, true).unwrap(), Some(false));
 }
+
+mod stealth_transfer_regression_tests {
+    use tari_engine_types::substate::{SubstateId, SubstateValue};
+    use tari_ootle_common_types::{Epoch, InputDeclaration, SubstateVersion};
+    use tari_ootle_light_client::test_fixtures::ValidatorSetFixture;
+    use tari_ootle_wallet_crypto::pay_to::PayTo;
+    use tari_ootle_wallet_sdk::{
+        apis::{
+            confidential_transfer::UtxoInputSelection,
+            stealth_transfer::{
+                BadgeUsage,
+                PayFeeWithSwapParams,
+                StealthTransferParams,
+                TransferFeeParams,
+                TransferOutput,
+            },
+        },
+        models::{AccountWithAddress, OutputStatus, StealthOutputModel},
+        network::WalletNetworkInterface,
+        storage::{WalletStoreWriter, WriteableWalletStore},
+    };
+    use tari_template_lib::types::{
+        Amount,
+        ComponentAddress,
+        EntityId,
+        ObjectKey,
+        ResourceAddress,
+        ResourceType,
+        SubstateOwnerRule,
+        TemplateAddress,
+        VaultId,
+        access_rules::ComponentAccessRules,
+        component::{ComponentBody, ComponentHeader},
+        constants::{STEALTH_TARI_RESOURCE_ADDRESS, TARI_TOKEN},
+        crypto::PedersenCommitmentBytes,
+    };
+
+    use crate::support::{ProvingNetwork, Test, TestWithNetwork};
+
+    fn add_owned_utxo<TNetwork: WalletNetworkInterface>(
+        test: &TestWithNetwork<TNetwork>,
+        account: &AccountWithAddress,
+        value: u64,
+    ) -> PedersenCommitmentBytes {
+        let (id, utxo) = test.owned_utxo(account, value);
+        let output = utxo.output().unwrap();
+        let commitment = id.into_commitment_bytes();
+        test.sdk()
+            .stealth_outputs_api()
+            .add_output(&StealthOutputModel {
+                owner_account: *account.component_address(),
+                resource_address: STEALTH_TARI_RESOURCE_ADDRESS,
+                commitment,
+                value,
+                sender_public_nonce: output.output.public_nonce,
+                view_only_key_id: account.view_only_key_id(),
+                owner_key_id: account.owner_key_id(),
+                encrypted_data: output.output.encrypted_data.clone(),
+                tag_byte: output.tag,
+                memo: None,
+                auth: output.auth.clone(),
+                minimum_value_promise: 0,
+                status: OutputStatus::Unspent,
+                is_burnt: false,
+                is_frozen: false,
+                is_on_chain: true,
+                is_condition_spendable: true,
+                lock_id: None,
+                proven_up: None,
+                spent_version: None,
+            })
+            .unwrap();
+        commitment
+    }
+
+    fn blinded_output(account: &AccountWithAddress, amount: u64) -> TransferOutput {
+        TransferOutput {
+            address: account.address().clone(),
+            revealed_amount: Amount::zero(),
+            blinded_amount: amount,
+            memo: None,
+            pay_to: PayTo::StealthPublicKey,
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn merged_fallback_with_single_utxo_releases_pre_fallback_lock_and_spends_fee_change() {
+        let test = Test::new();
+        let account = test
+            .sdk()
+            .accounts_api()
+            .get_account_by_address(&Test::test_account_address())
+            .unwrap();
+        let commitment = add_owned_utxo(&test, &account, 500);
+
+        // Three blinded outputs pass the 0-input precheck (`merged_statement_fits_credit(0, 3, false)`),
+        // and the 500 UTXO adds a change output (`num_outputs = 4`), tripping the post-selection fallback.
+        let (_lock, output) = test
+            .sdk()
+            .stealth_transfer_api()
+            .transfer(account.clone(), StealthTransferParams {
+                fee_params: TransferFeeParams::new(UtxoInputSelection::ConfidentialOnly),
+                input_selection: UtxoInputSelection::ConfidentialOnly,
+                outputs: vec![
+                    blinded_output(&account, 100),
+                    blinded_output(&account, 100),
+                    blinded_output(&account, 100),
+                ],
+                badge_usage: BadgeUsage::None,
+                resource_address: TARI_TOKEN,
+                max_fee: 50,
+                max_epoch: Epoch(10),
+                is_dry_run: false,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(output.fee_inputs.inputs.len(), 1);
+        assert_eq!(output.fee_inputs.inputs[0].commitment, commitment);
+        assert_eq!(output.transfer_inputs.inputs.len(), 1);
+        assert!(!output.transfer_inputs.inputs[0].is_on_chain);
+        assert_eq!(output.transfer_inputs.inputs[0].value, Amount::from(450u64));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn merged_fallback_with_prefer_revealed_locks_only_recipient_amount_for_transfer() {
+        let test = Test::new();
+        let account = test
+            .sdk()
+            .accounts_api()
+            .get_account_by_address(&Test::test_account_address())
+            .unwrap();
+        test.store()
+            .with_write_tx(|tx| {
+                tx.vaults_update(
+                    Test::test_vault_address(),
+                    SubstateVersion::ZERO,
+                    300u64.into(),
+                    0u64.into(),
+                )
+            })
+            .unwrap();
+        add_owned_utxo(&test, &account, 100);
+
+        // Pre-fallback `PreferRevealed` for `300 + 50` locks all 300 revealed plus the 100 UTXO (`total = 400 > 350`),
+        // adding a change output (`num_outputs = 4`) and triggering the fallback. On fallback, the fee statement
+        // spends the 100 UTXO and the transfer re-selects for `300` alone from revealed vault funds.
+        let (_lock, output) = test
+            .sdk()
+            .stealth_transfer_api()
+            .transfer(account.clone(), StealthTransferParams {
+                fee_params: TransferFeeParams::new(UtxoInputSelection::ConfidentialOnly),
+                input_selection: UtxoInputSelection::PreferRevealed,
+                outputs: vec![
+                    blinded_output(&account, 100),
+                    blinded_output(&account, 100),
+                    blinded_output(&account, 100),
+                ],
+                badge_usage: BadgeUsage::None,
+                resource_address: TARI_TOKEN,
+                max_fee: 50,
+                max_epoch: Epoch(10),
+                is_dry_run: false,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(output.transfer_inputs.revealed, Amount::from(300u64));
+        assert!(output.transfer_inputs.inputs.is_empty());
+        let vault = test
+            .sdk()
+            .accounts_api()
+            .get_vault_by_resource(account.component_address(), &TARI_TOKEN)
+            .unwrap();
+        assert_eq!(vault.locked_revealed_balance, Amount::from(300u64));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pay_fee_with_swap_and_pure_stealth_inputs_declares_owner_account_and_tari_vault() {
+        let sets = [ValidatorSetFixture::new(1), ValidatorSetFixture::new(2)];
+        let network = ProvingNetwork::new(&sets, 0);
+        let pool_address = ComponentAddress::from_array([9u8; 32]);
+        network.serve_substate(
+            SubstateId::Component(pool_address),
+            SubstateVersion::ZERO,
+            SubstateValue::Component(ComponentHeader {
+                template_address: TemplateAddress::default(),
+                module_name: String::new(),
+                owner_rule: SubstateOwnerRule::None,
+                access_rules: ComponentAccessRules::allow_all(),
+                entity_id: EntityId::default(),
+                body: ComponentBody {
+                    state: tari_bor::Value::Map(vec![]),
+                },
+            }),
+            None,
+        );
+        let test = TestWithNetwork::with_network(network);
+        let account = test
+            .sdk()
+            .accounts_api()
+            .get_account_by_address(&Test::test_account_address())
+            .unwrap();
+        add_owned_utxo(&test, &account, 500);
+
+        let (_lock, output) = test
+            .sdk()
+            .stealth_transfer_api()
+            .transfer(account.clone(), StealthTransferParams {
+                fee_params: TransferFeeParams::new(UtxoInputSelection::ConfidentialOnly).with_pay_fee_with_swap(
+                    PayFeeWithSwapParams {
+                        pool_address,
+                        input_resource: TARI_TOKEN,
+                        input_amount: 50u64.into(),
+                        min_xtr_output_amount: 40u64.into(),
+                    },
+                ),
+                input_selection: UtxoInputSelection::ConfidentialOnly,
+                outputs: vec![blinded_output(&account, 100)],
+                badge_usage: BadgeUsage::None,
+                resource_address: TARI_TOKEN,
+                max_fee: 50,
+                max_epoch: Epoch(10),
+                is_dry_run: false,
+            })
+            .await
+            .unwrap();
+
+        assert!(output.fee_inputs.revealed.is_zero());
+        assert!(output.transfer_inputs.revealed.is_zero());
+        let inputs = output.transaction.inputs();
+        assert!(inputs.contains(&InputDeclaration::write(*account.component_address())));
+        assert!(inputs.contains(&InputDeclaration::write(Test::test_vault_address())));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn badge_usage_with_pure_stealth_inputs_declares_owner_account_and_badge_vault() {
+        let test = Test::new();
+        let account = test
+            .sdk()
+            .accounts_api()
+            .get_account_by_address(&Test::test_account_address())
+            .unwrap();
+        let badge_resource = ResourceAddress::new(ObjectKey::from_array([11u8; ObjectKey::LENGTH]));
+        let badge_vault = VaultId::new(ObjectKey::from_array([12u8; ObjectKey::LENGTH]));
+        test.sdk()
+            .accounts_api()
+            .add_vault(
+                *account.component_address(),
+                badge_vault,
+                SubstateVersion::ZERO,
+                badge_resource,
+                ResourceType::Fungible,
+                Some("BADGE".to_string()),
+                0,
+            )
+            .unwrap();
+        add_owned_utxo(&test, &account, 500);
+
+        let (_lock, output) = test
+            .sdk()
+            .stealth_transfer_api()
+            .transfer(account.clone(), StealthTransferParams {
+                fee_params: TransferFeeParams::new(UtxoInputSelection::ConfidentialOnly),
+                input_selection: UtxoInputSelection::ConfidentialOnly,
+                outputs: vec![blinded_output(&account, 100)],
+                badge_usage: BadgeUsage::Resource(badge_resource),
+                resource_address: TARI_TOKEN,
+                max_fee: 50,
+                max_epoch: Epoch(10),
+                is_dry_run: false,
+            })
+            .await
+            .unwrap();
+
+        assert!(output.fee_inputs.revealed.is_zero());
+        assert!(output.transfer_inputs.revealed.is_zero());
+        let inputs = output.transaction.inputs();
+        assert!(inputs.contains(&InputDeclaration::write(*account.component_address())));
+        assert!(inputs.contains(&InputDeclaration::write(badge_vault)));
+        assert!(!inputs.contains(&InputDeclaration::write(Test::test_vault_address())));
+    }
+}

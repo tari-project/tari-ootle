@@ -316,7 +316,8 @@ impl PrecisionAmount {
             None => return None,
         };
 
-        // If the remainder is zero or the result is negative, we round down
+        // Truncation toward zero already rounds an exact or negative quotient up; only a positive inexact quotient
+        // needs +1.
         if rem.is_zero() || (n.is_negative() != d.is_negative()) {
             Some(Self(div))
         } else {

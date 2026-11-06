@@ -214,7 +214,7 @@ bnum = "0.13.0"
 bech32 = "0.11.0"
 bounded-vec = "0.9.0"
 merlin = { version = "3.0.0", default-features = false }
-minicbor = { version = "2.3", default-features = false, features = ["alloc", "derive"] }
+minicbor = { version = "2.3.1", default-features = false, features = ["alloc", "derive"] }
 clap = "3.2.25"
 chacha20poly1305 = "0.10.1"
 config = "0.14.0"

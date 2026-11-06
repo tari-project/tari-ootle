@@ -9,9 +9,10 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, InputDeclaration, declare_input};
-use tari_template_lib_types::{ComponentAddress, UtxoAddress, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib_types::{ComponentAddress, UtxoAddress, constants::TARI_TOKEN, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
+    Assertion,
     Blobs,
     ComponentReference,
     Instruction,
@@ -247,6 +248,16 @@ impl UnsignedTransactionV1 {
                 },
                 Instruction::ClaimValidatorFees { address, .. } => {
                     substates.insert(SubstateId::ValidatorFeePool(*address));
+                },
+                Instruction::Assert {
+                    assertion:
+                        Assertion::BucketAmount { resource_address, .. } |
+                        Assertion::BucketContainsNonFungibles { resource_address, .. },
+                    ..
+                } => {
+                    if *resource_address != TARI_TOKEN {
+                        substates.insert(SubstateId::Resource(*resource_address));
+                    }
                 },
                 Instruction::StealthTransfer {
                     resource_address_ref,

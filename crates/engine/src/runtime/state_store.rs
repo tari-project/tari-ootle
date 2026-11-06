@@ -72,8 +72,8 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
         if !self.exists(&id)? {
             return Err(RuntimeError::SubstateNotFound { id: id.clone() });
         }
-        let lock_id = self.locked_substates.try_lock(id.clone(), lock_flag)?;
-        self.load_and_cache(id)?;
+        self.load_and_cache(id.clone())?;
+        let lock_id = self.locked_substates.try_lock(id, lock_flag)?;
         Ok(lock_id)
     }
 

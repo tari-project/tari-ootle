@@ -195,6 +195,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             transaction_executor.clone(),
             config.consensus_constants.max_transaction_validity_epochs,
             config.consensus_constants.max_block_pledge_bytes,
+            config.consensus_constants.max_transaction_input_load_bytes,
         );
         let uncommitted_templates = transaction_manager.uncommitted_templates().clone();
 

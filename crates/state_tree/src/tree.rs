@@ -374,13 +374,6 @@ impl ShardGroupRootTree {
                 return Err(StateTreeError::DuplicateShardInShardGroupTree { shard });
             }
         }
-        if changes.is_empty() {
-            return Ok(Self {
-                store,
-                root: SPARSE_MERKLE_PLACEHOLDER_HASH,
-                leaves,
-            });
-        }
         let (root, update) = JellyfishMerkleTree::<_, ()>::new(&store, JmtHashScheme::V1).batch_put_value_set(
             changes,
             None,

@@ -191,17 +191,21 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                 );
                 // The birthday epoch is the first epoch any validator became active on the network; it
                 // is used as a cheap floor for whether there is a previous epoch's checkpoint to sync.
-                // Derive it from an activation epoch in this change set rather than the triggering
-                // event's epoch, whose offset from the activation epoch differs between epoch oracle
-                // implementations.
-                if let Some(activation_epoch) = node_changes.iter().find_map(|c| match c {
-                    ValidatorNodeChange::Add { activation_epoch, .. } => Some(*activation_epoch),
-                    ValidatorNodeChange::Remove { .. } => None,
-                }) {
+                // Derive it from the minimum activation epoch in this change set rather than the first
+                // entry or the triggering event's epoch, whose offset from the activation epoch differs
+                // between epoch oracle implementations.
+                if let Some(activation_epoch) = node_changes
+                    .iter()
+                    .filter_map(|c| match c {
+                        ValidatorNodeChange::Add { activation_epoch, .. } => Some(*activation_epoch),
+                        ValidatorNodeChange::Remove { .. } => None,
+                    })
+                    .min()
+                {
                     self.inner.set_birthday_epoch_if_unset(activation_epoch)?;
                 }
 
-                let mut invalidate_committee_cache = false;
+                let mut refresh_active_epoch_committees = false;
                 for node_change in node_changes {
                     match node_change {
                         ValidatorNodeChange::Add {
@@ -229,7 +233,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                                 vote_power,
                             )?;
                             if activation_epoch <= self.current_epoch() {
-                                invalidate_committee_cache = true;
+                                refresh_active_epoch_committees = true;
                             }
                         },
                         ValidatorNodeChange::Remove { public_key } => {
@@ -241,12 +245,19 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
 
                             self.inner.deactivate_validator_node(public_key, epoch)?;
                             if epoch <= self.current_epoch() {
-                                invalidate_committee_cache = true;
+                                refresh_active_epoch_committees = true;
                             }
                         },
                     }
                 }
-                if invalidate_committee_cache {
+                if refresh_active_epoch_committees {
+                    let current_epoch = self.current_epoch();
+                    if !self.inner.is_epoch_locked(current_epoch) &&
+                        self.inner.get_epoch_hash(current_epoch).optional()?.is_some()
+                    {
+                        let current_hash = self.inner.current_epoch_hash();
+                        self.inner.advance_to_epoch(current_epoch, current_hash)?;
+                    }
                     self.committee_cache.clear().await;
                 }
             },
@@ -553,26 +564,30 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                 shard_key,
                 power,
                 reply,
-            } => handle(
-                reply,
-                self.inner.add_validator_node_registration(
+            } => {
+                let res = self.inner.add_validator_node_registration(
                     activation_epoch,
                     validator_public_key,
                     claim_public_key,
                     shard_key,
                     power,
-                ),
-                context,
-            ),
+                );
+                if res.is_ok() && activation_epoch <= self.current_epoch() {
+                    self.committee_cache.clear().await;
+                }
+                handle(reply, res, context);
+            },
             EpochManagerRequest::DeactivateValidatorNode {
                 public_key,
                 deactivation_epoch,
                 reply,
-            } => handle(
-                reply,
-                self.inner.deactivate_validator_node(public_key, deactivation_epoch),
-                context,
-            ),
+            } => {
+                let res = self.inner.deactivate_validator_node(public_key, deactivation_epoch);
+                if res.is_ok() && deactivation_epoch <= self.current_epoch() {
+                    self.committee_cache.clear().await;
+                }
+                handle(reply, res, context);
+            },
             EpochManagerRequest::IsInitialScanningComplete { reply } => {
                 handle(reply, Ok(self.is_initial_epoch_sync_complete), context)
             },
@@ -1141,5 +1156,69 @@ mod tests {
             .unwrap();
         assert_eq!(vns.len(), 1);
         assert_eq!(vns[0].shard_key, shard_key_2);
+    }
+
+    #[tokio::test]
+    async fn validator_changes_choose_min_birthday_epoch_and_reassign_unlocked_current_epoch() {
+        let shutdown = Shutdown::new();
+        let all_shards = ShardGroup::all_shards(NumPreshards::P256);
+        let global_db = GlobalDb::new(SqliteGlobalDbAdapter::new(
+            SqliteConnection::establish(":memory:").unwrap(),
+        ));
+        global_db.adapter().migrate().unwrap();
+        let mut service = create_service(global_db.clone(), &shutdown);
+
+        let pk1 = RistrettoPublicKeyBytes::from_hex("e2f2ae0a6abc4e71a884a961c500515f58e30b6aa582dd8db6a65945e08d2d76")
+            .unwrap();
+        let pk2 = RistrettoPublicKeyBytes::from_hex("6a493210f7499cd17fecb510ae0cea23a110e8d5b901f8acadd3095c73a3b919")
+            .unwrap();
+
+        // First change batch has activation epochs 5 and 2 out of order; birthday_epoch should pick min (2).
+        service
+            .handle_epoch_event(EpochEvent::ActiveValidatorNodeSetChanged {
+                epoch: Epoch(1),
+                node_changes: vec![
+                    ValidatorNodeChange::Add {
+                        claim_public_key: pk1,
+                        validator_node_public_key: pk1,
+                        activation_epoch: Epoch(5),
+                        minimum_value_promise: 0,
+                        vote_power: VotePower::of(1),
+                        shard_key: SubstateAddress::from_array([1; SubstateAddress::LENGTH]),
+                    },
+                    ValidatorNodeChange::Add {
+                        claim_public_key: pk2,
+                        validator_node_public_key: pk2,
+                        activation_epoch: Epoch(2),
+                        minimum_value_promise: 0,
+                        vote_power: VotePower::of(1),
+                        shard_key: SubstateAddress::from_array([2; SubstateAddress::LENGTH]),
+                    },
+                ],
+            })
+            .await
+            .unwrap();
+        assert_eq!(service.inner.birthday_epoch(), Some(Epoch(2)));
+
+        // Activate Epoch(5) where both pk1 and pk2 are active.
+        service
+            .activate_epoch(Epoch(5), FixedHash::from([5; 32]))
+            .await
+            .unwrap();
+        assert_eq!(cached_committee(&service, Epoch(5), all_shards).await.len(), 2);
+
+        // Now remove pk1 in unlocked Epoch(5) without a hash change; committees & validator_set_hash must update.
+        service
+            .handle_epoch_event(EpochEvent::ActiveValidatorNodeSetChanged {
+                epoch: Epoch(5),
+                node_changes: vec![ValidatorNodeChange::Remove { public_key: pk1 }],
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            cached_committee(&service, Epoch(5), all_shards).await,
+            vec![pk2],
+            "unlocked current epoch committee must be reassigned when a validator change arrives in-epoch"
+        );
     }
 }

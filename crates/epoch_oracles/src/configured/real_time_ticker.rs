@@ -81,7 +81,7 @@ impl EpochTicker for RealTimeEpochTicker {
         }
     }
 }
-fn calc_static_epoch_hash(epoch: Epoch) -> FixedHash {
+pub(crate) fn calc_static_epoch_hash(epoch: Epoch) -> FixedHash {
     const U64_SIZE: usize = size_of::<u64>();
     const HASH_SIZE: usize = FixedHash::byte_size();
     let mut epoch_hash = [0u8; HASH_SIZE];

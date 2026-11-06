@@ -76,6 +76,11 @@ where
             Ok(None)
         }
 
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where E: de::Error {
+            Ok(None)
+        }
+
         fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
         where D: Deserializer<'de> {
             string_or_struct(deserializer).map(Some)

@@ -2381,7 +2381,8 @@ mod resource_access_rules {
             .unwrap();
 
         // `mint_resource` is a function rather than a method, so the mint acts on the resource from outside the
-        // hook's own component and the hook runs.
+        // hook's own component and the hook runs. This deposit creates the account's vault, so its hook reads stored
+        // account state that holds no vault for the resource yet.
         test.execute_expect_success(
             Transaction::builder_localnet(Epoch(1))
                 .call_function(access_rules_template, "mint_resource", args![token_resource])
@@ -2401,6 +2402,8 @@ mod resource_access_rules {
                 .call_method(user_account, "deposit", args![Workspace("withdrawn")])
                 .call_method(user_account, "create_proof_for_resource", args![token_resource])
                 .put_last_instruction_output_on_workspace("proof_all")
+                // The resource proof locks the whole balance, so it is dropped before an amount is locked.
+                .drop_all_proofs_in_workspace()
                 .call_method(user_account, "create_proof_by_amount", args![token_resource, 1])
                 .put_last_instruction_output_on_workspace("proof_amt")
                 .drop_all_proofs_in_workspace()

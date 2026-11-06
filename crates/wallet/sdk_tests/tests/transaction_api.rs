@@ -132,6 +132,7 @@ async fn final_fee_is_zero_for_a_rejected_transaction() {
     *final_decision = Decision::Abort(AbortReason::InsufficientFeesPaid);
     execution_result.as_mut().unwrap().finalize.result =
         TransactionResult::Reject(RejectReason::execution_failure_unclassified("nope"));
+    execution_result.as_mut().unwrap().finalize.fee_receipt = underpaid_fee_receipt();
 
     let test = TestWithNetwork::with_network(CannedTransactionResultInterface::new(query_result));
     test.store()
@@ -148,6 +149,68 @@ async fn final_fee_is_zero_for_a_rejected_transaction() {
 
     assert_eq!(finalized.status, TransactionStatus::Rejected);
     assert_eq!(finalized.final_fee, Some(0));
+}
+
+#[tokio::test]
+async fn an_abort_without_execution_records_abort_details_and_short_circuits_later_checks() {
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+
+    let query_result = TransactionQueryResult {
+        transaction_id,
+        result: TransactionFinalizedResult::Finalized {
+            final_decision: Decision::Abort(AbortReason::LockInputsFailed),
+            execution_result: None,
+            execution_time: Duration::ZERO,
+            finalized_time: now(),
+            abort_details: Some("inputs locked".to_string()),
+        },
+        receipt: None,
+        encoded_execution_result: None,
+    };
+
+    let test = TestWithNetwork::with_network(CannedTransactionResultInterface::new(query_result));
+    test.store()
+        .with_write_tx(|tx| tx.transactions_insert(&transaction, None, &[Test::test_account_address()], false))
+        .unwrap();
+
+    let finalized = test
+        .sdk()
+        .transaction_api()
+        .check_and_store_finalized_transaction(transaction_id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(finalized.status, TransactionStatus::Rejected);
+    assert_eq!(finalized.final_fee, Some(0));
+    assert_eq!(finalized.invalid_reason.as_deref(), Some("inputs locked"));
+    assert_eq!(finalized.failure_reason_as_string().as_deref(), Some("inputs locked"));
+
+    // Even if the network later returns NotFound, the already-resolved transaction is returned from storage.
+    let test_not_found = TestWithNetwork::with_network(CannedTransactionResultInterface::not_found());
+    test_not_found
+        .store()
+        .with_write_tx(|tx| {
+            tx.transactions_insert(&transaction, None, &[Test::test_account_address()], false)?;
+            tx.transactions_update(
+                WalletTransactionUpdate::new(transaction_id)
+                    .with_new_status(TransactionStatus::Rejected)
+                    .with_final_fee(Some(0))
+                    .with_invalid_reason(Some("inputs locked")),
+            )
+        })
+        .unwrap();
+
+    let cached = test_not_found
+        .sdk()
+        .transaction_api()
+        .check_and_store_finalized_transaction(transaction_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(cached.status, TransactionStatus::Rejected);
+    assert_eq!(cached.invalid_reason.as_deref(), Some("inputs locked"));
 }
 
 #[tokio::test]

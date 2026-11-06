@@ -33,6 +33,8 @@ mod high_pc_block_binding;
 #[cfg(test)]
 mod input_load_size;
 #[cfg(test)]
+mod invalid_foreign_proposal;
+#[cfg(test)]
 mod justify_certificate;
 #[cfg(test)]
 mod last_voted_persistence;
@@ -40,6 +42,8 @@ mod last_voted_persistence;
 mod leader_failure;
 #[cfg(test)]
 mod leader_fast_skip;
+#[cfg(test)]
+mod missing_foreign_proposal;
 #[cfg(test)]
 mod output_exists;
 #[cfg(test)]

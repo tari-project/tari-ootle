@@ -2908,17 +2908,12 @@ where
                 let admitted_transfer = match arg.statement {
                     Some(statement) => {
                         self.tracker.account_fee_intent_stealth_transfer()?;
-                        let (admitted, has_view_key) = self.tracker.write_with(|state| {
-                            let admitted = state.account_stealth_transfer(statement)?;
-                            let resource_lock = state.read_lock_substate(SubstateId::Resource(TARI_TOKEN))?;
-                            let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
-                            state.unlock_substate(resource_lock)?;
-                            Ok::<_, RuntimeError>((admitted, has_view_key))
-                        })?;
-                        self.tracker.charge_native_execution(stealth::transfer_native_points(
-                            admitted.statement(),
-                            has_view_key,
-                        ))?;
+                        let admitted = self
+                            .tracker
+                            .write_with(|state| state.account_stealth_transfer(statement))?;
+                        // TARI has no view key, so the viewable-balance surcharge never applies to a fee payment.
+                        self.tracker
+                            .charge_native_execution(stealth::transfer_native_points(admitted.statement(), false))?;
                         self.verify_input_authorizations(TARI_TOKEN.into(), admitted.statement())?;
                         Some(admitted)
                     },
@@ -4744,7 +4739,7 @@ mod tests {
             outputs_statement: tari_template_lib::types::stealth::StealthOutputsStatement {
                 outputs: vec![],
                 revealed_output: None,
-                agg_range_proof: Default::default(),
+                agg_range_proof: tari_template_lib::types::crypto::RangeProofBytes::empty(),
             },
             balance_proof: None,
             covenant_claims: vec![],

@@ -2089,8 +2089,8 @@ impl<TStore: StateReader> WorkingState<TStore> {
                         return Err(RuntimeError::RootSubstateNotFound { id });
                     }
                 }
-            } else if !scope.is_substate_in_scope(&id) &&
-                !(include_base_scope && self.initial_call_scope.is_substate_in_scope(&id)) &&
+            } else if !(scope.is_substate_in_scope(&id) ||
+                include_base_scope && self.initial_call_scope.is_substate_in_scope(&id)) &&
                 // The substate could be an allocated address
                 self.get_allocated_address_by_address(id.clone()).is_none()
             {

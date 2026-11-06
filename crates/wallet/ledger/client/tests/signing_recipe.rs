@@ -235,6 +235,27 @@ fn preimage_field_tags_match_protocol() {
 }
 
 #[test]
+fn expected_field_sequences_match_signing_preimage_v1() {
+    use ootle_ledger_common::arg_types::{SignMode, SigningField};
+
+    let seal_signer = pk_bytes(&random_scalar());
+    let tx = sample_unsigned();
+
+    let add_signer_fields: Vec<SigningField> = TransactionSignature::signing_preimage_v1(&seal_signer, &tx)
+        .into_iter()
+        .map(|seg| SigningField::try_from(seg.field as u8).unwrap())
+        .collect();
+    assert_eq!(add_signer_fields, SignMode::AddSigner.expected_fields());
+
+    let unsealed = UnsealedTransactionV1::new(tx, vec![]);
+    let seal_fields: Vec<SigningField> = TransactionSealSignature::signing_preimage_v1(&unsealed)
+        .into_iter()
+        .map(|seg| SigningField::try_from(seg.field as u8).unwrap())
+        .collect();
+    assert_eq!(seal_fields, SignMode::Seal.expected_fields());
+}
+
+#[test]
 fn add_signer_recipe_matches_and_verifies() {
     let seal_signer = pk_bytes(&random_scalar());
     let signer = random_scalar();

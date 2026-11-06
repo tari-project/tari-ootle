@@ -339,7 +339,7 @@ async fn prefer_confidential_respects_locked_revealed_balance() {
 
     let other_lock = test.new_lock();
     sdk.locks_api()
-        .lock_funds_in_vault(other_lock.id(), &vault_id, 80u64.into())
+        .lock_funds_in_vault(other_lock.id(), &vault_id, 80u64)
         .unwrap();
 
     let err = sdk

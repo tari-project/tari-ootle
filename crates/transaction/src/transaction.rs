@@ -383,7 +383,7 @@ impl Transaction {
         self.instructions()
             .iter()
             .chain(self.fee_instructions())
-            .filter_map(|instruction| instruction.referenced_template())
+            .flat_map(Instruction::referenced_templates)
     }
 
     /// Returns all substates addresses referenced by this transaction

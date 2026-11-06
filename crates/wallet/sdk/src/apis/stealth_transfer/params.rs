@@ -3,12 +3,20 @@
 
 use ootle_byte_type::FromByteType;
 use ootle_network::Network;
-use tari_bor::{Deserialize, Serialize};
-use tari_engine_types::crypto::MAX_LAZY_BP_AGG_FACTORS;
+use tari_bor::{Deserialize, Serialize, decode_exact};
+use tari_engine_types::{crypto::MAX_LAZY_BP_AGG_FACTORS, limits::WASM_LIMITS};
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::Epoch;
 use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo, stealth::validated_condition_root};
-use tari_template_lib::types::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress, UtxoAddress};
+use tari_template_lib::types::{
+    AccessRule,
+    Amount,
+    ComponentAddress,
+    NonFungibleAddress,
+    ResourceAddress,
+    UtxoAddress,
+    stealth::{AtomicCondition, TemplateFunction},
+};
 
 use crate::{
     apis::{
@@ -174,8 +182,8 @@ impl TransferOutput {
     /// at all — statement construction filters it out — so a gating intent on one would be silently dropped and the
     /// funds deposited unguarded. Reject it rather than mislead the caller.
     ///
-    /// For a condition set, the tree is built here so a malformed set is reported against the field the caller
-    /// supplied, before any inputs are locked, rather than failing deep in output construction.
+    /// For any intent that commits a condition tree, the tree is built here so a malformed set is reported against the
+    /// field the caller supplied, before any inputs are locked, rather than failing deep in output construction.
     pub fn validate_pay_to(&self) -> Result<(), String> {
         if self.blinded_amount == 0 {
             if matches!(self.pay_to, PayTo::StealthPublicKey) {
@@ -186,12 +194,47 @@ impl TransferOutput {
             );
         }
 
-        if let PayTo::Conditions(conditions) = &self.pay_to {
-            validated_condition_root(conditions).map_err(|e| e.to_string())?;
+        let Some(conditions) = self.pay_to.conditions() else {
+            return Ok(());
+        };
+        validated_condition_root(&conditions).map_err(|e| e.to_string())?;
+        for leaf in conditions.iter() {
+            for atom in leaf.conditions() {
+                match atom {
+                    AtomicCondition::AccessRule(rule) => validate_access_rule_condition(rule)?,
+                    AtomicCondition::TemplateFunction(tf) => validate_template_function_condition(tf)?,
+                    AtomicCondition::Builtin(_) | AtomicCondition::Covenant(_) => {},
+                }
+            }
         }
 
         Ok(())
     }
+}
+
+fn validate_access_rule_condition(rule: &AccessRule) -> Result<(), String> {
+    if matches!(rule, AccessRule::DenyAll) {
+        return Err("an AccessRule::DenyAll spend condition can never be satisfied".to_string());
+    }
+    if let Some(invalid) = rule.find_invalid_rule() {
+        return Err(format!("Invalid access rule in spend condition: {invalid:?}"));
+    }
+    Ok(())
+}
+
+fn validate_template_function_condition(tf: &TemplateFunction) -> Result<(), String> {
+    let max_bound_args = WASM_LIMITS.max_function_arguments.saturating_sub(1);
+    if tf.args.len() > max_bound_args {
+        return Err(format!(
+            "TemplateFunction has {} bound arguments, exceeding the limit of {max_bound_args}",
+            tf.args.len()
+        ));
+    }
+    for (i, arg) in tf.args.iter().enumerate() {
+        decode_exact::<tari_bor::Value>(arg)
+            .map_err(|e| format!("TemplateFunction bound argument {i} is not well-formed CBOR: {e}"))?;
+    }
+    Ok(())
 }
 
 /// Where a transfer statement's input value comes from.
@@ -338,8 +381,10 @@ mod tests {
     use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
     use tari_engine_types::limits::STEALTH_LIMITS;
     use tari_template_lib::types::{
+        Hash32,
+        access_rules::{MAX_ACCESS_RULE_NODES, RequireRule, RestrictedAccessRule, RuleRequirement},
         constants::STEALTH_TARI_RESOURCE_ADDRESS,
-        stealth::{AtomicCondition, BuiltinPredicate, SpendCondition},
+        stealth::{AtomicCondition, BuiltinPredicate, SpendCondition, TemplateFunction},
     };
 
     use super::*;
@@ -415,6 +460,29 @@ mod tests {
             AtomicCondition::Builtin(BuiltinPredicate::AfterEpoch(1));
             STEALTH_LIMITS.max_conditions_per_conjunction + 1
         ])]));
+    }
+
+    /// The single-leaf conveniences commit a leaf just as `Conditions` does, so they are held to the same rule: a leaf
+    /// that cannot decode at spend time is never revealed.
+    #[test]
+    fn rejects_a_single_leaf_pay_to_over_the_decode_node_limit() {
+        assert_rejects_pay_to(PayTo::TemplateFunction(TemplateFunction {
+            template: Default::default(),
+            function: "predicate".try_into().unwrap(),
+            args: vec![Default::default(); MAX_ACCESS_RULE_NODES],
+        }));
+
+        // The rule decodes on its own at the limit; the leaf wrapping it is one node over.
+        let requirements = (0..MAX_ACCESS_RULE_NODES - 1)
+            .map(|i| {
+                let mut bytes = [0u8; 32];
+                bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
+                RuleRequirement::ScopedToTemplate(Hash32::from_array(bytes))
+            })
+            .collect();
+        let rule = AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::AnyOf(requirements)));
+        assert_eq!(rule.num_nodes(), MAX_ACCESS_RULE_NODES);
+        assert_rejects_pay_to(PayTo::AccessRule(rule));
     }
 
     /// `pay_to` gates the blinded output, which a revealed-only transfer never produces. Silently depositing the
@@ -521,5 +589,30 @@ mod tests {
         blinded_paying_to(PayTo::Conditions(vec![a_condition(1), a_condition(2)]))
             .validate(NETWORK)
             .expect("distinct condition leaves form a tree");
+    }
+
+    #[test]
+    fn rejects_deny_all_and_invalid_m_of_n_access_rules() {
+        use tari_template_lib::types::{TemplateAddress, bytes::Bytes};
+
+        assert_rejects_pay_to(PayTo::AccessRule(AccessRule::DenyAll));
+        assert_rejects_pay_to(PayTo::Conditions(vec![SpendCondition::access_rule(
+            AccessRule::DenyAll,
+        )]));
+
+        let req = RuleRequirement::Resource(STEALTH_TARI_RESOURCE_ADDRESS);
+        let duplicate_m_of_n = AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::MOfN(
+            2,
+            Box::new([req.clone(), req]),
+        )));
+        assert_rejects_pay_to(PayTo::AccessRule(duplicate_m_of_n.clone()));
+        assert_rejects_pay_to(PayTo::Conditions(vec![SpendCondition::access_rule(duplicate_m_of_n)]));
+
+        let invalid_cbor_tf = TemplateFunction {
+            template: TemplateAddress::default(),
+            function: "predicate".try_into().unwrap(),
+            args: vec![Bytes::from_vec(vec![0xff])],
+        };
+        assert_rejects_pay_to(PayTo::TemplateFunction(invalid_cbor_tf));
     }
 }

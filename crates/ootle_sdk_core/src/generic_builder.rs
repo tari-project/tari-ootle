@@ -91,14 +91,12 @@ pub(crate) fn build_unsigned_instructions_with_extra_wants(
     let extra_inputs = extra_inputs_to_internal(intent)?;
 
     // Explicit-input short-circuit: caller supplied an input set, so skip resolution. `extra_inputs`
-    // is still merged in (it is always additive), de-duped by id so the first-seen entry wins —
-    // matching the resolution path's `push_unique`.
+    // is still merged in by id: writes take precedence and an unpinned version adopts a later
+    // declaration's version, matching the resolution path's `push_unique`.
     if !intent.inputs.is_empty() {
         let mut inputs = inputs_to_internal(intent)?;
         for req in extra_inputs {
-            if !inputs.contains(&req) {
-                inputs.push(req);
-            }
+            crate::inputs::push_unique(&mut inputs, req);
         }
         let partial = PartialTransaction::new_with_explicit_inputs(unsigned, inputs);
         return Ok((partial, WantList(Vec::new())));
@@ -116,9 +114,8 @@ pub(crate) fn build_unsigned_instructions_with_extra_wants(
 fn lower_intent(network: Network, intent: &GenericTransactionIntent) -> Result<TransactionBuilder, OotleSdkError> {
     // The fee phase runs first and its workspace is dropped before the main phase, so each phase
     // tracks its own bound workspace labels (matching the engine's per-phase workspace).
-    let fee_instructions = lower_fee_phase(network, intent)?;
-    let mut builder =
-        TransactionBuilder::new(network.as_byte(), Epoch(intent.max_epoch)).with_fee_instructions(fee_instructions);
+    let mut builder = TransactionBuilder::new(network.as_byte(), Epoch(intent.max_epoch));
+    builder = lower_fee_phase(builder, intent)?;
 
     // Track the main-phase workspace labels bound so far (by a `PutLastInstructionOutputOnWorkspace`)
     // so a later `ArgValue::Workspace(label)` is validated before we ask the builder for its id — the
@@ -134,18 +131,36 @@ fn lower_intent(network: Network, intent: &GenericTransactionIntent) -> Result<T
         .with_dry_run(intent.dry_run))
 }
 
-/// Lowers the fee phase to a flat instruction list: every `fee_instructions` spec followed by the
-/// fee payment. The fee payment is appended last so any account it pays from has been set up by the
-/// preceding fee instructions.
-fn lower_fee_phase(network: Network, intent: &GenericTransactionIntent) -> Result<Vec<Instruction>, OotleSdkError> {
-    let mut builder = TransactionBuilder::new(network.as_byte(), Epoch(intent.max_epoch));
-    let mut bound_labels: HashSet<String> = HashSet::new();
-    for instr in &intent.fee_instructions {
-        builder = lower_instruction(builder, intent, instr, &mut bound_labels)?;
-    }
-    builder = lower_fee_payment(builder, intent, &bound_labels)?;
-    // `into_instructions` returns this builder's main-phase list — the flat fee-phase sequence.
-    Ok(builder.into_instructions())
+/// Lowers the fee phase onto the builder's fee instruction builder: every `fee_instructions` spec
+/// followed by the fee payment. The fee payment is appended last so any account it pays from has been
+/// set up by the preceding fee instructions.
+fn lower_fee_phase(
+    builder: TransactionBuilder,
+    intent: &GenericTransactionIntent,
+) -> Result<TransactionBuilder, OotleSdkError> {
+    let mut result = Ok(());
+    let builder = builder.with_fee_instructions_builder(|mut fee_builder| {
+        let fallback_builder = fee_builder.clone();
+        let mut bound_labels: HashSet<String> = HashSet::new();
+        for instr in &intent.fee_instructions {
+            match lower_instruction(fee_builder, intent, instr, &mut bound_labels) {
+                Ok(b) => fee_builder = b,
+                Err(e) => {
+                    result = Err(e);
+                    return fallback_builder;
+                },
+            }
+        }
+        match lower_fee_payment(fee_builder, intent, &bound_labels) {
+            Ok(b) => b,
+            Err(e) => {
+                result = Err(e);
+                fallback_builder
+            },
+        }
+    });
+    result?;
+    Ok(builder)
 }
 
 /// Appends the fee-payment instruction to the fee phase per the intent's [`FeeSource`].
@@ -154,11 +169,11 @@ fn lower_fee_phase(network: Network, intent: &GenericTransactionIntent) -> Resul
 /// reference, or a workspace reference resolved like any [`ComponentRef::Workspace`]); `FromBucket`
 /// lowers to `PayFeeFromBucket`. A workspace/bucket label must be bound by a prior fee-phase
 /// `PutLastInstructionOutputOnWorkspace`.
-fn lower_fee_payment(
-    builder: TransactionBuilder,
+fn lower_fee_payment<D>(
+    builder: TransactionBuilder<D>,
     intent: &GenericTransactionIntent,
     bound_labels: &HashSet<String>,
-) -> Result<TransactionBuilder, OotleSdkError> {
+) -> Result<TransactionBuilder<D>, OotleSdkError> {
     let call = match &intent.fee_payment {
         FeeSource::FromAccount(account) => ComponentReference::from(account.to_internal()?),
         FeeSource::FromWorkspaceComponent { label } => {
@@ -193,12 +208,12 @@ fn ensure_label_bound(label: &str, bound_labels: &HashSet<String>) -> Result<(),
 }
 
 /// Lowers one [`InstructionSpec`] onto the builder, resolving workspace labels at the call point.
-fn lower_instruction(
-    builder: TransactionBuilder,
+fn lower_instruction<D>(
+    builder: TransactionBuilder<D>,
     intent: &GenericTransactionIntent,
     instr: &InstructionSpec,
     bound_labels: &mut HashSet<String>,
-) -> Result<TransactionBuilder, OotleSdkError> {
+) -> Result<TransactionBuilder<D>, OotleSdkError> {
     match instr {
         InstructionSpec::CallFunction {
             template_address,
@@ -277,8 +292,8 @@ fn lower_instruction(
 /// Literals are encoded via [`encode_arg`]. [`ArgValue::Workspace`] labels are resolved against the
 /// builder's label→id map (registered by the `PutLastInstructionOutputOnWorkspace` that produced the
 /// slot) and carried via [`workspace_arg`].
-fn lower_args(
-    builder: &TransactionBuilder,
+fn lower_args<D>(
+    builder: &TransactionBuilder<D>,
     args: &[ArgValue],
     bound_labels: &HashSet<String>,
 ) -> Result<Vec<InstructionArg>, OotleSdkError> {
@@ -296,8 +311,8 @@ fn lower_args(
 /// prior `PutLastInstructionOutputOnWorkspace` ⇒ [`OotleSdkError::Validation`]. We validate against
 /// `bound_labels` *first* so the builder's `get_workspace_offset_id_from_named_arg` (which panics on
 /// an unbound label) is only ever handed a label it has registered.
-fn resolve_workspace_arg(
-    builder: &TransactionBuilder,
+fn resolve_workspace_arg<D>(
+    builder: &TransactionBuilder<D>,
     label: &str,
     bound_labels: &HashSet<String>,
 ) -> Result<InstructionArg, OotleSdkError> {
@@ -314,8 +329,8 @@ fn resolve_workspace_arg(
 /// `Address` parses the component address; `Workspace` validates the label is bound in this phase
 /// then resolves it to the numeric id the builder registered. A component reference carries no offset,
 /// so a `name.offset` label is a [`OotleSdkError::Validation`].
-fn resolve_component_ref(
-    builder: &TransactionBuilder,
+fn resolve_component_ref<D>(
+    builder: &TransactionBuilder<D>,
     call: &ComponentRef,
     bound_labels: &HashSet<String>,
 ) -> Result<ComponentReference, OotleSdkError> {
@@ -1288,5 +1303,58 @@ mod tests {
             two_phase.contains(&resource().to_string()),
             "function literal-arg resource must be resolved"
         );
+    }
+
+    #[test]
+    fn fee_phase_publish_template_carries_and_remaps_blobs() {
+        let intent = GenericTransactionIntent {
+            fee: BoundaryAmount::new(2000),
+            fee_payment: fee_from(from_component()),
+            fee_instructions: vec![InstructionSpec::PublishTemplate {
+                blob_index: 1,
+                metadata_hash: None,
+            }],
+            instructions: vec![InstructionSpec::PublishTemplate {
+                blob_index: 0,
+                metadata_hash: None,
+            }],
+            blobs: vec![
+                crate::types::generic_intent::BlobSpec { bytes: vec![1, 2, 3] },
+                crate::types::generic_intent::BlobSpec { bytes: vec![4, 5, 6] },
+            ],
+            inputs: vec![InputRef::versioned(from_component().to_string(), 0)],
+            extra_inputs: vec![],
+            min_epoch: None,
+            max_epoch: 1,
+            dry_run: false,
+        };
+        let (partial, _w) = build_unsigned_instructions_with_wants(Network::Esmeralda, &intent).unwrap();
+        let unsigned = partial.into_unsigned();
+        assert_eq!(unsigned.blobs().len(), 2);
+        assert_eq!(unsigned.blobs().get(0).unwrap().as_bytes(), &[1, 2, 3]);
+        assert_eq!(unsigned.blobs().get(1).unwrap().as_bytes(), &[4, 5, 6]);
+        assert_eq!(unsigned.instructions()[0], Instruction::PublishTemplate {
+            binary: 0,
+            metadata_hash: None,
+        });
+        assert_eq!(unsigned.fee_instructions()[0], Instruction::PublishTemplate {
+            binary: 1,
+            metadata_hash: None,
+        });
+    }
+
+    #[test]
+    fn explicit_inputs_merge_with_extra_inputs() {
+        let mut intent = transfer_intent(vec![InputRef::unversioned(from_component().to_string()).read_only()]);
+        intent.extra_inputs = vec![InputRef::versioned(from_component().to_string(), 3)];
+        let (partial, _w) = build_unsigned_instructions_with_wants(Network::Esmeralda, &intent).unwrap();
+        let unsigned = partial.into_unsigned();
+        let decl = unsigned
+            .inputs()
+            .iter()
+            .find(|i| *i.substate_id() == SubstateId::Component(from_component()))
+            .expect("component input must be present");
+        assert!(decl.is_write(), "write extra_input must upgrade read explicit input");
+        assert_eq!(decl.version(), Some(SubstateVersion::from(3)));
     }
 }

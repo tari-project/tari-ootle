@@ -144,6 +144,8 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
     }
 
     /// Returns true if the key may sign. An imported view-only key never signs.
+    ///
+    /// Returns [`KeyManagerApiError::KeyNotFound`] for an imported key id the wallet holds no key at.
     pub fn is_signing_key(&self, key_id: KeyId) -> Result<bool, KeyManagerApiError> {
         if !key_id.is_signing_key() {
             return Ok(false);
@@ -151,12 +153,12 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
         let KeyId::Imported { local_key_id } = key_id else {
             return Ok(true);
         };
-        let key_type = self
+        let (key_type, _) = self
             .store
             .with_read_tx(|tx| tx.key_manager_get_raw_imported_key(local_key_id))
             .optional()?
-            .map(|(key_type, _)| key_type);
-        Ok(key_type != Some(KeyType::ViewOnly))
+            .ok_or(KeyManagerApiError::KeyNotFound { key_id })?;
+        Ok(key_type != KeyType::ViewOnly)
     }
 
     pub fn import_key(

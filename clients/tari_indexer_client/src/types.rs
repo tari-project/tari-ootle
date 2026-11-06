@@ -1321,6 +1321,7 @@ pub enum ValidatorConsensusState {
     Idle,
     CheckSync,
     Syncing,
+    Presyncing,
     Running,
     Sleeping,
     Shutdown,

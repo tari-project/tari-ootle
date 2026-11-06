@@ -148,6 +148,11 @@ pub enum NoVoteReason {
     )]
     BlockPledgeBytesExceeded { total_bytes: usize, max_bytes: usize },
     #[error(
+        "Block loads {total_bytes} bytes of input substates to execute its transactions, exceeding the maximum \
+         {max_bytes}"
+    )]
+    BlockInputLoadBytesExceeded { total_bytes: usize, max_bytes: usize },
+    #[error(
         "Block carries {num_proposals} foreign proposals totalling {total_bytes} bytes, exceeding the maximum \
          {max_bytes}"
     )]
@@ -234,6 +239,7 @@ impl NoVoteReason {
             Self::BlockExecutionPointsExceeded { .. } => "BlockExecutionPointsExceeded",
             Self::BlockShardOutputBytesExceeded { .. } => "BlockShardOutputBytesExceeded",
             Self::BlockPledgeBytesExceeded { .. } => "BlockPledgeBytesExceeded",
+            Self::BlockInputLoadBytesExceeded { .. } => "BlockInputLoadBytesExceeded",
             Self::BlockForeignProposalBytesExceeded { .. } => "BlockForeignProposalBytesExceeded",
             Self::ConflictingTransactionProposed { .. } => "ConflictingTransactionProposed",
             Self::LockedEpochDisagreement { .. } => "LockedEpochDisagreement",

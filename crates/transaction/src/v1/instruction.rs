@@ -177,12 +177,24 @@ impl Instruction {
         }
     }
 
-    pub fn referenced_template(&self) -> Option<&TemplateAddress> {
+    fn referenced_template(&self) -> Option<&TemplateAddress> {
         match self {
             Self::CallFunction { address, .. } => Some(address),
+            // `UpdateComponentTemplate` loads the template replacing the component's, and never the one it replaces.
             Self::UpdateComponentTemplate { new_template, .. } => Some(new_template),
             _ => None,
         }
+    }
+
+    pub fn referenced_templates(&self) -> impl Iterator<Item = &TemplateAddress> + '_ {
+        let single = self.referenced_template();
+        let stealth = match self {
+            Self::StealthTransfer { statement, .. } => {
+                Some(statement.script_path_template_functions().map(|tf| &tf.template))
+            },
+            _ => None,
+        };
+        single.into_iter().chain(stealth.into_iter().flatten())
     }
 
     /// Iterate over every `BlobIndex` this instruction references — both `PublishTemplate.binary`
@@ -275,6 +287,54 @@ impl Instruction {
 
     pub fn is_pay_fee(&self) -> bool {
         matches!(self, Self::PayFeeFromBucket { .. })
+    }
+
+    /// Whether this instruction can make a fee payment: `PayFeeFromBucket` directly, or a call into template code,
+    /// which may pay from a vault. Whether the fee intent pays enough is settled at the fee checkpoint.
+    pub fn may_pay_fee(&self) -> bool {
+        match self {
+            Self::PayFeeFromBucket { .. } | Self::CallMethod { .. } | Self::CallFunction { .. } => true,
+            Self::CreateAccount { .. } |
+            Self::PutLastInstructionOutputOnWorkspace { .. } |
+            Self::ClaimBurn { .. } |
+            Self::ClaimValidatorFees { .. } |
+            Self::DropAllProofsInWorkspace |
+            Self::Assert { .. } |
+            Self::TakeFromBucket { .. } |
+            Self::PublishTemplate { .. } |
+            Self::AllocateAddress { .. } |
+            Self::StealthTransfer { .. } |
+            Self::UpdateComponentTemplate { .. } |
+            Self::PutIntoBucket { .. } |
+            Self::AuthorizeProof { .. } |
+            Self::DropProofAuthorization { .. } => false,
+        }
+    }
+
+    /// Whether this instruction is permitted inside a transaction's fee instructions.
+    ///
+    /// The fee intent runs on a flat compute credit and its writes commit even when the main intent fails, so it
+    /// holds only the work of funding the fee. Publishing a template and changing a component's template are main
+    /// intent work, funded by the fee already paid.
+    pub fn is_allowed_in_fee_intent(&self) -> bool {
+        match self {
+            Self::PublishTemplate { .. } | Self::UpdateComponentTemplate { .. } => false,
+            Self::CreateAccount { .. } |
+            Self::CallFunction { .. } |
+            Self::CallMethod { .. } |
+            Self::PutLastInstructionOutputOnWorkspace { .. } |
+            Self::ClaimBurn { .. } |
+            Self::ClaimValidatorFees { .. } |
+            Self::DropAllProofsInWorkspace |
+            Self::Assert { .. } |
+            Self::TakeFromBucket { .. } |
+            Self::AllocateAddress { .. } |
+            Self::StealthTransfer { .. } |
+            Self::PayFeeFromBucket { .. } |
+            Self::PutIntoBucket { .. } |
+            Self::AuthorizeProof { .. } |
+            Self::DropProofAuthorization { .. } => true,
+        }
     }
 
     /// Shift all workspace IDs in this instruction by the given offset.

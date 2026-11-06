@@ -4732,18 +4732,8 @@ mod tests {
 
     #[test]
     fn restricted_frames_forbid_auth_hooks_spend_scripts_and_stealth_transfers() {
-        let statement = StealthTransferStatement {
-            inputs_statement: tari_template_lib::types::stealth::StealthInputsStatement::new_revealed_only(
-                Amount::zero(),
-            ),
-            outputs_statement: tari_template_lib::types::stealth::StealthOutputsStatement {
-                outputs: vec![],
-                revealed_output: None,
-                agg_range_proof: tari_template_lib::types::crypto::RangeProofBytes::empty(),
-            },
-            balance_proof: None,
-            covenant_claims: vec![],
-        };
+        let statement =
+            StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
         let vault_id = tari_template_lib::types::VaultId::new([1u8; 32].into());
         let pay_fee_args = EngineArgs::from(vec![
             tari_bor::encode(&PayFeeArg {

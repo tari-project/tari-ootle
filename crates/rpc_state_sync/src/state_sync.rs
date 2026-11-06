@@ -286,6 +286,46 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         local_state_matches_checkpoint_at(&self.epoch_manager, &self.state_store, checkpoint_epoch, local_epoch).await
     }
 
+    /// The sync status of a node that holds no leaf block, given the oracle's current epoch.
+    async fn leafless_sync_status(&self, oracle_epoch: Epoch) -> Result<SyncStatus, RpcStateSyncError> {
+        // A leaf-less node that still holds an `EpochCheckpoint` covering the epoch immediately before the
+        // oracle's current epoch — and whose committed state already matches that checkpoint — was rolled back:
+        // the offline rollback tool clears the consensus pointers (leaf, locked, high QC) but keeps the committed
+        // state and its checkpoint. There is nothing to state-sync; consensus recreates the current epoch's
+        // genesis from local state on entering `Running` (see
+        // `HotstuffWorker::get_starting_epoch`/`create_genesis_block_if_required`). Reporting `Behind` here would
+        // route it to `Syncing`, which fails because every committee member rolled back together holds the same
+        // (absent) state, wedging consensus in `Sleeping`.
+        //
+        // Checkpoint coverage and state-root match are both required, not merely a checkpoint's presence: state
+        // sync stores each shard group's checkpoint as soon as that group's shards match it, so a first-time sync
+        // interrupted before the remaining groups finish also leaves a leaf-less node holding a checkpoint — but
+        // with incomplete state. Such a node holds no checkpoint covering the remaining groups' shards, so it falls
+        // through here and resumes the sync.
+        let maybe_checkpoint = self
+            .state_store
+            .with_read_tx(|tx| EpochCheckpoint::get_last_checkpoint(tx))
+            .optional()?;
+        if let Some(checkpoint) = maybe_checkpoint &&
+            checkpoint_admits_leafless_join(checkpoint.epoch(), oracle_epoch) &&
+            self.local_state_matches_checkpoint(checkpoint.epoch(), checkpoint.epoch() + Epoch(1))
+                .await?
+        {
+            return Ok(SyncStatus::UpToDate);
+        }
+
+        let Some(birthday_epoch) = self.epoch_manager.get_birthday_epoch().await? else {
+            return Err(RpcStateSyncError::InvariantError {
+                details: "Check sync called before the birthday epoch was determined".to_string(),
+            });
+        };
+        Ok(if oracle_epoch > birthday_epoch {
+            SyncStatus::Behind { target_epoch: None }
+        } else {
+            SyncStatus::UpToDate
+        })
+    }
+
     async fn get_sync_sources(
         &self,
         local_shard_group: ShardGroup,
@@ -1013,42 +1053,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
         // the oracle has moved past it there is prior committed state to sync; at or before it there is
         // nothing, so we join consensus directly.
         let Some(leaf) = leaf_block else {
-            // A leaf-less node that still holds an `EpochCheckpoint` covering the epoch immediately before the
-            // oracle's current epoch — and whose committed state already matches that checkpoint — was rolled back:
-            // the offline rollback tool clears the consensus pointers (leaf, locked, high QC) but keeps the committed
-            // state and its checkpoint. There is nothing to state-sync; consensus recreates the current epoch's
-            // genesis from local state on entering `Running` (see
-            // `HotstuffWorker::get_starting_epoch`/`create_genesis_block_if_required`). Reporting `Behind` here would
-            // route it to `Syncing`, which fails because every committee member rolled back together holds the same
-            // (absent) state, wedging consensus in `Sleeping`.
-            //
-            // Checkpoint coverage and state-root match are both required, not merely a checkpoint's presence: state
-            // sync stores each shard group's checkpoint as soon as that group's shards match it, so a first-time sync
-            // interrupted before the remaining groups finish also leaves a leaf-less node holding a checkpoint — but
-            // with incomplete state. Such a node holds no checkpoint covering the remaining groups' shards, so it falls
-            // through here and resumes the sync.
-            let maybe_checkpoint = self
-                .state_store
-                .with_read_tx(|tx| EpochCheckpoint::get_last_checkpoint(tx))
-                .optional()?;
-            if let Some(cp) = maybe_checkpoint &&
-                checkpoint_admits_leafless_join(cp.epoch(), oracle_epoch) &&
-                self.local_state_matches_checkpoint(cp.epoch(), cp.epoch() + Epoch(1))
-                    .await?
-            {
-                return Ok(SyncStatus::UpToDate);
-            }
-
-            let Some(birthday_epoch) = self.epoch_manager.get_birthday_epoch().await? else {
-                return Err(RpcStateSyncError::InvariantError {
-                    details: "Check sync called before the birthday epoch was determined".to_string(),
-                });
-            };
-            return Ok(if oracle_epoch > birthday_epoch {
-                SyncStatus::Behind { target_epoch: None }
-            } else {
-                SyncStatus::UpToDate
-            });
+            return self.leafless_sync_status(oracle_epoch).await;
         };
 
         if self.holds_missing_values(leaf.shard_group())? {

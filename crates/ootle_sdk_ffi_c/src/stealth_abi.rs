@@ -42,7 +42,6 @@ use std::os::raw::c_char;
 
 use ootle_sdk_core::{
     FetchedSubstate,
-    RistrettoPublicKeyBytes,
     StealthKeys,
     StealthPartialTransaction,
     StealthResolution,
@@ -758,11 +757,7 @@ pub unsafe extern "C" fn ootle_build_stealth_outputs_statement_with_seed(
             let intent: StealthTransferIntent = parse_json(intent_json, "intent")?;
             let seed = BuildSeed::from_array(seed_from_hex(seed_hex)?);
             let revealed_receiver = unsafe { optional_str(revealed_receiver_hex, "revealed_receiver_hex") }?
-                .map(|hex| {
-                    RistrettoPublicKeyBytes::from_hex(hex).map_err(|e| {
-                        OotleResult::err("PARSE", &format!("revealed_receiver_hex is not a public key: {e}"))
-                    })
-                })
+                .map(|hex| crate::c_abi::public_key_from_hex(hex, "revealed_receiver_hex").map(|pk| pk.to_internal()))
                 .transpose()?;
 
             match build_stealth_outputs_statement_with_seed(network, &intent, &seed, revealed_receiver) {

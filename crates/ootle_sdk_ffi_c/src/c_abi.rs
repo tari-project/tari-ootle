@@ -419,7 +419,7 @@ pub(crate) fn seed_from_hex(seed_hex: &str) -> Result<[u8; 32], OotleResult> {
 /// Decodes a public-key hex argument into a 32-byte [`PublicKeyBytes`], mapping any bad/odd/uppercase
 /// hex or a wrong length to a `PARSE` envelope. The bytes are **not** validated as a canonical curve
 /// point: the engine derivation hashes them as-is, so there is no `KEY` path here.
-fn public_key_from_hex(pk_hex: &str, arg: &str) -> Result<PublicKeyBytes, OotleResult> {
+pub(crate) fn public_key_from_hex(pk_hex: &str, arg: &str) -> Result<PublicKeyBytes, OotleResult> {
     if pk_hex.chars().any(|c| c.is_ascii_uppercase()) {
         return Err(OotleResult::err("PARSE", &format!("{arg} must be lowercase hex")));
     }

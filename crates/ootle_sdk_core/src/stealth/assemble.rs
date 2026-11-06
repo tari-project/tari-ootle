@@ -316,6 +316,9 @@ pub fn build_stealth_unsigned_with_wants_with_seed(
     seed: &BuildSeed,
 ) -> Result<(PartialTransaction, WantList), OotleSdkError> {
     seed.validate_nonzero()?;
+    intent.from_account.to_internal()?;
+    intent.resource_address.to_internal()?;
+    intent.validate_revealed_outputs()?;
     let entropy = StealthEntropy::from_seed(seed, intent.outputs.len());
     // The live driver resolves the from-account component + vault (the fee + optional revealed-input
     // withdraw reference the account) in addition to the stealth-UTXO inputs, so all are declared.
@@ -332,6 +335,9 @@ pub fn build_stealth_unsigned_with_wants(
     network: Network,
     intent: &StealthTransferIntent,
 ) -> Result<(PartialTransaction, WantList), OotleSdkError> {
+    intent.from_account.to_internal()?;
+    intent.resource_address.to_internal()?;
+    intent.validate_revealed_outputs()?;
     let entropy = StealthEntropy::from_os_rng(intent.outputs.len());
     let want_list = WantList::from_stealth_inputs_with_account(intent);
     let partial = seed_partial(network, intent, &entropy, want_list.clone())?;
@@ -1606,5 +1612,52 @@ mod tests {
         };
         let err = assemble_from_intent(&intent, &entropy).unwrap_err();
         assert_eq!(err.code(), "VALIDATION");
+    }
+
+    #[test]
+    fn build_stealth_unsigned_with_wants_validates_intent_up_front() {
+        let seed = seed_for(150);
+
+        // Malformed from_account / resource_address -> PARSE before any fetch loop.
+        let mut bad_account = balanced_intent(1_000_000, 1_000_000);
+        bad_account.from_account = ComponentAddressStr("not-a-component".to_string());
+        assert_eq!(
+            build_stealth_unsigned_with_wants(Network::LocalNet, &bad_account)
+                .unwrap_err()
+                .code(),
+            "PARSE"
+        );
+        assert_eq!(
+            build_stealth_unsigned_with_wants_with_seed(Network::LocalNet, &bad_account, &seed)
+                .unwrap_err()
+                .code(),
+            "PARSE"
+        );
+
+        let mut bad_resource = balanced_intent(1_000_000, 1_000_000);
+        bad_resource.resource_address = ResourceAddressStr("not-a-resource".to_string());
+        assert_eq!(
+            build_stealth_unsigned_with_wants(Network::LocalNet, &bad_resource)
+                .unwrap_err()
+                .code(),
+            "PARSE"
+        );
+
+        // Mismatched per-output revealed_amount sum -> VALIDATION before any fetch loop.
+        let mut bad_revealed = balanced_intent(1_000_000, 1_500_000);
+        bad_revealed.outputs = vec![revealed_output_spec(3, 4, 1_000_000, 400_000)];
+        bad_revealed.revealed_output_amount = 500_000;
+        assert_eq!(
+            build_stealth_unsigned_with_wants(Network::LocalNet, &bad_revealed)
+                .unwrap_err()
+                .code(),
+            "VALIDATION"
+        );
+        assert_eq!(
+            build_stealth_unsigned_with_wants_with_seed(Network::LocalNet, &bad_revealed, &seed)
+                .unwrap_err()
+                .code(),
+            "VALIDATION"
+        );
     }
 }

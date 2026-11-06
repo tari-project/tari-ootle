@@ -28,13 +28,12 @@ use clap::Parser;
 use log::*;
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_common_types::seeds::seed_words::SeedWords;
-use tari_crypto::ristretto::RistrettoPublicKey;
+use tari_crypto::tari_utilities::SafePassword;
 use tari_ootle_app_utilities::{
     configuration::load_configuration,
-    keypair::{derive_fee_claim_keypair_from_seed_words, setup_keypair_from_seed_prompt, setup_keypair_prompt},
+    keypair::{setup_keypair_from_seed_prompt, setup_validator_keypair},
 };
 use tari_shutdown::Shutdown;
-use tari_utilities::SafePassword;
 use tari_validator_node::{ApplicationConfig, node, run_validator_node};
 
 use crate::cli::Cli;
@@ -42,9 +41,17 @@ use crate::cli::Cli;
 const LOG_TARGET: &str = "tari::validator_node::app";
 
 fn load_seed_words(seed_words: Option<&str>, seed_words_file: Option<&Path>) -> Result<Option<SeedWords>, ExitError> {
+    if seed_words.is_some() && seed_words_file.is_some() {
+        return Err(ExitError::new(
+            ExitCode::ConfigError,
+            "Specify either seed words or a seed words file",
+        ));
+    }
     if let Some(words) = seed_words {
         let parsed = words
-            .trim()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
             .parse::<SeedWords>()
             .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Invalid seed words: {e}")))?;
         return Ok(Some(parsed));
@@ -56,12 +63,17 @@ fn load_seed_words(seed_words: Option<&str>, seed_words_file: Option<&Path>) -> 
                 format!("Failed to read seed words file {}: {e}", path.display()),
             )
         })?;
-        let parsed = content.trim().parse::<SeedWords>().map_err(|e| {
-            ExitError::new(
-                ExitCode::ConfigError,
-                format!("Invalid seed words in {}: {e}", path.display()),
-            )
-        })?;
+        let parsed = content
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .parse::<SeedWords>()
+            .map_err(|e| {
+                ExitError::new(
+                    ExitCode::ConfigError,
+                    format!("Invalid seed words in {}: {e}", path.display()),
+                )
+            })?;
         return Ok(Some(parsed));
     }
     Ok(None)
@@ -123,35 +135,17 @@ async fn main() -> anyhow::Result<()> {
             return Ok(());
         },
         Some(cli::Subcommand::Start) | None => {
+            config.validator_node.validate_fee_claim_public_key()?;
             let shutdown = Shutdown::new();
             let parsed_seed_words = load_seed_words(cli.seed_words.as_deref(), cli.seed_words_file.as_deref())?;
-            let passphrase = cli
-                .seed_passphrase
-                .as_deref()
-                .map(SafePassword::from_str)
-                .transpose()
-                .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Invalid seed passphrase: {e}")))?;
+            let passphrase = cli.seed_passphrase.as_deref().map(SafePassword::from);
 
             let keypair = setup_keypair_from_seed_prompt(
                 &config.validator_node.identity_file,
                 parsed_seed_words.as_ref(),
-                passphrase.clone(),
+                passphrase,
                 !config.validator_node.dont_create_id,
             )?;
-
-            // If seed words were provided and fee claim public key was not explicitly configured, derive it
-            if let Some(ref words) = parsed_seed_words &&
-                config.validator_node.fee_claim_public_key == RistrettoPublicKey::default()
-            {
-                if let Ok(fee_key) = derive_fee_claim_keypair_from_seed_words(words, passphrase, 0) {
-                    info!(
-                        target: LOG_TARGET,
-                        "Fee claim public key derived from seed: {}",
-                        fee_key.public_key()
-                    );
-                    config.validator_node.fee_claim_public_key = *fee_key.public_key();
-                }
-            }
 
             run_validator_node(keypair, config, shutdown).await?;
             info!(target: LOG_TARGET, "Validator node shutdown successfully");
@@ -167,25 +161,14 @@ async fn main() -> anyhow::Result<()> {
             let passphrase_arg = seed_passphrase.as_deref().or(cli.seed_passphrase.as_deref());
 
             let parsed_seed_words = load_seed_words(seed_words_arg, seed_words_file_arg)?;
-            let passphrase = passphrase_arg
-                .map(SafePassword::from_str)
-                .transpose()
-                .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Invalid seed passphrase: {e}")))?;
+            let passphrase = passphrase_arg.map(SafePassword::from);
 
-            if overwrite && config.validator_node.identity_file.exists() {
-                info!(
-                    target: LOG_TARGET,
-                    "Removing existing identity file at {} due to --overwrite",
-                    config.validator_node.identity_file.display()
-                );
-                let _ = fs::remove_file(&config.validator_node.identity_file);
-            }
-
-            let keypair = setup_keypair_from_seed_prompt(
+            let keypair = setup_validator_keypair(
                 &config.validator_node.identity_file,
                 parsed_seed_words.as_ref(),
-                passphrase.clone(),
+                passphrase,
                 true,
+                overwrite,
             )?;
 
             info!(
@@ -193,22 +176,11 @@ async fn main() -> anyhow::Result<()> {
                 "Node identity ready with public key: {}",
                 keypair.public_key()
             );
-            #[cfg(feature = "p2p")]
             info!(
                 target: LOG_TARGET,
                 "Node peer address: {}",
                 keypair.to_peer_address()
             );
-
-            if let Some(ref words) = parsed_seed_words {
-                if let Ok(fee_key) = derive_fee_claim_keypair_from_seed_words(words, passphrase, 0) {
-                    info!(
-                        target: LOG_TARGET,
-                        "Derived fee claim public key: {}",
-                        fee_key.public_key()
-                    );
-                }
-            }
         },
     }
 
@@ -304,6 +276,22 @@ mod tests {
     use tari_validator_node::logging::default_logging_config;
 
     use super::*;
+
+    #[test]
+    fn seed_file_accepts_multiline_whitespace() {
+        use tari_common_types::seeds::{
+            cipher_seed::CipherSeed,
+            mnemonic::{Mnemonic, MnemonicLanguage},
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("seed.txt");
+        let words = CipherSeed::random()
+            .to_mnemonic(MnemonicLanguage::English, None)
+            .unwrap();
+        fs::write(&path, format!("  {}\n", words.join("\n\t").reveal())).unwrap();
+        assert_eq!(load_seed_words(None, Some(&path)).unwrap().unwrap(), words);
+        assert!(load_seed_words(Some("words"), Some(&path)).is_err());
+    }
 
     const CHILD_DIR_VAR: &str = "OOTLE_VN_PANIC_TEST_DIR";
     const PANIC_MESSAGE: &str = "panic-flush-test-4f1c";

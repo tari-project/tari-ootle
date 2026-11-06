@@ -84,8 +84,8 @@ pub struct Cli {
     /// passed. Diverges from the network; intended only for a node whose state is being discarded.
     #[clap(long)]
     pub allow_past_protocol_activation: bool,
-    /// 24-word seed phrase to restore or initialize the validator node identity and fee claim keys
-    #[clap(long, env = "TARI_VN_SEED_WORDS")]
+    /// 24-word seed phrase to restore or initialize the validator node identity
+    #[clap(long, env = "TARI_VN_SEED_WORDS", conflicts_with = "seed_words_file")]
     pub seed_words: Option<String>,
     /// Path to a file containing 24-word seed phrase
     #[clap(long, env = "TARI_VN_SEED_WORDS_FILE")]
@@ -196,7 +196,7 @@ pub enum Subcommand {
     /// Generate an identity keypair if one does not exist and exit
     GenerateIdentity {
         /// Optional 24-word seed phrase to restore the identity from
-        #[clap(long)]
+        #[clap(long, conflicts_with = "seed_words_file")]
         seed_words: Option<String>,
         /// Optional path to a file containing 24 seed words
         #[clap(long)]

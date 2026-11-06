@@ -39,7 +39,12 @@
 //! icacls $path /grant:r "$env:USERNAME:(F)"
 //! ```
 
-use std::{fs, io, path::Path, sync::Arc};
+use std::{
+    fs,
+    io::{self, Write},
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use log::*;
 use rand::{CryptoRng, Rng};
@@ -57,19 +62,17 @@ use tari_common_types::seeds::{
 use tari_crypto::{
     keys::{PublicKey as _, SecretKey as _},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    tari_utilities::SafePassword,
 };
 #[cfg(feature = "p2p")]
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_wallet_crypto::derive_ristretto_key;
-use tari_utilities::SafePassword;
 
 const REQUIRED_IDENTITY_PERMS: u32 = 0o100600;
 const LOG_TARGET: &str = "tari::application::identity";
 
 /// Key derivation branch for Tari validator node identity keypairs.
 pub const VN_IDENTITY_BRANCH: &[u8] = b"validator_node";
-/// Key derivation branch for Tari validator node fee claim keypairs.
-pub const VN_FEE_CLAIM_BRANCH: &[u8] = b"fee_claim";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
@@ -133,48 +136,6 @@ struct KeyPairInner {
 /// # Return
 /// A NodeIdentity wrapped in an atomic reference counter on success, the exit code indicating the reason on failure
 pub fn setup_keypair_prompt<P: AsRef<Path>>(identity_file: P, create_id: bool) -> Result<RistrettoKeypair, ExitError> {
-    setup_keypair_from_seed_prompt(identity_file, None, None, create_id)
-}
-
-/// Sets up a node identity, supporting restore from seed words when provided, or creating a fresh seed-derived
-/// identity.
-///
-/// ## Parameters
-/// - `identity_file` - Reference to file path
-/// - `seed_words` - Optional 24-word seed phrase for deterministic recovery
-/// - `passphrase` - Optional passphrase for seed decryption
-/// - `create_id` - If true, creates a new seed and identity if the file does not exist
-pub fn setup_keypair_from_seed_prompt<P: AsRef<Path>>(
-    identity_file: P,
-    seed_words: Option<&SeedWords>,
-    passphrase: Option<SafePassword>,
-    create_id: bool,
-) -> Result<RistrettoKeypair, ExitError> {
-    if let Some(words) = seed_words {
-        let identity_file_path = identity_file.as_ref().to_string_lossy();
-        info!(
-            target: LOG_TARGET,
-            "Restoring node identity from seed phrase at {}...",
-            identity_file_path
-        );
-        match create_new_keypair_from_seed_words(&identity_file, words, passphrase) {
-            Ok(id) => {
-                info!(
-                    target: LOG_TARGET,
-                    "Node identity successfully restored from seed with public key: {}",
-                    id.public_key()
-                );
-                return Ok(id);
-            },
-            Err(e) => {
-                return Err(ExitError::new(
-                    ExitCode::ConfigError,
-                    format!("Failed to restore node identity from seed phrase: {e}"),
-                ));
-            },
-        }
-    }
-
     match load_keypair(&identity_file) {
         Ok(id) => Ok(id),
         Err(IdentityError::InvalidPermissions) => Err(ExitError::new(
@@ -191,13 +152,13 @@ pub fn setup_keypair_from_seed_prompt<P: AsRef<Path>>(
                 if matches!(e, IdentityError::NotFound) {
                     debug!(
                         target: LOG_TARGET,
-                        "Node identity file not found at {}. Creating new ID from seed phrase",
+                        "Node identity file not found at {}. Creating new ID",
                         identity_file_path
                     );
                 } else {
                     warn!(
                         target: LOG_TARGET,
-                        "Existing node identity file at {} is invalid ({}). Creating new ID from seed phrase",
+                        "Existing node identity file at {} is invalid ({}). Creating new ID",
                         identity_file_path,
                         e
                     );
@@ -221,32 +182,15 @@ pub fn setup_keypair_from_seed_prompt<P: AsRef<Path>>(
                     ));
                 };
             }
-            debug!(target: LOG_TARGET, "Existing node id not found. {}. Creating new ID from seed phrase", e);
+            debug!(target: LOG_TARGET, "Existing node id not found. {}. Creating new ID", e);
 
-            match create_new_keypair_with_seed_words(&identity_file) {
-                Ok((id, words)) => {
+            match create_new_keypair(&identity_file) {
+                Ok(id) => {
                     info!(
                         target: LOG_TARGET,
                         "New node identity with public key {} has been created at {}.",
                         id.public_key(),
                         identity_file.as_ref().to_str().unwrap_or("?"),
-                    );
-                    info!(
-                        target: LOG_TARGET,
-                        "================================================================================"
-                    );
-                    info!(
-                        target: LOG_TARGET,
-                        "Validator Node Recovery Seed Phrase (SAVE THIS SAFELY!):"
-                    );
-                    info!(
-                        target: LOG_TARGET,
-                        "{}",
-                        words.join(" ").reveal()
-                    );
-                    info!(
-                        target: LOG_TARGET,
-                        "================================================================================"
                     );
                     Ok(id)
                 },
@@ -260,6 +204,120 @@ pub fn setup_keypair_from_seed_prompt<P: AsRef<Path>>(
             }
         },
     }
+}
+
+/// Loads or restores a validator identity, requiring explicit authorization to replace a different identity.
+pub fn setup_keypair_from_seed_prompt<P: AsRef<Path>>(
+    identity_file: P,
+    seed_words: Option<&SeedWords>,
+    passphrase: Option<SafePassword>,
+    create_id: bool,
+) -> Result<RistrettoKeypair, ExitError> {
+    setup_validator_keypair(identity_file, seed_words, passphrase, create_id, false)
+}
+
+/// Replacing an existing validator identity requires `overwrite`. Recovery words are stored in a separate
+/// owner-readable file so ordinary logs contain only the backup path.
+pub fn setup_validator_keypair<P: AsRef<Path>>(
+    identity_file: P,
+    seed_words: Option<&SeedWords>,
+    passphrase: Option<SafePassword>,
+    create_id: bool,
+    overwrite: bool,
+) -> Result<RistrettoKeypair, ExitError> {
+    setup_validator_keypair_inner(identity_file.as_ref(), seed_words, passphrase, create_id, overwrite).map_err(|e| {
+        ExitError::new(
+            ExitCode::ConfigError,
+            format!("Could not set up validator identity: {e}"),
+        )
+    })
+}
+
+fn setup_validator_keypair_inner(
+    identity_file: &Path,
+    seed_words: Option<&SeedWords>,
+    passphrase: Option<SafePassword>,
+    create_id: bool,
+    overwrite: bool,
+) -> Result<RistrettoKeypair, IdentityError> {
+    if seed_words.is_none() && passphrase.is_some() {
+        return Err(IdentityError::PassphraseRequiresSeedWords);
+    }
+    let restored = seed_words
+        .map(|words| {
+            CipherSeed::from_mnemonic(words, passphrase)
+                .map(|seed| RistrettoKeypair::derive_from_seed(&seed, VN_IDENTITY_BRANCH, 0))
+        })
+        .transpose()?;
+
+    if !overwrite {
+        match load_keypair(identity_file) {
+            Ok(existing) => {
+                if let Some(restored) = restored &&
+                    existing.public_key() != restored.public_key()
+                {
+                    return Err(IdentityError::IdentityExists);
+                }
+                return Ok(existing);
+            },
+            Err(IdentityError::NotFound) => {},
+            Err(e) => return Err(e),
+        }
+    }
+
+    let identity = match restored {
+        Some(identity) => identity,
+        None => {
+            if !create_id && !prompt("Node identity does not exist.\nWould you like to create one (Y/n)?") {
+                return Err(IdentityError::NotFound);
+            }
+            let seed = CipherSeed::random();
+            let words = seed.to_mnemonic(MnemonicLanguage::English, None)?;
+            let identity = RistrettoKeypair::derive_from_seed(&seed, VN_IDENTITY_BRANCH, 0);
+            let recovery_path = recovery_seed_path(identity_file, identity.public_key());
+            let mut file = private_tempfile(&recovery_path)?;
+            file.write_all(words.join(" ").reveal().as_bytes())?;
+            file.write_all(b"\n")?;
+            file.as_file().sync_all()?;
+            file.persist_noclobber(&recovery_path).map_err(|e| e.error)?;
+            info!(target: LOG_TARGET, "Back up the validator recovery phrase in {} to a safe location", recovery_path.display());
+            identity
+        },
+    };
+    save_identity(identity_file, &identity, overwrite)?;
+    Ok(identity)
+}
+
+fn recovery_seed_path(identity_file: &Path, public_key: &RistrettoPublicKey) -> PathBuf {
+    let mut name = identity_file.as_os_str().to_os_string();
+    name.push(format!(".recovery-{public_key}.txt"));
+    PathBuf::from(name)
+}
+
+fn private_tempfile(path: &Path) -> Result<tempfile::NamedTempFile, IdentityError> {
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    fs::create_dir_all(parent)?;
+    let file = tempfile::NamedTempFile::new_in(parent)?;
+    set_permissions(file.path(), REQUIRED_IDENTITY_PERMS)?;
+    Ok(file)
+}
+
+/// The replacement is fully serialized and synced before the destination changes. Creating an identity
+/// without replacement authorization must fail if another writer creates the destination first.
+fn save_identity(path: &Path, identity: &RistrettoKeypair, overwrite: bool) -> Result<(), IdentityError> {
+    let json = serde_json5::to_string(identity)?;
+    let mut file = private_tempfile(path)?;
+    file.write_all(json.as_bytes())?;
+    file.as_file().sync_all()?;
+    if overwrite {
+        file.persist(path).map_err(|e| e.error)?;
+    } else {
+        file.persist_noclobber(path).map_err(|e| e.error)?;
+    }
+    Ok(())
 }
 
 /// Tries to construct a node identity by loading the secret key and other metadata from disk and calculating the
@@ -300,7 +358,7 @@ pub fn create_new_keypair_from_seed<P: AsRef<Path>>(
     seed: &CipherSeed,
 ) -> Result<RistrettoKeypair, IdentityError> {
     let node_identity = RistrettoKeypair::derive_from_seed(seed, VN_IDENTITY_BRANCH, 0);
-    save_as_json(&path, &node_identity)?;
+    save_identity(path.as_ref(), &node_identity, false)?;
     Ok(node_identity)
 }
 
@@ -323,21 +381,6 @@ pub fn create_new_keypair_with_seed_words<P: AsRef<Path>>(
     let seed_words = seed.to_mnemonic(MnemonicLanguage::English, None)?;
     let keypair = create_new_keypair_from_seed(path, &seed)?;
     Ok((keypair, seed_words))
-}
-
-/// Derives the fee claim keypair from a CipherSeed.
-pub fn derive_fee_claim_keypair_from_seed(seed: &CipherSeed, index: u64) -> RistrettoKeypair {
-    RistrettoKeypair::derive_from_seed(seed, VN_FEE_CLAIM_BRANCH, index)
-}
-
-/// Derives the fee claim keypair from 24 seed words and an optional passphrase.
-pub fn derive_fee_claim_keypair_from_seed_words(
-    seed_words: &SeedWords,
-    passphrase: Option<SafePassword>,
-    index: u64,
-) -> Result<RistrettoKeypair, IdentityError> {
-    let seed = CipherSeed::from_mnemonic(seed_words, passphrase)?;
-    Ok(derive_fee_claim_keypair_from_seed(&seed, index))
 }
 
 /// Loads the node identity from json at the given path
@@ -480,6 +523,10 @@ fn has_permissions<P: AsRef<Path>>(_path: P, _perms: u32) -> io::Result<bool> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum IdentityError {
+    #[error("A seed passphrase requires seed words to restore")]
+    PassphraseRequiresSeedWords,
+    #[error("A different identity already exists; use generate-identity --overwrite to replace it")]
+    IdentityExists,
     #[error("Identity file has invalid permissions")]
     InvalidPermissions,
     #[error("Identity file was not found")]
@@ -507,11 +554,10 @@ mod tests {
         let keypair2 = RistrettoKeypair::derive_from_seed(&seed, VN_IDENTITY_BRANCH, 0);
         assert_eq!(keypair1.public_key(), keypair2.public_key());
         assert_eq!(keypair1.secret_key(), keypair2.secret_key());
-
-        let fee_claim_keypair = derive_fee_claim_keypair_from_seed(&seed, 0);
-        // Fee claim key and validator node identity key must be domain-separated and distinct
-        assert_ne!(keypair1.public_key(), fee_claim_keypair.public_key());
-        assert_ne!(keypair1.secret_key(), fee_claim_keypair.secret_key());
+        let wallet_account = RistrettoKeypair::derive_from_seed(&seed, b"account", 0);
+        assert_ne!(keypair1.public_key(), wallet_account.public_key());
+        let next_index = RistrettoKeypair::derive_from_seed(&seed, VN_IDENTITY_BRANCH, 1);
+        assert_ne!(keypair1.public_key(), next_index.public_key());
     }
 
     #[test]
@@ -522,12 +568,10 @@ mod tests {
         let (keypair1, seed_words) = create_new_keypair_with_seed_words(&id_file).unwrap();
         assert_eq!(seed_words.len(), 24);
 
-        // Derive again directly from seed words
         let keypair2 = RistrettoKeypair::derive_from_seed_words(&seed_words, None, VN_IDENTITY_BRANCH, 0).unwrap();
         assert_eq!(keypair1.public_key(), keypair2.public_key());
         assert_eq!(keypair1.secret_key(), keypair2.secret_key());
 
-        // Restore to another file path
         let restore_file = dir.path().join("restored_identity.json");
         let restored_keypair = create_new_keypair_from_seed_words(&restore_file, &seed_words, None).unwrap();
         assert_eq!(keypair1.public_key(), restored_keypair.public_key());
@@ -537,13 +581,124 @@ mod tests {
     }
 
     #[test]
-    fn fee_claim_keypair_reproducible_from_seed_words() {
+    fn generated_recovery_words_are_private_and_never_logged() {
+        use std::sync::Mutex;
+
+        struct CaptureLog(Mutex<Vec<String>>);
+        impl log::Log for CaptureLog {
+            fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+                true
+            }
+
+            fn log(&self, record: &log::Record<'_>) {
+                self.0.lock().unwrap().push(record.args().to_string());
+            }
+
+            fn flush(&self) {}
+        }
+        static LOG: CaptureLog = CaptureLog(Mutex::new(Vec::new()));
+        log::set_logger(&LOG).unwrap();
+        log::set_max_level(log::LevelFilter::Info);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("identity.json");
+        let identity = setup_validator_keypair(&path, None, None, true, false).unwrap();
+        let recovery_path = recovery_seed_path(&path, identity.public_key());
+        let phrase = fs::read_to_string(&recovery_path).unwrap();
+        let words: SeedWords = phrase.trim().parse().unwrap();
+        assert_eq!(words.len(), 24);
+        let restored = RistrettoKeypair::derive_from_seed_words(&words, None, VN_IDENTITY_BRANCH, 0).unwrap();
+        assert_eq!(identity.public_key(), restored.public_key());
+        #[cfg(unix)]
+        {
+            assert!(has_permissions(&path, REQUIRED_IDENTITY_PERMS).unwrap());
+            assert!(has_permissions(&recovery_path, REQUIRED_IDENTITY_PERMS).unwrap());
+        }
+        let logs = LOG.0.lock().unwrap();
+        assert!(
+            logs.iter()
+                .any(|line| line.contains(&recovery_path.display().to_string()))
+        );
+        assert!(logs.iter().all(|line| !line.contains(phrase.trim())));
+    }
+
+    #[test]
+    fn restoring_a_different_seed_requires_overwrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("identity.json");
+        let existing = create_new_keypair(&path).unwrap();
+        let original = fs::read(&path).unwrap();
         let seed = CipherSeed::random();
         let words = seed.to_mnemonic(MnemonicLanguage::English, None).unwrap();
+        assert!(setup_validator_keypair(&path, Some(&words), None, true, false).is_err());
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert_eq!(load_keypair(&path).unwrap().public_key(), existing.public_key());
 
-        let fee_key1 = derive_fee_claim_keypair_from_seed(&seed, 0);
-        let fee_key2 = derive_fee_claim_keypair_from_seed_words(&words, None, 0).unwrap();
-        assert_eq!(fee_key1.public_key(), fee_key2.public_key());
-        assert_eq!(fee_key1.secret_key(), fee_key2.secret_key());
+        let replaced = setup_validator_keypair(&path, Some(&words), None, true, true).unwrap();
+        let expected = RistrettoKeypair::derive_from_seed(&seed, VN_IDENTITY_BRANCH, 0);
+        assert_eq!(replaced.public_key(), expected.public_key());
+        assert_eq!(load_keypair(&path).unwrap().public_key(), expected.public_key());
+    }
+
+    #[test]
+    fn invalid_recovery_preserves_the_existing_identity_even_with_overwrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("identity.json");
+        create_new_keypair(&path).unwrap();
+        let original = fs::read(&path).unwrap();
+        let bad_words: SeedWords = "not a valid recovery phrase".parse().unwrap();
+        assert!(setup_validator_keypair(&path, Some(&bad_words), None, true, true).is_err());
+        assert_eq!(fs::read(&path).unwrap(), original);
+
+        let words = CipherSeed::random()
+            .to_mnemonic(MnemonicLanguage::English, Some(SafePassword::from("correct")))
+            .unwrap();
+        assert!(setup_validator_keypair(&path, Some(&words), Some(SafePassword::from("wrong")), true, true).is_err());
+        assert_eq!(fs::read(&path).unwrap(), original);
+    }
+
+    #[test]
+    fn matching_seed_and_normal_restart_leave_identity_file_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("identity.json");
+        let (identity, words) = create_new_keypair_with_seed_words(&path).unwrap();
+        let original = fs::read(&path).unwrap();
+        let with_words = setup_validator_keypair(&path, Some(&words), None, false, false).unwrap();
+        let without_words = setup_validator_keypair(&path, None, None, false, false).unwrap();
+        assert_eq!(with_words.public_key(), identity.public_key());
+        assert_eq!(without_words.public_key(), identity.public_key());
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn low_level_creation_does_not_clobber_an_existing_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("identity.json");
+        create_new_keypair(&path).unwrap();
+        let original = fs::read(&path).unwrap();
+        assert!(create_new_keypair_from_seed(&path, &CipherSeed::random()).is_err());
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn a_passphrase_without_words_does_not_create_an_unencrypted_seed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("identity.json");
+        assert!(setup_validator_keypair(&path, None, Some(SafePassword::from("secret")), true, false).is_err());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn failed_replacement_preserves_the_destination_and_removes_the_temporary_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("destination");
+        fs::create_dir(&path).unwrap();
+        fs::write(path.join("keep"), b"original").unwrap();
+        let identity = RistrettoKeypair::random(&mut rand::rng());
+        assert!(save_identity(&path, &identity, true).is_err());
+        assert_eq!(fs::read(path.join("keep")).unwrap(), b"original");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 }

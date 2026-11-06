@@ -1033,7 +1033,8 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
                 .optional()?;
             if let Some(cp) = maybe_checkpoint &&
                 checkpoint_admits_leafless_join(cp.epoch(), oracle_epoch) &&
-                self.local_state_matches_checkpoint(cp.epoch(), cp.epoch() + Epoch(1)).await?
+                self.local_state_matches_checkpoint(cp.epoch(), cp.epoch() + Epoch(1))
+                    .await?
             {
                 return Ok(SyncStatus::UpToDate);
             }

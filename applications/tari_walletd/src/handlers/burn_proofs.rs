@@ -23,7 +23,7 @@ use super::{
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::burn_proofs";
 
-/// Extracts the public key prefix from a burn proof file name with format `{pubkey}_{commitment}.json`.
+/// Extracts the public key prefix from a burn proof file name with format `{pubkey}-{commitment}.json`.
 /// Returns `None` if the file name does not match this format.
 fn extract_public_key_prefix(file_name: &str) -> Option<&str> {
     let stem = file_name.strip_suffix(".json")?;
@@ -75,10 +75,9 @@ pub async fn handle_list(
 
         // Apply account public key filter if provided
         if let Some(ref filter_pk) = req.filter_by_public_key {
-            // If the file name matches the expected format, check if the key matches.
-            // If the file name doesn't match the format, always include it.
+            // A file named `{pubkey}-{commitment}.json` must name the filter key; a parsed proof must be for it too.
             if let Some(file_pk) = extract_public_key_prefix(name) &&
-                file_pk != filter_pk.as_str()
+                !file_pk.eq_ignore_ascii_case(filter_pk.as_str())
             {
                 continue;
             }
@@ -87,7 +86,18 @@ pub async fn handle_list(
         // Read value from the proof file
         let value = match tokio::fs::read(&path).await {
             Ok(bytes) => match serde_json::from_slice::<CompleteClaimBurnProof>(&bytes) {
-                Ok(proof) => Some(proof.claim_proof.value),
+                Ok(proof) => {
+                    if let Some(ref filter_pk) = req.filter_by_public_key &&
+                        !proof
+                            .claim_proof
+                            .burn_public_key
+                            .to_string()
+                            .eq_ignore_ascii_case(filter_pk.as_str())
+                    {
+                        continue;
+                    }
+                    Some(proof.claim_proof.value)
+                },
                 Err(e) => {
                     warn!(target: LOG_TARGET, "Failed to parse burn proof {}: {}", path.display(), e);
                     None
@@ -134,4 +144,19 @@ pub async fn handle_get(
     let proof = complete_burn_proof_to_contents(complete_proof)?;
 
     Ok(BurnProofsGetResponse { proof })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_public_key_prefix;
+
+    #[test]
+    fn extract_public_key_prefix_parses_hyphen_format() {
+        assert_eq!(
+            extract_public_key_prefix("0123456789abcdef-deadbeef.json"),
+            Some("0123456789abcdef")
+        );
+        assert_eq!(extract_public_key_prefix("custom.json"), None);
+        assert_eq!(extract_public_key_prefix("-deadbeef.json"), None);
+    }
 }

@@ -66,9 +66,8 @@ mod account_template {
                     .add_method_rule("balance", rule!(allow_all))
                     .add_method_rule("get_balances", rule!(allow_all))
                     .add_method_rule("deposit", rule!(allow_all))
-                    .add_method_rule("deposit_with_auth", rule!(allow_all))
                     .add_method_rule("withdraw_approved", rule!(allow_all))
-                    .add_method_rule("withdraw_approved_with_auth", rule!(allow_all))
+                    .add_method_rule("approval", rule!(allow_all))
                     // By default, only the owner of the token will be able to withdraw funds from the account
                     .default(rule!(deny_all)),
             );
@@ -107,23 +106,9 @@ mod account_template {
             v.withdraw(amount)
         }
 
-        /// Withdraws with `auth` authorizing the resource's withdraw rule.
-        ///
-        /// A resource whose withdraw rule names a badge is reachable only by a frame that holds that badge, and a
-        /// `Proof` is how a badge reaches a frame. `auth` remains the caller's: it authorizes for the duration of
-        /// this call and is neither consumed nor dropped here.
-        pub fn withdraw_with_auth(&self, resource: ResourceAddress, amount: Amount, auth: Proof) -> Bucket {
-            auth.authorize_with(|| self.withdraw(resource, amount))
-        }
-
         pub fn withdraw_all(&self, resource: ResourceAddress) -> Bucket {
             let v = self.get_vault(resource);
             v.withdraw(v.balance())
-        }
-
-        /// [`Self::withdraw_all`] with `auth` authorizing the resource's withdraw rule.
-        pub fn withdraw_all_with_auth(&self, resource: ResourceAddress, auth: Proof) -> Bucket {
-            auth.authorize_with(|| self.withdraw_all(resource))
         }
 
         pub fn withdraw_non_fungible(&self, resource: ResourceAddress, nf_id: NonFungibleId) -> Bucket {
@@ -132,30 +117,10 @@ mod account_template {
             v.withdraw_non_fungibles([nf_id])
         }
 
-        /// [`Self::withdraw_non_fungible`] with `auth` authorizing the resource's withdraw rule.
-        pub fn withdraw_non_fungible_with_auth(
-            &self,
-            resource: ResourceAddress,
-            nf_id: NonFungibleId,
-            auth: Proof,
-        ) -> Bucket {
-            auth.authorize_with(|| self.withdraw_non_fungible(resource, nf_id))
-        }
-
         pub fn withdraw_many_non_fungibles(&self, resource: ResourceAddress, nf_ids: Vec<NonFungibleId>) -> Bucket {
             // An event is emitted by the vault.withdraw_non_fungibles method
             let v = self.get_vault(resource);
             v.withdraw_non_fungibles(nf_ids)
-        }
-
-        /// [`Self::withdraw_many_non_fungibles`] with `auth` authorizing the resource's withdraw rule.
-        pub fn withdraw_many_non_fungibles_with_auth(
-            &self,
-            resource: ResourceAddress,
-            nf_ids: Vec<NonFungibleId>,
-            auth: Proof,
-        ) -> Bucket {
-            auth.authorize_with(|| self.withdraw_many_non_fungibles(resource, nf_ids))
         }
 
         pub fn withdraw_confidential(
@@ -166,16 +131,6 @@ mod account_template {
             // An event is emitted by the vault.withdraw_confidential method
             let v = self.get_vault(resource);
             v.withdraw_confidential(withdraw_proof)
-        }
-
-        /// [`Self::withdraw_confidential`] with `auth` authorizing the resource's withdraw rule.
-        pub fn withdraw_confidential_with_auth(
-            &self,
-            resource: ResourceAddress,
-            withdraw_proof: ConfidentialWithdrawProof,
-            auth: Proof,
-        ) -> Bucket {
-            auth.authorize_with(|| self.withdraw_confidential(resource, withdraw_proof))
         }
 
         pub fn deposit(&mut self, bucket: Bucket) {
@@ -196,11 +151,6 @@ mod account_template {
                  Deposit into another account."
             );
             self.vaults.insert(resource_address, Vault::from_bucket(bucket));
-        }
-
-        /// [`Self::deposit`] with `auth` authorizing the resource's deposit rule.
-        pub fn deposit_with_auth(&mut self, bucket: Bucket, auth: Proof) {
-            auth.authorize_with(|| self.deposit(bucket));
         }
 
         fn get_vault(&self, resource: ResourceAddress) -> &Vault {
@@ -241,12 +191,6 @@ mod account_template {
             v.create_proof()
         }
 
-        /// [`Self::create_proof_for_resource`] with `auth` authorizing the resource's withdraw rule, which is what
-        /// taking a proof over a vault is checked against.
-        pub fn create_proof_for_resource_with_auth(&self, resource: ResourceAddress, auth: Proof) -> Proof {
-            auth.authorize_with(|| self.create_proof_for_resource(resource))
-        }
-
         pub fn create_proof_by_non_fungible(&self, nft: NonFungibleAddress) -> Proof {
             self.create_proof_by_non_fungible_ids(*nft.resource_address(), vec![nft.id().clone()])
         }
@@ -260,34 +204,35 @@ mod account_template {
             v.create_proof_by_non_fungible_ids(ids.into_iter().collect())
         }
 
-        /// [`Self::create_proof_by_non_fungible_ids`] with `auth` authorizing the resource's withdraw rule.
-        pub fn create_proof_by_non_fungible_ids_with_auth(
-            &self,
-            resource: ResourceAddress,
-            ids: Vec<NonFungibleId>,
-            auth: Proof,
-        ) -> Proof {
-            auth.authorize_with(|| self.create_proof_by_non_fungible_ids(resource, ids))
-        }
-
         pub fn create_proof_by_amount(&self, resource: ResourceAddress, amount: Amount) -> Proof {
             let v = self.get_vault(resource);
             v.create_proof_by_amount(amount)
         }
 
-        /// [`Self::create_proof_by_amount`] with `auth` authorizing the resource's withdraw rule.
-        pub fn create_proof_by_amount_with_auth(
-            &self,
-            resource: ResourceAddress,
-            amount: Amount,
-            auth: Proof,
-        ) -> Proof {
-            auth.authorize_with(|| self.create_proof_by_amount(resource, amount))
+        // Approval methods
+        /// Returns the amount of `resource` that `spender_badge` may still withdraw, zero when there is no approval.
+        pub fn approval(&self, spender_badge: NonFungibleAddress, resource: ResourceAddress) -> Amount {
+            self.approvals
+                .get(&(resource, spender_badge))
+                .copied()
+                .unwrap_or_else(Amount::zero)
         }
 
-        // Approval methods
-        /// Called by account owner — sets or updates approval. A zero `amount` revokes it.
-        pub fn approve(&mut self, spender_badge: NonFungibleAddress, resource: ResourceAddress, amount: Amount) {
+        /// Called by the account owner. Sets the approval for `spender_badge` on `resource` to `amount`, provided the
+        /// live approval equals `expected_current`, a missing approval counting as zero. Every
+        /// [`Self::withdraw_approved`] lowers the live approval, and exhausting it removes it, so the owner states
+        /// the value its new `amount` replaces and the call fails if a spend has changed it since; the owner then
+        /// reads it again with [`Self::approval`] and decides afresh.
+        ///
+        /// A zero `amount` revokes the approval whatever its current value and whatever `expected_current` is.
+        /// Revocation stops later spends only: anything withdrawn before it is final stays withdrawn.
+        pub fn approve(
+            &mut self,
+            spender_badge: NonFungibleAddress,
+            resource: ResourceAddress,
+            expected_current: Amount,
+            amount: Amount,
+        ) {
             if amount.is_zero() {
                 let key = (resource, spender_badge);
                 if self.approvals.swap_remove(&key).is_some() {
@@ -298,6 +243,16 @@ mod account_template {
                 }
                 // Else no-op
             } else {
+                let current = self.approval(spender_badge.clone(), resource);
+                assert_eq!(
+                    current, expected_current,
+                    "Approval for badge {} on resource {} is {}, not the expected {}; read the current approval and \
+                     retry",
+                    spender_badge,
+                    resource,
+                    current,
+                    expected_current
+                );
                 emit_event(
                     "approve",
                     metadata!(
@@ -320,7 +275,7 @@ mod account_template {
         /// when that key's transaction calls this method directly, or, when template code makes the call, the
         /// caller-component badge of the calling component or the caller-template badge of its template. An
         /// approval keyed on a template badge is therefore spendable by every component and function of that
-        /// template. A badge held in a vault is shown with [`Self::withdraw_approved_with_auth`].
+        /// template. A badge held in a vault is carried by authorizing a proof of it around this call.
         pub fn withdraw_approved(
             &mut self,
             spender_badge: NonFungibleAddress,
@@ -351,17 +306,6 @@ mod account_template {
             }
 
             self.get_vault(resource).withdraw(amount)
-        }
-
-        /// [`Self::withdraw_approved`] with `auth` proving that the caller holds `spender_badge`.
-        pub fn withdraw_approved_with_auth(
-            &mut self,
-            spender_badge: NonFungibleAddress,
-            resource: ResourceAddress,
-            amount: Amount,
-            auth: Proof,
-        ) -> Bucket {
-            auth.authorize_with(|| self.withdraw_approved(spender_badge, resource, amount))
         }
     }
 }

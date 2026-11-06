@@ -3,6 +3,7 @@
 
 use std::time::{Duration, Instant};
 
+use tari_engine_types::limits;
 use tari_ootle_transaction::{args, builder::named_args::NamedArg};
 use tari_template_lib::types::ComponentAddress;
 use tari_template_test_tooling::{ExecutionPoints, TemplateTest};
@@ -15,7 +16,8 @@ const N: u32 = 3_000;
 const TIMES: u32 = 40;
 
 /// The fastest of a few runs, so that one run slowed by other work on the machine does not decide the
-/// comparison.
+/// comparison, with the call's execution points. The charge for decoding `args` is taken off the native
+/// points, so calls with different arguments compare by the work their state writes do.
 fn timed_call(
     test: &mut TemplateTest,
     component: ComponentAddress,
@@ -30,7 +32,18 @@ fn timed_call(
         })
         .min()
         .unwrap();
-    (fastest, test.last_execution_points())
+    let mut points = test.last_execution_points();
+    points.native -= args.iter().map(literal_arg_points).sum::<u64>();
+    (fastest, points)
+}
+
+fn literal_arg_points(arg: &NamedArg) -> u64 {
+    match arg {
+        NamedArg::Literal(bytes) => {
+            limits::engine_arg_points(bytes.len() as u64, tari_bor::count_data_items(bytes).unwrap())
+        },
+        _ => panic!("timed calls take literal arguments only"),
+    }
 }
 
 /// Rewrites a state of `N` references that the previous state already held, as the baseline the other

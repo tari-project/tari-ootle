@@ -177,11 +177,24 @@ impl Instruction {
         }
     }
 
-    pub fn referenced_template(&self) -> Option<&TemplateAddress> {
+    fn referenced_template(&self) -> Option<&TemplateAddress> {
         match self {
             Self::CallFunction { address, .. } => Some(address),
+            // `UpdateComponentTemplate` loads the template replacing the component's, and never the one it replaces.
+            Self::UpdateComponentTemplate { new_template, .. } => Some(new_template),
             _ => None,
         }
+    }
+
+    pub fn referenced_templates(&self) -> impl Iterator<Item = &TemplateAddress> + '_ {
+        let single = self.referenced_template();
+        let stealth = match self {
+            Self::StealthTransfer { statement, .. } => {
+                Some(statement.script_path_template_functions().map(|tf| &tf.template))
+            },
+            _ => None,
+        };
+        single.into_iter().chain(stealth.into_iter().flatten())
     }
 
     /// Iterate over every `BlobIndex` this instruction references — both `PublishTemplate.binary`

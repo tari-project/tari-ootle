@@ -11,19 +11,26 @@ use tari_consensus::{
     messages::HotstuffMessage,
 };
 use tari_consensus_types::{Decision, LeafBlock};
-use tari_ootle_common_types::{Epoch, NodeHeight, ValidatorSetHash, optional::Optional};
+use tari_ootle_common_types::{Epoch, NodeHeight, ProtocolVersion, ValidatorSetHash, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     consensus_models::{Block, BookkeepingModel},
 };
+use tari_ootle_transaction::Network;
 use tari_sidechain::FixedHash;
 use tokio::sync::broadcast;
 
 use crate::support::{Test, TestAddress, logging::setup_logger};
 
-async fn epoch_change(mut test: Test) {
-    test.start_epoch(Epoch(1)).await;
+async fn epoch_change(test: Test) {
+    epoch_change_between(test, Epoch(1), Epoch(2)).await;
+}
+
+/// Starts `test` in `from`, changes to `to` while transactions are in flight, and checks that every transaction
+/// finalizes and every validator reaches `to` under the protocol version scheduled for it.
+async fn epoch_change_between(mut test: Test, from: Epoch, to: Epoch) {
+    test.start_epoch(from).await;
     let mut remaining_txs = 10;
 
     loop {
@@ -32,7 +39,7 @@ async fn epoch_change(mut test: Test) {
             remaining_txs -= 1;
         }
         if remaining_txs == 5 {
-            test.start_epoch(Epoch(2)).await;
+            test.start_epoch(to).await;
         }
 
         if remaining_txs == 0 && test.is_all_submitted_transactions_finalized() {
@@ -51,8 +58,13 @@ async fn epoch_change(mut test: Test) {
     for vn in vns {
         vn.state_store
             .with_read_tx(|tx| {
-                let leaf_block = tx.leaf_block_get(Epoch(2))?;
-                assert_eq!(leaf_block.epoch(), Epoch(2));
+                let leaf_block = tx.leaf_block_get(to)?;
+                assert_eq!(leaf_block.epoch(), to);
+                let leaf = Block::get(tx, leaf_block.block_id())?;
+                assert_eq!(
+                    leaf.header().protocol_version(),
+                    ProtocolVersion::at(Network::LocalNet, to)
+                );
 
                 Ok::<_, HotStuffError>(())
             })
@@ -101,6 +113,26 @@ async fn single_shard_epoch_change() {
         .await;
 
     epoch_change(test).await;
+}
+
+/// The epoch change crosses LocalNet's V1 activation, so the next epoch's genesis state root is formed under V1 and
+/// the transactions finalized after it hash their substates under V1.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn multishard_epoch_change_across_a_protocol_activation() {
+    setup_logger();
+    let (from, to) = (Epoch(9), Epoch(10));
+    assert_eq!(ProtocolVersion::at(Network::LocalNet, from), ProtocolVersion::V0);
+    assert_eq!(ProtocolVersion::at(Network::LocalNet, to), ProtocolVersion::V1);
+    let test = Test::builder()
+        .modify_config(|config_mut| {
+            config_mut.epoch_end_grace_period = Duration::from_millis(0);
+        })
+        .add_committee(0, vec!["1", "2"])
+        .add_committee(1, vec!["3", "4"])
+        .start()
+        .await;
+
+    epoch_change_between(test, from, to).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -503,6 +535,73 @@ async fn epoch_change_unknown_validator_set_is_not_voted() {
     }
 
     wait_for_all_validators_at_epoch(&mut test, Epoch(2), Duration::from_secs(45)).await;
+
+    test.stop();
+    test.assert_clean_shutdown().await;
+}
+
+/// A proposal this node never inserted keeps its executions until its epoch ends. The end-of-epoch transaction drops
+/// them before epoch GC can prune the epoch's blocks, after which execution reuse could not tell them from a committed
+/// block's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn epoch_change_drops_the_executions_of_an_uninserted_last_proposal() {
+    use tari_consensus_types::{BlockId, LastProposed};
+    use tari_engine_types::commit_result::RejectReason;
+    use tari_ootle_storage::{StorageError, consensus_models::TransactionExecution};
+    use tari_ootle_transaction::TransactionId;
+
+    setup_logger();
+    let mut test = Test::builder()
+        .modify_config(|cfg| {
+            cfg.epoch_end_grace_period = Duration::from_millis(10);
+        })
+        .with_test_timeout(Duration::from_secs(120))
+        .add_committee(0, vec!["1", "2", "3", "4"])
+        .start()
+        .await;
+
+    // Validator 1's last proposal of epoch 1 is a block it never inserted. Its height is above any epoch 1 reaches, so
+    // validator 1 proposes nothing else in the epoch and only the end of the epoch can drop the execution.
+    let addr = TestAddress::new("1");
+    let validator = test.get_validator(&addr);
+    let uninserted = LeafBlock {
+        block_id: BlockId::from([0x77; 32]),
+        height: NodeHeight(1_000_000),
+        epoch: Epoch(1),
+        shard_group: validator.shard_group,
+    };
+    let transaction_id = TransactionId::new([0x78; 32]);
+    validator
+        .state_store
+        .with_write_tx(|tx| {
+            LastProposed {
+                height: uninserted.height,
+                block_id: uninserted.block_id,
+                epoch: uninserted.epoch,
+                shard_group: uninserted.shard_group,
+            }
+            .set(tx)?;
+            TransactionExecution::abort(
+                &transaction_id,
+                RejectReason::execution_failure_unclassified("never proposed"),
+            )
+            .for_block(uninserted, transaction_id)
+            .insert_if_required(tx)?;
+            Ok::<_, StorageError>(())
+        })
+        .unwrap();
+
+    test.start_epoch(Epoch(1)).await;
+    drain_blocks(&mut test, Duration::from_secs(2)).await;
+    test.start_epoch(Epoch(2)).await;
+    wait_for_all_validators_at_epoch(&mut test, Epoch(2), Duration::from_secs(60)).await;
+
+    let remaining = test
+        .get_validator(&addr)
+        .state_store
+        .with_read_tx(|tx| tx.block_transaction_executions_get_all_for_block(&uninserted.block_id))
+        .unwrap();
+    assert!(remaining.is_empty(), "{remaining:?}");
 
     test.stop();
     test.assert_clean_shutdown().await;

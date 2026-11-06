@@ -48,7 +48,7 @@ use tari_ootle_transaction::{
     call_arg,
     call_args,
 };
-use tari_template_abi::FunctionDef;
+use tari_template_abi::{FunctionDef, FunctionKind, Receiver};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args::{BucketAction, BucketGetAmountArg, BucketRef, WorkspaceAction},
@@ -99,25 +99,22 @@ pub type ModulesCollection<TStore> = Arc<[Box<dyn RuntimeModule<TStore>>]>;
 
 /// The encoded bytes of the values of `inputs`, measured the way the fee module tallies storage.
 ///
-/// A global substate is held by every shard group and never pledged, so it is not counted. Every
-/// other declared input is resolved before execution — consensus aborts a transaction that names one
-/// it cannot find, and a dry run fails to fetch it — so one missing from `store` is an invariant
-/// violation.
+/// Every declared input counts, global ones included: every shard group resolves a global input
+/// locally and pledges it to the others. Every declared input is resolved before execution —
+/// consensus aborts a transaction that names one it cannot find, and a dry run fails to fetch it —
+/// so one missing from `store` is an invariant violation.
 fn declared_input_bytes<'a, TStore: StateReader, I: IntoIterator<Item = &'a SubstateId>>(
     store: &TStore,
     inputs: I,
 ) -> Result<u64, TransactionError> {
-    inputs
-        .into_iter()
-        .filter(|id| !id.is_global())
-        .try_fold(0u64, |total, id| {
-            let substate = store
-                .get_state(id)
-                .map_err(|err| TransactionErrorKind::InvariantError {
-                    details: format!("Declared input {id} was not resolved before execution: {err}"),
-                })?;
-            Ok(total.saturating_add(tari_bor::encoded_len(substate.substate_value()) as u64))
-        })
+    inputs.into_iter().try_fold(0u64, |total, id| {
+        let substate = store
+            .get_state(id)
+            .map_err(|err| TransactionErrorKind::InvariantError {
+                details: format!("Declared input {id} was not resolved before execution: {err}"),
+            })?;
+        Ok(total.saturating_add(tari_bor::encoded_len(substate.substate_value()) as u64))
+    })
 }
 
 pub struct TransactionProcessor<TStore, TTemplateProvider> {
@@ -220,8 +217,7 @@ where
         let execute_epoch = virtual_substates.current_epoch();
 
         let initial_auth_scope = AuthorizationScope::new(auth_params.initial_ownership_proofs);
-        let mut initial_call_scope = CallScope::new();
-        initial_call_scope.set_auth_scope(initial_auth_scope);
+        let mut initial_call_scope = CallScope::with_auth_scope(initial_auth_scope);
         // Because XTR resource is immutable, we can make it available to every shard group (genesis state) and
         // transaction (payment of fees)
         initial_call_scope.add_substate_to_owned(STEALTH_TARI_RESOURCE_ADDRESS.into());
@@ -585,6 +581,9 @@ where
             .track_template_loaded(&new_template_addr, template.code_size())?;
 
         let component_lock = runtime.interface().lock_component(component_address, LockFlag::Write)?;
+        // Evaluated in the instruction's own scope: the migration frame pushed below carries no signer badges and
+        // no loan of the authorized proofs.
+        runtime.interface().check_component_upgrade_rule(&component_lock)?;
 
         let template_def = template.shared_template_def();
         let migration_function = migrate
@@ -596,7 +595,7 @@ where
                         name: f.name.to_string(),
                     })
                     .and_then(|f| {
-                        if f.is_migration {
+                        if f.is_migration() {
                             Ok(f)
                         } else {
                             Err(TransactionErrorKind::NotAMigrationFunction { name: f.name.clone() })
@@ -654,11 +653,6 @@ where
         // executes in this frame, so the template identity is honest — but `template(...)` (and
         // `direct_caller_template(...)`) would become forgeable if any other code ever ran here.
         runtime.interface().push_call_frame(call_frame, None)?;
-        // This must come after the call frame as that defines the authorization scope
-        runtime.interface().check_component_upgrade_rule()?;
-        // A migration with no `migrate` function never reaches `invoke_template`, so this frame's call boundary
-        // ends here.
-        runtime.interface().revoke_boundary_proofs()?;
 
         runtime.interface().update_component_template(new_template_addr)?;
 
@@ -931,10 +925,21 @@ where
                     name: function.to_string(),
                 })?;
 
-        if function_def.is_migration {
-            return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
-                name: function_def.name.clone(),
-            });
+        match function_def.kind {
+            FunctionKind::Function => {},
+            FunctionKind::Migration { .. } => {
+                return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
+                    name: function_def.name.clone(),
+                });
+            },
+            // A method runs only in its component's frame, after the component's access rules. A static frame has
+            // neither, and carries the template's identity.
+            FunctionKind::Method(_) => {
+                return Err(TransactionErrorKind::MethodCalledAsFunction {
+                    template_address: *template_address,
+                    name: function_def.name.clone(),
+                });
+            },
         }
 
         let resolved_args = runtime.interface().resolve_args(None, &args)?;
@@ -1008,16 +1013,20 @@ where
                 name: method.to_string(),
             })?;
 
-        if function_def.is_migration {
-            return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
-                name: function_def.name.clone(),
-            });
-        }
-
-        let lock_flag = if function_def.is_mut {
-            LockFlag::Write
-        } else {
-            LockFlag::Read
+        let lock_flag = match function_def.kind {
+            FunctionKind::Method(Receiver::RefMut) => LockFlag::Write,
+            FunctionKind::Method(Receiver::Ref) => LockFlag::Read,
+            FunctionKind::Migration { .. } => {
+                return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
+                    name: function_def.name.clone(),
+                });
+            },
+            FunctionKind::Function => {
+                return Err(TransactionErrorKind::FunctionCalledAsMethod {
+                    component_address: component.address,
+                    name: function_def.name.clone(),
+                });
+            },
         };
 
         let component_lock = runtime.interface().lock_component(component.address, lock_flag)?;
@@ -1060,9 +1069,7 @@ where
     }
 
     /// Runs a template function in the frame the caller has already pushed. This is the only path from the engine
-    /// into template code, so it is where a frame stops holding the proofs that were in scope for its call
-    /// boundary: whatever the frame's access rule was evaluated against, the code itself acts with its own badges
-    /// and its `Proof` arguments.
+    /// into template code.
     ///
     /// The call runs on the instance of `template_address` the transaction's earlier calls used, if any (see
     /// [`WasmInstanceCache`]), restored first to the state of a fresh instantiation.
@@ -1073,8 +1080,6 @@ where
         function_def: &FunctionDef,
         args: &[tari_bor::Value],
     ) -> Result<IndexedValue, TransactionErrorKind> {
-        runtime.interface().revoke_boundary_proofs()?;
-
         let result = match module {
             LoadedTemplate::Wasm(loaded) => {
                 // Every call pays for an instantiation, whether it gets a new instance or a reused one reset to

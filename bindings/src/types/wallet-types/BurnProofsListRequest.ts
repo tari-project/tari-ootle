@@ -2,9 +2,9 @@
 
 export type BurnProofsListRequest = {
   /**
-   * Optional filter by account public key. Only proofs whose file name starts with this key
-   * will be returned. Proofs with file names that do not match the expected
-   * `{public_key}_{commitment}.json` format are always included.
+   * Optional filter by account public key, compared case-insensitively. A proof is excluded when its file name has
+   * the `{public_key}-{commitment}.json` format with a different key, or when it parses and its `burn_public_key`
+   * differs. A file that does not parse is listed unless its name gives a different key.
    */
   filter_by_public_key: string | null;
 };

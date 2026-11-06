@@ -5,12 +5,17 @@ use std::{
     collections::HashSet,
     fmt::Display,
     hash::{DefaultHasher, Hasher},
+    num::NonZeroU64,
     time::Duration,
 };
 
 use anyhow::bail;
-use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, SubstateAddress, displayable::Displayable};
+use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, SubstateAddress, VotePower, displayable::Displayable};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+
+/// The most vote power the configured validators may hold between them. Leader selection simulates up to
+/// `total_power × committee size` steps per call, so every committee's total power must stay a small integer.
+pub const MAX_TOTAL_VOTE_POWER: u64 = 1 << 16;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {
@@ -29,7 +34,19 @@ impl Config {
     /// than resolved by a default.
     pub fn validate(&self) -> anyhow::Result<()> {
         let mut seen = HashSet::with_capacity(self.validators.len());
+        // Every committee's total power is a sum over a subset of these validators, so bounding the network-wide sum
+        // bounds every committee total.
+        let mut total_power = 0u64;
         for validator in &self.validators {
+            total_power = total_power
+                .checked_add(validator.power.get())
+                .filter(|total| *total <= MAX_TOTAL_VOTE_POWER)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "The configured validators' vote power sums to more than {MAX_TOTAL_VOTE_POWER}. Lower the \
+                         `power` of one or more validators."
+                    )
+                })?;
             // A second entry for a validator would activate it twice. Listing it twice at one registration epoch
             // produces two rows sharing a start_epoch, which `distinct_validators` and `set_committee_shard` resolve
             // by different tiebreaks; listing it at two registration epochs moves its shard key.
@@ -85,6 +102,13 @@ pub struct Validator {
     /// key is unaffected by a rotation.
     #[serde(default)]
     pub claim_key_changes: Vec<ClaimKeyChange>,
+    /// The validator's vote power: a small integer count of stake units. The power of all configured validators
+    /// together is capped at [`MAX_TOTAL_VOTE_POWER`].
+    ///
+    /// Power is fixed for the life of the registration: a claim key rotation re-registers the validator with this
+    /// same power. Shard key derivation excludes it, so a validator's place in its committee is independent of stake.
+    #[serde(default = "Validator::default_power")]
+    pub power: NonZeroU64,
 }
 
 /// A scheduled claim key rotation for a [`Validator`].
@@ -101,6 +125,14 @@ impl Validator {
     /// The epoch at which this validator's initial registration becomes active.
     pub fn activation_epoch(&self) -> Epoch {
         self.registration_epoch.saturating_add(Epoch(1))
+    }
+
+    fn default_power() -> NonZeroU64 {
+        NonZeroU64::MIN
+    }
+
+    pub fn vote_power(&self) -> VotePower {
+        VotePower::of(self.power.get())
     }
 
     fn validate(&self) -> anyhow::Result<()> {
@@ -178,6 +210,7 @@ mod tests {
             shard_group: ShardGroup::new(1, 256),
             registration_epoch: Epoch(10),
             claim_key_changes,
+            power: NonZeroU64::MIN,
         }
     }
 
@@ -338,5 +371,61 @@ mod tests {
             claim_key: mk_key(3),
         }]);
         assert_eq!(without.calculate_shard_key(), with.calculate_shard_key());
+    }
+
+    #[test]
+    fn power_defaults_to_one_when_omitted() {
+        let validator: Validator = serde_json::from_value(serde_json::json!({
+            "public_key": mk_key(1),
+            "claim_key": mk_key(2),
+            "shard_group": ShardGroup::new(1, 256),
+            "registration_epoch": Epoch(10),
+        }))
+        .unwrap();
+        assert_eq!(validator.vote_power(), VotePower::of(1));
+        validator.validate().unwrap();
+    }
+
+    #[test]
+    fn zero_power_is_rejected() {
+        let err = serde_json::from_value::<Validator>(serde_json::json!({
+            "public_key": mk_key(1),
+            "claim_key": mk_key(2),
+            "shard_group": ShardGroup::new(1, 256),
+            "registration_epoch": Epoch(10),
+            "power": 0,
+        }))
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("nonzero"), "{err}");
+    }
+
+    #[test]
+    fn total_power_beyond_the_cap_is_rejected() {
+        let with_power = |seed, power| Validator {
+            public_key: mk_key(seed),
+            power: NonZeroU64::new(power).unwrap(),
+            ..mk_validator(vec![])
+        };
+        let at_limit = mk_config(vec![with_power(1, MAX_TOTAL_VOTE_POWER - 1), with_power(9, 1)]);
+        at_limit.validate().unwrap();
+
+        for validators in [
+            vec![with_power(1, MAX_TOTAL_VOTE_POWER + 1)],
+            vec![with_power(1, MAX_TOTAL_VOTE_POWER), with_power(9, 1)],
+            vec![with_power(1, u64::MAX), with_power(9, u64::MAX)],
+        ] {
+            let err = mk_config(validators).validate().unwrap_err().to_string();
+            assert!(err.contains("vote power sums to more than"), "{err}");
+        }
+    }
+
+    #[test]
+    fn power_does_not_move_the_shard_key() {
+        let heavy = Validator {
+            power: NonZeroU64::new(8).unwrap(),
+            ..mk_validator(vec![])
+        };
+        assert_eq!(mk_validator(vec![]).calculate_shard_key(), heavy.calculate_shard_key());
     }
 }

@@ -53,6 +53,7 @@
 //! `"INTERNAL"` error in the envelope, never undefined behaviour.
 
 mod c_abi;
+mod encoded_decode_abi;
 mod stealth_abi;
 mod substate_decode_abi;
 
@@ -80,6 +81,14 @@ pub use c_abi::{
     ootle_seal_and_encode_with_auth,
     ootle_string_free,
     ootle_unsigned_record_for_cosign,
+};
+pub use encoded_decode_abi::{
+    ootle_decode_event,
+    ootle_decode_execute_result,
+    ootle_decode_resource,
+    ootle_decode_substate_value,
+    ootle_decode_transaction_receipt,
+    ootle_decode_utxo,
 };
 pub use stealth_abi::{
     OotleStealthPartialTransaction,

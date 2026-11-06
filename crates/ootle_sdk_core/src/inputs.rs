@@ -541,7 +541,7 @@ pub fn apply_fetched_substates_with_secrets(
     // 1. Parse + cache the fetched batch (host's I/O result → internal types).
     for f in fetched {
         let id = SubstateId::from_str_checked(&f.substate_id)?;
-        let value = crate::substate_decode::decode_indexer_substate_value(&f.substate_value)
+        let value = crate::encoded_decode::decode_served::<SubstateValue>(&f.substate_value)
             .map_err(|e| OotleSdkError::Parse(format!("invalid substate value for '{}': {e}", f.substate_id)))?;
         partial.cache.insert(id, Some(value));
     }

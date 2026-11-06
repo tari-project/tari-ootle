@@ -197,13 +197,14 @@ fn test_composed() {
 fn test_buggy_template() {
     // Uncomment the following lines to print the template definition bytes embedded in the
     // `tari_tdef` custom section
-    // let bytes = tari_template_abi::TemplateDef::V1(tari_template_abi::TemplateDefV1 {
+    // let encoded = tari_bor::encode(&tari_template_abi::VersionedTemplateDef::V1(tari_template_abi::TemplateDefV1 {
     //     template_name: "Buggy".to_string(),
     //     abi_version: tari_template_abi::version::MINIMUM_SUPPORTED_WASM_ABI_VERSION,
     //     functions: vec![],
-    // })
-    // .encode_for_wasm_embedding()
+    // }))
     // .unwrap();
+    // let mut bytes = ((encoded.len() + 4) as u32).to_le_bytes().to_vec();
+    // bytes.extend(encoded);
     // println!("static _TARI_TEMPLATE_DEF: [u8; {}] = [", bytes.len());
     // for chunk in bytes.chunks(16) {
     //     print!("    ");
@@ -351,7 +352,7 @@ fn test_tuples() {
     assert_eq!(fn_get.output.to_string(), "Tuple<String,U32>");
     // the "set" method accepts a tuple (String, u32) as argument
     let fn_set = module.find_func_by_name("set").unwrap();
-    assert_eq!(fn_set.arguments[1].arg_type.to_string(), "Tuple<String,U32>");
+    assert_eq!(fn_set.arguments[0].arg_type.to_string(), "Tuple<String,U32>");
     // the "new_with_self" constructor returns a tuple (Self, String)
     let fn_new_with_self = module.find_func_by_name("new_with_self").unwrap();
     assert_eq!(fn_new_with_self.output.to_string(), "Tuple<Tuple,String>");

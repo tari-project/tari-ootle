@@ -25,4 +25,7 @@ tracing-log = { workspace = true }
 
 [features]
 # A Prometheus collector for the lines each sink dropped.
-metrics = ["dep:prometheus-client"]
+# `prometheus-client` stays an implicit feature: cargo-auditable runs `cargo metadata` across the workspace with the
+# features of the binary it is building, and the validator node and indexer enable a feature of that name, which
+# cargo rejects for a member whose optional dependency is only reachable through `dep:`.
+metrics = ["prometheus-client"]

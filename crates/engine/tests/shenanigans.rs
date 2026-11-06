@@ -10,7 +10,7 @@ use tari_engine_types::{
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_lib::{
     args::VaultAction,
-    types::{Amount, ComponentAddress, ResourceType, constants::TARI_TOKEN},
+    types::{Amount, ComponentAddress, ObjectKey, ResourceType, VaultId, constants::TARI_TOKEN},
 };
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 
@@ -160,6 +160,87 @@ fn it_rejects_double_ownership_of_vault() {
     );
 
     assert_reject_reason(reason, "Duplicate reference to substate");
+}
+
+/// Asserts that `reason` is [`RuntimeError::VaultAlreadyOwned`] for a vault the transaction created, whose id is
+/// unknown before it runs. The expected text is rendered from the variant around a placeholder id, so it follows
+/// the variant's message.
+#[track_caller]
+fn assert_new_vault_already_owned(reason: RejectReason) {
+    let placeholder = VaultId::new(ObjectKey::from_array([0u8; ObjectKey::LENGTH]));
+    let expected = RuntimeError::VaultAlreadyOwned { vault_id: placeholder }.to_string();
+    let (before_id, after_id) = expected.split_once(&placeholder.to_string()).unwrap();
+    let reason = reason.to_string();
+    let vault_id_start = reason
+        .find(before_id)
+        .unwrap_or_else(|| panic!("Expected reject reason \"{expected}\" but got \"{reason}\"")) +
+        before_id.len();
+    let rest = &reason[vault_id_start..];
+    let vault_id_end = rest
+        .find(after_id)
+        .unwrap_or_else(|| panic!("Expected reject reason \"{expected}\" but got \"{reason}\""));
+    rest[..vault_id_end]
+        .parse::<VaultId>()
+        .unwrap_or_else(|_| panic!("Expected a vault id in reject reason \"{reason}\""));
+}
+
+#[test]
+fn it_rejects_one_vault_in_two_new_components() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(template_addr, "with_vault_in_two_components", args![])
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()],
+    );
+
+    assert_new_vault_already_owned(reason);
+}
+
+fn create_component_with_vault(test: &mut TemplateTest) -> (ComponentAddress, VaultId) {
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(template_addr, "with_vault", args![])
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()],
+    );
+    let component_address = test.return_values()[0].decoded::<ComponentAddress>().unwrap();
+    let component = test.read_only_state_store().get_component(component_address).unwrap();
+    let indexed = IndexedWellKnownTypes::from_value(component.state()).unwrap();
+    (component_address, indexed.vault_ids()[0])
+}
+
+#[test]
+fn it_rejects_a_components_vault_in_a_new_component() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (component_address, vault_id) = create_component_with_vault(&mut test);
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(component_address, "share_vault_with_new_component", args![])
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()],
+    );
+
+    assert_reject_reason(reason, RuntimeError::VaultAlreadyOwned { vault_id });
+}
+
+#[test]
+fn it_rejects_another_components_vault_in_a_state_update() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (component_address, _) = create_component_with_vault(&mut test);
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(component_address, "share_new_component_vault_with_self", args![])
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()],
+    );
+
+    assert_new_vault_already_owned(reason);
 }
 
 #[test]
@@ -605,11 +686,50 @@ fn it_does_not_leak_a_callees_address_allocation_into_the_callers_scope() {
     );
     let victim = test.return_values()[0].decoded::<ComponentAddress>().unwrap();
 
-    // An allocation is a reservation of an address, and nothing checks that the template consuming one is the
-    // template that made it, so the caller must never be handed one it was not given.
+    // An allocation is a reservation of an address. Whichever frame holds one may consume it, provided the frame runs
+    // the template that made it, so the caller must never be handed one it was not given.
     let reason = test.execute_expect_failure(
         test.transaction()
             .call_function(template_addr, "call_then_use_abandoned_allocation", args![victim, 0u32])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, RuntimeError::AddressAllocationNotInScope { id: 0 });
+}
+
+#[test]
+fn it_rejects_a_call_returning_a_bucket_it_does_not_hold() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
+    let (account, owner_token, owner_key) = test.create_funded_account();
+
+    // The bucket is held by the transaction's workspace, and the callee is handed nothing.
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(account, "withdraw", args![TARI_TOKEN, 1000])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_function(template_addr, "return_bucket_by_id", args![0u32])
+            .put_last_instruction_output_on_workspace("alias")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .build_and_seal(&owner_key),
+        vec![owner_token],
+    );
+
+    assert_reject_reason(reason, RuntimeError::BucketNotInScope { bucket_id: 0.into() });
+}
+
+#[test]
+fn it_rejects_a_call_returning_an_address_allocation_it_does_not_hold() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
+
+    // The allocation is held by the transaction's workspace, and the callee is handed nothing.
+    let reason = test.execute_expect_failure(
+        test.transaction()
+            .allocate_component_address("allocation")
+            .call_function(template_addr, "return_allocation_by_id", args![0u32])
+            .put_last_instruction_output_on_workspace("alias")
             .build_and_seal(test.secret_key()),
         vec![],
     );
@@ -682,8 +802,8 @@ fn it_refuses_to_read_a_proof_the_frame_does_not_hold() {
 /// attacker runs, proof 0 is in the victim's `proof_scope` and not its `auth_scope`. What this pins is therefore the
 /// holder's `proof_scope` entry surviving the attacker's call, and the call answering at all. The `auth_scope` half
 /// of the isolation is structural — `current_call_scope_mut` is `call_frames.last_mut()`, so a frame has no way to
-/// address another's scope — and observing it would need the victim to hold its guard across the call and then
-/// exercise something gated on the badge, there being no engine query for `auth_scope` membership.
+/// address another's scope. A victim that held its guard across the call would be lending proof 0 to the attacker
+/// for that call, which `a_window_lends_the_proof_to_the_callee_and_no_further` covers.
 #[test]
 fn it_answers_a_drop_authorize_for_any_proof_id() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);

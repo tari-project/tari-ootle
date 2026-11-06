@@ -23,7 +23,7 @@
 use std::{fmt, fmt::Formatter, sync::Arc};
 
 use tari_engine_types::limits::{self, ModuleShape};
-use tari_template_abi::{FunctionDef, TEMPLATE_DEF_CUSTOM_SECTION, TemplateDef, Type, WASM_PTR_SIZE};
+use tari_template_abi::{FunctionDef, FunctionKind, TEMPLATE_DEF_CUSTOM_SECTION, TemplateDef, Type, WASM_PTR_SIZE};
 use wasmer::{
     Engine,
     ExternType,
@@ -313,7 +313,7 @@ fn load_template_def_from_custom_section(module: &wasmer::Module) -> Result<Temp
         .try_into()
         .expect("section.len() >= WASM_PTR_SIZE checked above");
     let full_len = u32::from_le_bytes(prefix) as usize;
-    if full_len < WASM_PTR_SIZE || full_len > section.len() {
+    if full_len != section.len() {
         return Err(WasmExecutionError::AbiTemplateDefSectionMalformed {
             reason: format!(
                 "declared length {} is inconsistent with section size {}",
@@ -322,7 +322,7 @@ fn load_template_def_from_custom_section(module: &wasmer::Module) -> Result<Temp
             ),
         });
     }
-    let template = tari_bor::decode_with_max_depth::<TemplateDef>(
+    let template = tari_bor::decode_exact_with_max_depth::<TemplateDef>(
         &section[WASM_PTR_SIZE..full_len],
         limits::MAX_CBOR_NESTING_DEPTH,
     )
@@ -427,7 +427,7 @@ fn validate_export_signature(
 
 fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionError> {
     match template_def {
-        TemplateDef::V1(def) => {
+        TemplateDef::V2(def) => {
             let function_count = def.functions.len();
             if function_count > limits::WASM_LIMITS.max_functions {
                 return Err(WasmValidationError::TooManyFunctions {
@@ -444,11 +444,11 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                     .into());
                 }
 
-                if func.arguments.len() > limits::WASM_LIMITS.max_function_arguments {
+                if func.num_call_args() > limits::WASM_LIMITS.max_function_arguments {
                     return Err(WasmValidationError::FunctionTooManyArguments {
                         name: func.name.clone(),
                         max_args: limits::WASM_LIMITS.max_function_arguments,
-                        num_args: func.arguments.len(),
+                        num_args: func.num_call_args(),
                     }
                     .into());
                 }
@@ -460,26 +460,11 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                         }
                         .into());
                     }
-                    match &arg.arg_type {
-                        Type::Tuple(tuple) if tuple.len() > limits::WASM_LIMITS.max_function_arguments => {
-                            return Err(WasmValidationError::FunctionTooManyTupleReturn {
-                                name: func.name.clone(),
-                                max_tuple_size: limits::WASM_LIMITS.max_function_arguments,
-                                tuple_size: tuple.len(),
-                            }
-                            .into());
-                        },
-                        Type::Other { name } if name.len() > limits::WASM_LIMITS.max_function_name_length => {
-                            return Err(WasmValidationError::FunctionNameTooLong {
-                                name: name.clone(),
-                                max_length: limits::WASM_LIMITS.max_function_name_length,
-                            }
-                            .into());
-                        },
-                        _ => {},
-                    }
+                    validate_abi_type(&func.name, &arg.arg_type)?;
                 }
-                if func.is_migration {
+                validate_abi_type(&func.name, &func.output)?;
+                if let FunctionKind::Migration { from } = &func.kind {
+                    validate_abi_type(&func.name, from)?;
                     // Note that we are checking the TemplateDef, not the actual return type of the function in Wasm.
                     match &func.output {
                         Type::Other { name } => {
@@ -506,6 +491,51 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                 }
             }
         },
+    }
+    Ok(())
+}
+
+/// Holds an ABI type `function` declares, and every type nested in it, to the depth, size, tuple width and name
+/// length limits.
+fn validate_abi_type(function: &str, ty: &Type) -> Result<(), WasmValidationError> {
+    let limits = &limits::WASM_LIMITS;
+    let mut num_types = 0usize;
+    let mut pending = vec![(ty, 1usize)];
+    while let Some((ty, depth)) = pending.pop() {
+        num_types += 1;
+        if num_types > limits.max_abi_type_nodes {
+            return Err(WasmValidationError::AbiTypeTooLarge {
+                function: function.to_string(),
+                max_types: limits.max_abi_type_nodes,
+            });
+        }
+        if depth > limits.max_abi_type_depth {
+            return Err(WasmValidationError::AbiTypeTooDeep {
+                function: function.to_string(),
+                max_depth: limits.max_abi_type_depth,
+            });
+        }
+        match ty {
+            Type::Vec(inner) | Type::Option(inner) => pending.push((inner, depth + 1)),
+            Type::Tuple(types) => {
+                if types.len() > limits.max_function_arguments {
+                    return Err(WasmValidationError::FunctionTooManyTupleReturn {
+                        name: function.to_string(),
+                        max_tuple_size: limits.max_function_arguments,
+                        tuple_size: types.len(),
+                    });
+                }
+                pending.extend(types.iter().map(|t| (t, depth + 1)));
+            },
+            Type::Other { name } if name.len() > limits.max_function_name_length => {
+                return Err(WasmValidationError::AbiTypeNameTooLong {
+                    function: function.to_string(),
+                    length: name.len(),
+                    max_length: limits.max_function_name_length,
+                });
+            },
+            _ => {},
+        }
     }
     Ok(())
 }

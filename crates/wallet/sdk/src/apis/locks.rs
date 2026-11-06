@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use tari_engine_types::substate::SubstateDiff;
-use tari_ootle_common_types::optional::IsNotFoundError;
+use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_ootle_transaction::TransactionId;
 use tari_template_lib::types::{Amount, VaultId};
 
@@ -55,6 +55,23 @@ impl<'a, TStore: WriteableWalletStore> LocksApi<'a, TStore> {
         Ok(())
     }
 
+    /// Releases `lock_id` only while no transaction is linked to it, and returns whether it did. A linked lock is left
+    /// for its transaction to resolve, and a missing lock needs no release. The check and the release share one
+    /// write, so a lock linked concurrently is never released.
+    pub fn release_unlinked_lock(&self, lock_id: WalletLockId) -> Result<bool, LocksApiError> {
+        let released = self.store.with_write_tx(|tx| {
+            let Some(lock) = tx.locks_get(lock_id).optional()? else {
+                return Ok::<_, WalletStorageError>(false);
+            };
+            if lock.transaction_id.is_some() {
+                return Ok(false);
+            }
+            tx.locks_release(lock_id)?;
+            Ok(true)
+        })?;
+        Ok(released)
+    }
+
     pub fn finalize_lock(&self, lock_id: WalletLockId, diff: &SubstateDiff) -> Result<(), LocksApiError> {
         self.store
             .with_write_tx(|tx| tx.locks_unlock_finalized(lock_id, diff))?;
@@ -80,11 +97,15 @@ impl<'a, TStore: WriteableWalletStore> LocksApi<'a, TStore> {
 }
 
 impl<TStore: ReadableWalletStore> LocksApi<'_, TStore> {
-    pub fn get_lock_by_transaction_id(&self, transaction_id: TransactionId) -> Result<WalletLockId, LocksApiError> {
-        let lock_id = self
+    /// Every lock linked to `transaction_id`. Empty when none is.
+    pub fn get_locks_by_transaction_id(
+        &self,
+        transaction_id: TransactionId,
+    ) -> Result<Vec<WalletLockId>, LocksApiError> {
+        let lock_ids = self
             .store
             .with_read_tx(|tx| tx.locks_get_by_transaction_id(transaction_id))?;
-        Ok(lock_id)
+        Ok(lock_ids)
     }
 }
 

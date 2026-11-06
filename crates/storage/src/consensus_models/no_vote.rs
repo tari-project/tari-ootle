@@ -2,11 +2,11 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_consensus_types::{BlockId, Decision};
-use tari_ootle_common_types::{ShardGroup, ValidatorSetHash};
+use tari_ootle_common_types::{Epoch, ShardGroup, ValidatorSetHash, displayable::Displayable};
 use tari_ootle_transaction::TransactionId;
 use tari_sidechain::FixedHash;
 
-use crate::consensus_models::TransactionPoolStage;
+use crate::consensus_models::{LockedEpoch, TransactionPoolStage};
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum NoVoteReason {
@@ -163,6 +163,21 @@ pub enum NoVoteReason {
         transaction_id: TransactionId,
         details: String,
     },
+    #[error("The leader pinned transaction {transaction_id} to {proposed}, but this node pins it to {}", local.display())]
+    LockedEpochDisagreement {
+        transaction_id: TransactionId,
+        local: Option<LockedEpoch>,
+        proposed: LockedEpoch,
+    },
+    #[error(
+        "The leader sequenced transaction {transaction_id}, pinned to {locked_epoch}, in a block of the earlier \
+         {block_epoch}"
+    )]
+    LockedEpochAfterBlock {
+        transaction_id: TransactionId,
+        locked_epoch: Epoch,
+        block_epoch: Epoch,
+    },
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -221,6 +236,8 @@ impl NoVoteReason {
             Self::BlockPledgeBytesExceeded { .. } => "BlockPledgeBytesExceeded",
             Self::BlockForeignProposalBytesExceeded { .. } => "BlockForeignProposalBytesExceeded",
             Self::ConflictingTransactionProposed { .. } => "ConflictingTransactionProposed",
+            Self::LockedEpochDisagreement { .. } => "LockedEpochDisagreement",
+            Self::LockedEpochAfterBlock { .. } => "LockedEpochAfterBlock",
         }
     }
 }

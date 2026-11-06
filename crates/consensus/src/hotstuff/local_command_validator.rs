@@ -6,8 +6,8 @@ use std::num::NonZeroU64;
 use log::*;
 use tari_consensus_types::{Decision, LeafBlock};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::commit_result::{AbortReason, RejectReason};
-use tari_ootle_common_types::{committee::CommitteeInfo, optional::Optional};
+use tari_engine_types::commit_result::RejectReason;
+use tari_ootle_common_types::{VersionedSubstateId, committee::CommitteeInfo, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
@@ -38,7 +38,9 @@ use crate::{
             derive_new_multishard_command,
             fee_intent_only_disagreement,
             local_only_disagreement,
+            locked_epoch_disagreement,
             new_multishard_disagreement,
+            pin_new_transaction,
         },
         error::HotStuffError,
         filter_diff_for_committee,
@@ -260,8 +262,15 @@ where
             return Ok(Some(reason));
         }
 
-        // Prepare phase, ensure we set a locked_epoch if not already done
-        tx_rec.update_locked_epoch(block.to_locked_epoch());
+        if let Err(pinned_after) = pin_new_transaction(
+            &mut tx_rec,
+            &block.to_locked_epoch(),
+            local_committee_info.shard_group(),
+        ) {
+            let reason = pinned_after.into_no_vote(*atom.id());
+            warn!(target: LOG_TARGET, "❌ NO VOTE {proposed_kind} in block {block}: {reason}");
+            return Ok(Some(reason));
+        }
 
         // Foreign block could have already resulted in an ABORT execution
         let maybe_execution = proposed_block_change_set.take_transaction_execution(tx_rec.id());
@@ -416,6 +425,7 @@ where
                 .then(|| abort_local_prepared_for_epoch_end(&mut tx_rec))
                 .flatten()
         });
+        let is_forced_abort = forced_abort.is_some();
         if let Some(execution) = forced_abort {
             proposed_block_change_set.add_abort_execution(*tx_rec.id(), execution);
         }
@@ -432,7 +442,14 @@ where
                 substate_store,
                 proposed_block_change_set,
             );
-        } else if tx_rec.current_decision().is_commit() {
+        }
+
+        if let Some(reason) = locked_epoch_disagreement(tx_rec.locked_epoch(), atom) {
+            warn!(target: LOG_TARGET, "❌ NO VOTE LocalAccept in block {block}: {reason}");
+            return Ok(Some(reason));
+        }
+
+        if tx_rec.current_decision().is_commit() {
             // CASE: We are in the LocalPrepared stage, and want to proceed to LocalAccept
 
             if !tx_rec.current_stage().is_local_prepared() {
@@ -489,16 +506,10 @@ where
             };
             let execution = execution.into_transaction_execution();
 
-            if execution.decision().is_commit() {
-                // Counted for the block pledge check once every command is evaluated. Preparing the transaction
-                // bounded what its inputs alone may pledge.
-                substate_store.pledge_inputs(
-                    local_pledged_inputs(&tx_rec, local_committee_info.shard_group()),
-                    usize::MAX,
-                )?;
-            }
-
             let execution = if execution.decision().is_commit() {
+                let pledged_inputs = local_pledged_inputs(&tx_rec, local_committee_info.shard_group())
+                    .map(|id| id.to_owned())
+                    .collect::<Vec<_>>();
                 // Lock all local outputs
                 let locked = lock_multishard_execution(
                     substate_store,
@@ -509,30 +520,7 @@ where
                     tx_rec.is_fee_intent_only(),
                 )
                 .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
-                // TODO: can we modify input locks at this point? For multi-shard input transactions, we locked all
-                // inputs as Write due to lack of information. We now know what locks are necessary, and this
-                // block has the correct evidence so this should be fine.
-                tx_rec.update_from_execution(
-                    local_committee_info.num_preshards(),
-                    local_committee_info.num_committees(),
-                    &locked.execution,
-                );
                 if let Some(err) = locked.lock_status.failures().first() {
-                    if atom.decision.is_commit() {
-                        // If we disagree with any local decision we abstain from voting
-                        warn!(
-                            target: LOG_TARGET,
-                            "❌ NO VOTE LocalAccept: Lock failure: {} but leader decided COMMIT for tx {} in block {}. Leader proposed COMMIT, we decided ABORT",
-                            err,
-                            tx_rec.id(),
-                            block,
-                        );
-                        return Ok(Some(NoVoteReason::DecisionDisagreement {
-                            local: Decision::Abort(AbortReason::LockOutputsFailed),
-                            remote: Decision::Commit,
-                        }));
-                    }
-
                     info!(
                         target: LOG_TARGET,
                         "⚠️ Failed to lock outputs for transaction {} in block {}. Error: {}",
@@ -545,24 +533,34 @@ where
                         &transaction_id,
                         RejectReason::FailedToLockOutputs(err.to_string()),
                     );
-
                     tx_rec
-                        .set_local_decision(execution.decision())
-                        .set_transaction_fee(0)
-                        .set_exhaust_burn(0)
-                        .no_leader_fee()
-                        .set_next_stage_and_readiness(TransactionPoolStage::LocalAccepted, block.shard_group())?;
-
-                    proposed_block_change_set
-                        .add_transaction_execution(*tx_rec.id(), execution)?
-                        .set_next_transaction_update(tx_rec)?;
-
-                    return Ok(None);
+                        .update_from_execution(
+                            local_committee_info.num_preshards(),
+                            local_committee_info.num_committees(),
+                            &execution,
+                        )
+                        .no_leader_fee();
+                    execution
+                } else {
+                    // Counted for the block pledge check once every command is evaluated. Preparing the transaction
+                    // bounded what its inputs alone may pledge.
+                    substate_store.pledge_inputs(
+                        pledged_inputs.iter().map(VersionedSubstateId::as_versioned_ref),
+                        usize::MAX,
+                    )?;
+                    // TODO: can we modify input locks at this point? For multi-shard input transactions, we locked all
+                    // inputs as Write due to lack of information. We now know what locks are necessary, and this
+                    // block has the correct evidence so this should be fine.
+                    tx_rec.update_from_execution(
+                        local_committee_info.num_preshards(),
+                        local_committee_info.num_committees(),
+                        &locked.execution,
+                    );
+                    if locked.fee_intent_only {
+                        tx_rec.set_fee_intent_only(true);
+                    }
+                    locked.execution
                 }
-                if locked.fee_intent_only {
-                    tx_rec.set_fee_intent_only(true);
-                }
-                locked.execution
             } else {
                 tx_rec.update_from_execution(
                     local_committee_info.num_preshards(),
@@ -600,6 +598,27 @@ where
             if let Some(reason) = check_ready_to_leave_stage(&tx_rec, block, "LocalAccept") {
                 return Ok(Some(reason));
             }
+        }
+
+        // CONSENSUS RULE: a forced abort accepts any abort the leader proposes. A leader whose oracle does not yet
+        // report the layout change aborts for its own reason, such as a lock failure, and the record takes that
+        // reason so that its later SomeAccept matches.
+        if is_forced_abort && atom.decision.is_abort() {
+            tx_rec.set_local_decision(atom.decision);
+        }
+        if tx_rec.current_decision() != atom.decision {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NO VOTE LocalAccept: decision disagreement for transaction {} in block {}. Leader proposed {}, we decided {}",
+                tx_rec.id(),
+                block,
+                atom.decision,
+                tx_rec.current_decision(),
+            );
+            return Ok(Some(NoVoteReason::DecisionDisagreement {
+                local: tx_rec.current_decision(),
+                remote: atom.decision,
+            }));
         }
 
         if let Some(reason) = fee_intent_only_disagreement(tx_rec.is_fee_intent_only(), atom) {
@@ -822,6 +841,11 @@ where
             }));
         }
 
+        if let Some(reason) = locked_epoch_disagreement(tx_rec.locked_epoch(), atom) {
+            warn!(target: LOG_TARGET, "❌ NO VOTE AllAccept in block {block}: {reason}");
+            return Ok(Some(reason));
+        }
+
         // A foreign proposal earlier in this block may have replaced the stored execution with its fee-intent commit
         let stored_execution;
         let execution = match proposed_block_change_set.transaction_execution(tx_rec.id()) {
@@ -958,20 +982,27 @@ where
 
         // We check that the leader decision is the same as our local decision (this will change to ABORT once we've
         // received the foreign LocalAccept).
-        if tx_rec.current_decision().is_commit() {
+        if tx_rec.current_decision() != atom.decision {
             warn!(
                 target: LOG_TARGET,
-                "❌ SomeAccept decision disagreement for transaction {} in block {}. Leader proposed ABORT, we decided COMMIT",
+                "❌ SomeAccept decision disagreement for transaction {} in block {}. Leader proposed {}, we decided {}",
                 tx_rec.id(),
                 block,
+                atom.decision,
+                tx_rec.current_decision(),
             );
             return Ok(Some(NoVoteReason::DecisionDisagreement {
-                local: Decision::Commit,
+                local: tx_rec.current_decision(),
                 remote: atom.decision,
             }));
         }
 
         if let Some(reason) = check_ready_to_leave_stage(&tx_rec, block, "SomeAccept") {
+            return Ok(Some(reason));
+        }
+
+        if let Some(reason) = fee_intent_only_disagreement(tx_rec.is_fee_intent_only(), atom) {
+            warn!(target: LOG_TARGET, "❌ NO VOTE SomeAccept in block {block}: {reason}");
             return Ok(Some(reason));
         }
 
@@ -985,6 +1016,35 @@ where
                 tx_rec.transaction_fee()
             );
             return Ok(Some(NoVoteReason::FeeDisagreement));
+        }
+
+        if let Some(reason) = locked_epoch_disagreement(tx_rec.locked_epoch(), atom) {
+            warn!(target: LOG_TARGET, "❌ NO VOTE SomeAccept in block {block}: {reason}");
+            return Ok(Some(reason));
+        }
+
+        if atom.leader_fee.is_some() {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NO VOTE: Leader fee in tx {} is set for SomeAccept ABORT command in block {}",
+                atom.id,
+                block,
+            );
+            return Ok(Some(NoVoteReason::LeaderFeeDisagreement));
+        }
+
+        if *tx_rec.evidence() != atom.evidence {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NO VOTE: SomeAccept disagreement for transaction {} in block {}. Leader proposed evidence {}, but we calculated {}",
+                tx_rec.id(),
+                block,
+                atom.evidence,
+                tx_rec.evidence()
+            );
+            return Ok(Some(NoVoteReason::InvalidEvidence {
+                reason: InvalidEvidenceReason::MismatchedEvidence,
+            }));
         }
 
         tx_rec.set_next_stage_and_readiness(TransactionPoolStage::SomeAccepted, block.shard_group())?;

@@ -243,9 +243,11 @@ impl<TStore: StateReader> RuntimeModule<TStore> for FeeModule {
     }
 
     fn on_fee_checkpoint(&self, state: &mut ChargeableState<'_, TStore>) -> Result<(), RuntimeModuleError> {
-        // Only the state-derived charges. Execution metering is charged once at finalization, over
-        // the whole transaction's accumulated points, so pricing it here would be replaced anyway.
-        self.charge_state_fees(state)
+        // Priced exactly as `on_before_persist` prices the fee-intent fallback, the fee intent's
+        // execution included: this is the gate that decides whether that fallback can be afforded.
+        // Finalization assigns the execution charges again over the whole transaction's points, so
+        // pricing them here does not count them twice.
+        self.charge_finalization_fees(state)
     }
 
     fn on_before_persist(&self, state: &mut ChargeableState<'_, TStore>) -> Result<(), RuntimeModuleError> {

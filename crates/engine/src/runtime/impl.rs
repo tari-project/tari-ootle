@@ -57,7 +57,7 @@ use tari_ootle_transaction::{
     ResourceAddressRef,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
 };
-use tari_template_abi::{FunctionDef, TemplateDef, Type};
+use tari_template_abi::{FunctionDef, FunctionKind, TemplateDef, Type};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, is_builtin_template_address};
 use tari_template_lib::{
     SpendContext,
@@ -133,7 +133,7 @@ use tari_template_lib::{
         access_rules::{
             AccessRule,
             ComponentAccessRules,
-            InvalidMOfN,
+            InvalidAccessRule,
             RequireRule,
             ResourceAuthAction,
             RestrictedAccessRule,
@@ -317,7 +317,10 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         match self.tracker.current_frame_write_mode() {
             FrameWriteMode::Full => Ok(()),
             FrameWriteMode::OwnComponent if FORBIDDEN_IN_OWN_COMPONENT.contains(&function) => {
-                Err(RuntimeError::ForbiddenInAuthHookContext { operation: function })
+                Err(RuntimeError::ForbiddenInRestrictedFrame {
+                    operation: function,
+                    frame: self.tracker.current_restricted_frame(),
+                })
             },
             FrameWriteMode::ReadOnly if FORBIDDEN_IN_READ_ONLY.contains(&function) => {
                 Err(RuntimeError::ForbiddenInReadOnlyContext { operation: function })
@@ -430,11 +433,9 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             }
 
             // `get_bucket` scope-checks; `get_proof` does not, so the frame's own scope is checked here to keep a
-            // returned proof to the same rule as a returned bucket.
+            // returned proof to the same rule as a returned bucket: only a held proof crosses to the caller.
             for proof_id in value.proof_ids() {
-                if !state.current_call_scope()?.is_proof_in_scope(proof_id) {
-                    return Err(RuntimeError::ProofNotInScope { proof_id: *proof_id });
-                }
+                state.current_call_scope()?.require_held_proof(proof_id)?;
                 let _ignore = state.get_proof(*proof_id)?;
             }
 
@@ -531,10 +532,10 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             }
             // The hook component may still be an unused address allocation when the resource is acted upon in the
             // same call that creates it. For example, commonly a user creates a resource with initial supply and
-            // deposits it into a vault before creating the component. In this case, we "skip" the hook.
-            if state
-                .get_allocated_address_by_address(auth_hook.component_address)
-                .is_some()
+            // deposits it into a vault before creating the component. In this case, we "skip" the hook. Only the
+            // frame holding the allocation, running the template that made it, may skip.
+            if let Some(alloc) = state.get_allocated_address_in_current_scope(auth_hook.component_address)? &&
+                alloc.template_address() == state.current_template().ok()
             {
                 return Ok(true);
             }
@@ -563,11 +564,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         }
 
         let resource_id: SubstateId = (*auth_caller.resource()).into();
-        // The signature of a call back is (action: ResourceAuthAction, auth_caller: AuthHookCaller). The hook's
-        // call decodes the acting component's state from these arguments, so they are charged as a cross-template
-        // call's are.
+        // The signature of a call back is (action: ResourceAuthAction, auth_caller: AuthHookCaller).
         let args = invoke_args![action, auth_caller];
-        self.charge_call_args(&args)?;
 
         // The hook frame only accepts the `AuthHookCaller` argument if the resource it names is in the acting
         // frame's scope. The reference is scoped to the hook call: the acting frame's scope must be the same after
@@ -627,7 +625,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     where
         F: FnOnce(&Resource) -> Result<(), RuntimeError>,
     {
-        let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+        let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
             let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
             let resource = state_mut.get_resource(&resource_lock)?;
             validate(resource)?;
@@ -681,21 +679,6 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             method: method.to_string(),
             details: Box::new(e),
         })
-    }
-
-    /// Charges for the arguments a template passes to a cross-template call, which the engine
-    /// decodes into the callee's `CallInfo`.
-    fn charge_call_args(&self, args: &[Bytes]) -> Result<(), RuntimeError> {
-        for arg in args {
-            self.charge_engine_arg(arg).map_err(|e| match e {
-                EngineArgChargeError::Unreadable(e) => RuntimeError::InvalidArgument {
-                    argument: "args",
-                    reason: format!("Argument failed to decode. Err: {:?}", e),
-                },
-                EngineArgChargeError::Runtime(e) => e,
-            })?;
-        }
-        Ok(())
     }
 
     fn invoke_template_function(
@@ -811,11 +794,18 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
 
-        if func.arguments.len() != 3 {
+        if !func.has_receiver() {
+            return Err(RuntimeError::InvalidArgument {
+                argument,
+                reason: format!("Authorize hook '{}' must be a method taking &self or &mut self", hook),
+            });
+        }
+
+        if func.arguments.len() != 2 {
             return Err(RuntimeError::InvalidArgument {
                 argument,
                 reason: format!(
-                    "Authorize hook '{}' must take 3 arguments (incl &self), but found {}",
+                    "Authorize hook '{}' must take 2 arguments after self, but found {}",
                     hook,
                     func.arguments.len()
                 ),
@@ -823,7 +813,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         }
 
         if !matches!(
-            func.arguments.get(1).expect("length checked").arg_type.other(),
+            func.arguments.first().expect("length checked").arg_type.other(),
             Some("ResourceAuthAction")
         ) {
             return Err(RuntimeError::InvalidArgument {
@@ -833,7 +823,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         }
 
         if !matches!(
-            func.arguments.get(2).expect("length checked").arg_type.other(),
+            func.arguments.get(1).expect("length checked").arg_type.other(),
             Some("AuthHookCaller")
         ) {
             return Err(RuntimeError::InvalidArgument {
@@ -846,14 +836,16 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     }
 
     /// Validates the shape of a spend-script predicate `FunctionDef`, mirroring `check_resource_auth_hook`. A spend
-    /// script must be a non-mutable, unit-returning function whose last argument is a `SpendContext`. The mutability
-    /// rule is load-bearing: a mutable predicate could take a write lock and cause side effects, defeating the
-    /// read-only guarantee.
+    /// script must be a unit-returning static function whose last argument is a `SpendContext`. Taking no component
+    /// is load-bearing: a predicate that locked a component could write it, defeating the read-only guarantee.
     fn validate_spend_script_signature(func: &FunctionDef) -> Result<(), RuntimeError> {
-        if func.is_mut {
+        if func.kind != FunctionKind::Function {
             return Err(RuntimeError::InvalidArgument {
                 argument: "TemplateFunction",
-                reason: format!("spend script function '{}' must not be mutable", func.name),
+                reason: format!(
+                    "spend script function '{}' must be a template function, not a method or a migration",
+                    func.name
+                ),
             });
         }
         if !matches!(func.output, Type::Unit) {
@@ -878,10 +870,12 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     }
 
     /// Resolves a `TemplateFunction` spend-condition leaf against its template and validates it end-to-end: the
-    /// referenced function exists, has the required signature, and `args` carries exactly one well-formed-CBOR element
-    /// per leading (non-`SpendContext`) parameter. Because a condition tree commits only an opaque root, leaves are
-    /// hidden at creation; this runs at spend time (T2) when the leaf is revealed. Templates are immutable substates,
-    /// so a referenced template must already resolve — there is no "not yet published" skip case.
+    /// referenced function exists, has the required signature, and `args` carries exactly one element per leading
+    /// (non-`SpendContext`) parameter. Each element is charged for and decoded once, when the script is invoked, and
+    /// its type is checked by the dispatcher's `decode_exact::<T>`. Because a condition tree commits only an opaque
+    /// root, leaves are hidden at creation; this runs at spend time (T2) when the leaf is revealed. Templates are
+    /// immutable substates, so a referenced template must already resolve — there is no "not yet published" skip
+    /// case.
     fn validate_template_function(&self, tf: &TemplateFunction) -> Result<(), RuntimeError> {
         let template_def = self.get_template_def(&tf.template)?;
         let func = template_def
@@ -909,18 +903,6 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                 ),
             });
         }
-        // The host can verify each element is well-formed CBOR; full type conformance against the declared parameter
-        // type is enforced at the WASM deserialization boundary (the dispatcher's `decode_exact::<T>`).
-        for (i, arg) in tf.args.iter().enumerate() {
-            let _value: tari_bor::Value = decode_exact(arg).map_err(|e| RuntimeError::InvalidArgument {
-                argument: "TemplateFunction",
-                reason: format!(
-                    "spend script '{}' bound argument {} is not well-formed CBOR: {}",
-                    tf.function, i, e
-                ),
-            })?;
-        }
-
         Ok(())
     }
 
@@ -1113,9 +1095,14 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     ) -> Result<(), RuntimeError> {
         match condition {
             AtomicCondition::AccessRule(access_rule) => {
+                // The engine rejects an invalid access rule (an empty `any_of`/`all_of`, or an `m_of_n` with an
+                // out-of-range threshold or a duplicate requirement) wherever it stores a rule. A stealth output
+                // commits only to a hash of its spend conditions, so its rules are first seen here and must fail
+                // closed.
+                reject_invalid_rule("spend_condition", access_rule.find_invalid_rule())?;
                 let allowed = self
                     .tracker
-                    .read_with(|state| state.authorization().check_access_rule(access_rule))?;
+                    .write_with_authorization(|state| state.authorization().check_access_rule(access_rule))?;
                 if !allowed {
                     return Err(RuntimeError::AccessDenied {
                         action_ident: ActionIdent::Native(NativeAction::StealthUtxoSpend),
@@ -1195,7 +1182,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         witness_data: &[u8],
     ) -> Result<(), RuntimeError> {
         // (T2) Authoritative spend-time validation. A revealed leaf is untrusted spender data, so the function shape
-        // and bound-arg encoding are validated immediately before invoking.
+        // and bound-arg count are validated immediately before invoking.
         self.validate_template_function(tf)?;
 
         let exec = SpendScriptExecution {
@@ -1238,6 +1225,20 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     /// moves are charged here, since a frame's proofs can be dropped where no engine call is made.
     fn charge_non_fungible_ids_locked(&self, ids: usize) -> Result<(), RuntimeError> {
         self.charge_non_fungible_ids_moved(ids.saturating_mul(2))
+    }
+
+    /// Charges [`Self::charge_engine_arg`] for an argument's CBOR, then decodes it into the `Value`
+    /// the call is invoked with.
+    ///
+    /// Every argument the engine decodes for a call goes through here: the decode, the indexing of the
+    /// value for well-known types and its encoding into the callee's `CallInfo` all run outside the
+    /// Wasmer meter, and transaction weight prices an argument's bytes, which follow none of that.
+    fn decode_charged_arg(&self, bytes: &[u8]) -> Result<tari_bor::Value, RuntimeError> {
+        self.charge_engine_arg(bytes).map_err(|e| match e {
+            EngineArgChargeError::Unreadable(e) => RuntimeError::from(e),
+            EngineArgChargeError::Runtime(e) => e,
+        })?;
+        Ok(decode_exact(bytes)?)
     }
 
     /// Charges `points(input.len(), 0)` for the bytes of the CBOR in `input`, then counts its items
@@ -1484,8 +1485,8 @@ where
                             .to_string(),
                     });
                 }
-                reject_invalid_m_of_n("access_rules", access_rules.find_invalid_m_of_n())?;
-                reject_invalid_m_of_n("owner_rule", owner_rule_m_of_n(&owner_rule))?;
+                reject_invalid_rule("access_rules", access_rules.find_invalid_rule())?;
+                reject_invalid_rule("owner_rule", find_invalid_owner_rule(&owner_rule))?;
                 // A component owner rule is only ever evaluated with the component's own frame on top, so
                 // `component(..)`/`template(..)` would be constant (true for the component's own address).
                 if let OwnerRule::ByAccessRule(rule) = &owner_rule &&
@@ -1506,7 +1507,7 @@ where
                             reason: "component(..)/template(..) cannot be used in a component upgrade rule".to_string(),
                         });
                     }
-                    reject_invalid_m_of_n("upgrade_rule", rule.find_invalid_m_of_n())?;
+                    reject_invalid_rule("upgrade_rule", rule.find_invalid_rule())?;
                 }
 
                 let owner_rule = match owner_rule {
@@ -1630,9 +1631,9 @@ where
                             .to_string(),
                     });
                 }
-                reject_invalid_m_of_n("access_rules", access_rules.find_invalid_m_of_n())?;
+                reject_invalid_rule("access_rules", access_rules.find_invalid_rule())?;
 
-                self.tracker.write_with(|state| {
+                self.tracker.write_with_authorization(|state| {
                     let component_lock = state
                         .current_call_scope()?
                         .get_current_component_lock()
@@ -1685,10 +1686,10 @@ where
                     });
                 }
                 if let SubstateOwnerRule::ByAccessRule(rule) = &owner_rule {
-                    reject_invalid_m_of_n("owner_rule", rule.find_invalid_m_of_n())?;
+                    reject_invalid_rule("owner_rule", rule.find_invalid_rule())?;
                 }
 
-                self.tracker.write_with(|state| {
+                self.tracker.write_with_authorization(|state| {
                     let component_lock = state
                         .current_call_scope()?
                         .get_current_component_lock()
@@ -1812,8 +1813,8 @@ where
 
                 Self::check_metadata_values("metadata", &arg.metadata)?;
                 Self::check_token_symbol(&arg.metadata)?;
-                reject_invalid_m_of_n("resource_access_rules", arg.access_rules.find_invalid_m_of_n())?;
-                reject_invalid_m_of_n("resource_owner_rule", owner_rule_m_of_n(&arg.owner_rule))?;
+                reject_invalid_rule("resource_access_rules", arg.access_rules.find_invalid_rule())?;
+                reject_invalid_rule("resource_owner_rule", find_invalid_owner_rule(&arg.owner_rule))?;
 
                 let owner_rule = match arg.owner_rule {
                     OwnerRule::OwnedBySigner => {
@@ -1944,7 +1945,7 @@ where
                 let mint_resource: MintResourceArg = args.assert_one_arg()?;
 
                 let (maybe_auth_hook, auth_caller, has_view_key, tracks_supply) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                         let resource = state_mut.get_resource(&resource_lock)?;
@@ -2003,7 +2004,7 @@ where
                         })?;
                 let arg: RecallResourceArg = args.assert_one_arg()?;
 
-                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2100,7 +2101,7 @@ where
                 let arg: ResourceUpdateNonFungibleDataArg = args.assert_one_arg()?;
                 reject_transient_values_in("Non-fungible mutable data", &arg.data)?;
 
-                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2163,9 +2164,9 @@ where
                             reason: "UpdateAccessRule resource action requires a resource address".to_string(),
                         })?;
                 let UpdateAccessRuleArg { action, new_rule } = args.assert_one_arg()?;
-                reject_invalid_m_of_n("new_rule", new_rule.find_invalid_m_of_n())?;
+                reject_invalid_rule("new_rule", new_rule.find_invalid_rule())?;
 
-                let resource_lock = self.tracker.write_with(|state_mut| {
+                let resource_lock = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2208,7 +2209,7 @@ where
                         })?;
                 let UpdateAuthHookArg { auth_hook } = args.assert_one_arg()?;
 
-                let resource_lock = self.tracker.write_with(|state_mut| {
+                let resource_lock = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2265,7 +2266,7 @@ where
                 Self::check_metadata_values("metadata", &new_metadata)?;
                 Self::check_token_symbol(&new_metadata)?;
 
-                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2331,7 +2332,7 @@ where
                     });
                 }
 
-                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
@@ -2423,14 +2424,7 @@ where
                         let id = SubstateId::Utxo(UtxoAddress::new(resource_address, utxo));
                         let locked = state_mut.write_lock_substate(id.clone())?;
 
-                        let utxo_mut = state_mut
-                            .get_locked_substate_mut(&locked)?
-                            .as_utxo_mut()
-                            .ok_or_else(|| RuntimeError::LockSubstateMismatch {
-                                lock_id: locked.lock_id(),
-                                expected_type: "Utxo",
-                                id,
-                            })?;
+                        let utxo_mut = state_mut.get_utxo_mut(&locked)?;
 
                         // Freeze is idempotent.
                         if arg.freeze {
@@ -2481,14 +2475,7 @@ where
                         ));
                         let locked = state_mut.write_lock_substate(id.clone())?;
 
-                        let output_mut = state_mut
-                            .get_locked_substate_mut(&locked)?
-                            .as_confidential_output_mut()
-                            .ok_or_else(|| RuntimeError::LockSubstateMismatch {
-                                lock_id: locked.lock_id(),
-                                expected_type: "ConfidentialOutput",
-                                id,
-                            })?;
+                        let output_mut = state_mut.get_confidential_output_mut(&locked)?;
 
                         // Freeze is idempotent.
                         if arg.freeze {
@@ -2547,14 +2534,7 @@ where
                     let id = SubstateId::Utxo(UtxoAddress::new(resource_address, arg.utxo_id));
                     let utxo_lock = state_mut.write_lock_substate(id.clone())?;
 
-                    let utxo_mut = state_mut
-                        .get_locked_substate_mut(&utxo_lock)?
-                        .as_utxo_mut()
-                        .ok_or_else(|| RuntimeError::LockSubstateMismatch {
-                            lock_id: utxo_lock.lock_id(),
-                            expected_type: "Utxo",
-                            id,
-                        })?;
+                    let utxo_mut = state_mut.get_utxo_mut(&utxo_lock)?;
 
                     if utxo_mut.is_burnt() {
                         return Err(RuntimeError::ResourceError(ResourceError::UtxoBurnFailed {
@@ -2628,7 +2608,7 @@ where
                     })?;
                 args.assert_no_args("CreateVault")?;
 
-                self.tracker.write_with(|state| {
+                self.tracker.write_with_authorization(|state| {
                     let resource_substate_id = SubstateId::Resource(*resource_address);
                     let resource_lock = state.read_lock_substate(resource_substate_id.clone())?;
                     let resource = state.get_resource(&resource_lock)?;
@@ -2682,7 +2662,7 @@ where
                 let bucket_id: BucketId = args.assert_one_arg()?;
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
@@ -2743,7 +2723,7 @@ where
                 let arg: VaultWithdrawArg = args.assert_one_arg()?;
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller, has_view_key) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
@@ -2942,6 +2922,7 @@ where
                 if let Some(ref statement) = arg.statement {
                     self.tracker.account_fee_intent_stealth_transfer()?;
                     let has_view_key = self.tracker.write_with(|state| {
+                        state.account_stealth_transfer(statement)?;
                         let resource_lock = state.read_lock_substate(SubstateId::Resource(TARI_TOKEN))?;
                         let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
                         state.unlock_substate(resource_lock)?;
@@ -2957,7 +2938,7 @@ where
                     self.verify_input_authorizations(TARI_TOKEN.into(), statement)?;
                 }
 
-                self.tracker.write_with(|state_mut| {
+                self.tracker.write_with_authorization(|state_mut| {
                     let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                     let vault = state_mut.get_vault(&vault_lock)?;
@@ -3030,7 +3011,7 @@ where
                 args.assert_no_args("CreateProofByResource")?;
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
@@ -3084,7 +3065,7 @@ where
                 let arg: VaultCreateProofByFungibleAmountArg = args.assert_one_arg()?;
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
@@ -3138,7 +3119,7 @@ where
                 let arg: VaultCreateProofByNonFungiblesArg = args.assert_one_arg()?;
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                         let vault = state_mut.get_vault(&vault_lock)?;
@@ -3381,7 +3362,7 @@ where
                 let arg: BurnBucketArg = args.assert_one_arg()?;
 
                 let (resource_address, maybe_auth_hook, auth_caller, tracks_supply) =
-                    self.tracker.write_with(|state_mut| {
+                    self.tracker.write_with_authorization(|state_mut| {
                         let bucket = state_mut.get_bucket(bucket_id)?;
                         // Reject a burn that cannot succeed before the auth hook runs or anything is charged for it.
                         // This is re-checked after the hook, which may lock funds itself.
@@ -3457,7 +3438,7 @@ where
 
                 args.assert_no_args("Bucket::CreateProof")?;
 
-                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with_authorization(|state_mut| {
                     let bucket = state_mut.get_bucket(bucket_id)?;
 
                     let resource_lock =
@@ -3635,12 +3616,17 @@ where
 
                 self.tracker.write_with(|state| {
                     // A proof id is a sequential counter shared by the whole transaction, so authority has to come
-                    // from the frame's own scope: a proof it created, was passed as an argument, or a callee handed
-                    // back. Every other live proof in the transaction belongs to someone else.
-                    if !state.proof_exists(proof_id) || !state.current_call_scope()?.is_proof_in_scope(&proof_id) {
+                    // from a proof the frame holds: one it created or a callee handed back. A proof shown as an
+                    // argument is the caller's to authorize, and every other live proof belongs to someone else.
+                    // The answer is the same for all of them, so it reveals nothing about ids the frame cannot see.
+                    // A window that is already open is refused too: the auth scope holds one entry per proof, so a
+                    // second window would alias the first and close it when either guard drops.
+                    let is_live = state.proof_exists(proof_id);
+                    let scope = state.current_call_scope_mut()?;
+                    if !is_live || !scope.is_proof_in_scope(&proof_id) || scope.auth_scope().contains_proof(&proof_id) {
                         return Ok(InvokeResult::encode(&Err::<(), _>(NotAuthorized))?);
                     }
-                    state.current_call_scope_mut()?.auth_scope_mut().add_proof(proof_id);
+                    scope.auth_scope_mut().add_proof(proof_id);
                     Ok(InvokeResult::encode(&Ok::<_, NotAuthorized>(()))?)
                 })
             },
@@ -3754,10 +3740,12 @@ where
                 let key: WorkspaceOffsetId = args.assert_one_arg()?;
                 self.tracker.write_with(|state| {
                     let proof_id = state.workspace_proof(key)?;
-                    if !state.current_call_scope()?.is_proof_in_scope(&proof_id) {
-                        return Err(RuntimeError::ProofNotInScope { proof_id });
+                    let scope = state.current_call_scope_mut()?;
+                    scope.require_held_proof(&proof_id)?;
+                    if scope.auth_scope().contains_proof(&proof_id) {
+                        return Err(RuntimeError::ProofAlreadyAuthorized { proof_id });
                     }
-                    state.current_call_scope_mut()?.auth_scope_mut().add_proof(proof_id);
+                    scope.auth_scope_mut().add_proof(proof_id);
                     Ok(InvokeResult::unit())
                 })
             },
@@ -3946,7 +3934,7 @@ where
         pool_address: ValidatorFeePoolAddress,
         max_amount: Option<Amount>,
     ) -> Result<BucketId, RuntimeError> {
-        self.tracker.write_with(|state| {
+        self.tracker.write_with_authorization(|state| {
             let resource = match max_amount {
                 Some(max_amount) => state.withdraw_fees_from_pool_up_to(pool_address, max_amount)?,
                 None => state.withdraw_all_fees_from_pool(pool_address)?,
@@ -4036,7 +4024,7 @@ where
                 let rule = AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::Require(
                     RuleRequirement::NonFungibleAddress(badge.clone()),
                 )));
-                self.tracker.read_with(|state| {
+                self.tracker.write_with_authorization(|state| {
                     if !state.authorization().check_access_rule(&rule)? {
                         return Err(RuntimeError::BadgeNotInScope { badge });
                     }
@@ -4117,7 +4105,6 @@ where
                     args,
                 } = args.assert_one_arg()?;
 
-                self.charge_call_args(&args)?;
                 self.invoke_template_function(
                     &template_address,
                     &function,
@@ -4132,7 +4119,6 @@ where
                     args,
                 } = args.assert_one_arg()?;
 
-                self.charge_call_args(&args)?;
                 self.invoke_component_method(component_address, &method, args, None)?
             },
         };
@@ -4155,7 +4141,7 @@ where
 
     fn check_component_access_rules(&self, method: &str) -> Result<(), RuntimeError> {
         self.tracker
-            .read_with(|state| state.authorization().check_current_component_access_rules(method))
+            .write_with_authorization(|state| state.authorization().check_current_component_access_rules(method))
     }
 
     fn check_signer_badge_in_scope(&self, public_key: RistrettoPublicKeyBytes) -> Result<(), RuntimeError> {
@@ -4168,28 +4154,16 @@ where
         })
     }
 
-    fn revoke_boundary_proofs(&self) -> Result<(), RuntimeError> {
-        self.tracker.write_with(|state| state.revoke_boundary_proofs())
-    }
-
-    fn check_component_upgrade_rule(&self) -> Result<(), RuntimeError> {
-        self.tracker.read_with(|state| {
-            let locked = state
-                .current_call_scope()?
-                .get_current_component_lock()
-                .ok_or_else(|| RuntimeError::InvariantError {
-                    function: "check_component_upgrade_rule",
-                    details: "No current component lock in call scope".to_string(),
-                })?;
-
-            let component = state.get_component(locked)?;
+    fn check_component_upgrade_rule(&self, component_lock: &LockedSubstate) -> Result<(), RuntimeError> {
+        self.tracker.write_with_authorization(|state| {
+            let component = state.get_component(component_lock)?;
             let action = NativeAction::UpdateComponentTemplate;
             match component.upgrade_rule() {
                 UpdateRule::Locked => Err(RuntimeError::ComponentUpgradesLocked {
-                    component: locked.substate_id().as_component_address().ok_or_else(|| {
+                    component: component_lock.substate_id().as_component_address().ok_or_else(|| {
                         RuntimeError::InvariantError {
                             function: "check_component_upgrade_rule",
-                            details: "Current component lock is not a component".to_string(),
+                            details: "Locked substate is not a component".to_string(),
                         }
                     })?,
                 }),
@@ -4220,9 +4194,7 @@ where
                     details: "No current component lock in call scope".to_string(),
                 })?;
 
-            let component_mut = state_mut.get_component_mut(&locked)?;
-            let prev_template = *component_mut.template_address();
-            component_mut.set_template_address(new_template);
+            let prev_template = state_mut.set_component_template_address(&locked, new_template)?;
 
             state_mut.push_event(Event::std(
                 Some(locked.substate_id().clone()),
@@ -4241,12 +4213,7 @@ where
     }
 
     fn push_call_frame(&self, frame: PushCallFrame, restrict_to: Option<FrameWriteMode>) -> Result<(), RuntimeError> {
-        self.tracker.push_call_frame(frame)?;
-        // The WASM only runs after this returns, so the restriction is in place before any host op can be issued.
-        if let Some(mode) = restrict_to {
-            self.tracker.write_with(|state| state.restrict_current_frame(mode))?;
-        }
-        Ok(())
+        self.tracker.push_call_frame(frame, restrict_to)
     }
 
     fn pop_call_frame(&self, returned: &IndexedWellKnownTypes) -> Result<(), RuntimeError> {
@@ -4408,6 +4375,7 @@ where
         // that will not pay traps here without extracting the crypto work. The resource peek is a
         // cheap substate read that determines whether the viewable-balance surcharge applies.
         let (address, has_view_key) = self.tracker.write_with(|state| {
+            state.account_stealth_transfer(&statement)?;
             let address = state.resolve_resource_address_ref(resource_address.clone())?;
             let resource_lock = state.read_lock_substate(SubstateId::Resource(address))?;
             let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
@@ -4432,7 +4400,7 @@ where
         // wraparound forgery in the covenant check.
         self.verify_input_authorizations(resource_address.clone(), &statement)?;
 
-        self.tracker.write_with(|state_mut| {
+        self.tracker.write_with_authorization(|state_mut| {
             let Some(container) =
                 state_mut.execute_stealth_transfer(resource_address, statement, revealed_funds_bucket_id)?
             else {
@@ -4591,10 +4559,11 @@ where
             .chain(args.iter())
             .map(|arg| match arg {
                 InstructionArg::Workspace(id) => self.resolve_workspace_id(id),
-                InstructionArg::Literal(v) => Ok(decode_exact(v)?),
+                InstructionArg::Literal(v) => self.decode_charged_arg(v),
                 // A blob arg's value is the raw bytes of the referenced blob, decoded as CBOR
                 // by the same path as `Literal`. Lookup is against the surrounding transaction's
-                // `Blobs`, set on the runtime at construction time.
+                // `Blobs`, set on the runtime at construction time. A blob is paid for once by
+                // transaction weight but may be referenced many times, so each reference is charged.
                 InstructionArg::Blob(idx) => {
                     let blob = self
                         .blobs
@@ -4603,7 +4572,7 @@ where
                             index: *idx,
                             count: self.blobs.len(),
                         })?;
-                    Ok(decode_exact(blob.as_bytes())?)
+                    self.decode_charged_arg(blob.as_bytes())
                 },
             })
             .collect()
@@ -4622,9 +4591,17 @@ where
     }
 }
 
-fn reject_invalid_m_of_n(argument: &'static str, invalid: Option<InvalidMOfN>) -> Result<(), RuntimeError> {
+fn reject_invalid_rule(argument: &'static str, invalid: Option<InvalidAccessRule>) -> Result<(), RuntimeError> {
     match invalid {
-        Some(InvalidMOfN::ThresholdOutOfRange {
+        Some(InvalidAccessRule::EmptyAnyOf) => Err(RuntimeError::EmptyAccessRuleComposite {
+            argument,
+            composite: "any_of",
+        }),
+        Some(InvalidAccessRule::EmptyAllOf) => Err(RuntimeError::EmptyAccessRuleComposite {
+            argument,
+            composite: "all_of",
+        }),
+        Some(InvalidAccessRule::ThresholdOutOfRange {
             threshold,
             num_requirements,
         }) => Err(RuntimeError::InvalidMOfNThreshold {
@@ -4632,16 +4609,16 @@ fn reject_invalid_m_of_n(argument: &'static str, invalid: Option<InvalidMOfN>) -
             threshold,
             num_requirements,
         }),
-        Some(InvalidMOfN::DuplicateRequirement { requirement }) => {
+        Some(InvalidAccessRule::DuplicateRequirement { requirement }) => {
             Err(RuntimeError::DuplicateMOfNRequirement { argument, requirement })
         },
         None => Ok(()),
     }
 }
 
-fn owner_rule_m_of_n(owner_rule: &OwnerRule) -> Option<InvalidMOfN> {
+fn find_invalid_owner_rule(owner_rule: &OwnerRule) -> Option<InvalidAccessRule> {
     match owner_rule {
-        OwnerRule::ByAccessRule(rule) => rule.find_invalid_m_of_n(),
+        OwnerRule::ByAccessRule(rule) => rule.find_invalid_rule(),
         OwnerRule::OwnedBySigner | OwnerRule::None | OwnerRule::ByPublicKey(_) => None,
     }
 }
@@ -4659,4 +4636,198 @@ fn validate_component_access_rule_methods(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use ootle_network::Network;
+    use tari_engine_types::{
+        confidential::MinotariBurnClaimProof,
+        fees::{ExhaustBurnRate, FeeScale},
+        limits::engine_arg_points,
+        virtual_substate::VirtualSubstates,
+    };
+    use tari_ootle_common_types::Epoch;
+    use tari_ootle_transaction::{Blob, Blobs, TransactionWeight};
+
+    use super::*;
+    use crate::{
+        fees::{FeeTable, WasmMeteringRate},
+        runtime::{DeclaredInputLoad, scope::CallScope},
+        state_store::memory::MemoryStateStore,
+        traits::VerifiedClaim,
+    };
+
+    #[derive(Default, Clone)]
+    struct DummyTemplateProvider;
+
+    impl TemplateProvider for DummyTemplateProvider {
+        type Error = std::convert::Infallible;
+        type Template = LoadedTemplate;
+
+        fn get_template(&self, _id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
+            Ok(None)
+        }
+    }
+
+    struct DummyClaimVerifier;
+
+    impl ClaimProofVerifier for DummyClaimVerifier {
+        fn verify_claim_proof(
+            &self,
+            _epoch: Epoch,
+            _claim: &MinotariBurnClaimProof,
+        ) -> Result<VerifiedClaim, ClaimProofError> {
+            unimplemented!("not used in blob metering tests")
+        }
+    }
+
+    fn runtime_with_blobs(blobs: Blobs) -> RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider> {
+        let mut fee_table = FeeTable::zero_rated();
+        fee_table.per_wasm_point_cost = 1;
+        let tracker = StateTracker::new(
+            MemoryStateStore::new(),
+            VirtualSubstates::empty(),
+            CallScope::new(),
+            HashSet::new(),
+            Hash32::zero(),
+            Hash32::zero(),
+            TransactionWeight::new(0),
+            DeclaredInputLoad::default(),
+            WasmMeteringRate::from_fee_table(&fee_table),
+            ExhaustBurnRate::default(),
+            FeeScale::default(),
+            Network::LocalNet,
+            false,
+        );
+        RuntimeInterfaceImpl::initialize(
+            tracker,
+            Arc::new(DummyTemplateProvider),
+            None,
+            EntityIdProvider::new(Hash32::zero(), 64),
+            Arc::from(Vec::new()),
+            Arc::new(DummyClaimVerifier),
+            Rc::new(blobs),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn resolving_a_literal_arg_charges_native_points_for_its_items() {
+        let payload: Vec<u64> = (0..128).collect();
+        let encoded = tari_bor::encode(&payload).unwrap();
+        let items = tari_bor::count_data_items_bounded(&encoded, limits::MAX_CBOR_NESTING_DEPTH, u64::MAX)
+            .unwrap()
+            .unwrap();
+        let expected = engine_arg_points(encoded.len() as u64, items);
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let resolved = runtime
+            .resolve_args(None, &[InstructionArg::Literal(encoded.into())])
+            .unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(runtime.native_points_consumed(), expected);
+    }
+
+    #[test]
+    fn resolving_a_blob_arg_charges_native_points_per_reference() {
+        let payload: Vec<u64> = (0..128).collect();
+        let encoded = tari_bor::encode(&payload).unwrap();
+        let items = tari_bor::count_data_items_bounded(&encoded, limits::MAX_CBOR_NESTING_DEPTH, u64::MAX)
+            .unwrap()
+            .unwrap();
+        let expected_per_ref = engine_arg_points(encoded.len() as u64, items);
+        assert!(expected_per_ref > 0);
+
+        let blobs = Blobs::from_vec(vec![Blob::from(encoded)]);
+        let runtime = runtime_with_blobs(blobs);
+
+        assert_eq!(runtime.native_points_consumed(), 0);
+
+        // First reference to blob 0 charges `expected_per_ref`.
+        let resolved = runtime.resolve_args(None, &[InstructionArg::Blob(0)]).unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(runtime.native_points_consumed(), expected_per_ref);
+
+        // Referencing the same blob three more times charges in direct proportion to the number of references.
+        let resolved_multi = runtime
+            .resolve_args(None, &[
+                InstructionArg::Blob(0),
+                InstructionArg::Blob(0),
+                InstructionArg::Blob(0),
+            ])
+            .unwrap();
+        assert_eq!(resolved_multi.len(), 3);
+        assert_eq!(runtime.native_points_consumed(), expected_per_ref * 4);
+    }
+
+    #[test]
+    fn repeating_a_large_blob_arg_across_instructions_exhausts_compute_allowance() {
+        // Build a CBOR blob with 2,000 items so each reference costs a substantial chunk of compute points,
+        // and repeating it across many instructions exceeds `FREE_COMPUTE_GRACE_POINTS`.
+        let payload: Vec<u64> = (0..2_000).collect();
+        let encoded = tari_bor::encode(&payload).unwrap();
+        let blobs = Blobs::from_vec(vec![Blob::from(encoded)]);
+        let runtime = runtime_with_blobs(blobs);
+
+        let mut exhausted = false;
+        for _ in 0..500 {
+            match runtime.resolve_args(None, &[InstructionArg::Blob(0)]) {
+                Ok(_) => {},
+                Err(RuntimeError::FeeIntentComputeExceeded { .. }) => {
+                    exhausted = true;
+                    break;
+                },
+                Err(other) => panic!("expected FeeIntentComputeExceeded, got {other:?}"),
+            }
+        }
+        assert!(
+            exhausted,
+            "repeatedly referencing a large blob must exhaust the compute allowance"
+        );
+    }
+
+    #[test]
+    fn stealth_transfer_and_pay_fee_enforce_limits_before_substate_reads_and_auth() {
+        let valid =
+            StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
+        let mut too_many_inputs = valid.clone();
+        too_many_inputs.inputs_statement.inputs = (0..=limits::STEALTH_LIMITS.max_inputs)
+            .map(|_| StealthInput::new(PedersenCommitmentBytes::from_bytes(&[0u8; 32]).unwrap()))
+            .collect();
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        assert!(matches!(
+            runtime.stealth_transfer(TARI_TOKEN.into(), too_many_inputs.clone(), None),
+            Err(RuntimeError::ArgumentValidationError(
+                ArgumentValidationError::MaxStealthInputsExceeded { .. }
+            ))
+        ));
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let vault_id = tari_template_lib::types::VaultId::new([1u8; 32].into());
+        runtime.tracker.write_with(|state| {
+            state
+                .current_call_scope_mut()
+                .unwrap()
+                .add_substate_to_scope(vault_id.into())
+                .unwrap();
+        });
+        let pay_fee_args = EngineArgs::from(vec![
+            tari_bor::encode(&PayFeeArg {
+                amount: Amount::zero(),
+                statement: Some(too_many_inputs),
+            })
+            .unwrap()
+            .into(),
+        ]);
+        // The statement decoder bounds inputs at `MAX_STEALTH_INPUTS`, which is `STEALTH_LIMITS.max_inputs`, so an
+        // over-limit `PayFeeArg` is refused while decoding, before the vault is read.
+        assert!(matches!(
+            runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args),
+            Err(RuntimeError::InvalidArgument { argument, .. }) if argument.ends_with("PayFeeArg")
+        ));
+    }
 }

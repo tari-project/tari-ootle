@@ -262,9 +262,10 @@ impl TransactionBuilder<MainIntent> {
             .fee_instruction_builder
             .take()
             .expect("Fee instruction builder is None");
-        self.unsigned_transaction
-            .inputs_mut()
-            .extend(fee_builder.unsigned_transaction.inputs_mut().drain(..));
+        declare_inputs(
+            self.unsigned_transaction.inputs_mut(),
+            fee_builder.unsigned_transaction.inputs_mut().drain(..),
+        );
 
         let fee_blobs = std::mem::take(fee_builder.unsigned_transaction.blobs_mut());
         // A transaction may hold `BlobIndex::MAX + 1` blobs, so the count alone does not fit a
@@ -431,9 +432,10 @@ impl<D> TransactionBuilder<D> {
         } = other;
 
         // Merge inputs first (before consuming the transaction)
-        self.unsigned_transaction
-            .inputs_mut()
-            .extend(other_tx.inputs().iter().cloned());
+        declare_inputs(
+            self.unsigned_transaction.inputs_mut(),
+            other_tx.inputs().iter().cloned(),
+        );
 
         // Move other's blobs over, appending in order so existing indices on `other`'s
         // instructions just shift by `blob_id_offset` after remapping.
@@ -551,7 +553,7 @@ impl<D> TransactionBuilder<D> {
 
     fn add_input_for_component_ref(&mut self, component_ref: &ComponentReference) {
         if let Some(address) = component_ref.address() {
-            self.unsigned_transaction.inputs_mut().insert((*address).into());
+            declare_input(self.unsigned_transaction.inputs_mut(), (*address).into());
         }
     }
 
@@ -994,6 +996,27 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
+    fn add_inputs_for_raw_arg<F>(&mut self, bytes: &[u8], make_declaration: F)
+    where F: FnMut(SubstateId) -> InputDeclaration {
+        if let Ok(indexed) = IndexedValue::from_raw(bytes) {
+            declare_inputs(
+                self.unsigned_transaction.inputs_mut(),
+                indexed
+                    .referenced_substates()
+                    .filter(SubstateId::is_declarable_input)
+                    .map(make_declaration),
+            );
+        }
+    }
+
+    fn add_inputs_for_args(&mut self, args: &[InstructionArg]) {
+        for arg in args {
+            if let Some(bytes) = arg.as_literal_bytes() {
+                self.add_inputs_for_raw_arg(bytes, InputDeclaration::write);
+            }
+        }
+    }
+
     fn add_inputs_for_instruction(&mut self, instruction: &Instruction) {
         if !self.fill_inputs {
             return;
@@ -1001,46 +1024,27 @@ impl<D> TransactionBuilder<D> {
 
         match instruction {
             Instruction::CallFunction { args, .. } => {
-                for arg in args {
-                    if let InstructionArg::Literal(bytes) = arg &&
-                        let Ok(indexed) = IndexedValue::from_raw(bytes)
-                    {
-                        declare_inputs(
-                            self.unsigned_transaction.inputs_mut(),
-                            indexed
-                                .referenced_substates()
-                                .filter(SubstateId::is_declarable_input)
-                                .map(InputDeclaration::write),
-                        );
-                    }
-                }
+                self.add_inputs_for_args(args);
             },
             Instruction::CallMethod { call, args, .. } => {
                 self.add_input_for_component_ref(call);
-                for arg in args {
-                    if let InstructionArg::Literal(bytes) = arg &&
-                        let Ok(indexed) = IndexedValue::from_raw(bytes)
-                    {
-                        declare_inputs(
-                            self.unsigned_transaction.inputs_mut(),
-                            indexed
-                                .referenced_substates()
-                                .filter(SubstateId::is_declarable_input)
-                                .map(InputDeclaration::write),
-                        );
-                    }
-                }
+                self.add_inputs_for_args(args);
             },
             Instruction::StealthTransfer {
-                resource_address_ref, ..
+                resource_address_ref,
+                statement,
+                ..
             } => {
                 // NOTE: UTXO inputs may have come from previous instructions, and therefore are not an existing
                 // on-chain substate input. This means the user will have to manually add them as inputs as required.
 
                 self.add_input_for_resource_ref(resource_address_ref);
+                for arg in statement.script_path_template_functions().flat_map(|tf| &tf.args) {
+                    self.add_inputs_for_raw_arg(arg, InputDeclaration::read);
+                }
             },
             Instruction::ClaimValidatorFees { address, .. } => {
-                self.unsigned_transaction.inputs_mut().insert((*address).into());
+                declare_input(self.unsigned_transaction.inputs_mut(), (*address).into());
             },
             Instruction::Assert {
                 assertion:
@@ -1049,13 +1053,17 @@ impl<D> TransactionBuilder<D> {
                 ..
             } => {
                 if *resource_address != TARI_TOKEN {
-                    self.unsigned_transaction
-                        .inputs_mut()
-                        .insert((*resource_address).into());
+                    declare_input(
+                        self.unsigned_transaction.inputs_mut(),
+                        InputDeclaration::read(*resource_address),
+                    );
                 }
             },
-            Instruction::UpdateComponentTemplate { component, .. } => {
+            Instruction::UpdateComponentTemplate { component, migrate, .. } => {
                 self.add_input_for_component_ref(component);
+                if let Some(migrate) = migrate {
+                    self.add_inputs_for_args(&migrate.args);
+                }
             },
             Instruction::Assert {
                 assertion: Assertion::IsNotNull,

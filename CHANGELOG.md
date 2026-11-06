@@ -3,6 +3,200 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.50.0](https://github.com/tari-project/tari-ootle/compare/v0.49.2...v0.50.0) (2026-11-05)
+
+Esmeralda moves to protocol V1 without a reset: from epoch 12951, substate hashes commit to each
+value's CBOR encoding. Engine metering, call resolution and state validation tighten, validators
+gain vote power and weighted leader rotation, and a validator syncs its committee's state before it
+activates.
+
+### ⚠️ Upgrade notes
+
+- **Validators and indexers run 0.50.0 before Esmeralda epoch 12951** (L1 height 1,036,080, about
+  2026-11-06 12:00 UTC), when protocol V1 activates. A node upgraded in time keeps its data
+  directory, and walletd migrates its database on first start. A node still on 0.49 at that epoch
+  forks off, and 0.50.0 refuses to start it on that data: delete its data directory and resync.
+  (#3327)
+- **The whole fleet upgrades together**: metering, call resolution and state validation change
+  with no activation epoch. (#3213, #3261, #3262, #3267, #3268, #3273, #3282, #3328)
+- **Template authors build against `tari_template_lib` 0.38.** Template definitions move to V2,
+  which records how each function is called; published V1 definitions keep working. (#3281)
+- **`CallFunction` reaches only static functions and `CallMethod` only methods**, failing with
+  `MethodCalledAsFunction` or `FunctionCalledAsMethod`. (#3273)
+- **A vault lives in one component's state**: placing a vault another component holds fails with
+  `VaultAlreadyOwned`. (#3262)
+- **Stored access rules reject an empty `any_of` or `all_of`**; use `deny_all` for a rule that
+  always denies. (#3323)
+- **Account `approve` is compare-and-set**: `approve(spender_badge, resource, expected_current,
+  amount)` writes only if the live allowance is `expected_current`, which the new `approval` getter
+  reads. (#3365)
+- **Template wasm takes one active element segment**, and `table.init`, `table.set`, `table.grow`,
+  `table.fill` and `table.copy` are refused at compile. (#3328)
+- **Fees rise for call arguments**: every literal and blob argument is metered as it is decoded,
+  and a template table slot costs 24 points. (#3213, #3261, #3328)
+- **ootle-rs trusts the indexer by default**; pass `IndexerTrust::Verify` to keep verifying
+  receipts and substate reads. (#3369)
+- **Host SDKs**: ootle-go, ootle-py and ootle.ts must decode the V2 template definition layout.
+  (#3281)
+
+### Features
+
+- **Committee presync**: a validator scheduled to activate syncs its shard group's state before its
+  activation epoch. (#3324)
+- **Weighted consensus**: validator vote power comes from the epoch oracle (configured `power`,
+  default 1, at most 65,536 in total), and leaders rotate by smooth weighted round robin. (#3272,
+  #3329)
+- **walletd upgrade warnings**: dry runs list the upgradable components a transaction calls, and the
+  signing view shows the component upgrades it makes. (#3263, #3271)
+- **MainNet settings ship in the binary**: the epoch oracle settings, a 100% fee burn at genesis
+  and the genesis council key. (#3269, #3322, #3374)
+
+### Bug fixes
+
+- **consensus:** a multishard transaction that aborts on a lock conflict releases its locks, and
+  every shard group runs it under the transaction's pinned epoch. (#3282, #3267)
+- **consensus:** `LastExecuted` never rewinds, and pending executions are reused only on their own
+  chain. (#3268)
+- **consensus:** proposal certificates are held to their block's shard group, QCs bind their shard
+  group, `put_diff` is atomic and NEWVIEW timeouts are validated. (#3371, #3285)
+- **consensus:** LocalAccept is fully validated, SomeAccept abort fields are checked, the catch-up
+  leaf is sent, and a validator votes on a proposal first processed from catch-up. (#3227, #3287,
+  #3375)
+- **engine:** stealth transfer limits are enforced before authorization, and spend-script bound
+  arguments are metered. (#3295)
+- **engine:** scoped rules evaluate outside frames, and the fee intent is priced and the last output
+  cleared at the fee checkpoint. (#3294, #3266)
+- **engine:** a frame cannot return buckets or address allocations it does not hold, and component
+  address allocations are bound to their template and call scope. (#3231, #3221)
+- **engine_types:** substates, metadata and manifest arguments decode exactly, trailing bytes in
+  indexed values and template definition sections are rejected, and u64 values above `i64::MAX`
+  survive JSON-to-CBOR conversion. (#3331, #3302, #3366)
+- **template_lib_types:** `Amount` and `PrecisionAmount` check their sequence lengths. (#3293)
+- **transaction:** stealth script-path references are included, and builder inputs are merged.
+  (#3308)
+- **transaction_manifest:** call and argument paths, local call arguments and duplicate bindings
+  are validated. (#3234)
+- **template_metadata:** `Cargo.toml` metadata fields are validated. (#3246)
+- **state sync:** unverified synced state rewinds one version per write transaction, merged-group
+  checkpoints match, and transfer responses are memory-bounded. (#3376, #3286, #3370)
+- **indexer:** nonexistence with f=0 is deferred, and unproven batch downs are confirmed. (#3313)
+- **epoch oracles:** the configured oracle reports done at epoch 0, and the hybrid oracle forwards
+  errors. (#3364)
+- **networking:** messaging sinks cycle, connection-close events fire and streams queue correctly,
+  and peer sync completes its want list. (#3238, #3236)
+- **rpc_framework:** a response whose flags do not fit a byte no longer panics the reader, a
+  panicked session task is logged and frees its peer slot, and a rejected request deadline reports
+  its bounds. (#3368)
+- **validator_node_client:** null JSON-RPC errors and HTTP status errors are handled. (#3243)
+- **wallet:** a transaction can hold several locks and never orphans a linked lock, request
+  summaries count locked inputs, invalid M-of-N and oversized spend conditions are refused, and a
+  nonexistent imported key cannot sign. (#3270, #3284, #3325, #3225)
+- **walletd:** auto-claimed burns stay queued through network failures, submits check lock
+  ownership, and passkeys register with the daemon's algorithms and user id. (#3378, #3258, #3260)
+- **walletd UI:** transaction request cards describe account withdrawals, and the first passkey
+  registration URL is highlighted. (#3377, #3264)
+- **web_ui:** an empty `dist` is tracked so the build always finds it. (#3321)
+
+## [0.49.2](https://github.com/tari-project/tari-ootle/compare/v0.49.1...v0.49.2) (2026-11-02)
+
+Ships the validator, indexer, wallet daemon and swarm binaries that 0.49.0 and 0.49.1 failed to
+build.
+
+### Bug fixes
+
+- **build:** release binaries build again; the audited release build rejected the workspace's
+  feature set. (#3259)
+
+## [0.49.1](https://github.com/tari-project/tari-ootle/compare/v0.49.0...v0.49.1) (2026-11-02)
+
+Ships the validator, indexer, wallet daemon and swarm binaries that 0.49.0 failed to build.
+
+### Features
+
+- **FFI decoders for indexer-served values**: events, substate values, execution results,
+  receipts, resources and UTXOs, matching `ootle-wasm-bor`, for Go and C hosts. The ABI tag stays
+  `ootle-sdk-ffi-c/19`. (#3257)
+
+### Bug fixes
+
+- **build:** release binaries build again; the indexer web UI's wasm build failed on every
+  platform for 0.48.0 and 0.49.0. (#3256)
+- **networking:** substream events queued before a poll are all delivered, and a closed connection
+  reports its pending outbound requests as outbound failures. (#3239)
+- **ootle_serde:** optional hex and duration fields round-trip through binary serde formats. (#3247)
+- **db_inspector:** state transition totals, proposal certificate signature counts and prefix
+  scans are fixed. (#3248)
+
+## [0.49.0](https://github.com/tari-project/tari-ootle/compare/v0.48.0...v0.49.0) (2026-11-02)
+
+A second testnet reset, for a new authorization model. Proofs authorize only inside a window the
+caller opens, a window lends one hop, signer badges stay in the frame they are stamped into, and a
+component's template can be upgraded only if it opts in.
+
+### ⚠️ Upgrade notes
+
+- **Every node, indexer and wallet resets**: component headers gain an upgrade rule, so delete
+  validator, indexer and wallet data directories before starting 0.49.0. (#3195)
+- **The whole fleet upgrades together**: authorization, metering and fee rules change with no
+  activation epoch. (#3190, #3202, #3206, #3207)
+- **A proof authorizes only inside an explicit window, and a window lends one hop.** Templates that
+  authorize a `Proof` argument, and callers of the account's `*_with_auth` methods, open the window
+  on the caller's side instead (see the authorization guide). The faucet's `take_with_proof` is
+  gone. (#3199, #3206)
+- **Public-key badges authorize only the frame they are stamped into.** `template_lib` drops the
+  signer and owner proof getters (use `transaction_signer_public_key` or `assert_badge_in_scope`),
+  the account's `withdraw_approved` takes the spender's badge address, and `create_ownership_proof`
+  is gone. (#3190)
+- **Component template upgrades are opt-in**: components default to `UpgradeRule::Locked`, and a
+  template that upgrades must set `.with_upgrade_rule(..)`. Rebuild templates against
+  `tari_template_lib` 0.37. (#3195)
+- **Component migrations run confined, like a resource auth hook, and neither carries signer
+  badges.** A migration may only rewrite its component's own state; anything else happens in a
+  method call after the upgrade. (#3206)
+- **A resource's auth hook component must be declared as an input**, or the transaction is rejected
+  with `AuthHookComponentNotDeclared`. walletd, the wallet SDK and ootle-rs do not add it yet.
+  (#3188)
+- **Fees rise**: declared templates and the governance component count toward the input load and
+  fanout charges, and each authorization is metered per rule node and proof examined. (#3202,
+  #3207)
+- **Host SDKs**: transactions gain `AuthorizeProof` and `DropProofAuthorization`, and component
+  headers gain `upgrade_rule`. ootle-go, ootle-py and ootle.ts must decode both and resync the
+  regenerated golden vectors. (#3195, #3199)
+- **walletd WebAuthn: the first passkey needs a setup token**, printed at startup and written to
+  `<base_path>/setup_token`. `tari_ootle_walletd reset-passkeys` clears enrolled passkeys. (#3114)
+
+### Features
+
+- **Proof authorization windows** in transactions and manifests (`authorize!` /
+  `drop_authorize!`), and `with_authorized_proof` in the transaction builder. (#3199, #3206)
+- **Opt-in component template upgrades** with an upgrade rule in the component header. (#3195)
+- **walletd `reset-passkeys`** recovers a wallet locked out of WebAuthn. (#3114)
+
+### Bug fixes
+
+- **consensus:** future timeout-recovery proposals are released at the right height, catch-up
+  proposes as soon as its batch lands, and the persisted NewView height survives a restart.
+  (#3233)
+- **consensus:** a block's foreign proposals are applied in block command order when proposing.
+  (#3254)
+- **consensus:** a fee-intent commit's evidence counts the shard groups of rejected outputs.
+  (#3191)
+- **common_types:** a committee tolerates fewer than a third of its members failing, and shard
+  state versions and shard groups reject malformed input. (#3244)
+- **transaction:** component template updates declare their migration arguments and are checked
+  against the target template. (#3233)
+- **engine:** a resource auth hook runs unless its component is an unused allocation. (#3188)
+- **epoch oracle:** a multi-batch scan no longer stops short of the tip. (#3192)
+- **indexer:** batch cache writes are bounded, and component references are deduplicated. (#3249)
+- **networking:** identified peers are disconnected only for a different network, and IPv6 scope,
+  bootstrap completion and topic peers are fixed. (#3252, #3237)
+- **tari_bor:** decoding a `Value` no longer preallocates from an untrusted length. (#3244)
+- **wallet:** a stored transaction is reported as submitted when its network call fails. (#3204)
+- **template_build:** stateless templates get docs, `extra_entry` merges, and a bad `source_path`
+  is reported. (#3241)
+- **swarm:** L1 watch paths, registration counts and protocol parsing are fixed. (#3240, #3242)
+- **deps:** libz-sys 1.1.31 (RUSTSEC-2026-0418). (#3196)
+
 ## [0.48.0](https://github.com/tari-project/tari-ootle/compare/v0.47.0...v0.48.0) (2026-10-29)
 
 The testnet reset release. Protocol history collapses to a single `V0`, transaction and libp2p

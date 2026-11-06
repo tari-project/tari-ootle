@@ -35,6 +35,7 @@ use crate::{
             cookie,
             jwt::{AuthError, JwtApi, enforce_scopes},
         },
+        component_upgrades::{UPGRADE_RULE_CACHE_MAX_ENTRIES, UpgradeRuleCache},
         helpers::invalid_params,
     },
     services::{RefreshTokenStore, WebauthnService},
@@ -124,6 +125,7 @@ pub struct HandlerContext {
     /// the current epoch to stamp `max_epoch`; epochs turn over on the order of tens of minutes, so
     /// a short cache keeps a burst of builds from making an indexer round-trip each.
     cached_epoch: Arc<Mutex<Option<CachedEpoch>>>,
+    upgrade_rules: UpgradeRuleCache,
 }
 
 /// How long a read of the current epoch is reused before the network is asked again. Well under an
@@ -154,6 +156,7 @@ impl HandlerContext {
             shutdown_signal,
             api_key_last_used_bumps: Arc::new(DashMap::new()),
             cached_epoch: Arc::new(Mutex::new(None)),
+            upgrade_rules: UpgradeRuleCache::new(UPGRADE_RULE_CACHE_MAX_ENTRIES),
         }
     }
 
@@ -168,6 +171,10 @@ impl HandlerContext {
 
     pub fn wallet_sdk(&self) -> &WalletSdk {
         &self.wallet_sdk
+    }
+
+    pub(crate) fn upgrade_rules(&self) -> &UpgradeRuleCache {
+        &self.upgrade_rules
     }
 
     fn check_cookie_auth(&self, raw_token: &str) -> Result<Permissions, AuthError> {

@@ -57,7 +57,7 @@ pub(crate) fn arg_to_value(arg: InstructionArg) -> Result<tari_bor::Value, Manif
         .ok_or_else(|| ManifestError::InvalidInstruction {
             reason: format!("{arg:?} is not a literal"),
         })?;
-    Ok(tari_bor::decode(bytes)?)
+    Ok(tari_bor::decode_exact(bytes)?)
 }
 
 /// The CBOR value `address!` writes for `id`: the typed address it holds, which is what a template
@@ -375,5 +375,19 @@ mod tests {
                 VaultId::from_hex("0000000000000000000000000000000000000000000000000000000000000000").unwrap()
             )
         );
+    }
+
+    #[test]
+    fn arg_to_value_rejects_trailing_bytes() {
+        let mut bytes = tari_bor::encode(&"valid_value").unwrap();
+        bytes.extend_from_slice(b"trailing_garbage");
+        let arg = InstructionArg::raw_literal_bytes(bytes);
+        let err = arg_to_value(arg).unwrap_err();
+        match err {
+            ManifestError::CborSerializationError(bor_err) => {
+                assert!(bor_err.to_string().contains("remaining on input"));
+            },
+            other => panic!("expected CborSerializationError, got: {other:?}"),
+        }
     }
 }

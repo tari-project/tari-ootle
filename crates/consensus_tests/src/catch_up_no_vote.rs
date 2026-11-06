@@ -46,7 +46,7 @@ use crate::support::{
 /// Consecutive proposals withheld from the target.
 const DROPPED_PROPOSALS: u64 = 3;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Observed {
     /// Every proposal delivered to the target, by sender.
     proposal_deliveries: HashSet<(TestAddress, BlockId)>,
@@ -65,7 +65,7 @@ struct Observed {
     votes: Vec<(BlockId, NodeHeight)>,
     /// Uncommitted withheld catch-up blocks that held a non-empty saved `BlockDiff` when the target next voted.
     withheld_with_saved_diff: HashSet<BlockId>,
-    /// Whether `LastVoted` has been seeded over the withheld window once the target voted at `start - 1`.
+    /// Whether `LastVoted` has been seeded over the withheld window before the target requests catch-up.
     seeded_last_voted: bool,
 }
 
@@ -133,9 +133,6 @@ async fn run_catch_up_window(seed_last_voted_over_window: bool) {
         let observed = observed.clone();
         Arc::new(
             move |address: &TestAddress, store: &TestStore, message: &HotstuffMessage| {
-                let HotstuffMessage::Vote(vote) = message else {
-                    return;
-                };
                 if *address != target {
                     return;
                 }
@@ -144,7 +141,8 @@ async fn run_catch_up_window(seed_last_voted_over_window: bool) {
                 if seed_last_voted_over_window &&
                     !obs.seeded_last_voted &&
                     start != 0 &&
-                    vote.vote.block_height == NodeHeight(start - 1)
+                    !obs.withheld.is_empty() &&
+                    matches!(message, HotstuffMessage::CatchUpSyncRequest(_))
                 {
                     let last_voted = LastVoted {
                         block_id: BlockId::zero(),
@@ -153,6 +151,9 @@ async fn run_catch_up_window(seed_last_voted_over_window: bool) {
                     };
                     store.with_write_tx(|tx| last_voted.set(tx)).unwrap();
                     obs.seeded_last_voted = true;
+                }
+                if !matches!(message, HotstuffMessage::Vote(_)) {
+                    return;
                 }
                 let candidates = obs
                     .withheld_with_txs
@@ -227,7 +228,7 @@ async fn run_catch_up_window(seed_last_voted_over_window: bool) {
             let voted_after_window = observed.lock().unwrap().votes.iter().any(|(_, h)| *h >= after_window);
             let window_txs_committed = window_txs
                 .iter()
-                .all(|tx_id| test.get_validator(&target).has_committed_substates(tx_id));
+                .all(|tx_id| test.validators().values().all(|v| v.has_committed_substates(tx_id)));
             if target_leaf >= after_window && voted_after_window && window_txs_committed {
                 break;
             }
@@ -240,7 +241,7 @@ async fn run_catch_up_window(seed_last_voted_over_window: bool) {
     }
 
     {
-        let observed = observed.lock().unwrap();
+        let observed = observed.lock().unwrap().clone();
         assert!(
             !observed.withheld.is_empty(),
             "test premise: proposals to the target must have been withheld"
@@ -261,7 +262,7 @@ async fn run_catch_up_window(seed_last_voted_over_window: bool) {
         if seed_last_voted_over_window {
             assert!(
                 observed.seeded_last_voted,
-                "test premise: LastVoted must have been seeded when the target voted at start - 1"
+                "test premise: LastVoted must have been seeded before the target requested catch-up"
             );
         }
         assert!(

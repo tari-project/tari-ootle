@@ -393,23 +393,8 @@ impl ManifestInstructionGenerator {
             },
             ManifestLiteral::Special(SpecialLiteral::Amount(amount)) => Ok(call_arg!(amount)),
             ManifestLiteral::Special(SpecialLiteral::NonFungibleId(id)) => Ok(call_arg!(id)),
-            ManifestLiteral::Special(SpecialLiteral::Cbor(value)) => {
-                let bytes = tari_bor::encode(&value)?;
-                tari_bor::decode::<tari_bor::Value>(&bytes).map_err(|_| ManifestError::InvalidInstruction {
-                    reason: format!("cbor! argument nests deeper than {} levels", tari_bor::MAX_DECODE_DEPTH),
-                })?;
-                Ok(InstructionArg::raw_literal_bytes(bytes))
-            },
-            ManifestLiteral::Special(SpecialLiteral::Metadata(metadata)) => {
-                let bytes = tari_bor::encode(&metadata)?;
-                tari_bor::decode::<tari_bor::Value>(&bytes).map_err(|_| ManifestError::InvalidInstruction {
-                    reason: format!(
-                        "metadata! argument nests deeper than {} levels",
-                        tari_bor::MAX_DECODE_DEPTH
-                    ),
-                })?;
-                Ok(InstructionArg::raw_literal_bytes(bytes))
-            },
+            ManifestLiteral::Special(SpecialLiteral::Cbor(value)) => Ok(InstructionArg::literal(value)?),
+            ManifestLiteral::Special(SpecialLiteral::Metadata(metadata)) => Ok(call_arg!(metadata)),
             ManifestLiteral::Special(SpecialLiteral::SubstateId(id_or_var)) => match id_or_var {
                 OrVar::Var(ident) => self.get_ident(&ident.to_string()),
                 OrVar::Value(id) => Ok(call_arg!(id)),

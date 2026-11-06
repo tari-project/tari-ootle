@@ -434,8 +434,9 @@ impl Block {
 
     /// Whether some branch has justified this block.
     ///
-    /// This is stamped by a block carrying a QC over this one, before that block is voted on, and stays
-    /// stamped across the whole block store even where that branch is later abandoned. Work whose result
+    /// This is stamped when a block carrying a QC over this one, or over a descendant reached by walking back
+    /// from it, is accepted and its change set records the evidence of the justification. It stays stamped
+    /// across the whole block store even where that branch is later abandoned. Work whose result
     /// belongs to one branch must therefore key off that branch rather than off this flag.
     pub fn has_justify_qc(&self) -> bool {
         self.justify_qc_id.is_some()

@@ -89,7 +89,9 @@ impl<T: SessionData + Clone> SessionStore<T> {
     }
 
     fn is_expired(&self, session: &T) -> bool {
-        session.created_at().elapsed() > self.session_ttl
+        Instant::now()
+            .checked_duration_since(session.created_at())
+            .is_some_and(|elapsed| elapsed > self.session_ttl)
     }
 }
 
@@ -126,12 +128,16 @@ impl<T: SessionData> Sessions<T> {
     }
 
     fn remove_expired(&mut self, session_ttl: Duration) {
-        while self
-            .by_age
-            .first()
-            .is_some_and(|(created_at, _)| created_at.elapsed() > session_ttl)
-        {
-            self.remove_oldest();
+        while let Some((created_at, session_id)) = self.by_age.first() {
+            let Some(elapsed) = Instant::now().checked_duration_since(*created_at) else {
+                break;
+            };
+            if elapsed <= session_ttl {
+                break;
+            }
+            let key = (*created_at, session_id.clone());
+            self.by_age.remove(&key);
+            self.by_id.remove(&key.1);
         }
     }
 }

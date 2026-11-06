@@ -866,7 +866,10 @@ mod transaction_id_tests {
         }];
         let sig = TransactionSignature::sign_v1(&author_sk, &sealer_pk, &unsigned);
         let unsealed = UnsealedTransactionV1::new(unsigned.clone(), vec![sig]);
-        let tx = TransactionV1::new(unsealed.clone(), TransactionSealSignature::sign_v1(&sealer_sk, &unsealed));
+        let tx = TransactionV1::new(
+            unsealed.clone(),
+            TransactionSealSignature::sign_v1(&sealer_sk, &unsealed),
+        );
 
         let published: Vec<_> = tx.all_published_templates_iter().collect();
         assert_eq!(published, vec![(expected_address, binary.as_slice())]);

@@ -469,6 +469,9 @@ fn calc_stealth_statement_weight(statement: &StealthTransferStatement) -> u64 {
     const WEIGHT_PER_TRANSFER: u64 = 100;
     // An input contributes a commitment aggregation and a substate lookup.
     const WEIGHT_PER_INPUT: u64 = 1;
+    // Every script-path `TemplateFunction` atom instantiates and invokes a WASM template in
+    // `TransactionProcessor::evaluate_spend_script`, so each carries `INVOCATION_FLOOR`.
+    let invocation_weight = statement.script_path_template_functions().count() as u64 * INVOCATION_FLOOR;
 
     // Outputs carry no weight term. Weight is a size/IO measure; an output's cost is its native verification, which
     // the engine charges directly in metering points and the per-block execution budget bounds, and its storage,
@@ -476,7 +479,8 @@ fn calc_stealth_statement_weight(statement: &StealthTransferStatement) -> u64 {
     // output a third time.
     WEIGHT_PER_TRANSFER +
         statement.inputs_statement.inputs.len() as u64 * WEIGHT_PER_INPUT +
-        witness_bytes / SPEND_WITNESS_BYTE_DIVISOR
+        witness_bytes / SPEND_WITNESS_BYTE_DIVISOR +
+        invocation_weight
 }
 
 /// Least weight a template invocation may carry, whatever its arguments come to.
@@ -943,6 +947,63 @@ mod weight_tests {
         assert_eq!(calc_instruction_weight(&no_arg_call()), INVOCATION_FLOOR);
         assert_eq!(calc_instruction_weight(&bare_create_account()), INVOCATION_FLOOR);
         assert_eq!(calc_instruction_weight(&bare_template_update()), INVOCATION_FLOOR);
+    }
+
+    #[test]
+    fn stealth_script_path_template_functions_add_invocation_floor_weight() {
+        use tari_template_lib_types::{
+            Amount,
+            access_rules::AccessRule,
+            crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+            stealth::{
+                AtomicCondition,
+                MerkleProof,
+                SpendCondition,
+                SpendWitness,
+                StealthInput,
+                StealthInputsStatement,
+                StealthOutputsStatement,
+                StealthTransferStatement,
+                TemplateFunction,
+            },
+        };
+
+        let make_statement = |leaf: SpendCondition| StealthTransferStatement {
+            inputs_statement: StealthInputsStatement::new(
+                vec![StealthInput::with_witness(
+                    PedersenCommitmentBytes::zero(),
+                    SpendWitness::script_path(leaf, MerkleProof::empty()),
+                )],
+                Amount::ZERO,
+            ),
+            outputs_statement: StealthOutputsStatement::new_revealed_only(
+                Amount::from(10u64),
+                RistrettoPublicKeyBytes::zero(),
+            ),
+            balance_proof: None,
+            covenant_claims: vec![],
+        };
+
+        let func = TemplateFunction::new(TemplateAddress::default(), FunctionName::try_from("m").unwrap(), vec![]);
+        let access_only = make_statement(SpendCondition::access_rule(AccessRule::AllowAll));
+        let one_tf = make_statement(SpendCondition::template_function(func.clone()));
+        let two_tfs = make_statement(SpendCondition::all([
+            AtomicCondition::TemplateFunction(func.clone()),
+            AtomicCondition::TemplateFunction(func),
+        ]));
+
+        let w_access = calc_stealth_statement_weight(&access_only);
+        let w_one = calc_stealth_statement_weight(&one_tf);
+        let w_two = calc_stealth_statement_weight(&two_tfs);
+
+        assert!(
+            w_one >= w_access + INVOCATION_FLOOR,
+            "one script-path TemplateFunction must add at least INVOCATION_FLOOR ({w_one} vs {w_access})"
+        );
+        assert!(
+            w_two >= w_one + INVOCATION_FLOOR,
+            "each additional script-path TemplateFunction must add at least INVOCATION_FLOOR ({w_two} vs {w_one})"
+        );
     }
 
     /// `consensus_constants::the_weight_cap_bounds_the_instructions_the_size_cap_admits` reads this

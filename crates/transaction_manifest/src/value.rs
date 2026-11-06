@@ -104,17 +104,26 @@ pub fn lit_to_arg(lit: &Lit) -> Result<InstructionArg, ManifestError> {
             // `tari_bor::Value` (read back via `Value::as_integer()`) accept these literals.
             "u128" => {
                 let parsed = i.base10_parse::<u128>()?;
-                let as_i128 = i128::try_from(parsed).map_err(|_| {
-                    ManifestError::UnsupportedExpr(format!(
-                        "u128 literal {} exceeds i128 (tari_bor::Value::Integer) range",
-                        i.base10_digits()
-                    ))
-                })?;
-                Ok(InstructionArg::literal(tari_bor::Value::Integer(as_i128))?)
+                let value = i128::try_from(parsed)
+                    .ok()
+                    .and_then(tari_bor::Value::integer)
+                    .ok_or_else(|| {
+                        ManifestError::UnsupportedExpr(format!(
+                            "u128 literal {} exceeds CBOR integer range",
+                            i.base10_digits()
+                        ))
+                    })?;
+                Ok(InstructionArg::literal(value)?)
             },
             "i128" => {
                 let parsed = i.base10_parse::<i128>()?;
-                Ok(InstructionArg::literal(tari_bor::Value::Integer(parsed))?)
+                let value = tari_bor::Value::integer(parsed).ok_or_else(|| {
+                    ManifestError::UnsupportedExpr(format!(
+                        "i128 literal {} exceeds CBOR integer range",
+                        i.base10_digits()
+                    ))
+                })?;
+                Ok(InstructionArg::literal(value)?)
             },
             _ => Err(ManifestError::UnsupportedExpr(format!(
                 r#"Unsupported integer suffix "{}""#,
@@ -197,12 +206,23 @@ fn parse_value(s: &str, depth: usize) -> Result<ManifestValue, ManifestParseErro
             // like "044bccd4..." that syn misinterprets as integer + suffix, or "1e23" as float).
             match &lit {
                 Lit::Str(_) | Lit::Bool(_) | Lit::ByteStr(_) | Lit::Byte(_) | Lit::Char(_) => {},
-                Lit::Int(i) => match i.suffix() {
-                    "" | "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" => {},
-                    _ => return None,
+                Lit::Int(i) => {
+                    let trimmed = s.trim();
+                    if i.suffix().is_empty() &&
+                        trimmed.len() > 1 &&
+                        trimmed.starts_with('0') &&
+                        trimmed.len().is_multiple_of(2)
+                    {
+                        return None;
+                    }
+                    match i.suffix() {
+                        "" | "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" => {},
+                        _ => return None,
+                    }
                 },
                 _ => return None,
             }
+            lit_to_arg(&lit).ok()?;
             Some(ManifestValue::Literal(lit))
         })
         .or_else(|| {
@@ -275,6 +295,19 @@ mod tests {
         // Hex string that looks like a float literal (contains 'e')
         let val = "1e2345".parse::<ManifestValue>().unwrap();
         assert!(matches!(val, ManifestValue::Value(tari_bor::Value::Bytes(_))));
+
+        // All-digit 64-char hex strings (with leading zero or exceeding i64::MAX) parse as hex bytes
+        let leading_zero_hex = "0000000000000000000000000000000000000000000000000000000000000001";
+        let val = leading_zero_hex.parse::<ManifestValue>().unwrap();
+        assert!(matches!(val, ManifestValue::Value(tari_bor::Value::Bytes(ref b)) if b.len() == 32));
+
+        let large_digit_hex = "12345678901234567890123456789012345678901234567890123456789012345678";
+        let val = large_digit_hex.parse::<ManifestValue>().unwrap();
+        assert!(matches!(val, ManifestValue::Value(tari_bor::Value::Bytes(ref b)) if b.len() == 34));
+
+        // Out-of-range integer literals are rejected at parse time
+        assert!("256u8".parse::<ManifestValue>().is_err());
+        assert!("18446744073709551616u128".parse::<ManifestValue>().is_err());
     }
 
     #[test]

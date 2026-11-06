@@ -1773,3 +1773,42 @@ fn duplicate_keyword_args_in_create_account_and_publish_template_are_rejected() 
         assert!(err.to_string().contains(expected), "unexpected error: {err}");
     }
 }
+
+#[test]
+fn blob_variable_resolves_in_call_args_and_globals_are_rejected_in_workspace_or_blob_positions() {
+    use tari_ootle_transaction::Blob;
+
+    let manifest = r#"
+            use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;
+
+            fn main() {
+                let code = blob!("actual_wasm");
+                MyTemplate::upload(blob!(code));
+            }
+        "#;
+    let blobs = HashMap::from([("actual_wasm".to_string(), Blob::from(vec![1u8, 2, 3]))]);
+    let parsed = parse_manifest(manifest, HashMap::new(), Default::default(), blobs).unwrap();
+    assert_eq!(parsed.blobs.len(), 1);
+    assert_eq!(parsed.instructions, vec![Instruction::CallFunction {
+        address: TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap(),
+        function: "upload".try_into().unwrap(),
+        args: vec![InstructionArg::Blob(0)],
+    }]);
+
+    // Global input variables passed to workspace-only or blob-only macros report InvalidVariableType.
+    let globals = HashMap::from([("account".to_string(), caller_component())]);
+    for bad in [
+        "fn main() { authorize!(account); }",
+        "fn main() { drop_authorize!(account); }",
+        "fn main() { publish_template!(account); }",
+        "fn main() { Account::new(blob!(account)); }",
+    ] {
+        let err = parse_manifest(bad, globals.clone(), Default::default(), Default::default())
+            .err()
+            .unwrap_or_else(|| panic!("expected error for `{bad}`"));
+        assert!(
+            err.to_string().contains("Invalid variable type"),
+            "unexpected error for `{bad}`: {err}"
+        );
+    }
+}

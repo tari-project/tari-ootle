@@ -278,16 +278,7 @@ impl ManifestInstructionGenerator {
                 // blob-resolution path as `blob!(name)` — the binary is registered in the output
                 // Blobs on first reference and assigned the next BlobIndex.
                 let ident = pt.blob_name.to_string();
-                let blob_name = match self.bindings.get(&ident) {
-                    Some(Binding::Blob(blob_name)) => blob_name.clone(),
-                    Some(_) => {
-                        return Err(ManifestError::InvalidVariableType(format!(
-                            "publish_template!({ident}) requires a blob, but '{ident}' is bound to a value that is \
-                             not a blob"
-                        )));
-                    },
-                    None => ident,
-                };
+                let blob_name = self.resolve_blob_name(&ident, "publish_template!")?;
                 let arg = self.resolve_blob_arg(&blob_name)?;
                 let binary = arg.as_blob_index().ok_or_else(|| ManifestError::InvalidInstruction {
                     reason: "publish_template! resolved to a non-Blob arg".to_string(),
@@ -372,7 +363,10 @@ impl ManifestInstructionGenerator {
         match arg {
             ManifestLiteral::Lit(lit) => lit_to_arg(&lit),
             ManifestLiteral::Workspace(ident) => self.get_ident(&ident.to_string()),
-            ManifestLiteral::Blob(ident) => self.resolve_blob_arg(&ident.to_string()),
+            ManifestLiteral::Blob(ident) => {
+                let blob_name = self.resolve_blob_name(&ident.to_string(), "blob!")?;
+                self.resolve_blob_arg(&blob_name)
+            },
             ManifestLiteral::Global(name) => self.get_global(&name.value())?.to_arg(),
             ManifestLiteral::Array(items) => {
                 let items = items
@@ -529,14 +523,26 @@ impl ManifestInstructionGenerator {
         }
     }
 
+    fn resolve_blob_name(&self, ident: &str, macro_name: &str) -> Result<String, ManifestError> {
+        match self.bindings.get(ident) {
+            Some(Binding::Blob(blob_name)) => Ok(blob_name.clone()),
+            Some(_) => Err(ManifestError::InvalidVariableType(format!(
+                "{macro_name}({ident}) requires a blob, but '{ident}' is bound to a value that is not a blob"
+            ))),
+            None if self.globals.contains_key(ident) => Err(ManifestError::InvalidVariableType(format!(
+                "{macro_name}({ident}) requires a blob, but '{ident}' is bound to a value that is not a blob"
+            ))),
+            None => Ok(ident.to_string()),
+        }
+    }
+
     fn get_workspace_id(&self, name: &str) -> Result<WorkspaceOffsetId, ManifestError> {
-        match self.bindings.get(name) {
-            Some(Binding::Workspace(id)) => Ok(*id),
-            Some(Binding::Input(_)) => Err(ManifestError::InvalidVariableType(format!(
+        match self.resolve(name)? {
+            Resolved::Workspace(id) => Ok(id),
+            Resolved::Value(_) => Err(ManifestError::InvalidVariableType(format!(
                 "'{name}' is an input value, but this position requires a workspace value"
             ))),
-            Some(Binding::Blob(_)) => Err(Self::misplaced_blob(name)),
-            None => Err(ManifestError::UndefinedVariable { name: name.to_string() }),
+            Resolved::Blob => Err(Self::misplaced_blob(name)),
         }
     }
 

@@ -69,6 +69,11 @@ impl<'b, C> minicbor::Decode<'b, C> for PrecisionAmount {
                             digits[idx] = d.u64()?;
                             idx += 1;
                         }
+                        if idx != Self::NUM_DIGITS {
+                            return Err(minicbor::decode::Error::message(
+                                "PrecisionAmount: unexpected array length",
+                            ));
+                        }
                     },
                 }
                 Ok(PrecisionAmount::from_le_digits(digits))
@@ -875,6 +880,31 @@ mod tests {
         let encoded = tari_bor::encode(&a).unwrap();
         let decoded = tari_bor::decode::<Amount>(&encoded).unwrap();
         assert_eq!(a, decoded);
+    }
+
+    #[test]
+    fn rejects_truncated_and_oversized_cbor_arrays() {
+        for definite_short in [
+            tari_bor::encode(&[1u64; 0]).unwrap(),
+            tari_bor::encode(&[1u64]).unwrap(),
+            tari_bor::encode(&[u64::MAX, u64::MAX]).unwrap(),
+        ] {
+            assert!(tari_bor::decode::<Amount>(&definite_short).is_err());
+        }
+
+        let definite_long = tari_bor::encode(&[1u64, 2, 3, 4]).unwrap();
+        assert!(tari_bor::decode::<Amount>(&definite_long).is_err());
+
+        for indef_short in [vec![0x9f, 0xff], vec![0x9f, 0x01, 0xff], vec![0x9f, 0x01, 0x02, 0xff]] {
+            assert!(tari_bor::decode::<Amount>(&indef_short).is_err());
+        }
+
+        let indef_valid = [0x9f, 0x05, 0x00, 0x00, 0xff];
+        let decoded = tari_bor::decode::<Amount>(&indef_valid).unwrap();
+        assert_eq!(decoded, Amount::from(5));
+
+        let indef_long = [0x9f, 0x01, 0x02, 0x03, 0x04, 0xff];
+        assert!(tari_bor::decode::<Amount>(&indef_long).is_err());
     }
 
     #[test]

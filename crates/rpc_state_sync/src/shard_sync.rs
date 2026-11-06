@@ -68,27 +68,48 @@ const _: () =
 /// Rewinds every shard that a sync committed unverified versions of, so that everything the node reads or builds
 /// on afterwards is verified state.
 pub(crate) fn discard_all_unverified_state<TStore: StateStore>(store: &TStore) -> Result<(), RpcStateSyncError> {
-    store.with_write_tx(|tx| {
-        for (shard, rewind_point) in tx.state_sync_rewind_points_get_all()? {
-            rewind_shard(tx, shard, rewind_point)?;
-        }
-        Ok::<_, RpcStateSyncError>(())
-    })
+    for (shard, rewind_point) in store.with_read_tx(|tx| tx.state_sync_rewind_points_get_all())? {
+        rewind_shard(store, shard, rewind_point)?;
+    }
+    Ok(())
 }
 
-fn rewind_shard<TTx: StateStoreWriteTransaction>(
-    tx: &mut TTx,
+/// Rewinds `shard` to `rewind_point` and then clears its rewind point.
+///
+/// Each write transaction undoes only the shard's highest remaining version, so no transaction holds more than the
+/// forward commit of one version did. Every step leaves the shard at a version it committed before, with the rewind
+/// point still stored until the last step, so a rewind that stops part-way resumes from where it stopped.
+fn rewind_shard<TStore: StateStore>(
+    store: &TStore,
     shard: Shard,
     rewind_point: Version,
-) -> Result<(), StorageError> {
-    let tree_stats = tx.state_tree_truncate_to_version(shard, rewind_point)?;
-    let substate_stats = tx.substates_rewind_to_state_version(shard, rewind_point)?;
-    tx.state_sync_rewind_point_remove(shard)?;
+) -> Result<(), RpcStateSyncError> {
+    let mut versions_rewound = 0usize;
+    let mut nodes_deleted = 0usize;
+    loop {
+        let is_done = store.with_write_tx(|tx| {
+            let target = match tx.state_tree_versions_get_latest(shard)? {
+                Some(latest) if latest > rewind_point => latest - 1,
+                _ => rewind_point,
+            };
+            let tree_stats = tx.state_tree_truncate_to_version(shard, target)?;
+            let substate_stats = tx.substates_rewind_to_state_version(shard, target)?;
+            versions_rewound += substate_stats.transitions_processed;
+            nodes_deleted += tree_stats.nodes_deleted;
+            let is_done = target == rewind_point;
+            if is_done {
+                tx.state_sync_rewind_point_remove(shard)?;
+            }
+            Ok::<_, StorageError>(is_done)
+        })?;
+        if is_done {
+            break;
+        }
+    }
     warn!(
         target: LOG_TARGET,
-        "🛜 Discarded unverified synced state for {shard} above v{rewind_point}: {} state version(s), {} tree node(s)",
-        substate_stats.transitions_processed,
-        tree_stats.nodes_deleted,
+        "🛜 Discarded unverified synced state for {shard} above v{rewind_point}: {versions_rewound} state version(s), \
+         {nodes_deleted} tree node(s)",
     );
     Ok(())
 }
@@ -371,20 +392,28 @@ impl<'a, TStore: StateStore, TValidator: CommitProofValidator> ShardSync<'a, TSt
     /// still holds such a substate is rewound to below the substate's creation, and its value is streamed again.
     pub fn discard_unverified_state(&self) -> Result<Option<Version>, RpcStateSyncError> {
         let shard = self.shard;
-        self.store.with_write_tx(|tx| {
-            let mut rewind_point = tx.state_sync_rewind_point_get(shard)?;
+        let (stored_point, rewind_point) = self.store.with_read_tx(|tx| {
+            let stored_point = tx.state_sync_rewind_point_get(shard)?;
+            let mut rewind_point = stored_point;
             if let Some((_, created_at)) = tx.state_sync_missing_values_get_earliest(shard, 0)? {
                 let latest = tx.state_tree_versions_get_latest(shard)?;
-                if self.state_matches_checkpoint_in(&**tx, latest)? {
+                if self.state_matches_checkpoint_in(tx, latest)? {
                     let below_creation = created_at.saturating_sub(1);
                     rewind_point = Some(rewind_point.map_or(below_creation, |point| point.min(below_creation)));
                 }
             }
-            if let Some(rewind_point) = rewind_point {
-                rewind_shard(tx, shard, rewind_point)?;
+            Ok::<_, RpcStateSyncError>((stored_point, rewind_point))
+        })?;
+        if let Some(rewind_point) = rewind_point {
+            // The rewind commits one version at a time, so the point it rewinds to must be stored before it starts
+            // for a rewind that stops part-way to resume to the same point.
+            if stored_point != Some(rewind_point) {
+                self.store
+                    .with_write_tx(|tx| tx.state_sync_rewind_point_set(shard, rewind_point))?;
             }
-            Ok::<_, RpcStateSyncError>(tx.state_tree_versions_get_latest(shard)?)
-        })
+            rewind_shard(self.store, shard, rewind_point)?;
+        }
+        Ok(self.store.with_read_tx(|tx| tx.state_tree_versions_get_latest(shard))?)
     }
 
     /// The epoch of the shard's last transition at or below `persisted_version`.
@@ -1843,6 +1872,113 @@ mod tests {
         }
     }
 
+    /// A store that opens only as many write transactions as its budget allows, as a node that stops part-way
+    /// through an operation keeps only the transactions it committed.
+    struct WriteBudgetStore<'a, TStore> {
+        inner: &'a TStore,
+        remaining: std::cell::Cell<usize>,
+    }
+
+    impl<'a, TStore: StateStore> WriteBudgetStore<'a, TStore> {
+        fn new(inner: &'a TStore, budget: usize) -> Self {
+            Self {
+                inner,
+                remaining: std::cell::Cell::new(budget),
+            }
+        }
+
+        fn spend(&self) -> Result<(), StorageError> {
+            let remaining = self.remaining.get();
+            if remaining == 0 {
+                return Err(StorageError::General {
+                    details: "write transaction budget exhausted".to_string(),
+                });
+            }
+            self.remaining.set(remaining - 1);
+            Ok(())
+        }
+    }
+
+    impl<TStore: StateStore> StateStore for WriteBudgetStore<'_, TStore> {
+        type Addr = TStore::Addr;
+        type ReadTransaction<'a>
+            = TStore::ReadTransaction<'a>
+        where Self: 'a;
+        type WriteTransaction<'a>
+            = TStore::WriteTransaction<'a>
+        where Self: 'a;
+
+        fn create_read_tx(&self) -> Result<Self::ReadTransaction<'_>, StorageError> {
+            self.inner.create_read_tx()
+        }
+
+        fn create_write_tx(&self) -> Result<Self::WriteTransaction<'_>, StorageError> {
+            self.spend()?;
+            self.inner.create_write_tx()
+        }
+
+        fn create_durable_write_tx(&self) -> Result<Self::WriteTransaction<'_>, StorageError> {
+            self.spend()?;
+            self.inner.create_durable_write_tx()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_rewind_commits_one_version_per_write_transaction_and_resumes_after_stopping() {
+        let (store, _tmp) = create_store();
+        let checkpoint: Versions = (1..=4u8)
+            .map(|seed| (Version::from(seed), vec![create(seed)]))
+            .collect();
+        let sync = ShardSync::new(
+            NETWORK,
+            NUM_PRESHARDS,
+            &store,
+            shard(),
+            root_after(&checkpoint),
+            acc_after(&checkpoint),
+            version_after(&checkpoint),
+            EPOCH,
+            UP_VERSION_LOOKBACK,
+        );
+        // The peer stalls after four versions and the sync is dropped mid-stream, leaving them unverified.
+        let stalled = stream::iter(stream_of(&checkpoint)).chain(stream::pending());
+        assert!(
+            sync.sync_from_stream(&mut StateSyncStats::default(), None, stalled)
+                .now_or_never()
+                .is_none()
+        );
+        assert_eq!(local_version(&store), Some(4));
+        assert_eq!(rewind_point(&store), Some(0));
+
+        // A rewind that stops after one write transaction has undone the highest version alone.
+        let budgeted = WriteBudgetStore::new(&store, 1);
+        let stopped = ShardSync::new(
+            NETWORK,
+            NUM_PRESHARDS,
+            &budgeted,
+            shard(),
+            root_after(&checkpoint),
+            acc_after(&checkpoint),
+            version_after(&checkpoint),
+            EPOCH,
+            UP_VERSION_LOOKBACK,
+        );
+        assert!(stopped.discard_unverified_state().is_err());
+        assert_eq!(local_version(&store), Some(3));
+        assert!(substate(&store, 4).is_none());
+        assert!(substate(&store, 3).is_some_and(|s| s.is_up()));
+        assert_eq!(local_acc(&store), acc_after(&checkpoint[..3].to_vec()));
+        assert_eq!(rewind_point(&store), Some(0));
+
+        // On restart the rewind point is still stored, so the rewind resumes and finishes.
+        discard_all_unverified_state(&store).unwrap();
+        assert_eq!(local_version(&store), None);
+        for seed in 1..=4 {
+            assert!(substate(&store, seed).is_none(), "{seed}");
+        }
+        assert_eq!(rewind_point(&store), None);
+    }
+
     /// Accepts every commit proof, standing in for a committee's signatures.
     struct AcceptAll;
 
@@ -2857,6 +2993,45 @@ mod tests {
         responses.push(complete(N));
         sync_with_proofs(&store, &checkpoint, responses).await.unwrap();
         assert!(substate(&store, 1).is_some_and(|s| s.substate_value().is_some()));
+    }
+
+    #[tokio::test]
+    async fn a_rewind_below_a_missing_value_that_stops_part_way_resumes_to_below_it() {
+        let (store, _tmp) = create_store();
+        let mut checkpoint = versions_to_proof_point();
+        checkpoint.push((N + 1, vec![create(200)]));
+        // The peer proves the shard at v{N} and closes the stream, leaving v1's substate without its value.
+        sync_with_proofs(&store, &checkpoint, stream_to_proof_point_without_first_value())
+            .await
+            .unwrap_err();
+        assert_eq!(local_version(&store), Some(N));
+        assert_eq!(missing_value(&store), Some((address(1), 1)));
+        assert_eq!(rewind_point(&store), None);
+
+        // Against a checkpoint at the proven root, the shard is rewound below v1. Two write transactions store that
+        // rewind point and undo v{N}.
+        let at_proof_point = versions_to_proof_point();
+        let budgeted = WriteBudgetStore::new(&store, 2);
+        let stopped = ShardSync::new(
+            NETWORK,
+            NUM_PRESHARDS,
+            &budgeted,
+            shard(),
+            root_after(&at_proof_point),
+            acc_after(&at_proof_point),
+            version_after(&at_proof_point),
+            EPOCH,
+            UP_VERSION_LOOKBACK,
+        );
+        assert!(stopped.discard_unverified_state().is_err());
+        assert_eq!(local_version(&store), Some(N - 1));
+        assert_eq!(rewind_point(&store), Some(0));
+
+        discard_all_unverified_state(&store).unwrap();
+        assert_eq!(local_version(&store), None);
+        assert!(substate(&store, 1).is_none());
+        assert_eq!(missing_value(&store), None);
+        assert_eq!(rewind_point(&store), None);
     }
 
     #[tokio::test]

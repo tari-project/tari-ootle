@@ -329,12 +329,13 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
         }
 
         let cf = self.db().cf(ParkedBlockCf)?;
-        // Idempotent, except that a catch-up delivery marks the parked block as a catch-up block whatever origin it
-        // was parked with: it shows the committee has certified the block, so it must not be voted on when unparked.
+        // Idempotent, except that a live delivery marks the parked block as live whatever origin it was parked with.
+        // Any committee member can send a catch-up response, so a block is only left unvoted when unparked if every
+        // delivery of it came through catch-up.
         if cf.exists(block.id(), OPERATION)? {
-            if origin.is_catch_up() {
+            if !origin.is_catch_up() {
                 let mut data = cf.get(block.id(), OPERATION)?;
-                if !data.origin.is_catch_up() {
+                if data.origin.is_catch_up() {
                     data.origin = origin;
                     cf.put(block.id(), &data, OPERATION)?;
                 }
@@ -1873,16 +1874,37 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             debug_assert_eq!(key.0, shard, "range iterator leaked across shard boundary");
             stale_cf.delete(key, OPERATION)?;
         }
-        // The nodes kept for a pinned tree that went stale at versions > target are live again.
+        // The nodes kept for a pinned tree that went stale at versions > target are live again. Records are keyed by
+        // (shard, pin, stale_at), so each pin's records at or above `start_version` are one contiguous run: seek to
+        // the start of each run, so that only the records being deleted and one key per pin are read.
         let deferred_cf = db.cf(StateTreeDeferredStaleNodesCf)?;
-        for key in db
-            .cf(state_tree::ByDeferredStaleShardQuery)?
-            .query_prefix_range_keys(Ordering::Ascending, &shard)?
-        {
-            let (_, _, stale_at) = key;
-            if stale_at >= start_version {
-                deferred_cf.delete(&key, OPERATION)?;
+        let deferred_query = db.cf(state_tree::ByDeferredStaleShardPinStaleAtQuery)?;
+        let mut pin_from = 0;
+        loop {
+            let Some((_, pin, stale_at)) = deferred_query
+                .query_range_keys_limited(
+                    Ordering::Ascending,
+                    (shard, pin_from, start_version)..(shard, Version::MAX, Version::MAX),
+                    1,
+                )?
+                .pop()
+            else {
+                break;
+            };
+            if stale_at < start_version {
+                // The seek landed on a later pin below `start_version`: seek again within that pin.
+                pin_from = pin;
+                continue;
             }
+            let run = deferred_query
+                .query_range_keys(Ordering::Ascending, (shard, pin, stale_at)..(shard, pin, Version::MAX))?;
+            for key in &run {
+                deferred_cf.delete(key, OPERATION)?;
+            }
+            let Some(next_pin) = pin.checked_add(1) else {
+                break;
+            };
+            pin_from = next_pin;
         }
 
         // 3. Delete the proofs of versions > target for this shard: they prove state that no longer exists.

@@ -54,6 +54,7 @@ use tokio::{
 
 use super::{
     MessageFilter,
+    MessageInjector,
     NetworkSendObserver,
     TEST_NUM_PRESHARDS,
     TEST_WASM_EXECUTION_POINTS,
@@ -426,9 +427,14 @@ impl Test {
         self.network.start();
     }
 
+    /// Waits until every validator that is active at its current epoch runs consensus.
     pub async fn wait_for_all_validators_to_start_consensus(&mut self) {
         let mut complete = HashSet::new();
-        let total_validators = self.validators.len();
+        let total_validators = self
+            .validators
+            .values()
+            .filter(|v| !v.epoch_manager.is_pending_activation())
+            .count();
         loop {
             let validators = self.validators.values_mut();
             for validator in validators {
@@ -685,6 +691,7 @@ pub struct TestBuilder {
     rocks_path: Option<String>,
     timeout: Option<Duration>,
     message_filter: Option<MessageFilter>,
+    message_injector: Option<MessageInjector>,
     send_observer: Option<NetworkSendObserver>,
     failure_nodes: Vec<TestAddress>,
     config: HotstuffConfig,
@@ -702,6 +709,7 @@ impl TestBuilder {
             timeout: Some(DEFAULT_PACEMAKER_BLOCK_TIME * 3),
             rocks_path: None,
             message_filter: None,
+            message_injector: None,
             send_observer: None,
             failure_nodes: Vec::new(),
             claim_keys: None,
@@ -809,6 +817,11 @@ impl TestBuilder {
     /// the network, with the sender's address and its own state store.
     pub fn with_send_observer(mut self, send_observer: NetworkSendObserver) -> Self {
         self.send_observer = Some(send_observer);
+        self
+    }
+
+    pub fn with_message_injector(mut self, message_injector: MessageInjector) -> Self {
+        self.message_injector = Some(message_injector);
         self
     }
 
@@ -923,7 +936,12 @@ impl TestBuilder {
             shutdown.to_signal(),
         )
         .await;
-        let network = spawn_network(channels, shutdown.to_signal(), self.message_filter);
+        let network = spawn_network(
+            channels,
+            shutdown.to_signal(),
+            self.message_filter,
+            self.message_injector,
+        );
 
         Test {
             validators,

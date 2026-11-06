@@ -1119,6 +1119,12 @@ fn validating_a_spend_script_charges_native_points_for_bound_args() {
     );
 }
 
+#[test]
+fn spend_rejects_transient_handle_in_bound_arg() {
+    let proof_arg = encode_arg(&tari_template_lib::models::ProofId::from(0u32));
+    assert_spend_rejected("timelock", vec![proof_arg], "may not contain a proof");
+}
+
 /// Mints a UTXO gated by a single no-argument `function` leaf, then spends it revealing that leaf with fees enabled,
 /// paying from a funded account. Returns the finalize result.
 fn spend_leaf_paying_fees(function: &str) -> FinalizeResult {

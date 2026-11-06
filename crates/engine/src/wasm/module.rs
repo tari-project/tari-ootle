@@ -635,11 +635,7 @@ mod tests {
     #[test]
     fn rejects_oversized_tuple_in_function_output() {
         let max = limits::WASM_LIMITS.max_function_arguments;
-        let def = template_def_with_func(
-            FunctionKind::Function,
-            vec![],
-            Type::Tuple(vec![Type::U8; max + 1]),
-        );
+        let def = template_def_with_func(FunctionKind::Function, vec![], Type::Tuple(vec![Type::U8; max + 1]));
         match validate_functions(&def) {
             Err(WasmExecutionError::WasmValidationError(WasmValidationError::FunctionTooManyTupleReturn {
                 name,
@@ -671,14 +667,16 @@ mod tests {
         ] {
             let def = template_def_with_func(FunctionKind::Function, vec![], bad_type.clone());
             match validate_functions(&def) {
-                Err(WasmExecutionError::WasmValidationError(WasmValidationError::FunctionNameTooLong {
-                    name,
+                Err(WasmExecutionError::WasmValidationError(WasmValidationError::AbiTypeNameTooLong {
+                    function,
+                    length,
                     max_length,
                 })) => {
-                    assert_eq!(name, long_name);
+                    assert_eq!(function, "f");
+                    assert_eq!(length, long_name.len());
                     assert_eq!(max_length, max_len);
                 },
-                other => panic!("expected FunctionNameTooLong for output {bad_type:?}, got {other:?}"),
+                other => panic!("expected AbiTypeNameTooLong for output {bad_type:?}, got {other:?}"),
             }
 
             let def = template_def_with_func(
@@ -690,14 +688,16 @@ mod tests {
                 Type::Unit,
             );
             match validate_functions(&def) {
-                Err(WasmExecutionError::WasmValidationError(WasmValidationError::FunctionNameTooLong {
-                    name,
+                Err(WasmExecutionError::WasmValidationError(WasmValidationError::AbiTypeNameTooLong {
+                    function,
+                    length,
                     max_length,
                 })) => {
-                    assert_eq!(name, long_name);
+                    assert_eq!(function, "f");
+                    assert_eq!(length, long_name.len());
                     assert_eq!(max_length, max_len);
                 },
-                other => panic!("expected FunctionNameTooLong for arg {bad_type:?}, got {other:?}"),
+                other => panic!("expected AbiTypeNameTooLong for arg {bad_type:?}, got {other:?}"),
             }
         }
     }

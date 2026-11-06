@@ -41,7 +41,9 @@ use std::{
     future::Future,
     io,
     io::ErrorKind,
+    pin::Pin,
     sync::Arc,
+    task::{Context, Poll},
     time::{Duration, Instant},
 };
 
@@ -52,7 +54,11 @@ use libp2p_substream::{ProtocolEvent, ProtocolNotification};
 use log::*;
 use prost::Message;
 use router::Router;
-use tokio::{sync::mpsc, task::JoinHandle, time};
+use tokio::{
+    sync::mpsc,
+    task::{JoinError, JoinHandle},
+    time,
+};
 use tower::{Service, make::MakeService};
 use tracing::{Instrument, Level, debug, error, instrument, span, trace, warn};
 
@@ -289,7 +295,27 @@ pub(super) struct PeerRpcServer<TSvc, TSubstream> {
     protocol_notifications: Option<ProtocolNotificationRx<TSubstream>>,
     request_rx: mpsc::Receiver<RpcServerRequest>,
     sessions: HashMap<PeerId, usize>,
-    tasks: FuturesUnordered<JoinHandle<PeerId>>,
+    tasks: FuturesUnordered<SessionTask>,
+}
+
+/// A spawned session task, tagged with its peer so that the session slot is released however the
+/// task ends, including when it panics.
+struct SessionTask {
+    peer_id: PeerId,
+    handle: JoinHandle<()>,
+}
+
+impl Future for SessionTask {
+    type Output = (PeerId, Result<(), JoinError>);
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let peer_id = self.peer_id;
+        Pin::new(&mut self.handle).poll(cx).map(|result| (peer_id, result))
+    }
+}
+
+fn session_task(peer_id: PeerId, handle: JoinHandle<()>) -> SessionTask {
+    SessionTask { peer_id, handle }
 }
 
 impl<TSvc, TSubstream> PeerRpcServer<TSvc, TSubstream>
@@ -343,8 +369,14 @@ where
                     }
                 }
 
-                Some(Ok(node_id)) = self.tasks.next() => {
-                    self.on_session_complete(&node_id);
+                Some((peer_id, result)) = self.tasks.next() => {
+                    if let Err(err) = result {
+                        error!(
+                            target: LOG_TARGET,
+                            "Session task for peer `{}` panicked: {}", peer_id, err
+                        );
+                    }
+                    self.on_session_complete(&peer_id);
                 },
 
                 Some(req) = self.request_rx.recv() => {
@@ -365,16 +397,14 @@ where
         // notification stream only ends once networking has shut down, so each session errors out at its
         // next substream read/write — which also closes any in-progress response stream — and handler
         // futures are bounded by the client deadline.
-        while let Some(result) = self.tasks.next().await {
-            match result {
-                Ok(peer_id) => self.on_session_complete(&peer_id),
-                Err(err) => {
-                    error!(
-                        target: LOG_TARGET,
-                        "Session task panicked while shutting down: {}", err
-                    );
-                },
+        while let Some((peer_id, result)) = self.tasks.next().await {
+            if let Err(err) = result {
+                error!(
+                    target: LOG_TARGET,
+                    "Session task for peer `{}` panicked while shutting down: {}", peer_id, err
+                );
             }
+            self.on_session_complete(&peer_id);
         }
 
         debug!(target: LOG_TARGET, "Peer RPC server is shut down");
@@ -486,7 +516,7 @@ where
         // that never starts must release it here.
         match self.executor.try_spawn(session) {
             Ok(handle) => {
-                self.tasks.push(handle);
+                self.tasks.push(session_task(peer_id, handle));
                 Ok(())
             },
             Err(_) => {
@@ -497,16 +527,14 @@ where
     }
 }
 
-/// Performs the server handshake on `framed`, then serves the session until it ends. Returns
-/// `peer_id` either way, which is what releases the session's slot.
+/// Performs the server handshake on `framed`, then serves the session until it ends.
 async fn run_session<TSvc, TSubstream>(
     config: RpcServerBuilder,
     protocol: StreamProtocol,
     peer_id: PeerId,
     service: TSvc,
     mut framed: CanonicalFraming<TSubstream>,
-) -> PeerId
-where
+) where
     TSvc: Service<Request<Bytes>, Response = Response<Body>, Error = RpcStatus>,
     TSubstream: AsyncRead + AsyncWrite + Unpin,
 {
@@ -525,7 +553,7 @@ where
             debug!(target: LOG_TARGET, "Handshake error with peer `{}`: {}", peer_id, err);
             #[cfg(feature = "metrics")]
             metrics::handshake_error_counter(&peer_id, &protocol).inc();
-            return peer_id;
+            return;
         },
     }
 
@@ -538,8 +566,6 @@ where
     debug!(target: LOG_TARGET, "END OF SESSION for {} ", peer_id,);
     #[cfg(feature = "metrics")]
     num_sessions.dec();
-
-    peer_id
 }
 
 /// Refuses a session from a task of its own, so that a peer slow to take the refusal cannot hold up
@@ -729,8 +755,8 @@ where
             );
             // Let the client know that they have disobeyed the spec
             let status = RpcStatus::bad_request(format!(
-                "Invalid deadline ({:.0?}). The deadline MUST be greater than {:.0?}.",
-                self.peer_id, deadline,
+                "Invalid deadline ({:.0?}). The deadline MUST be at least {:.0?}.",
+                deadline, self.config.minimum_client_deadline,
             ));
             let bad_request = proto::RpcResponse {
                 request_id,
@@ -861,7 +887,7 @@ where
         #[cfg(feature = "metrics")]
         let protocol = self.protocol.clone();
         let mut stream = body
-            .into_message()
+            .into_guarded_body()
             .map(|result| into_response(request_id, result))
             .map(move |mut message| {
                 if message.payload.len() > max_response_payload_size() {
@@ -1098,11 +1124,11 @@ mod tests {
         let session_resource = Arc::new(());
         for _ in 0..3 {
             let resource = session_resource.clone();
-            server.tasks.push(tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 time::sleep(Duration::from_millis(50)).await;
                 drop(resource);
-                PeerId::random()
-            }));
+            });
+            server.tasks.push(session_task(PeerId::random(), handle));
         }
 
         // Closing the notification channel signals serve to shut down.
@@ -1110,6 +1136,33 @@ mod tests {
         server.serve().await.unwrap();
 
         assert_eq!(Arc::strong_count(&session_resource), 1);
+    }
+
+    #[tokio::test]
+    async fn a_panicked_session_releases_its_peer_slot() {
+        let (_notify_tx, notify_rx) = mpsc::unbounded_channel::<ProtocolNotification<Compat<DuplexStream>>>();
+        let (request_tx, request_rx) = mpsc::channel(1);
+        let mut server = PeerRpcServer::new(
+            RpcServerBuilder::new().with_maximum_sessions_per_client(1),
+            ProtocolServiceNotFound,
+            notify_rx,
+            request_rx,
+        );
+
+        let peer_id = PeerId::random();
+        server.new_session_for(peer_id).unwrap();
+        let handle = tokio::spawn(async { panic!("session task panicked") });
+        server.tasks.push(session_task(peer_id, handle));
+        tokio::spawn(server.serve());
+
+        let mut handle = RpcServerHandle::new(request_tx);
+        time::timeout(Duration::from_secs(5), async {
+            while handle.get_num_active_sessions_for(peer_id).await.unwrap() != 0 {
+                time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the panicked session's slot was never released");
     }
 }
 
@@ -1303,6 +1356,23 @@ mod keepalive_tests {
             assert_eq!(response.status, RpcStatus::ok().as_code());
             assert_eq!(response.payload, b"pong");
         }
+    }
+
+    #[tokio::test]
+    async fn a_deadline_below_the_minimum_is_rejected_with_the_configured_minimum_in_details() {
+        let config = RpcServerBuilder::default().with_minimum_client_deadline(Duration::from_secs(5));
+        let response = serve_one_request_with_deadline(config, 2).await;
+        assert_eq!(response.status, RpcStatus::bad_request("").as_code());
+        let details = std::str::from_utf8(&response.payload).unwrap();
+        assert_eq!(details, "Invalid deadline (2s). The deadline MUST be at least 5s.");
+    }
+
+    #[tokio::test]
+    async fn a_deadline_equal_to_the_minimum_is_served() {
+        let config = RpcServerBuilder::default().with_minimum_client_deadline(Duration::from_secs(5));
+        let response = serve_one_request_with_deadline(config, 5).await;
+        assert_eq!(response.status, RpcStatus::ok().as_code());
+        assert_eq!(response.payload, b"pong");
     }
 
     #[test]

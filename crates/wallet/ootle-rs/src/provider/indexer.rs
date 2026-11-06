@@ -68,13 +68,14 @@ pub struct IndexerProvider<Wallet> {
 }
 
 impl<Wallet> IndexerProvider<Wallet> {
-    /// A provider that verifies what the indexer serves, as [`IndexerTrust::Verify`] describes.
+    /// A provider that takes the indexer at its word, as [`IndexerTrust::Trust`] describes. Call
+    /// [`with_indexer_trust`](Self::with_indexer_trust) to verify what it serves.
     pub fn new(client: IndexerRestApiClient, wallet: Wallet, network: Network) -> Self {
         let client = Arc::new(client);
         let verifier = Arc::new(IndexerVerifier::new(
             Arc::downgrade(&client),
             network,
-            IndexerTrust::Verify,
+            IndexerTrust::default(),
         ));
         Self {
             client,

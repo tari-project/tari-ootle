@@ -47,11 +47,11 @@ impl Workspace {
     }
 
     pub fn insert(&mut self, id: WorkspaceId, value: IndexedValue) -> Result<(), WorkspaceError> {
-        if !value.proof_ids().is_empty() {
-            self.proofs.extend(value.proof_ids().iter().copied());
-        }
         if self.items.contains_key(&id) {
             return Err(WorkspaceError::WorkspaceIdAlreadyExists(id));
+        }
+        if !value.proof_ids().is_empty() {
+            self.proofs.extend(value.proof_ids().iter().copied());
         }
 
         self.items.insert(id, value);
@@ -106,5 +106,19 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(value, expected.value());
+    }
+
+    #[test]
+    fn duplicate_workspace_id_does_not_record_proofs() {
+        use tari_template_lib::models::Proof;
+
+        let mut workspace = Workspace::default();
+        let initial = IndexedValue::from_type(&"existing").unwrap();
+        workspace.insert(1, initial).unwrap();
+
+        let with_proof = IndexedValue::from_type(&Proof::from_id(ProofId::from(42))).unwrap();
+        let err = workspace.insert(1, with_proof).unwrap_err();
+        assert!(matches!(err, WorkspaceError::WorkspaceIdAlreadyExists(1)));
+        assert!(workspace.take_all_proofs().is_empty());
     }
 }

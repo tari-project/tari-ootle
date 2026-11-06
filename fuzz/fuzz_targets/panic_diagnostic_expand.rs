@@ -15,7 +15,8 @@
 //!   * a message with no marker is returned byte-for-byte;
 //!   * output is either the input verbatim or a rendered diagnostic;
 //!   * an index past the definition's arguments never renders;
-//!   * output is bounded by the input plus the definition's own text, so a crafted message cannot amplify allocation.
+//!   * output is bounded by the input plus the definition's own text, so a crafted message cannot amplify allocation;
+//!   * output is bounded by the limit the expander is given.
 
 use libfuzzer_sys::fuzz_target;
 use tari_template_abi::{
@@ -30,6 +31,9 @@ use tari_template_abi::{
 /// Longest text `render` can add from the definition itself: the fixed wording, plus the function
 /// name and argument type built below.
 const MAX_RENDER_OVERHEAD: usize = 256;
+
+/// The bound the engine renders a panic message to (`ENGINE_LIMITS.max_panic_message_size`).
+const MAX_PANIC_MESSAGE_SIZE: usize = 32 * 1024;
 
 fn func_def(arg_count: u8) -> FunctionDef {
     let arguments = (0..arg_count)
@@ -58,7 +62,7 @@ fuzz_target!(|data: (&str, u8)| {
     let (message, arg_count) = data;
     let func_def = func_def(arg_count);
 
-    let expanded = expand_panic_message(&func_def, message.to_string());
+    let expanded = expand_panic_message(&func_def, message.to_string(), MAX_PANIC_MESSAGE_SIZE);
 
     let parsed = PanicDiagnostic::parse(message);
 
@@ -82,6 +86,11 @@ fuzz_target!(|data: (&str, u8)| {
         assert!(
             expanded.starts_with("failed to decode"),
             "rendered message has an unexpected shape: {expanded:?}"
+        );
+        assert!(
+            expanded.len() <= MAX_PANIC_MESSAGE_SIZE,
+            "rendered {} bytes, past the {MAX_PANIC_MESSAGE_SIZE}-byte limit",
+            expanded.len()
         );
         assert!(
             expanded.len() <= message.len() + MAX_RENDER_OVERHEAD,

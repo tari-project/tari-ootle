@@ -114,7 +114,7 @@ impl TemplatePrewarmer {
         // compile to wait for rather than two waiters on the same one.
         let mut seen = HashSet::new();
         let receivers = instructions()
-            .filter_map(|instruction| template_for(instruction, &instantiated))
+            .flat_map(|instruction| templates_for(instruction, &instantiated))
             .filter(|address| seen.insert(*address))
             .filter_map(|address| self.enqueue(address))
             .collect();
@@ -264,23 +264,21 @@ fn called_component(instruction: &Instruction) -> Option<ComponentAddress> {
     }
 }
 
-/// The template an instruction will load, where that is knowable before execution. `instantiated`
+/// The templates an instruction will load, where that is knowable before execution. `instantiated`
 /// answers for the components [`called_component`] named.
 ///
 /// A `PublishTemplate` yields nothing: its address exists only once its substate is committed, so
 /// the template it publishes is kept by the publish execution itself and, for a node that learns of
 /// one without executing its publish, by [`TemplatePrewarmHooks`].
-fn template_for(
-    instruction: &Instruction,
-    instantiated: &HashMap<ComponentAddress, TemplateAddress>,
-) -> Option<TemplateAddress> {
-    match instruction {
-        Instruction::CallFunction { address, .. } => Some(*address),
-        // `update_component_template` loads the template replacing the component's, and never the
-        // one it replaces.
-        Instruction::UpdateComponentTemplate { new_template, .. } => Some(*new_template),
-        _ => instantiated.get(&called_component(instruction)?).copied(),
-    }
+fn templates_for<'a>(
+    instruction: &'a Instruction,
+    instantiated: &'a HashMap<ComponentAddress, TemplateAddress>,
+) -> impl Iterator<Item = TemplateAddress> + 'a {
+    let referenced = instruction.referenced_templates().copied();
+    let from_component = called_component(instruction)
+        .and_then(|component| instantiated.get(&component))
+        .copied();
+    referenced.chain(from_component)
 }
 
 /// Resolves the templates components instantiate.
@@ -787,6 +785,45 @@ mod tests {
         let provider = FakeProvider::with_resident(template(1));
         drain(provider.clone(), &[template(1)]);
         assert_eq!(provider.loads(), 0);
+    }
+
+    #[test]
+    fn a_stealth_script_path_spend_queues_its_template_function() {
+        use tari_template_lib::types::{
+            Amount,
+            constants::TARI_TOKEN,
+            crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+            stealth::{
+                MerkleProof,
+                SpendCondition,
+                SpendWitness,
+                StealthInput,
+                StealthInputsStatement,
+                StealthOutputsStatement,
+                StealthTransferStatement,
+                TemplateFunction,
+            },
+        };
+
+        let (prewarmer, rx) = undrained(FakeProvider::default());
+        let func = TemplateFunction::new(template(4), "check".try_into().unwrap(), vec![]);
+        let leaf = SpendCondition::template_function(func);
+        let witness = SpendWitness::script_path(leaf, MerkleProof::empty());
+        let input = StealthInput::with_witness(PedersenCommitmentBytes::zero(), witness);
+        let outputs_statement =
+            StealthOutputsStatement::new_revealed_only(Amount::from(10u64), RistrettoPublicKeyBytes::zero());
+        let statement = StealthTransferStatement {
+            inputs_statement: StealthInputsStatement::new(vec![input], Amount::ZERO),
+            outputs_statement,
+            balance_proof: None,
+            covenant_claims: vec![],
+        };
+        let tx = transaction(|b| b.stealth_transfer(TARI_TOKEN, statement));
+
+        let wait = prewarmer.prewarm_transaction(&tx);
+
+        assert!(!wait.is_empty());
+        assert_eq!(queued_in(&rx), vec![template(4)]);
     }
 
     #[test]

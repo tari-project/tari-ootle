@@ -693,7 +693,7 @@ impl WasmProcess {
                 if let Some(TemplatePanic { message, line, col }) = self.env_mut(store).take_last_panic() {
                     log::debug!(target: WASM_DEBUG_LOG_TARGET, "📣 PANIC: ({}:{}) {}", line, col, message);
                     return Err(WasmExecutionError::Panic {
-                        message: expand_panic_message(func_def, message),
+                        message: expand_panic_message(func_def, message, limits::ENGINE_LIMITS.max_panic_message_size),
                         runtime_error: err,
                     });
                 }

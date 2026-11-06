@@ -870,10 +870,12 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     }
 
     /// Resolves a `TemplateFunction` spend-condition leaf against its template and validates it end-to-end: the
-    /// referenced function exists, has the required signature, and `args` carries exactly one well-formed-CBOR element
-    /// per leading (non-`SpendContext`) parameter. Because a condition tree commits only an opaque root, leaves are
-    /// hidden at creation; this runs at spend time (T2) when the leaf is revealed. Templates are immutable substates,
-    /// so a referenced template must already resolve — there is no "not yet published" skip case.
+    /// referenced function exists, has the required signature, and `args` carries exactly one element per leading
+    /// (non-`SpendContext`) parameter. Each element is charged for and decoded once, when the script is invoked, and
+    /// its type is checked by the dispatcher's `decode_exact::<T>`. Because a condition tree commits only an opaque
+    /// root, leaves are hidden at creation; this runs at spend time (T2) when the leaf is revealed. Templates are
+    /// immutable substates, so a referenced template must already resolve — there is no "not yet published" skip
+    /// case.
     fn validate_template_function(&self, tf: &TemplateFunction) -> Result<(), RuntimeError> {
         let template_def = self.get_template_def(&tf.template)?;
         let func = template_def
@@ -901,18 +903,6 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                 ),
             });
         }
-        // The host can verify each element is well-formed CBOR; full type conformance against the declared parameter
-        // type is enforced at the WASM deserialization boundary (the dispatcher's `decode_exact::<T>`).
-        for (i, arg) in tf.args.iter().enumerate() {
-            let _value: tari_bor::Value = decode_exact(arg).map_err(|e| RuntimeError::InvalidArgument {
-                argument: "TemplateFunction",
-                reason: format!(
-                    "spend script '{}' bound argument {} is not well-formed CBOR: {}",
-                    tf.function, i, e
-                ),
-            })?;
-        }
-
         Ok(())
     }
 
@@ -1105,6 +1095,11 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     ) -> Result<(), RuntimeError> {
         match condition {
             AtomicCondition::AccessRule(access_rule) => {
+                // The engine rejects an invalid access rule (an empty `any_of`/`all_of`, or an `m_of_n` with an
+                // out-of-range threshold or a duplicate requirement) wherever it stores a rule. A stealth output
+                // commits only to a hash of its spend conditions, so its rules are first seen here and must fail
+                // closed.
+                reject_invalid_rule("spend_condition", access_rule.find_invalid_rule())?;
                 let allowed = self
                     .tracker
                     .write_with_authorization(|state| state.authorization().check_access_rule(access_rule))?;
@@ -1187,7 +1182,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         witness_data: &[u8],
     ) -> Result<(), RuntimeError> {
         // (T2) Authoritative spend-time validation. A revealed leaf is untrusted spender data, so the function shape
-        // and bound-arg encoding are validated immediately before invoking.
+        // and bound-arg count are validated immediately before invoking.
         self.validate_template_function(tf)?;
 
         let exec = SpendScriptExecution {
@@ -2927,6 +2922,7 @@ where
                 if let Some(ref statement) = arg.statement {
                     self.tracker.account_fee_intent_stealth_transfer()?;
                     let has_view_key = self.tracker.write_with(|state| {
+                        state.account_stealth_transfer(statement)?;
                         let resource_lock = state.read_lock_substate(SubstateId::Resource(TARI_TOKEN))?;
                         let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
                         state.unlock_substate(resource_lock)?;
@@ -4379,6 +4375,7 @@ where
         // that will not pay traps here without extracting the crypto work. The resource peek is a
         // cheap substate read that determines whether the viewable-balance surcharge applies.
         let (address, has_view_key) = self.tracker.write_with(|state| {
+            state.account_stealth_transfer(&statement)?;
             let address = state.resolve_resource_address_ref(resource_address.clone())?;
             let resource_lock = state.read_lock_substate(SubstateId::Resource(address))?;
             let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
@@ -4790,5 +4787,47 @@ mod tests {
             exhausted,
             "repeatedly referencing a large blob must exhaust the compute allowance"
         );
+    }
+
+    #[test]
+    fn stealth_transfer_and_pay_fee_enforce_limits_before_substate_reads_and_auth() {
+        let valid =
+            StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
+        let mut too_many_inputs = valid.clone();
+        too_many_inputs.inputs_statement.inputs = (0..=limits::STEALTH_LIMITS.max_inputs)
+            .map(|_| StealthInput::new(PedersenCommitmentBytes::from_bytes(&[0u8; 32]).unwrap()))
+            .collect();
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        assert!(matches!(
+            runtime.stealth_transfer(TARI_TOKEN.into(), too_many_inputs.clone(), None),
+            Err(RuntimeError::ArgumentValidationError(
+                ArgumentValidationError::MaxStealthInputsExceeded { .. }
+            ))
+        ));
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let vault_id = tari_template_lib::types::VaultId::new([1u8; 32].into());
+        runtime.tracker.write_with(|state| {
+            state
+                .current_call_scope_mut()
+                .unwrap()
+                .add_substate_to_scope(vault_id.into())
+                .unwrap();
+        });
+        let pay_fee_args = EngineArgs::from(vec![
+            tari_bor::encode(&PayFeeArg {
+                amount: Amount::zero(),
+                statement: Some(too_many_inputs),
+            })
+            .unwrap()
+            .into(),
+        ]);
+        // The statement decoder bounds inputs at `MAX_STEALTH_INPUTS`, which is `STEALTH_LIMITS.max_inputs`, so an
+        // over-limit `PayFeeArg` is refused while decoding, before the vault is read.
+        assert!(matches!(
+            runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args),
+            Err(RuntimeError::InvalidArgument { argument, .. }) if argument.ends_with("PayFeeArg")
+        ));
     }
 }

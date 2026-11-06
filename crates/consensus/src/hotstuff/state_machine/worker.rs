@@ -16,7 +16,7 @@ use crate::{
             idle::Idle,
             initialising::Initialising,
             state::{ConsensusCurrentState, ConsensusState},
-            syncing::Syncing,
+            syncing::{SyncMode, Syncing},
         },
     },
     traits::{ConsensusSpec, SyncManager, hooks::ConsensusHooks},
@@ -97,13 +97,24 @@ where
             (ConsensusState::Idle(state), ConsensusStateEvent::RegisteredForEpoch { .. }) => {
                 ConsensusState::CheckSync(state.into())
             },
+            (ConsensusState::Idle(_), ConsensusStateEvent::PendingActivation { shard_group }) => {
+                ConsensusState::Syncing(Syncing::new(SyncMode::Presync {
+                    shard_group: *shard_group,
+                }))
+            },
             (ConsensusState::CheckSync(_), ConsensusStateEvent::NeedSync { target_epoch }) => {
-                ConsensusState::Syncing(Syncing::new(*target_epoch))
+                ConsensusState::Syncing(Syncing::new(SyncMode::Member {
+                    target_epoch: *target_epoch,
+                }))
             },
             (ConsensusState::CheckSync(state), ConsensusStateEvent::Ready) => ConsensusState::Running(state.into()),
             (ConsensusState::Syncing(state), ConsensusStateEvent::SyncComplete) => {
                 ConsensusState::Running(state.into())
             },
+            (ConsensusState::Syncing(_), ConsensusStateEvent::PresyncComplete { epoch }) => {
+                ConsensusState::Idle(Idle::presynced_at(*epoch))
+            },
+            (ConsensusState::Syncing(_), ConsensusStateEvent::PresyncDeferred) => ConsensusState::Idle(Idle::new()),
             // Resuming from a failure starts over: whatever was known about the epoch was established
             // before the failure and is not assumed to still hold.
             (ConsensusState::Sleeping, ConsensusStateEvent::Resume) => {

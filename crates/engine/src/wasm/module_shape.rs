@@ -33,7 +33,17 @@
 
 use tari_engine_types::limits::{self, CompileCounts, ModuleShape};
 use tari_wasmer_middlewares::metering::is_accounting;
-use wasmer::wasmparser::{DataKind, ElementItems, ElementKind, Operator, OperatorsReader, Parser, Payload, TypeRef};
+use wasmer::wasmparser::{
+    DataKind,
+    ElementItems,
+    ElementKind,
+    ElementSectionReader,
+    Operator,
+    OperatorsReader,
+    Parser,
+    Payload,
+    TypeRef,
+};
 
 use crate::wasm::{WasmValidationError, bulk_metering};
 
@@ -47,9 +57,9 @@ pub struct ModuleStructure {
 }
 
 /// Checks what only the module bytes show: that the module declares no start function, no more
-/// tables, globals, functions or variables than the limits, no function whose control flow or
-/// metering is larger than the function limits, and no more compile work than a binary at the
-/// size cap.
+/// tables, globals, active element segments, functions or variables than the limits, no function
+/// whose control flow or metering is larger than the function limits, and no more compile work
+/// than a binary at the size cap.
 ///
 /// A start function runs on every instantiation, before the engine has installed this call's
 /// metering allowance and outside any invocation it could attribute effects to. Templates have no
@@ -58,7 +68,9 @@ pub struct ModuleStructure {
 /// Tables and globals are both host storage built at every instantiation and claimed by a
 /// declaration far smaller than what it claims. Each table's element count is bounded by the
 /// tunables, which see one table at a time, so the number of tables is what bounds the storage all
-/// of them together claim; a global's slot is fixed, so its count is the whole bound.
+/// of them together claim; a global's slot is fixed, so its count is the whole bound. Each active
+/// element segment makes instantiation re-sync its target table in full, so the segment count is
+/// what bounds that work (see [`limits::WasmLimits::max_element_segments`]).
 ///
 /// Functions, the parameters and locals they declare and the metering checks compiled into them
 /// are bounded because the compile's cost for each is far above what the bytes asking for it are
@@ -147,18 +159,7 @@ pub(crate) fn validate_module_structure(code: &[u8]) -> Result<ModuleStructure, 
                     }
                 }
             },
-            Payload::ElementSection(reader) => {
-                for segment in reader.into_iter().flatten() {
-                    if !matches!(segment.kind, ElementKind::Active { .. }) {
-                        continue;
-                    }
-                    let entries = match segment.items {
-                        ElementItems::Functions(items) => u64::from(items.count()),
-                        ElementItems::Expressions(_, items) => u64::from(items.count()),
-                    };
-                    shape.element_segment_entries = shape.element_segment_entries.saturating_add(entries);
-                }
-            },
+            Payload::ElementSection(reader) => add_element_section(&mut shape, reader)?,
             _ => {},
         }
     }
@@ -171,6 +172,29 @@ pub(crate) fn validate_module_structure(code: &[u8]) -> Result<ModuleStructure, 
         });
     }
     Ok(ModuleStructure { shape, compile })
+}
+
+/// Counts the entries of the active element segments, refusing more of those segments than
+/// `max_element_segments`. The compile refuses a module with a second element section, so the
+/// segments of a module that loads are all counted in one call.
+fn add_element_section(shape: &mut ModuleShape, reader: ElementSectionReader<'_>) -> Result<(), WasmValidationError> {
+    let max_element_segments = limits::WASM_LIMITS.max_element_segments;
+    let mut active_segments = 0usize;
+    for segment in reader.into_iter().flatten() {
+        if !matches!(segment.kind, ElementKind::Active { .. }) {
+            continue;
+        }
+        active_segments += 1;
+        if active_segments > max_element_segments {
+            return Err(WasmValidationError::TooManyElementSegments { max_element_segments });
+        }
+        let entries = match segment.items {
+            ElementItems::Functions(items) => u64::from(items.count()),
+            ElementItems::Expressions(_, items) => u64::from(items.count()),
+        };
+        shape.element_segment_entries = shape.element_segment_entries.saturating_add(entries);
+    }
+    Ok(())
 }
 
 /// Counts a function of signature `ty` and its parameters. A signature the type section does not

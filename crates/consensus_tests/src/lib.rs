@@ -5,6 +5,8 @@ mod catch_up_no_vote;
 #[cfg(test)]
 mod catch_up_on_proposal_ahead;
 #[cfg(test)]
+mod catch_up_relay;
+#[cfg(test)]
 mod catch_up_rewind;
 #[cfg(test)]
 mod consensus;
@@ -40,6 +42,8 @@ mod leader_fast_skip;
 mod output_exists;
 #[cfg(test)]
 mod peer_message_admission;
+#[cfg(test)]
+mod presync;
 #[cfg(test)]
 mod proposal_certificate_signatures;
 #[cfg(test)]

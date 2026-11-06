@@ -3,7 +3,11 @@
 
 use std::{fmt, fmt::Display, io, str::FromStr};
 
-use bech32::{Bech32m, Hrp};
+use bech32::{
+    Bech32m,
+    Hrp,
+    primitives::decode::{CheckedHrpstring, CheckedHrpstringError},
+};
 use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
 use ootle_network::{Network, NetworkParseError};
 use tari_crypto::ristretto::RistrettoPublicKey;
@@ -198,7 +202,9 @@ impl OotleAddress {
 
     pub fn decode_bech32(s: &str) -> Result<Self, OotleAddressError> {
         const KL: usize = RistrettoPublicKeyBytes::length();
-        let (hrp, data) = bech32::decode(s)?;
+        let checked = CheckedHrpstring::new::<Bech32m>(s)?;
+        let hrp = checked.hrp();
+        let data: Vec<u8> = checked.byte_iter().collect();
         let network = network_from_hrp(&hrp).ok_or(OotleAddressError::UnrecognisedHrp { hrp })?;
         if data.len() < KL * 2 {
             return Err(OotleAddressError::AddressLengthTooShort {
@@ -270,6 +276,8 @@ impl FromStr for OotleAddress {
 pub enum OotleAddressError {
     #[error("Bech32 decode error: {0}")]
     Bech32DecodeError(#[from] bech32::DecodeError),
+    #[error("Bech32m decode error: {0}")]
+    Bech32mDecodeError(#[from] CheckedHrpstringError),
     #[error("Bech32 encode error: {0}")]
     Bech32EncodeError(#[from] bech32::EncodeError),
     #[error("Unrecognised HRP: {hrp}")]
@@ -457,6 +465,16 @@ mod tests {
         assert_eq!(addr.view_only_key(), parsed.view_only_key());
         assert_eq!(addr.account_public_key(), parsed.account_public_key());
         assert_eq!(addr.destination_tag(), None);
+    }
+
+    #[test]
+    fn it_rejects_bech32_v1_checksum() {
+        let addr = sample(4);
+        let hrp = hrp_from_network(addr.network());
+        let mut payload = Vec::with_capacity(64);
+        addr.encode_keys_to_writer(&mut payload).unwrap();
+        let bech32_v1 = bech32::encode::<bech32::Bech32>(hrp, &payload).unwrap();
+        assert!(OotleAddress::decode_bech32(&bech32_v1).is_err());
     }
 
     mod with_destination_tag {

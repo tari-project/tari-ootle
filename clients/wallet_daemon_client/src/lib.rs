@@ -1174,7 +1174,11 @@ impl WalletDaemonClient {
             // If we don't have the token and the method is anything else than "auth.login" it will fail.
             builder = builder.header(AUTHORIZATION, format!("Bearer {}", token.as_str()));
         }
-        let resp = builder.body(request_json.to_string()).send().await?;
+        let resp = builder
+            .body(request_json.to_string())
+            .send()
+            .await?
+            .error_for_status()?;
         let val = resp.json().await?;
         jsonrpc_result(val)
     }

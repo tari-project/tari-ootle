@@ -72,7 +72,7 @@ impl GrpcBaseNodeClient {
     }
 
     pub async fn get_mempool_transaction_count(&mut self) -> Result<usize, BaseNodeClientError> {
-        let inner = self.connection().await.unwrap();
+        let inner = self.connection().await?;
         let request = grpc::GetMempoolTransactionsRequest {};
 
         let mut count = 0;
@@ -262,7 +262,7 @@ impl BaseNodeClient for GrpcBaseNodeClient {
             count,
         };
         let mut stream = inner.get_side_chain_utxos(request).await?.into_inner();
-        let mut responses = Vec::with_capacity(count as usize);
+        let mut responses = Vec::with_capacity(usize::try_from(count).unwrap_or(0).min(1024));
         loop {
             match stream.message().await {
                 Ok(Some(resp)) => {

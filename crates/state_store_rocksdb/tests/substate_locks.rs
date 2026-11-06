@@ -1002,9 +1002,15 @@ fn a_lock_on_a_pending_block_diff_substate_carries_its_value() {
         .unwrap();
     assert_eq!(locked.len(), 3);
     let on_chain = locked.iter().find(|l| l.substate_id == substate_id).unwrap();
-    assert_eq!(on_chain.value, Some(value));
+    assert_eq!(
+        tari_bor::encode(on_chain.value.as_ref().unwrap()).unwrap(),
+        tari_bor::encode(&value).unwrap()
+    );
     let on_chain_read = locked.iter().find(|l| l.substate_id == read_substate_id).unwrap();
-    assert_eq!(on_chain_read.value, Some(read_value));
+    assert_eq!(
+        tari_bor::encode(on_chain_read.value.as_ref().unwrap()).unwrap(),
+        tari_bor::encode(&read_value).unwrap()
+    );
     let on_fork = locked.iter().find(|l| l.substate_id == fork_substate_id).unwrap();
     assert!(on_fork.value.is_none());
 

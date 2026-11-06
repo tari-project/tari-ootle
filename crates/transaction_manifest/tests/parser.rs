@@ -1749,14 +1749,9 @@ fn nested_cbor_and_metadata_macros_enforce_cumulative_depth() {
         }}
     "#
     );
-    let err = parse_manifest(
-        &err_nested_cbor,
-        HashMap::new(),
-        Default::default(),
-        Default::default(),
-    )
-    .err()
-    .expect("nested cbor! at MAX_DECODE_DEPTH must fail");
+    let err = parse_manifest(&err_nested_cbor, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("nested cbor! at MAX_DECODE_DEPTH must fail");
     assert!(err.to_string().contains("nested deeper than"), "{err}");
 
     // 3. `metadata!({"k": 1})` adds 2 container levels (Tag + Map), so 61 brackets puts the scalar at depth 63

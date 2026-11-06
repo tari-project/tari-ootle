@@ -486,6 +486,46 @@ async fn the_locks_of_a_stored_transaction_are_left_for_it_to_resolve() {
     );
 }
 
+#[tokio::test]
+async fn release_unlinked_lock_releases_a_lock_no_transaction_holds() {
+    let test = TestWithNetwork::with_network(CannedTransactionResultInterface::not_found());
+    test.add_unspent_output(25u64);
+    let lock_id = test.new_lock().keep_locked();
+    test.sdk()
+        .confidential_outputs_api()
+        .lock_outputs_by_amount(lock_id, &Test::test_vault_address(), 20u64)
+        .unwrap();
+    assert_eq!(test.get_unspent_balance(), 0);
+
+    assert!(test.sdk().locks_api().release_unlinked_lock(lock_id).unwrap());
+
+    assert_eq!(test.get_unspent_balance(), 25);
+    assert!(
+        !test.sdk().locks_api().release_unlinked_lock(lock_id).unwrap(),
+        "a released lock no longer exists"
+    );
+}
+
+#[tokio::test]
+async fn release_unlinked_lock_leaves_a_lock_linked_to_a_stored_transaction() {
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    let (test, lock_ids) = wallet_with_two_locks_for(CannedTransactionResultInterface::not_found(), &transaction);
+
+    for lock_id in lock_ids {
+        assert!(!test.sdk().locks_api().release_unlinked_lock(lock_id).unwrap());
+    }
+
+    assert_eq!(test.get_unspent_balance(), 0, "the outputs stay locked");
+    assert_eq!(
+        test.sdk()
+            .locks_api()
+            .get_locks_by_transaction_id(transaction_id)
+            .unwrap(),
+        lock_ids.to_vec()
+    );
+}
+
 fn build_dry_run_transaction() -> Transaction {
     Transaction::builder_localnet(Epoch(100))
         .with_dry_run(true)

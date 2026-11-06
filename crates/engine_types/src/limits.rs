@@ -10,6 +10,14 @@ pub struct WasmLimits {
     pub max_function_name_length: usize,
     /// Maximum number of functions a template's ABI definition may list.
     pub max_functions: usize,
+    /// Maximum depth of an ABI type a template declares for an argument or return value, the type itself at depth 1.
+    /// The engine renders a declared type into the message of a dispatcher's decode failure, so every ABI type is
+    /// bounded in depth, in parts ([`WasmLimits::max_abi_type_nodes`]), in tuple width
+    /// ([`WasmLimits::max_function_arguments`]) and in name length ([`WasmLimits::max_function_name_length`]) at
+    /// every level.
+    pub max_abi_type_depth: usize,
+    /// Maximum number of types, counting every nested one, in an ABI type a template declares.
+    pub max_abi_type_nodes: usize,
     /// Maximum number of functions a module may contain, imported and defined together. Every one
     /// of them is Cranelift-compiled at publish, at a cost per function that its bytes do not
     /// reflect: an empty function is four bytes of binary. `rustc`'s wasm32 output for the
@@ -59,12 +67,23 @@ pub struct WasmLimits {
     /// sized by a guest operand. The cap is well above `max_functions`, which bounds what a
     /// template's own `__indirect_function_table` needs.
     pub max_table_elements: u32,
+    /// Maximum number of active element segments a module may declare. Wasmer re-syncs a
+    /// fixed-size funcref table in full after writing each active segment into it at
+    /// instantiation, empty segments included, so the work is the segment count times the table
+    /// slots while an empty segment costs ~5 bytes of binary. [`PER_TEMPLATE_TABLE_SLOT`] covers the
+    /// sync wasmer runs on every fixed table once the instance is built plus the one a single active
+    /// segment adds. `wasm-ld` emits one active segment for a module's
+    /// `__indirect_function_table`. Only active segments count: declarative and passive ones stay
+    /// out of every table at instantiation.
+    pub max_element_segments: usize,
 }
 
 pub const WASM_LIMITS: WasmLimits = WasmLimits {
     max_function_arguments: 32,
     max_function_name_length: 256,
     max_functions: 8192,
+    max_abi_type_depth: 16,
+    max_abi_type_nodes: 256,
     max_module_functions: 2048,
     max_module_variables: 512 * 1024,
     max_function_metering_checks: 8192,
@@ -75,6 +94,7 @@ pub const WASM_LIMITS: WasmLimits = WasmLimits {
     max_globals: 1024,
     max_tables: 4,
     max_table_elements: 16_384,
+    max_element_segments: 1,
 };
 
 /// Maximum Wasmer metering points a single template invocation may consume. Enforced by the
@@ -337,24 +357,26 @@ pub const PER_TEMPLATE_DATA_SEGMENT: u64 = 700;
 /// Each slot a declared table claims, whether or not anything is written into it.
 ///
 /// Allocating and zeroing the tables is separate from filling them: four tables of
-/// `max_table_elements` with no element section at all measure at 0.114 ms against 192 bytes of
-/// binary. Measured at ~13 points per slot.
-pub const PER_TEMPLATE_TABLE_SLOT: u64 = 16;
+/// `max_table_elements` with no element section at all measure at ~0.083 ms against 192 bytes of
+/// binary, ~11 points per slot, which includes the pass wasmer makes over every fixed-size funcref
+/// table to sync it once the instance is built. The active element segment a module may declare
+/// makes wasmer sync its fixed-size table once more, another ~10 points per slot: one empty active
+/// segment on a fixed table of `max_table_elements` measures at ~411,000 points for the whole
+/// instantiation. The price covers both passes.
+pub const PER_TEMPLATE_TABLE_SLOT: u64 = 24;
 
 /// Each element-segment entry written into a table.
 ///
 /// Active element segments initialise the instance's tables at every instantiation, the same class
 /// of work as copying the data segments but per funcref rather than per byte.
 ///
-/// What bounds the entry count is the binary size, not the table limits. Nothing caps how many
-/// element segments a module declares, and several may target one table at overlapping offsets —
-/// each is written out in turn — so `max_tables` x `max_table_elements` (65,536) is the widest a
-/// single pass over the tables can be, not the most a module can ask for. An entry is a LEB128 func
-/// index, so roughly a byte of binary buys one: a publish at
-/// [`EngineLimits::max_template_binary_size_bytes`] can carry on the order of a million.
+/// A module declares at most [`WasmLimits::max_element_segments`] active segments, and
+/// instantiation refuses one whose entries run past the end of its table before writing any of
+/// them, so a module that loads writes at most `max_table_elements` entries.
 ///
-/// 65,536 entries measure at ~0.21 ms once the table allocation they used to be conflated with is
-/// priced separately by [`PER_TEMPLATE_TABLE_SLOT`], i.e. ~28 points each. Set above that.
+/// One segment filling a fixed table of `max_table_elements` measures at ~0.062 ms, ~511,000 points
+/// over a module with no table. Taking away the same table behind an empty segment, which
+/// [`PER_TEMPLATE_TABLE_SLOT`] prices, leaves ~10 points per entry written. Set well above that.
 pub const PER_TEMPLATE_ELEMENT_ENTRY: u64 = 32;
 
 /// What a module's binary says about the work instantiating it will cost.

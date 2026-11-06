@@ -48,9 +48,9 @@ variables; no config file needs to be mounted.
 docker run -d --name walletd \
   -v walletd-data:/data \
   -p 127.0.0.1:5100:5100 \
-  -e TARI_NETWORK=esmeralda \
+  -e TARI_NETWORK=mainnet \
   -e JRPC_LISTEN_ON=0.0.0.0:5100 \
-  -e OOTLE_WALLETD_INDEXER_API_URL=https://ootle-indexer-a.tari.com/,https://ootle-indexer-b.tari.com/ \
+  -e OOTLE_WALLETD_INDEXER_API_URL=https://indexer-a.ootle.tari.com/,https://indexer-b.ootle.tari.com/ \
   -e OOTLE_WALLETD_KEYRING_PASSWORD=<password> \
   ghcr.io/tari-project/ootle-walletd:vX.Y.Z
 
@@ -62,7 +62,7 @@ curl -fsS http://127.0.0.1:5100/health
 | `TARI_NETWORK` | `--network` | `esmeralda` | Network to join |
 | `TARI_BASE_DIR` | `--base-path` / `-b` | `/data` | Data directory; the wallet uses `<base>/<network>/` |
 | `JRPC_LISTEN_ON` | `--listen-on` | `127.0.0.1:5100` | JSON-RPC, web UI and `/health` listener. Set `0.0.0.0:<port>` only when something outside the container's network namespace must reach it (`docker run -p`, ECS `bridge` mode); see [Running headless in ECS](#running-headless-in-ecs) |
-| `OOTLE_WALLETD_INDEXER_API_URL` | `--indexer-api-url` / `-i` | the network preset (Esmeralda: the two public Tari indexers) | Comma-separated indexer URLs; one is picked at random, the rest are failovers |
+| `OOTLE_WALLETD_INDEXER_API_URL` | `--indexer-api-url` / `-i` | the network preset (Mainnet and Esmeralda: two public Tari indexers each) | Comma-separated indexer URLs; one is picked at random, the rest are failovers |
 | `OOTLE_WALLETD_KEYRING_PASSWORD` | `--override-keyring-password` | none | Password that encrypts the wallet seed. **Required in a container** |
 | `OOTLE_WALLETD_AUTHENTICATION` | `--authentication` | `webauthn` | `webauthn` or `none` |
 | `OOTLE_WALLETD_AUTO_CLAIM_BURNS` | `--auto-claim-burns` | `true` | Claim burn proofs found in the burn proof directory |

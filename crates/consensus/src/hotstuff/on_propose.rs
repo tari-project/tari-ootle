@@ -475,7 +475,8 @@ where TConsensusSpec: ConsensusSpec
 
         let mut substate_store =
             PendingSubstateStore::init(tx, state_anchor_leaf, self.config.consensus_constants.num_preshards)?
-                .with_pledge_budget(self.config.consensus_constants.max_block_pledge_bytes);
+                .with_pledge_budget(self.config.consensus_constants.max_block_pledge_bytes)
+                .with_input_load_budget(self.config.consensus_constants.max_block_input_load_bytes);
 
         let mut executed_transactions = HashMap::new();
 
@@ -504,8 +505,9 @@ where TConsensusSpec: ConsensusSpec
         let mut invalid_foreign_proposals = Vec::new();
         let mut dropped_foreign_proposals = false;
 
-        // No need to include evidence from justified block if no transactions are included in the next block
-        if !batch.transactions.is_empty() {
+        // No need to include evidence from justified block if no transactions or foreign proposals are included
+        // in the next block
+        if !batch.transactions.is_empty() || !batch.foreign_proposals.is_empty() {
             // A replica evaluates this block as: the newly justified block, then the commands in block order
             // (foreign proposals sort before the transaction commands, see `BlockCommands`), all against
             // a single change set. The commands generated below must be derived from that same sequence, or
@@ -989,6 +991,15 @@ where TConsensusSpec: ConsensusSpec
                 info!(
                     target: LOG_TARGET,
                     "📦 PROPOSE: transaction {} would take the block's pledge to {total_bytes} bytes, past the \
+                     {max_bytes} budget. Deferring it to a later block",
+                    pool_tx.id(),
+                );
+                Ok(None)
+            },
+            PreparedTransaction::InputLoadBudgetReached { total_bytes, max_bytes } => {
+                info!(
+                    target: LOG_TARGET,
+                    "📦 PROPOSE: transaction {} would take the input bytes the block loads to {total_bytes}, past the \
                      {max_bytes} budget. Deferring it to a later block",
                     pool_tx.id(),
                 );

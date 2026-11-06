@@ -7,7 +7,8 @@ use crate::args::WorkspaceId;
 
 #[derive(Debug, Clone, Default)]
 pub struct WorkspaceIds {
-    next_id: WorkspaceId,
+    /// One past the highest allocated ID; `WorkspaceId::MAX + 1` represents exhaustion.
+    next_id: u32,
     ids: HashMap<String, WorkspaceId>,
 }
 
@@ -20,7 +21,7 @@ impl WorkspaceIds {
     }
 
     fn progress_to_next_id(&mut self) -> WorkspaceId {
-        let id = self.next_id;
+        let id = self.next_id();
         self.next_id += 1;
         id
     }
@@ -36,10 +37,14 @@ impl WorkspaceIds {
     }
 
     pub fn set_next_id(&mut self, id: WorkspaceId) {
-        self.next_id = id;
+        self.next_id = u32::from(id);
+    }
+
+    pub fn advance_past(&mut self, id: WorkspaceId) {
+        self.next_id = self.next_id.max(u32::from(id) + 1);
     }
 
     pub fn next_id(&self) -> WorkspaceId {
-        self.next_id
+        self.next_id.try_into().expect("Workspace ID overflow")
     }
 }

@@ -54,7 +54,12 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::{
     AtomicDb,
-    global::{BlockHeaderModel, EpochData, GlobalDbAdapter, models::ValidatorNode},
+    global::{
+        BlockHeaderModel,
+        EpochData,
+        GlobalDbAdapter,
+        models::{ShardGroupSize, ValidatorNode},
+    },
 };
 use tari_sidechain::FixedHash;
 use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
@@ -223,6 +228,9 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
     ) -> Result<(), Self::Error> {
         use crate::global::schema::validator_nodes;
         let addr = serialize_json(&address)?;
+        let power = i64::try_from(power.value()).map_err(|_| SqliteStorageError::ConversionError {
+            reason: format!("Vote power {power} of validator node {public_key} exceeds the i64 column range"),
+        })?;
 
         diesel::insert_into(validator_nodes::table)
             .values((
@@ -231,7 +239,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 validator_nodes::shard_key.eq(shard_key.as_bytes()),
                 validator_nodes::start_epoch.eq(start_epoch.as_u64() as i64),
                 validator_nodes::fee_claim_public_key.eq(fee_claim_public_key.as_bytes()),
-                validator_nodes::power.eq(power.value() as i64),
+                validator_nodes::power.eq(power),
             ))
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
@@ -253,6 +261,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         diesel::update(validator_nodes::table)
             .set(validator_nodes::end_epoch.eq(deactivation_epoch.as_u64() as i64))
             .filter(validator_nodes::public_key.eq(public_key.as_bytes()))
+            .filter(validator_nodes::end_epoch.is_null())
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
@@ -392,6 +401,40 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         Ok(count as u64)
     }
 
+    fn validator_nodes_size_of_shard_group(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<ShardGroupSize, Self::Error> {
+        use crate::global::schema::{committees, validator_nodes};
+
+        let powers = committees::table
+            .inner_join(validator_nodes::table)
+            .filter(committees::epoch.eq(epoch.as_u64() as i64))
+            .filter(committees::shard_start.eq(shard_group.start().as_u32() as i32))
+            .filter(committees::shard_end.eq(shard_group.end().as_u32() as i32))
+            .select((validator_nodes::id, validator_nodes::power))
+            .get_results::<(i32, i64)>(tx.connection())
+            .map_err(|source| SqliteStorageError::DieselError {
+                source,
+                operation: "validator_nodes_size_of_shard_group",
+            })?;
+
+        let num_members = powers.len() as u64;
+        let total_power = powers.into_iter().try_fold(VotePower::zero(), |total, (id, power)| {
+            total
+                .checked_add(models::power_from_db(power, id)?)
+                .ok_or_else(|| SqliteStorageError::ConversionError {
+                    reason: format!("Total vote power of shard group {shard_group} in epoch {epoch} overflows u64"),
+                })
+        })?;
+        Ok(ShardGroupSize {
+            num_members,
+            total_power,
+        })
+    }
+
     fn validator_nodes_clear_committees(
         &self,
         tx: &mut Self::DbTransaction<'_>,
@@ -488,7 +531,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 Ok(CommitteeMember {
                     address,
                     public_key,
-                    vote_power: VotePower::of(vn.power as u64),
+                    vote_power: vn.try_vote_power()?,
                 })
             })
             .collect()
@@ -531,7 +574,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                             vn.id
                         ))
                     })?,
-                    vote_power: VotePower::of(vn.power as u64),
+                    vote_power: vn.try_vote_power()?,
                 });
         }
 

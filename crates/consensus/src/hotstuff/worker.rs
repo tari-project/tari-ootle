@@ -195,6 +195,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             transaction_executor.clone(),
             config.consensus_constants.max_transaction_validity_epochs,
             config.consensus_constants.max_block_pledge_bytes,
+            config.consensus_constants.max_transaction_input_load_bytes,
         );
         let uncommitted_templates = transaction_manager.uncommitted_templates().clone();
 
@@ -905,6 +906,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 // available.
                 self.try_resume_pending_end_of_epoch().await?;
             },
+            // A running node is already a committee member, so it has nothing to presync.
+            EpochManagerEvent::PendingActivation { .. } => {},
         }
 
         Ok(())

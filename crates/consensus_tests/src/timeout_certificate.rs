@@ -358,7 +358,7 @@ fn a_timeout_certificate_signed_on_the_local_network_is_accepted() {
 /// timeout signed as a validator of one network attests to nothing about a view of another.
 #[test]
 fn a_timeout_certificate_signed_on_another_network_is_rejected() {
-    let other_network = Network::Igor;
+    let other_network = Network::Esmeralda;
     assert_eq!(
         ProtocolVersion::at(other_network, TEST_EPOCH),
         ProtocolVersion::at(NETWORK, TEST_EPOCH),

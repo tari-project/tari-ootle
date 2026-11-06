@@ -109,6 +109,8 @@ const ENGINE_FINGERPRINT_BITS: u64 = {
         max_function_arguments,
         max_function_name_length,
         max_functions,
+        max_abi_type_depth,
+        max_abi_type_nodes,
         max_module_functions,
         max_module_variables,
         max_function_metering_checks,
@@ -119,12 +121,15 @@ const ENGINE_FINGERPRINT_BITS: u64 = {
         max_globals,
         max_tables,
         max_table_elements,
+        max_element_segments,
     } = limits::WASM_LIMITS;
     const_hash::finish(const_hash::values(h, &[
         limits::MAX_WASM_POINTS_PER_CALL as u128,
         max_function_arguments as u128,
         max_function_name_length as u128,
         max_functions as u128,
+        max_abi_type_depth as u128,
+        max_abi_type_nodes as u128,
         max_module_functions as u128,
         max_module_variables as u128,
         max_function_metering_checks as u128,
@@ -135,6 +140,7 @@ const ENGINE_FINGERPRINT_BITS: u64 = {
         max_globals as u128,
         max_tables as u128,
         max_table_elements as u128,
+        max_element_segments as u128,
         // The compile work `validate_module_structure` refuses a module for is these counts at these
         // prices, against the size cap.
         limits::ENGINE_LIMITS.max_template_binary_size_bytes as u128,

@@ -845,6 +845,7 @@ impl<TStore: StateReader + Clone> StateTracker<TStore> {
             let checkpoint_state = state.clone();
 
             // After checkpointing, the main intent has a cleared workspace
+            drop(state.take_last_instruction_output());
             state.workspace_mut().clear_items();
             let proofs = state.workspace_mut().take_all_proofs();
             for proof_id in proofs {
@@ -855,5 +856,45 @@ impl<TStore: StateReader + Clone> StateTracker<TStore> {
 
         *self.fee_checkpoint.borrow_mut() = Some(state);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_engine_types::virtual_substate::{VirtualSubstate, VirtualSubstateId};
+
+    use super::*;
+    use crate::state_store::memory::MemoryStateStore;
+
+    #[test]
+    fn fee_checkpoint_clears_last_instruction_output_and_workspace() {
+        let tracker = StateTracker::new(
+            MemoryStateStore::new(),
+            [(VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(0))]
+                .into_iter()
+                .collect(),
+            CallScope::new(),
+            HashSet::new(),
+            Hash32::zero(),
+            Hash32::zero(),
+            TransactionWeight::new(0),
+            DeclaredInputLoad::default(),
+            WasmMeteringRate::unmetered(),
+            ExhaustBurnRate::new(0),
+            FeeScale::default(),
+            Network::LocalNet,
+            true,
+        );
+
+        let output = IndexedValue::from_type(&123u64).unwrap();
+        let item = IndexedValue::from_type(&456u64).unwrap();
+        tracker.write_with(|state| {
+            state.set_last_instruction_output(output);
+            state.workspace_mut().insert(1, item).unwrap();
+        });
+        tracker.fee_checkpoint().unwrap();
+
+        assert!(tracker.take_last_instruction_output().is_none());
+        tracker.read_with(|state| assert_eq!(state.workspace().all_ids_iter().count(), 0));
     }
 }

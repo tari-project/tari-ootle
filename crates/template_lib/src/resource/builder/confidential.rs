@@ -364,6 +364,6 @@ mod tests {
         let builder = ResourceBuilder::confidential().update_metadata(AccessRule::AllowAll, UpdateRule::Owner);
         let action = ResourceAuthAction::UpdateMetadata;
         assert_eq!(builder.access_rules.get_access_rule(&action), &AccessRule::AllowAll);
-        assert_eq!(builder.access_rules.get_updater(&action), &UpdateRule::Owner);
+        assert!(matches!(builder.access_rules.get_updater(&action), UpdateRule::Owner));
     }
 }

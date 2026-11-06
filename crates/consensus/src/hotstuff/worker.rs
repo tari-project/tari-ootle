@@ -905,6 +905,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 // available.
                 self.try_resume_pending_end_of_epoch().await?;
             },
+            // A running node is already a committee member, so it has nothing to presync.
+            EpochManagerEvent::PendingActivation { .. } => {},
         }
 
         Ok(())

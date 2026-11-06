@@ -1,11 +1,17 @@
 //  Copyright 2026 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-//! Plain-language descriptions of what a signing request authorises, for the
+//! Plain-language descriptions of what a signing or transaction request authorises, for the
 //! instructions a person can verify by reading them. Everything else falls back
 //! to the generic instruction list.
 
-import type { Blobs, Instruction, InstructionArg } from "@tari-project/ootle-ts-bindings";
+import type {
+  Blobs,
+  ComponentReference,
+  Instruction,
+  InstructionArg,
+  WorkspaceOffsetId,
+} from "@tari-project/ootle-ts-bindings";
 import { blobBytes, toHexString } from "@utils/helpers";
 import { decode } from "cbor2";
 
@@ -131,6 +137,267 @@ export function describeGovernanceCall(instruction: Instruction, blobs: Blobs): 
   }
 }
 
+const RESOURCE_ADDRESS_TAG = 131;
+const U64_LIMIT = 1n << 64n;
+
+function resourceAddress(value: unknown): string {
+  if (typeof value === "object" && value !== null && "tag" in value && "contents" in value) {
+    const { tag, contents } = value as { tag: unknown; contents: unknown };
+    if (tag === RESOURCE_ADDRESS_TAG && (contents instanceof Uint8Array || Array.isArray(contents))) {
+      return `resource_${toHexString(contents)}`;
+    }
+  }
+  throw new Error("argument is not a resource address");
+}
+
+/// An `Amount` in any encoding the engine accepts for one: an integer, a
+/// decimal string, or its canonical `[low, high]` pair of u64 digits.
+function amount(value: unknown): bigint {
+  if (typeof value === "string" && /^[0-9]+$/.test(value)) {
+    return BigInt(value);
+  }
+  if (Array.isArray(value) && value.length === 2) {
+    const [low, high] = value.map(integer);
+    if (low >= 0n && high >= 0n && low < U64_LIMIT && high < U64_LIMIT) {
+      return low + (high << 64n);
+    }
+  }
+  const n = integer(value);
+  if (n < 0n) {
+    throw new Error("amount is negative");
+  }
+  return n;
+}
+
+export type WithdrawnValue =
+  | { kind: "amount"; amount: bigint }
+  | { kind: "all" }
+  | { kind: "non_fungibles"; count: number }
+  | { kind: "confidential" };
+
+/// Where a withdrawn bucket goes. `unknown` covers every destination other than
+/// a single `deposit` call or fee payment consuming the whole bucket; the
+/// instruction list is then the only account of it.
+export type WithdrawalDestination =
+  | { kind: "deposit"; component: string; isOwnAccount: boolean }
+  | { kind: "fee" }
+  | { kind: "unknown" };
+
+export interface AccountWithdrawal {
+  account: string;
+  resource: string;
+  value: WithdrawnValue;
+  destination: WithdrawalDestination;
+}
+
+export interface FeePayment {
+  account: string;
+  amount: bigint;
+}
+
+export interface InstructionsDescription {
+  withdrawals: AccountWithdrawal[];
+  fees: FeePayment[];
+  /// Instructions that are neither part of a described withdrawal or fee
+  /// payment nor a stealth transfer, which the wallet summarises itself.
+  undescribed: number;
+}
+
+function withdrawnValue(method: string, args: InstructionArg[], blobs: Blobs): WithdrawnValue | null {
+  switch (method) {
+    case "withdraw":
+      return { kind: "amount", amount: amount(argValue(args[1], blobs)) };
+    case "withdraw_approved":
+      return { kind: "amount", amount: amount(argValue(args[2], blobs)) };
+    case "withdraw_all":
+      return { kind: "all" };
+    case "withdraw_non_fungible":
+      return { kind: "non_fungibles", count: 1 };
+    case "withdraw_many_non_fungibles": {
+      const ids = argValue(args[1], blobs);
+      if (!Array.isArray(ids)) {
+        throw new Error("non-fungible ids are not a list");
+      }
+      return { kind: "non_fungibles", count: ids.length };
+    }
+    case "withdraw_confidential":
+      return { kind: "confidential" };
+    default:
+      return null;
+  }
+}
+
+function argKeys(args: InstructionArg[]): number[] {
+  return args.flatMap((arg) => (typeof arg === "object" && "Workspace" in arg ? [arg.Workspace.id] : []));
+}
+
+function componentKeys(component: ComponentReference): number[] {
+  return "Workspace" in component ? [component.Workspace] : [];
+}
+
+/// Every workspace key an instruction reads. A read leaves a bucket on the
+/// workspace, so value can leave it by any of these, e.g. `TakeFromBucket`.
+function workspaceKeysRead(instruction: Instruction): number[] {
+  if (typeof instruction !== "object") {
+    return [];
+  }
+  if ("CallMethod" in instruction) {
+    const { call, args } = instruction.CallMethod;
+    return [...componentKeys(call), ...argKeys(args)];
+  }
+  if ("CallFunction" in instruction) {
+    return argKeys(instruction.CallFunction.args);
+  }
+  if ("CreateAccount" in instruction) {
+    const bucket = instruction.CreateAccount.bucket_workspace_id;
+    return bucket ? [bucket.id] : [];
+  }
+  if ("Assert" in instruction) {
+    return [instruction.Assert.key.id];
+  }
+  if ("TakeFromBucket" in instruction) {
+    return [instruction.TakeFromBucket.input_bucket.id];
+  }
+  if ("PutIntoBucket" in instruction) {
+    const { src, dest } = instruction.PutIntoBucket;
+    return [src.id, dest.id];
+  }
+  if ("PayFeeFromBucket" in instruction) {
+    return [instruction.PayFeeFromBucket.bucket.id];
+  }
+  if ("StealthTransfer" in instruction) {
+    const { resource_address_ref, revealed_input_bucket } = instruction.StealthTransfer;
+    return [
+      ...("Workspace" in resource_address_ref ? [resource_address_ref.Workspace.id] : []),
+      ...(revealed_input_bucket ? [revealed_input_bucket.id] : []),
+    ];
+  }
+  if ("AuthorizeProof" in instruction) {
+    return [instruction.AuthorizeProof.proof.id];
+  }
+  if ("DropProofAuthorization" in instruction) {
+    return [instruction.DropProofAuthorization.proof.id];
+  }
+  if ("UpdateComponentTemplate" in instruction) {
+    const { component, migrate } = instruction.UpdateComponentTemplate;
+    return [...componentKeys(component), ...(migrate ? argKeys(migrate.args) : [])];
+  }
+  return [];
+}
+
+function wholeItem({ id, offset }: WorkspaceOffsetId): number | null {
+  return offset == null ? id : null;
+}
+
+/// The bucket an instruction consumes whole, and where it goes, when the
+/// instruction is a `deposit` of one workspace bucket or a fee payment from one.
+function bucketConsumer(
+  instruction: Instruction,
+  ownAccounts: ReadonlySet<string>,
+): { key: number; destination: WithdrawalDestination } | null {
+  if (typeof instruction === "object" && "PayFeeFromBucket" in instruction) {
+    const key = wholeItem(instruction.PayFeeFromBucket.bucket);
+    return key == null ? null : { key, destination: { kind: "fee" } };
+  }
+  const target = callTarget(instruction);
+  const [arg] = target?.args ?? [];
+  if (!target || target.method !== "deposit" || target.args.length !== 1 || typeof arg !== "object") {
+    return null;
+  }
+  const key = "Workspace" in arg ? wholeItem(arg.Workspace) : null;
+  if (key == null) {
+    return null;
+  }
+  const destination: WithdrawalDestination = {
+    kind: "deposit",
+    component: target.address,
+    isOwnAccount: ownAccounts.has(target.address),
+  };
+  return { key, destination };
+}
+
+/// Describes the withdrawals from the wallet's own accounts and the fee
+/// payments in one instruction list (a transaction's instructions or its fee
+/// instructions), following each withdrawn bucket to the `deposit` or fee
+/// payment that consumes it. A withdrawal whose bucket any other instruction
+/// reads keeps an `unknown` destination. Every other instruction is counted as
+/// undescribed, so a caller can tell when the summary is not the whole story.
+export function describeInstructions(
+  instructions: Instruction[],
+  blobs: Blobs,
+  ownAccounts: ReadonlySet<string>,
+): InstructionsDescription {
+  const withdrawals: AccountWithdrawal[] = [];
+  const fees: FeePayment[] = [];
+  let undescribed = 0;
+  // Workspace key -> the withdrawal whose bucket it holds, until something
+  // other than a whole-bucket deposit or fee payment touches it.
+  const buckets = new Map<number, AccountWithdrawal>();
+
+  for (let i = 0; i < instructions.length; i++) {
+    const instruction = instructions[i];
+
+    const consumer = bucketConsumer(instruction, ownAccounts);
+    for (const key of workspaceKeysRead(instruction)) {
+      if (key !== consumer?.key) {
+        buckets.delete(key);
+      }
+    }
+    const consumed = consumer ? buckets.get(consumer.key) : undefined;
+    if (consumer && consumed) {
+      consumed.destination = consumer.destination;
+      buckets.delete(consumer.key);
+      continue;
+    }
+
+    if (typeof instruction === "object" && "StealthTransfer" in instruction) {
+      const next = instructions[i + 1];
+      if (next && typeof next === "object" && "PutLastInstructionOutputOnWorkspace" in next) {
+        i++;
+      }
+      continue;
+    }
+
+    if (typeof instruction === "object" && "PayFeeFromBucket" in instruction) {
+      continue;
+    }
+
+    const target = callTarget(instruction);
+    if (target && ownAccounts.has(target.address)) {
+      const { address, method, args } = target;
+      try {
+        if (method === "pay_fee") {
+          fees.push({ account: address, amount: amount(argValue(args[0], blobs)) });
+          continue;
+        }
+        const resourceArg = method === "withdraw_approved" ? args[1] : args[0];
+        const value = withdrawnValue(method, args, blobs);
+        if (value) {
+          const withdrawal: AccountWithdrawal = {
+            account: address,
+            resource: resourceAddress(argValue(resourceArg, blobs)),
+            value,
+            destination: { kind: "unknown" },
+          };
+          withdrawals.push(withdrawal);
+          const next = instructions[i + 1];
+          if (next && typeof next === "object" && "PutLastInstructionOutputOnWorkspace" in next) {
+            buckets.set(next.PutLastInstructionOutputOnWorkspace.key, withdrawal);
+            i++;
+          }
+          continue;
+        }
+      } catch {
+        // An argument that cannot be read leaves the call undescribed.
+      }
+    }
+
+    undescribed++;
+  }
+
+  return { withdrawals, fees, undescribed };
+}
+
 /// The fee an instruction commits to paying, when it is a `pay_fee` call whose
 /// amount is a literal or a blob.
 export function describeFee(instruction: Instruction, blobs: Blobs): string | null {
@@ -139,8 +406,8 @@ export function describeFee(instruction: Instruction, blobs: Blobs): string | nu
     return null;
   }
   try {
-    const amount = integer(argValue(target.args[0], blobs));
-    return `Up to ${amount.toLocaleString()} µT, paid by ${target.address}`;
+    const fee = amount(argValue(target.args[0], blobs));
+    return `Up to ${fee.toLocaleString()} µT, paid by ${target.address}`;
   } catch {
     return null;
   }

@@ -81,25 +81,68 @@ impl PanicDiagnostic {
 
 #[cfg(feature = "std")]
 mod render {
+    use core::fmt::{self, Write};
+
     use super::{DETAIL_SEPARATOR, PanicDiagnostic};
-    use crate::{
-        FunctionDef,
-        Type,
-        rust::{format, string::String},
-    };
+    use crate::{FunctionDef, Type, rust::string::String};
+
+    /// Ends a rendered message cut short at its length limit.
+    pub const TRUNCATION_SUFFIX: &str = "…";
+
+    /// Keeps what is written to it up to `max_len` bytes, cut at a char boundary, and fails the write that reaches
+    /// past them so that whatever is rendering stops there.
+    struct BoundedWriter {
+        buf: String,
+        max_len: usize,
+        truncated: bool,
+    }
+
+    impl Write for BoundedWriter {
+        fn write_str(&mut self, s: &str) -> fmt::Result {
+            let room = self.max_len - self.buf.len();
+            if s.len() <= room {
+                self.buf.push_str(s);
+                return Ok(());
+            }
+            self.buf.push_str(&s[..s.floor_char_boundary(room)]);
+            self.truncated = true;
+            Err(fmt::Error)
+        }
+    }
+
+    /// `args` rendered to at most `max_len` bytes. A rendering that does not fit is cut short and ends with
+    /// [`TRUNCATION_SUFFIX`], and the rest of it is never rendered.
+    fn render_bounded(args: fmt::Arguments<'_>, max_len: usize) -> String {
+        let mut writer = BoundedWriter {
+            buf: String::new(),
+            max_len,
+            truncated: false,
+        };
+        // A failed write is the writer reaching its limit, recorded as `truncated`.
+        let _ = writer.write_fmt(args);
+        let mut rendered = writer.buf;
+        if writer.truncated && TRUNCATION_SUFFIX.len() <= max_len {
+            rendered.truncate(rendered.floor_char_boundary(max_len - TRUNCATION_SUFFIX.len()));
+            rendered.push_str(TRUNCATION_SUFFIX);
+        }
+        rendered
+    }
 
     impl PanicDiagnostic {
         /// Renders the message the template would have carried, drawing the function name and the
-        /// argument type from `func_def`.
+        /// argument type from `func_def`, to at most `max_len` bytes. A declared argument type can
+        /// render to far more than the template's own message, so a message that does not fit is cut
+        /// short and ends with [`TRUNCATION_SUFFIX`].
         ///
         /// `None` when the diagnostic does not describe `func_def`, which means the marker did not
         /// come from this function's dispatcher: an index past its parameters, or index 0 on a
         /// method or migration, whose component the dispatcher reports as `ComponentDecode`.
-        pub fn render(&self, func_def: &FunctionDef, detail: &str) -> Option<String> {
+        pub fn render(&self, func_def: &FunctionDef, detail: &str, max_len: usize) -> Option<String> {
             let name = &func_def.name;
             match *self {
-                Self::ComponentDecode => Some(format!(
-                    "failed to decode component instance for function '{name}'{DETAIL_SEPARATOR}{detail}"
+                Self::ComponentDecode => Some(render_bounded(
+                    format_args!("failed to decode component instance for function '{name}'{DETAIL_SEPARATOR}{detail}"),
+                    max_len,
                 )),
                 Self::ArgDecode { index } => {
                     // The dispatcher counts the component among a method's or migration's parameters, and
@@ -115,32 +158,38 @@ mod render {
                         _ => "argument",
                     };
                     let arg_type = &arg.arg_type;
-                    Some(format!(
-                        "failed to decode {kind} at position {index} ({arg_type}) for function \
-                         '{name}'{DETAIL_SEPARATOR}{detail}"
+                    Some(render_bounded(
+                        format_args!(
+                            "failed to decode {kind} at position {index} ({arg_type}) for function \
+                             '{name}'{DETAIL_SEPARATOR}{detail}"
+                        ),
+                        max_len,
                     ))
                 },
             }
         }
     }
 
-    /// Expands `message` into the full diagnostic if it carries a marker, and returns it unchanged
-    /// otherwise.
-    pub fn expand_panic_message(func_def: &FunctionDef, message: String) -> String {
+    /// Expands `message` into the full diagnostic, of at most `max_len` bytes, if it carries a
+    /// marker, and returns it unchanged otherwise.
+    pub fn expand_panic_message(func_def: &FunctionDef, message: String, max_len: usize) -> String {
         let Some((diagnostic, detail)) = PanicDiagnostic::parse(&message) else {
             return message;
         };
-        diagnostic.render(func_def, detail).unwrap_or(message)
+        diagnostic.render(func_def, detail, max_len).unwrap_or(message)
     }
 }
 
 #[cfg(feature = "std")]
-pub use render::expand_panic_message;
+pub use render::{TRUNCATION_SUFFIX, expand_panic_message};
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{ArgDef, FunctionDef, FunctionKind, Receiver, Type};
+
+    /// The bound the engine renders a panic message to (`ENGINE_LIMITS.max_panic_message_size`).
+    const LIMIT: usize = 32 * 1024;
 
     fn func_def() -> FunctionDef {
         FunctionDef {
@@ -194,7 +243,7 @@ mod tests {
     fn a_message_without_a_marker_is_left_alone() {
         assert_eq!(PanicDiagnostic::parse("something went wrong"), None);
         assert_eq!(
-            expand_panic_message(&func_def(), "something went wrong".to_string()),
+            expand_panic_message(&func_def(), "something went wrong".to_string(), LIMIT),
             "something went wrong"
         );
     }
@@ -203,7 +252,7 @@ mod tests {
     fn renders_an_argument_failure() {
         let message = format!("{}: unexpected type", PanicDiagnostic::ArgDecode { index: 1 }.marker());
         assert_eq!(
-            expand_panic_message(&func_def(), message),
+            expand_panic_message(&func_def(), message, LIMIT),
             "failed to decode argument at position 1 (Amount) for function 'withdraw': unexpected type"
         );
     }
@@ -212,7 +261,7 @@ mod tests {
     fn renders_a_tuple_argument_failure() {
         let message = format!("{}: unexpected type", PanicDiagnostic::ArgDecode { index: 2 }.marker());
         assert_eq!(
-            expand_panic_message(&func_def(), message),
+            expand_panic_message(&func_def(), message, LIMIT),
             "failed to decode tuple argument at position 2 (Tuple<String,U32>) for function 'withdraw': unexpected \
              type"
         );
@@ -231,7 +280,7 @@ mod tests {
         };
         let message = format!("{}: unexpected type", PanicDiagnostic::ArgDecode { index: 1 }.marker());
         assert_eq!(
-            expand_panic_message(&migration, message),
+            expand_panic_message(&migration, message, LIMIT),
             "failed to decode argument at position 1 (Amount) for function 'migrate': unexpected type"
         );
     }
@@ -240,7 +289,7 @@ mod tests {
     fn renders_a_component_failure() {
         let message = format!("{}: end of input bytes", PanicDiagnostic::ComponentDecode.marker());
         assert_eq!(
-            expand_panic_message(&func_def(), message),
+            expand_panic_message(&func_def(), message, LIMIT),
             "failed to decode component instance for function 'withdraw': end of input bytes"
         );
     }
@@ -248,7 +297,7 @@ mod tests {
     #[test]
     fn an_index_past_the_definition_is_passed_through() {
         let message = format!("{}: boom", PanicDiagnostic::ArgDecode { index: 9 }.marker());
-        assert_eq!(expand_panic_message(&func_def(), message.clone()), message);
+        assert_eq!(expand_panic_message(&func_def(), message.clone(), LIMIT), message);
     }
 
     #[test]
@@ -304,7 +353,7 @@ mod tests {
     fn crafted_messages_render_or_pass_through() {
         let func_def = func_def();
         for message in CRAFTED {
-            let expanded = expand_panic_message(&func_def, message.to_string());
+            let expanded = expand_panic_message(&func_def, message.to_string(), LIMIT);
             match PanicDiagnostic::parse(message) {
                 Some((PanicDiagnostic::ArgDecode { index }, _))
                     if (index == 0 && func_def.takes_component()) || index >= func_def.num_call_args() =>
@@ -352,7 +401,7 @@ mod tests {
                 message.push_str(ALPHABET[(seed % ALPHABET.len() as u64) as usize]);
                 len += 1;
             }
-            let expanded = expand_panic_message(&func_def, message.clone());
+            let expanded = expand_panic_message(&func_def, message.clone(), LIMIT);
             assert!(
                 expanded == message || expanded.starts_with("failed to decode"),
                 "{message:?} expanded to {expanded:?}"
@@ -360,19 +409,55 @@ mod tests {
         }
     }
 
+    fn func_def_taking(arg_type: Type) -> FunctionDef {
+        FunctionDef {
+            name: "withdraw".to_string(),
+            kind: FunctionKind::Function,
+            arguments: vec![ArgDef {
+                name: "arg".to_string(),
+                arg_type,
+            }],
+            output: Type::Unit,
+        }
+    }
+
+    /// The declared argument type comes from the template, and can render to far more than the message the template
+    /// panicked with.
+    #[test]
+    fn a_rendering_past_the_limit_is_cut_short() {
+        let message = format!("{}: x", PanicDiagnostic::ArgDecode { index: 0 }.marker());
+        let wide = Type::Tuple(vec![Type::Tuple(vec![Type::String; 32]); 32]);
+        let long_name = Type::Vec(Box::new(Type::Other {
+            name: "\u{1F600}".repeat(LIMIT),
+        }));
+        for arg_type in [wide, long_name] {
+            let expanded = expand_panic_message(&func_def_taking(arg_type), message.clone(), 1024);
+            assert!(expanded.len() <= 1024, "rendered {} bytes", expanded.len());
+            assert!(expanded.starts_with("failed to decode"), "{expanded:.80}");
+            assert!(expanded.ends_with(TRUNCATION_SUFFIX), "{expanded:.80}");
+        }
+    }
+
+    #[test]
+    fn a_rendering_within_the_limit_is_whole() {
+        let message = format!("{}: unexpected type", PanicDiagnostic::ArgDecode { index: 2 }.marker());
+        let whole = expand_panic_message(&func_def(), message.clone(), LIMIT);
+        assert_eq!(expand_panic_message(&func_def(), message, whole.len()), whole);
+    }
+
     #[test]
     fn an_author_message_shaped_like_a_marker_is_passed_through() {
         // Without the marker there is nothing to expand, however closely the text matches.
         let message = "A1: mine".to_string();
         assert_eq!(PanicDiagnostic::parse(&message), None);
-        assert_eq!(expand_panic_message(&func_def(), message.clone()), message);
+        assert_eq!(expand_panic_message(&func_def(), message.clone(), LIMIT), message);
     }
 
     #[test]
     fn a_marker_without_detail_renders_with_none() {
         let message = PanicDiagnostic::ComponentDecode.marker();
         assert_eq!(
-            expand_panic_message(&func_def(), message),
+            expand_panic_message(&func_def(), message, LIMIT),
             "failed to decode component instance for function 'withdraw': "
         );
     }

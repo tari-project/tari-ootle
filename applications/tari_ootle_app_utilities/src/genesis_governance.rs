@@ -76,7 +76,7 @@ pub fn genesis_council(network: Network) -> GenesisCouncil {
         Network::MainNet => GenesisCouncil {
             threshold: 1,
             members: vec![council_member(
-                "9a05fef0e26b4a87d995ccb8c48582d86485c7a2c767c77c561f3db2724a8b19",
+                "b8276c32aa7a5acef83a10854c3546dbf805f192e6918e4c0de89429bebb6346",
             )],
         },
         Network::StageNet | Network::NextNet | Network::Igor | Network::Esmeralda | Network::LocalNet => {

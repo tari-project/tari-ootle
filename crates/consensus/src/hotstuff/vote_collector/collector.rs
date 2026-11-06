@@ -220,7 +220,7 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
         };
         let mut power = VotePower::zero();
         for vote in votes_iter.filter(|vote| vote.decision().is_accept() && vote.aggregation_key() == *agg_key) {
-            power += committee.get_power_by_public_key(vote.public_key()).unwrap_or_default();
+            power = power.saturating_add(committee.get_power_by_public_key(vote.public_key()).unwrap_or_default());
         }
         power
     }
@@ -344,6 +344,52 @@ mod tests {
                 })
                 .collect(),
         )
+    }
+
+    #[test]
+    fn quorum_is_reached_when_the_signers_power_crosses_the_threshold() {
+        let heavy = pubkey(1);
+        let lights = [pubkey(2), pubkey(3), pubkey(4)];
+        // n = 5 + 1 + 1 + 1 = 8, f = 2, quorum_threshold = 6
+        let committee = Committee::new(
+            [(heavy, 5), (lights[0], 1), (lights[1], 1), (lights[2], 1)]
+                .into_iter()
+                .map(|(pk, power)| CommitteeMember {
+                    address: pk,
+                    public_key: pk,
+                    vote_power: VotePower::of(power),
+                })
+                .collect(),
+        );
+        assert_eq!(committee.quorum_threshold(), VotePower::of(6));
+
+        let block_id = FixedHash::new([0xAu8; 32]);
+        let vote = |public_key| TestVote {
+            epoch: Epoch(1),
+            height: NodeHeight(1),
+            block_id,
+            decision: QuorumDecision::Accept,
+            sig: ZERO_SIG,
+            public_key,
+        };
+        let power =
+            |store: &VoteStoreInner<TestVote>| store.accept_power(Epoch(1), NodeHeight(1), &block_id, &committee);
+
+        // Three of four members, but only 3 of the 8 power.
+        let mut store = VoteStoreInner::<TestVote>::new();
+        for pk in lights {
+            store.save_vote(vote(pk)).unwrap();
+        }
+        assert_eq!(power(&store), VotePower::of(3));
+        assert!(power(&store) < committee.quorum_threshold());
+
+        // One member holding 5 of the 8 power is still short; one more light vote crosses the threshold.
+        let mut store = VoteStoreInner::<TestVote>::new();
+        store.save_vote(vote(heavy)).unwrap();
+        assert!(power(&store) < committee.quorum_threshold());
+        store.save_vote(vote(lights[0])).unwrap();
+        assert_eq!(power(&store), VotePower::of(6));
+        assert!(power(&store) >= committee.quorum_threshold());
     }
 
     #[test]

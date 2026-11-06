@@ -1489,15 +1489,21 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let down_proofs_epoch_index = db.cf(SubstateDownProofEpochIndex)?;
         let missing_values_cf = db.cf(StateSyncMissingValueCf)?;
 
-        let start_version = target_state_version.saturating_add(1);
+        if target_state_version == Version::MAX {
+            return Ok(SubstateRewindStats::default());
+        }
+        let start_version = target_state_version + 1;
         let mut touched: HashSet<SubstateId> = HashSet::new();
         let mut stats = SubstateRewindStats::default();
 
         // Collect only the versions to process, then load each record one at a time inside the loop. This caps memory
         // at ~O(n_versions) rather than O(n_versions * avg_record_size), which matters for rewinds spanning many
         // epochs.
-        let versions =
+        let mut versions =
             transitions_query.query_range_keys(Ordering::Descending, (shard, start_version)..(shard, Version::MAX))?;
+        if transitions_cf.exists(&(shard, Version::MAX), OPERATION)? {
+            versions.insert(0, (shard, Version::MAX));
+        }
 
         // Descending, so `versions` is already in reverse state_version order.
         for key in versions {
@@ -1835,20 +1841,26 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let stale_cf = db.cf(StateTreeStaleNodesCf)?;
         let versions_cf = db.cf(StateTreeShardVersionCf)?;
 
-        // Versions are u64; saturate on the unlikely MAX case so we don't overflow.
-        let start_version = target_version.saturating_add(1);
+        if target_version == Version::MAX {
+            return Ok(StateTreeTruncateStats::default());
+        }
+        let start_version = target_version + 1;
 
         // 1. Delete tree nodes at versions > target for this shard.
-        let node_keys =
+        let mut node_keys =
             version_query.query_range_keys(Ordering::Ascending, (shard, start_version)..(shard, Version::MAX))?;
+        node_keys.extend(version_query.query_prefix_range_keys(Ordering::Ascending, &(shard, Version::MAX))?);
         for key in &node_keys {
             debug_assert_eq!(key.0, shard, "range iterator leaked across shard boundary");
             tree_cf.delete(key, OPERATION)?;
         }
 
         // 2. Delete stale-node records at versions > target for this shard.
-        let stale_keys =
+        let mut stale_keys =
             stale_query.query_range_keys(Ordering::Ascending, (shard, start_version)..(shard, Version::MAX))?;
+        if stale_cf.exists(&(shard, Version::MAX), OPERATION)? {
+            stale_keys.push((shard, Version::MAX));
+        }
         for key in &stale_keys {
             debug_assert_eq!(key.0, shard, "range iterator leaked across shard boundary");
             stale_cf.delete(key, OPERATION)?;
@@ -1875,8 +1887,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 pin_from = pin;
                 continue;
             }
-            let run = deferred_query
+            let mut run = deferred_query
                 .query_range_keys(Ordering::Ascending, (shard, pin, stale_at)..(shard, pin, Version::MAX))?;
+            if deferred_cf.exists(&(shard, pin, Version::MAX), OPERATION)? {
+                run.push((shard, pin, Version::MAX));
+            }
             for key in &run {
                 deferred_cf.delete(key, OPERATION)?;
             }
@@ -1888,13 +1903,16 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         // 3. Delete the proofs of versions > target for this shard: they prove state that no longer exists.
         let proofs_cf = db.cf(StateVersionProofCf)?;
-        let proof_keys = proofs_cf
+        let mut proof_keys = proofs_cf
             .range_iterator(
                 Ordering::Ascending,
                 proofs_cf.encode_key(&(shard, start_version))..proofs_cf.encode_key(&(shard, Version::MAX)),
             )
             .map(|res| res.map(|(key, _)| key))
             .collect::<Result<Vec<_>, _>>()?;
+        if proofs_cf.exists(&(shard, Version::MAX), OPERATION)? {
+            proof_keys.push((shard, Version::MAX));
+        }
         for key in proof_keys {
             state_version_proofs::remove(&db, key)?;
         }

@@ -922,12 +922,21 @@ fn sandbox_denies_resource_auth_hook_invocation() {
     let script_template = test.get_template_address(SCRIPT_TEMPLATE);
     let hook_component: tari_template_lib::types::ComponentAddress =
         test.call_function(SCRIPT_TEMPLATE, "new", args![], vec![]);
-    let hooked_resource: ResourceAddress = test.call_function(
-        SCRIPT_TEMPLATE,
-        "create_hooked_mintable_resource",
-        args![hook_component],
+    let (account, _proof, _key) = test.create_empty_account();
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(script_template, "create_hooked_mintable_resource", args![
+                hook_component
+            ])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .build_and_seal(test.secret_key()),
         vec![],
     );
+    let hooked_resource = test
+        .get_previous_output_address(SubstateType::Resource)
+        .as_resource_address()
+        .unwrap();
     let (resx, mint) = mint_utxo(
         &mut test,
         script_condition(script_template, "try_mint", vec![encode_arg(&hooked_resource)]),

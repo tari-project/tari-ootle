@@ -120,11 +120,11 @@ mod spend_scripts {
         }
 
         /// Creates a fungible resource guarded by an authorization hook on `component`.
-        pub fn create_hooked_mintable_resource(component: ComponentAddress) -> ResourceAddress {
+        pub fn create_hooked_mintable_resource(component: ComponentAddress) -> Bucket {
             ResourceBuilder::public_fungible()
                 .mintable(rule!(allow_all), LOCKED)
                 .with_authorization_hook(component, "auth_hook")
-                .build()
+                .initial_supply(1u32)
         }
 
         pub fn auth_hook(&self, _action: ResourceAuthAction, _caller: AuthHookCaller) {}

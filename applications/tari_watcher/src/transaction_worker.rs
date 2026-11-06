@@ -27,7 +27,12 @@ const REGISTRATION_LOOP_INTERVAL: Duration = Duration::from_secs(30);
 pub async fn worker_loop(config: Config, handle: ManagerHandle) -> anyhow::Result<ManagerHandle> {
     let mut is_registered = false;
     let vn_registration_file = config.get_registration_file();
-    let vn_layer_one_transactions = config.get_layer_one_transaction_path();
+    let mut watch_dirs = vec![config.get_layer_one_transaction_path()];
+    for dir in &config.watch_dirs {
+        if !watch_dirs.contains(dir) {
+            watch_dirs.push(dir.clone());
+        }
+    }
 
     loop {
         time::sleep(REGISTRATION_LOOP_INTERVAL).await;
@@ -47,7 +52,11 @@ pub async fn worker_loop(config: Config, handle: ManagerHandle) -> anyhow::Resul
             }
         }
 
-        check_and_submit_layer_one_transactions(&handle, &vn_layer_one_transactions).await?;
+        for dir in &watch_dirs {
+            if let Err(e) = check_and_submit_layer_one_transactions(&handle, dir).await {
+                warn!("Error checking layer one transactions in {}: {}", dir.display(), e);
+            }
+        }
     }
 }
 

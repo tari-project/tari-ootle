@@ -178,7 +178,13 @@ mod tests {
         let sign_extended = encode(&tari_bor::Value::Bytes(vec![0xff])).unwrap();
         let decoded_bytes: Amount = tari_bor::serde_codec::from_slice(&sign_extended).unwrap();
         assert_eq!(decoded_bytes, Amount::from(-1i64));
-        let overlong_bytes = encode(&tari_bor::Value::Bytes(vec![0u8; 25])).unwrap();
+        // Bytes past `Amount::BYTES` are accepted when they equal the sign fill and rejected otherwise.
+        let zero_extended = encode(&tari_bor::Value::Bytes(vec![0u8; 25])).unwrap();
+        let decoded_bytes: Amount = tari_bor::serde_codec::from_slice(&zero_extended).unwrap();
+        assert_eq!(decoded_bytes, Amount::ZERO);
+        let mut overlong = vec![0u8; 25];
+        overlong[24] = 0x01;
+        let overlong_bytes = encode(&tari_bor::Value::Bytes(overlong)).unwrap();
         tari_bor::serde_codec::from_slice::<Amount>(&overlong_bytes).unwrap_err();
     }
 

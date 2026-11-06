@@ -114,6 +114,7 @@ use tari_template_lib::{
 };
 pub use tracker::{ComputeAllowance, ComputeFunding, DeclaredInputLoad, FinalizedState, StateTracker};
 pub use working_state::ChargeableState;
+pub(crate) use working_state::reject_transient_values;
 
 use crate::{
     runtime::{

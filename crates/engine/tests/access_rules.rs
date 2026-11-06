@@ -264,6 +264,45 @@ mod component_access_rules {
     }
 
     #[test]
+    fn set_access_rules_rejects_unknown_method() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+
+        let (owner_proof, _, owner_key) = test.create_owner_proof();
+
+        let access_rules_template = test.get_template_address("AccessRulesTest");
+
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_function(access_rules_template, "with_configured_rules", args![
+                    OwnerRule::OwnedBySigner,
+                    ComponentAccessRules::new().default(AccessRule::AllowAll),
+                    ResourceAccessRules::new(),
+                    AccessRule::DenyAll,
+                ])
+                .build_and_seal(&owner_key),
+            vec![owner_proof.clone()],
+        );
+
+        let component_address = test.return_values()[0].decoded::<ComponentAddress>().unwrap();
+
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(component_address, "set_component_access_rules", args![
+                    ComponentAccessRules::new()
+                        .add_method_rule("nonexistent_method", AccessRule::DenyAll)
+                        .default(AccessRule::AllowAll)
+                ])
+                .build_and_seal(&owner_key),
+            vec![owner_proof],
+        );
+
+        assert_reject_reason(reason, RuntimeError::InvalidMethodAccessRule {
+            template_name: "AccessRulesTest".to_string(),
+            details: "No method 'nonexistent_method' found in template".to_string(),
+        });
+    }
+
+    #[test]
     fn create_component_rejects_scoped_owner_rule() {
         let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
@@ -2348,8 +2387,9 @@ mod resource_access_rules {
         });
     }
 
-    /// Mint takes the resource's write lock. The hook guards that resource and may legitimately read it, so the
-    /// lock must not be held across the hook call.
+    /// Mint takes the resource's write lock, and vault withdraw, deposit and proof creation take the vault's write
+    /// lock. The hook guards that resource and may legitimately read both the resource and its vault, so neither lock
+    /// must be held across the hook call.
     #[test]
     fn it_allows_a_hook_to_read_the_resource_it_guards() {
         let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
@@ -2380,7 +2420,8 @@ mod resource_access_rules {
             .unwrap();
 
         // `mint_resource` is a function rather than a method, so the mint acts on the resource from outside the
-        // hook's own component and the hook runs.
+        // hook's own component and the hook runs. This deposit creates the account's vault, so its hook reads stored
+        // account state that holds no vault for the resource yet.
         test.execute_expect_success(
             Transaction::builder_localnet(Epoch(1))
                 .call_function(access_rules_template, "mint_resource", args![token_resource])
@@ -2388,6 +2429,25 @@ mod resource_access_rules {
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&user_key),
             vec![user_proof.clone()],
+        );
+
+        // Once the account holds a vault for the resource, the hook also decodes `caller.component_state()` as an
+        // `Account` and reads `vault.balance()`, exercising vault lock release across withdraw, deposit and proof
+        // creation hooks.
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(user_account, "withdraw", args![token_resource, 1])
+                .put_last_instruction_output_on_workspace("withdrawn")
+                .call_method(user_account, "deposit", args![Workspace("withdrawn")])
+                .call_method(user_account, "create_proof_for_resource", args![token_resource])
+                .put_last_instruction_output_on_workspace("proof_all")
+                // The resource proof locks the whole balance, so it is dropped before an amount is locked.
+                .drop_all_proofs_in_workspace()
+                .call_method(user_account, "create_proof_by_amount", args![token_resource, 1])
+                .put_last_instruction_output_on_workspace("proof_amt")
+                .drop_all_proofs_in_workspace()
+                .build_and_seal(&user_key),
+            vec![user_proof],
         );
     }
 

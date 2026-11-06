@@ -130,6 +130,7 @@ use tari_template_lib::{
         TemplateMetadataHash,
         UtxoAddress,
         ValidatorFeePoolAddress,
+        VaultId,
         access_rules::{
             AccessRule,
             ComponentAccessRules,
@@ -587,6 +588,14 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             args,
             Some(FrameWriteMode::OwnComponent),
         );
+        if !resource_was_in_scope {
+            self.tracker.write_with(|state_mut| {
+                state_mut
+                    .current_call_scope_mut()?
+                    .remove_substate_from_referenced(&resource_id);
+                Ok::<_, RuntimeError>(())
+            })?;
+        }
         let ret = ret.map_err(|e| match e {
             RuntimeError::CrossTemplateCallMethodError { details, .. } => RuntimeError::AccessDeniedAuthHook {
                 action_ident: action.into(),
@@ -602,14 +611,6 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             return Err(RuntimeError::UnexpectedNonNullInAuthHookReturn);
         }
 
-        if !resource_was_in_scope {
-            self.tracker.write_with(|state_mut| {
-                state_mut
-                    .current_call_scope_mut()?
-                    .remove_substate_from_referenced(&resource_id);
-                Ok::<_, RuntimeError>(())
-            })?;
-        }
         Ok(())
     }
 
@@ -647,6 +648,31 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             self.invoke_resource_access_hook(auth_hook, auth_caller, action)?;
         }
         Ok(())
+    }
+
+    /// Authorizes `action` on a vault against its freeze flags and its resource's static access rule and auth hook.
+    /// Both the vault and resource are unlocked before the hook runs, so the hook may read either substate.
+    fn authorize_vault_action(
+        &self,
+        vault_id: VaultId,
+        action: ResourceAuthAction,
+        freeze_flag: VaultFreezeFlag,
+    ) -> Result<ResourceAddress, RuntimeError> {
+        let resource_address = self.tracker.write_with(|state_mut| {
+            let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
+            let vault = state_mut.get_vault(&vault_lock)?;
+            let freeze_flags = vault.freeze_flags();
+            let resource_address = *vault.resource_address();
+            state_mut.unlock_substate(vault_lock)?;
+
+            if freeze_flags.contains(freeze_flag) {
+                return Err(RuntimeError::VaultFrozen { vault_id, freeze_flag });
+            }
+            Ok::<_, RuntimeError>(resource_address)
+        })?;
+
+        self.authorize_resource_action(resource_address, action, |_| Ok(()))?;
+        Ok(resource_address)
     }
 
     /// An interface over this transaction's state for a nested call to run against.
@@ -870,10 +896,12 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     }
 
     /// Resolves a `TemplateFunction` spend-condition leaf against its template and validates it end-to-end: the
-    /// referenced function exists, has the required signature, and `args` carries exactly one well-formed-CBOR element
-    /// per leading (non-`SpendContext`) parameter. Because a condition tree commits only an opaque root, leaves are
-    /// hidden at creation; this runs at spend time (T2) when the leaf is revealed. Templates are immutable substates,
-    /// so a referenced template must already resolve — there is no "not yet published" skip case.
+    /// referenced function exists, has the required signature, and `args` carries exactly one element per leading
+    /// (non-`SpendContext`) parameter. Each element is charged for and decoded once, when the script is invoked, and
+    /// its type is checked by the dispatcher's `decode_exact::<T>`. Because a condition tree commits only an opaque
+    /// root, leaves are hidden at creation; this runs at spend time (T2) when the leaf is revealed. Templates are
+    /// immutable substates, so a referenced template must already resolve — there is no "not yet published" skip
+    /// case.
     fn validate_template_function(&self, tf: &TemplateFunction) -> Result<(), RuntimeError> {
         let template_def = self.get_template_def(&tf.template)?;
         let func = template_def
@@ -901,18 +929,6 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                 ),
             });
         }
-        // The host can verify each element is well-formed CBOR; full type conformance against the declared parameter
-        // type is enforced at the WASM deserialization boundary (the dispatcher's `decode_exact::<T>`).
-        for (i, arg) in tf.args.iter().enumerate() {
-            let _value: tari_bor::Value = decode_exact(arg).map_err(|e| RuntimeError::InvalidArgument {
-                argument: "TemplateFunction",
-                reason: format!(
-                    "spend script '{}' bound argument {} is not well-formed CBOR: {}",
-                    tf.function, i, e
-                ),
-            })?;
-        }
-
         Ok(())
     }
 
@@ -1105,6 +1121,11 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     ) -> Result<(), RuntimeError> {
         match condition {
             AtomicCondition::AccessRule(access_rule) => {
+                // The engine rejects an invalid access rule (an empty `any_of`/`all_of`, or an `m_of_n` with an
+                // out-of-range threshold or a duplicate requirement) wherever it stores a rule. A stealth output
+                // commits only to a hash of its spend conditions, so its rules are first seen here and must fail
+                // closed.
+                reject_invalid_rule("spend_condition", access_rule.find_invalid_rule())?;
                 let allowed = self
                     .tracker
                     .write_with_authorization(|state| state.authorization().check_access_rule(access_rule))?;
@@ -1187,7 +1208,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         witness_data: &[u8],
     ) -> Result<(), RuntimeError> {
         // (T2) Authoritative spend-time validation. A revealed leaf is untrusted spender data, so the function shape
-        // and bound-arg encoding are validated immediately before invoking.
+        // and bound-arg count are validated immediately before invoking.
         self.validate_template_function(tf)?;
 
         let exec = SpendScriptExecution {
@@ -1628,6 +1649,10 @@ where
                         })?;
 
                 let access_rules: ComponentAccessRules = args.assert_one_arg()?;
+
+                let template_addr = self.tracker.get_template_address()?;
+                let template_def = self.get_template_def(&template_addr)?;
+                validate_component_access_rule_methods(&access_rules, &template_def)?;
 
                 if access_rules.contains_scoped_to_component_or_template() {
                     return Err(RuntimeError::InvalidArgument {
@@ -2666,38 +2691,10 @@ where
 
                 let bucket_id: BucketId = args.assert_one_arg()?;
 
-                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with_authorization(|state_mut| {
-                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
-
-                        let vault = state_mut.get_vault(&vault_lock)?;
-                        if vault.freeze_flags().contains(VaultFreezeFlag::Deposits) {
-                            return Err(RuntimeError::VaultFrozen {
-                                vault_id,
-                                freeze_flag: VaultFreezeFlag::Deposits,
-                            });
-                        }
-                        let resource_address = *vault.resource_address();
-
-                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
-
-                        let resource = state_mut.get_resource(&resource_lock)?;
-
-                        state_mut.authorization().check_resource_access_rules(
-                            ResourceAuthAction::Deposit,
-                            resource.as_ownership(),
-                            resource.access_rules(),
-                        )?;
-
-                        let auth_caller = state_mut.get_auth_caller(&resource_lock)?;
-                        Ok::<_, RuntimeError>((vault_lock, resource_lock, resource.auth_hook().cloned(), auth_caller))
-                    })?;
-
-                if let Some(auth_hook) = maybe_auth_hook {
-                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Deposit)?;
-                }
+                self.authorize_vault_action(vault_id, ResourceAuthAction::Deposit, VaultFreezeFlag::Deposits)?;
 
                 let moved = self.tracker.write_with(move |state_mut| {
+                    let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
                     let bucket = state_mut.take_bucket(bucket_id)?;
                     Self::check_bucket_is_unlocked("deposit", bucket_id, &bucket)?;
 
@@ -2711,7 +2708,6 @@ where
                     let moved = bucket.non_fungible_ids().len();
                     vault_mut.deposit(bucket)?;
 
-                    state_mut.unlock_substate(resource_lock)?;
                     state_mut.unlock_substate(vault_lock)?;
 
                     Ok::<_, RuntimeError>(moved)
@@ -2727,43 +2723,30 @@ where
                 })?;
                 let arg: VaultWithdrawArg = args.assert_one_arg()?;
 
-                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller, has_view_key) =
-                    self.tracker.write_with_authorization(|state_mut| {
-                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
+                let resource_address =
+                    self.authorize_vault_action(vault_id, ResourceAuthAction::Withdraw, VaultFreezeFlag::Withdrawals)?;
 
-                        let vault = state_mut.get_vault(&vault_lock)?;
-                        if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
-                            return Err(RuntimeError::VaultFrozen {
-                                vault_id,
-                                freeze_flag: VaultFreezeFlag::Withdrawals,
-                            });
-                        }
-                        let resource_address = vault.resource_address();
-
-                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(*resource_address))?;
-
+                let maybe_view_key = if matches!(&arg, VaultWithdrawArg::Confidential { .. }) {
+                    self.tracker.write_with(|state_mut| {
+                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
                         let resource = state_mut.get_resource(&resource_lock)?;
-
-                        state_mut.authorization().check_resource_access_rules(
-                            ResourceAuthAction::Withdraw,
-                            resource.as_ownership(),
-                            resource.access_rules(),
-                        )?;
-
-                        let auth_caller = state_mut.get_auth_caller(&resource_lock)?;
-                        let has_view_key = resource.view_key().is_some();
-                        Ok::<_, RuntimeError>((
-                            vault_lock,
-                            resource_lock,
-                            resource.auth_hook().cloned(),
-                            auth_caller,
-                            has_view_key,
-                        ))
-                    })?;
-
-                if let Some(auth_hook) = maybe_auth_hook {
-                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Withdraw)?;
-                }
+                        let maybe_view_key =
+                            resource
+                                .to_view_key_public_key()
+                                .map_err(|e| RuntimeError::InvariantError {
+                                    function: "VaultAction::Withdraw",
+                                    details: format!(
+                                        "Resource {} has a malformed view key: {}",
+                                        resource_lock.substate_id(),
+                                        e
+                                    ),
+                                })?;
+                        state_mut.unlock_substate(resource_lock)?;
+                        Ok::<_, RuntimeError>(maybe_view_key)
+                    })?
+                } else {
+                    None
+                };
 
                 // Charge the withdraw's native verification cost against the payment-funded
                 // allowance before any of its proof crypto runs.
@@ -2771,23 +2754,12 @@ where
                     self.tracker
                         .charge_native_execution(tari_engine_types::confidential::withdraw_native_points(
                             proof,
-                            has_view_key,
+                            maybe_view_key.is_some(),
                         ))?;
                 }
 
                 let (result, moved) = self.tracker.write_with(|state| {
-                    let resource = state.get_resource(&resource_lock)?;
-                    let maybe_view_key =
-                        resource
-                            .to_view_key_public_key()
-                            .map_err(|e| RuntimeError::InvariantError {
-                                function: "VaultAction::Withdraw",
-                                details: format!(
-                                    "Resource {} has a malformed view key: {}",
-                                    resource_lock.substate_id(),
-                                    e
-                                ),
-                            })?;
+                    let vault_lock = state.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                     // Enforce confidential limits before the withdraw's proof crypto runs.
                     if let VaultWithdrawArg::Confidential { proof } = &arg {
@@ -2829,7 +2801,6 @@ where
                     state.new_bucket(bucket_id, resource_container)?;
 
                     state.unlock_substate(vault_lock)?;
-                    state.unlock_substate(resource_lock)?;
 
                     let bucket = tari_template_lib::models::Bucket::from_id(bucket_id);
                     Ok::<_, RuntimeError>((InvokeResult::encode(&bucket)?, moved))
@@ -2927,6 +2898,7 @@ where
                 if let Some(ref statement) = arg.statement {
                     self.tracker.account_fee_intent_stealth_transfer()?;
                     let has_view_key = self.tracker.write_with(|state| {
+                        state.account_stealth_transfer(statement)?;
                         let resource_lock = state.read_lock_substate(SubstateId::Resource(TARI_TOKEN))?;
                         let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
                         state.unlock_substate(resource_lock)?;
@@ -3014,38 +2986,10 @@ where
                 })?;
                 args.assert_no_args("CreateProofByResource")?;
 
-                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with_authorization(|state_mut| {
-                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
-
-                        let vault = state_mut.get_vault(&vault_lock)?;
-                        if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
-                            return Err(RuntimeError::VaultFrozen {
-                                vault_id,
-                                freeze_flag: VaultFreezeFlag::Withdrawals,
-                            });
-                        }
-                        let resource_address = vault.resource_address();
-
-                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(*resource_address))?;
-
-                        let resource = state_mut.get_resource(&resource_lock)?;
-
-                        state_mut.authorization().check_resource_access_rules(
-                            ResourceAuthAction::Withdraw,
-                            resource.as_ownership(),
-                            resource.access_rules(),
-                        )?;
-
-                        let auth_caller = state_mut.get_auth_caller(&resource_lock)?;
-                        Ok::<_, RuntimeError>((vault_lock, resource_lock, resource.auth_hook().cloned(), auth_caller))
-                    })?;
-
-                if let Some(auth_hook) = maybe_auth_hook {
-                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Withdraw)?;
-                }
+                self.authorize_vault_action(vault_id, ResourceAuthAction::Withdraw, VaultFreezeFlag::Withdrawals)?;
 
                 let (result, locked) = self.tracker.write_with(|state| {
+                    let vault_lock = state.write_lock_substate(SubstateId::Vault(vault_id))?;
                     let proof_id = state.id_provider()?.new_proof_id()?;
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
                     let locked_funds = vault_mut.lock_all(vault_id)?;
@@ -3053,7 +2997,6 @@ where
                     state.new_proof(proof_id, locked_funds)?;
 
                     state.unlock_substate(vault_lock)?;
-                    state.unlock_substate(resource_lock)?;
 
                     Ok::<_, RuntimeError>((InvokeResult::encode(&proof_id)?, locked))
                 })?;
@@ -3068,38 +3011,10 @@ where
                 })?;
                 let arg: VaultCreateProofByFungibleAmountArg = args.assert_one_arg()?;
 
-                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with_authorization(|state_mut| {
-                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
-
-                        let vault = state_mut.get_vault(&vault_lock)?;
-                        if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
-                            return Err(RuntimeError::VaultFrozen {
-                                vault_id,
-                                freeze_flag: VaultFreezeFlag::Withdrawals,
-                            });
-                        }
-                        let resource_address = vault.resource_address();
-
-                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(*resource_address))?;
-
-                        let resource = state_mut.get_resource(&resource_lock)?;
-
-                        state_mut.authorization().check_resource_access_rules(
-                            ResourceAuthAction::Withdraw,
-                            resource.as_ownership(),
-                            resource.access_rules(),
-                        )?;
-
-                        let auth_caller = state_mut.get_auth_caller(&resource_lock)?;
-                        Ok::<_, RuntimeError>((vault_lock, resource_lock, resource.auth_hook().cloned(), auth_caller))
-                    })?;
-
-                if let Some(auth_hook) = maybe_auth_hook {
-                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Withdraw)?;
-                }
+                self.authorize_vault_action(vault_id, ResourceAuthAction::Withdraw, VaultFreezeFlag::Withdrawals)?;
 
                 let (result, locked) = self.tracker.write_with(|state| {
+                    let vault_lock = state.write_lock_substate(SubstateId::Vault(vault_id))?;
                     let proof_id = state.id_provider()?.new_proof_id()?;
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
                     let locked_funds = vault_mut.lock_by_amount(vault_id, arg.amount)?;
@@ -3107,7 +3022,6 @@ where
                     state.new_proof(proof_id, locked_funds)?;
 
                     state.unlock_substate(vault_lock)?;
-                    state.unlock_substate(resource_lock)?;
 
                     Ok::<_, RuntimeError>((InvokeResult::encode(&proof_id)?, locked))
                 })?;
@@ -3122,38 +3036,10 @@ where
                 })?;
                 let arg: VaultCreateProofByNonFungiblesArg = args.assert_one_arg()?;
 
-                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with_authorization(|state_mut| {
-                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
-
-                        let vault = state_mut.get_vault(&vault_lock)?;
-                        if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
-                            return Err(RuntimeError::VaultFrozen {
-                                vault_id,
-                                freeze_flag: VaultFreezeFlag::Withdrawals,
-                            });
-                        }
-                        let resource_address = vault.resource_address();
-
-                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(*resource_address))?;
-
-                        let resource = state_mut.get_resource(&resource_lock)?;
-
-                        state_mut.authorization().check_resource_access_rules(
-                            ResourceAuthAction::Withdraw,
-                            resource.as_ownership(),
-                            resource.access_rules(),
-                        )?;
-
-                        let auth_caller = state_mut.get_auth_caller(&resource_lock)?;
-                        Ok::<_, RuntimeError>((vault_lock, resource_lock, resource.auth_hook().cloned(), auth_caller))
-                    })?;
-
-                if let Some(auth_hook) = maybe_auth_hook {
-                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Withdraw)?;
-                }
+                self.authorize_vault_action(vault_id, ResourceAuthAction::Withdraw, VaultFreezeFlag::Withdrawals)?;
 
                 let (result, locked) = self.tracker.write_with(|state| {
+                    let vault_lock = state.write_lock_substate(SubstateId::Vault(vault_id))?;
                     let proof_id = state.id_provider()?.new_proof_id()?;
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
                     let locked_funds = vault_mut.lock_by_non_fungible_ids(vault_id, arg.ids)?;
@@ -3161,7 +3047,6 @@ where
                     state.new_proof(proof_id, locked_funds)?;
 
                     state.unlock_substate(vault_lock)?;
-                    state.unlock_substate(resource_lock)?;
 
                     Ok::<_, RuntimeError>((InvokeResult::encode(&proof_id)?, locked))
                 })?;
@@ -4379,6 +4264,7 @@ where
         // that will not pay traps here without extracting the crypto work. The resource peek is a
         // cheap substate read that determines whether the viewable-balance surcharge applies.
         let (address, has_view_key) = self.tracker.write_with(|state| {
+            state.account_stealth_transfer(&statement)?;
             let address = state.resolve_resource_address_ref(resource_address.clone())?;
             let resource_lock = state.read_lock_substate(SubstateId::Resource(address))?;
             let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
@@ -4790,5 +4676,47 @@ mod tests {
             exhausted,
             "repeatedly referencing a large blob must exhaust the compute allowance"
         );
+    }
+
+    #[test]
+    fn stealth_transfer_and_pay_fee_enforce_limits_before_substate_reads_and_auth() {
+        let valid =
+            StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
+        let mut too_many_inputs = valid.clone();
+        too_many_inputs.inputs_statement.inputs = (0..=limits::STEALTH_LIMITS.max_inputs)
+            .map(|_| StealthInput::new(PedersenCommitmentBytes::from_bytes(&[0u8; 32]).unwrap()))
+            .collect();
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        assert!(matches!(
+            runtime.stealth_transfer(TARI_TOKEN.into(), too_many_inputs.clone(), None),
+            Err(RuntimeError::ArgumentValidationError(
+                ArgumentValidationError::MaxStealthInputsExceeded { .. }
+            ))
+        ));
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let vault_id = tari_template_lib::types::VaultId::new([1u8; 32].into());
+        runtime.tracker.write_with(|state| {
+            state
+                .current_call_scope_mut()
+                .unwrap()
+                .add_substate_to_scope(vault_id.into())
+                .unwrap();
+        });
+        let pay_fee_args = EngineArgs::from(vec![
+            tari_bor::encode(&PayFeeArg {
+                amount: Amount::zero(),
+                statement: Some(too_many_inputs),
+            })
+            .unwrap()
+            .into(),
+        ]);
+        // The statement decoder bounds inputs at `MAX_STEALTH_INPUTS`, which is `STEALTH_LIMITS.max_inputs`, so an
+        // over-limit `PayFeeArg` is refused while decoding, before the vault is read.
+        assert!(matches!(
+            runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args),
+            Err(RuntimeError::InvalidArgument { argument, .. }) if argument.ends_with("PayFeeArg")
+        ));
     }
 }

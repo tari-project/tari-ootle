@@ -276,7 +276,37 @@ fn script_path_zero_of_n_access_rule_leaf_denies_spend() {
             .seal(test.secret_key()),
         vec![],
     );
-    assert_reject_reason(&reason, "Access Denied");
+    assert_reject_reason(
+        &reason,
+        "spend_condition has an m_of_n rule requiring 0 of 1 requirements",
+    );
+}
+
+#[test]
+fn script_path_duplicate_m_of_n_access_rule_leaf_denies_spend() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let signer = test.to_public_key_bytes();
+    let (_secret, other_pk) = create_key_pair_from_seed(99);
+    let other = other_pk.to_byte_type();
+    let (resx, mint) = mint_utxo(
+        &mut test,
+        conditions(vec![SpendCondition::access_rule(rule!(m_of_n(
+            2,
+            public_key(signer),
+            public_key(signer),
+            public_key(other)
+        )))]),
+    );
+
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "spend_condition has an m_of_n rule that lists");
 }
 
 // -------------------------------- Script path: multi-leaf tree -------------------------------- //
@@ -1031,7 +1061,68 @@ fn spend_rejects_wrong_bound_arg_count() {
 #[test]
 fn spend_rejects_malformed_bound_arg() {
     // `timelock` expects one bound argument; provide one whose bytes are not well-formed CBOR (trailing data).
-    assert_spend_rejected("timelock", vec![Bytes::from_vec(vec![0x00, 0x00])], "well-formed CBOR");
+    assert_spend_rejected(
+        "timelock",
+        vec![Bytes::from_vec(vec![0x00, 0x00])],
+        "bytes remaining on input",
+    );
+}
+
+#[test]
+fn validating_a_spend_script_charges_native_points_for_bound_args() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let payload: Vec<u8> = vec![7u8; 256];
+    let encoded_arg = encode_arg(&payload);
+    let items = tari_bor::count_data_items_bounded(&encoded_arg, limits::MAX_CBOR_NESTING_DEPTH, u64::MAX)
+        .unwrap()
+        .unwrap();
+    let expected_arg_points = limits::engine_arg_points(encoded_arg.len() as u64, items);
+    assert!(expected_arg_points > 0);
+
+    let (resx_bound, mint_bound) = mint_utxo(
+        &mut test,
+        script_condition(script_template, "always_ok_with_bytes", vec![encoded_arg]),
+    );
+    let transfer_bound = spend_into(&mint_bound, key_path(test.to_public_key_bytes()));
+    let result_bound = test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .stealth_transfer(resx_bound, transfer_bound.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    let (resx_empty, mint_empty) = mint_utxo(
+        &mut test,
+        script_condition(script_template, "always_ok_with_bytes", vec![encode_arg(
+            &Vec::<u8>::new(),
+        )]),
+    );
+    let transfer_empty = spend_into(&mint_empty, key_path(test.to_public_key_bytes()));
+    let result_empty = test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .stealth_transfer(resx_empty, transfer_empty.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    let empty_encoded = encode_arg(&Vec::<u8>::new());
+    let empty_items = tari_bor::count_data_items_bounded(&empty_encoded, limits::MAX_CBOR_NESTING_DEPTH, u64::MAX)
+        .unwrap()
+        .unwrap();
+    let empty_arg_points = limits::engine_arg_points(empty_encoded.len() as u64, empty_items);
+    assert_eq!(
+        result_bound.native_execution_points - result_empty.native_execution_points,
+        expected_arg_points - empty_arg_points
+    );
+}
+
+#[test]
+fn spend_rejects_transient_handle_in_bound_arg() {
+    let proof_arg = encode_arg(&tari_template_lib::models::ProofId::from(0u32));
+    assert_spend_rejected("timelock", vec![proof_arg], "may not contain a proof");
 }
 
 /// Mints a UTXO gated by a single no-argument `function` leaf, then spends it revealing that leaf with fees enabled,

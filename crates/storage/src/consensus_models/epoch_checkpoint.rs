@@ -236,7 +236,7 @@ impl EpochCheckpoint {
             )));
         }
 
-        // 1 + for global shard
+        // Cheap early length bound before checking each key (`1 +` for the global shard).
         if self.shard_tree_summary.len() > num_shards + 1 {
             return Err(
                 EpochCheckpointValidationError::NumberOfShardStateRootsExceedsNumberOfShards {

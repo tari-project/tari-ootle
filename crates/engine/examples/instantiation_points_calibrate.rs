@@ -44,8 +44,8 @@ const LARGE_SEGMENT: usize = 1024 * 1024;
 /// See `tests/wasm_loader.rs` — the same encoded `TemplateDef` for a template named `Buggy` with a
 /// single `main`.
 const TEMPLATE_DEF: &[u8] = &[
-    28, 0, 0, 0, 130, 0, 129, 131, 101, 66, 117, 103, 103, 121, 0, 129, 133, 100, 109, 97, 105, 110, 128, 130, 0, 128,
-    244, 244,
+    29, 0, 0, 0, 130, 1, 129, 131, 101, 66, 117, 103, 103, 121, 0, 129, 132, 100, 109, 97, 105, 110, 130, 0, 128, 128,
+    130, 0, 128,
 ];
 
 fn wat_bytes(bytes: &[u8]) -> String {
@@ -102,15 +102,23 @@ fn instantiate_ms(segment_len: usize) -> (f64, usize) {
     (best, code_size)
 }
 
-/// A module whose tables are filled by active element segments, which `Instance::new` writes out on
-/// every instantiation just as it copies the data segments. `tables` x `entries` funcref writes.
-fn module_with_element_segments(tables: usize, entries: usize) -> Vec<u8> {
+/// A module of `segments` active element segments, each filling a fixed table of its own with
+/// `entries` funcrefs, which `Instance::new` writes out on every instantiation just as it copies the
+/// data segments. `segments` x `entries` funcref writes.
+fn module_with_element_segments(segments: usize, entries: usize) -> Vec<u8> {
+    module_with_fixed_tables(segments, entries, entries)
+}
+
+/// A module of `segments` fixed tables of `slots` slots, each written by an active element segment
+/// of its own carrying `entries` funcrefs. With `entries` at 0 the segment writes nothing, and what
+/// it adds over [`module_with_tables_only`] is the table sync wasmer runs after every active segment.
+fn module_with_fixed_tables(segments: usize, slots: usize, entries: usize) -> Vec<u8> {
     let funcrefs = vec!["0"; entries].join(" ");
-    let table_decls = (0..tables)
-        .map(|_| format!("(table {entries} {entries} funcref)"))
+    let table_decls = (0..segments)
+        .map(|_| format!("(table {slots} {slots} funcref)"))
         .collect::<Vec<_>>()
         .join("\n");
-    let elem_decls = (0..tables)
+    let elem_decls = (0..segments)
         .map(|i| format!("(elem (table {i}) (i32.const 0) func {funcrefs})"))
         .collect::<Vec<_>>()
         .join("\n");
@@ -555,13 +563,14 @@ fn main() {
     // Element segments are the other thing copied per instantiation.
     let tables = limits::WASM_LIMITS.max_tables;
     let entries = limits::WASM_LIMITS.max_table_elements as usize;
+    let segments = limits::WASM_LIMITS.max_element_segments;
     let none = instantiate_code_ms(&module_with_element_segments(0, 0));
-    let full = instantiate_code_ms(&module_with_element_segments(tables, entries));
+    let full = instantiate_code_ms(&module_with_element_segments(segments, entries));
     println!();
     println!(
-        "element segments: none {none:.4} ms, {tables}x{entries} {full:.4} ms -> {} points for {} writes",
+        "element segments: none {none:.4} ms, {segments}x{entries} {full:.4} ms -> {} points for {} writes",
         ((full - none) * rate).ceil() as i64,
-        tables * entries,
+        segments * entries,
     );
 
     // Declared table capacity, with nothing written into it.
@@ -573,6 +582,23 @@ fn main() {
         ((tables_only_ms - none) * rate).ceil() as i64,
         charged_points(&tables_only),
     );
+
+    // The fullest table one empty active segment can make wasmer re-sync, against the same table
+    // with no segment at all. Both figures are whole instantiations, measured and charged.
+    for (empty_segments, code) in [
+        (0, module_with_tables_only(1, entries)),
+        (segments, module_with_fixed_tables(segments, entries, 0)),
+    ] {
+        let ms = instantiate_code_ms(&code);
+        let charged = charged_points(&code);
+        let measured = (ms * rate).ceil() as u64;
+        println!(
+            "{entries}-slot fixed table, {empty_segments} empty active segments ({} bytes): {ms:.4} ms -> {measured} \
+             points, charged {charged} ({:.2}x)",
+            code.len(),
+            charged as f64 / measured as f64,
+        );
+    }
 
     // Zero-length active data segments.
     // wasmparser refuses a data section above 100,000 segments, so this is the whole range.

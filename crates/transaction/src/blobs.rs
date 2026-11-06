@@ -207,7 +207,18 @@ impl IntoIterator for Blobs {
 )]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct BlobHashes(#[n(0)] Vec<Hash32>);
+pub struct BlobHashes(
+    #[n(0)]
+    #[cbor(decode_with = "decode_blob_hashes")]
+    Vec<Hash32>,
+);
+
+fn decode_blob_hashes<'b, C>(
+    d: &mut minicbor::Decoder<'b>,
+    ctx: &mut C,
+) -> Result<Vec<Hash32>, minicbor::decode::Error> {
+    tari_bor::adapters::bounded_vec::decode(d, ctx, Blobs::MAX_BLOBS)
+}
 
 impl BlobHashes {
     pub fn empty() -> Self {

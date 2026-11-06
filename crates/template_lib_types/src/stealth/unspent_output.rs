@@ -2,7 +2,7 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use minicbor::{CborLen, Decode, Decoder, Encode, decode};
-use tari_bor::adapters::{bounded_vec, boxed_slice};
+use tari_bor::adapters::bounded_vec;
 use tari_template_abi::rust::prelude::*;
 
 use super::ViewableBalanceProof;
@@ -129,11 +129,7 @@ impl StealthUnspentOutput {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SpendCondition(
     #[n(0)]
-    #[cbor(
-        encode_with = "boxed_slice::encode",
-        decode_with = "decode_conditions",
-        cbor_len = "boxed_slice::cbor_len"
-    )]
+    #[cbor(decode_with = "decode_conditions")]
     Box<[AtomicCondition]>,
 );
 

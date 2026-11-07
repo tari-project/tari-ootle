@@ -5,7 +5,7 @@ use std::time;
 
 use tari_engine_types::{published_template::PublishedTemplateAddress, substate::SubstateId};
 use tari_epoch_manager::EpochManagerError;
-use tari_ootle_common_types::SubstateVersion;
+use tari_ootle_common_types::{SubstateVersion, substate_type::SubstateType};
 
 use crate::substate_cache::SubstateCacheError;
 
@@ -29,6 +29,12 @@ pub enum IndexerError {
         vn: String,
         substate_id: SubstateId,
         details: String,
+    },
+    #[error("{vn} served a {actual} value for {substate_id}")]
+    UnexpectedSubstateType {
+        vn: String,
+        substate_id: SubstateId,
+        actual: SubstateType,
     },
     #[error("{vn} served a template for {requested} whose author and binary hash derive {derived}")]
     TemplateAddressMismatch {

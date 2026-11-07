@@ -286,7 +286,7 @@ async fn submit_inner(
     // the request.
     let submission = task::spawn(async move {
         let submission = transaction_service
-            .submit_transaction_with_opts(transaction, tx_context, None)
+            .submit_transaction_with_locks(transaction, tx_context, lock_ids.clone())
             .await;
         if let Err(err) = &submission &&
             let Err(unlink_err) = unlink_locks_of_unstored_transaction(&task_sdk, tx_id, &lock_ids)

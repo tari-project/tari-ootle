@@ -916,6 +916,46 @@ fn sandbox_denies_minting_into_a_bucket() {
     });
 }
 
+#[test]
+fn sandbox_denies_resource_auth_hook_invocation() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let hook_component: tari_template_lib::types::ComponentAddress =
+        test.call_function(SCRIPT_TEMPLATE, "new", args![], vec![]);
+    let (account, _proof, _key) = test.create_empty_account();
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(script_template, "create_hooked_mintable_resource", args![
+                hook_component
+            ])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    let hooked_resource = test
+        .get_previous_output_address(SubstateType::Resource)
+        .as_resource_address()
+        .unwrap();
+    let (resx, mint) = mint_utxo(
+        &mut test,
+        script_condition(script_template, "try_mint", vec![encode_arg(&hooked_resource)]),
+    );
+
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "Spend script rejected the spend");
+    assert_reject_reason(&reason, RuntimeError::ForbiddenInReadOnlyContext {
+        operation: "invoke_resource_access_hook",
+    });
+}
+
 // -------------------------------- Compute budget -------------------------------- //
 
 #[test]
@@ -1123,6 +1163,45 @@ fn validating_a_spend_script_charges_native_points_for_bound_args() {
 fn spend_rejects_transient_handle_in_bound_arg() {
     let proof_arg = encode_arg(&tari_template_lib::models::ProofId::from(0u32));
     assert_spend_rejected("timelock", vec![proof_arg], "may not contain a proof");
+}
+
+#[test]
+fn programmatic_spend_brings_base_scope_bound_substates_into_frame_scope() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let faucet_template = test.get_template_address(FAUCET_TEMPLATE);
+    let (account, _proof, _key) = test.create_empty_account();
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(script_template, "create_untracked_mintable_resource", args![])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    let bound_resource = test
+        .get_previous_output_address(SubstateType::Resource)
+        .as_resource_address()
+        .unwrap();
+    let (resx, mint) = mint_utxo(
+        &mut test,
+        script_condition(script_template, "try_mint", vec![encode_arg(&bound_resource)]),
+    );
+
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(faucet_template, "static_programmatic_transfer", args![
+                resx,
+                transfer.statement
+            ])
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, RuntimeError::ForbiddenInReadOnlyContext {
+        operation: "new_bucket",
+    });
 }
 
 /// Mints a UTXO gated by a single no-argument `function` leaf, then spends it revealing that leaf with fees enabled,

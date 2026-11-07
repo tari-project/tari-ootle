@@ -79,6 +79,8 @@ activates.
   arguments cannot carry transient handles. (#3345, #3351, #3219)
 - **engine:** stealth transfer limits are enforced before authorization, and spend-script bound
   arguments are metered. (#3295)
+- **engine:** each spend-script evaluation incurs an additional `per_module_call_cost` fee, recorded
+  as `FeeSource::RuntimeCall`, in addition to bound-argument metering. (#3309)
 - **engine:** scoped rules evaluate outside frames, and the fee intent is priced and the last output
   cleared at the fee checkpoint. (#3294, #3266)
 - **engine:** a frame cannot return buckets or address allocations it does not hold, and component

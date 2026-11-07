@@ -143,10 +143,10 @@ pub fn to_value<T: Encode<()> + ?Sized>(val: &T) -> Result<Value, BorError> {
 
 /// Decode a value out of a dynamic [`Value`] tree by re-encoding to bytes and decoding via the
 /// target type. Useful for tests and dynamic conversion; for production paths prefer to
-/// `decode` the original bytes directly.
+/// `decode_exact` the original bytes directly.
 pub fn from_value<T: for<'b> Decode<'b, ()>>(val: &Value) -> Result<T, BorError> {
     let bytes = encode(val)?;
-    decode(&bytes)
+    decode_exact(&bytes)
 }
 
 /// Decode a single value from a byte slice (unit context). Extra trailing bytes are ignored.

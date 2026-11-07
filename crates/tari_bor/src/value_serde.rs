@@ -38,6 +38,13 @@
 //! form. Hex strings without the sentinel envelope are NOT decoded as bytes — only the
 //! sentinel form preserves byte semantics through a round-trip.
 
+#[cfg(not(feature = "std"))]
+use alloc::{
+    boxed::Box,
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::fmt;
 
 use serde::{
@@ -227,8 +234,19 @@ impl<'de> Visitor<'de> for ValueVisitor {
         let first_value: Value = map.next_value()?;
         let mut entries: Vec<(Value, Value)> = Vec::with_capacity(cautious_capacity(map.size_hint()) + 1);
         entries.push((Value::Text(first_key), first_value));
+        let mut deferred_sentinel_kind: Option<String> = None;
         while let Some((k, v)) = map.next_entry::<String, Value>()? {
-            entries.push((Value::Text(k), v));
+            if k == SENTINEL_KEY {
+                let Value::Text(kind) = v else {
+                    return Err(de::Error::custom("@cbor sentinel kind must be a string"));
+                };
+                deferred_sentinel_kind = Some(kind);
+            } else {
+                entries.push((Value::Text(k), v));
+            }
+        }
+        if let Some(kind) = deferred_sentinel_kind {
+            return decode_sentinel_from_entries(&kind, entries);
         }
         Ok(Value::Map(entries))
     }
@@ -297,6 +315,60 @@ fn decode_sentinel<'de, A: MapAccess<'de>>(kind: &str, map: &mut A) -> Result<Va
             Ok(Value::Tag(tag, Box::new(value)))
         },
         other => Err(de::Error::custom(format!("unknown @cbor sentinel kind: {other}"))),
+    }
+}
+
+fn decode_sentinel_from_entries<E: de::Error>(kind: &str, entries: Vec<(Value, Value)>) -> Result<Value, E> {
+    let find_entry = |name: &str| -> Option<Value> {
+        entries.iter().find_map(|(k, v)| match k {
+            Value::Text(s) if s == name => Some(v.clone()),
+            _ => None,
+        })
+    };
+    match kind {
+        SENTINEL_BYTES => {
+            let Some(Value::Text(hex)) = find_entry("hex") else {
+                return Err(E::custom("missing 'hex' in @cbor:bytes"));
+            };
+            decode_hex(&hex).map(Value::Bytes).map_err(E::custom)
+        },
+        SENTINEL_INT => {
+            let Some(Value::Text(s)) = find_entry("value") else {
+                return Err(E::custom("missing 'value' in @cbor:int"));
+            };
+            let i = s.parse::<i128>().map_err(E::custom)?;
+            Value::integer(i).ok_or_else(|| E::custom("Value::Integer out of CBOR range"))
+        },
+        SENTINEL_MAP => {
+            let Some(Value::Array(raw_entries)) = find_entry("entries") else {
+                return Err(E::custom("missing 'entries' in @cbor:map"));
+            };
+            let mut pairs = Vec::with_capacity(raw_entries.len());
+            for item in raw_entries {
+                let Value::Array(mut pair) = item else {
+                    return Err(E::custom("@cbor:map entry must be a 2-element array"));
+                };
+                if pair.len() != 2 {
+                    return Err(E::custom("@cbor:map entry must be a 2-element array"));
+                }
+                let val = pair.pop().unwrap();
+                let key = pair.pop().unwrap();
+                pairs.push((key, val));
+            }
+            Ok(Value::Map(pairs))
+        },
+        SENTINEL_TAG => {
+            let Some(tag_val) = find_entry("tag") else {
+                return Err(E::custom("missing 'tag' in @cbor:tag"));
+            };
+            let tag: u64 = match tag_val {
+                Value::Integer(i) => u64::try_from(i).map_err(|_| E::custom("invalid 'tag' in @cbor:tag"))?,
+                _ => return Err(E::custom("invalid 'tag' in @cbor:tag")),
+            };
+            let value = find_entry("value").ok_or_else(|| E::custom("missing 'value' in @cbor:tag"))?;
+            Ok(Value::Tag(tag, Box::new(value)))
+        },
+        other => Err(E::custom(format!("unknown @cbor sentinel kind: {other}"))),
     }
 }
 
@@ -554,5 +626,23 @@ mod tests {
         });
         let bytes = crate::serde_codec::to_vec(&v).unwrap();
         assert_eq!(crate::serde_codec::from_slice::<Value>(&bytes).unwrap(), v);
+    }
+
+    #[test]
+    fn sentinel_decodes_when_cbor_key_is_not_first() {
+        let bytes_val: Value = serde_json::from_str(r#"{"hex":"deadbeef","@cbor":"bytes"}"#).unwrap();
+        assert_eq!(bytes_val, Value::Bytes(vec![0xde, 0xad, 0xbe, 0xef]));
+
+        let int_val: Value = serde_json::from_str(r#"{"value":"18446744073709551615","@cbor":"int"}"#).unwrap();
+        assert_eq!(int_val, Value::integer(u64::MAX as i128).unwrap());
+
+        let map_val: Value = serde_json::from_str(r#"{"entries":[[1,"one"]],"@cbor":"map"}"#).unwrap();
+        assert_eq!(
+            map_val,
+            Value::Map(vec![(Value::integer(1).unwrap(), Value::Text("one".into()))])
+        );
+
+        let tag_val: Value = serde_json::from_str(r#"{"tag":42,"value":"inner","@cbor":"tag"}"#).unwrap();
+        assert_eq!(tag_val, Value::Tag(42, Box::new(Value::Text("inner".into()))));
     }
 }

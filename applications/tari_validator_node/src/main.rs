@@ -22,13 +22,13 @@
 
 mod cli;
 
-use std::{borrow::Cow, fs, fs::OpenOptions, io::Write, panic, path::Path, time::SystemTime};
+use std::{fs, fs::OpenOptions, io::Write, panic, path::Path, time::SystemTime};
 
 use clap::Parser;
 use log::*;
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_common_types::seeds::seed_words::SeedWords;
-use tari_crypto::tari_utilities::SafePassword;
+use tari_crypto::tari_utilities::hidden::Hidden;
 use tari_ootle_app_utilities::{configuration::load_configuration, keypair::setup_validator_keypair};
 use tari_shutdown::Shutdown;
 use tari_validator_node::{ApplicationConfig, node, run_validator_node};
@@ -37,33 +37,27 @@ use crate::cli::Cli;
 
 const LOG_TARGET: &str = "tari::validator_node::app";
 
-fn load_seed_words(seed_words: Option<&str>, seed_words_file: Option<&Path>) -> Result<Option<SeedWords>, ExitError> {
-    if seed_words.is_some() && seed_words_file.is_some() {
-        return Err(ExitError::new(
+fn load_seed_words(
+    seed_words: Option<SeedWords>,
+    seed_words_file: Option<&Path>,
+) -> Result<Option<SeedWords>, ExitError> {
+    match (seed_words, seed_words_file) {
+        (Some(_), Some(_)) => Err(ExitError::new(
             ExitCode::ConfigError,
             "Specify either seed words or a seed words file",
-        ));
-    }
-    let (words, source) = match (seed_words, seed_words_file) {
-        (Some(words), _) => (Cow::Borrowed(words), "seed words".to_string()),
+        )),
+        (Some(words), None) => Ok(Some(words)),
         (None, Some(path)) => {
-            let content = fs::read_to_string(path).map_err(|e| {
+            let content = fs::read_to_string(path).map(Hidden::hide).map_err(|e| {
                 ExitError::new(
                     ExitCode::ConfigError,
                     format!("Failed to read seed words file {}: {e}", path.display()),
                 )
             })?;
-            (Cow::Owned(content), format!("seed words in {}", path.display()))
+            Ok(Some(cli::parse_seed_words(content.reveal())))
         },
-        (None, None) => return Ok(None),
-    };
-    let parsed = words
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .parse::<SeedWords>()
-        .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Invalid {source}: {e}")))?;
-    Ok(Some(parsed))
+        (None, None) => Ok(None),
+    }
 }
 
 #[cfg(feature = "tokio_debug")]
@@ -124,13 +118,12 @@ async fn main() -> anyhow::Result<()> {
         Some(cli::Subcommand::Start) | None => {
             config.validator_node.validate_fee_claim_public_key()?;
             let shutdown = Shutdown::new();
-            let parsed_seed_words = load_seed_words(cli.seed_words.as_deref(), cli.seed_words_file.as_deref())?;
-            let passphrase = cli.seed_passphrase.as_deref().map(SafePassword::from);
+            let parsed_seed_words = load_seed_words(cli.seed_words, cli.seed_words_file.as_deref())?;
 
             let keypair = setup_validator_keypair(
                 &config.validator_node.identity_file,
                 parsed_seed_words.as_ref(),
-                passphrase,
+                cli.seed_passphrase,
                 !config.validator_node.dont_create_id,
                 false,
             )?;
@@ -144,17 +137,13 @@ async fn main() -> anyhow::Result<()> {
             seed_passphrase,
             overwrite,
         }) => {
-            let seed_words_arg = seed_words.as_deref().or(cli.seed_words.as_deref());
             let seed_words_file_arg = seed_words_file.as_deref().or(cli.seed_words_file.as_deref());
-            let passphrase_arg = seed_passphrase.as_deref().or(cli.seed_passphrase.as_deref());
-
-            let parsed_seed_words = load_seed_words(seed_words_arg, seed_words_file_arg)?;
-            let passphrase = passphrase_arg.map(SafePassword::from);
+            let parsed_seed_words = load_seed_words(seed_words.or(cli.seed_words), seed_words_file_arg)?;
 
             let keypair = setup_validator_keypair(
                 &config.validator_node.identity_file,
                 parsed_seed_words.as_ref(),
-                passphrase,
+                seed_passphrase.or(cli.seed_passphrase),
                 true,
                 overwrite,
             )?;
@@ -278,9 +267,8 @@ mod tests {
             .unwrap();
         fs::write(&path, format!("  {}\n", words.join("\n\t").reveal())).unwrap();
         assert_eq!(load_seed_words(None, Some(&path)).unwrap().unwrap(), words);
-        let inline = format!(" {} ", words.join("  ").reveal());
-        assert_eq!(load_seed_words(Some(&inline), None).unwrap().unwrap(), words);
-        assert!(load_seed_words(Some("words"), Some(&path)).is_err());
+        assert_eq!(load_seed_words(Some(words.clone()), None).unwrap().unwrap(), words);
+        assert!(load_seed_words(Some(words), Some(&path)).is_err());
         assert!(load_seed_words(None, None).unwrap().is_none());
         assert!(load_seed_words(None, Some(&dir.path().join("missing.txt"))).is_err());
     }

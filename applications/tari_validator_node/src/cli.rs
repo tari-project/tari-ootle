@@ -27,6 +27,8 @@ use tari_common::{
     ConfigPath,
     configuration::{ConfigOverrideProvider, Network as L1Network},
 };
+use tari_common_types::seeds::seed_words::SeedWords;
+use tari_crypto::tari_utilities::{SafePassword, hidden::Hidden};
 use tari_ootle_app_utilities::{
     common_cli_args::CommonCliArgs,
     p2p_config::{PeerSeedsConfig, ReachabilityMode},
@@ -85,14 +87,19 @@ pub struct Cli {
     #[clap(long)]
     pub allow_past_protocol_activation: bool,
     /// 24-word seed phrase to restore or initialize the validator node identity
-    #[clap(long, env = "TARI_VN_SEED_WORDS", conflicts_with = "seed-words-file")]
-    pub seed_words: Option<String>,
+    #[clap(
+        long,
+        env = "TARI_VN_SEED_WORDS",
+        conflicts_with = "seed-words-file",
+        parse(from_str = parse_seed_words)
+    )]
+    pub seed_words: Option<SeedWords>,
     /// Path to a file containing 24-word seed phrase
     #[clap(long, env = "TARI_VN_SEED_WORDS_FILE")]
     pub seed_words_file: Option<PathBuf>,
     /// Optional passphrase for enciphered seed words
     #[clap(long, env = "TARI_VN_SEED_PASSPHRASE")]
-    pub seed_passphrase: Option<String>,
+    pub seed_passphrase: Option<SafePassword>,
     #[clap(subcommand)]
     pub command: Option<Subcommand>,
 }
@@ -196,18 +203,23 @@ pub enum Subcommand {
     /// Generate an identity keypair if one does not exist and exit
     GenerateIdentity {
         /// Optional 24-word seed phrase to restore the identity from
-        #[clap(long, conflicts_with = "seed-words-file")]
-        seed_words: Option<String>,
+        #[clap(long, conflicts_with = "seed-words-file", parse(from_str = parse_seed_words))]
+        seed_words: Option<SeedWords>,
         /// Optional path to a file containing 24 seed words
         #[clap(long)]
         seed_words_file: Option<PathBuf>,
         /// Optional passphrase for enciphered seed words
         #[clap(long)]
-        seed_passphrase: Option<String>,
+        seed_passphrase: Option<SafePassword>,
         /// Overwrite existing identity file if it already exists
         #[clap(long)]
         overwrite: bool,
     },
+}
+
+/// Splits a seed phrase on any whitespace, so spaces, tabs and newlines all separate words.
+pub fn parse_seed_words(s: &str) -> SeedWords {
+    SeedWords::new(s.split_whitespace().map(|w| Hidden::hide(w.to_string())).collect())
 }
 
 #[cfg(test)]
@@ -248,16 +260,19 @@ mod tests {
         let cli = Cli::parse_from([
             "tari_validator_node",
             "--seed-words",
-            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon \
-             abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art",
+            " abandon  abandon\tabandon abandon abandon abandon abandon abandon abandon abandon abandon abandon \
+             abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon\nart ",
+            "--seed-passphrase",
+            "hunter2",
         ]);
+        let seed_words = cli.seed_words.unwrap();
+        assert_eq!(seed_words.len(), 24);
         assert_eq!(
-            cli.seed_words.as_deref(),
-            Some(
-                "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon \
-                 abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
-            )
+            seed_words.join(" ").reveal(),
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon \
+             abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
         );
+        assert_eq!(cli.seed_passphrase.unwrap().reveal(), b"hunter2");
 
         let cli_gen = Cli::parse_from([
             "tari_validator_node",

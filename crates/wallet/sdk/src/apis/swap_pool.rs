@@ -49,7 +49,7 @@ pub enum SwapPoolApiError {
         input_resource: ResourceAddress,
         expected_resource: ResourceAddress,
     },
-    #[error("Pool {pool_address} does not have enough TARI liquidity for the desired output of {desired_output}")]
+    #[error("Pool {pool_address} does not have enough liquidity for the desired output of {desired_output}")]
     InsufficientPoolLiquidity {
         pool_address: ComponentAddress,
         desired_output: Amount,
@@ -83,11 +83,12 @@ impl PoolReserves {
 }
 
 /// Calculate the input amount of a non-TARI token needed for a constant-product swap to yield at least
-/// `desired_output` of the output token. Returns `None` if the pool lacks enough output liquidity.
+/// `desired_output` of the output token. Returns `None` if the pool lacks enough output liquidity or has
+/// no input liquidity, or if `desired_output` is zero.
 ///
 /// Includes a [`SLIPPAGE_MARGIN_PERCENT`] slippage margin and uses ceiling division to avoid integer truncation.
 pub fn calculate_swap_input(desired_output: Amount, reserve_in: Amount, reserve_out: Amount) -> Option<Amount> {
-    if reserve_out <= desired_output {
+    if reserve_out <= desired_output || reserve_in.is_zero() || desired_output.is_zero() {
         return None;
     }
     // ceil(desired_output * reserve_in * (100 + margin) / ((reserve_out - desired_output) * 100))
@@ -221,6 +222,14 @@ mod tests {
         // reserve_out equal to or below the desired output can never yield it
         assert!(calculate_swap_input(amt(1000), amt(1000), amt(1000)).is_none());
         assert!(calculate_swap_input(amt(1500), amt(1000), amt(1000)).is_none());
+    }
+
+    #[test]
+    fn returns_none_when_input_reserve_or_desired_output_is_zero() {
+        // A pool with no input reserve cannot yield any output
+        assert!(calculate_swap_input(amt(500), amt(0), amt(1000)).is_none());
+        // Desired output of zero requires no swap
+        assert!(calculate_swap_input(amt(0), amt(1000), amt(1000)).is_none());
     }
 
     #[test]

@@ -257,6 +257,11 @@ impl ResourceContainer {
                 actual: *other.resource_address(),
             });
         }
+        if other.has_locked_funds() {
+            return Err(ResourceError::InvariantError(
+                "Cannot deposit a container with locked funds".to_string(),
+            ));
+        }
 
         match (self, other) {
             (
@@ -270,7 +275,11 @@ impl ResourceContainer {
                 *amount = checked_deposit(*amount, *locked_amount, other_amount, "deposit")?;
             },
             (
-                Self::NonFungible { token_ids, .. },
+                Self::NonFungible {
+                    token_ids,
+                    locked_token_ids,
+                    ..
+                },
                 Self::NonFungible {
                     token_ids: other_token_ids,
                     ..
@@ -278,16 +287,29 @@ impl ResourceContainer {
             ) => {
                 // General protection against overflow. Currently, usize::MAX is the limit, however we likely
                 // want to greatly reduce this limit w.r.t nfts to prevent memory exhaustion.
-                if token_ids.len().checked_add(other_token_ids.len()).is_none() {
+                if token_ids
+                    .len()
+                    .checked_add(locked_token_ids.len())
+                    .and_then(|n| n.checked_add(other_token_ids.len()))
+                    .is_none()
+                {
                     return Err(ResourceError::OperationNotAllowed(
                         "Non-fungible deposit would exceed maximum number of tokens".to_string(),
                     ));
+                }
+                for token in &other_token_ids {
+                    if token_ids.contains(token) || locked_token_ids.contains(token) {
+                        return Err(ResourceError::InvariantError(format!(
+                            "Non-fungible deposit contained duplicate token {token}"
+                        )));
+                    }
                 }
                 token_ids.extend(other_token_ids);
             },
             (
                 Self::Confidential {
                     commitments,
+                    locked_commitments,
                     revealed_amount,
                     locked_revealed_amount,
                     ..
@@ -298,14 +320,15 @@ impl ResourceContainer {
                     ..
                 },
             ) => {
-                for commit in other_commitments {
-                    if !commitments.insert(commit) {
+                for commit in &other_commitments {
+                    if commitments.contains(commit) || locked_commitments.contains(commit) {
                         return Err(ResourceError::InvariantError(
                             "Confidential deposit contained duplicate commitment".to_string(),
                         ));
                     }
                 }
                 *revealed_amount = checked_deposit(*revealed_amount, *locked_revealed_amount, other_amount, "deposit")?;
+                commitments.extend(other_commitments);
             },
             (
                 Self::Stealth {
@@ -462,9 +485,9 @@ impl ResourceContainer {
             Self::Confidential {
                 address,
                 commitments,
+                locked_commitments,
                 revealed_amount,
                 locked_revealed_amount,
-                ..
             } => {
                 let address = *address;
                 let mut inputs = Vec::with_capacity(proof.inputs.len());
@@ -515,7 +538,7 @@ impl ResourceContainer {
 
                 if let Some(change) = validated_proof.change_output {
                     let change_commitment = change.commitment.to_byte_type();
-                    if !commitments.insert(change_commitment) {
+                    if locked_commitments.contains(&change_commitment) || !commitments.insert(change_commitment) {
                         return Err(ResourceError::InvariantError(
                             "Confidential withdraw contained duplicate commitment in change commitment".to_string(),
                         ));
@@ -701,6 +724,11 @@ impl ResourceContainer {
                 actual: *container.resource_address(),
             });
         }
+        if container.has_locked_funds() {
+            return Err(ResourceError::InvariantError(
+                "unlock: proof container cannot itself contain locked funds".to_string(),
+            ));
+        }
 
         match self {
             Self::Fungible {
@@ -740,7 +768,11 @@ impl ResourceContainer {
                             "unlock: tried to unlock token {token} that was not locked",
                         ))
                     })?;
-                    token_ids.insert(token);
+                    if !token_ids.insert(token.clone()) {
+                        return Err(ResourceError::InvariantError(format!(
+                            "unlock: token {token} is already held unlocked"
+                        )));
+                    }
                 }
             },
             Self::Confidential {
@@ -1094,5 +1126,73 @@ mod tests {
             assert_eq!(container.unlocked_amount(), Amount::from(1u64), "{ty}");
             assert_eq!(container.locked_amount(), Amount::MAX, "{ty}");
         }
+    }
+
+    #[test]
+    fn deposit_rejects_locked_funds_and_duplicates() {
+        let mut dest = ResourceContainer::public_fungible(PUBLIC_IDENTITY_RESOURCE_ADDRESS, Amount::from(10u64));
+        let mut other = ResourceContainer::public_fungible(PUBLIC_IDENTITY_RESOURCE_ADDRESS, Amount::from(5u64));
+        let _locked = other.lock_by_amount(Amount::from(2u64)).unwrap();
+        let err = dest.deposit(other).unwrap_err();
+        assert!(matches!(err, ResourceError::InvariantError(_)));
+        assert_eq!(dest.unlocked_amount(), Amount::from(10u64));
+
+        // Duplicate NFT in unlocked or locked set must be rejected without partial mutation.
+        let id1 = NonFungibleId::from_u64(1);
+        let id2 = NonFungibleId::from_u64(2);
+        let mut nft_dest =
+            ResourceContainer::non_fungible(PUBLIC_IDENTITY_RESOURCE_ADDRESS, BTreeSet::from([id1.clone()]));
+        let dup = ResourceContainer::non_fungible(
+            PUBLIC_IDENTITY_RESOURCE_ADDRESS,
+            BTreeSet::from([id1.clone(), id2.clone()]),
+        );
+        let err = nft_dest.deposit(dup).unwrap_err();
+        assert!(matches!(err, ResourceError::InvariantError(_)));
+        assert_eq!(nft_dest.non_fungible_token_ids(), &BTreeSet::from([id1.clone()]));
+
+        // Duplicate NFT against locked_token_ids is also rejected.
+        let _proof = nft_dest.lock_all().unwrap();
+        let dup_locked =
+            ResourceContainer::non_fungible(PUBLIC_IDENTITY_RESOURCE_ADDRESS, BTreeSet::from([id1.clone()]));
+        let err = nft_dest.deposit(dup_locked).unwrap_err();
+        assert!(matches!(err, ResourceError::InvariantError(_)));
+
+        // Duplicate confidential commitment against locked_commitments is rejected.
+        let c1 = PedersenCommitmentBytes::from([1u8; 32]);
+        let mut conf_dest =
+            ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c1], Amount::from(0u64));
+        let _proof = conf_dest.lock_all().unwrap();
+        let dup_conf = ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c1], Amount::from(0u64));
+        let err = conf_dest.deposit(dup_conf).unwrap_err();
+        assert!(matches!(err, ResourceError::InvariantError(_)));
+
+        // Confidential deposit whose revealed sum overflows leaves the destination commitment set unchanged.
+        let c2 = PedersenCommitmentBytes::from([2u8; 32]);
+        let mut overflow_dest =
+            ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c1], Amount::MAX);
+        let incoming =
+            ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c2], Amount::from(1u64));
+        let err = overflow_dest.deposit(incoming).unwrap_err();
+        assert!(matches!(err, ResourceError::BalanceOverflow { operate: "deposit", .. }));
+        assert_eq!(overflow_dest.get_commitment_count(), 1);
+    }
+
+    #[test]
+    fn unlock_rejects_locked_proof_container_and_duplicate_nft() {
+        let mut container = ResourceContainer::public_fungible(PUBLIC_IDENTITY_RESOURCE_ADDRESS, Amount::from(10u64));
+        let mut proof = container.lock_by_amount(Amount::from(5u64)).unwrap();
+        let _nested = proof.lock_by_amount(Amount::from(1u64)).unwrap();
+        let err = container.unlock(proof).unwrap_err();
+        assert!(matches!(err, ResourceError::InvariantError(_)));
+
+        let id1 = NonFungibleId::from_u64(1);
+        let mut nft_container = ResourceContainer::NonFungible {
+            address: PUBLIC_IDENTITY_RESOURCE_ADDRESS,
+            token_ids: BTreeSet::from([id1.clone()]),
+            locked_token_ids: BTreeSet::from([id1.clone()]),
+        };
+        let nft_proof = ResourceContainer::non_fungible(PUBLIC_IDENTITY_RESOURCE_ADDRESS, BTreeSet::from([id1]));
+        let err = nft_container.unlock(nft_proof).unwrap_err();
+        assert!(matches!(err, ResourceError::InvariantError(_)));
     }
 }

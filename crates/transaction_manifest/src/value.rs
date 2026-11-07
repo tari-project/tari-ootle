@@ -193,16 +193,7 @@ fn parse_value(s: &str, depth: usize) -> Result<ManifestValue, ManifestParseErro
                 return None;
             }
             let lit: Lit = parse2(tokens).ok()?;
-            // Reject literals that are not supported or have unrecognized suffixes (e.g. hex strings
-            // like "044bccd4..." that syn misinterprets as integer + suffix, or "1e23" as float).
-            match &lit {
-                Lit::Str(_) | Lit::Bool(_) | Lit::ByteStr(_) | Lit::Byte(_) | Lit::Char(_) => {},
-                Lit::Int(i) => match i.suffix() {
-                    "" | "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" => {},
-                    _ => return None,
-                },
-                _ => return None,
-            }
+            lit_to_arg(&lit).ok()?;
             Some(ManifestValue::Literal(lit))
         })
         .or_else(|| {
@@ -388,6 +379,33 @@ mod tests {
                 assert!(bor_err.to_string().contains("remaining on input"));
             },
             other => panic!("expected CborSerializationError, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn it_parses_digit_only_hex_bytes_and_rejects_overflowing_int_literals() {
+        let digit_only_pk = "1234567890123456789012345678901234567890123456789012345678901234";
+        let expected_bytes = tari_bor::Value::Bytes(bytes_from_hex(digit_only_pk).unwrap());
+
+        let parsed = digit_only_pk.parse::<ManifestValue>().unwrap();
+        assert_eq!(parsed.to_value().unwrap(), expected_bytes);
+
+        let parsed_list = format!("[{digit_only_pk}]").parse::<ManifestValue>().unwrap();
+        assert_eq!(
+            parsed_list.to_value().unwrap(),
+            tari_bor::Value::Array(vec![expected_bytes])
+        );
+
+        for overflowing in [
+            "256u8",
+            "65536u16",
+            "18446744073709551616u64",
+            "18446744073709551616u128",
+        ] {
+            assert!(
+                overflowing.parse::<ManifestValue>().is_err(),
+                "expected {overflowing} to be rejected by FromStr"
+            );
         }
     }
 }

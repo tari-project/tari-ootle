@@ -84,8 +84,10 @@ impl PeerStore for MemoryPeerStore {
     async fn put_address(&self, peer_id: &PeerId, address: Multiaddr) -> Result<bool, Self::Error> {
         match self.get(peer_id).await? {
             Some(mut peer) => {
-                peer.addresses.push(address);
-                self.put(peer).await?;
+                if !peer.addresses.contains(&address) {
+                    peer.addresses.push(address);
+                    self.put(peer).await?;
+                }
                 Ok(true)
             },
             None => Ok(false),

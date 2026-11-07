@@ -606,3 +606,27 @@ fn set_committee_shard_selects_latest_active_registration() {
         assert_eq!(vn.fee_claim_public_key, expected_claim_key);
     }
 }
+
+#[test]
+fn overlapping_shard_group_committees_are_sorted_by_public_key() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut validator_nodes = db.validator_nodes(&mut tx);
+
+    let sg = ShardGroup::new(1, 10);
+    for _ in 0..20 {
+        let pk = new_public_key();
+        insert_vn_with_public_key(&mut validator_nodes, pk.clone(), Epoch(1));
+        set_committee_shard_group(&mut validator_nodes, &pk, sg, Epoch(1));
+    }
+
+    let overlapping = validator_nodes
+        .get_committees_overlapping_shard_group(Epoch(1), sg)
+        .unwrap();
+    let committee = &overlapping[&sg];
+    let public_keys: Vec<_> = committee.public_keys().copied().collect();
+    let mut sorted = public_keys.clone();
+    sorted.sort();
+    assert_eq!(public_keys.len(), 20);
+    assert_eq!(public_keys, sorted);
+}

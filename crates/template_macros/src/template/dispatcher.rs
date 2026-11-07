@@ -24,7 +24,7 @@ use std::collections::HashMap;
 
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
-use syn::{Block, Expr, ExprBlock, ExprField, Result, Stmt, TypePath, TypeTuple, parse_quote, token::Brace};
+use syn::{Block, Expr, ExprBlock, Index, Result, Stmt, TypePath, TypeTuple, parse_quote, token::Brace};
 use tari_template_abi::{FunctionIdent, diagnostics::PanicDiagnostic, func_hasher::hash_function_name};
 
 use crate::template::ast::{FunctionAst, TemplateAst, TypeAst};
@@ -244,8 +244,9 @@ fn replace_self_in_output(ast: &FunctionAst) -> Vec<Stmt> {
                 }
             },
             TypeAst::Tuple { type_tuple, .. } => {
-                let stmt = replace_self_in_tuple(type_tuple);
-                return vec![stmt];
+                if let Some(stmt) = replace_self_in_tuple(type_tuple) {
+                    return vec![stmt];
+                }
             },
             _ => todo!("replace_self_in_output only supports typed and tuple"),
         }
@@ -273,60 +274,108 @@ fn replace_self_in_single_value(type_path: &TypePath) -> Option<Stmt> {
     None
 }
 
-fn replace_self_in_tuple(type_tuple: &TypeTuple) -> Stmt {
-    // build the expressions for each element in the tuple
+fn replace_self_in_tuple(type_tuple: &TypeTuple) -> Option<Stmt> {
+    let rtn_expr: Expr = parse_quote!(rtn);
+    replace_self_in_tuple_expr(type_tuple, rtn_expr).map(|tuple_expr| {
+        parse_quote! {
+            let rtn = #tuple_expr;
+        }
+    })
+}
+
+fn replace_self_in_tuple_expr(type_tuple: &TypeTuple, base_expr: Expr) -> Option<Expr> {
+    let mut has_self = false;
     let elems: Vec<Expr> = type_tuple
         .elems
         .iter()
         .enumerate()
-        .map(|(i, t)| match t {
-            syn::Type::Path(path) => {
-                let ident = path
-                    .path
-                    .segments
-                    .first()
-                    .expect("path segments is empty")
-                    .ident
-                    .clone();
-                let field_expr = build_tuple_field_expr("rtn".to_string(), i as u32);
-                if ident == "Self" {
-                    // When we return self we use default rules - which only permit the owner of the component to call
-                    // methods
-                    parse_quote! {
-                        engine().create_component(
-                            #field_expr,
-                            ::tari_template_lib::template_macro_deps::OwnerRule::default(),
-                            ::tari_template_lib::template_macro_deps::ComponentAccessRules::new(),
-                            None,
-                            ::tari_template_lib::template_macro_deps::UpdateRule::Locked,
-                        )
+        .map(|(i, t)| {
+            let field_expr = build_tuple_field_expr(base_expr.clone(), i as u32);
+            match t {
+                syn::Type::Path(path) => {
+                    let is_self = path.path.segments.first().is_some_and(|seg| seg.ident == "Self");
+                    if is_self {
+                        has_self = true;
+                        // When we return self we use default rules - which only permit the owner of the component to
+                        // call methods
+                        parse_quote! {
+                            engine().create_component(
+                                #field_expr,
+                                ::tari_template_lib::template_macro_deps::OwnerRule::default(),
+                                ::tari_template_lib::template_macro_deps::ComponentAccessRules::new(),
+                                None,
+                                ::tari_template_lib::template_macro_deps::UpdateRule::Locked,
+                            )
+                        }
+                    } else {
+                        field_expr
                     }
-                } else {
-                    field_expr
-                }
-            },
-            _ => todo!("replace_self_in_tuple only supports paths"),
+                },
+                syn::Type::Tuple(subtuple) => {
+                    if let Some(replaced) = replace_self_in_tuple_expr(subtuple, field_expr.clone()) {
+                        has_self = true;
+                        replaced
+                    } else {
+                        field_expr
+                    }
+                },
+                _ => field_expr,
+            }
         })
         .collect();
 
-    parse_quote! {
-        let rtn = (#(#elems),*);
+    if !has_self {
+        return None;
+    }
+
+    if elems.len() == 1 {
+        let only = &elems[0];
+        Some(parse_quote! { (#only,) })
+    } else {
+        Some(parse_quote! { (#(#elems),*) })
     }
 }
 
-fn build_tuple_field_expr(name: String, i: u32) -> Expr {
-    let name = Ident::new(&name, Span::call_site());
-
-    let mut field_expr: ExprField = parse_quote! {
-        #name.0
-    };
-
-    match field_expr.member {
-        syn::Member::Unnamed(ref mut unnamed) => {
-            unnamed.index = i;
-        },
-        _ => todo!("build_tuple_field_expr only supports Unnamed"),
+fn build_tuple_field_expr(base: Expr, i: u32) -> Expr {
+    let index = Index::from(i as usize);
+    parse_quote! {
+        #base.#index
     }
+}
 
-    Expr::Field(field_expr)
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use indoc::indoc;
+    use proc_macro2::TokenStream;
+    use syn::parse2;
+
+    use super::generate_dispatcher;
+    use crate::template::ast::TemplateAst;
+
+    #[test]
+    fn supports_nested_and_unit_tuple_returns() {
+        let ast = parse2::<TemplateAst>(
+            TokenStream::from_str(indoc! {"
+                mod tuple_test {
+                    pub struct TupleComponent {}
+                    impl TupleComponent {
+                        pub fn unit_ret(&self) -> () { }
+                        pub fn nested_ret(&self) -> (u32, (u64, String)) { (1, (2, String::new())) }
+                        pub fn nested_self_ret() -> (u32, (Self, String)) { (1, (Self {}, String::new())) }
+                        pub fn single_self_tuple() -> (Self,) { (Self {},) }
+                    }
+                }
+            "})
+            .unwrap(),
+        )
+        .unwrap();
+
+        let dispatcher = generate_dispatcher(&ast).unwrap().to_string();
+        // `nested_self_ret` must wrap `rtn.1.0` in `create_component` while preserving `rtn.0` and `rtn.1.1`.
+        assert!(dispatcher.contains("create_component (rtn . 1 . 0"), "{dispatcher}");
+        // `single_self_tuple` must preserve trailing comma so the 1-tuple remains a tuple.
+        assert!(dispatcher.contains("UpdateRule :: Locked ,) ,)"), "{dispatcher}");
+    }
 }

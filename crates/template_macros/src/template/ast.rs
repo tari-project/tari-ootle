@@ -98,12 +98,10 @@ impl TemplateAst {
 
         let mut functions = Vec::with_capacity(5);
 
-        // add derive macros to all structs
+        // First pass: validate struct/enum visibility and resolve the first public struct/enum
+        // as the component template name so `impl` blocks can appear in any order.
         let mut template_name = None;
-        let mut has_impl = false;
-        let mut uses = Vec::new();
-
-        for item in items {
+        for item in items.iter() {
             match item {
                 Item::Struct(item) => {
                     if !matches!(item.vis, Visibility::Public(_)) {
@@ -123,61 +121,87 @@ impl TemplateAst {
                         template_name = Some(item.ident.clone());
                     }
                 },
+                _ => {},
+            }
+        }
+
+        let Some(template_name) = template_name else {
+            return Err(Error::new(module.ident.span(), "a template must define a struct"));
+        };
+
+        let mut has_impl = false;
+        let mut uses = Vec::new();
+
+        for item in items {
+            match item {
                 Item::Impl(impl_item) => {
-                    if let Type::Path(path) = &*impl_item.self_ty {
-                        let template_name_ref = template_name.as_ref().expect("struct not defined before impl");
-                        if path.path.is_ident(template_name_ref) {
-                            for impl_item_mut in &mut impl_item.items {
-                                if let Some(func) = Self::get_function_from_item(impl_item_mut) {
-                                    functions.push(func);
-                                    if let ImplItem::Fn(fn_item) = impl_item_mut {
-                                        let migration_pos =
-                                            fn_item.attrs.iter().position(|attr| attr.path().is_ident("migration"));
+                    let is_component_inherent_impl = impl_item.trait_.is_none() &&
+                        matches!(&*impl_item.self_ty, Type::Path(path) if path.path.is_ident(&template_name));
 
-                                        if let Some(migration_index) = migration_pos {
-                                            match &fn_item.sig.output {
-                                                ReturnType::Default => {
-                                                    return Err(Error::new(
-                                                        fn_item.sig.ident.span(),
-                                                        "migration functions must return the new template struct. \
-                                                         Found: unit",
-                                                    ));
-                                                },
-                                                ReturnType::Type(_, ty) => match &**ty {
-                                                    Type::Path(pth) => {
-                                                        if !pth.path.is_ident(template_name_ref) &&
-                                                            !pth.path.is_ident("Self")
-                                                        {
-                                                            return Err(Error::new(
-                                                                ty.span(),
-                                                                format!(
-                                                                    "migration functions must return the new template \
-                                                                     struct. Found: {}",
-                                                                    pth.path.segments.last().unwrap().ident
-                                                                ),
-                                                            ));
-                                                        }
-                                                    },
+                    if is_component_inherent_impl {
+                        for impl_item_mut in &mut impl_item.items {
+                            if let Some(func) = Self::get_function_from_item(impl_item_mut)? {
+                                functions.push(func);
+                                if let ImplItem::Fn(fn_item) = impl_item_mut {
+                                    let migration_pos =
+                                        fn_item.attrs.iter().position(|attr| attr.path().is_ident("migration"));
 
-                                                    ty => {
+                                    if let Some(migration_index) = migration_pos {
+                                        match &fn_item.sig.output {
+                                            ReturnType::Default => {
+                                                return Err(Error::new(
+                                                    fn_item.sig.ident.span(),
+                                                    "migration functions must return the new template struct. Found: \
+                                                     unit",
+                                                ));
+                                            },
+                                            ReturnType::Type(_, ty) => match &**ty {
+                                                Type::Path(pth) => {
+                                                    if !pth.path.is_ident(&template_name) && !pth.path.is_ident("Self")
+                                                    {
                                                         return Err(Error::new(
                                                             ty.span(),
                                                             format!(
                                                                 "migration functions must return the new template \
-                                                                 struct. Found: {:?}",
-                                                                ty
+                                                                 struct. Found: {}",
+                                                                pth.path.segments.last().unwrap().ident
                                                             ),
                                                         ));
-                                                    },
+                                                    }
                                                 },
-                                            }
-                                            // Remove migration attribute from functions/methods
-                                            fn_item.attrs.remove(migration_index);
+
+                                                ty => {
+                                                    return Err(Error::new(
+                                                        ty.span(),
+                                                        format!(
+                                                            "migration functions must return the new template struct. \
+                                                             Found: {:?}",
+                                                            ty
+                                                        ),
+                                                    ));
+                                                },
+                                            },
                                         }
+                                        // Remove migration attribute from functions/methods
+                                        fn_item.attrs.remove(migration_index);
                                     }
                                 }
                             }
-                            has_impl = true;
+                        }
+                        has_impl = true;
+                    } else {
+                        // Reject misplaced #[migration] attributes on trait impls or helper struct impls
+                        // with a clear error rather than leaving an unresolved attribute for rustc.
+                        for other_item in &impl_item.items {
+                            if let ImplItem::Fn(fn_item) = other_item &&
+                                fn_item.attrs.iter().any(|attr| attr.path().is_ident("migration"))
+                            {
+                                return Err(Error::new(
+                                    fn_item.sig.ident.span(),
+                                    "#[migration] is only supported on inherent impl functions of the template \
+                                     component",
+                                ));
+                            }
                         }
                     }
                 },
@@ -194,10 +218,6 @@ impl TemplateAst {
             }
         }
 
-        if template_name.is_none() {
-            return Err(Error::new(module.ident.span(), "a template must define a struct"));
-        }
-
         if !has_impl {
             return Err(Error::new(
                 module.ident.span(),
@@ -206,7 +226,7 @@ impl TemplateAst {
         }
 
         Ok(Self {
-            template_name: template_name.unwrap(),
+            template_name,
             functions,
             module_content: module
                 .content
@@ -236,18 +256,18 @@ impl TemplateAst {
         for item in items {
             match item {
                 Item::Fn(fn_item) => {
-                    // Only public free functions form the template's public API. Anything else
-                    // (private helpers, data-type `impl` blocks, etc.) is left untouched in the
-                    // module for the author to use internally.
-                    if !matches!(fn_item.vis, Visibility::Public(_)) {
-                        continue;
-                    }
-
                     if fn_item.attrs.iter().any(|attr| attr.path().is_ident("migration")) {
                         return Err(Error::new(
                             fn_item.sig.ident.span(),
                             "stateless templates cannot have #[migration] functions",
                         ));
+                    }
+
+                    // Only public free functions form the template's public API. Anything else
+                    // (private helpers, data-type `impl` blocks, etc.) is left untouched in the
+                    // module for the author to use internally.
+                    if !matches!(fn_item.vis, Visibility::Public(_)) {
+                        continue;
                     }
 
                     if let Some(receiver) = fn_item.sig.receiver() {
@@ -264,7 +284,7 @@ impl TemplateAst {
                         ));
                     }
 
-                    functions.push(Self::get_function_from_fn(fn_item));
+                    functions.push(Self::get_function_from_fn(fn_item)?);
                 },
                 Item::Use(item) => {
                     // Exclude super imports
@@ -432,47 +452,51 @@ impl TemplateAst {
         self.functions.iter()
     }
 
-    fn get_function_from_item(item: &ImplItem) -> Option<FunctionAst> {
+    fn get_function_from_item(item: &ImplItem) -> Result<Option<FunctionAst>> {
         match item {
             ImplItem::Fn(m) => {
                 if !Self::is_public_function(m) {
-                    return None;
+                    if m.attrs.iter().any(|attr| attr.path().is_ident("migration")) {
+                        return Err(Error::new(m.sig.ident.span(), "migration functions must be public"));
+                    }
+                    return Ok(None);
                 }
-                Some(FunctionAst {
+                Ok(Some(FunctionAst {
                     name: m.sig.ident.to_string(),
-                    input_types: Self::get_input_types(&m.sig.inputs),
+                    input_types: Self::get_input_types(&m.sig.inputs)?,
                     output_type: Self::get_output_type_token(&m.sig.output),
                     is_migration: m.attrs.iter().any(|attr| attr.path().is_ident("migration")),
-                })
+                }))
             },
-            _ => todo!("get_function_from_item does not support anything other than functions/methods"),
+            // Ignore associated constants, associated types, and macro invocations inside impl blocks.
+            _ => Ok(None),
         }
     }
 
     /// Build a [`FunctionAst`] from a free `pub fn` item (used by stateless templates). Callers
     /// must have already rejected `self` receivers, `-> Self` returns and `#[migration]`.
-    fn get_function_from_fn(item: &ItemFn) -> FunctionAst {
-        FunctionAst {
+    fn get_function_from_fn(item: &ItemFn) -> Result<FunctionAst> {
+        Ok(FunctionAst {
             name: item.sig.ident.to_string(),
-            input_types: Self::get_input_types(&item.sig.inputs),
+            input_types: Self::get_input_types(&item.sig.inputs)?,
             output_type: Self::get_output_type_token(&item.sig.output),
             is_migration: false,
-        }
+        })
     }
 
-    fn get_input_types(inputs: &Punctuated<FnArg, Comma>) -> Vec<TypeAst> {
+    fn get_input_types(inputs: &Punctuated<FnArg, Comma>) -> Result<Vec<TypeAst>> {
         inputs
             .iter()
             .map(|arg| match arg {
                 syn::FnArg::Receiver(r) => {
                     if r.reference.is_none() {
-                        panic!("Consuming methods are not supported")
+                        return Err(Error::new(r.span(), "Consuming methods are not supported"));
                     }
 
                     let mutability = r.mutability.is_some();
-                    TypeAst::Receiver { mutability }
+                    Ok(TypeAst::Receiver { mutability })
                 },
-                syn::FnArg::Typed(t) => Self::get_type_ast(Some(&t.pat), &t.ty),
+                syn::FnArg::Typed(t) => Ok(Self::get_type_ast(Some(&t.pat), &t.ty)),
             })
             .collect()
     }
@@ -686,5 +710,136 @@ mod stateless_tests {
         .err()
         .unwrap();
         assert!(err.to_string().contains("at least one public function"), "{err}");
+    }
+}
+
+#[cfg(test)]
+mod stateful_tests {
+    use std::str::FromStr;
+
+    use indoc::indoc;
+    use proc_macro2::TokenStream;
+    use syn::parse2;
+
+    use super::TemplateAst;
+
+    fn parse(src: &str) -> super::Result<TemplateAst> {
+        parse2::<TemplateAst>(TokenStream::from_str(src).unwrap())
+    }
+
+    #[test]
+    fn supports_impl_before_component_struct_and_associated_constants() {
+        let ast = parse(indoc! {"
+            mod counter {
+                impl Counter {
+                    pub const INITIAL: u64 = 0;
+
+                    pub fn new() -> Self {
+                        Self { value: Self::INITIAL }
+                    }
+                }
+
+                pub struct Counter {
+                    value: u64,
+                }
+            }
+        "})
+        .unwrap();
+
+        assert_eq!(ast.template_name.to_string(), "Counter");
+        assert_eq!(ast.functions.len(), 1);
+        assert_eq!(ast.functions[0].name, "new");
+    }
+
+    #[test]
+    fn ignores_trait_impls_and_requires_inherent_impl() {
+        // A trait impl with associated types/constants on the component struct must not panic
+        // or falsely satisfy the requirement for an inherent impl block.
+        let err = parse(indoc! {"
+            mod counter {
+                pub struct Counter { value: u64 }
+                impl Default for Counter {
+                    fn default() -> Self { Self { value: 0 } }
+                }
+            }
+        "})
+        .err()
+        .unwrap();
+        assert!(
+            err.to_string()
+                .contains("a template must have associated functions and/or methods"),
+            "{err}"
+        );
+
+        // When paired with an inherent impl, trait impls with associated types/consts succeed.
+        let ast = parse(indoc! {"
+            mod counter {
+                pub struct Counter { value: u64 }
+                impl TryFrom<u64> for Counter {
+                    type Error = String;
+                    fn try_from(value: u64) -> Result<Self, Self::Error> {
+                        Ok(Self { value })
+                    }
+                }
+                impl Counter {
+                    pub fn new() -> Self { Self { value: 0 } }
+                }
+            }
+        "})
+        .unwrap();
+        assert_eq!(ast.functions.len(), 1);
+        assert_eq!(ast.functions[0].name, "new");
+    }
+
+    #[test]
+    fn rejects_consuming_self_method_with_compile_error() {
+        let err = parse(indoc! {"
+            mod counter {
+                pub struct Counter { value: u64 }
+                impl Counter {
+                    pub fn into_value(self) -> u64 { self.value }
+                }
+            }
+        "})
+        .err()
+        .unwrap();
+        assert!(err.to_string().contains("Consuming methods are not supported"), "{err}");
+    }
+
+    #[test]
+    fn rejects_private_or_misplaced_migration_functions() {
+        let err = parse(indoc! {"
+            mod counter {
+                pub struct Counter { value: u64 }
+                impl Counter {
+                    #[migration]
+                    fn migrate(old: CounterV1) -> Self { Self { value: 0 } }
+                }
+            }
+        "})
+        .err()
+        .unwrap();
+        assert!(err.to_string().contains("migration functions must be public"), "{err}");
+
+        let err = parse(indoc! {"
+            mod counter {
+                pub struct Counter { value: u64 }
+                pub struct Helper { value: u64 }
+                impl Counter {
+                    pub fn new() -> Self { Self { value: 0 } }
+                }
+                impl Helper {
+                    #[migration]
+                    pub fn migrate(old: Counter) -> Self { Self { value: 0 } }
+                }
+            }
+        "})
+        .err()
+        .unwrap();
+        assert!(
+            err.to_string()
+                .contains("#[migration] is only supported on inherent impl functions"),
+            "{err}"
+        );
     }
 }

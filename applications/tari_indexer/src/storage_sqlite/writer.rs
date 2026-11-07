@@ -8,7 +8,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection, dsl, sql_types};
+use diesel::{BoolExpressionMethods, OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection, dsl, sql_types};
 use log::{debug, info, warn};
 use serde::Serialize;
 use tari_engine_types::{
@@ -893,11 +893,12 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             // A record that the substate does not exist is left to the ranking below. It is settled
             // by f + 1 members rather than one, so a single member being behind cannot produce it,
             // and refusing it here would suppress the legitimate one that follows a destroy.
-            if version.is_some_and(|v| v < observed_version) {
+            if version.is_some_and(|v| (v as u64) < (observed_version as u64)) {
                 debug!(
                     target: LOG_TARGET,
-                    "Discarding cache write for {substate_id} v{}: the stream has already seen v{observed_version}",
-                    entry.version.display()
+                    "Discarding cache write for {substate_id} v{}: the stream has already seen v{}",
+                    entry.version.display(),
+                    observed_version as u64,
                 );
                 return Ok(false);
             }
@@ -910,7 +911,8 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             if observed_version_spent && claims_live_at_floor {
                 debug!(
                     target: LOG_TARGET,
-                    "Discarding cache write for {substate_id} v{observed_version}: the stream saw that version spent"
+                    "Discarding cache write for {substate_id} v{}: the stream saw that version spent",
+                    observed_version as u64,
                 );
                 return Ok(false);
             }
@@ -941,7 +943,9 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             let aged_out = !cached_verified && unix_timestamp().saturating_sub(cached_at) > head_ttl.as_secs() as i64;
             // A substate that does not exist ranks below every version, which `Option`'s own ordering
             // gives: nonexistence yields to any head, and any head displaces it.
-            if cached_version > version && !outranked && !aged_out {
+            let cached_version_u64 = cached_version.map(|v| v as u64);
+            let version_u64 = version.map(|v| v as u64);
+            if cached_version_u64 > version_u64 && !outranked && !aged_out {
                 return Ok(false);
             }
         }
@@ -1169,12 +1173,23 @@ impl SqliteStoreWriteTransaction<'_> {
         let mut retired = 0;
 
         if let Some(retires_up_to) = invalidation.retires_up_to() {
-            retired += diesel::delete(
-                substate_cache::table
-                    .filter(substate_cache::substate_id.eq(&id))
-                    .filter(substate_cache::version.le(retires_up_to.as_u64() as i64)),
-            )
-            .execute(self.connection())
+            let max_v = retires_up_to.as_u64() as i64;
+            retired += if max_v >= 0 {
+                diesel::delete(
+                    substate_cache::table
+                        .filter(substate_cache::substate_id.eq(&id))
+                        .filter(substate_cache::version.ge(0))
+                        .filter(substate_cache::version.le(max_v)),
+                )
+                .execute(self.connection())
+            } else {
+                diesel::delete(
+                    substate_cache::table
+                        .filter(substate_cache::substate_id.eq(&id))
+                        .filter(substate_cache::version.ge(0).or(substate_cache::version.le(max_v))),
+                )
+                .execute(self.connection())
+            }
             .map_err(|e| StorageError::general(OPERATION, e))?;
         }
 
@@ -1199,20 +1214,28 @@ impl SqliteStoreWriteTransaction<'_> {
             .on_conflict(substate_cache_invalidations::substate_id)
             .do_update()
             .set((
-                substate_cache_invalidations::state_version.eq(state_version.as_u64() as i64),
+                // The state_version column in SQLite is signed BIGINT, so keep the highest unsigned
+                // StateVersion (e.g. a retire_committed watermark ahead of a later stream invalidation).
+                substate_cache_invalidations::state_version.eq(diesel::dsl::sql::<diesel::sql_types::BigInt>(
+                    "case when (state_version < 0) != (excluded.state_version < 0) then min(state_version, \
+                     excluded.state_version) else max(state_version, excluded.state_version) end",
+                )),
                 // A floor only ever rises. The transitions of one batch arrive in no stated order,
                 // and a destroy of the version below a creation must not lower what the creation
                 // showed.
                 substate_cache_invalidations::substate_version.eq(diesel::dsl::sql::<diesel::sql_types::BigInt>(
-                    "max(substate_version, excluded.substate_version)",
+                    "case when (substate_version < 0) != (excluded.substate_version < 0) then min(substate_version, \
+                     excluded.substate_version) else max(substate_version, excluded.substate_version) end",
                 )),
                 // The provenance belongs to whichever version the floor ends up holding, so it
                 // follows that same comparison rather than being overwritten. At the one version
                 // both a creation and a destroy can show, a spend stands: it is the later of the
                 // two whatever order they arrive in.
                 substate_cache_invalidations::spent.eq(diesel::dsl::sql::<diesel::sql_types::Bool>(
-                    "case when excluded.substate_version > substate_version then excluded.spent when \
-                     excluded.substate_version = substate_version then (spent or excluded.spent) else spent end",
+                    "case when ((excluded.substate_version < 0) and (substate_version >= 0)) or \
+                     (((excluded.substate_version < 0) = (substate_version < 0)) and (excluded.substate_version > \
+                     substate_version)) then excluded.spent when excluded.substate_version = substate_version then \
+                     (spent or excluded.spent) else spent end",
                 )),
                 substate_cache_invalidations::invalidated_at.eq(now),
             ))

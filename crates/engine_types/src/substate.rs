@@ -404,7 +404,8 @@ impl SubstateId {
     /// by. Nothing can ever be resolved or locked at one of these, so they are neither derived as transaction
     /// inputs nor brought into a call scope, and a transaction naming one as an input is rejected at validation.
     pub fn is_virtual(&self) -> bool {
-        self.is_virtual_badge() || matches!(self, Self::Resource(addr) if addr.is_caller_badge())
+        self.is_virtual_badge() ||
+            matches!(self, Self::Resource(addr) if addr.is_caller_badge() || *addr == PUBLIC_IDENTITY_RESOURCE_ADDRESS)
     }
 
     /// Returns `true` for substate ids that only exist as the output of the transaction that creates them: a
@@ -1356,6 +1357,13 @@ mod tests {
             bytes.extend_from_slice(b"trailing_malicious_bytes");
             let err = Substate::from_bytes(&bytes).unwrap_err();
             assert!(err.to_string().contains("remaining on input"));
+        }
+
+        #[test]
+        fn public_identity_and_caller_badge_resources_are_virtual_and_non_declarable() {
+            let public_identity_res = SubstateId::Resource(PUBLIC_IDENTITY_RESOURCE_ADDRESS);
+            assert!(public_identity_res.is_virtual());
+            assert!(!public_identity_res.is_declarable_input());
         }
     }
 }

@@ -103,7 +103,13 @@ impl TemplateMetadataBuilder {
 
     /// Override the tags from Cargo.toml.
     pub fn tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.tags = Some(tags.into_iter().map(Into::into).collect());
+        self.tags = Some(
+            tags.into_iter()
+                .map(Into::into)
+                .map(|t| t.trim().to_lowercase())
+                .filter(|t| !t.is_empty())
+                .collect(),
+        );
         self
     }
 
@@ -173,7 +179,8 @@ impl TemplateMetadataBuilder {
             metadata.tags = tags.clone();
         }
         if let Some(ref category) = self.category {
-            metadata.category = Some(category.clone());
+            let cat = category.trim().to_lowercase();
+            metadata.category = (!cat.is_empty()).then_some(cat);
         }
         if let Some(ref repository) = self.repository {
             metadata.repository =
@@ -570,6 +577,29 @@ overridden = "old"
             result,
             Err(TemplateBuildError::DocExtract(DocExtractError::Io { .. }))
         ));
+    }
+
+    #[test]
+    fn normalizes_tags_and_category_overrides() {
+        let dir = tempfile::tempdir().unwrap();
+        create_test_cargo_toml(dir.path());
+        let out_dir = dir.path().join("out");
+        std::fs::create_dir_all(&out_dir).unwrap();
+
+        let output = TemplateMetadataBuilder::new()
+            .tags(vec![" DeFi ", "", "  ", "NFT"])
+            .category("  Marketplace ")
+            .build_inner(dir.path().to_str().unwrap(), out_dir.to_str().unwrap())
+            .unwrap();
+
+        assert_eq!(output.metadata.tags, vec!["defi", "nft"]);
+        assert_eq!(output.metadata.category.as_deref(), Some("marketplace"));
+
+        let cleared = TemplateMetadataBuilder::new()
+            .category("   ")
+            .build_inner(dir.path().to_str().unwrap(), out_dir.to_str().unwrap())
+            .unwrap();
+        assert_eq!(cleared.metadata.category, None);
     }
 
     #[test]

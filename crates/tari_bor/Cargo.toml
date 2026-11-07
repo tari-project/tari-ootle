@@ -27,6 +27,6 @@ alloc = ["minicbor/alloc", "serde?/alloc"]
 # that accepts a CBOR byte string where serde asks for a sequence) so the `adapters::serde_bridge`
 # module — which lets foreign serde-only types ride inside minicbor-encoded structs — is available
 # wherever serde is.
-serde = ["dep:serde"]
+serde = ["dep:serde", "alloc"]
 ts = ["dep:ts-rs"]
 indexmap = ["dep:indexmap"]

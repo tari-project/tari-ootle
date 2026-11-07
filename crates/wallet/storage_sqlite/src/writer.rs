@@ -202,12 +202,18 @@ impl<'a> WriteTransaction<'a> {
             .up_iter()
             .filter_map(|(id, _)| id.as_utxo_address())
             .collect::<HashSet<_>>();
+        let burnt_id_index = diff
+            .up_iter()
+            .filter(|(_, s)| s.substate_value().as_utxo().is_some_and(|u| u.is_burnt()))
+            .filter_map(|(id, _)| id.as_utxo_address())
+            .collect::<HashSet<_>>();
         let down_id_index = diff
             .down_iter()
             .filter_map(|(id, version)| Some((id.as_utxo_address()?, *version)))
             .collect::<HashMap<_, _>>();
         let mut to_confirm = vec![];
         let mut to_spend = vec![];
+        let mut to_burn = vec![];
         let mut spent_versions = vec![];
         let mut affected_balances = HashSet::new();
 
@@ -229,8 +235,15 @@ impl<'a> WriteTransaction<'a> {
             let addr = UtxoAddress::new(resource_address, commitment.into());
             let downed_version = down_id_index.get(&addr).copied();
             let is_upped = up_id_index.contains(&addr);
+            let is_burnt = burnt_id_index.contains(&addr);
 
-            if is_upped {
+            if is_burnt {
+                if let Some(version) = downed_version {
+                    spent_versions.push((addr.clone(), version));
+                }
+                to_burn.push(addr);
+                affected_balances.insert((owner_account_id, resource_address));
+            } else if is_upped {
                 to_confirm.push(id);
                 affected_balances.insert((owner_account_id, resource_address));
             } else if let Some(version) = downed_version {
@@ -271,9 +284,14 @@ impl<'a> WriteTransaction<'a> {
                 ))
                 .execute(self.connection())
                 .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-            for (address, version) in spent_versions {
-                self.stealth_outputs_record_spent_version(&address, version)?;
-            }
+        }
+
+        for address in &to_burn {
+            self.stealth_outputs_mark_as_burnt(address)?;
+        }
+
+        for (address, version) in spent_versions {
+            self.stealth_outputs_record_spent_version(&address, version)?;
         }
 
         // Any outputs that were not confirmed or spent are released

@@ -15,7 +15,7 @@ use crate::PeerId;
 /// attempts.
 #[derive(Debug, Default)]
 pub struct RendezvousState {
-    servers: HashMap<PeerId, RvPeerState>,
+    servers: HashMap<PeerId, Vec<RvPeerState>>,
 }
 
 #[derive(Debug, Clone)]
@@ -26,12 +26,14 @@ struct RvPeerState {
 
 impl RendezvousState {
     pub fn new<I: IntoIterator<Item = (PeerId, Multiaddr)>>(servers: I) -> Self {
-        Self {
-            servers: servers
-                .into_iter()
-                .map(|(peer_id, address)| (peer_id, RvPeerState { address, cookie: None }))
-                .collect(),
+        let mut map = HashMap::<PeerId, Vec<RvPeerState>>::new();
+        for (peer_id, address) in servers {
+            let entries = map.entry(peer_id).or_default();
+            if !entries.iter().any(|s| s.address == address) {
+                entries.push(RvPeerState { address, cookie: None });
+            }
         }
+        Self { servers: map }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -47,18 +49,43 @@ impl RendezvousState {
     /// known rendezvous server.
     pub fn set_cookie(&mut self, peer_id: &PeerId, cookie: Cookie) -> bool {
         match self.servers.get_mut(peer_id) {
-            Some(state) => {
-                state.cookie = Some(cookie);
+            Some(states) => {
+                for state in states {
+                    state.cookie = Some(cookie.clone());
+                }
                 true
             },
             None => false,
         }
     }
 
-    /// Returns the (peer id, address, last cookie) of each configured rendezvous server.
-    pub fn servers(&self) -> impl Iterator<Item = (PeerId, Multiaddr, Option<Cookie>)> + '_ {
-        self.servers
-            .iter()
-            .map(|(peer_id, state)| (*peer_id, state.address.clone(), state.cookie.clone()))
+    /// Returns the (peer id, addresses, last cookie) of each configured rendezvous server.
+    pub fn servers(&self) -> impl Iterator<Item = (PeerId, Vec<Multiaddr>, Option<Cookie>)> + '_ {
+        self.servers.iter().map(|(peer_id, states)| {
+            let addresses = states.iter().map(|s| s.address.clone()).collect();
+            let cookie = states.first().and_then(|s| s.cookie.clone());
+            (*peer_id, addresses, cookie)
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_all_addresses_for_same_rendezvous_server() {
+        let peer = PeerId::random();
+        let addr1: Multiaddr = "/ip4/1.1.1.1/tcp/1000".parse().unwrap();
+        let addr2: Multiaddr = "/ip4/1.1.1.1/udp/1000/quic-v1".parse().unwrap();
+
+        let state = RendezvousState::new([(peer, addr1.clone()), (peer, addr2.clone()), (peer, addr1.clone())]);
+        assert!(state.contains(&peer));
+
+        let servers: Vec<_> = state.servers().collect();
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].0, peer);
+        assert_eq!(servers[0].1, vec![addr1, addr2]);
+        assert!(servers[0].2.is_none());
     }
 }

@@ -145,7 +145,7 @@ impl RelayState {
             });
     }
 
-    fn addresses_of(&self, peer_id: &PeerId) -> Option<&HashSet<Multiaddr>> {
+    pub(crate) fn addresses_of(&self, peer_id: &PeerId) -> Option<&HashSet<Multiaddr>> {
         self.configured_relays
             .get(peer_id)
             .or_else(|| self.discovered_relays.get(peer_id))

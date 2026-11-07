@@ -171,7 +171,12 @@ impl StealthUtxoStream {
                         let UtxoUpdatePayload { sos, update, eos } = payload;
                         if let Some(sos) = sos {
                             let shard = Shard::from(sos.shard);
-                            current_shard = Some(shard);
+                            if let Some(prev_shard) = current_shard.replace(shard) {
+                                yield Err(UtxoWatcherError::DecodeError(format!(
+                                    "StartOfShard for {shard} received before EndOfShard for {prev_shard}"
+                                )));
+                                return;
+                            }
                             yield Ok(StealthUtxoFrame::StartOfShard {
                                 shard,
                                 max_state_version: StateVersion::from(sos.max_state_version),
@@ -181,6 +186,12 @@ impl StealthUtxoStream {
                             });
                         }
                         if let Some(update) = update {
+                            if current_shard.is_none() {
+                                yield Err(UtxoWatcherError::DecodeError(
+                                    "UtxoUpdate received outside StartOfShard/EndOfShard".to_string(),
+                                ));
+                                return;
+                            }
                             match convert_update(update) {
                                 Ok(frame) => yield Ok(frame),
                                 Err(err) => {

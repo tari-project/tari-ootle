@@ -289,6 +289,7 @@ impl TransactionInputResolver {
                 );
 
                 let mut all_cached = true;
+                let mut resolved_vaults = Vec::new();
                 for vault_id in vault_ids {
                     match self.cache.get(&vault_id) {
                         Some(Some(vault)) => {
@@ -298,10 +299,7 @@ impl TransactionInputResolver {
                                     found: SubstateType::from(vault),
                                 }
                             })?;
-                            tx_mut.add_input(InputDeclaration::write(vault_id));
-                            if *vault.resource_address() != TARI_TOKEN {
-                                tx_mut.add_input(InputDeclaration::write(*vault.resource_address()));
-                            }
+                            resolved_vaults.push((vault_id, *vault.resource_address()));
                         },
                         Some(None) => {
                             // The vault ID came from the component's state but the indexer
@@ -323,6 +321,15 @@ impl TransactionInputResolver {
                             );
                             substates_to_cache.push(vault_id);
                         },
+                    }
+                }
+
+                if all_cached {
+                    for (vault_id, resource_address) in resolved_vaults {
+                        tx_mut.add_input(InputDeclaration::write(vault_id));
+                        if resource_address != TARI_TOKEN {
+                            tx_mut.add_input(InputDeclaration::write(resource_address));
+                        }
                     }
                 }
 

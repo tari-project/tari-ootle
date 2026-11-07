@@ -50,12 +50,15 @@ impl<Wallet> IndexerProvider<Wallet> {
         resource: ResourceAddress,
     ) -> ProviderResult<Amount> {
         let vaults = self.fetch_account_vaults(account).await?;
-        let balance = vaults
-            .into_iter()
-            .find(|v| v.resource_address == resource)
-            .map(|v| v.balance)
-            .unwrap_or_else(Amount::zero);
-        Ok(balance)
+        let mut total = Amount::zero();
+        for v in vaults.into_iter().filter(|v| v.resource_address == resource) {
+            total = total.checked_add(v.balance).ok_or_else(|| {
+                ProviderError::other(format!(
+                    "Account {account} balance for resource {resource} overflowed Amount::MAX"
+                ))
+            })?;
+        }
+        Ok(total)
     }
 
     /// Returns balances for all resources held in the given account.
@@ -67,7 +70,16 @@ impl<Wallet> IndexerProvider<Wallet> {
         account: ComponentAddress,
     ) -> ProviderResult<HashMap<ResourceAddress, Amount>> {
         let vaults = self.fetch_account_vaults(account).await?;
-        let balances = vaults.into_iter().map(|v| (v.resource_address, v.balance)).collect();
+        let mut balances = HashMap::with_capacity(vaults.len());
+        for v in vaults {
+            let entry = balances.entry(v.resource_address).or_insert_with(Amount::zero);
+            *entry = entry.checked_add(v.balance).ok_or_else(|| {
+                ProviderError::other(format!(
+                    "Account {account} balance for resource {} overflowed Amount::MAX",
+                    v.resource_address
+                ))
+            })?;
+        }
         Ok(balances)
     }
 

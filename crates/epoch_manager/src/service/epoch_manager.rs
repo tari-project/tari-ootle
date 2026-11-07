@@ -407,7 +407,15 @@ where TSpec: EpochManagerSpec
         let num_committees = self.get_number_of_committees(epoch)?;
         let shard_group = substate_address.to_shard_group(self.config.num_preshards, num_committees);
 
-        let committee = self.get_committee_for_shard_group(epoch, shard_group, None)?;
+        let mut tx = self.global_db.create_transaction()?;
+        let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
+        let committee = validator_node_db.get_committee_for_shard_group(epoch, shard_group, usize::MAX)?;
+        if committee.is_empty() {
+            return Err(EpochManagerError::NoCommitteeVns {
+                substate_address,
+                epoch,
+            });
+        }
         Ok(committee)
     }
 
@@ -879,5 +887,13 @@ mod tests {
         }
         let committee = manager.get_committee_for_substate(Epoch(2), substate_addr).unwrap();
         assert_eq!(committee.len(), 10);
+
+        assert!(matches!(
+            manager.get_committee_for_substate(Epoch(5), substate_addr),
+            Err(EpochManagerError::NoCommitteeVns {
+                substate_address,
+                epoch: Epoch(5),
+            }) if substate_address == substate_addr
+        ));
     }
 }

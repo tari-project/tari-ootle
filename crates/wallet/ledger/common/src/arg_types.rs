@@ -168,6 +168,50 @@ impl TryFrom<u8> for SigningField {
     }
 }
 
+/// Canonical field order for an authorization signature. Matches
+/// `tari_ootle_transaction::TransactionSignature::signing_preimage_v1`.
+pub const ADD_SIGNER_SEQ: &[SigningField] = &[
+    SigningField::SchemaVersion,
+    SigningField::SealSigner,
+    SigningField::Network,
+    SigningField::FeeInstructions,
+    SigningField::Instructions,
+    SigningField::Inputs,
+    SigningField::MinEpoch,
+    SigningField::MaxEpoch,
+    SigningField::MainSigner,
+    SigningField::DryRun,
+    SigningField::TransactionNonce,
+    SigningField::BlobHashes,
+];
+
+/// Canonical field order for a seal signature. Matches
+/// `tari_ootle_transaction::TransactionSealSignature::signing_preimage_v1`.
+pub const SEAL_SEQ: &[SigningField] = &[
+    SigningField::SchemaVersion,
+    SigningField::Network,
+    SigningField::FeeInstructions,
+    SigningField::Instructions,
+    SigningField::Inputs,
+    SigningField::MinEpoch,
+    SigningField::MaxEpoch,
+    SigningField::MainSigner,
+    SigningField::DryRun,
+    SigningField::TransactionNonce,
+    SigningField::BlobHashes,
+    SigningField::Signatures,
+];
+
+impl SignMode {
+    /// The canonical ordered sequence of [`SigningField`]s expected by the device for this mode.
+    pub const fn expected_fields(self) -> &'static [SigningField] {
+        match self {
+            SignMode::AddSigner => ADD_SIGNER_SEQ,
+            SignMode::Seal => SEAL_SEQ,
+        }
+    }
+}
+
 /// Body of the `Header` frame that opens a `SignTransaction` stream.
 ///
 /// Identifies the signing key (same derivation params as [`GetPublicKeyRequest`]) and the

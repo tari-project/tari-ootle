@@ -62,3 +62,21 @@ fn import_key_is_idempotent_on_public_key() {
 
     tx.commit().unwrap();
 }
+
+#[test]
+fn reset_index_promotes_highest_remaining_key_when_active_key_is_deleted() {
+    let db = SqliteWalletStore::try_open(":memory:").unwrap();
+    db.run_migrations().unwrap();
+    let mut tx = db.create_write_tx().unwrap();
+
+    tx.key_manager_insert_or_ignore("branch", 0).unwrap();
+    tx.key_manager_insert_or_ignore("branch", 1).unwrap();
+    tx.key_manager_set_active_index("branch", 2).unwrap();
+    assert_eq!(tx.key_manager_get_active_index("branch").unwrap(), 2);
+
+    tx.key_manager_reset_index("branch", 1).unwrap();
+    assert_eq!(tx.key_manager_get_last_index("branch").unwrap(), 1);
+    assert_eq!(tx.key_manager_get_active_index("branch").unwrap(), 1);
+
+    tx.commit().unwrap();
+}

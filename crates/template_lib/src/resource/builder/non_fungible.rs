@@ -89,7 +89,10 @@ impl NonFungibleResourceBuilder {
 
     /// Sets the already allocated address for the resource, optionally
     pub fn with_address_allocation_opt(mut self, address: Option<ResourceAddressAllocation>) -> Self {
-        self.address_allocation = address;
+        if let Some(address) = address {
+            assert!(self.address_allocation.is_none(), "Address allocation already set");
+            self.address_allocation = Some(address);
+        }
         self
     }
 

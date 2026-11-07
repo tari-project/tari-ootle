@@ -40,7 +40,7 @@
 //! Apply the `template` macro and define your template struct and its methods.
 //! This macro generates the necessary ABI functions and boilerplate to make your template work with the Ootle engine.
 //!
-//! ```rust
+//! ```rust,no_run
 //! use tari_template_lib::prelude::*;
 //!
 //! // The `template` macro generates and implements the necessary ABI functions, `TemplateDefinition` and other boilerplate that
@@ -48,8 +48,8 @@
 //! // The module name is not important (it is ignored). The `template` macro must be applied to the module that contains your template struct/enum.
 //! #[template]
 //! mod my_template {
-//!    // Bring prelude and anything else into scope.
-//!    use super::*;
+//!     // Bring prelude and anything else into scope.
+//!     use tari_template_lib::prelude::*;
 //!
 //!    /// Defines the component state that is stored on-chain. This can be a struct or an enum.
 //!    /// The struct/enum name can be selected arbitrarily, and is exposed in the TemplateDefinition for the template.

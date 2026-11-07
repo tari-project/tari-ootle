@@ -51,6 +51,10 @@ const TAG: u64 = BinaryTag::BucketId.as_u64();
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct BucketId(BorTag<u32, TAG>);
 
+impl tari_bor::Tagged for BucketId {
+    const TAG: u64 = TAG;
+}
+
 impl From<u32> for BucketId {
     fn from(value: u32) -> Self {
         Self(BorTag::new(value))

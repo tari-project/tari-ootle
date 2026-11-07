@@ -58,11 +58,17 @@ impl TemplateDef {
         use crate::WASM_PTR_SIZE;
         let data_len = encoded_len(self);
         // for the length prefix
-        let mut buf = Vec::with_capacity(data_len + WASM_PTR_SIZE);
-        let full_len = data_len + WASM_PTR_SIZE;
+        let full_len = data_len
+            .checked_add(WASM_PTR_SIZE)
+            .ok_or_else(|| tari_bor::BorError::new("Template definition length overflow".to_string()))?;
+        let full_len_u32 = u32::try_from(full_len)
+            .map_err(|_| tari_bor::BorError::new("Template definition length exceeds u32".to_string()))?;
+        let mut buf = Vec::with_capacity(full_len);
         let writer = &mut buf;
         // length prefix
-        writer.write_all(&(full_len as u32).to_le_bytes())?;
+        writer
+            .write_all(&full_len_u32.to_le_bytes())
+            .map_err(|e| tari_bor::BorError::new(e.to_string()))?;
         encode_into_writer(self, writer)?;
         Ok(buf)
     }

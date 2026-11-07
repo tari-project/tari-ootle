@@ -1202,8 +1202,8 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
     // The notification is gossiped on a single network-wide topic, so it only needs to be published once. The target
     // shard groups are carried in the message and receivers that are not in the audience ignore it.
     // TODO: all local VNs will broadcast this. Perhaps we can reduce this to $f+1$.
-    // The shard groups are sorted so that the encoded payload is deterministic: every local VN produces identical
-    // bytes for the same block, allowing gossipsub's content-addressed message id to deduplicate the broadcasts.
+    // Gossip message ids are scoped to the author, so each local VN's broadcast propagates separately and receivers
+    // deduplicate them by block id. The shard groups are sorted so that the encoded payload is deterministic.
     let mut shard_groups = non_local_shard_groups.into_iter().collect::<Vec<_>>();
     shard_groups.sort_by_key(|sg| sg.encode_as_u32());
     if let Err(err) = outbound_messaging

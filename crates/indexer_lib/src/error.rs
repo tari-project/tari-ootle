@@ -42,6 +42,8 @@ pub enum IndexerError {
         requested: PublishedTemplateAddress,
         derived: PublishedTemplateAddress,
     },
+    #[error("{vn} returned unrequested or duplicate substate {substate_id} in a batch")]
+    UnrequestedSubstateInBatch { vn: String, substate_id: SubstateId },
     #[error("Not found transaction for component address {0} and version {1}")]
     NotFoundTransaction(SubstateId, u32),
     #[error("Failed to get consensus constants: {0}")]

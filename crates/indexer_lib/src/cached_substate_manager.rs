@@ -902,28 +902,27 @@ where
         vn_addr: &TAddr,
     ) -> Result<BatchTrust, IndexerError> {
         let mut expected = requested.iter().copied().collect::<HashSet<_>>();
-        let mut values = Vec::with_capacity(batch.substates.len());
+        let mut verified_entries = Vec::with_capacity(batch.substates.len());
         for substate in &batch.substates {
             if !expected.remove(&substate.substate_id) {
-                return Err(IndexerError::SubstateProofVerificationFailed {
-                    details: format!(
-                        "{} returned unrequested or duplicate substate {} in a batch",
-                        vn_addr, substate.substate_id
-                    ),
+                return Err(IndexerError::UnrequestedSubstateInBatch {
+                    vn: vn_addr.to_string(),
+                    substate_id: substate.substate_id.clone(),
                 });
             }
             // A batch returns only substates it holds a record of; the ids it holds none for come
             // back as `missing`, which no proof can settle.
-            if matches!(substate.result, SubstateResult::DoesNotExist) {
-                return Err(IndexerError::SubstateProofVerificationFailed {
-                    details: format!("{} was returned as DoesNotExist in a batch", substate.substate_id),
-                });
-            }
-            values.push(Self::validate_substate_result(
-                &substate.result,
-                &substate.substate_id,
-                vn_addr,
-            )?);
+            let version = match &substate.result {
+                SubstateResult::Up { substate: up } => up.version(),
+                SubstateResult::Down { version } => *version,
+                SubstateResult::DoesNotExist => {
+                    return Err(IndexerError::SubstateProofVerificationFailed {
+                        details: format!("{} was returned as DoesNotExist in a batch", substate.substate_id),
+                    });
+                },
+            };
+            let value = Self::validate_substate_result(&substate.result, &substate.substate_id, vn_addr)?;
+            verified_entries.push((substate, version, value));
         }
         if !self.verify_substate_proofs {
             return Ok(BatchTrust::NotRequired);
@@ -935,7 +934,7 @@ where
         let Some(trusted_root) = self.trusted_root_from_commit_proof(commit_proof).await? else {
             return Ok(BatchTrust::Stale);
         };
-        for (substate, value) in batch.substates.iter().zip(&values) {
+        for (substate, version, value) in &verified_entries {
             let Some(value_proof) = &substate.value_proof else {
                 return Err(IndexerError::SubstateProofVerificationFailed {
                     details: format!(
@@ -944,15 +943,10 @@ where
                     ),
                 });
             };
-            let version = match &substate.result {
-                SubstateResult::Up { substate: up } => up.version(),
-                SubstateResult::Down { version } => *version,
-                SubstateResult::DoesNotExist => unreachable!("rejected before proof verification"),
-            };
             verify_substate_value_proof_against_root(
                 value_proof,
                 &substate.substate_id,
-                version,
+                *version,
                 value.as_ref(),
                 self.network,
                 self.num_preshards,
@@ -3957,7 +3951,10 @@ mod tests {
         ];
 
         for verify_proofs in [false, true] {
-            for bad_batch in &invalid_batches {
+            for (bad_batch, expected_bad_id) in [
+                (&invalid_batches[0], &unrequested_id),
+                (&invalid_batches[1], &requested_id),
+            ] {
                 for _ in 0..8 {
                     let member_batches = HashMap::from([("vn_malicious".to_string(), bad_batch.clone())]);
                     let (manager, _) = manager_with_members(
@@ -3969,6 +3966,16 @@ mod tests {
                         vec!["vn_malicious".to_string(), "vn_honest".to_string()],
                     );
                     let manager = manager.with_substate_proof_verification(verify_proofs);
+
+                    let err = manager
+                        .verify_substate_batch(bad_batch, &[&requested_id], &"vn_malicious".to_string())
+                        .await
+                        .unwrap_err();
+                    assert!(matches!(
+                        err,
+                        IndexerError::UnrequestedSubstateInBatch { ref vn, ref substate_id }
+                            if vn == "vn_malicious" && substate_id == expected_bad_id
+                    ));
 
                     let results = manager
                         .fetch_and_cache_substates(std::slice::from_ref(&requested_id))

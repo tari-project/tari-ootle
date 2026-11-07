@@ -97,7 +97,6 @@ pub fn check_foreign_proposal<TConsensusSpec: ConsensusSpec>(
     check_network(proposal, config.network)?;
     check_protocol_version(proposal, config.network)?;
     check_proposer_in_committee(proposal, foreign_committee)?;
-    check_header(proposal)?;
     check_block_metadata(proposal)?;
     check_commit_proof::<TConsensusSpec>(proposal.commit_proof(), config.network, foreign_committee)?;
     Ok(())
@@ -136,11 +135,6 @@ fn check_proposer_in_committee<TAddr: PartialEq>(
             ),
         });
     }
-    Ok(())
-}
-
-fn check_header(proposal: &ForeignProposal) -> Result<(), ProposalValidationError> {
-    proposal.commit_proof().validate_header()?;
     Ok(())
 }
 

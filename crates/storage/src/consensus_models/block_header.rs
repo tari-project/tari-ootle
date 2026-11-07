@@ -449,12 +449,18 @@ impl BlockHeader {
         // malicious tricks with the other fields here? Ideally we'd simple do
         // `self == Self::genesis(self.epoch, self.shard_group)` however the previous epoch state hash makes that
         // difficult.
+        // An empty `BlockCommands` produces a zero command root (`SPARSE_MERKLE_PLACEHOLDER_HASH`) and a zero
+        // `KeyedProofTree` transaction root (guarded by `genesis_header_is_recognized_as_genesis_and_not_dummy`).
         self.height.is_zero() &&
             self.parent.is_zero() &&
             self.timestamp == 0 &&
-            self.command_merkle_root.iter().all(|b| *b == 0) &&
-            self.proposed_by.iter().all(|b| *b == 0) &&
-            self.signature.is_none()
+            self.total_leader_fee == 0 &&
+            self.timeout_certificate_id.is_none() &&
+            self.accumulated_data.total_exhaust_burn == 0 &&
+            self.command_merkle_root == FixedHash::zero() &&
+            self.transaction_merkle_root == FixedHash::zero() &&
+            self.proposed_by.is_zero() &&
+            self.signature == Some(SchnorrSignatureBytes::zero())
     }
 
     pub fn as_locked(&self) -> LockedBlock {
@@ -964,5 +970,42 @@ mod tests {
         assert_ne!(dummy.id(), proposal.id());
         assert_eq!(dummy.calculate_id(), *dummy.id());
         assert_eq!(proposal.calculate_id(), *proposal.id());
+    }
+
+    #[test]
+    fn genesis_header_is_recognized_as_genesis_and_not_dummy() {
+        let shard_group = ShardGroup::all_shards(NumPreshards::P64);
+        let justify_id = ProposalCertificate::genesis(Epoch(0), shard_group).calculate_id();
+        let genesis = BlockHeader::genesis(
+            Network::LocalNet,
+            ProtocolVersion::V0,
+            justify_id,
+            Epoch(0),
+            shard_group,
+            FixedHash::zero(),
+            FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
+            ExtraData::new(),
+        );
+        assert!(genesis.is_genesis());
+        assert!(!genesis.is_dummy());
+
+        let dummy = BlockHeader::dummy_block(
+            Network::LocalNet,
+            ProtocolVersion::V0,
+            BlockId::zero(),
+            RistrettoPublicKeyBytes::default(),
+            NodeHeight::zero(),
+            justify_id,
+            Epoch(0),
+            shard_group,
+            FixedHash::zero(),
+            0,
+            FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
+            ExhaustBurnRate::new(0),
+        );
+        assert!(dummy.is_dummy());
+        assert!(!dummy.is_genesis());
     }
 }

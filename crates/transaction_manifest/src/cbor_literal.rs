@@ -191,6 +191,7 @@ fn lit_value(lit: Lit) -> syn::Result<Value> {
         },
         Lit::Bool(b) => Ok(Value::Bool(b.value)),
         Lit::ByteStr(b) => Ok(Value::Bytes(b.value())),
+        Lit::Byte(b) => Ok(Value::Integer(i128::from(b.value()))),
         Lit::Char(c) => Ok(Value::Text(c.value().to_string())),
         lit @ Lit::Float(_) => Err(syn::Error::new_spanned(lit, "float literals are not supported")),
         lit => Err(syn::Error::new_spanned(lit, "unsupported literal")),

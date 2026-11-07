@@ -32,7 +32,11 @@ impl SseEventStreamBuilder {
     pub fn into_stream(self) -> Result<SseEventStream, IndexerRestClientError> {
         let response = require_success_status(self.response)?;
         let content_type = response.headers().get(header::CONTENT_TYPE);
-        if content_type != Some(&MIME_EVENT_STREAM) {
+        let is_event_stream = content_type
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split(';').next())
+            .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("text/event-stream"));
+        if !is_event_stream {
             return Err(IndexerRestClientError::InvalidResponse {
                 message: format!(
                     "Invalid Content-Type for SSE stream: expected '{:?}', got '{:?}'",
@@ -66,6 +70,9 @@ pub struct SseEventStream {
     buf: BytesMut,
     /// Length of the prefix of `buf` already searched for a line terminator.
     scanned: usize,
+    /// Set when the last line ended with `\r` at the very end of `buf`, so a leading `\n` in the next chunk
+    /// is consumed as the second half of that `\r\n` rather than read as an empty separator line.
+    pending_cr: bool,
     finished: bool,
 }
 
@@ -75,6 +82,7 @@ impl SseEventStream {
             bytes_stream: Box::pin(bytes_stream),
             buf: BytesMut::with_capacity(512 * 1024), // 512 KiB
             scanned: 0,
+            pending_cr: false,
             event_buffer: EventBuffer::new(),
             finished: false,
         }
@@ -83,6 +91,15 @@ impl SseEventStream {
     /// Splits the next complete line, without its terminator, off the front of `buf`. Fails once a line is
     /// longer than [`MAX_LINE_LEN`], whether or not its terminator has arrived.
     fn next_line(&mut self) -> Result<Option<BytesMut>, SseStreamError> {
+        if self.pending_cr {
+            if self.buf.is_empty() {
+                return Ok(None);
+            }
+            self.pending_cr = false;
+            if self.buf.first() == Some(&b'\n') {
+                self.buf.advance(1);
+            }
+        }
         let Some(pos) = memchr::memchr2(b'\n', b'\r', &self.buf[self.scanned..]) else {
             if self.buf.len() > MAX_LINE_LEN {
                 return Err(line_too_long());
@@ -97,10 +114,14 @@ impl SseEventStream {
         let terminator = self.buf[end];
         let mut line = self.buf.split_to(end + 1);
         line.truncate(end);
-        // A `\r\n` pair is one terminator. When the `\n` arrives in a later chunk it reads as an empty line,
-        // which produces nothing.
-        if terminator == b'\r' && self.buf.first() == Some(&b'\n') {
-            self.buf.advance(1);
+        // A `\r\n` pair is one terminator. When `\r` falls at the end of a chunk, remember it so a leading `\n`
+        // in the next chunk is swallowed rather than parsed as a blank line.
+        if terminator == b'\r' {
+            if self.buf.first() == Some(&b'\n') {
+                self.buf.advance(1);
+            } else if self.buf.is_empty() {
+                self.pending_cr = true;
+            }
         }
         self.scanned = 0;
         Ok(Some(line))
@@ -124,6 +145,16 @@ fn parse_sse_event(line: &BytesMut, buf_mut: &mut EventBuffer) -> Result<(), Sse
     let s = std::str::from_utf8(line).map_err(|e| SseStreamError::EventParseError {
         details: format!("Invalid UTF-8 in SSE event line: {}", e),
     })?;
+    if s.is_empty() {
+        // An empty line separates SSE events. If no `data:` line was produced before this blank line,
+        // clear any stale `event_type` so it does not leak into a subsequent event.
+        buf_mut.set_event_type("");
+        return Ok(());
+    }
+    if s.starts_with(':') {
+        // SSE comment / keep-alive line (`: ...`)
+        return Ok(());
+    }
     let (field, value) = parse_line(s);
     match field {
         "event" => {
@@ -135,7 +166,9 @@ fn parse_sse_event(line: &BytesMut, buf_mut: &mut EventBuffer) -> Result<(), Sse
             Ok(())
         },
         "id" => {
-            buf_mut.set_id(value);
+            if !value.contains('\0') {
+                buf_mut.set_id(value);
+            }
             Ok(())
         },
         "retry" => {
@@ -145,7 +178,7 @@ fn parse_sse_event(line: &BytesMut, buf_mut: &mut EventBuffer) -> Result<(), Sse
             buf_mut.set_retry(Duration::from_millis(retry_ms));
             Ok(())
         },
-        // Ignore unknown fields and empty lines
+        // Ignore unknown fields
         _ => Ok(()),
     }
 }
@@ -222,6 +255,7 @@ impl Event {
 struct EventBuffer {
     event_type: String,
     data: String,
+    has_data: bool,
     last_event_id: Option<String>,
     retry: Option<Duration>,
 }
@@ -233,6 +267,7 @@ impl EventBuffer {
         Self {
             event_type: String::new(),
             data: String::new(),
+            has_data: false,
             last_event_id: None,
             retry: None,
         }
@@ -248,6 +283,7 @@ impl EventBuffer {
 
         let event_type = mem::take(&mut self.event_type);
         let data = mem::take(&mut self.data);
+        self.has_data = false;
         let event = Event {
             event_type: Some(event_type)
                 .filter(|s| !s.is_empty())
@@ -261,7 +297,7 @@ impl EventBuffer {
     }
 
     pub fn can_produce_event(&self) -> bool {
-        !self.data.is_empty()
+        self.has_data
     }
 
     /// Set the [`Event`]'s type. Overide previous value.
@@ -272,10 +308,11 @@ impl EventBuffer {
 
     /// Extends internal data with given data.
     fn push_data(&mut self, data: &str) {
-        if !self.data.is_empty() {
+        if self.has_data {
             self.data.push('\n');
         }
         self.data.push_str(data);
+        self.has_data = true;
     }
 
     fn set_id(&mut self, id: &str) {
@@ -375,5 +412,20 @@ mod tests {
         assert_eq!(data_of(&items), ["1", "2"]);
         assert_eq!(items[0].as_ref().unwrap().event_type, "a");
         assert_eq!(items[1].as_ref().unwrap().last_event_id.as_deref(), Some("7"));
+    }
+
+    #[tokio::test]
+    async fn keep_alive_comments_and_empty_data_are_handled() {
+        let chunks = vec![b": keep-alive\n\nevent: EmptyPayload\ndata:\n\nid: 5\x00bad\ndata: after\n\n".to_vec()];
+        let items = collect(stream_of(chunks)).await;
+        assert_eq!(items.len(), 2);
+        let first = items[0].as_ref().unwrap();
+        assert_eq!(first.event_type, "EmptyPayload");
+        assert_eq!(first.data, "");
+        assert_eq!(first.last_event_id, None);
+        let second = items[1].as_ref().unwrap();
+        assert_eq!(second.event_type, "message");
+        assert_eq!(second.data, "after");
+        assert_eq!(second.last_event_id, None);
     }
 }

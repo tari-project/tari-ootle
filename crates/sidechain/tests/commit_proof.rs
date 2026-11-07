@@ -561,3 +561,18 @@ fn every_current_protocol_version_uses_jmt_hash_scheme_v1() {
         assert_eq!(jmt_hash_scheme(protocol_version), JmtHashScheme::V1);
     }
 }
+
+#[test]
+fn it_rejects_a_qc_whose_epoch_differs_from_the_header_epoch() {
+    let mut proof = load_fixture::<SidechainBlockCommitProof>("commit_proof.json");
+    if let Some(CommitProofElement::QuorumCertificate(qc)) = proof.proof_elements.first_mut() {
+        qc.epoch = proof.header.epoch + 1;
+    }
+    let err = proof
+        .validate_committed(FIXTURE_NETWORK, 4, &fixture_committee())
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("Quorum certificate is for epoch"),
+        "Expected the QC epoch mismatch error, got: {err}"
+    );
+}

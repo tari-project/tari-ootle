@@ -280,8 +280,15 @@ pub(crate) fn build_stealth_outputs_statement_from_entropy(
         .map_err(|e| OotleSdkError::Stealth(format!("range proof failed: {e}")))?;
 
     let revealed_output = match (intent.revealed_output_amount, revealed_receiver) {
-        (0, _) => None,
-        (amount, Some(receiver)) => Some(RevealedOutput::new(Amount::from_u64(amount), receiver)),
+        (0, None) => None,
+        (0, Some(receiver)) => {
+            parse_public_key(receiver.as_bytes())?;
+            None
+        },
+        (amount, Some(receiver)) => {
+            parse_public_key(receiver.as_bytes())?;
+            Some(RevealedOutput::new(Amount::from_u64(amount), receiver))
+        },
         (_, None) => {
             return Err(OotleSdkError::Validation(
                 "a revealed output must name the receiver authorised to take it".to_string(),
@@ -528,6 +535,23 @@ mod tests {
         let e = entropy_for(&[]);
         let err = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e, None).unwrap_err();
         assert!(matches!(err, OotleSdkError::Validation(_)), "unexpected error: {err}");
+    }
+
+    // A non-canonical revealed_receiver point is rejected with KEY even when revealed_output_amount is 0.
+    #[test]
+    fn non_canonical_revealed_receiver_is_rejected() {
+        let bad_receiver = RistrettoPublicKeyBytes::from([0xffu8; 32]);
+        for revealed_amount in [0u64, 1_000_000u64] {
+            let it = intent(vec![], revealed_amount);
+            let e = entropy_for(&[]);
+            let err = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e, Some(bad_receiver))
+                .unwrap_err();
+            assert_eq!(
+                err.code(),
+                "KEY",
+                "expected KEY for revealed_amount={revealed_amount}, got {err}"
+            );
+        }
     }
 
     // The witness build is decryptable by the recipient (sanity that the AEAD-injected path is correct).

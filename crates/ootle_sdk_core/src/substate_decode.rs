@@ -314,7 +314,11 @@ pub fn account_balances(
                 ))
             })?
             .to_string();
-        supplied.insert(canonical_id, vault);
+        if supplied.insert(canonical_id.clone(), vault).is_some() {
+            return Err(OotleSdkError::Validation(format!(
+                "account_balances: duplicate vault substate id '{canonical_id}' in vault_substates"
+            )));
+        }
     }
 
     // Sum the revealed balance per resource, preserving first-seen order. A discovered vault the host
@@ -522,5 +526,16 @@ mod tests {
     fn malformed_substate_is_parse_error() {
         let err = decode_substate(&serde_json::json!({ "NotASubstate": 1 })).unwrap_err();
         assert_eq!(err.code(), "PARSE");
+    }
+
+    #[test]
+    fn account_balances_rejects_duplicate_vault_substate_ids() {
+        let r = resource(4);
+        let id = vault_id(1);
+        let v1 = fungible_vault(r, 500);
+        let v2 = fungible_vault(r, 900);
+        let account = account_substate_json(&[id]);
+        let err = account_balances(&account, &[fetched_vault(id, &v1), fetched_vault(id, &v2)]).unwrap_err();
+        assert_eq!(err.code(), "VALIDATION");
     }
 }

@@ -124,11 +124,16 @@ impl TemplateAst {
                     }
                 },
                 Item::Impl(impl_item) => {
+                    if impl_item.trait_.is_some() {
+                        continue;
+                    }
                     if let Type::Path(path) = &*impl_item.self_ty {
-                        let template_name_ref = template_name.as_ref().expect("struct not defined before impl");
+                        let Some(template_name_ref) = template_name.as_ref() else {
+                            continue;
+                        };
                         if path.path.is_ident(template_name_ref) {
                             for impl_item_mut in &mut impl_item.items {
-                                if let Some(func) = Self::get_function_from_item(impl_item_mut) {
+                                if let Some(func) = Self::get_function_from_item(impl_item_mut)? {
                                     functions.push(func);
                                     if let ImplItem::Fn(fn_item) = impl_item_mut {
                                         let migration_pos =
@@ -264,7 +269,7 @@ impl TemplateAst {
                         ));
                     }
 
-                    functions.push(Self::get_function_from_fn(fn_item));
+                    functions.push(Self::get_function_from_fn(fn_item)?);
                 },
                 Item::Use(item) => {
                     // Exclude super imports
@@ -432,76 +437,79 @@ impl TemplateAst {
         self.functions.iter()
     }
 
-    fn get_function_from_item(item: &ImplItem) -> Option<FunctionAst> {
+    fn get_function_from_item(item: &ImplItem) -> Result<Option<FunctionAst>> {
         match item {
             ImplItem::Fn(m) => {
                 if !Self::is_public_function(m) {
-                    return None;
+                    return Ok(None);
                 }
-                Some(FunctionAst {
+                Ok(Some(FunctionAst {
                     name: m.sig.ident.to_string(),
-                    input_types: Self::get_input_types(&m.sig.inputs),
-                    output_type: Self::get_output_type_token(&m.sig.output),
+                    input_types: Self::get_input_types(&m.sig.inputs)?,
+                    output_type: Self::get_output_type_token(&m.sig.output)?,
                     is_migration: m.attrs.iter().any(|attr| attr.path().is_ident("migration")),
-                })
+                }))
             },
-            _ => todo!("get_function_from_item does not support anything other than functions/methods"),
+            // Ignore non-function impl items (e.g. associated constants or type aliases).
+            _ => Ok(None),
         }
     }
 
     /// Build a [`FunctionAst`] from a free `pub fn` item (used by stateless templates). Callers
     /// must have already rejected `self` receivers, `-> Self` returns and `#[migration]`.
-    fn get_function_from_fn(item: &ItemFn) -> FunctionAst {
-        FunctionAst {
+    fn get_function_from_fn(item: &ItemFn) -> Result<FunctionAst> {
+        Ok(FunctionAst {
             name: item.sig.ident.to_string(),
-            input_types: Self::get_input_types(&item.sig.inputs),
-            output_type: Self::get_output_type_token(&item.sig.output),
+            input_types: Self::get_input_types(&item.sig.inputs)?,
+            output_type: Self::get_output_type_token(&item.sig.output)?,
             is_migration: false,
-        }
+        })
     }
 
-    fn get_input_types(inputs: &Punctuated<FnArg, Comma>) -> Vec<TypeAst> {
+    fn get_input_types(inputs: &Punctuated<FnArg, Comma>) -> Result<Vec<TypeAst>> {
         inputs
             .iter()
             .map(|arg| match arg {
                 syn::FnArg::Receiver(r) => {
                     if r.reference.is_none() {
-                        panic!("Consuming methods are not supported")
+                        return Err(Error::new(
+                            r.span(),
+                            "Consuming methods (taking `self` by value) are not supported; use `&self` or `&mut self`",
+                        ));
                     }
 
                     let mutability = r.mutability.is_some();
-                    TypeAst::Receiver { mutability }
+                    Ok(TypeAst::Receiver { mutability })
                 },
                 syn::FnArg::Typed(t) => Self::get_type_ast(Some(&t.pat), &t.ty),
             })
             .collect()
     }
 
-    fn get_output_type_token(ast_type: &ReturnType) -> Option<TypeAst> {
+    fn get_output_type_token(ast_type: &ReturnType) -> Result<Option<TypeAst>> {
         match ast_type {
-            ReturnType::Default => None, // the function does not return anything
-            ReturnType::Type(_, t) => Some(Self::get_type_ast(None, t)),
+            ReturnType::Default => Ok(None), // the function does not return anything
+            ReturnType::Type(_, t) => Self::get_type_ast(None, t).map(Some),
         }
     }
 
-    fn get_type_ast(pat: Option<&syn::Pat>, syn_type: &syn::Type) -> TypeAst {
+    fn get_type_ast(pat: Option<&syn::Pat>, syn_type: &syn::Type) -> Result<TypeAst> {
         match syn_type {
-            syn::Type::Path(type_path) => {
-                // TODO: handle "Self"
-                // TODO: detect more complex types
-                TypeAst::Typed {
-                    name: pat.map(Self::get_pat_name),
-                    type_path: type_path.clone(),
-                }
-            },
-            syn::Type::Tuple(type_tuple) => TypeAst::Tuple {
+            syn::Type::Path(type_path) => Ok(TypeAst::Typed {
+                name: pat.map(Self::get_pat_name),
+                type_path: type_path.clone(),
+            }),
+            syn::Type::Tuple(type_tuple) => Ok(TypeAst::Tuple {
                 name: pat.map(Self::get_pat_name),
                 type_tuple: type_tuple.clone(),
-            },
-            _ => todo!(
-                "get_type_ast only supports paths and tuples. Encountered:{:?}",
-                syn_type
-            ),
+            }),
+            _ => Err(Error::new(
+                syn_type.span(),
+                format!(
+                    "get_type_ast only supports paths and tuples. Encountered: {:?}",
+                    syn_type
+                ),
+            )),
         }
     }
 
@@ -686,5 +694,51 @@ mod stateless_tests {
         .err()
         .unwrap();
         assert!(err.to_string().contains("at least one public function"), "{err}");
+    }
+
+    #[test]
+    fn stateful_ignores_trait_impls_and_non_fn_items_and_rejects_consuming_self() {
+        use std::str::FromStr;
+
+        use syn::parse2;
+
+        let ast = parse2::<TemplateAst>(
+            TokenStream::from_str(indoc! {"
+                mod foo {
+                    pub struct Foo {}
+                    impl Default for Foo {
+                        fn default() -> Self { Foo {} }
+                    }
+                    impl Foo {
+                        pub const LIMIT: u32 = 10;
+                        pub fn create() -> Self { Foo {} }
+                        pub fn nested_tuple() -> ((u32, u32), u32) { ((1, 2), 3) }
+                    }
+                    pub struct Helper {}
+                    impl Helper {
+                        pub fn helper_fn() {}
+                    }
+                }
+            "})
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(ast.functions.len(), 2);
+        assert_eq!(ast.functions[0].name, "create");
+        assert_eq!(ast.functions[1].name, "nested_tuple");
+        crate::template::dispatcher::generate_dispatcher(&ast).unwrap();
+
+        let consuming = parse2::<TemplateAst>(
+            TokenStream::from_str(indoc! {"
+                mod foo {
+                    pub struct Foo {}
+                    impl Foo {
+                        pub fn consume(self) {}
+                    }
+                }
+            "})
+            .unwrap(),
+        );
+        assert!(consuming.is_err());
     }
 }

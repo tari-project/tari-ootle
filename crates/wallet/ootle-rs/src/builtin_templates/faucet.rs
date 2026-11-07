@@ -47,6 +47,7 @@ pub struct FaucetInvokeBuilder<'a, P> {
     provider: &'a P,
     want_list: HashSet<WantInput>,
     account_workspace_name: Option<String>,
+    next_workspace_id: u16,
 }
 
 impl<'a, P: Provider> UnsignedTransactionBuilder for FaucetInvokeBuilder<'a, P> {
@@ -82,6 +83,7 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
             provider,
             want_list: HashSet::new(),
             account_workspace_name: None,
+            next_workspace_id: 0,
         }
     }
 
@@ -101,7 +103,9 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
     }
 
     fn next_workspace_name(&mut self) -> String {
-        format!("__AccountInvokeBuilder_{}", self.builder.next_workspace_id())
+        let id = self.next_workspace_id.max(self.builder.next_workspace_id());
+        self.next_workspace_id = id.checked_add(1).expect("workspace ID overflow");
+        format!("__AccountInvokeBuilder_{id}")
     }
 
     pub fn into_stealth_transfer(mut self, transfer: StealthTransferStatement) -> Self {
@@ -111,7 +115,7 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
         }
         let bucket_name = self.next_workspace_name();
 
-        let Some(account_name) = self.account_workspace_name.as_ref() else {
+        let Some(account_name) = self.account_workspace_name.as_ref().cloned() else {
             // TODO: make this panic impossible
             panic!(
                 "Call take_faucet_funds() before converting to a stealth transfer to ensure the builder has the \
@@ -162,12 +166,13 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
         });
 
         let account_name = self.next_workspace_name();
+        let account_name_for_fee = account_name.clone();
         self.builder = self.builder.with_fee_instructions_builder(|builder| {
             builder
                 // Create the recipient account if it doesn't exist
                 .create_account(recipient_account_pk)
-                .put_last_instruction_output_on_workspace(&account_name)
-                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Workspace(&account_name)])
+                .put_last_instruction_output_on_workspace(&account_name_for_fee)
+                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Workspace(&account_name_for_fee)])
                 .add_input(XTR_FAUCET_VAULT_ADDRESS)
                 .add_input(XTR_FAUCET_CLAIM_RESOURCE_ADDRESS)
         });
@@ -176,16 +181,15 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
     }
 }
 
+impl<P: Provider> IntoBuildParts for FaucetInvokeBuilder<'_, P> {
+    fn into_build_parts(self) -> (TransactionBuilder, HashSet<WantInput>) {
+        (self.builder, self.want_list)
+    }
+}
+
 impl<P: Provider> TransactionBuildable for FaucetInvokeBuilder<'_, P> {
-    fn pay_fee<A: Into<Amount>>(mut self, amount: A) -> Self {
-        let component_addr = self.provider.default_signer_address().to_account_address();
-        self.want_list.insert(WantInput::VaultForResource {
-            component_address: component_addr,
-            resource_address: TARI_TOKEN,
-            required: true,
-        });
-        self.builder = self.builder.pay_fee_from_component(component_addr, amount);
-        self
+    fn pay_fee<A: Into<Amount>>(self, amount: A) -> Self {
+        FaucetInvokeBuilder::pay_fee(self, amount)
     }
 
     fn want_vault_for(
@@ -234,5 +238,106 @@ impl<P: Provider> TransactionBuildable for FaucetInvokeBuilder<'_, P> {
         self.builder = self.builder.merge(other_builder);
         self.want_list.extend(other_wants);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, sync::Weak};
+
+    use tari_ootle_common_types::engine_types::substate::Substate;
+    use tari_ootle_transaction::{ComponentReference, Instruction};
+    use tari_template_lib_types::stealth::StealthTransferStatement;
+
+    use super::*;
+    use crate::{Network, key_provider::PrivateKeyProvider, provider::ProviderResult, transaction::TransactionSigner};
+
+    struct DummyProvider {
+        address: Address,
+    }
+
+    impl Provider for DummyProvider {
+        type Client = ();
+
+        fn network(&self) -> Network {
+            Network::LocalNet
+        }
+
+        fn weak_client(&self) -> Weak<Self::Client> {
+            Weak::new()
+        }
+
+        fn default_signer_address(&self) -> &Address {
+            &self.address
+        }
+
+        async fn resolve_input_want_list(
+            &self,
+            transaction: UnsignedTransaction,
+            _want_list: &HashSet<WantInput>,
+        ) -> ProviderResult<UnsignedTransaction> {
+            Ok(transaction)
+        }
+
+        async fn fetch_substates<I: IntoIterator<Item = SubstateId> + Send>(
+            &self,
+            _substate_ids: I,
+        ) -> ProviderResult<HashMap<SubstateId, Substate>> {
+            Ok(HashMap::new())
+        }
+    }
+
+    #[tokio::test]
+    async fn faucet_builder_allocates_distinct_workspace_ids_and_preserves_account_workspace() {
+        let signer = PrivateKeyProvider::random(Network::LocalNet);
+        let provider = DummyProvider {
+            address: signer.address().clone(),
+        };
+        let stmt = StealthTransferStatement::revealed_only(
+            Amount::from(100u64),
+            Amount::from(100u64),
+            *signer.address().account_public_key(),
+        );
+        let builder = IFaucet::new(&provider, Epoch(10))
+            .take_faucet_funds()
+            .into_stealth_transfer(stmt)
+            .and_pay_fee_from_revealed_output();
+        let tx = TransactionBuildable::pay_fee(builder, 50u64).prepare().await.unwrap();
+
+        let fee_instrs = tx.fee_instructions();
+        let put_ids: Vec<_> = fee_instrs
+            .iter()
+            .filter_map(|i| match i {
+                Instruction::PutLastInstructionOutputOnWorkspace { key } => Some(*key),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(put_ids, vec![0, 1, 2], "each fee workspace slot must get a distinct ID");
+
+        let last = fee_instrs.last().unwrap();
+        assert!(
+            matches!(
+                last,
+                Instruction::CallMethod {
+                    call: ComponentReference::Workspace(0),
+                    method,
+                    ..
+                } if &**method == "pay_fee"
+            ),
+            "TransactionBuildable::pay_fee after take_faucet_funds must pay from the workspace account, got: {last:?}"
+        );
+
+        let withdraw = &fee_instrs[3];
+        assert!(
+            matches!(
+                withdraw,
+                Instruction::CallMethod {
+                    call: ComponentReference::Workspace(0),
+                    method,
+                    ..
+                } if &**method == "withdraw"
+            ),
+            "into_stealth_transfer must withdraw from the account workspace ID 0, got: {withdraw:?}"
+        );
     }
 }

@@ -75,18 +75,59 @@ pub fn generate_template(options: TemplateOptions, input: TokenStream) -> Result
     Ok(output)
 }
 
+/// Expand a `#[template(...)]` annotated module for non-WASM host targets.
+///
+/// Validates the template AST (and strips internal marker attributes such as `#[migration]`)
+/// identically to [`generate_template`], while omitting the WASM ABI exports and custom section
+/// so that templates compile cleanly under host `cargo check`, `cargo test`, and IDE analysis.
+pub fn generate_template_non_wasm(options: TemplateOptions, mut module: ItemMod) -> Result<TokenStream> {
+    let mut ast = TemplateAst::from_item_mod(module.clone(), options)?;
+
+    // Run template definition and dispatcher validation so host builds surface the same
+    // compile-time errors (e.g. invalid migration signatures, reserved template names, or
+    // function hash collisions) as WASM builds.
+    generate_template_def(&ast)?;
+    generate_dispatcher(&ast)?;
+
+    if !options.skip_cbor_derives {
+        ast::inject_cbor_derives(&mut ast.module_content)?;
+
+        // Bring `minicbor` into scope so the injected derives — and the code those
+        // derives emit (which references `minicbor::Encoder`, `minicbor::Decoder`, …) —
+        // resolve. The WASM path gets this via `use template_macro_deps::*` inside the
+        // generated wrapper module; here we inject the same alias directly. Skipped
+        // alongside the derives under `skip_cbor_derives` so authors rolling their own
+        // encoding can manage their own `minicbor` import without collision.
+        ast.module_content.insert(0, syn::parse_quote! {
+            use ::tari_template_lib::template_macro_deps::minicbor;
+        });
+    }
+
+    if let Some((_, items)) = &mut module.content {
+        *items = ast.module_content;
+    }
+
+    Ok(quote!(#[allow(dead_code)] #module))
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
 
     use proc_macro2::TokenStream;
+    use syn::{ItemMod, parse2};
 
-    use super::{generate_template, options::TemplateOptions};
+    use super::{generate_template, generate_template_non_wasm, options::TemplateOptions};
 
     fn expand(src: &str, options: TemplateOptions) -> String {
         generate_template(options, TokenStream::from_str(src).unwrap())
             .unwrap()
             .to_string()
+    }
+
+    fn expand_non_wasm(src: &str, options: TemplateOptions) -> syn::Result<String> {
+        let module = parse2::<ItemMod>(TokenStream::from_str(src).unwrap()).unwrap();
+        generate_template_non_wasm(options, module).map(|ts| ts.to_string())
     }
 
     #[test]
@@ -123,5 +164,63 @@ mod tests {
             skip_cbor_derives: true,
         });
         assert!(!skipped.contains("minicbor :: Encode"), "{skipped}");
+    }
+
+    #[test]
+    fn non_wasm_strips_migration_attribute_and_injects_cbor_derives() {
+        let out = expand_non_wasm(
+            r#"
+            mod upgrade {
+                pub struct CounterV2 { value: u64 }
+                impl CounterV2 {
+                    #[migration]
+                    pub fn migrate(old: CounterV1) -> Self {
+                        Self { value: 0 }
+                    }
+                }
+            }
+            "#,
+            TemplateOptions::default(),
+        )
+        .unwrap();
+
+        assert!(!out.contains("migration"), "residual #[migration] attribute: {out}");
+        assert!(out.contains("minicbor :: Encode"), "{out}");
+        assert!(
+            out.contains("use :: tari_template_lib :: template_macro_deps :: minicbor"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn non_wasm_validates_template_ast_and_migration_signature() {
+        // Missing previous state argument on a #[migration] function must fail on host builds too.
+        let err = expand_non_wasm(
+            r#"
+            mod upgrade {
+                pub struct CounterV2 { value: u64 }
+                impl CounterV2 {
+                    #[migration]
+                    pub fn migrate() -> Self {
+                        Self { value: 0 }
+                    }
+                }
+            }
+            "#,
+            TemplateOptions::default(),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("migration 'migrate'"), "{err}");
+
+        // Reserved template name `std` must also be rejected on host builds.
+        let err = expand_non_wasm(
+            "mod std { pub fn add(a: u32, b: u32) -> u32 { a + b } }",
+            TemplateOptions {
+                stateless: true,
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("not permitted"), "{err}");
     }
 }

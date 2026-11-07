@@ -73,6 +73,10 @@ macro_rules! impl_str_number {
 
 impl_str_number!(u64, deserialize_u64);
 impl_str_number!(i64, deserialize_i64);
+impl_str_number!(u128, deserialize_u128);
+impl_str_number!(i128, deserialize_i128);
+impl_str_number!(usize, deserialize_u64);
+impl_str_number!(isize, deserialize_i64);
 
 struct StrNumberVisitor<T>(PhantomData<T>);
 
@@ -363,5 +367,23 @@ mod tests {
             let decoded: OptWrapper = tari_bor::serde_codec::from_slice(&encoded).unwrap();
             assert_eq!(decoded, o(value));
         }
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct WideWrapper {
+        #[serde(with = "crate::str_number")]
+        unsigned: u128,
+        #[serde(with = "crate::str_number")]
+        signed: i128,
+    }
+
+    #[test]
+    fn deserialize_u128_and_i128_from_string_and_number() {
+        let json = r#"{"unsigned":"340282366920938463463374607431768211455","signed":"-170141183460469231731687303715884105728"}"#;
+        let parsed: WideWrapper = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed, WideWrapper {
+            unsigned: u128::MAX,
+            signed: i128::MIN,
+        });
     }
 }

@@ -331,6 +331,16 @@ fn empty_shard_has_no_leaf_in_the_shard_group_root() {
         .unwrap(),
         SPARSE_MERKLE_PLACEHOLDER_HASH
     );
+    assert_ne!(
+        compute_shard_group_root(ProtocolVersion::V0, [(
+            Shard::first(),
+            SPARSE_MERKLE_PLACEHOLDER_HASH,
+            0,
+            TransitionAccumulator::new([1; 32])
+        )])
+        .unwrap(),
+        SPARSE_MERKLE_PLACEHOLDER_HASH
+    );
 }
 
 /// An empty shard's state is proved by the absence of its leaf from the shard-group root, and that

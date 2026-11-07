@@ -1893,8 +1893,8 @@ mod new_multishard_rules {
 }
 
 /// A replica that has prepared and accepted [`executing_cross_shard`]'s transaction, whose execution settles a fee
-/// intent, holding the other shard group's pledge of the output it creates there.
-fn accepted_cross_shard_with_fee_intent() -> (Replica, TransactionId) {
+/// intent, and the output pledge the other shard group sends for the output it creates there.
+fn accepted_cross_shard_with_fee_intent_and_output_pledge() -> (Replica, TransactionId, SubstatePledge) {
     let (local, foreign) = local_and_foreign_halves();
     let mut replica = Replica::in_committee(local, 2);
     let input = component_id_in(local);
@@ -1909,10 +1909,6 @@ fn accepted_cross_shard_with_fee_intent() -> (Replica, TransactionId) {
     let output_pledge = SubstatePledge::Output {
         substate_id: VersionedSubstateId::new(output, SubstateVersion::ZERO),
     };
-    replica
-        .store
-        .with_write_tx(|tx| tx.foreign_substate_pledges_save(&id, foreign, &vec![output_pledge]))
-        .unwrap();
     let prepare = multishard_atom(&replica.honest_new_multishard_command(&id));
     replica.prepare_in_parent(&prepare);
     replica.extend();
@@ -1921,6 +1917,18 @@ fn accepted_cross_shard_with_fee_intent() -> (Replica, TransactionId) {
         leader_fee: Some(calculate_leader_fee(FEE, exhaust_burn(), involved)),
         ..prepare
     });
+    (replica, id, output_pledge)
+}
+
+/// A replica that has prepared and accepted [`executing_cross_shard`]'s transaction, whose execution settles a fee
+/// intent, holding the other shard group's pledge of the output it creates there.
+fn accepted_cross_shard_with_fee_intent() -> (Replica, TransactionId) {
+    let (_, foreign) = local_and_foreign_halves();
+    let (replica, id, output_pledge) = accepted_cross_shard_with_fee_intent_and_output_pledge();
+    replica
+        .store
+        .with_write_tx(|tx| tx.foreign_substate_pledges_save(&id, foreign, &vec![output_pledge]))
+        .unwrap();
     (replica, id)
 }
 
@@ -1994,6 +2002,21 @@ mod all_accept {
             "{:?}",
             evaluation.no_vote
         );
+    }
+
+    #[test]
+    fn an_accept_whose_foreign_pledges_were_received_in_the_block_is_voted_for() {
+        let (_, foreign) = local_and_foreign_halves();
+        let (replica, id, output_pledge) = accepted_cross_shard_with_fee_intent_and_output_pledge();
+        let (rec, execution) = adopt_foreign_fee_intent_accept(&replica, &id);
+
+        let evaluation = replica.evaluate_after(&[Command::AllAccept(all_accept_atom(&rec))], |change_set| {
+            change_set.add_foreign_pledges(&id, foreign, vec![output_pledge]);
+            change_set.set_next_transaction_update(rec).unwrap();
+            change_set.add_transaction_execution(id, execution).unwrap();
+        });
+
+        assert_voted(&evaluation, TransactionPoolStage::AllAccepted, true);
     }
 }
 
@@ -2162,6 +2185,62 @@ mod local_accept_from_local_prepared {
 
         let evaluation = replica.evaluate_after(&[Command::LocalAccept(accept)], |change_set| {
             change_set.add_transaction_execution(id, execution).unwrap();
+        });
+
+        assert_voted(&evaluation, TransactionPoolStage::LocalAccepted, true);
+    }
+
+    #[test]
+    fn an_accept_whose_foreign_input_pledges_were_received_in_the_block_is_voted_for() {
+        let (local, foreign) = local_and_foreign_halves();
+        let (replica, id) = pledging_cross_shard();
+        let foreign_input = component_id_in(foreign);
+        let prepare = multishard_atom(&replica.honest_new_multishard_command(&id));
+        replica.prepare_in_parent(&prepare);
+
+        let mut rec = replica.pending_record(&id);
+        rec.evidence_mut().add_shard_group(foreign).set_prepare_qc(PcId::zero());
+        rec.set_ready(true);
+
+        let input_pledge = SubstatePledge::Input {
+            substate_id: VersionedSubstateId::new(foreign_input.clone(), SubstateVersion::ZERO),
+            is_write: true,
+            substate: Box::new(component_value()),
+        };
+        let mut expected = rec.clone();
+        for lock in [
+            VersionedSubstateIdLockIntent::write(
+                VersionedSubstateId::new(component_id_in(local), SubstateVersion::ZERO),
+                false,
+            )
+            .with_pledged_value(&component_value()),
+            VersionedSubstateIdLockIntent::write(VersionedSubstateId::new(foreign_input, SubstateVersion::ZERO), false)
+                .with_pledged_value(&component_value()),
+            VersionedSubstateIdLockIntent::output(VersionedSubstateId::new(
+                component_id_in(local),
+                SubstateVersion::new(1),
+            )),
+            VersionedSubstateIdLockIntent::output(VersionedSubstateId::new(
+                component_id_in(foreign),
+                SubstateVersion::new(1),
+            )),
+            VersionedSubstateIdLockIntent::output(VersionedSubstateId::new(
+                SubstateId::TransactionReceipt(TransactionReceiptAddress::from(id)),
+                SubstateVersion::ZERO,
+            )),
+        ] {
+            expected
+                .evidence_mut()
+                .insert_from_lock_intent(NUM_PRESHARDS, replica.committee.num_committees(), lock);
+        }
+        expected.set_transaction_fee(FEE).set_exhaust_burn(exhaust_burn());
+        let involved = NonZeroU64::new(expected.evidence().num_shard_groups() as u64).unwrap();
+        expected.set_leader_fee(expected.calculate_leader_fee(involved));
+        let accept = expected.get_current_multi_shard_atom().unwrap();
+
+        let evaluation = replica.evaluate_after(&[Command::LocalAccept(accept)], |change_set| {
+            change_set.add_foreign_pledges(&id, foreign, vec![input_pledge]);
+            change_set.set_next_transaction_update(rec).unwrap();
         });
 
         assert_voted(&evaluation, TransactionPoolStage::LocalAccepted, true);

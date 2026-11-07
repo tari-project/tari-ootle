@@ -352,7 +352,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .inner_join(committees::table.on(validator_nodes::id.eq(committees::validator_node_id)))
             .filter(committees::epoch.eq(epoch.as_u64() as i64))
             .filter(validator_nodes::public_key.eq(public_key.as_bytes()))
-            .order_by(validator_nodes::shard_key.desc())
+            .order_by(validator_nodes::id.desc())
             .first::<DbValidatorNode>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
@@ -557,6 +557,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             // Overlapping c.shard_start <= :end and c.shard_end >= :start;
             .filter(committees::shard_start.le(shard_group.end().as_u32() as i32))
             .filter(committees::shard_end.ge(shard_group.start().as_u32() as i32))
+            .order_by(validator_nodes::public_key.asc())
             .get_results::<(DbValidatorNode, DbCommittee)>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,

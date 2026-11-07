@@ -317,7 +317,7 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
         block: &Block,
         foreign_proposals: &[ForeignProposal],
         origin: ProposalOrigin,
-    ) -> Result<bool, StorageError> {
+    ) -> Result<(), StorageError> {
         const OPERATION: &str = "parked_blocks_insert";
         if self.blocks_exists(block.id())? {
             return Err(StorageError::QueryError {
@@ -340,7 +340,7 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
                     cf.put(block.id(), &data, OPERATION)?;
                 }
             }
-            return Ok(false);
+            return Ok(());
         }
 
         let codec = DefaultCodec::<ParkedBlockDataRef<'_>>::default();
@@ -359,7 +359,7 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
             OPERATION,
         )?;
 
-        Ok(true)
+        Ok(())
     }
 
     fn parked_blocks_remove(
@@ -1094,6 +1094,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             pool.set_fee_intent_only(update.fee_intent_only);
             if let Some(leader_fee) = update.leader_fee {
                 pool.set_leader_fee(leader_fee);
+            } else {
+                pool.no_leader_fee();
             }
             pool.set_evidence(update.evidence.clone());
             pool.set_is_ready(update.is_ready);
@@ -1141,9 +1143,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             });
         }
 
-        if !self.parked_blocks_insert(block, foreign_proposals, origin)? {
-            return Ok(());
-        }
+        self.parked_blocks_insert(block, foreign_proposals, origin)?;
 
         let cf = self.db().cf(MissingTransactionCf)?;
         let index_cf = self.db().cf(missing_transactions::MissingTransactionBlockIdIndex)?;

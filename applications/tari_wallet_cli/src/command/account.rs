@@ -55,6 +55,7 @@ pub enum AccountsSubcommand {
 pub struct CreateArgs {
     #[clap(long, alias = "name")]
     pub account_name: Option<String>,
+    #[clap(long = "default", short = 'd', alias = "is-default")]
     pub is_default: bool,
     #[clap(long, short, alias = "key")]
     pub key_id: Option<u64>,
@@ -105,10 +106,11 @@ impl AccountsSubcommand {
 }
 
 async fn handle_create(args: CreateArgs, client: &mut WalletDaemonClient) -> Result<(), anyhow::Error> {
+    let is_default = if args.is_default { Some(true) } else { None };
     let resp = client
         .create_account(AccountsCreateRequest {
             account_name: args.account_name,
-            is_default: Some(args.is_default),
+            is_default,
             key_index: args.key_id,
         })
         .await?;
@@ -235,4 +237,56 @@ async fn handle_get(args: GetArgs, client: &mut WalletDaemonClient) -> Result<()
     println!();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+
+    #[derive(Debug, Parser)]
+    struct CliTest {
+        #[clap(subcommand)]
+        command: AccountsSubcommand,
+    }
+
+    #[test]
+    fn test_create_args_parsing_without_default() {
+        let cli = CliTest::try_parse_from(["wallet", "create", "--name", "test_acc"])
+            .expect("Failed to parse accounts create command");
+
+        match cli.command {
+            AccountsSubcommand::Create(args) => {
+                assert_eq!(args.account_name.as_deref(), Some("test_acc"));
+                assert!(!args.is_default);
+                assert_eq!(args.key_id, None);
+            },
+            _ => panic!("Expected AccountsSubcommand::Create"),
+        }
+    }
+
+    #[test]
+    fn test_create_args_parsing_with_default_flags() {
+        let cli_long = CliTest::try_parse_from(["wallet", "create", "--name", "test_acc", "--default"])
+            .expect("Failed to parse accounts create with --default");
+
+        match cli_long.command {
+            AccountsSubcommand::Create(args) => {
+                assert_eq!(args.account_name.as_deref(), Some("test_acc"));
+                assert!(args.is_default);
+            },
+            _ => panic!("Expected AccountsSubcommand::Create"),
+        }
+
+        let cli_short =
+            CliTest::try_parse_from(["wallet", "create", "-d"]).expect("Failed to parse accounts create with -d");
+
+        match cli_short.command {
+            AccountsSubcommand::Create(args) => {
+                assert!(args.is_default);
+            },
+            _ => panic!("Expected AccountsSubcommand::Create"),
+        }
+    }
 }

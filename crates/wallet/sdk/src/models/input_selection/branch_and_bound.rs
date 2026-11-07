@@ -88,6 +88,15 @@ fn select_bounded<A: Into<Amount>, K: Clone>(
     max_inputs: usize,
     max_states: usize,
 ) -> Option<SelectionResult<'_, K>> {
+    select_bounded_with_stats(inputs, target, max_inputs, max_states).map(|(result, _)| result)
+}
+
+fn select_bounded_with_stats<A: Into<Amount>, K: Clone>(
+    inputs: &[KeyedInput<K>],
+    target: A,
+    max_inputs: usize,
+    max_states: usize,
+) -> Option<(SelectionResult<'_, K>, usize)> {
     // Sort descending to improve pruning efficiency
     // Collect references to avoid cloning keys/values unnecessarily
     let mut items = inputs.iter().collect::<Vec<_>>();
@@ -140,20 +149,10 @@ fn select_bounded<A: Into<Amount>, K: Clone>(
 
         // if total already meets or exceeds target → potential solution
         if target <= state.total {
-            match best_sum {
-                Some(best) if state.total < best => {
-                    best_sum = Some(state.total);
-                    best_keys = state.selected;
-                    let change = state.total - target;
-                    if change == 0 {
-                        break; // optimal solution found
-                    }
-                },
-                None => {
-                    best_sum = Some(state.total);
-                    best_keys = state.selected;
-                },
-                _ => {},
+            best_sum = Some(state.total);
+            best_keys = state.selected;
+            if state.total == target {
+                break; // optimal solution found
             }
             continue;
         }
@@ -186,13 +185,16 @@ fn select_bounded<A: Into<Amount>, K: Clone>(
     }
 
     match best_sum {
-        Some(total_value) => Some(SelectionResult {
-            total_value,
-            selected_keys: best_keys,
-        }),
+        Some(total_value) => Some((
+            SelectionResult {
+                total_value,
+                selected_keys: best_keys,
+            },
+            states_explored,
+        )),
         // The search ran out of states before it reached any solution. The largest-first selection is one whenever
         // the target is reachable at all, which the check above has established it is.
-        None => take_largest_first(&items, target, max_inputs),
+        None => take_largest_first(&items, target, max_inputs).map(|res| (res, states_explored)),
     }
 }
 
@@ -525,5 +527,18 @@ mod tests {
         assert!(select_bounded(&inputs, 40_500u64, 40, 0).is_none());
         // ...and exactly `max_inputs` of them do reach it
         assert!(select(&inputs, 40_000u64, 40).is_some());
+    }
+
+    #[test]
+    fn it_stops_when_the_first_descent_totals_the_target() {
+        // An exact total ends the search: no later state can improve on it.
+        let inputs: Vec<KeyedInput<usize>> = (0..40).map(|i| KeyedInput { key: i, value: 1000 }).collect();
+
+        let (result, states_explored) = select_bounded_with_stats(&inputs, 20_000u64, 1000, 100).unwrap();
+
+        assert_eq!(result.total_value, 20_000);
+        assert_eq!(result.selected_keys.len(), 20);
+        // The root plus 20 includes reaches the exact target on the very first descent and terminates immediately.
+        assert_eq!(states_explored, 21);
     }
 }

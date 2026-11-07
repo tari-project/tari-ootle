@@ -206,18 +206,8 @@ pub fn setup_keypair_prompt<P: AsRef<Path>>(identity_file: P, create_id: bool) -
     }
 }
 
-/// Loads or restores a validator identity, requiring explicit authorization to replace a different identity.
-pub fn setup_keypair_from_seed_prompt<P: AsRef<Path>>(
-    identity_file: P,
-    seed_words: Option<&SeedWords>,
-    passphrase: Option<SafePassword>,
-    create_id: bool,
-) -> Result<RistrettoKeypair, ExitError> {
-    setup_validator_keypair(identity_file, seed_words, passphrase, create_id, false)
-}
-
-/// Replacing an existing validator identity requires `overwrite`. Recovery words are stored in a separate
-/// owner-readable file so ordinary logs contain only the backup path.
+/// Loads, restores or generates a validator identity. Replacing an existing validator identity requires `overwrite`.
+/// Recovery words are stored in a separate owner-readable file so ordinary logs contain only the backup path.
 pub fn setup_validator_keypair<P: AsRef<Path>>(
     identity_file: P,
     seed_words: Option<&SeedWords>,
@@ -350,37 +340,6 @@ pub fn create_new_keypair<P: AsRef<Path>>(path: P) -> Result<RistrettoKeypair, I
     let node_identity = RistrettoKeypair::random(&mut rand::rng());
     save_as_json(&path, &node_identity)?;
     Ok(node_identity)
-}
-
-/// Create a new node identity derived from a CipherSeed and save it to disk.
-pub fn create_new_keypair_from_seed<P: AsRef<Path>>(
-    path: P,
-    seed: &CipherSeed,
-) -> Result<RistrettoKeypair, IdentityError> {
-    let node_identity = RistrettoKeypair::derive_from_seed(seed, VN_IDENTITY_BRANCH, 0);
-    save_identity(path.as_ref(), &node_identity, false)?;
-    Ok(node_identity)
-}
-
-/// Create a new node identity derived from 24 seed words and save it to disk.
-pub fn create_new_keypair_from_seed_words<P: AsRef<Path>>(
-    path: P,
-    seed_words: &SeedWords,
-    passphrase: Option<SafePassword>,
-) -> Result<RistrettoKeypair, IdentityError> {
-    let seed = CipherSeed::from_mnemonic(seed_words, passphrase)?;
-    create_new_keypair_from_seed(path, &seed)
-}
-
-/// Generate a fresh random seed, derive the validator node identity keypair,
-/// save the identity to disk, and return `(RistrettoKeypair, SeedWords)`.
-pub fn create_new_keypair_with_seed_words<P: AsRef<Path>>(
-    path: P,
-) -> Result<(RistrettoKeypair, SeedWords), IdentityError> {
-    let seed = CipherSeed::random();
-    let seed_words = seed.to_mnemonic(MnemonicLanguage::English, None)?;
-    let keypair = create_new_keypair_from_seed(path, &seed)?;
-    Ok((keypair, seed_words))
 }
 
 /// Loads the node identity from json at the given path
@@ -547,6 +506,28 @@ pub enum IdentityError {
 mod tests {
     use super::*;
 
+    fn create_new_keypair_from_seed(path: &Path, seed: &CipherSeed) -> Result<RistrettoKeypair, IdentityError> {
+        let node_identity = RistrettoKeypair::derive_from_seed(seed, VN_IDENTITY_BRANCH, 0);
+        save_identity(path, &node_identity, false)?;
+        Ok(node_identity)
+    }
+
+    fn create_new_keypair_from_seed_words(
+        path: &Path,
+        seed_words: &SeedWords,
+        passphrase: Option<SafePassword>,
+    ) -> Result<RistrettoKeypair, IdentityError> {
+        let seed = CipherSeed::from_mnemonic(seed_words, passphrase)?;
+        create_new_keypair_from_seed(path, &seed)
+    }
+
+    fn create_new_keypair_with_seed_words(path: &Path) -> Result<(RistrettoKeypair, SeedWords), IdentityError> {
+        let seed = CipherSeed::random();
+        let seed_words = seed.to_mnemonic(MnemonicLanguage::English, None)?;
+        let keypair = create_new_keypair_from_seed(path, &seed)?;
+        Ok((keypair, seed_words))
+    }
+
     #[test]
     fn deterministic_derivation_from_seed() {
         let seed = CipherSeed::random();
@@ -694,7 +675,7 @@ mod tests {
     fn failed_replacement_preserves_the_destination_and_removes_the_temporary_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("destination");
-        fs::create_dir(&path).unwrap();
+        fs::create_dir_all(&path).unwrap();
         fs::write(path.join("keep"), b"original").unwrap();
         let identity = RistrettoKeypair::random(&mut rand::rng());
         assert!(save_identity(&path, &identity, true).is_err());

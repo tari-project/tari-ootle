@@ -22,17 +22,14 @@
 
 mod cli;
 
-use std::{fs, fs::OpenOptions, io::Write, panic, path::Path, time::SystemTime};
+use std::{borrow::Cow, fs, fs::OpenOptions, io::Write, panic, path::Path, time::SystemTime};
 
 use clap::Parser;
 use log::*;
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_common_types::seeds::seed_words::SeedWords;
 use tari_crypto::tari_utilities::SafePassword;
-use tari_ootle_app_utilities::{
-    configuration::load_configuration,
-    keypair::{setup_keypair_from_seed_prompt, setup_validator_keypair},
-};
+use tari_ootle_app_utilities::{configuration::load_configuration, keypair::setup_validator_keypair};
 use tari_shutdown::Shutdown;
 use tari_validator_node::{ApplicationConfig, node, run_validator_node};
 
@@ -47,36 +44,26 @@ fn load_seed_words(seed_words: Option<&str>, seed_words_file: Option<&Path>) -> 
             "Specify either seed words or a seed words file",
         ));
     }
-    if let Some(words) = seed_words {
-        let parsed = words
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .parse::<SeedWords>()
-            .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Invalid seed words: {e}")))?;
-        return Ok(Some(parsed));
-    }
-    if let Some(path) = seed_words_file {
-        let content = fs::read_to_string(path).map_err(|e| {
-            ExitError::new(
-                ExitCode::ConfigError,
-                format!("Failed to read seed words file {}: {e}", path.display()),
-            )
-        })?;
-        let parsed = content
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .parse::<SeedWords>()
-            .map_err(|e| {
+    let (words, source) = match (seed_words, seed_words_file) {
+        (Some(words), _) => (Cow::Borrowed(words), "seed words".to_string()),
+        (None, Some(path)) => {
+            let content = fs::read_to_string(path).map_err(|e| {
                 ExitError::new(
                     ExitCode::ConfigError,
-                    format!("Invalid seed words in {}: {e}", path.display()),
+                    format!("Failed to read seed words file {}: {e}", path.display()),
                 )
             })?;
-        return Ok(Some(parsed));
-    }
-    Ok(None)
+            (Cow::Owned(content), format!("seed words in {}", path.display()))
+        },
+        (None, None) => return Ok(None),
+    };
+    let parsed = words
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .parse::<SeedWords>()
+        .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Invalid {source}: {e}")))?;
+    Ok(Some(parsed))
 }
 
 #[cfg(feature = "tokio_debug")]
@@ -140,11 +127,12 @@ async fn main() -> anyhow::Result<()> {
             let parsed_seed_words = load_seed_words(cli.seed_words.as_deref(), cli.seed_words_file.as_deref())?;
             let passphrase = cli.seed_passphrase.as_deref().map(SafePassword::from);
 
-            let keypair = setup_keypair_from_seed_prompt(
+            let keypair = setup_validator_keypair(
                 &config.validator_node.identity_file,
                 parsed_seed_words.as_ref(),
                 passphrase,
                 !config.validator_node.dont_create_id,
+                false,
             )?;
 
             run_validator_node(keypair, config, shutdown).await?;
@@ -290,7 +278,11 @@ mod tests {
             .unwrap();
         fs::write(&path, format!("  {}\n", words.join("\n\t").reveal())).unwrap();
         assert_eq!(load_seed_words(None, Some(&path)).unwrap().unwrap(), words);
+        let inline = format!(" {} ", words.join("  ").reveal());
+        assert_eq!(load_seed_words(Some(&inline), None).unwrap().unwrap(), words);
         assert!(load_seed_words(Some("words"), Some(&path)).is_err());
+        assert!(load_seed_words(None, None).unwrap().is_none());
+        assert!(load_seed_words(None, Some(&dir.path().join("missing.txt"))).is_err());
     }
 
     const CHILD_DIR_VAR: &str = "OOTLE_VN_PANIC_TEST_DIR";

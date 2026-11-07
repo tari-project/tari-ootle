@@ -265,10 +265,8 @@ mod tests {
     #[tokio::test]
     async fn missing_claim_key_prevents_startup_before_database_creation() {
         let dir = tempfile::tempdir().unwrap();
-        let validator_config = config::ValidatorNodeConfig {
-            data_dir: dir.path().join("validator-data"),
-            ..Default::default()
-        };
+        let mut validator_config = config::ValidatorNodeConfig::default();
+        validator_config.data_dir = dir.path().join("validator-data");
         let config = ApplicationConfig {
             common: Default::default(),
             validator_node: validator_config,

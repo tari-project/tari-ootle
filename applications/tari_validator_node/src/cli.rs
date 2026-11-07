@@ -85,7 +85,7 @@ pub struct Cli {
     #[clap(long)]
     pub allow_past_protocol_activation: bool,
     /// 24-word seed phrase to restore or initialize the validator node identity
-    #[clap(long, env = "TARI_VN_SEED_WORDS", conflicts_with = "seed_words_file")]
+    #[clap(long, env = "TARI_VN_SEED_WORDS", conflicts_with = "seed-words-file")]
     pub seed_words: Option<String>,
     /// Path to a file containing 24-word seed phrase
     #[clap(long, env = "TARI_VN_SEED_WORDS_FILE")]
@@ -196,7 +196,7 @@ pub enum Subcommand {
     /// Generate an identity keypair if one does not exist and exit
     GenerateIdentity {
         /// Optional 24-word seed phrase to restore the identity from
-        #[clap(long, conflicts_with = "seed_words_file")]
+        #[clap(long, conflicts_with = "seed-words-file")]
         seed_words: Option<String>,
         /// Optional path to a file containing 24 seed words
         #[clap(long)]
@@ -277,5 +277,25 @@ mod tests {
             },
             _ => panic!("Expected GenerateIdentity subcommand"),
         }
+
+        let err = Cli::try_parse_from([
+            "tari_validator_node",
+            "--seed-words",
+            "words",
+            "--seed-words-file",
+            "/tmp/seed.txt",
+        ])
+        .unwrap_err();
+        assert_eq!(err.kind(), clap::ErrorKind::ArgumentConflict);
+        let err = Cli::try_parse_from([
+            "tari_validator_node",
+            "generate-identity",
+            "--seed-words",
+            "words",
+            "--seed-words-file",
+            "/tmp/seed.txt",
+        ])
+        .unwrap_err();
+        assert_eq!(err.kind(), clap::ErrorKind::ArgumentConflict);
     }
 }

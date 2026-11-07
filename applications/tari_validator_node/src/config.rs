@@ -483,8 +483,8 @@ mod tests {
         let mut config = ValidatorNodeConfig::default();
         assert!(config.validate_fee_claim_public_key().is_err());
         let wallet_key = RistrettoKeypair::random(&mut rand::rng());
-        config.fee_claim_public_key = *wallet_key.public_key();
+        config.fee_claim_public_key = wallet_key.public_key().clone();
         config.validate_fee_claim_public_key().unwrap();
-        assert_eq!(config.fee_claim_public_key, *wallet_key.public_key());
+        assert_eq!(&config.fee_claim_public_key, wallet_key.public_key());
     }
 }

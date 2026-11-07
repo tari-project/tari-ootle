@@ -154,9 +154,13 @@ impl StealthCryptoApi {
         statement: &OutputWitness,
         revealed_amount: A,
     ) -> Result<ConfidentialOutputStatement, StealthCryptoApiError> {
+        let revealed_amount = revealed_amount
+            .into()
+            .non_negative_checked()
+            .ok_or(StealthCryptoApiError::NegativeAmount)?;
         let proof = confidential::create_output_statement(
             Some(statement).filter(|s| s.amount > 0),
-            revealed_amount.into(),
+            revealed_amount,
             None,
             Amount::zero(),
         )?;

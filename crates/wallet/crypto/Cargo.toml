@@ -40,5 +40,5 @@ tari_bor = { workspace = true }
 [features]
 default = []
 serde = ["dep:serde"]
-ts = ["dep:ts-rs"]
+ts = ["dep:ts-rs", "tari_template_lib_types/ts"]
 mmap-value-lookup = ["dep:memmap2"]

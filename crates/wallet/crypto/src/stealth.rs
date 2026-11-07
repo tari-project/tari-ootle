@@ -166,6 +166,16 @@ where
     let output_witnesses = output_statements.into_iter().collect::<Vec<_>>();
     let num_outputs = output_witnesses.len();
 
+    let requires_balance_proof = num_inputs > 0 || num_outputs > 0;
+    if requires_balance_proof &&
+        (revealed_input_amount > u64::MAX || outputs_statement.revealed_output_amount() > u64::MAX)
+    {
+        return Err(WalletCryptoError::InvalidArgument {
+            name: "amounts",
+            details: "Revealed amount in a stealth transfer with stealth inputs or outputs must fit in u64".to_string(),
+        });
+    }
+
     let mut inputs_to_spend = Vec::with_capacity(num_inputs);
     let mut agg_input_mask = RistrettoSecretKey::default();
     let mut seen = HashSet::with_capacity(num_inputs);
@@ -201,7 +211,6 @@ where
     // The claims are bound by the balance proof, so they must exist before it is signed.
     let covenant_claims = generate_covenant_claims(&inputs, &output_witnesses)?;
 
-    let requires_balance_proof = num_inputs > 0 || num_outputs > 0;
     let balance_proof = requires_balance_proof.then(|| {
         generate_stealth_balance_proof_signature(
             &agg_input_mask,
@@ -284,6 +293,12 @@ fn generate_covenant_claims(
                     .to_string(),
             });
         };
+        if revealed_amount > u64::MAX {
+            return Err(WalletCryptoError::InvalidArgument {
+                name: "covenant",
+                details: "Covenant partition revealed amount exceeds u64::MAX".to_string(),
+            });
+        }
 
         claims.push(CovenantBalanceClaim {
             partition_input_index: partition_input_index as u32,

@@ -13,7 +13,8 @@ pub struct BaseLayerEpochOracleConfig {
     pub height_lag: u64,
     /// The interval between scans of the base layer for new epoch data
     pub scanning_interval: Duration,
-    /// The sidechain ID to filter validator node changes by. If `None`, the "default" Ootle sidechain is used.
+    /// The sidechain ID to filter validator node changes and retained headers by. If `None`, the "default" Ootle
+    /// sidechain is used.
     pub sidechain_id: Option<RistrettoPublicKeyBytes>,
     /// Features for the base layer epoch oracle.
     pub features: BaseLayerEpochOracleFeatures,
@@ -21,7 +22,8 @@ pub struct BaseLayerEpochOracleConfig {
 
 #[derive(Debug, Clone, Copy)]
 pub struct BaseLayerEpochOracleFeatures {
-    /// Whether to sync headers when scanning the base layer.
+    /// Whether to store the base layer headers burn claims are verified against: every block with an output for
+    /// this sidechain, plus every epoch boundary. Requires an archival base node that allows `get_side_chain_utxos`.
     pub sync_headers: bool,
     /// Whether to sync validator node changes when scanning the base layer.
     pub sync_validator_node_changes: bool,

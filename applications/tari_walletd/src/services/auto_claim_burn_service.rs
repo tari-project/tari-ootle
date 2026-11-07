@@ -563,6 +563,9 @@ impl AutoClaimBurnService {
     }
 
     async fn query_current_epoch(&self) -> anyhow::Result<Epoch> {
+        if self.sdk.sdk_config().indexer_trust.is_verify() {
+            return Ok(self.sdk.validator_set_api().sync().await?.epoch());
+        }
         self.sdk
             .get_network_interface()
             .get_current_epoch()

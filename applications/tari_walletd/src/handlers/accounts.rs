@@ -1957,13 +1957,17 @@ impl DeclaredInputPricing {
             .collect();
 
         let num_preshards = NumPreshards::current();
-        let checkpoints = sdk.get_network_interface().get_latest_shard_group_checkpoints().await?;
-        let num_committees = committees_of_checkpoint_layout(
-            num_preshards,
-            checkpoints
-                .iter()
-                .map(|checkpoint| (checkpoint.epoch, checkpoint.shard_group)),
-        );
+        let checkpoint_layout = if sdk.sdk_config().indexer_trust.is_verify() {
+            sdk.validator_set_api().verified_checkpoint_layout().await?
+        } else {
+            sdk.get_network_interface()
+                .get_latest_shard_group_checkpoints()
+                .await?
+                .into_iter()
+                .map(|checkpoint| (checkpoint.epoch, checkpoint.shard_group))
+                .collect()
+        };
+        let num_committees = committees_of_checkpoint_layout(num_preshards, checkpoint_layout);
         Ok(Self {
             value_bytes,
             num_preshards,

@@ -68,7 +68,7 @@ impl LayerOneTransactionService {
                 Err(err) => {
                     log::error!("Failed to decode transaction file {}: {}", path.display(), err);
                     fs::rename(&path, path.with_extension("json.failed")).await?;
-                    return Err(err);
+                    continue;
                 },
             };
             match self.submitter.submit_transaction(transaction.clone()).await {
@@ -80,7 +80,7 @@ impl LayerOneTransactionService {
                 Err(err) => {
                     log::error!("Failed to submit transaction: {}", err);
                     fs::rename(&path, path.with_extension("json.failed")).await?;
-                    return Err(err);
+                    continue;
                 },
             }
         }

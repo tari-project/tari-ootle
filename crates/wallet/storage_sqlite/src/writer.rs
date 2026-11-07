@@ -744,6 +744,34 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
+        // If the active key was deleted by the reset, mark the highest remaining key as active.
+        let has_active = key_manager_states::table
+            .filter(key_manager_states::branch_seed.eq(branch))
+            .filter(key_manager_states::is_active.eq(true))
+            .limit(1)
+            .count()
+            .first::<i64>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))? >
+            0;
+        if !has_active &&
+            let Some(latest_id) = key_manager_states::table
+                .select(key_manager_states::id)
+                .filter(key_manager_states::branch_seed.eq(branch))
+                .order(key_manager_states::index.desc())
+                .first::<i32>(self.connection())
+                .optional()
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?
+        {
+            diesel::update(key_manager_states::table)
+                .set((
+                    key_manager_states::is_active.eq(true),
+                    key_manager_states::updated_at.eq(diesel::dsl::now),
+                ))
+                .filter(key_manager_states::id.eq(latest_id))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        }
+
         Ok(())
     }
 
@@ -1946,6 +1974,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .filter(
                 stealth_outputs::status
                     .eq(OutputStatus::Unspent.as_key_str())
+                    .and(stealth_outputs::is_on_chain.eq(true))
                     // Allow locking a UTXO created within the transaction
                     .or(stealth_outputs::status
                         .eq(OutputStatus::LockedUnconfirmed.as_key_str())
@@ -1997,6 +2026,8 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     ) -> Result<(), WalletStorageError> {
         const OPERATION: &str = "stealth_outputs_lock_many";
         use crate::schema::stealth_outputs;
+
+        self.ensure_lock_exists(lock_id)?;
 
         let num_rows = diesel::update(stealth_outputs::table)
             .set((

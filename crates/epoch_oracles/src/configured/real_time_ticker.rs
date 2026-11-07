@@ -161,7 +161,7 @@ mod tests {
         let mut ticker =
             RealTimeEpochTicker::new(Epoch(10), base_time, Epoch(0)).with_epoch_time_secs(1_000.try_into().unwrap());
 
-        for i in 0..10 {
+        for i in 0..=10 {
             let res = timeout(Duration::from_secs(10), poll_fn(|cx| ticker.poll_tick(cx)))
                 .await
                 .expect("elapsed");
@@ -170,13 +170,13 @@ mod tests {
                 Some(EpochTickerData {
                     epoch: Epoch(i),
                     epoch_hash: calc_static_epoch_hash(Epoch(i)),
-                    done_for_now: i == 9,
+                    done_for_now: i == 10,
                 })
             );
         }
 
         let next = timeout(Duration::from_secs(3), poll_fn(|cx| ticker.poll_tick(cx))).await;
-        assert!(next.is_err(), "epoch 10 is not due for 10,000 seconds, got {next:?}");
+        assert!(next.is_err(), "epoch 11 is not due for 11,000 seconds, got {next:?}");
     }
 
     #[tokio::test]
@@ -194,8 +194,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn it_stops_at_initial_epoch_when_calculated_epoch_is_behind() {
+    #[tokio::test]
+    async fn it_stops_at_initial_epoch_when_calculated_epoch_is_behind() {
         let base_time = time::OffsetDateTime::now_utc();
         let mut ticker = RealTimeEpochTicker::new(Epoch(3), base_time, Epoch(0)).disable_ticks();
         let mut cx = Context::from_waker(Waker::noop());

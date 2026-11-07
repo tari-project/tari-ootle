@@ -465,7 +465,12 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .select(validator_nodes::id)
             .filter(validator_nodes::shard_key.eq(shard_key.as_bytes()))
             .filter(validator_nodes::start_epoch.le(epoch.as_u64() as i64))
-            .order_by(validator_nodes::id.desc())
+            .filter(
+                validator_nodes::end_epoch
+                    .is_null()
+                    .or(validator_nodes::end_epoch.gt(epoch.as_u64() as i64)),
+            )
+            .order_by((validator_nodes::start_epoch.desc(), validator_nodes::id.desc()))
             .first::<i32>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,

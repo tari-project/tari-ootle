@@ -703,6 +703,8 @@ pub trait StateStoreWriteTransaction {
         missing_transaction_ids: IMissing,
     ) -> Result<(), StorageError>;
 
+    /// Removes `transaction_id` from every parked local block waiting on it and returns each block that has no
+    /// missing transactions left.
     fn parked_block_remove_missing_transaction(
         &mut self,
         transaction_id: &TransactionId,

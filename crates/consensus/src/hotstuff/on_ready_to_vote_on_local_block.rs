@@ -26,6 +26,7 @@ use tari_ootle_storage::{
         ForeignProposalStatus,
         NoVoteReason,
         PendingShardStateTreeDiff,
+        ProposalOrigin,
         SubstateRecord,
         TransactionPool,
         TransactionPoolRecord,
@@ -122,6 +123,7 @@ where
         // a transaction from LocalPrepared (see `abort_local_prepared_for_epoch_end`) and requires the end-of-epoch
         // block to leave none there (see `check_epoch_end_drained`).
         next_epoch_changes_layout: bool,
+        origin: ProposalOrigin,
         change_set: &mut ProposedBlockChangeSet,
     ) -> Result<BlockDecision, HotStuffError> {
         let _timer =
@@ -174,7 +176,10 @@ where
         let processed_blocks =
             process_newly_justified_block(&**tx, &justified_block, block_qc_id, local_committee_info, change_set)?;
 
-        if self.should_vote(&**tx, valid_block.block())? {
+        // Blocks first imported through catch-up have already been certified by the committee (and are never voted
+        // on by the caller), so evaluate and save their state transitions even when at or below `last_voted`. A live
+        // proposal at or below `last_voted`, and any block NoVoted for another reason, saves no change set.
+        if origin.is_catch_up() || self.should_vote(&**tx, valid_block.block())? {
             let parent = valid_block.block().get_parent(&**tx)?;
 
             self.decide_what_to_vote(
@@ -1708,6 +1713,7 @@ mod tests {
                             false,
                             LocalNextEpochView::default(),
                             false,
+                            ProposalOrigin::Live,
                             &mut change_set,
                         )
                     })

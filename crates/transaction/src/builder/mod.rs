@@ -422,8 +422,6 @@ impl<D> TransactionBuilder<D> {
     /// - If the combined blob count would exceed the `BlobIndex` range (256 blobs total).
     /// - If a named blob in `other` collides with one already registered on `self`.
     pub fn merge(mut self, other: TransactionBuilder<D>) -> Self {
-        let workspace_id_offset = self.workspace_ids.next_id();
-        let other_next_workspace_id = other.workspace_ids.next_id();
         // A transaction may hold `BlobIndex::MAX + 1` blobs, so the count alone does not fit a
         // `BlobIndex`; only an offset a blob is actually placed at has to.
         let own_blob_count = self.unsigned_transaction.blobs().len();
@@ -441,9 +439,12 @@ impl<D> TransactionBuilder<D> {
 
         let TransactionBuilder {
             unsigned_transaction: mut other_tx,
+            workspace_ids: other_workspace_ids,
             blob_ids: other_blob_ids,
             ..
         } = other;
+
+        let workspace_id_offset = self.workspace_ids.merge(other_workspace_ids);
 
         // Merge inputs first (before consuming the transaction)
         declare_inputs(
@@ -476,10 +477,6 @@ impl<D> TransactionBuilder<D> {
             instruction.remap_blob_ids(blob_id_offset);
             self.unsigned_transaction.instructions_mut().push(instruction);
         }
-
-        // Advance workspace ID counter past merged IDs
-        self.workspace_ids
-            .set_next_id(workspace_id_offset + other_next_workspace_id);
 
         self
     }
@@ -1105,12 +1102,7 @@ impl<D> TransactionBuilder<D> {
     fn resolve_resource_ref(&self, resx_ref: NamedResourceRef) -> ResourceAddressRef {
         match resx_ref {
             NamedResourceRef::Address(addr) => addr.into(),
-            NamedResourceRef::Workspace(id) => {
-                let id = self.workspace_ids.get(id.name()).unwrap_or_else(|| {
-                    panic!("Workspace key '{}' not found", id.name());
-                });
-                WorkspaceOffsetId::new(id).into()
-            },
+            NamedResourceRef::Workspace(id) => self.get_workspace_offset_id_from_named_arg(id.name()).into(),
         }
     }
 

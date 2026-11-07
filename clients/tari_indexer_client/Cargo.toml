@@ -38,6 +38,14 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
 [features]
 default = ["client"]
-ts = ["ts-rs", "tari_template_lib_types/ts", "tari_engine_types/ts", "tari_ootle_common_types/ts"]
+ts = [
+    "ts-rs",
+    "tari_template_lib_types/ts",
+    "tari_engine_types/ts",
+    "tari_ootle_common_types/ts",
+    "tari_ootle_transaction/ts",
+    "tari_consensus_types/ts",
+    "tari_template_abi/ts",
+]
 client = ["dep:reqwest", "dep:thiserror", "dep:serde_urlencoded", "dep:bytes", "dep:tokio"]
 utoipa = ["dep:utoipa"]

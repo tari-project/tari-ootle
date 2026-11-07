@@ -43,7 +43,7 @@ impl<TMsg> ProtobufStream<TMsg> {
     ) -> Self {
         Self {
             bytes_stream: Box::pin(bytes_stream.fuse()),
-            buf: BytesMut::with_capacity(max_message_size),
+            buf: BytesMut::with_capacity(max_message_size.min(64 * 1024)),
             max_message_size,
             terminated: false,
             _marker: std::marker::PhantomData,

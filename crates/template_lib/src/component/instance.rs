@@ -58,9 +58,9 @@ impl<T> ComponentBuilder<T> {
     /// .with_address_allocation(allocation)
     /// ```
     /// Calling this followed by `with_address_allocation` will cause execution to fail
-    pub fn with_public_key_address(mut self, public_key: RistrettoPublicKeyBytes) -> Self {
-        self.address_allocation = Some(CallerContext::allocate_component_address(Some(public_key)));
-        self
+    pub fn with_public_key_address(self, public_key: RistrettoPublicKeyBytes) -> Self {
+        assert!(self.address_allocation.is_none(), "Address allocation already set");
+        self.with_address_allocation(CallerContext::allocate_component_address(Some(public_key)))
     }
 
     /// Sets up who will be the owner of the component.

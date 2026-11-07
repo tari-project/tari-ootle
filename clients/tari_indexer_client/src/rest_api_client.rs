@@ -504,9 +504,10 @@ async fn read_body_capped(mut resp: reqwest::Response, limit: usize) -> Result<O
     if declared.is_some_and(|len| len > limit as u64) {
         return Ok(None);
     }
-    let mut body = Vec::with_capacity(declared.unwrap_or(0) as usize);
+    let initial_cap = declared.unwrap_or(0).min(64 * 1024) as usize;
+    let mut body = Vec::with_capacity(initial_cap.min(limit));
     while let Some(chunk) = resp.chunk().await? {
-        if body.len() + chunk.len() > limit {
+        if body.len().saturating_add(chunk.len()) > limit {
             return Ok(None);
         }
         body.extend_from_slice(&chunk);

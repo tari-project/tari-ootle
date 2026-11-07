@@ -270,6 +270,9 @@ fn extract_single_generic_arg(template_name: &str, segment: &PathSegment) -> Arg
 }
 
 fn tuple_to_arg_type(template_name: &str, tuple: &TypeTuple) -> ArgType {
+    // Encode an explicit `()` (`-> ()`, `Option<()>`) as `ArgType::Unit`, matching omitted return types.
+    // Note: templates published before this change encoded explicit `()` as `ArgType::Tuple(vec![])`, so ABI
+    // consumers inspecting on-chain `TemplateDef`s may encounter both representations.
     if tuple.elems.is_empty() {
         return ArgType::Unit;
     }

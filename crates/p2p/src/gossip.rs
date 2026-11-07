@@ -76,7 +76,14 @@ impl TransactionGossipCodec {
     }
 
     pub async fn decode(&self, message: gossipsub::Message) -> std::io::Result<(usize, TariMessage)> {
-        let (length, message) = self.codec.decode_from(&mut message.data.as_slice()).await?;
+        let mut reader = message.data.as_slice();
+        let (length, message) = self.codec.decode_from(&mut reader).await?;
+        if !reader.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Gossip message has {} trailing bytes after frame", reader.len()),
+            ));
+        }
         let message = TariMessage::try_from(message).map_err(std::io::Error::other)?;
 
         Ok((length, message))

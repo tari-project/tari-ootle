@@ -270,13 +270,6 @@ fn extract_single_generic_arg(template_name: &str, segment: &PathSegment) -> Arg
 }
 
 fn tuple_to_arg_type(template_name: &str, tuple: &TypeTuple) -> ArgType {
-    // Encode an explicit `()` (`-> ()`, `Option<()>`) as `ArgType::Unit`, matching omitted return types.
-    // Note: templates published before this change encoded explicit `()` as `ArgType::Tuple(vec![])`, so ABI
-    // consumers inspecting on-chain `TemplateDef`s may encounter both representations.
-    if tuple.elems.is_empty() {
-        return ArgType::Unit;
-    }
-
     let subtypes = tuple
         .elems
         .iter()
@@ -633,23 +626,6 @@ mod tests {
 
         let funcs = get_functions(&def);
         assert_eq!(funcs[0].output, ArgType::Unit);
-    }
-
-    #[test]
-    fn test_explicit_unit_return_type() {
-        let def = parse_template_def(indoc! {"
-            mod test_template {
-                pub struct TestTemplate {}
-                impl TestTemplate {
-                    pub fn explicit_unit(a: u32) -> () { }
-                    pub fn option_unit() -> Option<()> { }
-                }
-            }
-        "});
-
-        let funcs = get_functions(&def);
-        assert_eq!(funcs[0].output, ArgType::Unit);
-        assert_eq!(funcs[1].output, ArgType::Option(Box::new(ArgType::Unit)));
     }
 
     #[test]

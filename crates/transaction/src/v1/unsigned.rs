@@ -23,6 +23,7 @@ use crate::{
     ResourceAddressRef,
     Signable,
     TransactionSignature,
+    args::InstructionArg,
 };
 
 pub(crate) fn decode_instructions<'b, C>(
@@ -235,6 +236,13 @@ impl UnsignedTransactionV1 {
             })
     }
 
+    /// Resolves literal argument bytes or looks up a blob argument in `self.blobs`. Out-of-range blob indexes are
+    /// skipped here because the engine rejects the transaction with `BlobIndexOutOfBounds`.
+    fn resolve_arg_bytes<'a>(&'a self, arg: &'a InstructionArg) -> Option<&'a [u8]> {
+        arg.as_literal_bytes()
+            .or_else(|| arg.as_blob_index().and_then(|idx| self.blobs.get(idx)).map(|b| b.as_bytes()))
+    }
+
     /// Returns the substates this transaction references that it may declare as inputs (see
     /// [`SubstateId::is_declarable_input`]).
     pub fn to_referenced_substates(&self) -> Result<HashSet<SubstateId>, IndexedValueError> {
@@ -244,7 +252,7 @@ impl UnsignedTransactionV1 {
         for instruction in all_instructions {
             match instruction {
                 Instruction::CallFunction { args, .. } => {
-                    for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
+                    for arg in args.iter().filter_map(|arg| self.resolve_arg_bytes(arg)) {
                         let value = IndexedValue::from_raw(arg)?;
                         substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
                     }
@@ -253,7 +261,7 @@ impl UnsignedTransactionV1 {
                     if let Some(component_address) = call.address() {
                         substates.insert(SubstateId::Component(*component_address));
                     }
-                    for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
+                    for arg in args.iter().filter_map(|arg| self.resolve_arg_bytes(arg)) {
                         let value = IndexedValue::from_raw(arg)?;
                         substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
                     }
@@ -300,7 +308,7 @@ impl UnsignedTransactionV1 {
                         .as_ref()
                         .iter()
                         .flat_map(|m| &m.args)
-                        .filter_map(|a| a.as_literal_bytes())
+                        .filter_map(|arg| self.resolve_arg_bytes(arg))
                     {
                         let value = IndexedValue::from_raw(arg)?;
                         substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
@@ -322,5 +330,66 @@ impl Signable<&RistrettoPublicKeyBytes> for UnsignedTransactionV1 {
 
     fn to_signing_message(&self, seal_signer: &RistrettoPublicKeyBytes) -> crate::TransactionMessage {
         TransactionSignature::create_message_v1(seal_signer, self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ootle_network::Network;
+    use tari_template_lib_types::{ObjectKey, ResourceAddress, TemplateAddress};
+
+    use super::*;
+    use crate::{blobs::Blob, v1::instruction::MigrateFunction};
+
+    #[test]
+    fn to_referenced_substates_includes_blob_arguments_across_call_instructions() {
+        let fn_comp = ComponentAddress::from_array([1u8; ObjectKey::LENGTH]);
+        let method_res = ResourceAddress::new(ObjectKey::from_array([2u8; ObjectKey::LENGTH]));
+        let migrate_comp = ComponentAddress::from_array([3u8; ObjectKey::LENGTH]);
+        let fee_comp = ComponentAddress::from_array([4u8; ObjectKey::LENGTH]);
+        let target_comp = ComponentAddress::from_array([5u8; ObjectKey::LENGTH]);
+
+        let mut tx = UnsignedTransactionV1::new_default(Network::LocalNet, Epoch(10));
+        let fn_blob = tx.blobs.push(Blob::new(tari_bor::encode(&fn_comp).unwrap())).unwrap();
+        let method_blob = tx
+            .blobs
+            .push(Blob::new(tari_bor::encode(&method_res).unwrap()))
+            .unwrap();
+        let migrate_blob = tx
+            .blobs
+            .push(Blob::new(tari_bor::encode(&migrate_comp).unwrap()))
+            .unwrap();
+        let fee_blob = tx.blobs.push(Blob::new(tari_bor::encode(&fee_comp).unwrap())).unwrap();
+
+        tx.fee_instructions.push(Instruction::CallFunction {
+            address: TemplateAddress::default(),
+            function: "fee_fn".try_into().unwrap(),
+            args: vec![InstructionArg::Blob(fee_blob)],
+        });
+        tx.instructions.push(Instruction::CallFunction {
+            address: TemplateAddress::default(),
+            function: "main_fn".try_into().unwrap(),
+            args: vec![InstructionArg::Blob(fn_blob)],
+        });
+        tx.instructions.push(Instruction::CallMethod {
+            call: ComponentReference::Address(target_comp),
+            method: "main_method".try_into().unwrap(),
+            args: vec![InstructionArg::Blob(method_blob)],
+        });
+        tx.instructions.push(Instruction::UpdateComponentTemplate {
+            component: ComponentReference::Address(target_comp),
+            migrate: Some(MigrateFunction {
+                name: "migrate".try_into().unwrap(),
+                args: vec![InstructionArg::Blob(migrate_blob)],
+            }),
+            new_template: TemplateAddress::default(),
+        });
+
+        let referenced = tx.to_referenced_substates().unwrap();
+        assert!(referenced.contains(&SubstateId::Component(fn_comp)));
+        assert!(referenced.contains(&SubstateId::Resource(method_res)));
+        assert!(referenced.contains(&SubstateId::Component(migrate_comp)));
+        assert!(referenced.contains(&SubstateId::Component(fee_comp)));
+        assert!(referenced.contains(&SubstateId::Component(target_comp)));
     }
 }

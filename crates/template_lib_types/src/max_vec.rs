@@ -15,6 +15,26 @@ pub struct MaxVec<const N: usize, T> {
     elems: Box<[T]>,
 }
 
+#[cfg(feature = "borsh")]
+impl<const N: usize, T: borsh::BorshDeserialize> borsh::BorshDeserialize for MaxVec<N, T> {
+    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
+        let len = u32::deserialize_reader(reader)? as usize;
+        if len > N {
+            return Err(borsh::io::Error::new(
+                borsh::io::ErrorKind::InvalidData,
+                format!("sequence length exceeds maximum of {}: got {}", N, len),
+            ));
+        }
+        let mut elems = Vec::with_capacity(len.min(64));
+        for _ in 0..len {
+            elems.push(T::deserialize_reader(reader)?);
+        }
+        Ok(Self {
+            elems: elems.into_boxed_slice(),
+        })
+    }
+}
+
 impl<const N: usize, T> Deref for MaxVec<N, T> {
     type Target = [T];
 
@@ -261,6 +281,27 @@ mod tests {
             };
             let serialized = tari_bor::encode(&bytes).unwrap();
             let err = tari_bor::decode::<MaxVec<5, u8>>(&serialized).unwrap_err();
+            assert!(err.to_string().contains("sequence length exceeds maximum"));
+        }
+    }
+
+    #[cfg(feature = "borsh")]
+    mod borsh_impl {
+        use borsh::{BorshDeserialize, BorshSerialize};
+
+        use super::*;
+
+        #[test]
+        fn it_enforces_max_length_on_borsh_deserialize() {
+            let valid = MaxVec::<5, u8>::new_checked(vec![1, 2, 3, 4, 5]).unwrap();
+            let mut encoded = Vec::new();
+            valid.serialize(&mut encoded).unwrap();
+            let decoded = MaxVec::<5, u8>::try_from_slice(&encoded).unwrap();
+            assert_eq!(decoded, valid);
+
+            let mut oversized = Vec::new();
+            vec![1u8; 6].serialize(&mut oversized).unwrap();
+            let err = MaxVec::<5, u8>::try_from_slice(&oversized).unwrap_err();
             assert!(err.to_string().contains("sequence length exceeds maximum"));
         }
     }

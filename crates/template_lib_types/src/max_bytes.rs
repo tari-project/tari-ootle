@@ -17,6 +17,24 @@ use crate::{
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct MaxBytes<const N: usize>(Box<[u8]>);
 
+#[cfg(feature = "borsh")]
+impl<const N: usize> borsh::BorshDeserialize for MaxBytes<N> {
+    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
+        let len = u32::deserialize_reader(reader)? as usize;
+        if len > N {
+            return Err(borsh::io::Error::new(
+                borsh::io::ErrorKind::InvalidData,
+                format!("byte array length exceeds maximum of {}: got {}", N, len),
+            ));
+        }
+        let mut buf = Vec::with_capacity(len.min(1024));
+        for _ in 0..len {
+            buf.push(u8::deserialize_reader(reader)?);
+        }
+        Ok(Self(buf.into_boxed_slice()))
+    }
+}
+
 impl<const N: usize> Deref for MaxBytes<N> {
     type Target = [u8];
 
@@ -124,7 +142,7 @@ impl<'de, const N: usize> serde::Deserialize<'de> for MaxBytes<N> {
     where D: serde::Deserializer<'de> {
         if deserializer.is_human_readable() {
             let s = String::deserialize(deserializer)?;
-            if s.len() > N * 2 {
+            if s.len() > N.saturating_mul(2) {
                 return Err(serde::de::Error::custom(format!(
                     "byte array length exceeds maximum of {}",
                     N
@@ -159,6 +177,20 @@ impl<C, const N: usize> minicbor::Encode<C> for MaxBytes<N> {
 
 impl<'b, C, const N: usize> minicbor::Decode<'b, C> for MaxBytes<N> {
     fn decode(d: &mut minicbor::Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        if matches!(d.datatype()?, minicbor::data::Type::BytesIndef) {
+            let mut out = Vec::new();
+            for chunk in d.bytes_iter()? {
+                let chunk = chunk?;
+                if out.len().saturating_add(chunk.len()) > N {
+                    return Err(minicbor::decode::Error::message(format!(
+                        "byte array length exceeds maximum of {}",
+                        N
+                    )));
+                }
+                out.extend_from_slice(chunk);
+            }
+            return Ok(MaxBytes::new_checked(out.into_boxed_slice()).expect("length checked above"));
+        }
         let bytes = d.bytes()?;
         if bytes.len() > N {
             return Err(minicbor::decode::Error::message(format!(
@@ -235,6 +267,35 @@ mod tests {
             let bytes = MaxBytes::<5>(vec![1; 6].into_boxed_slice());
             let serialized = tari_bor::encode(&bytes).unwrap();
             let err = tari_bor::decode::<MaxBytes<5>>(&serialized).unwrap_err();
+            assert!(err.to_string().contains("byte array length exceeds maximum"));
+
+            // Indefinite-length CBOR byte strings within and above bound
+            let ok_indef = [0x5f, 0x42, 0x01, 0x02, 0x42, 0x03, 0x04, 0xff];
+            let decoded: MaxBytes<5> = tari_bor::decode(&ok_indef).unwrap();
+            assert_eq!(decoded.as_slice(), &[1, 2, 3, 4]);
+
+            let over_indef = [0x5f, 0x43, 0x01, 0x02, 0x03, 0x43, 0x04, 0x05, 0x06, 0xff];
+            assert!(tari_bor::decode::<MaxBytes<5>>(&over_indef).is_err());
+        }
+    }
+
+    #[cfg(feature = "borsh")]
+    mod borsh_impl {
+        use borsh::{BorshDeserialize, BorshSerialize};
+
+        use super::*;
+
+        #[test]
+        fn it_enforces_max_length_on_borsh_deserialize() {
+            let valid = MaxBytes::<5>::new_checked(vec![1, 2, 3, 4, 5]).unwrap();
+            let mut encoded = Vec::new();
+            valid.serialize(&mut encoded).unwrap();
+            let decoded = MaxBytes::<5>::try_from_slice(&encoded).unwrap();
+            assert_eq!(decoded, valid);
+
+            let mut oversized = Vec::new();
+            vec![1u8; 6].serialize(&mut oversized).unwrap();
+            let err = MaxBytes::<5>::try_from_slice(&oversized).unwrap_err();
             assert!(err.to_string().contains("byte array length exceeds maximum"));
         }
     }

@@ -228,8 +228,6 @@ where TConsensusSpec: ConsensusSpec
                     invalid_foreign_proposals,
                 } = next_block;
 
-                lock_conflicts.save_for_block(tx, next_block.id())?;
-
                 // Invalid leaves the unconfirmed index, so a proposal rejected here is not selected into a
                 // later block. Selection is what makes such a failure repeat: the batch query returns every
                 // proposal still in that index, and a validation failure is deterministic across leaders.
@@ -242,6 +240,7 @@ where TConsensusSpec: ConsensusSpec
                 }
 
                 drop_executions_of_uninserted_proposal(tx, epoch)?;
+                lock_conflicts.save_for_block(tx, next_block.id())?;
 
                 // Add executions for this block
                 if !executed_transactions.is_empty() {
@@ -1365,12 +1364,15 @@ fn subtract_weight_checked(remaining_weight: Option<u64>, by: u64) -> Option<u64
     remaining_weight.and_then(|w| w.checked_sub(by)).filter(|w| *w > 0)
 }
 
-/// Drops the executions of this node's last proposal in `epoch` if that proposal was never inserted.
+/// Drops the executions and lock conflicts of this node's last proposal in `epoch` if that proposal was never
+/// inserted.
 ///
-/// `OnPropose` records a proposal's executions before its block is inserted, so a proposal that is never inserted
-/// leaves executions with no block. Execution reuse rejects them within the epoch because the block is absent, but not
-/// in a later epoch, where epoch GC has pruned committed blocks too. This runs before each proposal and in the
-/// transaction that ends the epoch, which precedes any pruning of the epoch's blocks, so they do not outlive it.
+/// `OnPropose` records a proposal's executions and lock conflicts before its block is inserted, so a proposal that is
+/// never inserted leaves records with no block. Execution reuse rejects those executions within the epoch because the
+/// block is absent, but not in a later epoch, where epoch GC has pruned committed blocks too; and neither `on_commit`
+/// nor `delete_orphaned_block_and_children` reaches the uninserted block's lock conflicts. This runs before each
+/// proposal and in the transaction that ends the epoch, which precedes any pruning of the epoch's blocks, so they do
+/// not outlive it.
 pub(crate) fn drop_executions_of_uninserted_proposal<TTx>(tx: &mut TTx, epoch: Epoch) -> Result<(), StorageError>
 where
     TTx: StateStoreWriteTransaction + Deref,
@@ -1380,6 +1382,7 @@ where
         !Block::record_exists(&**tx, &previous.block_id)?
     {
         tx.block_transaction_executions_remove_any_by_block_id(&previous.block_id)?;
+        tx.lock_conflicts_remove_by_block_id(&previous.block_id)?;
     }
     Ok(())
 }

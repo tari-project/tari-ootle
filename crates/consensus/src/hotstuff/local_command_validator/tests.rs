@@ -2349,7 +2349,7 @@ mod pending_execution_reuse {
     /// inserted, and keeps them when it was.
     #[test]
     fn proposing_drops_only_the_executions_of_an_uninserted_previous_proposal() {
-        use tari_ootle_storage::consensus_models::BookkeepingModel;
+        use tari_ootle_storage::consensus_models::{BookkeepingModel, LockConflict};
 
         use crate::hotstuff::on_propose::drop_executions_of_uninserted_proposal;
 
@@ -2361,6 +2361,12 @@ mod pending_execution_reuse {
         let unsaved_commands = BlockCommands::init([Command::LocalPrepare(prepare)]).unwrap();
         let unsaved = child(&replica.candidate, replica.committee.shard_group(), unsaved_commands);
         let orphan_tx_id = TransactionId::new([0xAC; 32]);
+        let conflict = LockConflict {
+            transaction_id: orphan_tx_id,
+            existing_lock: SubstateLockType::Write,
+            requested_lock: SubstateLockType::Write,
+            is_local_only: false,
+        };
 
         let num_executions = |block: &Block| {
             replica
@@ -2368,6 +2374,12 @@ mod pending_execution_reuse {
                 .with_read_tx(|tx| tx.block_transaction_executions_get_all_for_block(block.id()))
                 .unwrap()
                 .len()
+        };
+        let is_lock_conflicted = || {
+            !replica
+                .store
+                .with_read_tx(|tx| tx.transaction_pool_any(true, |rec| *rec.id() == id))
+                .unwrap()
         };
 
         replica
@@ -2377,23 +2389,28 @@ mod pending_execution_reuse {
                     .clone()
                     .for_block(replica.candidate.as_leaf(), orphan_tx_id)
                     .insert_if_required(tx)?;
+                tx.lock_conflicts_insert_all(replica.candidate.id(), [(&id, &vec![conflict])])?;
                 replica.candidate.as_last_proposed().set(tx)?;
                 drop_executions_of_uninserted_proposal(tx, replica.candidate.epoch())
             })
             .unwrap();
         assert_eq!(num_executions(&replica.candidate), 1);
+        assert!(is_lock_conflicted());
 
         replica
             .store
             .with_write_tx(|tx| {
+                tx.lock_conflicts_remove_by_block_id(replica.candidate.id())?;
                 execution
                     .for_block(unsaved.as_leaf(), orphan_tx_id)
                     .insert_if_required(tx)?;
+                tx.lock_conflicts_insert_all(unsaved.id(), [(&id, &vec![conflict])])?;
                 unsaved.as_last_proposed().set(tx)?;
                 drop_executions_of_uninserted_proposal(tx, unsaved.epoch())
             })
             .unwrap();
         assert_eq!(num_executions(&unsaved), 0);
+        assert!(!is_lock_conflicted());
     }
 }
 

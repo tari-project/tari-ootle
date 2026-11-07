@@ -60,6 +60,13 @@ line can take 0.7. Of the binaries this project ships, only `tari_ootle_walletd`
 curves for ephemeral ECDH alone: each secret scalar serves one handshake, so an observer gets one
 trace per secret, and DTLS signing goes through `ring`. `pgp` and `cx448` also pull it in, reached
 only through the L1 binaries `integration_tests` runs. Remove once `dtls` moves to `p256` 0.14.""" },
+    { id = "RUSTSEC-2026-0186", reason = """
+Unchecked pointer offset in crate memmap2, patched in 0.9.11. Direct workspace dependencies specify
+`memmap2 = "0.9"` in the workspace Cargo.toml and resolve to 0.9.11. The vulnerable 0.6.2 release is
+pulled in transitively by `wasmer` 7.5.0 (`wasmer-compiler`, `wasmer-vm`) via `shared-buffer` 0.1.4.
+`shared-buffer` 0.1.4 is the latest release on crates.io and only invokes `Mmap::map()` to map
+immutable memory regions, never calling `advise_range`, `flush_async_range`, or mutable offset APIs.
+Remove once `wasmer` drops `shared-buffer` or `shared-buffer` updates to `memmap2` >= 0.9.""" },
 ]
 
 [licenses]

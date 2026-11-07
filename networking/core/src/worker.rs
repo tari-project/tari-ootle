@@ -1049,7 +1049,29 @@ where
 
         // Identify is sent again on push and on every new connection, so this replaces the peer's relay addresses
         // and drops the peer if it no longer advertises any.
-        let first_relay_address = relay_addresses.first().cloned();
+        let first_relay_address = relay_addresses.first().cloned().or_else(|| {
+            self.active_connections
+                .get(&peer_id)
+                .and_then(|conns| {
+                    conns
+                        .iter()
+                        .find(|c| c.connection_id == connection_id && c.endpoint.is_dialer())
+                        .or_else(|| conns.iter().find(|c| c.endpoint.is_dialer()))
+                        .map(|c| c.endpoint.get_remote_address().clone())
+                })
+                .or_else(|| {
+                    self.relays
+                        .addresses_of(&peer_id)
+                        .and_then(|addrs| addrs.iter().next().cloned())
+                })
+                .map(|addr| {
+                    if is_p2p_address(&addr) {
+                        addr
+                    } else {
+                        addr.with(Protocol::P2p(peer_id))
+                    }
+                })
+        });
         let is_discovered_relay = self.relays.set_discovered_relay(peer_id, relay_addresses);
         if is_discovered_relay {
             info!(target: LOG_TARGET, "📡 Adding peer {peer_id} as a relay");
@@ -1189,13 +1211,13 @@ where
             .filter(|(peer_id, ..)| only.is_none_or(|o| o == *peer_id))
             .collect::<Vec<_>>();
         let ns = self.get_rendezvous_namespace();
-        for (peer_id, addr, cookie) in servers {
+        for (peer_id, addrs, cookie) in servers {
             // Rendezvous servers are dialed at bootstrap, but if a connection has since dropped (e.g. idle timeout)
             // re-dial it so the discovery request can be delivered.
             if !self.active_connections.contains_key(&peer_id) {
                 debug!(target: LOG_TARGET, "🌐 Not connected to rendezvous server {peer_id}. Dialing");
                 let opts = DialOpts::peer_id(peer_id)
-                    .addresses(vec![addr])
+                    .addresses(addrs)
                     .condition(PeerCondition::DisconnectedAndNotDialing)
                     .extend_addresses_through_behaviour()
                     .build();
@@ -1220,29 +1242,22 @@ fn is_p2p_address(address: &Multiaddr) -> bool {
     address.iter().any(|p| matches!(p, Protocol::P2p(_)))
 }
 
-/// Returns true if every /p2p/ component of the address names `peer_id`.
+/// Returns true if the address contains at least one `/p2p/` component and every `/p2p/` component names `peer_id`.
 fn is_address_of_peer(address: &Multiaddr, peer_id: &PeerId) -> bool {
-    address.iter().all(|p| match p {
-        Protocol::P2p(id) => id == *peer_id,
-        _ => true,
-    })
+    let mut has_p2p = false;
+    for p in address {
+        if let Protocol::P2p(id) = p {
+            if id != *peer_id {
+                return false;
+            }
+            has_p2p = true;
+        }
+    }
+    has_p2p
 }
 
 fn is_through_relay_address(address: &Multiaddr) -> bool {
-    let mut found_p2p_circuit = false;
-    for protocol in address {
-        if !found_p2p_circuit {
-            if let Protocol::P2pCircuit = protocol {
-                found_p2p_circuit = true;
-                continue;
-            }
-            continue;
-        }
-        // Once we found a p2p-circuit protocol, this is followed by /p2p/<peer_id>
-        return matches!(protocol, Protocol::P2p(_));
-    }
-
-    false
+    address.iter().any(|p| matches!(p, Protocol::P2pCircuit))
 }
 
 fn is_dial_error_caused_by_remote(err: &DialError) -> bool {
@@ -1265,11 +1280,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn address_of_peer_rejects_foreign_p2p_id() {
+    fn address_of_peer_rejects_foreign_or_missing_p2p_id() {
         let peer = PeerId::random();
         let other = PeerId::random();
         let base: Multiaddr = "/ip4/1.1.1.1/tcp/1".parse().unwrap();
+        assert!(!is_address_of_peer(&base, &peer));
         assert!(is_address_of_peer(&base.clone().with(Protocol::P2p(peer)), &peer));
         assert!(!is_address_of_peer(&base.with(Protocol::P2p(other)), &peer));
+    }
+
+    #[test]
+    fn through_relay_address_detects_bare_and_suffixed_p2p_circuit() {
+        let relay = PeerId::random();
+        let dest = PeerId::random();
+        let direct: Multiaddr = format!("/ip4/1.1.1.1/tcp/1/p2p/{relay}").parse().unwrap();
+        let bare_circuit: Multiaddr = format!("/ip4/1.1.1.1/tcp/1/p2p/{relay}/p2p-circuit").parse().unwrap();
+        let suffixed_circuit: Multiaddr = format!("/ip4/1.1.1.1/tcp/1/p2p/{relay}/p2p-circuit/p2p/{dest}")
+            .parse()
+            .unwrap();
+
+        assert!(!is_through_relay_address(&direct));
+        assert!(is_through_relay_address(&bare_circuit));
+        assert!(is_through_relay_address(&suffixed_circuit));
     }
 }

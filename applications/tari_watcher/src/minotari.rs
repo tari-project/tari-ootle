@@ -205,7 +205,10 @@ impl MinotariNodes {
                 let resp = client
                     .submit_validator_node_exit(grpc::SubmitValidatorNodeExitRequest {
                         validator_node_public_key: exit.public_key.as_bytes().to_vec(),
-                        validator_node_signature: None,
+                        validator_node_signature: Some(grpc::Signature {
+                            public_nonce: exit.signature.public_nonce().to_vec(),
+                            signature: exit.signature.signature().to_vec(),
+                        }),
                         max_epoch: exit.max_epoch.as_u64(),
                         activation_epoch: exit.activation_epoch.as_u64(),
                         fee_per_gram: 10,
@@ -217,7 +220,7 @@ impl MinotariNodes {
 
                 let resp = resp.into_inner();
                 if !resp.is_success {
-                    bail!("Failed to register VN: {}", resp.failure_message);
+                    bail!("Failed to submit VN exit: {}", resp.failure_message);
                 }
                 info!(
                     "{} transaction sent successfully (tx_id={})",

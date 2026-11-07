@@ -105,7 +105,11 @@ impl ProposalCertificate {
 
 impl ProposalCertificate {
     pub fn justifies_zero_block(&self) -> bool {
-        self.header_hash.as_slice().iter().all(|b| *b == 0)
+        self.height.is_zero() &&
+            self.parent_id.is_zero() &&
+            self.header_hash.as_slice().iter().all(|b| *b == 0) &&
+            self.signatures == Self::genesis_signatures() &&
+            self.decision.is_accept()
     }
 
     pub fn epoch(&self) -> Epoch {
@@ -170,5 +174,56 @@ impl Display for ProposalCertificate {
             self.epoch,
             self.signatures.num_signatures()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shard_group() -> ShardGroup {
+        ShardGroup::new(0, 255)
+    }
+
+    #[test]
+    fn justifies_zero_block_requires_canonical_genesis_shape() {
+        let genesis = ProposalCertificate::genesis(Epoch(3), shard_group());
+        assert!(genesis.justifies_zero_block());
+
+        // Non-zero height with zero header hash is not a genesis certificate.
+        let non_zero_height = ProposalCertificate::new(
+            FixedHash::zero(),
+            BlockId::zero(),
+            NodeHeight(5),
+            Epoch(3),
+            shard_group(),
+            ProposalCertificate::genesis_signatures(),
+            QuorumDecision::Accept,
+        );
+        assert!(!non_zero_height.justifies_zero_block());
+
+        // Non-zero parent_id with zero header hash is not a genesis certificate.
+        let non_zero_parent = ProposalCertificate::new(
+            FixedHash::zero(),
+            BlockId::new(FixedHash::from([1u8; 32])),
+            NodeHeight::zero(),
+            Epoch(3),
+            shard_group(),
+            ProposalCertificate::genesis_signatures(),
+            QuorumDecision::Accept,
+        );
+        assert!(!non_zero_parent.justifies_zero_block());
+
+        // Reject decision is not a genesis certificate.
+        let reject = ProposalCertificate::new(
+            FixedHash::zero(),
+            BlockId::zero(),
+            NodeHeight::zero(),
+            Epoch(3),
+            shard_group(),
+            ProposalCertificate::genesis_signatures(),
+            QuorumDecision::Reject,
+        );
+        assert!(!reject.justifies_zero_block());
     }
 }

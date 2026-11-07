@@ -137,6 +137,8 @@ impl ManifestInstructionGenerator {
 
     #[expect(clippy::too_many_lines)]
     fn translate_intent(&mut self, intent: ManifestIntent) -> Result<Vec<Instruction>, ManifestError> {
+        // Every visited intent is charged, whether or not it emits anything, so a call tree of empty
+        // bodies cannot expand without bound.
         self.generated_instructions = self.generated_instructions.saturating_add(1);
         if self.generated_instructions > MAX_GENERATED_INSTRUCTIONS {
             return Err(ManifestError::TooManyInstructions {

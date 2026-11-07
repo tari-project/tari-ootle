@@ -116,7 +116,9 @@ jobs:
   release:
     name: Attach to draft release
     needs: build
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    # Runs when some platforms fail, so the ones that built still reach the draft. A missing platform shows up in
+    # scripts/release_status.py, and re-running its leg attaches it to the same draft.
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

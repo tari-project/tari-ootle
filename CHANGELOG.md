@@ -3,6 +3,26 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.50.1](https://github.com/tari-project/tari-ootle/compare/v0.50.0...v0.50.1) (2026-11-07)
+
+Ships the macOS arm64 binaries and FFI library that 0.50.0 could not build, plus engine and
+validator-registration fixes.
+
+### ⚠️ Upgrade notes
+
+- **Validators and indexers run 0.50.1 before Esmeralda epoch 12951**, when protocol V1 activates;
+  the 0.50.0 notes apply unchanged. The engine changes in #3309 take effect with no activation
+  epoch, so the fleet upgrades together. (#3309)
+
+### Bug fixes
+
+- **build:** macOS arm64 binaries and FFI libraries build on the `macos-15` runner. (#3443)
+- **engine:** spend-script bound arguments may name substates in the transaction's base scope,
+  read-only and own-component frames cannot re-enter resource hooks or spend scripts, and stealth
+  transfers and vault fee payments check write access first. (#3309)
+- **storage_sqlite:** deactivating a re-registered validator keeps its earlier exit epochs, and
+  registrations in the same epoch are ordered by id. (#3338)
+
 ## [0.50.0](https://github.com/tari-project/tari-ootle/compare/v0.49.2...v0.50.0) (2026-11-06)
 
 Esmeralda moves to protocol V1 without a reset: from epoch 12951, substate hashes commit to each
@@ -72,6 +92,8 @@ activates.
 - **consensus:** LocalAccept is fully validated, SomeAccept abort fields are checked, the catch-up
   leaf is sent, and a validator votes on a proposal first processed from catch-up. (#3227, #3287,
   #3375)
+- **consensus:** a transaction that arrives is removed from every parked local block waiting on
+  it, and unparked blocks are processed parent first. (#3335)
 - **consensus:** proposals no longer leak locks or carry stale foreign proposal state, and a
   LocalAccept stall is fixed. (#3283)
 - **engine:** vault and resource locks are released across auth hooks, `SetAccessRules` checks its
@@ -101,7 +123,12 @@ activates.
 - **ootle_sdk_core:** fee-phase template blobs are kept, and input declarations are merged. (#3391)
 - **state_tree:** a shard group root over only empty shards is the null root. (#3353)
 - **transaction_manifest:** call and argument paths, local call arguments and duplicate bindings
-  are validated. (#3234)
+  are validated, `fee_main()` bindings are isolated from `main()`, `cbor!` and `metadata!` literals
+  respect the decode depth, and duplicate macro keyword arguments are rejected. (#3234, #3352)
+- **state_store_rocksdb:** a locked substate created in an uncommitted ancestor block resolves from
+  the pending block diffs. (#3336)
+- **epoch_manager:** a re-registered validator's earlier deactivations are kept, and an epoch hash
+  correction emits an epoch change. (#3307)
 - **template_metadata:** `Cargo.toml` metadata fields are validated. (#3246)
 - **state sync:** unverified synced state rewinds one version per write transaction, merged-group
   checkpoints match, every shard group checkpoint is verified at the local epoch, and transfer
@@ -110,8 +137,8 @@ activates.
   substates are indexed when a shard snapshot is promoted. (#3313, #3300)
 - **light_client:** the diff check verifies implied downs, the receipt substate and fee withdrawals.
   (#3303)
-- **epoch oracles:** the configured oracle reports done at epoch 0, and the hybrid oracle forwards
-  errors. (#3364)
+- **epoch oracles:** the configured oracle reports done at epoch 0, its real-time ticker stops at
+  `initial_epoch`, and the hybrid oracle forwards errors. (#3364, #3355)
 - **networking:** messaging sinks cycle, connection-close events fire and streams queue correctly,
   and peer sync completes its want list. (#3238, #3236)
 - **rpc_framework:** a response whose flags do not fit a byte no longer panics the reader, a

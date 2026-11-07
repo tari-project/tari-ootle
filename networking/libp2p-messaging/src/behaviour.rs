@@ -83,8 +83,6 @@ where TCodec: Codec + Send + Clone + 'static
     }
 
     pub fn obtain_message_channel(&mut self, peer_id: PeerId) -> MessageSink<TCodec::Message> {
-        let stream_id = self.next_outbound_stream_id;
-
         self.clear_closed_streams();
         match self.get_connections(&peer_id) {
             Some(connections) => {
@@ -101,6 +99,10 @@ where TCodec: Codec + Send + Clone + 'static
                 }
 
                 // Otherwise, create a new stream
+                let stream_id = self.next_outbound_stream_id();
+                let connections = self
+                    .get_connections(&peer_id)
+                    .expect("connections verified to be non-empty");
                 let (sink, stream) = stream::channel(stream_id, peer_id);
                 let ix = (stream_id as usize) % connections.connections.len();
                 let conn_mut = connections
@@ -120,28 +122,27 @@ where TCodec: Codec + Send + Clone + 'static
                     event: stream,
                 });
 
-                // Can't use next_outbound_stream_id() above because of multiple mutable borrows
-                self.next_outbound_stream_id();
-
                 sink
             },
-            None => match self.pending_outbound_dials.get(&peer_id) {
-                Some((sink, _)) => {
-                    tracing::debug!("return a pending outbound dial {}", sink.stream_id());
-                    sink.clone()
-                },
-                None => {
-                    let stream_id = self.next_outbound_stream_id();
-                    let (sink, stream) = stream::channel(stream_id, peer_id);
+            None => {
+                if let Some((sink, _)) = self.pending_outbound_dials.get(&peer_id) {
+                    if !sink.is_closed() {
+                        tracing::debug!("return a pending outbound dial {}", sink.stream_id());
+                        return sink.clone();
+                    }
+                    self.pending_outbound_dials.remove(&peer_id);
+                }
 
-                    let opts = DialOpts::peer_id(peer_id).build();
-                    let connection_id = opts.connection_id();
-                    self.pending_events.push_back(ToSwarm::Dial { opts });
-                    tracing::debug!("create a new outbound dial (conn_id={connection_id}, stream {stream_id})");
+                let stream_id = self.next_outbound_stream_id();
+                let (sink, stream) = stream::channel(stream_id, peer_id);
 
-                    self.pending_outbound_dials.insert(peer_id, (sink.clone(), stream));
-                    sink
-                },
+                let opts = DialOpts::peer_id(peer_id).build();
+                let connection_id = opts.connection_id();
+                self.pending_events.push_back(ToSwarm::Dial { opts });
+                tracing::debug!("create a new outbound dial (conn_id={connection_id}, stream {stream_id})");
+
+                self.pending_outbound_dials.insert(peer_id, (sink.clone(), stream));
+                sink
             },
         }
     }
@@ -232,6 +233,7 @@ where TCodec: Codec + Send + Clone + 'static
         }
 
         if let Some(peer) = peer_id &&
+            !self.connected.get(&peer).is_some_and(|c| !c.is_empty()) &&
             let Some((_sink, stream)) = self.pending_outbound_dials.remove(&peer)
         {
             self.pending_events
@@ -311,7 +313,7 @@ where TCodec: Codec + Send + Clone + 'static
     fn on_connection_handler_event(
         &mut self,
         peer_id: PeerId,
-        _connection_id: ConnectionId,
+        connection_id: ConnectionId,
         event: THandlerOutEvent<Self>,
     ) {
         match &event {
@@ -320,7 +322,7 @@ where TCodec: Codec + Send + Clone + 'static
             Event::StreamClosed { stream_id, .. } => {
                 if let Some(connections) = self.connected.get_mut(&peer_id) {
                     for connection in &mut connections.connections {
-                        if connection.stream_id == Some(*stream_id) {
+                        if connection.id == connection_id && connection.stream_id == Some(*stream_id) {
                             connection.stream_id = None;
                             connection.pending_sink = None;
                             connection.message_sink = None;
@@ -332,7 +334,7 @@ where TCodec: Codec + Send + Clone + 'static
             Event::OutboundStreamOpened { stream_id, .. } => {
                 if let Some(connections) = self.connected.get_mut(&peer_id) {
                     for connection in &mut connections.connections {
-                        if connection.stream_id == Some(*stream_id) {
+                        if connection.id == connection_id && connection.stream_id == Some(*stream_id) {
                             connection.message_sink = connection.pending_sink.take();
                             break;
                         }
@@ -572,5 +574,24 @@ mod tests {
             None
         );
         assert_eq!(visited, vec![2, 3, 0, 1]);
+    }
+
+    #[test]
+    fn closed_pending_outbound_dial_is_replaced_on_next_channel_request() {
+        let mut behaviour = Behaviour::<TestCodec>::new(StreamProtocol::new("/test/1"), Config::default());
+        let peer_id = PeerId::random();
+
+        let sink1 = behaviour.obtain_message_channel(peer_id);
+        let _dial1 = poll_event(&mut behaviour);
+        assert!(!sink1.is_closed());
+
+        // Simulate the pending dial's stream receiver being closed before the dial completes.
+        behaviour.pending_outbound_dials.get_mut(&peer_id).unwrap().1.close();
+        assert!(sink1.is_closed());
+
+        let mut sink2 = behaviour.obtain_message_channel(peer_id);
+        assert!(!sink2.is_closed());
+        assert_ne!(sink2.stream_id(), sink1.stream_id());
+        sink2.send(b"hello".to_vec()).unwrap();
     }
 }

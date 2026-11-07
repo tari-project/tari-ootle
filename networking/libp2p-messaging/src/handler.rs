@@ -147,7 +147,7 @@ where TCodec: Codec + Send + Clone + 'static
                     error: Error::ProtocolNotSupported,
                 });
             },
-            StreamUpgradeError::Apply(_) => {},
+            StreamUpgradeError::Apply(infallible) => match infallible {},
             StreamUpgradeError::Io(e) => {
                 tracing::debug!("outbound stream {} failed to negotiate: {e}", stream.stream_id());
                 // Dropping the stream closes its sink, so the behaviour opens a new stream for later messages.

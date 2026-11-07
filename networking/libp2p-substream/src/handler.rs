@@ -102,7 +102,7 @@ impl Handler {
                     error: Error::ProtocolNotSupported,
                 });
             },
-            StreamUpgradeError::Apply(_infallible) => {},
+            StreamUpgradeError::Apply(infallible) => match infallible {},
             StreamUpgradeError::Io(e) => {
                 tracing::debug!("outbound stream {} failed to negotiate: {e}", stream.stream_id());
                 self.pending_events.push_back(Event::OutboundFailure {

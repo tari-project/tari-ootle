@@ -197,7 +197,9 @@ impl Behaviour {
             return;
         }
 
-        if let Some(peer) = peer_id {
+        if let Some(peer) = peer_id &&
+            !self.connected.get(&peer).is_some_and(|c| !c.is_empty())
+        {
             // If there are pending outgoing stream requests when a dial failure occurs,
             // it is implied that we are not connected to the peer, since pending
             // outgoing stream requests are drained when a connection is established and
@@ -294,14 +296,17 @@ impl NetworkBehaviour for Behaviour {
     fn on_connection_handler_event(
         &mut self,
         _peer_id: PeerId,
-        _connection_id: ConnectionId,
+        connection_id: ConnectionId,
         event: THandlerOutEvent<Self>,
     ) {
         match &event {
             Event::SubstreamOpen { peer_id, stream_id, .. } | Event::OutboundFailure { peer_id, stream_id, .. } => {
                 if let Some(connections) = self.connected.get_mut(peer_id) {
                     for connection in connections {
-                        connection.pending_streams.remove(stream_id);
+                        if connection.id == connection_id {
+                            connection.pending_streams.remove(stream_id);
+                            break;
+                        }
                     }
                 }
             },
@@ -484,5 +489,33 @@ mod tests {
         behaviour.add_protocol(protocol.clone());
         assert_eq!(behaviour.supported_protocols(), [protocol]);
         assert!(drain(&mut behaviour).is_empty());
+    }
+
+    #[test]
+    fn handler_event_only_clears_pending_stream_on_matching_connection() {
+        let peer_id = PeerId::random();
+        let protocol = StreamProtocol::new("/test/1");
+        let conn1 = ConnectionId::new_unchecked(1);
+        let conn2 = ConnectionId::new_unchecked(2);
+        let mut behaviour = Behaviour::new([protocol.clone()], Config::default());
+        let _h1 = connect(&mut behaviour, peer_id, conn1);
+        let _h2 = connect(&mut behaviour, peer_id, conn2);
+
+        let stream1 = behaviour.open_substream(peer_id, protocol.clone());
+        let stream2 = behaviour.open_substream(peer_id, protocol.clone());
+        drain(&mut behaviour);
+
+        // An event on conn2 with stream1's ID must not remove stream1 from conn1's pending streams.
+        behaviour.on_connection_handler_event(peer_id, conn2, Event::OutboundFailure {
+            peer_id,
+            protocol: protocol.clone(),
+            stream_id: stream1,
+            error: Error::ProtocolNotSupported,
+        });
+        drain(&mut behaviour);
+
+        let connections = behaviour.connected.get(&peer_id).unwrap();
+        assert!(connections[0].pending_streams.contains_key(&stream1));
+        assert!(connections[1].pending_streams.contains_key(&stream2));
     }
 }

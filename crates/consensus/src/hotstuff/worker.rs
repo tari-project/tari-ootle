@@ -511,8 +511,16 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             );
 
             tokio::select! {
-                Ok(event) = epoch_manager_events.recv() => {
-                    self.on_epoch_manager_event(event).await?;
+                result = epoch_manager_events.recv() => match result {
+                    Ok(event) => {
+                        self.on_epoch_manager_event(event).await?;
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(target: LOG_TARGET, "Epoch manager event subscriber lagged by {} event(s)", n);
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        debug!(target: LOG_TARGET, "Epoch manager event stream closed");
+                    },
                 },
 
                 forced_height = on_force_beat.wait() => {

@@ -80,12 +80,28 @@ impl ValidatorNode {
                     break;
                 },
 
-                Ok(event) = hotstuff_events.recv() => if let Err(err) = self.handle_hotstuff_event(event).await {
-                    error!(target: LOG_TARGET, "Error handling hotstuff event: {}", err);
+                result = hotstuff_events.recv() => match result {
+                    Ok(event) => if let Err(err) = self.handle_hotstuff_event(event).await {
+                        error!(target: LOG_TARGET, "Error handling hotstuff event: {}", err);
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(target: LOG_TARGET, "Hotstuff event subscriber lagged by {} event(s)", n);
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        debug!(target: LOG_TARGET, "Hotstuff event stream closed");
+                    },
                 },
 
-                Ok(event) = epoch_manager_events.recv() => if let Err(err) = self.handle_epoch_manager_event(event).await {
-                    error!(target: LOG_TARGET, "Error handling epoch manager event: {}", err);
+                result = epoch_manager_events.recv() => match result {
+                    Ok(event) => if let Err(err) = self.handle_epoch_manager_event(event).await {
+                        error!(target: LOG_TARGET, "Error handling epoch manager event: {}", err);
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(target: LOG_TARGET, "Epoch manager event subscriber lagged by {} event(s)", n);
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        debug!(target: LOG_TARGET, "Epoch manager event stream closed");
+                    },
                 },
 
                 result = self.services.on_any_exit() => {

@@ -72,28 +72,60 @@ impl ConsensusGossipService {
         let mut initial_subscription_complete = false;
         loop {
             tokio::select! {
-                Ok(HotstuffEvent::EpochChanged{ registered_shard_group, .. }) = self.consensus_events.recv() => {
-                    if registered_shard_group.is_some() {
-                        self.subscribe().await?;
-                    } else {
-                        self.unsubscribe().await?;
+                result = self.consensus_events.recv() => {
+                    match result {
+                        Ok(HotstuffEvent::EpochChanged { registered_shard_group, .. }) => {
+                            if registered_shard_group.is_some() {
+                                self.subscribe().await?;
+                            } else {
+                                self.unsubscribe().await?;
+                            }
+                        },
+                        Ok(_) => {},
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(target: LOG_TARGET, "Consensus events receiver lagged by {} messages", n);
+                        },
+                        Err(broadcast::error::RecvError::Closed) => {
+                            info!(
+                                target: LOG_TARGET,
+                                "Consensus events channel closed; consensus gossip service stopping"
+                            );
+                            break;
+                        },
                     }
                 },
-                Some(msg) = self.rx_gossip.recv() => {
+                msg = self.rx_gossip.recv() => {
+                    let Some(msg) = msg else {
+                        info!(
+                            target: LOG_TARGET,
+                            "Gossip channel closed; consensus gossip service stopping"
+                        );
+                        break;
+                    };
                     if let Err(err) = self.handle_incoming_gossip_message(msg).await {
                         warn!(target: LOG_TARGET, "Consensus gossip service error: {}", err);
                     }
                 },
-                Ok(EpochManagerEvent::EpochChanged{ registered_shard_group, .. }) = self.epoch_manager_events.recv() => {
-                    if !initial_subscription_complete && registered_shard_group.is_some() {
-                        self.subscribe().await?;
-                        initial_subscription_complete = true;
+                result = self.epoch_manager_events.recv() => {
+                    match result {
+                        Ok(EpochManagerEvent::EpochChanged { registered_shard_group, .. }) => {
+                            if !initial_subscription_complete && registered_shard_group.is_some() {
+                                self.subscribe().await?;
+                                initial_subscription_complete = true;
+                            }
+                        },
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(target: LOG_TARGET, "Epoch manager events receiver lagged by {} messages", n);
+                        },
+                        Err(broadcast::error::RecvError::Closed) => {
+                            info!(
+                                target: LOG_TARGET,
+                                "Epoch manager events channel closed; consensus gossip service stopping"
+                            );
+                            break;
+                        },
                     }
                 },
-                else => {
-                    info!(target: LOG_TARGET, "Consensus gossip service shutting down");
-                    break;
-                }
             }
         }
 

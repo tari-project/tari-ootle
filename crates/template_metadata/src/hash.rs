@@ -128,6 +128,15 @@ impl borsh::BorshSerialize for MetadataHash {
     }
 }
 
+#[cfg(feature = "borsh")]
+impl borsh::BorshDeserialize for MetadataHash {
+    fn deserialize_reader<R: io::Read>(reader: &mut R) -> io::Result<Self> {
+        let mh =
+            Multihash::<MAX_DIGEST_SIZE>::read(reader).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        Ok(Self(mh))
+    }
+}
+
 impl<C> minicbor::Encode<C> for MetadataHash {
     fn encode<W: minicbor::encode::Write>(
         &self,
@@ -310,6 +319,15 @@ mod tests {
         let hash = hash_data(b"test");
         let bytes = hash.to_bytes();
         let parsed = MetadataHash::from_bytes(&bytes).unwrap();
+        assert_eq!(hash, parsed);
+    }
+
+    #[test]
+    #[cfg(feature = "borsh")]
+    fn borsh_roundtrip() {
+        let hash = hash_data(b"test");
+        let bytes = borsh::to_vec(&hash).unwrap();
+        let parsed: MetadataHash = borsh::from_slice(&bytes).unwrap();
         assert_eq!(hash, parsed);
     }
 }

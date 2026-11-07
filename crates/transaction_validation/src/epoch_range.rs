@@ -31,17 +31,24 @@ impl Validator<Transaction> for EpochRangeValidator {
     type Error = TransactionValidationError;
 
     fn validate(&self, &current_epoch: &Epoch, transaction: &Transaction) -> Result<(), TransactionValidationError> {
-        if let Some(min_epoch) = transaction.min_epoch() &&
-            current_epoch < min_epoch
-        {
-            warn!(target: LOG_TARGET, "EpochRangeValidator - FAIL: Current epoch {current_epoch} less than minimum epoch {min_epoch}.");
-            return Err(TransactionValidationError::CurrentEpochLessThanMinimum {
-                current_epoch,
-                min_epoch,
-            });
+        let max_epoch = transaction.max_epoch();
+        if let Some(min_epoch) = transaction.min_epoch() {
+            if min_epoch > max_epoch {
+                warn!(
+                    target: LOG_TARGET,
+                    "EpochRangeValidator - FAIL: Minimum epoch {min_epoch} is greater than maximum epoch {max_epoch}."
+                );
+                return Err(TransactionValidationError::MinEpochGreaterThanMaxEpoch { min_epoch, max_epoch });
+            }
+            if current_epoch < min_epoch {
+                warn!(target: LOG_TARGET, "EpochRangeValidator - FAIL: Current epoch {current_epoch} less than minimum epoch {min_epoch}.");
+                return Err(TransactionValidationError::CurrentEpochLessThanMinimum {
+                    current_epoch,
+                    min_epoch,
+                });
+            }
         }
 
-        let max_epoch = transaction.max_epoch();
         if current_epoch > max_epoch {
             warn!(target: LOG_TARGET, "EpochRangeValidator - FAIL: Current epoch {current_epoch} greater than maximum epoch {max_epoch}.");
             return Err(TransactionValidationError::CurrentEpochGreaterThanMaximum {
@@ -200,5 +207,16 @@ mod tests {
         TransactionValidityWindowValidator::new(u64::MAX)
             .validate(&Epoch(1), &tx)
             .unwrap();
+    }
+
+    #[test]
+    fn it_rejects_an_inverted_epoch_window_as_sender_fault() {
+        let tx = transaction(Some(Epoch(20)), Epoch(10));
+        let err = validate(Epoch(5), &tx).unwrap_err();
+        assert!(matches!(err, TransactionValidationError::MinEpochGreaterThanMaxEpoch {
+            min_epoch: Epoch(20),
+            max_epoch: Epoch(10),
+        }));
+        assert!(err.is_sender_fault());
     }
 }

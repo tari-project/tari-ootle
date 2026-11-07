@@ -55,6 +55,10 @@ const RESOURCE_TAG: u64 = BinaryTag::AllocatedResourceAddress.as_u64();
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 pub struct ResourceAddressAllocation(BorTag<AddressAllocationId, RESOURCE_TAG>);
 
+impl Tagged for ResourceAddressAllocation {
+    const TAG: u64 = RESOURCE_TAG;
+}
+
 impl ResourceAddressAllocation {
     /// Creates a new `ResourceAddressAllocation` with the given ID.
     /// For internal use.
@@ -76,5 +80,16 @@ impl ResourceAddressAllocation {
 
         resp.decode()
             .expect("Failed to decode ResourceAddressAllocation response")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn component_and_resource_address_allocations_implement_tagged() {
+        assert_eq!(ComponentAddressAllocation::TAG, COMPONENT_ALLOC_TAG);
+        assert_eq!(ResourceAddressAllocation::TAG, RESOURCE_TAG);
     }
 }

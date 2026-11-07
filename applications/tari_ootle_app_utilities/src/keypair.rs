@@ -58,7 +58,7 @@ use tari_ootle_p2p::PeerAddress;
 const REQUIRED_IDENTITY_PERMS: u32 = 0o100600;
 const LOG_TARGET: &str = "tari::application::identity";
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 #[serde(transparent)]
 pub struct RistrettoKeypair(Arc<KeyPairInner>);
 
@@ -84,6 +84,20 @@ impl RistrettoKeypair {
     #[cfg(feature = "p2p")]
     pub fn to_peer_address(&self) -> PeerAddress {
         self.public_key().clone().into()
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for RistrettoKeypair {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where D: serde::Deserializer<'de> {
+        let inner = KeyPairInner::deserialize(deserializer)?;
+        let derived = RistrettoPublicKey::from_secret_key(&inner.secret_key);
+        if derived != inner.public_key {
+            return Err(serde::de::Error::custom(
+                "public_key does not match secret_key in RistrettoKeypair",
+            ));
+        }
+        Ok(Self(Arc::new(inner)))
     }
 }
 
@@ -357,4 +371,25 @@ pub enum IdentityError {
     JsonError(#[from] serde_json5::Error),
     #[error(transparent)]
     Io(#[from] io::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserializing_keypair_verifies_public_key_matches_secret_key() {
+        let kp = RistrettoKeypair::random(&mut rand::rng());
+        let json = serde_json5::to_string(&kp).unwrap();
+        let loaded: RistrettoKeypair = serde_json5::from_str(&json).unwrap();
+        assert_eq!(loaded.public_key(), kp.public_key());
+
+        let other = RistrettoKeypair::random(&mut rand::rng());
+        let mismatched = KeyPairInner {
+            secret_key: kp.secret_key().clone(),
+            public_key: other.public_key().clone(),
+        };
+        let bad_json = serde_json5::to_string(&mismatched).unwrap();
+        assert!(serde_json5::from_str::<RistrettoKeypair>(&bad_json).is_err());
+    }
 }

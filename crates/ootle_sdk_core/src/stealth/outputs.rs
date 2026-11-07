@@ -218,6 +218,13 @@ pub(crate) fn build_stealth_outputs_statement_from_entropy(
     let mut witnesses = Vec::with_capacity(intent.outputs.len());
     let mut agg_output_mask = RistrettoSecretKey::default();
     for (spec, per_entropy) in intent.outputs.iter().zip(entropy.per_output.iter()) {
+        if spec.resource_address != intent.resource_address {
+            return Err(OotleSdkError::Validation(format!(
+                "output resource_address ('{}') does not match intent.resource_address ('{}')",
+                spec.resource_address.as_str(),
+                intent.resource_address.as_str()
+            )));
+        }
         let witness = build_stealth_output_witness(network, spec, per_entropy)?;
         agg_output_mask = agg_output_mask + &witness.witness.mask;
         witnesses.push((witness, per_entropy));
@@ -607,6 +614,19 @@ mod tests {
         let err =
             build_stealth_outputs_statement_with_seed(Network::LocalNet, &it, &BuildSeed::from_array([0u8; 32]), None)
                 .unwrap_err();
+        assert_eq!(err.code(), "VALIDATION");
+    }
+
+    #[test]
+    fn rejects_output_resource_address_mismatch() {
+        use tari_template_lib_types::ObjectKey;
+
+        let mut spec = output_spec(1000, false);
+        spec.resource_address =
+            ResourceAddressStr::parse(ResourceAddress::new(ObjectKey::from_array([0x99; 32])).to_string()).unwrap();
+        let it = intent(vec![spec], 0);
+        let e = entropy_for(&[(10, false)]);
+        let err = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e, None).unwrap_err();
         assert_eq!(err.code(), "VALIDATION");
     }
 }

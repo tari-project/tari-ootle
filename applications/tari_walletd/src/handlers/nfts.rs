@@ -178,7 +178,7 @@ async fn try_find_target_account(
     let sdk = context.wallet_sdk();
     let existing_account = sdk
         .substate_api()
-        .fetch_substate_from_network(&SubstateId::Component(target_account_address), None)
+        .fetch_substate_for_signing(&SubstateId::Component(target_account_address), None)
         .await
         .optional()?;
 
@@ -212,7 +212,7 @@ async fn try_find_target_account(
                 // TODO(perf): slow with lots of vaults
                 let vault = sdk
                     .substate_api()
-                    .fetch_substate_from_network(&SubstateId::Vault(*vault_id), None)
+                    .fetch_substate_for_signing(&SubstateId::Vault(*vault_id), None)
                     .await
                     .optional()?;
 

@@ -321,3 +321,75 @@ async fn a_substate_older_than_the_version_asked_for_is_refused() {
         "{err}"
     );
 }
+
+#[tokio::test]
+async fn sign_act_fetches_enforce_proof_verification_even_under_indexer_trust_mode() {
+    let (_sets, network, test) = walked_wallet(IndexerTrust::Trust).await;
+    let (id, value) = substate(1);
+    // Indexer serves the substate without a proof
+    network.serve_substate(id.clone(), VERSION, value.clone(), None);
+
+    // In IndexerTrust::Trust mode, passive fetch succeeds
+    let passive = test
+        .sdk()
+        .substate_api()
+        .fetch_substate_from_network(&id, None)
+        .await
+        .unwrap();
+    assert_eq!(tombstone_value(&passive.substate), tombstone_value(&value));
+
+    // BUT fetch_substate_for_signing fails closed because it requires proof verification
+    let err = match test.sdk().substate_api().fetch_substate_for_signing(&id, None).await {
+        Ok(_) => panic!("expected fetch_substate_for_signing to fail closed on unproven substate"),
+        Err(err) => err,
+    };
+    assert!(
+        matches!(err, SubstateApiError::SubstateUnproven { .. }),
+        "expected SubstateUnproven, got: {err}"
+    );
+
+    // AND get_substates_for_signing also fails closed
+    let err2 = match test
+        .sdk()
+        .substate_api()
+        .get_substates_for_signing(std::slice::from_ref(&id))
+        .await
+    {
+        Ok(_) => panic!("expected get_substates_for_signing to fail closed on unproven substate"),
+        Err(err) => err,
+    };
+    assert!(
+        matches!(err2, SubstateApiError::SubstateUnproven { .. }),
+        "expected SubstateUnproven, got: {err2}"
+    );
+}
+
+#[tokio::test]
+async fn sign_act_fetches_succeed_when_substate_is_properly_proven() {
+    let (sets, network, test) = walked_wallet(IndexerTrust::Trust).await;
+    let (id, value) = substate(1);
+    let proof = substate_proof(&sets[4], &id, VERSION, &value);
+    network.serve_substate(id.clone(), VERSION, value.clone(), Some(proof));
+
+    // fetch_substate_for_signing succeeds when proven
+    let verified = test
+        .sdk()
+        .substate_api()
+        .fetch_substate_for_signing(&id, None)
+        .await
+        .unwrap();
+    assert_eq!(verified.id.version(), VERSION);
+    assert_eq!(tombstone_value(&verified.substate), tombstone_value(&value));
+
+    // get_substates_for_signing succeeds when proven
+    let verified_map = test
+        .sdk()
+        .substate_api()
+        .get_substates_for_signing(std::slice::from_ref(&id))
+        .await
+        .unwrap();
+    assert_eq!(
+        tombstone_value(verified_map[&id].substate_value()),
+        tombstone_value(&value)
+    );
+}

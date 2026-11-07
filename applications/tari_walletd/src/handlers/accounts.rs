@@ -465,7 +465,8 @@ pub async fn handle_get_balances(
     let stealth_outputs = stealth_outputs
         .into_iter()
         .filter(|o| !vaulted_resources.contains(&o.resource_address))
-        // NOTE: indexemap used to ensure a consistent order (HashMap causes UI to randomly switch positions for multiple stealth resources)
+        // NOTE: indexemap used to ensure a consistent order (HashMap causes UI to randomly switch positions for
+        // multiple stealth resources)
         .fold(IndexMap::new(), |mut acc, o| {
             acc.entry(o.resource_address)
                 .and_modify(|v| *v += Amount::from(o.value))
@@ -1234,7 +1235,7 @@ pub async fn handle_transfer(
         derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.destination_public_key);
     let existing_dest_account = sdk
         .substate_api()
-        .fetch_substate_from_network(&SubstateId::Component(destination_account_address), None)
+        .fetch_substate_for_signing(&SubstateId::Component(destination_account_address), None)
         .await
         .optional()?;
 
@@ -1272,7 +1273,7 @@ pub async fn handle_transfer(
                     // TODO(perf): slow with lots of vaults
                     let vault = sdk
                         .substate_api()
-                        .fetch_substate_from_network(&SubstateId::Vault(*vault_id), None)
+                        .fetch_substate_for_signing(&SubstateId::Vault(*vault_id), None)
                         .await
                         .optional()?;
 
@@ -1937,7 +1938,7 @@ impl DeclaredInputPricing {
         let started = tokio::time::Instant::now();
         let mut interval = Duration::from_millis(250);
         let substates = loop {
-            match sdk.substate_api().get_substates_from_network(&ids).await {
+            match sdk.substate_api().get_substates_for_signing(&ids).await {
                 Err(SubstateApiError::SubstateUnproven { substate_id })
                     if started.elapsed() < Self::UNPROVEN_READ_RETRY_WINDOW =>
                 {

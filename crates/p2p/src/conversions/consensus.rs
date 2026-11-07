@@ -312,6 +312,22 @@ impl TryFrom<proto::consensus::ForeignProposalNotification> for ForeignProposalN
     type Error = anyhow::Error;
 
     fn try_from(value: proto::consensus::ForeignProposalNotification) -> Result<Self, Self::Error> {
+        // Check the cap before mapping over value.shard_groups so an oversized notification does not allocate first.
+        let max_shard_groups = Shard::max().as_u32() as usize;
+        if value.shard_groups.len() > max_shard_groups {
+            return Err(anyhow!(
+                "ForeignProposalNotification carries {} shard groups, exceeding maximum {max_shard_groups}",
+                value.shard_groups.len(),
+            ));
+        }
+        let shard_groups = value
+            .shard_groups
+            .into_iter()
+            .map(|sg| {
+                ShardGroup::decode_from_u32(sg)
+                    .ok_or_else(|| anyhow!("Invalid shard group in foreign proposal notification: {sg}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
             block_id: BlockId::try_from(value.block_id)?,
             epoch: Epoch(value.epoch),
@@ -321,14 +337,7 @@ impl TryFrom<proto::consensus::ForeignProposalNotification> for ForeignProposalN
                     value.shard_group
                 )
             })?,
-            shard_groups: value
-                .shard_groups
-                .into_iter()
-                .map(|sg| {
-                    ShardGroup::decode_from_u32(sg)
-                        .ok_or_else(|| anyhow!("Invalid shard group in foreign proposal notification: {sg}"))
-                })
-                .collect::<Result<_, _>>()?,
+            shard_groups,
         })
     }
 }
@@ -711,15 +720,24 @@ impl TryFrom<proto::consensus::TcSignatures> for TcSignatures {
             .scheme
             .ok_or_else(|| anyhow!("TC signature scheme not provided"))?
         {
-            proto::consensus::tc_signatures::Scheme::Schnorr(schnorr) => Ok(Self::Schnorr {
-                signers: SignerBitmap::from_bytes(schnorr.signers),
-                timeouts: schnorr
-                    .timeouts
-                    .into_iter()
-                    .map(TryInto::try_into)
-                    .collect::<Result<_, _>>()
-                    .context("invalid encoding of timeouts")?,
-            }),
+            proto::consensus::tc_signatures::Scheme::Schnorr(schnorr) => {
+                if schnorr.timeouts.len() > tari_sidechain::MAX_QC_SIGNATURES {
+                    return Err(anyhow!(
+                        "TcSignatures carries {} timeouts, exceeding maximum {}",
+                        schnorr.timeouts.len(),
+                        tari_sidechain::MAX_QC_SIGNATURES
+                    ));
+                }
+                Ok(Self::Schnorr {
+                    signers: SignerBitmap::from_bytes(schnorr.signers),
+                    timeouts: schnorr
+                        .timeouts
+                        .into_iter()
+                        .map(TryInto::try_into)
+                        .collect::<Result<_, _>>()
+                        .context("invalid encoding of timeouts")?,
+                })
+            },
         }
     }
 }
@@ -1133,20 +1151,29 @@ impl TryFrom<proto::consensus::QcSignatures> for QcSignatures {
             .scheme
             .ok_or_else(|| anyhow!("QC signature scheme not provided"))?
         {
-            proto::consensus::qc_signatures::Scheme::Schnorr(schnorr) => Ok(Self::Schnorr {
-                signers: SignerBitmap::from_bytes(schnorr.signers),
-                signatures: schnorr
-                    .signatures
-                    .into_iter()
-                    .map(|signature| {
-                        let public_nonce = CompressedPublicKey::from_canonical_bytes(&signature.public_nonce)
-                            .map_err(|e| anyhow!("QC signature public nonce: {e}"))?;
-                        let signature = RistrettoSecretKey::from_canonical_bytes(&signature.signature)
-                            .map_err(|e| anyhow!("QC signature scalar: {e}"))?;
-                        Ok(ValidatorBlockSignature::new(public_nonce, signature))
-                    })
-                    .collect::<Result<_, anyhow::Error>>()?,
-            }),
+            proto::consensus::qc_signatures::Scheme::Schnorr(schnorr) => {
+                if schnorr.signatures.len() > tari_sidechain::MAX_QC_SIGNATURES {
+                    return Err(anyhow!(
+                        "QcSignatures carries {} signatures, exceeding maximum {}",
+                        schnorr.signatures.len(),
+                        tari_sidechain::MAX_QC_SIGNATURES
+                    ));
+                }
+                Ok(Self::Schnorr {
+                    signers: SignerBitmap::from_bytes(schnorr.signers),
+                    signatures: schnorr
+                        .signatures
+                        .into_iter()
+                        .map(|signature| {
+                            let public_nonce = CompressedPublicKey::from_canonical_bytes(&signature.public_nonce)
+                                .map_err(|e| anyhow!("QC signature public nonce: {e}"))?;
+                            let signature = RistrettoSecretKey::from_canonical_bytes(&signature.signature)
+                                .map_err(|e| anyhow!("QC signature scalar: {e}"))?;
+                            Ok(ValidatorBlockSignature::new(public_nonce, signature))
+                        })
+                        .collect::<Result<_, anyhow::Error>>()?,
+                })
+            },
         }
     }
 }
@@ -1447,6 +1474,41 @@ mod tests {
 
         assert_eq!(decoded.signatures(), certificate.signatures());
         assert_eq!(decoded.calculate_id(), certificate.calculate_id());
+    }
+
+    #[test]
+    fn qc_and_tc_signatures_beyond_the_maximum_do_not_decode() {
+        let qc = proto::consensus::QcSignatures {
+            scheme: Some(proto::consensus::qc_signatures::Scheme::Schnorr(
+                proto::consensus::SchnorrQcSignatures {
+                    signers: vec![],
+                    signatures: vec![proto::common::Signature::default(); tari_sidechain::MAX_QC_SIGNATURES + 1],
+                },
+            )),
+        };
+        assert!(QcSignatures::try_from(qc).is_err());
+
+        let tc = proto::consensus::TcSignatures {
+            scheme: Some(proto::consensus::tc_signatures::Scheme::Schnorr(
+                proto::consensus::SchnorrTcSignatures {
+                    signers: vec![],
+                    timeouts: vec![proto::consensus::SignedTimeout::default(); tari_sidechain::MAX_QC_SIGNATURES + 1],
+                },
+            )),
+        };
+        assert!(TcSignatures::try_from(tc).is_err());
+    }
+
+    #[test]
+    fn foreign_proposal_notification_beyond_max_shard_groups_does_not_decode() {
+        let sg = ShardGroup::new(1u32, 1u32).encode_as_u32();
+        let notification = proto::consensus::ForeignProposalNotification {
+            block_id: vec![0u8; 32],
+            epoch: 1,
+            shard_group: sg,
+            shard_groups: vec![sg; Shard::max().as_u32() as usize + 1],
+        };
+        assert!(ForeignProposalNotificationMessage::try_from(notification).is_err());
     }
 
     mod block_commands {

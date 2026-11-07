@@ -167,13 +167,26 @@ impl<S: TreeStore<()>, M: DbKeyMapper<TreeHash>> StateTree<'_, S, M> {
         next_version: Version,
         changes: I,
     ) -> Result<(TreeHash, TreeUpdateBatch<()>), StateTreeError> {
+        if let Some(current_version) = current_version &&
+            next_version <= current_version
+        {
+            return Err(StateTreeError::NonMonotonicVersion {
+                current_version,
+                next_version,
+            });
+        }
+
+        let mut leaves_by_key = BTreeMap::new();
+        for hash in changes {
+            let key = M::map_to_leaf_key(&hash);
+            if leaves_by_key.insert(key, Some((hash, ()))).is_some() {
+                return Err(StateTreeError::DuplicateLeafKey { key: key.bytes });
+            }
+        }
+
         let jmt = JellyfishMerkleTree::<_, ()>::new(self.store, JmtHashScheme::V1);
 
-        let changes = changes
-            .into_iter()
-            .map(|hash| (M::map_to_leaf_key(&hash), Some((hash, ()))));
-
-        let (root, update) = jmt.batch_put_value_set(changes, current_version, next_version)?;
+        let (root, update) = jmt.batch_put_value_set(leaves_by_key, current_version, next_version)?;
         Ok((root, update))
     }
 }
@@ -189,6 +202,12 @@ fn calculate_substate_changes<
     next_version: Version,
     changes: I,
 ) -> Result<(TreeHash, TreeUpdateBatch<StateTreePayload>), StateTreeError> {
+    struct SubstateTransitions {
+        leaf_key: LeafKey,
+        up: Option<TreeHash>,
+        down: bool,
+    }
+
     // JMT nodes are keyed by (version, nibble_path). Writing a version that is not strictly ahead of
     // the base version overwrites live nodes with keys that this same write records as stale, so the
     // stale-node GC later deletes nodes the current tree still points at. Callers that stage changes
@@ -203,14 +222,41 @@ fn calculate_substate_changes<
         });
     }
 
+    // A version can both create a versioned id and destroy it again, which collapses to no leaf in the
+    // tree regardless of the order the caller lists the two transitions in, but it holds at most one
+    // transition of each kind per substate address.
+    let mut by_address = BTreeMap::new();
+    for ch in changes {
+        let id = ch.id();
+        let address = id.to_substate_address();
+        let entry = by_address.entry(address).or_insert_with(|| SubstateTransitions {
+            leaf_key: M::map_to_leaf_key(id),
+            up: None,
+            down: false,
+        });
+        match ch {
+            SubstateTreeChange::Up { value_hash, .. } => {
+                if entry.up.replace(TreeHash::new(value_hash.into_array())).is_some() {
+                    return Err(StateTreeError::DuplicateTransition { address });
+                }
+            },
+            SubstateTreeChange::Down { .. } => {
+                if std::mem::replace(&mut entry.down, true) {
+                    return Err(StateTreeError::DuplicateTransition { address });
+                }
+            },
+        }
+    }
+
     let jmt = JellyfishMerkleTree::new(store, JmtHashScheme::V1);
 
-    let changes = changes.into_iter().map(|ch| match ch {
-        SubstateTreeChange::Up { id, value_hash } => (
-            M::map_to_leaf_key(&id),
-            Some((TreeHash::new(value_hash.into_array()), id.to_substate_address())),
-        ),
-        SubstateTreeChange::Down { id } => (M::map_to_leaf_key(&id), None),
+    let changes = by_address.into_iter().map(|(address, transitions)| {
+        let value = if transitions.down {
+            None
+        } else {
+            transitions.up.map(|value_hash| (value_hash, address))
+        };
+        (transitions.leaf_key, value)
     });
 
     let (root_hash, update_result) = jmt.batch_put_value_set(changes, current_version, next_version)?;

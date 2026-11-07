@@ -725,9 +725,14 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin + Send
             self.protocol_name(),
             start.elapsed()
         );
-        let mut reader = RpcResponseReader::new(&mut self.framed, self.config, 0);
+        let may_be_session_rejection = !self.has_read_a_response;
+        let mut reader = RpcResponseReader::new(&mut self.framed, self.config, 0)
+            .watching_for_session_rejection(may_be_session_rejection);
         let resp = match reader.read_ack().await {
-            Ok(resp) => resp,
+            Ok(resp) => {
+                self.has_read_a_response = true;
+                resp
+            },
             Err(RpcError::ReplyTimeout) => {
                 debug!(
                     target: LOG_TARGET,
@@ -739,6 +744,14 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin + Send
                 metrics::client_timeouts(&self.peer_id, &self.protocol_id).inc();
                 let _result = reply.send(Err(RpcStatus::timed_out("Response timed out")));
                 return Ok(());
+            },
+            Err(RpcError::HandshakeError(RpcHandshakeError::Rejected(reason))) => {
+                debug!(
+                    target: LOG_TARGET,
+                    "(peer={}) Server refused the session on ping: {}", self.peer_id, reason
+                );
+                let _result = reply.send(Err(RpcStatus::handshake_denied(reason.to_string())));
+                return Err(RpcError::HandshakeError(RpcHandshakeError::Rejected(reason)));
             },
             Err(err) => return Err(err),
         };
@@ -1220,9 +1233,7 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin
         if resp_id != self.request_id {
             return Err(RpcError::ResponseIdDidNotMatchRequest {
                 expected: self.request_id,
-                actual: u16::try_from(resp.request_id).map_err(|_| {
-                    RpcStatus::protocol_error(format!("invalid request_id: must be less than {}", u16::MAX))
-                })?,
+                actual: resp_id,
             });
         }
 
@@ -1259,10 +1270,10 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin
 
         match next_msg_fut.await {
             Ok(Some(Ok(frame))) => {
-                let resp = proto::RpcResponse::decode(frame.as_ref())?;
                 // Request ids start at one, so a frame without one is not a response at all. On the
                 // first frame of a session that means the server refused it: the handshake is
                 // one-way, so a refusal arrives where the first response was expected.
+                let resp = proto::RpcResponse::decode(frame.as_ref())?;
                 if self.may_be_session_rejection &&
                     resp.request_id == 0 &&
                     let Some(reason) = crate::handshake::decode_session_rejection(&frame)
@@ -2264,6 +2275,40 @@ mod keepalive_tests {
             latency >= Duration::from_millis(150),
             "ping was answered by the stale keepalive ({:.0?})",
             latency
+        );
+    }
+
+    #[tokio::test]
+    async fn a_session_refusal_in_place_of_the_first_pong_is_reported() {
+        let (server, client) = tokio::io::duplex(RPC_MAX_FRAME_SIZE);
+        let server = tokio::spawn(async move {
+            let mut framed = framing::canonical(server.compat(), RPC_MAX_FRAME_SIZE);
+            let _handshake = framed.next().await.unwrap().unwrap();
+            let _ping = framed.next().await.unwrap().unwrap();
+            let mut handshake = Handshake::new(&mut framed);
+            handshake
+                .reject_with_reason(crate::error::HandshakeRejectReason::NoSessionsAvailable)
+                .await
+                .unwrap();
+        });
+
+        let mut rpc_client = RpcClient::connect(
+            RpcClientConfig::default(),
+            PeerId::random(),
+            framing::canonical(client.compat(), RPC_MAX_FRAME_SIZE),
+            StreamProtocol::new(PROTOCOL),
+        )
+        .await
+        .unwrap();
+
+        let err = rpc_client.ping().await.unwrap_err();
+        server.await.unwrap();
+        assert!(
+            matches!(
+                err,
+                RpcError::RequestFailed(ref status) if status.as_status_code() == RpcStatusCode::HandshakeDenied
+            ),
+            "expected HandshakeDenied on ping, got {err:?}"
         );
     }
 }

@@ -106,6 +106,21 @@ impl<C, const N: usize> minicbor::Encode<C> for MaxString<N> {
 
 impl<'b, C, const N: usize> minicbor::Decode<'b, C> for MaxString<N> {
     fn decode(d: &mut minicbor::Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        if matches!(d.datatype()?, minicbor::data::Type::StringIndef) {
+            let mut out = String::new();
+            for chunk in d.str_iter()? {
+                let chunk = chunk?;
+                let new_len = out.len().saturating_add(chunk.len());
+                if new_len > N {
+                    return Err(minicbor::decode::Error::message(format!(
+                        "string length exceeds maximum of {}: got {}",
+                        N, new_len
+                    )));
+                }
+                out.push_str(chunk);
+            }
+            return Ok(MaxString::new_checked(out.into_boxed_str()).expect("length checked above"));
+        }
         let s = d.str()?;
         if s.len() > N {
             return Err(minicbor::decode::Error::message(format!(
@@ -230,6 +245,14 @@ mod tests {
             let serialized = tari_bor::encode(&bytes).unwrap();
             let err = tari_bor::decode::<MaxString<5>>(&serialized).unwrap_err();
             assert!(err.to_string().contains("string length exceeds maximum"));
+
+            // Indefinite-length CBOR text strings within and above bound
+            let ok_indef = [0x7f, 0x62, b'a', b'b', 0x62, b'c', b'd', 0xff];
+            let decoded: MaxString<5> = tari_bor::decode(&ok_indef).unwrap();
+            assert_eq!(&decoded[..], "abcd");
+
+            let over_indef = [0x7f, 0x63, b'a', b'b', b'c', 0x63, b'd', b'e', b'f', 0xff];
+            assert!(tari_bor::decode::<MaxString<5>>(&over_indef).is_err());
         }
     }
 

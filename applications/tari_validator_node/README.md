@@ -65,6 +65,31 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 cargo install tari_validator_node
 ```
 
+### Identity recovery and fee claims
+
+Configure `validator_node.fee_claim_public_key` with the public key of an account in your wallet before starting
+this validator. Startup refuses an unset or zero key. The wallet holds the claim secret and claims fees using its
+existing account workflow; the validator's recovery phrase recovers only its node identity.
+
+`generate-identity` creates an identity without requiring a fee claim key. When it generates a new seed, it writes
+the 24 recovery words to `<identity_file>.recovery-<public_key>.txt`, with owner-only permissions on Unix. Logs
+contain the backup path, never the words. Back up that file off the validator host and keep it secret.
+
+Restore an identity with:
+
+```sh
+tari_validator_node generate-identity --seed-words-file /secure/path/recovery.txt
+```
+
+`--seed-words "<24 words>"` also works, but a file avoids putting the words in shell history and process arguments.
+For encrypted recovery words, supply `--seed-passphrase` (or `TARI_VN_SEED_PASSPHRASE`). Seed input flags must
+precede an explicit `start` subcommand. The `generate-identity` subcommand also accepts them after its name.
+A matching existing identity loads without rewriting it. Replacing a different identity requires
+`generate-identity --overwrite`; invalid words or a wrong passphrase leave the existing identity intact.
+
+On a replacement host, configure the same wallet account public key for fee claims and recover that account
+through the wallet's own backup process. Stop the original validator before starting the recovered identity.
+
 ### Backups
 
 `create_backup_snapshot` writes a point-in-time copy of the node's state while it keeps running, and returns the

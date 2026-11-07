@@ -142,12 +142,15 @@ where
 /// it. `Admin` covers these endpoints by implication and is grantable, because the endpoints themselves refuse API
 /// keys.
 fn reject_user_only_grants(permissions: &Permissions) -> Result<(), anyhow::Error> {
-    let approve = Permission::TransactionRequests(TxRequestAction::Approve);
-    if permissions.has_permission(&approve) {
-        return Err(anyhow!(
-            "{approve} cannot be granted to an API key: approving a transaction request requires an interactive user \
-             session"
-        ));
+    for approve in [
+        Permission::TransactionRequests(TxRequestAction::Approve),
+        Permission::SigningRequests(TxRequestAction::Approve),
+    ] {
+        if permissions.has_permission(&approve) {
+            return Err(anyhow!(
+                "{approve} cannot be granted to an API key: approving a request requires an interactive user session"
+            ));
+        }
     }
     Ok(())
 }
@@ -416,9 +419,18 @@ mod tests {
         .into();
         assert!(reject_user_only_grants(&approve).is_err());
 
+        let sign_approve: Permissions = vec![
+            Permission::SigningRequests(TxRequestAction::Create),
+            Permission::SigningRequests(TxRequestAction::Approve),
+        ]
+        .into();
+        assert!(reject_user_only_grants(&sign_approve).is_err());
+
         let create_and_read: Permissions = vec![
             Permission::TransactionRequests(TxRequestAction::Create),
             Permission::TransactionRequests(TxRequestAction::Read),
+            Permission::SigningRequests(TxRequestAction::Create),
+            Permission::SigningRequests(TxRequestAction::Read),
         ]
         .into();
         assert!(reject_user_only_grants(&create_and_read).is_ok());

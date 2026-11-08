@@ -154,7 +154,7 @@ export class IndexerClient {
   }
 
   public getTransactionReceipt(address: TransactionReceiptAddress): Promise<GetTransactionReceiptResponse> {
-    return this.transport.sendGet(`transaction-receipts/${address}`, {});
+    return this.transport.sendGet(`transaction-receipts/${encodeURIComponent(address)}`, {});
   }
 
   public templatesGet(template_address: string): Promise<TemplatesGetResponse> {

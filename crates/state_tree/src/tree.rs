@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, btree_map},
     marker::PhantomData,
 };
 
@@ -186,7 +186,7 @@ impl<S: TreeStore<()>, M: DbKeyMapper<TreeHash>> StateTree<'_, S, M> {
 
         let jmt = JellyfishMerkleTree::<_, ()>::new(self.store, JmtHashScheme::V1);
 
-        let (root, update) = jmt.batch_put_value_set(leaves_by_key, current_version, next_version)?;
+        let (root, update) = jmt.batch_put_value_map(&leaves_by_key, current_version, next_version)?;
         Ok((root, update))
     }
 }
@@ -202,12 +202,6 @@ fn calculate_substate_changes<
     next_version: Version,
     changes: I,
 ) -> Result<(TreeHash, TreeUpdateBatch<StateTreePayload>), StateTreeError> {
-    struct SubstateTransitions {
-        leaf_key: LeafKey,
-        up: Option<TreeHash>,
-        down: bool,
-    }
-
     // JMT nodes are keyed by (version, nibble_path). Writing a version that is not strictly ahead of
     // the base version overwrites live nodes with keys that this same write records as stale, so the
     // stale-node GC later deletes nodes the current tree still points at. Callers that stage changes
@@ -224,42 +218,44 @@ fn calculate_substate_changes<
 
     // A version can both create a versioned id and destroy it again, which collapses to no leaf in the
     // tree regardless of the order the caller lists the two transitions in, but it holds at most one
-    // transition of each kind per substate address.
-    let mut by_address = BTreeMap::new();
+    // transition of each kind per substate address. Leaves are keyed by leaf key, which stands in for
+    // the substate address because every `DbKeyMapper` maps each versioned id to its own leaf key. A
+    // `None` leaf records a seen down; `collapsed` records the leaf keys that have also seen an up.
+    let mut leaves = BTreeMap::new();
+    let mut collapsed = BTreeSet::new();
     for ch in changes {
-        let id = ch.id();
-        let address = id.to_substate_address();
-        let entry = by_address.entry(address).or_insert_with(|| SubstateTransitions {
-            leaf_key: M::map_to_leaf_key(id),
-            up: None,
-            down: false,
-        });
         match ch {
-            SubstateTreeChange::Up { value_hash, .. } => {
-                if entry.up.replace(TreeHash::new(value_hash.into_array())).is_some() {
-                    return Err(StateTreeError::DuplicateTransition { address });
-                }
+            SubstateTreeChange::Up { id, value_hash } => match leaves.entry(M::map_to_leaf_key(&id)) {
+                btree_map::Entry::Vacant(entry) => {
+                    entry.insert(Some((TreeHash::new(value_hash.into_array()), id.to_substate_address())));
+                },
+                btree_map::Entry::Occupied(entry) => {
+                    if entry.get().is_some() || !collapsed.insert(*entry.key()) {
+                        return Err(StateTreeError::DuplicateTransition {
+                            address: id.to_substate_address(),
+                        });
+                    }
+                },
             },
-            SubstateTreeChange::Down { .. } => {
-                if std::mem::replace(&mut entry.down, true) {
-                    return Err(StateTreeError::DuplicateTransition { address });
-                }
+            SubstateTreeChange::Down { id } => match leaves.entry(M::map_to_leaf_key(&id)) {
+                btree_map::Entry::Vacant(entry) => {
+                    entry.insert(None);
+                },
+                btree_map::Entry::Occupied(mut entry) => {
+                    if entry.get_mut().take().is_none() {
+                        return Err(StateTreeError::DuplicateTransition {
+                            address: id.to_substate_address(),
+                        });
+                    }
+                    collapsed.insert(*entry.key());
+                },
             },
         }
     }
 
     let jmt = JellyfishMerkleTree::new(store, JmtHashScheme::V1);
 
-    let changes = by_address.into_iter().map(|(address, transitions)| {
-        let value = if transitions.down {
-            None
-        } else {
-            transitions.up.map(|value_hash| (value_hash, address))
-        };
-        (transitions.leaf_key, value)
-    });
-
-    let (root_hash, update_result) = jmt.batch_put_value_set(changes, current_version, next_version)?;
+    let (root_hash, update_result) = jmt.batch_put_value_map(&leaves, current_version, next_version)?;
 
     Ok((root_hash, update_result))
 }

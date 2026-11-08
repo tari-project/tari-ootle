@@ -791,6 +791,10 @@ fn two_transitions_of_one_kind_at_one_address_in_one_version_are_rejected_by_sta
         vec![change(1, Some(30)), change(1, Some(40))],
         vec![change(1, Some(30)), change(1, Some(30))],
         vec![change(1, None), change(1, None)],
+        vec![change(1, Some(30)), change(1, None), change(1, Some(40))],
+        vec![change(1, None), change(1, Some(30)), change(1, Some(40))],
+        vec![change(1, Some(30)), change(1, None), change(1, None)],
+        vec![change(1, None), change(1, Some(30)), change(1, None)],
     ] {
         let mut tester = HashTreeTester::new_empty();
         let err = tester.try_put_changes_at_version(None, 1, duplicated).unwrap_err();

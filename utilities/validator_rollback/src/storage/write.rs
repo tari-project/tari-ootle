@@ -16,7 +16,13 @@ use log::*;
 use serde::{Serialize, de::DeserializeOwned};
 use tari_consensus_types::{BlockId, PcId, TcId};
 use tari_ootle_common_types::{Epoch, NodeAddressable, NodeHeight, ShardGroup};
-use tari_ootle_storage::{Ordering, StateStoreWriteTransaction, StorageError, consensus_models::RollbackHistoryEntry};
+use tari_ootle_storage::{
+    Ordering,
+    StateStoreWriteTransaction,
+    StorageError,
+    consensus_models::RollbackHistoryEntry,
+    optional::Optional,
+};
 use tari_state_store_rocksdb::{
     codecs::ByteColumn,
     column_families::{
@@ -37,10 +43,12 @@ use tari_state_store_rocksdb::{
         certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
         chain::{self, CommittedParentChildChainIndex},
         epoch_checkpoint::EpochCheckpointCf,
-        finalized_transaction::FinalizedTransactionLinkCf,
+        finalized_transaction::{self, FinalizedTransactionLinkCf},
         foreign_proposal::{self, EpochIndex as ForeignProposalEpochIndex, ForeignProposalCf},
         rollback_history::RollbackHistoryCf,
+        validator_liveness_log::{self, ValidatorLivenessLogCf},
         validator_node_epoch_stats::ValidatorNodeEpochStatsCf,
+        vote_equivocation::{self, VoteEquivocationCf},
     },
     writer::RocksDbStateStoreWriteTransaction,
 };
@@ -115,12 +123,42 @@ where
         tx.transaction_pool_state_updates_remove_any_by_block_id(block_id)?;
         tx.lock_conflicts_remove_by_block_id(block_id)?;
 
+        let fp_proposed_query = tx.db().cf(foreign_proposal::ByProposedInBlockIndexQuery)?;
+        let fp_proposed_keys = fp_proposed_query.query_prefix_range_keys(Ordering::default(), block_id)?;
+        for (proposed_in_block, fp_id) in fp_proposed_keys {
+            if let Some(mut fp) = tx.db().cf(ForeignProposalCf)?.get(&fp_id, OPERATION).optional()? &&
+                fp.proposed_in_block() == Some(&proposed_in_block)
+            {
+                let was_unconfirmed = fp.status().is_unconfirmed();
+                fp.reset_proposed();
+                tx.db().cf(ForeignProposalCf)?.put(&fp_id, &fp, OPERATION)?;
+                if !was_unconfirmed {
+                    tx.db()
+                        .cf(foreign_proposal::UnconfirmedIndex)?
+                        .put(&(fp.epoch(), fp_id), &(), OPERATION)?;
+                }
+                let epoch_index_cf = tx.db().cf(ForeignProposalEpochIndex)?;
+                let epoch_key = (fp.epoch(), fp_id);
+                if let Some(mut index_data) = epoch_index_cf.get(&epoch_key, OPERATION).optional()? {
+                    index_data.proposed_in_block = None;
+                    epoch_index_cf.put(&epoch_key, &index_data, OPERATION)?;
+                }
+            }
+            tx.db()
+                .cf(foreign_proposal::ProposedInBlockIndex)?
+                .delete(&(proposed_in_block, fp_id), OPERATION)?;
+        }
+
         let finalized_link_cf = tx.db().cf(FinalizedTransactionLinkCf)?;
+        let finalized_epoch_index_cf = tx.db().cf(finalized_transaction::EpochIndex)?;
         // Finalising commands mark this block as where the transaction's finalize QC
         // committed, so `FinalizedTransactionLinkCf[tx_id]` was written here. Deleting it
         // restores the "not-yet-finalized" state so `finalized_transaction_execution_get`
         // returns NotFound post-rollback.
         for tx_id in block.all_finalising_transactions_ids() {
+            if let Some(link) = finalized_link_cf.get(tx_id, OPERATION).optional()? {
+                finalized_epoch_index_cf.delete(&(link.epoch, *tx_id), OPERATION)?;
+            }
             finalized_link_cf.delete(tx_id, OPERATION)?;
         }
 
@@ -187,17 +225,23 @@ where
     //    per-block helper which handles all the secondary indexes.
     let fp_query = tx.db().cf(foreign_proposal::ByEpochQuery)?;
     let fp_epoch_index_cf = tx.db().cf(ForeignProposalEpochIndex)?;
+    let fp_unconfirmed_index_cf = tx.db().cf(foreign_proposal::UnconfirmedIndex)?;
+    let fp_proposed_in_block_index_cf = tx.db().cf(foreign_proposal::ProposedInBlockIndex)?;
     let fp_epoch_keys: Vec<((Epoch, BlockId), foreign_proposal::ForeignProposalEpochIndexData)> = fp_query
         .query_range_iterator(Ordering::Ascending, start_epoch..Epoch::max())
         .collect::<Result<Vec<_>, _>>()?;
-    for ((epoch, block_id), _) in &fp_epoch_keys {
+    for ((epoch, block_id), data) in &fp_epoch_keys {
         // Idempotent delete in case a prior cascade already removed it.
         tx.db().cf(ForeignProposalCf)?.delete(block_id, OPERATION)?;
         fp_epoch_index_cf.delete(&(*epoch, *block_id), OPERATION)?;
+        fp_unconfirmed_index_cf.delete(&(*epoch, *block_id), OPERATION)?;
+        if let Some(proposed_block_id) = data.proposed_in_block {
+            fp_proposed_in_block_index_cf.delete(&(proposed_block_id, *block_id), OPERATION)?;
+        }
     }
     stats.foreign_proposals_deleted = fp_epoch_keys.len();
 
-    // 6. Validator epoch stats with epoch > target.
+    // 6. Validator epoch stats and liveness log with epoch > target.
     let stats_cf = tx.db().cf(ValidatorNodeEpochStatsCf)?;
     let stats_query = tx
         .db()
@@ -209,6 +253,24 @@ where
         stats_cf.delete(key, OPERATION)?;
     }
     stats.validator_stats_deleted = stats_keys.len();
+
+    let liveness_cf = tx.db().cf(ValidatorLivenessLogCf)?;
+    let liveness_query = tx.db().cf(validator_liveness_log::ByEpochQuery)?;
+    let liveness_keys: Vec<(Epoch, RistrettoPublicKeyBytes, NodeHeight)> = liveness_query
+        .query_range_key_iterator(Ordering::Ascending, start_epoch..Epoch::max())
+        .collect::<Result<Vec<_>, _>>()?;
+    for key in &liveness_keys {
+        liveness_cf.delete(key, OPERATION)?;
+    }
+
+    let equivocation_cf = tx.db().cf(VoteEquivocationCf)?;
+    let equivocation_query = tx.db().cf(vote_equivocation::ByEpochQuery)?;
+    let equivocation_keys: Vec<(Epoch, NodeHeight, RistrettoPublicKeyBytes)> = equivocation_query
+        .query_range_key_iterator(Ordering::Ascending, start_epoch..Epoch::max())
+        .collect::<Result<Vec<_>, _>>()?;
+    for key in &equivocation_keys {
+        equivocation_cf.delete(key, OPERATION)?;
+    }
 
     // 7. Clear bookkeeping singletons. These are all keyed by `ByteColumn`; deleting the single entry removes the
     //    pointer entirely. On consensus resume the genesis path in `create_genesis_block_if_required` repopulates them

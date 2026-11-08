@@ -93,3 +93,59 @@ fn collect_blocks_empty_when_no_blocks_after_target_epoch() {
         .unwrap();
     assert!(rows.is_empty(), "unexpected rows: {rows:?}");
 }
+
+#[test]
+fn rollback_delete_after_epoch_cleans_foreign_proposal_indexes_and_restores_surviving() {
+    use helpers::{create_block_with_qc, create_first_block_of_next_epoch, create_foreign_proposal};
+    use tari_ootle_storage::{
+        StateStoreReadTransaction,
+        consensus_models::{BookkeepingModel, ForeignProposalStatus},
+    };
+    use tari_validator_rollback::storage::rollback_delete_after_epoch;
+
+    let (db, _tmp) = create_rocksdb();
+    let mut tx = db.create_write_tx().unwrap();
+    let zero_block = Block::zero_block(Network::LocalNet, num_preshards());
+    zero_block.insert(&mut tx).unwrap();
+    zero_block.as_locked().set(&mut tx).unwrap();
+
+    let epoch0_block = create_block_with_qc(&zero_block.as_leaf());
+    epoch0_block.insert(&mut tx).unwrap();
+    let epoch1_block = create_first_block_of_next_epoch(&epoch0_block.as_leaf());
+    epoch1_block.insert(&mut tx).unwrap();
+
+    // Surviving foreign proposal from epoch 0 that was confirmed in an epoch 1 block.
+    let fp_epoch0 = create_foreign_proposal(*zero_block.id(), Epoch(0));
+    tx.foreign_proposals_save(&fp_epoch0).unwrap();
+    tx.foreign_proposals_set_status(
+        fp_epoch0.block_id(),
+        ForeignProposalStatus::Confirmed,
+        Some(epoch1_block.id()),
+    )
+    .unwrap();
+
+    // Unconfirmed foreign proposal from epoch 1 that must be deleted along with its UnconfirmedIndex entry.
+    let fp_epoch1 = create_foreign_proposal(*epoch0_block.id(), Epoch(1));
+    tx.foreign_proposals_save(&fp_epoch1).unwrap();
+
+    let stats = rollback_delete_after_epoch(&mut tx, Epoch(0)).unwrap();
+    assert_eq!(stats.blocks_deleted, 1);
+    assert_eq!(stats.foreign_proposals_deleted, 1);
+
+    // Re-set locked block at epoch 0 so `foreign_proposals_get_all_new` can query up to epoch 0.
+    epoch0_block.as_locked().set(&mut tx).unwrap();
+    tx.commit().unwrap();
+
+    db.with_read_tx(|tx| {
+        assert!(!tx.foreign_proposals_exists(fp_epoch1.block_id()).unwrap());
+        assert!(!tx.foreign_proposals_has_unconfirmed(Epoch(1)).unwrap());
+
+        let new_fps = tx.foreign_proposals_get_all_new(epoch0_block.id(), 10).unwrap();
+        assert_eq!(new_fps.len(), 1);
+        assert_eq!(new_fps[0].block_id(), fp_epoch0.block_id());
+        assert_eq!(new_fps[0].status(), ForeignProposalStatus::New);
+        assert_eq!(new_fps[0].proposed_in_block(), None);
+        Ok::<_, tari_ootle_storage::StorageError>(())
+    })
+    .unwrap();
+}

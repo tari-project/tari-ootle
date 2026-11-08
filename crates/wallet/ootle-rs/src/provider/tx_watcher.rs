@@ -2,9 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     future::Future,
-    mem,
     pin::{Pin, pin},
     sync::{Arc, Weak},
     task::{Context, Poll},
@@ -52,11 +51,15 @@ const MAX_RESULT_POLL_INTERVAL: Duration = Duration::from_secs(4);
 /// the last one goes.
 const ABANDONED_WATCH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
+struct PendingWatch {
+    reap_at: Option<Instant>,
+    reply: oneshot::Sender<Result<FinalizeOutcome, PendingTransactionError>>,
+}
+
 pub struct TransactionWatcher {
     stream: BoxStream<'static, Result<sse::Event, EventStreamError>>,
     span: tracing::Span,
-    pending_requests: HashMap<TransactionId, TxWatchRequest>,
-    reap_times: BTreeMap<Instant, TransactionId>,
+    pending_requests: HashMap<TransactionId, Vec<PendingWatch>>,
     paused: Paused,
 }
 
@@ -67,7 +70,6 @@ impl TransactionWatcher {
             stream,
             span,
             pending_requests: HashMap::new(),
-            reap_times: BTreeMap::new(),
             paused,
         }
     }
@@ -83,9 +85,11 @@ impl TransactionWatcher {
     fn next_reap_time(&self) -> Instant {
         let now = Instant::now();
         let next_reap = self
-            .reap_times
-            .first_key_value()
-            .map(|(instant, _)| *instant)
+            .pending_requests
+            .values()
+            .flatten()
+            .filter_map(|watch| watch.reap_at)
+            .min()
             .unwrap_or(now + Duration::from_secs(60_000));
         if self.pending_requests.is_empty() {
             return next_reap;
@@ -95,12 +99,15 @@ impl TransactionWatcher {
 
     /// Drops the watches whose waiter has gone, such as a watch answered by asking the indexer directly.
     fn drop_abandoned_watches(&mut self) {
-        self.pending_requests.retain(|tx_id, request| {
-            let waited_on = !request.reply.is_closed();
-            if !waited_on {
-                tracing::debug!("Dropping the watch of tx_id {tx_id}, which nothing waits on");
-            }
-            waited_on
+        self.pending_requests.retain(|tx_id, watches| {
+            watches.retain(|watch| {
+                let waited_on = !watch.reply.is_closed();
+                if !waited_on {
+                    tracing::debug!("Dropping the watch of tx_id {tx_id}, which nothing waits on");
+                }
+                waited_on
+            });
+            !watches.is_empty()
         });
     }
 
@@ -130,37 +137,45 @@ impl TransactionWatcher {
     }
 
     fn reap_timeouts(&mut self) {
-        let to_keep = self.reap_times.split_off(&Instant::now());
-        let to_reap = mem::replace(&mut self.reap_times, to_keep);
-        for tx_id in to_reap.into_values() {
-            if let Some(request) = self.pending_requests.remove(&tx_id) {
-                tracing::warn!("Transaction watch timed out for tx_id: {}", tx_id);
-                let _ignore = request
-                    .reply
-                    .send(Err(PendingTransactionError::Timeout { tx_id }))
-                    .inspect_err(|_| {
-                        tracing::debug!("The watch of tx_id {} was dropped before it timed out", tx_id);
-                    });
+        let now = Instant::now();
+        self.pending_requests.retain(|&tx_id, watches| {
+            let mut remaining = Vec::with_capacity(watches.len());
+            for watch in watches.drain(..) {
+                if watch.reap_at.is_some_and(|reap_at| reap_at <= now) {
+                    tracing::warn!("Transaction watch timed out for tx_id: {}", tx_id);
+                    let _ignore = watch
+                        .reply
+                        .send(Err(PendingTransactionError::Timeout { tx_id }))
+                        .inspect_err(|_| {
+                            tracing::debug!("The watch of tx_id {} was dropped before it timed out", tx_id);
+                        });
+                } else {
+                    remaining.push(watch);
+                }
             }
-        }
+            *watches = remaining;
+            !watches.is_empty()
+        });
     }
 
     async fn handle_request(&mut self, request: TxWatchRequest) {
         let _enter = self.span.enter();
         tracing::debug!("Received watch request for tx_id: {}", request.tx_id);
         // A timeout too large to represent as an `Instant` never reaps.
-        match Instant::now().checked_add(request.timeout) {
-            Some(reap_at) => {
-                self.reap_times.insert(reap_at, request.tx_id);
-            },
-            None => {
-                tracing::warn!(
-                    "Watch request for tx_id {} has an unrepresentable timeout",
-                    request.tx_id
-                );
-            },
+        let reap_at = Instant::now().checked_add(request.timeout);
+        if reap_at.is_none() {
+            tracing::warn!(
+                "Watch request for tx_id {} has an unrepresentable timeout",
+                request.tx_id
+            );
         }
-        self.pending_requests.insert(request.tx_id, request);
+        self.pending_requests
+            .entry(request.tx_id)
+            .or_default()
+            .push(PendingWatch {
+                reap_at,
+                reply: request.reply,
+            });
     }
 
     async fn handle_event(&mut self, event: Result<sse::Event, EventStreamError>) {
@@ -183,7 +198,7 @@ impl TransactionWatcher {
                     },
                 };
 
-                let Some(watch) = self.pending_requests.remove(&event_data.transaction_id) else {
+                let Some(watches) = self.pending_requests.remove(&event_data.transaction_id) else {
                     tracing::debug!("No pending watch found for tx_id: {}", event_data.transaction_id);
                     return;
                 };
@@ -194,12 +209,14 @@ impl TransactionWatcher {
                     event_data.outcome
                 );
 
-                watch.reply.send(Ok(event_data.outcome)).unwrap_or_else(|_| {
-                    tracing::debug!(
-                        "The watch of tx_id {} was dropped before it finalized",
-                        event_data.transaction_id
-                    );
-                });
+                for watch in watches {
+                    watch.reply.send(Ok(event_data.outcome)).unwrap_or_else(|_| {
+                        tracing::debug!(
+                            "The watch of tx_id {} was dropped before it finalized",
+                            event_data.transaction_id
+                        );
+                    });
+                }
             },
             Err(e) => {
                 tracing::error!("Error receiving SSE event: {}", e);
@@ -900,5 +917,93 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(3), pause_waiter.wait_paused())
             .await
             .expect("the event stream stays unpaused for the answered watch");
+    }
+
+    #[tokio::test]
+    async fn watches_sharing_the_same_reap_instant_both_time_out() {
+        let paused = Paused::default();
+        let watcher = TransactionWatcher::new(Box::pin(futures::stream::pending()), paused).spawn();
+        let tx_a = TransactionId::new([1; 32]);
+        let tx_b = TransactionId::new([2; 32]);
+
+        let watch_a = watcher.watch_transaction(tx_a, Duration::ZERO).await;
+        let watch_b = watcher.watch_transaction(tx_b, Duration::ZERO).await;
+
+        let err_a = tokio::time::timeout(Duration::from_secs(2), watch_a)
+            .await
+            .expect("watch_a must not hang when another watch shares the same reap instant")
+            .unwrap_err();
+        let err_b = tokio::time::timeout(Duration::from_secs(2), watch_b)
+            .await
+            .expect("watch_b must not hang")
+            .unwrap_err();
+        assert!(err_a.is_timeout(), "{err_a}");
+        assert!(err_b.is_timeout(), "{err_b}");
+    }
+
+    #[tokio::test]
+    async fn concurrent_watches_for_the_same_transaction_both_receive_finalization() {
+        let (tx_events, rx_events) = mpsc::unbounded_channel();
+        let stream = futures::stream::unfold(rx_events, |mut rx| async move { rx.recv().await.map(|ev| (ev, rx)) });
+        let paused = Paused::default();
+        let watcher = TransactionWatcher::new(Box::pin(stream), paused).spawn();
+
+        let watch_1 = watcher.watch_transaction(TRANSACTION_ID, Duration::from_secs(5)).await;
+        let watch_2 = watcher.watch_transaction(TRANSACTION_ID, Duration::from_secs(5)).await;
+
+        let event = TransactionFinalizedEvent {
+            transaction_id: TRANSACTION_ID,
+            outcome: FinalizeOutcome::Commit,
+        };
+        tx_events
+            .send(Ok(sse::Event {
+                event_type: "TransactionFinalized".to_string(),
+                data: serde_json::to_string(&event).unwrap(),
+            }))
+            .unwrap();
+
+        let outcome_1 = tokio::time::timeout(Duration::from_secs(2), watch_1)
+            .await
+            .expect("watch_1 must complete")
+            .expect("watch_1 must not be aborted by watch_2");
+        let outcome_2 = tokio::time::timeout(Duration::from_secs(2), watch_2)
+            .await
+            .expect("watch_2 must complete")
+            .expect("watch_2 must succeed");
+        assert!(matches!(outcome_1, FinalizeOutcome::Commit));
+        assert!(matches!(outcome_2, FinalizeOutcome::Commit));
+    }
+
+    #[tokio::test]
+    async fn an_earlier_abandoned_watch_does_not_prematurely_time_out_a_later_watch() {
+        let (tx_events, rx_events) = mpsc::unbounded_channel();
+        let stream = futures::stream::unfold(rx_events, |mut rx| async move { rx.recv().await.map(|ev| (ev, rx)) });
+        let paused = Paused::default();
+        let watcher = TransactionWatcher::new(Box::pin(stream), paused).spawn();
+
+        let short_watch = watcher
+            .watch_transaction(TRANSACTION_ID, Duration::from_millis(50))
+            .await;
+        drop(short_watch);
+
+        let long_watch = watcher.watch_transaction(TRANSACTION_ID, Duration::from_secs(5)).await;
+        sleep(Duration::from_millis(150)).await;
+
+        let event = TransactionFinalizedEvent {
+            transaction_id: TRANSACTION_ID,
+            outcome: FinalizeOutcome::Commit,
+        };
+        tx_events
+            .send(Ok(sse::Event {
+                event_type: "TransactionFinalized".to_string(),
+                data: serde_json::to_string(&event).unwrap(),
+            }))
+            .unwrap();
+
+        let outcome = tokio::time::timeout(Duration::from_secs(2), long_watch)
+            .await
+            .expect("long_watch must complete")
+            .expect("long_watch must not be timed out by the dropped short_watch");
+        assert!(matches!(outcome, FinalizeOutcome::Commit));
     }
 }

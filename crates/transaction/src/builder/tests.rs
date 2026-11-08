@@ -706,3 +706,79 @@ fn fee_and_merged_inputs_widen_read_declarations_to_writes() {
     let merged = read_builder.merge(write_builder).build_unsigned();
     assert!(merged.inputs()[0].is_write());
 }
+
+#[test]
+fn merge_preserves_and_shifts_named_workspace_keys_and_handles_max_workspace_id() {
+    let address = TemplateAddress::from_array([9; 32]);
+
+    let a = Transaction::builder_localnet(Epoch(1))
+        .put_last_instruction_output_on_workspace("first")
+        .allocate_component_address("comp_a");
+
+    let b = Transaction::builder_localnet(Epoch(1))
+        .put_last_instruction_output_on_workspace("second")
+        .allocate_component_address("comp_b");
+
+    let merged = a
+        .merge(b)
+        .call_method(CallFromWorkspace::new("comp_b"), "use_merged", args![
+            Workspace("first"),
+            Workspace("second.1")
+        ])
+        .build_unsigned();
+
+    assert_eq!(merged.instructions()[4], Instruction::CallMethod {
+        call: ComponentReference::Workspace(3),
+        method: "use_merged".try_into().unwrap(),
+        args: vec![
+            InstructionArg::Workspace(WorkspaceOffsetId::new(0)),
+            InstructionArg::Workspace(WorkspaceOffsetId::new(2).with_offset(1)),
+        ],
+    });
+
+    // Merging an empty builder after allocating WorkspaceId::MAX must not panic.
+    let at_max = Transaction::builder_localnet(Epoch(1)).add_instruction(Instruction::AllocateAddress {
+        allocatable_type: AllocatableAddressType::Component,
+        workspace_id: WorkspaceId::MAX,
+    });
+    let empty = Transaction::builder_localnet(Epoch(1)).call_function(address, "noop", args![]);
+    let merged_at_max = at_max.merge(empty).build_unsigned();
+    assert_eq!(merged_at_max.instructions().len(), 2);
+}
+
+#[test]
+#[should_panic(expected = "workspace key 'dup' collides during merge")]
+fn merge_rejects_colliding_workspace_keys() {
+    let a = Transaction::builder_localnet(Epoch(1)).put_last_instruction_output_on_workspace("dup");
+    let b = Transaction::builder_localnet(Epoch(1)).put_last_instruction_output_on_workspace("dup");
+    let _unused = a.merge(b);
+}
+
+#[test]
+fn stealth_transfer_resolves_workspace_resource_offset() {
+    use tari_template_lib_types::{Amount, crypto::RistrettoPublicKeyBytes, stealth::StealthTransferStatement};
+
+    use crate::ResourceAddressRef;
+
+    let statement = StealthTransferStatement::revealed_only(
+        Amount::from(10u64),
+        Amount::from(10u64),
+        RistrettoPublicKeyBytes::zero(),
+    );
+    let tx = Transaction::builder_localnet(Epoch(1))
+        .put_last_instruction_output_on_workspace("tuple_out")
+        .stealth_transfer(String::from("tuple_out.1"), statement)
+        .build_unsigned();
+
+    match &tx.instructions()[1] {
+        Instruction::StealthTransfer {
+            resource_address_ref, ..
+        } => {
+            assert_eq!(
+                *resource_address_ref,
+                ResourceAddressRef::Workspace(WorkspaceOffsetId::new(0).with_offset(1))
+            );
+        },
+        other => panic!("expected StealthTransfer, got {other:?}"),
+    }
+}

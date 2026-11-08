@@ -55,15 +55,19 @@ use crate::{
     codec::Codec,
     error::Error,
     event::Event,
-    stream::MessageStream,
+    stream::{MessageStream, StreamId},
 };
 
 pub struct Handler<TCodec: Codec> {
     peer_id: PeerId,
     protocol: StreamProtocol,
-    requested_stream: Option<MessageStream<TCodec::Message>>,
-    pending_stream: Option<MessageStream<TCodec::Message>>,
+    /// Streams with an outbound substream request in flight. libp2p reports one negotiation result per request.
+    requested_streams: VecDeque<MessageStream<TCodec::Message>>,
+    /// Streams from the behaviour awaiting an outbound substream request. The behaviour sends a connection one stream
+    /// at a time; the queue keeps a later stream from replacing an earlier one regardless.
+    pending_streams: VecDeque<MessageStream<TCodec::Message>>,
     pending_events: VecDeque<Event<TCodec::Message>>,
+    pending_close_events: VecDeque<Event<TCodec::Message>>,
     pending_events_sender: mpsc::Sender<Event<TCodec::Message>>,
     pending_events_receiver: mpsc::Receiver<Event<TCodec::Message>>,
     codec: TCodec,
@@ -87,9 +91,10 @@ impl<TCodec: Codec> Handler<TCodec> {
         Self {
             peer_id,
             protocol,
-            requested_stream: None,
-            pending_stream: None,
+            requested_streams: VecDeque::new(),
+            pending_streams: VecDeque::new(),
             pending_events: VecDeque::new(),
+            pending_close_events: VecDeque::new(),
             codec: TCodec::default(),
             pending_events_sender,
             pending_events_receiver,
@@ -113,11 +118,24 @@ where TCodec: Codec + Send + Clone + 'static
         tracing::warn!("unexpected listen upgrade error: {:?}", error.error);
     }
 
-    fn on_dial_upgrade_error(&mut self, error: DialUpgradeError<(), Protocol<StreamProtocol>>) {
-        let stream = self
-            .requested_stream
-            .take()
-            .expect("negotiated a stream without a requested stream");
+    /// Removes the request for `stream_id`. Outbound negotiations complete in any order, so the request is found by id
+    /// rather than by position.
+    fn take_requested_stream(&mut self, stream_id: StreamId) -> Option<MessageStream<TCodec::Message>> {
+        let pos = self.requested_streams.iter().position(|s| s.stream_id() == stream_id)?;
+        self.requested_streams.remove(pos)
+    }
+
+    fn on_dial_upgrade_error(&mut self, error: DialUpgradeError<StreamId, Protocol<StreamProtocol>>) {
+        let stream = self.take_requested_stream(error.info);
+        debug_assert!(
+            stream.is_some(),
+            "outbound stream {} upgrade failed with no requested stream",
+            error.info
+        );
+        let Some(stream) = stream else {
+            tracing::warn!("outbound stream {} upgrade failed with no requested stream", error.info);
+            return;
+        };
 
         match error.error {
             StreamUpgradeError::Timeout => {
@@ -152,42 +170,62 @@ where TCodec: Codec + Send + Clone + 'static
         }
     }
 
-    fn on_fully_negotiated_outbound(&mut self, outbound: FullyNegotiatedOutbound<Protocol<StreamProtocol>, ()>) {
-        let codec = self.codec.clone();
+    fn on_fully_negotiated_outbound(&mut self, outbound: FullyNegotiatedOutbound<Protocol<StreamProtocol>, StreamId>) {
         let (peer_stream, _protocol) = outbound.protocol;
+        self.handle_negotiated_outbound(peer_stream, outbound.info);
+    }
 
-        let msg_stream = self
-            .requested_stream
-            .take()
-            .expect("negotiated outbound stream without a requested stream");
+    fn handle_negotiated_outbound<TStream>(&mut self, peer_stream: TStream, stream_id: StreamId)
+    where TStream: AsyncRead + AsyncWrite + Unpin + Send + 'static {
+        let codec = self.codec.clone();
 
+        let msg_stream = self.take_requested_stream(stream_id);
+        debug_assert!(
+            msg_stream.is_some(),
+            "negotiated outbound stream {stream_id} without a requested stream"
+        );
+        let Some(msg_stream) = msg_stream else {
+            tracing::warn!("negotiated outbound stream {stream_id} without a requested stream");
+            return;
+        };
+
+        let stream_id = msg_stream.stream_id();
         let events = self.pending_events_sender.clone();
-
-        self.pending_events.push_back(Event::OutboundStreamOpened {
-            peer_id: self.peer_id,
-            stream_id: msg_stream.stream_id(),
-        });
-
         let fut = outbound_loop(codec, peer_stream, msg_stream, events, self.timeouts).boxed();
 
         if self.outbound_tasks.try_push(fut).is_err() {
-            tracing::warn!("Dropping outbound stream because we are at capacity")
+            tracing::warn!("Dropping outbound stream because we are at capacity");
+            self.pending_events.push_back(Event::StreamClosed {
+                peer_id: self.peer_id,
+                stream_id,
+            });
+            return;
         }
+
+        self.pending_events.push_back(Event::OutboundStreamOpened {
+            peer_id: self.peer_id,
+            stream_id,
+        });
     }
 
     fn on_fully_negotiated_inbound(&mut self, inbound: FullyNegotiatedInbound<Protocol<StreamProtocol>, ()>) {
+        let (stream, _protocol) = inbound.protocol;
+        self.handle_negotiated_inbound(stream);
+    }
+
+    fn handle_negotiated_inbound<TStream>(&mut self, stream: TStream)
+    where TStream: AsyncRead + Unpin + Send + 'static {
         let codec = self.codec.clone();
         let peer_id = self.peer_id;
-        let (stream, _protocol) = inbound.protocol;
         let events = self.pending_events_sender.clone();
-
-        self.pending_events.push_back(Event::InboundStreamOpened { peer_id });
-
         let fut = inbound_loop(codec, stream, peer_id, events, self.timeouts).boxed();
 
         if self.inbound_tasks.try_push(fut).is_err() {
-            tracing::warn!("Dropping inbound stream because we are at capacity")
+            tracing::warn!("Dropping inbound stream because we are at capacity");
+            return;
         }
+
+        self.pending_events.push_back(Event::InboundStreamOpened { peer_id });
     }
 }
 
@@ -260,7 +298,13 @@ where
             Some(Err(e)) if e.kind() == io::ErrorKind::UnexpectedEof => {
                 break Event::StreamClosed { peer_id, stream_id };
             },
-            Some(Err(e)) => break Event::Error(Error::CodecError(e)),
+            Some(Err(e)) => {
+                break Event::OutboundFailure {
+                    peer_id,
+                    stream_id,
+                    error: Error::CodecError(e),
+                };
+            },
         }
         message_id = message_id.wrapping_add(1);
     }
@@ -333,7 +377,7 @@ where TCodec: Codec + Send + Clone + 'static
     type FromBehaviour = MessageStream<TCodec::Message>;
     type InboundOpenInfo = ();
     type InboundProtocol = Protocol<StreamProtocol>;
-    type OutboundOpenInfo = ();
+    type OutboundOpenInfo = StreamId;
     type OutboundProtocol = Protocol<StreamProtocol>;
     type ToBehaviour = Event<TCodec::Message>;
 
@@ -350,21 +394,8 @@ where TCodec: Codec + Send + Clone + 'static
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<ConnectionHandlerEvent<Self::OutboundProtocol, Self::OutboundOpenInfo, Self::ToBehaviour>> {
-        for tasks in [&mut self.outbound_tasks, &mut self.inbound_tasks] {
-            match tasks.poll_unpin(cx) {
-                Poll::Ready(Ok(event)) => {
-                    return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(event));
-                },
-                Poll::Ready(Err(err)) => {
-                    return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::Error(Error::Timeout(
-                        err,
-                    ))));
-                },
-                Poll::Pending => {},
-            }
-        }
-
-        // Drain pending events that were produced by handler
+        // Drain pending events that were produced by handler (such as stream-opened notifications) before polling
+        // stream tasks so that a stream is always reported opened before any message or close event from its task.
         if let Some(event) = self.pending_events.pop_front() {
             return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(event));
         }
@@ -372,21 +403,43 @@ where TCodec: Codec + Send + Clone + 'static
             self.pending_events.shrink_to_fit();
         }
 
-        // Emit pending events produced by handler tasks
+        // Drain any message events already queued by stream tasks before polling tasks again or emitting close events.
         if let Poll::Ready(Some(event)) = self.pending_events_receiver.poll_next_unpin(cx) {
             return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(event));
         }
 
+        for tasks in [&mut self.outbound_tasks, &mut self.inbound_tasks] {
+            while let Poll::Ready(result) = tasks.poll_unpin(cx) {
+                match result {
+                    Ok(event) => self.pending_close_events.push_back(event),
+                    Err(err) => self.pending_close_events.push_back(Event::Error(Error::Timeout(err))),
+                }
+            }
+        }
+
+        // Emit message events produced by stream tasks during this poll before any task completion events.
+        if let Poll::Ready(Some(event)) = self.pending_events_receiver.poll_next_unpin(cx) {
+            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(event));
+        }
+
+        if let Some(event) = self.pending_close_events.pop_front() {
+            return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(event));
+        }
+        if self.pending_close_events.capacity() > EMPTY_QUEUE_SHRINK_THRESHOLD {
+            self.pending_close_events.shrink_to_fit();
+        }
+
         // Open outbound stream.
-        if let Some(stream) = self.pending_stream.take() {
-            self.requested_stream = Some(stream);
+        if let Some(stream) = self.pending_streams.pop_front() {
+            let stream_id = stream.stream_id();
+            self.requested_streams.push_back(stream);
 
             return Poll::Ready(ConnectionHandlerEvent::OutboundSubstreamRequest {
                 protocol: SubstreamProtocol::new(
                     Protocol {
                         protocol: self.protocol.clone(),
                     },
-                    (),
+                    stream_id,
                 ),
             });
         }
@@ -395,7 +448,7 @@ where TCodec: Codec + Send + Clone + 'static
     }
 
     fn on_behaviour_event(&mut self, stream: Self::FromBehaviour) {
-        self.pending_stream = Some(stream);
+        self.pending_streams.push_back(stream);
     }
 
     fn on_connection_event(
@@ -504,13 +557,14 @@ pub(crate) mod tests {
         }
     }
 
-    /// Yields `data`, then either reports EOF or stays pending forever. Writes are either accepted or stay pending
-    /// forever.
+    /// Yields `data`, then either reports EOF or stays pending forever. Writes are either accepted, fail, or stay
+    /// pending forever.
     struct TestStream {
         data: Vec<u8>,
         pos: usize,
         eof_after_data: bool,
         accept_writes: bool,
+        write_error: Option<io::ErrorKind>,
         /// Bytes written before the stream was closed.
         written: Arc<AtomicUsize>,
         closed: Arc<AtomicBool>,
@@ -527,6 +581,7 @@ pub(crate) mod tests {
                 pos: 0,
                 eof_after_data: false,
                 accept_writes: false,
+                write_error: None,
                 written: Arc::default(),
                 closed: Arc::default(),
             }
@@ -538,6 +593,7 @@ pub(crate) mod tests {
                 pos: 0,
                 eof_after_data: true,
                 accept_writes: true,
+                write_error: None,
                 written: Arc::default(),
                 closed: Arc::default(),
             }
@@ -550,6 +606,19 @@ pub(crate) mod tests {
                 pos: 0,
                 eof_after_data: false,
                 accept_writes: true,
+                write_error: None,
+                written: Arc::default(),
+                closed: Arc::default(),
+            }
+        }
+
+        fn broken_write(kind: io::ErrorKind) -> Self {
+            Self {
+                data: vec![],
+                pos: 0,
+                eof_after_data: false,
+                accept_writes: false,
+                write_error: Some(kind),
                 written: Arc::default(),
                 closed: Arc::default(),
             }
@@ -576,6 +645,9 @@ pub(crate) mod tests {
 
     impl AsyncWrite for TestStream {
         fn poll_write(self: Pin<&mut Self>, _cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+            if let Some(kind) = self.write_error {
+                return Poll::Ready(Err(io::Error::from(kind)));
+            }
             if self.accept_writes {
                 if !self.closed.load(Ordering::SeqCst) {
                     self.written.fetch_add(buf.len(), Ordering::SeqCst);
@@ -694,6 +766,32 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn outbound_codec_write_error_reports_outbound_failure_for_stream() {
+        let peer_id = PeerId::random();
+        let (mut sink, msg_stream) = stream::channel(42, peer_id);
+        sink.send(b"hello".to_vec()).unwrap();
+        let (events, _rx) = mpsc::channel(10);
+        let event = run_guarded(outbound_loop(
+            TestCodec,
+            TestStream::broken_write(io::ErrorKind::BrokenPipe),
+            msg_stream,
+            events,
+            timeouts(100, 100),
+        ));
+        assert!(
+            matches!(
+                event,
+                Event::OutboundFailure {
+                    peer_id: p,
+                    stream_id: 42,
+                    error: Error::CodecError(ref e),
+                } if p == peer_id && e.kind() == io::ErrorKind::BrokenPipe
+            ),
+            "{event:?}"
+        );
+    }
+
+    #[test]
     fn idle_outbound_stream_is_closed_by_the_sender() {
         let (sink, msg_stream) = stream::channel(1, PeerId::random());
         let peer_stream = TestStream::open();
@@ -763,11 +861,11 @@ pub(crate) mod tests {
         let mut cx = Context::from_waker(std::task::Waker::noop());
         assert!(matches!(
             handler.poll(&mut cx),
-            Poll::Ready(ConnectionHandlerEvent::OutboundSubstreamRequest { .. })
+            Poll::Ready(ConnectionHandlerEvent::OutboundSubstreamRequest { protocol }) if *protocol.info() == 7
         ));
 
         handler.on_dial_upgrade_error(DialUpgradeError {
-            info: (),
+            info: 7,
             error: StreamUpgradeError::Io(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "invalid multistream message",
@@ -787,6 +885,147 @@ pub(crate) mod tests {
             "the handler must not keep the failed stream's receiver"
         );
         assert!(sink.send(b"later".to_vec()).is_err());
+        assert!(handler.poll(&mut cx).is_pending());
+    }
+
+    #[test]
+    fn multiple_pending_outbound_streams_are_queued_in_order() {
+        let peer_id = PeerId::random();
+        let mut handler = Handler::<TestCodec>::new(peer_id, StreamProtocol::new("/test/1"), &Config::default());
+        let (_sink1, stream1) = stream::channel(1, peer_id);
+        let (_sink2, stream2) = stream::channel(2, peer_id);
+        handler.on_behaviour_event(stream1);
+        handler.on_behaviour_event(stream2);
+
+        let mut cx = Context::from_waker(std::task::Waker::noop());
+        for expected_id in [1, 2] {
+            assert!(matches!(
+                handler.poll(&mut cx),
+                Poll::Ready(ConnectionHandlerEvent::OutboundSubstreamRequest { protocol })
+                    if *protocol.info() == expected_id
+            ));
+        }
+
+        for expected_id in [1, 2] {
+            handler.on_dial_upgrade_error(DialUpgradeError {
+                info: expected_id,
+                error: StreamUpgradeError::NegotiationFailed,
+            });
+            match handler.poll(&mut cx) {
+                Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::OutboundFailure {
+                    stream_id,
+                    error: Error::ProtocolNotSupported,
+                    ..
+                })) => assert_eq!(stream_id, expected_id),
+                other => panic!("expected an outbound failure, got {:?}", other.map(|_| ())),
+            }
+        }
+    }
+
+    #[test]
+    fn out_of_order_outbound_negotiation_matches_requests_by_stream_id() {
+        let peer_id = PeerId::random();
+        let mut handler = Handler::<TestCodec>::new(peer_id, StreamProtocol::new("/test/1"), &Config::default());
+        let (mut sink1, stream1) = stream::channel(1, peer_id);
+        let (sink2, stream2) = stream::channel(2, peer_id);
+        sink1.send(b"for-stream-1".to_vec()).unwrap();
+        handler.on_behaviour_event(stream1);
+        handler.on_behaviour_event(stream2);
+
+        let mut cx = Context::from_waker(std::task::Waker::noop());
+        for expected_id in [1, 2] {
+            assert!(matches!(
+                handler.poll(&mut cx),
+                Poll::Ready(ConnectionHandlerEvent::OutboundSubstreamRequest { protocol })
+                    if *protocol.info() == expected_id
+            ));
+        }
+
+        // Stream 2 fails negotiation first while stream 1 is still in flight.
+        handler.on_dial_upgrade_error(DialUpgradeError {
+            info: 2,
+            error: StreamUpgradeError::NegotiationFailed,
+        });
+        assert!(sink2.is_closed(), "stream 2 sink should be closed upon failure");
+        assert!(!sink1.is_closed(), "stream 1 sink must remain open while negotiating");
+
+        match handler.poll(&mut cx) {
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::OutboundFailure {
+                stream_id: 2,
+                error: Error::ProtocolNotSupported,
+                ..
+            })) => {},
+            other => panic!("expected OutboundFailure for stream 2, got {:?}", other.map(|_| ())),
+        }
+
+        // Now stream 1 completes negotiation and delivers its queued message before closing.
+        drop(sink1);
+        let peer_stream = TestStream::open();
+        let written = peer_stream.written.clone();
+        handler.handle_negotiated_outbound(peer_stream, 1);
+
+        assert!(matches!(
+            handler.poll(&mut cx),
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::OutboundStreamOpened {
+                stream_id: 1,
+                ..
+            }))
+        ));
+        assert!(matches!(
+            handler.poll(&mut cx),
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::MessageSent {
+                message_id: 0,
+                stream_id: 1,
+            }))
+        ));
+        assert!(matches!(
+            handler.poll(&mut cx),
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::StreamClosed {
+                stream_id: 1,
+                ..
+            }))
+        ));
+        assert_eq!(written.load(Ordering::SeqCst), frame(b"for-stream-1").len());
+        assert!(handler.poll(&mut cx).is_pending());
+    }
+
+    #[test]
+    fn inbound_stream_events_are_emitted_in_causal_order() {
+        let peer_id = PeerId::random();
+        let mut handler = Handler::<TestCodec>::new(peer_id, StreamProtocol::new("/test/1"), &Config::default());
+        let mut data = frame(b"first");
+        data.extend(frame(b"second"));
+        handler.handle_negotiated_inbound(TestStream::closed_after(data));
+
+        let mut cx = Context::from_waker(std::task::Waker::noop());
+        assert!(matches!(
+            handler.poll(&mut cx),
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::InboundStreamOpened {
+                peer_id: p,
+            })) if p == peer_id
+        ));
+        assert!(matches!(
+            handler.poll(&mut cx),
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::ReceivedMessage {
+                peer_id: p,
+                ref message,
+                ..
+            })) if p == peer_id && message == b"first"
+        ));
+        assert!(matches!(
+            handler.poll(&mut cx),
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::ReceivedMessage {
+                peer_id: p,
+                ref message,
+                ..
+            })) if p == peer_id && message == b"second"
+        ));
+        assert!(matches!(
+            handler.poll(&mut cx),
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::InboundStreamClosed {
+                peer_id: p,
+            })) if p == peer_id
+        ));
         assert!(handler.poll(&mut cx).is_pending());
     }
 }

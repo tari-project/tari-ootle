@@ -5,7 +5,14 @@ use minicbor::{CborLen, Decode, Decoder, Encode, decode};
 use tari_bor::adapters::bounded_vec;
 use tari_template_abi::rust::{prelude::*, vec};
 
-use super::{MAX_CONDITIONS_PER_CONJUNCTION, MAX_INCLUSION_PROOF_LEN, SpendWitness, StealthUnspentOutput};
+use super::{
+    AtomicCondition,
+    MAX_CONDITIONS_PER_CONJUNCTION,
+    MAX_INCLUSION_PROOF_LEN,
+    SpendWitness,
+    StealthUnspentOutput,
+    TemplateFunction,
+};
 use crate::{
     Amount,
     UtxoAddress,
@@ -271,6 +278,18 @@ impl StealthTransferStatement {
 
     pub fn stealth_inputs(&self) -> &[StealthInput] {
         &self.inputs_statement.inputs
+    }
+
+    /// Every [`TemplateFunction`] condition revealed on a script-path spend of this statement's inputs.
+    pub fn script_path_template_functions(&self) -> impl Iterator<Item = &TemplateFunction> {
+        self.stealth_inputs()
+            .iter()
+            .filter_map(|input| input.witness.as_script_path())
+            .flat_map(|(leaf, _, _)| leaf.conditions())
+            .filter_map(|condition| match condition {
+                AtomicCondition::TemplateFunction(tf) => Some(tf),
+                _ => None,
+            })
     }
 
     /// The nodes of every spend condition the inputs reveal (see

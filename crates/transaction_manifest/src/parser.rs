@@ -1,7 +1,7 @@
 //   Copyright 2022 The Tari Project
 //   SPDX-License-Identifier: BSD-3-clause
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use proc_macro2::{Group, Ident, Span, TokenStream};
 use syn::{
@@ -183,6 +183,7 @@ impl ManifestParser {
         let mut instruction_intents = vec![];
         let mut fee_instruction_intents = vec![];
         let mut functions = HashMap::new();
+        let mut function_names = HashSet::new();
         let mut defines = vec![];
         defines.push(ManifestImport {
             template_address: Some(ACCOUNT_TEMPLATE_ADDRESS),
@@ -204,10 +205,13 @@ impl ManifestParser {
                 let body;
                 braced!(body in input);
                 let intents = self.parse_block(&body)?;
+                if !function_names.insert(ident.to_string()) {
+                    return Err(syn::Error::new_spanned(&ident, format!("duplicate function `{ident}`")));
+                }
                 if ident == "fee_main" {
-                    fee_instruction_intents.extend(intents);
+                    fee_instruction_intents = intents;
                 } else if ident == "main" {
-                    instruction_intents.extend(intents);
+                    instruction_intents = intents;
                 } else {
                     functions.insert(ident.to_string(), intents);
                 }
@@ -268,6 +272,12 @@ impl ManifestParser {
             Expr::Call(call) => {
                 match &*call.func {
                     Expr::Path(path) => {
+                        if path.path.leading_colon.is_some() {
+                            return Err(syn::Error::new_spanned(
+                                path,
+                                "Invalid function call, expected `Template::function(..)`",
+                            ));
+                        }
                         let mut iter = path.path.segments.iter();
                         let first = iter
                             .next()
@@ -280,6 +290,12 @@ impl ManifestParser {
                                 "a local function call has no value to bind",
                             ));
                         };
+                        if iter.next().is_some() {
+                            return Err(syn::Error::new_spanned(
+                                path,
+                                "Invalid function call, expected `Template::function(..)`",
+                            ));
+                        }
                         ManifestIntent::InvokeTemplate(InvokeIntent {
                             output_variable: Some(output_binding),
                             component_variable: None,
@@ -307,10 +323,9 @@ impl ManifestParser {
                 mac: Macro { path, tokens, .. },
                 ..
             }) => {
-                if path.segments.len() != 1 {
-                    // TODO: improve error
+                let Some(mac) = path.get_ident() else {
                     return Err(syn::Error::new_spanned(path, "macro path must have a single segment"));
-                }
+                };
 
                 let var_ident = match output_binding {
                     OutputBinding::Single(ident) => ident,
@@ -322,15 +337,7 @@ impl ManifestParser {
                     },
                 };
 
-                assignment_from_macro(
-                    var_ident,
-                    &path
-                        .segments
-                        .first()
-                        .expect("macro path must have a single segment")
-                        .ident,
-                    tokens,
-                )?
+                assignment_from_macro(var_ident, mac, tokens)?
             },
             other => {
                 return Err(syn::Error::new_spanned(
@@ -348,12 +355,24 @@ impl ManifestParser {
             Expr::Call(call) => {
                 match &*call.func {
                     Expr::Path(path) => {
+                        if path.path.leading_colon.is_some() {
+                            return Err(syn::Error::new_spanned(
+                                path,
+                                "Invalid function call, expected `Template::function(..)` or `local_function()`",
+                            ));
+                        }
                         let mut iter = path.path.segments.iter();
                         let first = iter
                             .next()
                             .ok_or_else(|| syn::Error::new_spanned(path, "Invalid function call, empty path"))?;
 
                         if let Some(second) = iter.next() {
+                            if iter.next().is_some() {
+                                return Err(syn::Error::new_spanned(
+                                    path,
+                                    "Invalid function call, expected `Template::function(..)` or `local_function()`",
+                                ));
+                            }
                             // Two segments: Template::function()
                             Ok(ManifestIntent::InvokeTemplate(InvokeIntent {
                                 output_variable: None,
@@ -363,6 +382,12 @@ impl ManifestParser {
                                 arguments: build_arguments(call.args)?,
                             }))
                         } else {
+                            if !call.args.is_empty() {
+                                return Err(syn::Error::new_spanned(
+                                    &call.args,
+                                    "manifest functions take no arguments",
+                                ));
+                            }
                             // Single segment: local function call
                             Ok(ManifestIntent::CallLocalFunction(first.ident.clone()))
                         }
@@ -386,11 +411,11 @@ impl ManifestParser {
                 mac: Macro { path, tokens, .. },
                 ..
             }) => {
-                let Some(mac) = path.segments.first() else {
+                let Some(mac) = path.get_ident() else {
                     return Err(syn::Error::new_spanned(path, "macro path must have a single segment"));
                 };
 
-                macro_call(&mac.ident, tokens)
+                macro_call(mac, tokens)
             },
             other => Err(syn::Error::new_spanned(
                 other,
@@ -459,7 +484,18 @@ fn parse_binding(input: ParseStream) -> Result<(OutputBinding, Span), syn::Error
         if idents.is_empty() {
             return Err(syn::Error::new(span, "Empty tuple pattern is not supported"));
         }
-        return Ok((OutputBinding::Tuple(idents.into_iter().collect()), span));
+        let mut seen = HashSet::with_capacity(idents.len());
+        let mut tuple_idents = Vec::with_capacity(idents.len());
+        for ident in idents {
+            if !seen.insert(ident.to_string()) {
+                return Err(syn::Error::new_spanned(
+                    &ident,
+                    format!("identifier `{ident}` is bound more than once in the same pattern"),
+                ));
+            }
+            tuple_idents.push(ident);
+        }
+        return Ok((OutputBinding::Tuple(tuple_idents), span));
     }
 
     let ident = binding_ident(input)?;
@@ -585,14 +621,27 @@ fn assignment_from_macro(var_name: Ident, mac: &Ident, tokens: TokenStream) -> R
                 blob_name: parse_blob_name(mac, tokens)?,
             }))
         },
-        "new_component_addr" => Ok(ManifestIntent::AllocateAddress(AllocateAddressStmt {
-            output_variable: var_name,
-            allocatable_type: AllocatableAddressType::Component,
-        })),
-        "new_resource_addr" => Ok(ManifestIntent::AllocateAddress(AllocateAddressStmt {
-            output_variable: var_name,
-            allocatable_type: AllocatableAddressType::Resource,
-        })),
+        "new_component_addr" => {
+            if !tokens.is_empty() {
+                return Err(syn::Error::new_spanned(
+                    tokens,
+                    "new_component_addr! takes no arguments",
+                ));
+            }
+            Ok(ManifestIntent::AllocateAddress(AllocateAddressStmt {
+                output_variable: var_name,
+                allocatable_type: AllocatableAddressType::Component,
+            }))
+        },
+        "new_resource_addr" => {
+            if !tokens.is_empty() {
+                return Err(syn::Error::new_spanned(tokens, "new_resource_addr! takes no arguments"));
+            }
+            Ok(ManifestIntent::AllocateAddress(AllocateAddressStmt {
+                output_variable: var_name,
+                allocatable_type: AllocatableAddressType::Resource,
+            }))
+        },
         "create_account" => {
             let args = parse_create_account_args(tokens)?;
             Ok(ManifestIntent::CreateAccount(CreateAccountIntent {
@@ -609,7 +658,12 @@ fn assignment_from_macro(var_name: Ident, mac: &Ident, tokens: TokenStream) -> R
 
 fn macro_call(mac: &Ident, tokens: TokenStream) -> Result<ManifestIntent, syn::Error> {
     match mac.to_string().as_str() {
-        "drop_all_proofs" => Ok(ManifestIntent::DropAllProofs),
+        "drop_all_proofs" => {
+            if !tokens.is_empty() {
+                return Err(syn::Error::new_spanned(tokens, "drop_all_proofs! takes no arguments"));
+            }
+            Ok(ManifestIntent::DropAllProofs)
+        },
         "authorize" => Ok(ManifestIntent::AuthorizeProof(parse2(tokens)?)),
         "drop_authorize" => Ok(ManifestIntent::DropProofAuthorization(parse2(tokens)?)),
         "put_into_bucket" => {
@@ -677,6 +731,12 @@ fn parse_publish_template_args(tokens: TokenStream) -> Result<ManifestIntent, sy
                 input.parse::<syn::Token![=]>()?;
                 match key.to_string().as_str() {
                     "metadata" => {
+                        if metadata_hash_hex.is_some() {
+                            return Err(syn::Error::new_spanned(
+                                key,
+                                "duplicate `metadata` argument in publish_template!",
+                            ));
+                        }
                         let value: LitStr = input.parse()?;
                         metadata_hash_hex = Some(value.value());
                     },
@@ -707,15 +767,15 @@ fn build_argument(arg: Expr, depth: usize) -> Result<ManifestLiteral, syn::Error
         Expr::Lit(lit) => Ok(ManifestLiteral::Lit(lit.lit)),
 
         Expr::Path(ExprPath { path, .. }) => {
-            if let Some(seg) = path.segments.first() {
-                if seg.ident == "None" {
+            if let Some(ident) = path.get_ident() {
+                if ident == "None" {
                     Ok(ManifestLiteral::Special(SpecialLiteral::Null))
-                } else if seg.ident == "TARI" {
+                } else if ident == "TARI" {
                     Ok(ManifestLiteral::Special(SpecialLiteral::Address(OrVar::Value(
                         TARI_TOKEN.into(),
                     ))))
                 } else {
-                    Ok(ManifestLiteral::Workspace(seg.ident.clone()))
+                    Ok(ManifestLiteral::Workspace(ident.clone()))
                 }
             } else {
                 Err(syn::Error::new_spanned(
@@ -876,9 +936,33 @@ fn parse_create_account_args(tokens: TokenStream) -> Result<CreateAccountArgs, s
                 let value: Ident = input.parse()?;
 
                 match key.to_string().as_str() {
-                    "owner_rule" => owner_rule = Some(value),
-                    "access_rules" => access_rules = Some(value),
-                    "bucket" => bucket = Some(value),
+                    "owner_rule" => {
+                        if owner_rule.is_some() {
+                            return Err(syn::Error::new_spanned(
+                                key,
+                                "duplicate `owner_rule` argument in create_account!",
+                            ));
+                        }
+                        owner_rule = Some(value);
+                    },
+                    "access_rules" => {
+                        if access_rules.is_some() {
+                            return Err(syn::Error::new_spanned(
+                                key,
+                                "duplicate `access_rules` argument in create_account!",
+                            ));
+                        }
+                        access_rules = Some(value);
+                    },
+                    "bucket" => {
+                        if bucket.is_some() {
+                            return Err(syn::Error::new_spanned(
+                                key,
+                                "duplicate `bucket` argument in create_account!",
+                            ));
+                        }
+                        bucket = Some(value);
+                    },
                     _ => {
                         return Err(syn::Error::new_spanned(
                             key,

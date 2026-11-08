@@ -43,7 +43,7 @@ pub async fn list(
     type Key = <cfs::block_diff::BlockDiffRecordCf as Cf>::Key;
     type Value = <cfs::block_diff::BlockDiffRecordCf as Cf>::Value;
     let iter: Box<dyn Iterator<Item = Result<(Key, Value), RocksDbStorageError>>> =
-        if let Some(prefix_hex) = req.query.as_ref() {
+        if let Some(prefix_hex) = req.query.as_ref().filter(|q| !q.is_empty()) {
             let key_prefix = decode_hex_prefix::<cfs::block_diff::BlockDiffRecordCf>(prefix_hex)?;
             Box::new(cf.prefix_range_iterator_raw_key(ordering, key_prefix))
         } else {

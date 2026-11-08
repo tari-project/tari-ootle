@@ -316,9 +316,9 @@ pub type ShardState = (Shard, TreeHash, Version, TransitionAccumulator);
 /// value, or `None` when the tree holds no leaf for the shard.
 ///
 /// The leaf is keyed by the shard, so a proof names the shard a leaf belongs to, and the leaf value commits to the
-/// shard as well (see [`shard_state_leaf`]). A shard with no state - the empty-tree root at state version 0 - has no
-/// leaf, and the absence of its key proves its state. This keeps the tree, and the cost of building it for every
-/// block, proportional to the shards that hold state.
+/// shard as well (see [`shard_state_leaf`]). A shard with no state - the empty-tree root at state version 0 with a
+/// zero transition accumulator - has no leaf, and the absence of its key proves its state. This keeps the tree, and
+/// the cost of building it for every block, proportional to the shards that hold state.
 #[derive(Debug, Clone)]
 pub struct ShardGroupLeaf {
     pub key: LeafKey,
@@ -335,8 +335,10 @@ impl ShardGroupLeaf {
     ) -> Self {
         let value = shard_state_leaf(protocol_version, shard, shard_root, state_version, transition_acc);
         match protocol_version {
-            ProtocolVersion::V0 => {
-                let has_state = *shard_root != SPARSE_MERKLE_PLACEHOLDER_HASH || state_version != 0;
+            ProtocolVersion::V0 | ProtocolVersion::V1 => {
+                let has_state = *shard_root != SPARSE_MERKLE_PLACEHOLDER_HASH ||
+                    state_version != 0 ||
+                    *transition_acc != TransitionAccumulator::zero();
                 Self {
                     key: ShardKeyMapper::map_to_leaf_key(&shard),
                     value: has_state.then_some(value),
@@ -373,13 +375,6 @@ impl ShardGroupRootTree {
             if leaves.insert(shard, leaf).is_some() {
                 return Err(StateTreeError::DuplicateShardInShardGroupTree { shard });
             }
-        }
-        if changes.is_empty() {
-            return Ok(Self {
-                store,
-                root: SPARSE_MERKLE_PLACEHOLDER_HASH,
-                leaves,
-            });
         }
         let (root, update) = JellyfishMerkleTree::<_, ()>::new(&store, JmtHashScheme::V1).batch_put_value_set(
             changes,

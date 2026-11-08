@@ -114,7 +114,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/development' }}
 
       - name: Install wasm-pack
-        uses: taiki-e/install-action@v2.87.31
+        uses: taiki-e/install-action@v2.88.1
         with:
           tool: wasm-pack@0.15.0
 
@@ -137,6 +137,9 @@ jobs:
       # prebuilt binaries and aren't needed to compile the UIs.
       - name: build workspace web UIs
         run: pnpm --recursive run build
+
+      - name: test wallet web UI
+        run: pnpm --filter tari_ootle_wallet_web_ui test
 
       # The swarm daemon web UI is a standalone npm project, not part of the pnpm workspace.
       - name: build swarm daemon web UI
@@ -228,7 +231,7 @@ jobs:
         uses: actions/checkout@v7.0.1
 
       - name: Install cargo-machete
-        uses: taiki-e/install-action@v2.87.31
+        uses: taiki-e/install-action@v2.88.1
         with:
           tool: cargo-machete
 
@@ -261,7 +264,7 @@ jobs:
           node-version-file: .nvmrc
 
       - name: Install wasm-pack
-        uses: taiki-e/install-action@v2.87.31
+        uses: taiki-e/install-action@v2.88.1
         with:
           tool: wasm-pack@0.15.0
 
@@ -349,7 +352,7 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2.87.31
+        uses: taiki-e/install-action@v2.88.1
         with:
           tool: cargo-nextest
 

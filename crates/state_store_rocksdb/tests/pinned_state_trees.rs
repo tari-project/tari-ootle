@@ -330,6 +330,58 @@ fn truncating_below_a_deferred_stale_version_keeps_its_nodes_live() {
         .unwrap();
 }
 
+#[test]
+fn truncating_releases_only_the_deferred_stale_nodes_above_the_target_of_every_pin() {
+    let (store, _tmp) = create_store();
+    // Each node is kept for the highest pin in [created, stale_at): `held_below` for pin 1 and `held_at` for pin 3 go
+    // stale at or below the target, `released_3` for pin 3 and `released_5` for pin 5 above it.
+    let held_below = NodeKey::new_empty_path(1);
+    let held_at = NodeKey::new_empty_path(3);
+    let released_3 = NodeKey::new_empty_path(2);
+    let released_5 = NodeKey::new_empty_path(5);
+    let target = 4;
+    let latest = 6 + HISTORY;
+    store
+        .with_write_tx(|tx| {
+            tx.state_tree_nodes_batch_insert(SHARD, &[
+                (held_below.clone(), Node::Null),
+                (released_3.clone(), Node::Null),
+                (held_at.clone(), Node::Null),
+                (NodeKey::new_empty_path(4), Node::Null),
+                (released_5.clone(), Node::Null),
+            ])?;
+            tx.state_tree_nodes_record_stale_tree_nodes(SHARD, 2, &[StaleTreeNode::Node(held_below.clone())])?;
+            tx.state_tree_nodes_record_stale_tree_nodes(SHARD, 4, &[StaleTreeNode::Node(held_at.clone())])?;
+            tx.state_tree_nodes_record_stale_tree_nodes(SHARD, 5, &[StaleTreeNode::Node(released_3.clone())])?;
+            tx.state_tree_nodes_record_stale_tree_nodes(SHARD, 6, &[StaleTreeNode::Node(released_5.clone())])?;
+            tx.state_tree_shard_versions_set(SHARD, latest)?;
+            let mut retention = StateTreeRetention::default();
+            retention
+                .add_shard(SHARD, latest)
+                .pin(SHARD, 1)
+                .pin(SHARD, 3)
+                .pin(SHARD, 5);
+            tx.state_tree_nodes_clear_stale(&retention, usize::MAX)?;
+
+            tx.state_tree_truncate_to_version(SHARD, target)?;
+            // With every pin released, the nodes still deferred are deleted.
+            let mut retention = StateTreeRetention::default();
+            retention.add_shard(SHARD, latest);
+            tx.state_tree_nodes_clear_stale(&retention, usize::MAX)?;
+            Ok::<_, StorageError>(())
+        })
+        .unwrap();
+    store
+        .with_read_tx(|tx| {
+            assert!(tx.state_tree_nodes_get(SHARD, &held_below).optional()?.is_none());
+            assert!(tx.state_tree_nodes_get(SHARD, &held_at).optional()?.is_none());
+            // Live again at the target, so kept.
+            assert!(tx.state_tree_nodes_get(SHARD, &released_3).optional()?.is_some());
+            Ok::<_, StorageError>(())
+        })
+        .unwrap();
+}
+
 fn checkpoint(epoch: u64, shard_versions: &[(Shard, Version)]) -> EpochCheckpoint {
     let shard_group = ShardGroup::all_shards(num_preshards());
     let key = LeafKey::new(TreeHash::new([7; 32]));

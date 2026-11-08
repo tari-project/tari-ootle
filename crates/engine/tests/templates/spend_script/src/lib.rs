@@ -35,6 +35,9 @@ mod spend_scripts {
         /// Unconditionally authorises the spend.
         pub fn always_ok(_ctx: SpendContext) {}
 
+        /// Unconditionally authorises the spend, ignoring a bound byte-vector argument.
+        pub fn always_ok_with_bytes(_ignored: Vec<u8>, _ctx: SpendContext) {}
+
         /// Unconditionally rejects the spend.
         pub fn always_reject(_ctx: SpendContext) {
             panic!("spend always rejected");
@@ -64,6 +67,13 @@ mod spend_scripts {
         /// Exercises `signature_invoke` from inside a spend script.
         pub fn require_signature(public_key: PublicKey, signature: Signature<SpendSigDomain>, _ctx: SpendContext) {
             assert!(signature.verify(&public_key, SIG_MESSAGE), "invalid spend signature");
+        }
+
+        /// Signer lock: authorises only if the spending call carries the badge of `public_key`. A predicate reached
+        /// from a `StealthTransfer` instruction carries the transaction signers' badges; one reached through a
+        /// component's frame carries that component's caller badges instead.
+        pub fn require_signer_badge(public_key: RistrettoPublicKeyBytes, _ctx: SpendContext) {
+            CallerContext::assert_badge_in_scope(&NonFungibleAddress::from_public_key(public_key));
         }
 
         /// Witness-data lock: authorises only if the spend-supplied witness `data` equals the committed `expected`
@@ -109,6 +119,16 @@ mod spend_scripts {
                 .initial_supply(1u32)
         }
 
+        /// Creates a fungible resource guarded by an authorization hook on `component`.
+        pub fn create_hooked_mintable_resource(component: ComponentAddress) -> Bucket {
+            ResourceBuilder::public_fungible()
+                .mintable(rule!(allow_all), LOCKED)
+                .with_authorization_hook(component, "auth_hook")
+                .initial_supply(1u32)
+        }
+
+        pub fn auth_hook(&self, _action: ResourceAuthAction, _caller: AuthHookCaller) {}
+
         /// Attempts a cross-template call. `call_invoke` is on the read-only deny-list (and cross-template calls are
         /// disabled at the frame level), so this always aborts the spend before the target runs.
         pub fn try_cross_template_call(template: TemplateAddress, _ctx: SpendContext) {
@@ -127,6 +147,9 @@ mod spend_scripts {
         pub fn bad_mutable(&mut self, _ctx: SpendContext) {
             self.nonce += 1;
         }
+
+        /// Component method — rejected because its first argument is the `&self` receiver.
+        pub fn bad_receiver(&self, _ctx: SpendContext) {}
 
         /// Non-unit return — rejected at creation time.
         pub fn bad_returns_value(_ctx: SpendContext) -> u32 {

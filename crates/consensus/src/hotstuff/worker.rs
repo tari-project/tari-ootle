@@ -195,6 +195,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             transaction_executor.clone(),
             config.consensus_constants.max_transaction_validity_epochs,
             config.consensus_constants.max_block_pledge_bytes,
+            config.consensus_constants.max_transaction_input_load_bytes,
         );
         let uncommitted_templates = transaction_manager.uncommitted_templates().clone();
 
@@ -471,6 +472,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
             // Need to update epoch state if the epoch has changed
             if epoch_state.epoch != current_epoch {
+                self.worker_state.has_processed_first_block = false;
                 let exhaust_burn_rate = self.epoch_exhaust_burn_rate(current_epoch)?;
                 epoch_state
                     .update_from_epoch_manager(&self.epoch_manager, current_epoch, exhaust_burn_rate)
@@ -510,8 +512,18 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             );
 
             tokio::select! {
-                Ok(event) = epoch_manager_events.recv() => {
-                    self.on_epoch_manager_event(event).await?;
+                result = epoch_manager_events.recv() => match result {
+                    Ok(event) => {
+                        self.on_epoch_manager_event(event).await?;
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(target: LOG_TARGET, "Epoch manager event subscriber lagged by {} event(s)", n);
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        return Err(HotStuffError::InternalChannelClosed {
+                            context: "receiving epoch manager event",
+                        });
+                    },
                 },
 
                 forced_height = on_force_beat.wait() => {
@@ -710,7 +722,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let made_progress = !transactions.is_empty();
         self.on_receive_new_transaction
             .process_requested(
-                epoch_state.epoch(),
+                epoch,
                 from.clone(),
                 block_id,
                 transactions,
@@ -905,6 +917,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 // available.
                 self.try_resume_pending_end_of_epoch().await?;
             },
+            // A running node is already a committee member, so it has nothing to presync.
+            EpochManagerEvent::PendingActivation { .. } => {},
         }
 
         Ok(())
@@ -1670,6 +1684,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             self.on_receive_local_proposal.handle(epoch_state, msg, origin).await,
         ) {
             Ok(no_vote) => {
+                let current_height = self.pacemaker.current_view().get_height();
                 if let Some(mut catch_up) = self.worker_state.catch_up.take() {
                     if current_height >= catch_up.expected_batch_height {
                         if catch_up.set_next_batch(current_height, self.config.catch_up_request_timeout) {

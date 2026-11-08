@@ -178,6 +178,17 @@ impl JsonRpcHandlers {
         self.config.validator_node.sidechain_id.as_ref()
     }
 
+    fn compressed_sidechain_id(&self) -> Option<CompressedPublicKey> {
+        self.sidechain_id().map(|s| {
+            // The following is guaranteed to be infallible (invariant), more of a shortcoming of the
+            // CompressedPublicKey API. new_from_pk requires a clone
+            CompressedPublicKey::from_canonical_bytes(s.as_bytes()).expect(
+                "INVARIANT VIOLATION: CompressedPublicKey::from_canonical_bytes(sidechain_id.as_bytes()) returned an \
+                 error",
+            )
+        })
+    }
+
     pub fn networking_is_active(&self) -> bool {
         !self.networking.is_closed()
     }
@@ -506,9 +517,9 @@ impl JsonRpcHandlers {
                 .iter()
                 .map(|f| FunctionDef {
                     name: f.name.clone(),
+                    kind: f.kind.clone(),
                     arguments: f.arguments.to_vec(),
                     output: f.output.to_string(),
-                    is_mut: f.is_mut,
                 })
                 .collect(),
             version: loaded.template_def().abi_version(),
@@ -929,14 +940,7 @@ impl JsonRpcHandlers {
 
                 // Use the currently configured fee claim public key
                 let fee_claim_public_key = self.config.validator_node.fee_claim_public_key.to_byte_type();
-                let sidechain_id = self.sidechain_id().map(|s| {
-                    // The following is guaranteed to be infallible (invariant), more of a shortcoming of the
-                    // CompressedPublicKey API. new_from_pk requires a clone
-                    CompressedPublicKey::from_canonical_bytes(s.as_bytes()).expect(
-                        "INVARIANT VIOLATION: \
-                         CompressedPublicKey::from_canonical_bytes(fee_claim_public_key.as_bytes()) returned an error",
-                    )
-                });
+                let sidechain_id = self.compressed_sidechain_id();
                 // TODO: we permit the registration within the next 3 epochs. Since we scan behind the chain, this
                 // should be set according to the number of epochs behind (consensus constants) rather than arbitrarily.
                 let max_epoch = current_epoch + Epoch(3);
@@ -1000,12 +1004,12 @@ impl JsonRpcHandlers {
                     .get_our_validator_node(current_epoch)
                     .await
                     .map_err(internal_error(answer_id.clone()))?;
+                let sidechain_id = self.compressed_sidechain_id();
                 let max_epoch = current_epoch + Epoch(3);
                 let signature = ValidatorNodeSignature::sign_for_exit(
                     self.keypair.secret_key(),
                     self.config.network.as_byte(),
-                    // TODO: sidechain support
-                    None,
+                    sidechain_id.as_ref(),
                     registration.start_epoch.as_u64().into(),
                     max_epoch.as_u64().into(),
                 );

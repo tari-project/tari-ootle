@@ -530,15 +530,6 @@ pub struct FunctionAst {
     // pub is_public: bool,
 }
 
-impl FunctionAst {
-    /// Returns true if the any argument is a &mut Self receiver
-    pub fn is_mut(&self) -> bool {
-        self.input_types
-            .iter()
-            .any(|t| matches!(t, TypeAst::Receiver { mutability: true }))
-    }
-}
-
 pub enum TypeAst {
     Receiver {
         mutability: bool,
@@ -601,8 +592,13 @@ mod stateless_tests {
         assert_eq!(ast.functions.len(), 2);
         assert_eq!(ast.functions[0].name, "add");
         assert_eq!(ast.functions[1].name, "mul");
-        // No function touches `self`, so none is mutable.
-        assert!(ast.functions.iter().all(|f| !f.is_mut()));
+        // A stateless template has no component, so no function takes a receiver.
+        assert!(
+            ast.functions
+                .iter()
+                .flat_map(|f| &f.input_types)
+                .all(|t| !matches!(t, super::TypeAst::Receiver { .. }))
+        );
     }
 
     #[test]

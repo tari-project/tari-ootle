@@ -10,7 +10,7 @@ use axum::{
 };
 use serde_json::json;
 use tari_ootle_storage::Ordering;
-use tari_state_store_rocksdb::column_families;
+use tari_state_store_rocksdb::{column_families, error::RocksDbStorageError, traits::Cf};
 
 use crate::webserver::{
     context::HandlerContext,
@@ -40,14 +40,16 @@ pub async fn list(
     } else {
         Ordering::Ascending
     };
-    let iter = if let Some(prefix_hex) = req.query.as_ref() {
-        let key_prefix =
-            decode_hex_prefix::<column_families::foreign_substate_pledge::ForeignSubstatePledgeCf>(prefix_hex)?;
-        cf.range_iterator(ordering, key_prefix.as_slice()..)
-    } else {
-        let empty = Vec::<u8>::new();
-        cf.range_iterator(ordering, empty.as_slice()..)
-    };
+    type Key = <column_families::foreign_substate_pledge::ForeignSubstatePledgeCf as Cf>::Key;
+    type Value = <column_families::foreign_substate_pledge::ForeignSubstatePledgeCf as Cf>::Value;
+    let iter: Box<dyn Iterator<Item = Result<(Key, Value), RocksDbStorageError>>> =
+        if let Some(prefix_hex) = req.query.as_ref().filter(|q| !q.is_empty()) {
+            let key_prefix =
+                decode_hex_prefix::<column_families::foreign_substate_pledge::ForeignSubstatePledgeCf>(prefix_hex)?;
+            Box::new(cf.prefix_range_iterator_raw_key(ordering, key_prefix))
+        } else {
+            Box::new(cf.iterator(ordering, OPERATION))
+        };
 
     let page_size = req.limit.unwrap_or(1_000);
     let skip = req.page.unwrap_or(0).saturating_mul(page_size);

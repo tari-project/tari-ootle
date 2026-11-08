@@ -19,7 +19,11 @@ pub fn create_badge_resource(recall_rule: AccessRule) -> Bucket {
 
 #[template]
 mod access_rules_template {
-    use tari_template_lib::types::{FunctionName, SubstateOwnerRule};
+    use tari_template_lib::types::{
+        FunctionName,
+        SubstateOwnerRule,
+        access_rules::{RequireRule, RuleRequirement},
+    };
 
     use super::*;
 
@@ -329,6 +333,54 @@ mod access_rules_template {
             .create()
         }
 
+        /// Tokens whose withdraw rule tests `unmatched_requirements` badge requirements, which no proof in scope
+        /// satisfies, before a requirement this component's own execution satisfies.
+        pub fn with_withdraw_rule_of_unmatched_requirements(unmatched_requirements: u32) -> Component<AccessRulesTest> {
+            let badges = create_badge_resource(rule!(allow_all));
+            let badge_resource = badges.resource_address();
+            let allocation = CallerContext::allocate_component_address(None);
+
+            let mut requirements = (0..unmatched_requirements)
+                .map(|_| RuleRequirement::Resource(badge_resource))
+                .collect::<Vec<_>>();
+            requirements.push(RuleRequirement::ScopedToComponent(allocation.get_address()));
+            let withdraw_rule = AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::AnyOf(
+                requirements.into_boxed_slice(),
+            )));
+
+            let tokens = ResourceBuilder::public_fungible()
+                .with_owner_rule(OwnerRule::None)
+                .withdrawable(withdraw_rule, LOCKED)
+                .initial_supply(1000u32);
+
+            Component::new(Self {
+                value: 0,
+                tokens: Vault::from_bucket(tokens),
+                badges: Vault::from_bucket(badges),
+                allowed: true,
+                attack_component: None,
+            })
+            .with_address_allocation(allocation)
+            .with_access_rules(ComponentAccessRules::new().default(rule!(allow_all)))
+            .create()
+        }
+
+        /// Creates `count` proofs of the tokens, opening an authorization window over each so every later one is
+        /// authorized with all of them in scope, then closes the windows and drops the proofs.
+        pub fn hold_token_proofs(&mut self, count: u32) {
+            let mut proofs = Vec::with_capacity(count as usize);
+            let mut windows = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                let proof = self.tokens.create_proof_by_amount(1u32);
+                windows.push(proof.authorize());
+                proofs.push(proof);
+            }
+            drop(windows);
+            for proof in proofs {
+                proof.drop();
+            }
+        }
+
         /// Custom resource auth hook
         pub fn valid_auth_hook(&self, action: ResourceAuthAction, caller: AuthHookCaller) {
             assert_eq!(
@@ -419,15 +471,38 @@ mod access_rules_template {
             let _bucket = ResourceManager::get(self.badges.resource_address()).mint_fungible(1u32);
         }
 
-        /// Reads the resource the hook guards. A resource action that write-locks the resource must release that
-        /// lock across the hook call, or this read is refused.
-        pub fn hook_reads_own_resource(&self, action: ResourceAuthAction, _caller: AuthHookCaller) {
+        /// Reads the resource the hook guards and, when the acting component is an account, reads the balance of its
+        /// vault for that resource. Actions that write-lock the resource or vault must release those locks across the
+        /// hook call, or these reads are refused.
+        ///
+        /// Withdrawals and proof creation act on an existing vault, so the account must hold one. A deposit into a
+        /// new vault runs the hook before the account's state records that vault, so a deposit reads the vault only
+        /// when the stored state already holds it.
+        pub fn hook_reads_own_resource(&self, action: ResourceAuthAction, caller: AuthHookCaller) {
             let manager = ResourceManager::get(self.tokens.resource_address());
             assert_eq!(
                 manager.resource_type(),
                 ResourceType::Fungible,
                 "hook read the wrong resource for action {action:?}"
             );
+            if let Some(state) = caller.component_state() {
+                let account = tari_template_lib::models::Account::from_value(state)
+                    .expect("acting component state must decode as an Account");
+                let vault = account.get_vault_by_resource(caller.resource());
+                if action == ResourceAuthAction::Withdraw {
+                    let vault = vault.expect("acting account must hold a vault for the guarded resource");
+                    let _balance = vault.balance();
+                } else if let Some(vault) = vault {
+                    let _balance = vault.balance();
+                }
+            }
+        }
+
+        /// Asserts that the hook's frame carries `badge`. A hook frame receives no loan of the acting frame's
+        /// authorized proofs, so a badge carried only by such a proof is absent here.
+        pub fn hook_asserts_badge(&self, _action: ResourceAuthAction, _caller: AuthHookCaller) {
+            let badge = NonFungibleAddress::new(self.badges.resource_address(), NonFungibleId::from_string("mint"));
+            CallerContext::assert_badge_in_scope(&badge);
         }
 
         pub fn invalid_auth_hook2(&self, _action: String, _caller: AuthHookCaller) {}
@@ -435,6 +510,8 @@ mod access_rules_template {
         pub fn invalid_auth_hook3(&self, _action: ResourceAuthAction, _caller: String) {}
 
         pub fn invalid_auth_hook4(&self, _action: ResourceAuthAction, _caller: AuthHookCaller, _third: String) {}
+
+        pub fn invalid_auth_hook6(_first: u32, _action: ResourceAuthAction, _caller: AuthHookCaller) {}
 
         pub fn invalid_auth_hook5(&self, _action: ResourceAuthAction, _caller: AuthHookCaller) -> String {
             unimplemented!()
@@ -464,10 +541,9 @@ mod access_rules_template {
             self.tokens.withdraw(amount)
         }
 
+        /// Tries to authorize a proof it was shown. A shown proof is the caller's to authorize, so this never
+        /// reaches the withdraw: the caller lends authority by authorizing the proof around the call instead.
         pub fn take_tokens_using_proof(&mut self, proof: Proof, amount: Amount) -> Bucket {
-            // let _access = proof.authorize(); is better if you want to panic immediately
-            // try_authorize can be used to determine if access is permitted and still run some other code branch if
-            // not.
             match proof.try_authorize() {
                 Ok(_access) => self.tokens.withdraw(amount),
                 Err(_) => {

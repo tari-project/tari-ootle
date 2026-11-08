@@ -72,7 +72,7 @@ let stealth = sdk.stealth_outputs_api()
 
 // Submit a transaction. A wallet that verifies its indexer holds the transaction back until it trusts a
 // validator set, and leaves submitting it again to the caller.
-let tx_id = sdk.transaction_api().insert_new_transaction(transaction, None, &[], false)?;
+let tx_id = sdk.transaction_api().insert_new_transaction(transaction, None, &[], false, &[])?;
 loop {
     match sdk.transaction_api().submit_transaction(tx_id).await? {
         Submission::Submitted => break,

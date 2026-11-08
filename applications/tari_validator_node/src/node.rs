@@ -55,6 +55,8 @@ impl ValidatorNode {
     pub async fn start(mut self, shutdown: Shutdown) -> Result<(), anyhow::Error> {
         let mut hotstuff_events = self.services.consensus_handle.subscribe_to_hotstuff_events()?;
         let mut epoch_manager_events = self.services.epoch_manager.subscribe();
+        let mut hotstuff_events_closed = false;
+        let mut epoch_events_closed = false;
 
         loop {
             let metrics = tokio::runtime::Handle::current().metrics();
@@ -80,12 +82,30 @@ impl ValidatorNode {
                     break;
                 },
 
-                Ok(event) = hotstuff_events.recv() => if let Err(err) = self.handle_hotstuff_event(event).await {
-                    error!(target: LOG_TARGET, "Error handling hotstuff event: {}", err);
+                result = hotstuff_events.recv(), if !hotstuff_events_closed => match result {
+                    Ok(event) => if let Err(err) = self.handle_hotstuff_event(event).await {
+                        error!(target: LOG_TARGET, "Error handling hotstuff event: {}", err);
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(target: LOG_TARGET, "Hotstuff event subscriber lagged by {} event(s)", n);
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        warn!(target: LOG_TARGET, "Hotstuff event stream closed");
+                        hotstuff_events_closed = true;
+                    },
                 },
 
-                Ok(event) = epoch_manager_events.recv() => if let Err(err) = self.handle_epoch_manager_event(event).await {
-                    error!(target: LOG_TARGET, "Error handling epoch manager event: {}", err);
+                result = epoch_manager_events.recv(), if !epoch_events_closed => match result {
+                    Ok(event) => if let Err(err) = self.handle_epoch_manager_event(event).await {
+                        error!(target: LOG_TARGET, "Error handling epoch manager event: {}", err);
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(target: LOG_TARGET, "Epoch manager event subscriber lagged by {} event(s)", n);
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        warn!(target: LOG_TARGET, "Epoch manager event stream closed");
+                        epoch_events_closed = true;
+                    },
                 },
 
                 result = self.services.on_any_exit() => {
@@ -131,7 +151,9 @@ impl ValidatorNode {
     }
 
     async fn handle_epoch_manager_event(&mut self, event: EpochManagerEvent) -> Result<(), anyhow::Error> {
-        let EpochManagerEvent::EpochChanged { epoch, .. } = event;
+        let EpochManagerEvent::EpochChanged { epoch, .. } = event else {
+            return Ok(());
+        };
         let all_vns = self.services.epoch_manager.get_all_validator_nodes(epoch).await?;
         self.services
             .networking
@@ -152,19 +174,19 @@ impl ValidatorNode {
 
         info!(target: LOG_TARGET, "🏁 Block {} committed", block);
 
-        let committed_transactions = block
+        let finalized_transactions = block
             .commands()
             .iter()
-            .filter_map(|cmd| cmd.committing())
+            .filter_map(|cmd| cmd.finalising())
             .map(|t| *t.id())
             .collect::<Vec<_>>();
 
-        if committed_transactions.is_empty() {
+        if finalized_transactions.is_empty() {
             return Ok(());
         }
 
-        info!(target: LOG_TARGET, "🏁 Removing {} finalized transaction(s) from mempool", committed_transactions.len());
-        if let Err(err) = self.services.mempool.remove_transactions(committed_transactions).await {
+        info!(target: LOG_TARGET, "🏁 Removing {} finalized transaction(s) from mempool", finalized_transactions.len());
+        if let Err(err) = self.services.mempool.remove_transactions(finalized_transactions).await {
             error!(target: LOG_TARGET, "Failed to remove transaction from mempool: {}", err);
         }
 

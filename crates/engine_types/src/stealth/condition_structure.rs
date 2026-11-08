@@ -1,7 +1,10 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_lib::types::stealth::{AtomicCondition, SpendCondition};
+use tari_template_lib::types::{
+    access_rules::MAX_ACCESS_RULE_NODES,
+    stealth::{AtomicCondition, SpendCondition},
+};
 
 use crate::limits;
 
@@ -15,6 +18,8 @@ pub enum ConditionStructureError {
         num_conditions: usize,
         max_conditions: usize,
     },
+    #[error("Spend condition holds {num_nodes} nodes, exceeding the limit of {max_nodes}")]
+    TooManyNodes { num_nodes: usize, max_nodes: usize },
     #[error("{num_consumers} data-consuming builtins; at most one may consume the witness data")]
     MultipleDataConsumers { num_consumers: usize },
     #[error(
@@ -29,7 +34,9 @@ pub enum ConditionStructureError {
 /// that fails here can never be satisfied, so an output whose only spend paths are such leaves is unspendable.
 ///
 /// A leaf is a conjunction of atoms (logical AND). It must be non-empty and must not exceed
-/// `STEALTH_LIMITS.max_conditions_per_conjunction`, which caps the worst-case work of evaluating one leaf.
+/// `STEALTH_LIMITS.max_conditions_per_conjunction`, which caps the worst-case work of evaluating one leaf. It must hold
+/// at most [`MAX_ACCESS_RULE_NODES`] nodes ([`SpendCondition::num_nodes`]), the bound `SpendCondition` decoding
+/// applies, so a leaf that passes here can be revealed in a spend.
 ///
 /// A data-consuming builtin (e.g. a hashlock) reads the entire witness `data` blob as its own raw input and cannot
 /// know the blob's shape relative to siblings, so it must be the sole consumer of `data` in its leaf: a leaf may hold
@@ -46,6 +53,14 @@ pub fn validate_condition_structure(leaf: &SpendCondition) -> Result<(), Conditi
         return Err(ConditionStructureError::TooManyConditions {
             num_conditions: conditions.len(),
             max_conditions,
+        });
+    }
+
+    let num_nodes = leaf.num_nodes();
+    if num_nodes > MAX_ACCESS_RULE_NODES {
+        return Err(ConditionStructureError::TooManyNodes {
+            num_nodes,
+            max_nodes: MAX_ACCESS_RULE_NODES,
         });
     }
 
@@ -121,6 +136,47 @@ mod tests {
         );
         // The limit itself is admissible.
         validate_condition_structure(&SpendCondition::all(vec![context_only(); max_conditions])).unwrap();
+    }
+
+    fn template_function_with_args(num_args: usize) -> AtomicCondition {
+        AtomicCondition::TemplateFunction(TemplateFunction {
+            template: Default::default(),
+            function: "predicate".try_into().unwrap(),
+            args: vec![Default::default(); num_args],
+        })
+    }
+
+    fn decodes(leaf: &SpendCondition) -> bool {
+        tari_bor::decode::<SpendCondition>(&tari_bor::encode(leaf).unwrap()).is_ok()
+    }
+
+    /// A leaf is admissible exactly when it decodes: a leaf that fails decoding can never be revealed in a spend.
+    #[test]
+    fn rejects_a_leaf_over_the_decode_node_limit() {
+        let at_limit = SpendCondition::single(template_function_with_args(MAX_ACCESS_RULE_NODES - 1));
+        assert_eq!(at_limit.num_nodes(), MAX_ACCESS_RULE_NODES);
+        assert!(decodes(&at_limit));
+        validate_condition_structure(&at_limit).unwrap();
+
+        let over_limit = SpendCondition::single(template_function_with_args(MAX_ACCESS_RULE_NODES));
+        assert!(!decodes(&over_limit));
+        assert_eq!(
+            validate_condition_structure(&over_limit),
+            Err(ConditionStructureError::TooManyNodes {
+                num_nodes: MAX_ACCESS_RULE_NODES + 1,
+                max_nodes: MAX_ACCESS_RULE_NODES,
+            })
+        );
+
+        // Atoms each within the limit whose sum exceeds it.
+        let half = MAX_ACCESS_RULE_NODES / 2;
+        let conjunction = SpendCondition::all([template_function_with_args(half), template_function_with_args(half)]);
+        assert!(conjunction.num_nodes() > MAX_ACCESS_RULE_NODES);
+        assert!(!decodes(&conjunction));
+        assert!(matches!(
+            validate_condition_structure(&conjunction),
+            Err(ConditionStructureError::TooManyNodes { .. })
+        ));
     }
 
     #[test]

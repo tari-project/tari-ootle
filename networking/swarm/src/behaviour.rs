@@ -3,7 +3,7 @@
 
 use std::{
     collections::{HashSet, hash_map::DefaultHasher},
-    hash::Hasher,
+    hash::{Hash, Hasher},
 };
 
 use libp2p::{
@@ -220,7 +220,7 @@ fn create_gossipsub(keypair: &Keypair, config: &Config) -> Result<gossipsub::Beh
         .max_transmit_size(config.gossip_sub_max_message_size)
         .validation_mode(gossipsub::ValidationMode::Strict) // This sets the kind of message validation. The default is Strict (enforce message signing)
         .validate_messages()
-        .message_id_fn(get_message_id) // content-address messages. No two messages of the same content will be propagated.
+        .message_id_fn(get_message_id) // An author's identical messages are propagated once.
         .history_length(config.gossip_sub_history_length)
         .history_gossip(config.gossip_sub_history_gossip)
         .duplicate_cache_time(config.gossip_sub_duplicate_cache_time)
@@ -275,11 +275,16 @@ fn create_relay_config(circuit: &RelayCircuitLimits, reservations: &RelayReserva
     config
 }
 
-/// Generates a hash of contents of the message
+/// Identifies a message by its author, content and topic.
+///
+/// Receivers may judge a message by who authored it, so identical bytes from different authors are distinct messages.
+/// gossipsub records an id on arrival, before the application's verdict, and keeps it after a `Reject`; scoping the id
+/// to the author keeps one author's copy from suppressing another author's.
 fn get_message_id(message: &gossipsub::Message) -> gossipsub::MessageId {
     let mut hasher = DefaultHasher::new();
-    hasher.write(&message.data);
-    hasher.write(message.topic.as_str().as_bytes());
+    message.source.hash(&mut hasher);
+    message.data.hash(&mut hasher);
+    message.topic.as_str().hash(&mut hasher);
     gossipsub::MessageId::from(hasher.finish().to_be_bytes())
 }
 

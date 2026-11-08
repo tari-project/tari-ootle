@@ -76,7 +76,14 @@ where
                         ),
                     });
                 }
-                store.put(msg).await.map_err(|e| Error::StoreError(e.to_string()))?;
+                let updated_at = msg.updated_at;
+                let is_stored = store
+                    .put_unless_older(msg)
+                    .await
+                    .map_err(|e| Error::StoreError(e.to_string()))?;
+                if !is_stored {
+                    tracing::debug!("Ignoring stale local peer record from {peer_id} (updated_at={updated_at:?})");
+                }
                 received_remote_peer_record = true;
             },
             proto::mod_Message::OneOfpayload::WantPeers(msg) => {
@@ -134,11 +141,12 @@ where
             details: format!("invalid peer id in requested want_list: {e}"),
         })?;
 
+    let mut peers_sent = 0;
     let event = loop {
         if remaining_want_list.is_empty() {
             break Event::InboundRequestCompleted {
                 peer_id,
-                peers_sent: orig_want_list_len - remaining_want_list.len(),
+                peers_sent,
                 requested: orig_want_list_len,
             };
         }
@@ -146,7 +154,7 @@ where
         let Some(result) = store_stream.next().await else {
             break Event::InboundRequestCompleted {
                 peer_id,
-                peers_sent: orig_want_list_len - remaining_want_list.len(),
+                peers_sent,
                 requested: orig_want_list_len,
             };
         };
@@ -171,6 +179,7 @@ where
                 break Event::Error(Error::CodecError(e));
             }
         }
+        peers_sent += 1;
     };
 
     if let Err(err) = framed.close().await {
@@ -256,8 +265,20 @@ mod tests {
                 .unwrap();
             assert_eq!(store.get(&peer_id).await.unwrap().unwrap().addresses.len(), 1);
 
-            let framed2 = make_inbound_framed(vec![proto::SignedPeerRecord::from(&signed2).into(), none_msg]);
+            let framed2 = make_inbound_framed(vec![proto::SignedPeerRecord::from(&signed2).into(), none_msg.clone()]);
             inbound_sync_task_inner(peer_id, framed2, store.clone(), Config::default())
+                .await
+                .unwrap();
+            assert_eq!(store.get(&peer_id).await.unwrap().unwrap().addresses.len(), 2);
+
+            let mut stale = signed1;
+            stale.updated_at = stale.updated_at.saturating_sub(std::time::Duration::from_secs(10));
+            stale.signature = crate::PeerSignature::sign(
+                &kp,
+                &crate::peer_record::peer_signature_challenge(&stale.addresses, &stale.updated_at),
+            );
+            let framed_stale = make_inbound_framed(vec![proto::SignedPeerRecord::from(&stale).into(), none_msg]);
+            inbound_sync_task_inner(peer_id, framed_stale, store.clone(), Config::default())
                 .await
                 .unwrap();
             assert_eq!(store.get(&peer_id).await.unwrap().unwrap().addresses.len(), 2);

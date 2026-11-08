@@ -80,7 +80,7 @@ println!("Hash: {hash}");
 | `documentation` | `[package.metadata.tari-template] documentation` (parsed as `Url`) |
 | `homepage` | `[package.metadata.tari-template] homepage` (parsed as `Url`) |
 | `logo_url` | `[package.metadata.tari-template] logo_url` (parsed as `Url`) |
-| `supersedes` | `[package.metadata.tari-template] supersedes` (64-char hex template address) |
+| `supersedes` | `[package.metadata.tari-template] supersedes` (64-char hex template address, optionally `template_`-prefixed) |
 | `extra` | `[package.metadata.tari-template] extra` |
 
 ## Features

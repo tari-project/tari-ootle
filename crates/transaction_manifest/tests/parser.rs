@@ -1530,3 +1530,246 @@ fn doc_comments_and_attributes_are_ignored() {
     assert_eq!(instructions.len(), 1);
     assert_eq!(fee_instructions.len(), 1);
 }
+
+#[test]
+fn multi_segment_call_and_argument_paths_are_rejected() {
+    const STMT_CALL: &str = "Invalid function call, expected `Template::function(..)` or `local_function()`";
+    const LET_CALL: &str = "Invalid function call, expected `Template::function(..)`";
+    const ARG_PATH: &str = "Invalid path, only single segment paths are supported";
+    let cases = [
+        ("fn main() { Foo::Bar::baz(); }", STMT_CALL),
+        ("fn main() { let x = Foo::Bar::baz(); }", LET_CALL),
+        ("fn main() { ::Foo::bar(); }", STMT_CALL),
+        ("fn main() { let x = ::Foo::bar(); }", LET_CALL),
+        ("fn main() { Foo::bar(Baz::Qux); }", ARG_PATH),
+    ];
+    for (manifest, expected) in cases {
+        let err = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default())
+            .err()
+            .expect("Expected syntax error for invalid path");
+        assert_eq!(
+            err.to_string(),
+            format!("Syntax error: {expected}"),
+            "Unexpected error for `{manifest}`"
+        );
+    }
+}
+
+#[test]
+fn local_function_call_with_arguments_is_rejected() {
+    let manifest = r#"
+        fn helper() {
+            drop_all_proofs!();
+        }
+
+        fn main() {
+            helper(1);
+        }
+    "#;
+
+    let err = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("local function calls take no arguments");
+    assert!(err.to_string().contains("take no arguments"), "{err}");
+}
+
+#[test]
+fn duplicate_functions_and_tuple_bindings_are_rejected() {
+    let dup_fn = r#"
+        fn helper() {}
+        fn helper() {}
+        fn main() {}
+    "#;
+    let err = parse_manifest(dup_fn, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("duplicate helper function should fail");
+    assert!(err.to_string().contains("duplicate function `helper`"), "{err}");
+
+    for name in ["main", "fee_main"] {
+        let dup_entry = format!("fn {name}() {{ drop_all_proofs!(); }} fn {name}() {{ drop_all_proofs!(); }}");
+        let err = parse_manifest(&dup_entry, HashMap::new(), Default::default(), Default::default())
+            .err()
+            .unwrap_or_else(|| panic!("duplicate `{name}` should fail"));
+        assert!(
+            err.to_string().contains(&format!("duplicate function `{name}`")),
+            "{err}"
+        );
+    }
+
+    let dup_tuple = r#"
+        fn main() {
+            let (a, a) = comp.redeem(100);
+        }
+    "#;
+    let err = parse_manifest(dup_tuple, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("duplicate identifier in tuple pattern should fail");
+    assert!(
+        err.to_string()
+            .contains("identifier `a` is bound more than once in the same pattern"),
+        "{err}"
+    );
+}
+
+#[test]
+fn zero_arg_macros_reject_arguments() {
+    let cases = [
+        "fn main() { let a = new_component_addr!(1); }",
+        "fn main() { let r = new_resource_addr!(1); }",
+        "fn main() { drop_all_proofs!(1); }",
+    ];
+    for manifest in cases {
+        let err = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default())
+            .err()
+            .expect("zero-arg macro with arguments should fail");
+        assert!(err.to_string().contains("takes no arguments"), "{err}");
+    }
+}
+
+#[test]
+fn main_bindings_do_not_leak_into_fee_main() {
+    let manifest = r#"
+        fn main() {
+            let account = new_component_addr!();
+            let main_only = new_component_addr!();
+            account.deposit(main_only);
+        }
+
+        fn fee_main() {
+            let fee_comp = new_component_addr!();
+            account.pay_fee(fee_comp);
+        }
+    "#;
+    let globals = HashMap::from([("account".to_string(), caller_component())]);
+    let ManifestInstructions {
+        instructions,
+        fee_instructions,
+        ..
+    } = parse_manifest(manifest, globals.clone(), Default::default(), Default::default()).unwrap();
+
+    // In `main()`, `account` is bound to workspace 0 and `main_only` to workspace 1.
+    assert_eq!(instructions[0], Instruction::AllocateAddress {
+        allocatable_type: AllocatableAddressType::Component,
+        workspace_id: 0,
+    });
+    assert_eq!(instructions[1], Instruction::AllocateAddress {
+        allocatable_type: AllocatableAddressType::Component,
+        workspace_id: 1,
+    });
+    let Instruction::CallMethod { call, .. } = &instructions[2] else {
+        panic!("expected a method call in main");
+    };
+    assert_eq!(*call, ComponentReference::Workspace(0));
+
+    // In `fee_main()`, `account` must resolve to the caller-supplied global (not `main()`'s workspace 0),
+    // and `fee_comp` starts at workspace 0 (since the runtime clears the workspace at the fee checkpoint).
+    assert_eq!(fee_instructions[0], Instruction::AllocateAddress {
+        allocatable_type: AllocatableAddressType::Component,
+        workspace_id: 0,
+    });
+    let Instruction::CallMethod { call, args, .. } = &fee_instructions[1] else {
+        panic!("expected a method call in fee_main");
+    };
+    assert_eq!(
+        *call,
+        ComponentReference::Address(ComponentAddress::new([9u8; ObjectKey::LENGTH].into()))
+    );
+    assert_eq!(*args, vec![InstructionArg::Workspace(WorkspaceOffsetId::new(0))]);
+
+    // Referencing a binding defined only in `main()` from `fee_main()` must fail as undefined.
+    let leaked_manifest = r#"
+        fn main() {
+            let main_only = new_component_addr!();
+        }
+
+        fn fee_main() {
+            main_only.pay_fee(100);
+        }
+    "#;
+    let err = parse_manifest(leaked_manifest, globals, Default::default(), Default::default())
+        .err()
+        .expect("a binding from main() must not be visible in fee_main()");
+    assert_eq!(err.to_string(), "Variable 'main_only' is not defined");
+}
+
+#[test]
+fn nested_cbor_and_metadata_macros_enforce_cumulative_depth() {
+    fn nest(levels: usize, inner: &str) -> String {
+        format!("{}{inner}{}", "[".repeat(levels), "]".repeat(levels))
+    }
+
+    let max = tari_bor::MAX_DECODE_DEPTH;
+    let address = r#"address!("component_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")"#;
+    let metadata = r#"metadata!({"k": 1})"#;
+    // Each pair puts the innermost item at depth MAX_DECODE_DEPTH - 1, which decodes, and at
+    // MAX_DECODE_DEPTH, which does not. A nested `cbor!` adds its own brackets, `metadata!` adds a tag
+    // and a map level, and `address!` adds a tag level.
+    let cases = [
+        ("plain arrays", nest(max - 1, "1"), nest(max, "1")),
+        (
+            "nested cbor!",
+            nest(31, &format!("cbor!({})", nest(32, "1"))),
+            nest(32, &format!("cbor!({})", nest(32, "1"))),
+        ),
+        ("nested metadata!", nest(max - 3, metadata), nest(max - 2, metadata)),
+        ("tagged address!", nest(max - 2, address), nest(max - 1, address)),
+    ];
+
+    for (name, deepest_valid, too_deep) in cases {
+        let manifest = |arg: &str| {
+            format!(
+                r#"
+                use template_{LIST_TEMPLATE} as MyTemplate;
+                fn main() {{
+                    MyTemplate::create(cbor!({arg}));
+                }}
+            "#
+            )
+        };
+        parse_manifest(
+            &manifest(&deepest_valid),
+            HashMap::new(),
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap_or_else(|e| panic!("{name}: depth MAX_DECODE_DEPTH - 1 must parse: {e}"));
+        let err = parse_manifest(
+            &manifest(&too_deep),
+            HashMap::new(),
+            Default::default(),
+            Default::default(),
+        )
+        .err()
+        .unwrap_or_else(|| panic!("{name}: depth MAX_DECODE_DEPTH must be rejected"));
+        assert!(err.to_string().contains("nested deeper than"), "{name}: {err}");
+    }
+}
+
+#[test]
+fn duplicate_keyword_args_in_create_account_and_publish_template_are_rejected() {
+    let cases = [
+        (
+            "fn main() { create_account!(pk, owner_rule = r1, owner_rule = r2); }",
+            "duplicate `owner_rule` argument in create_account!",
+        ),
+        (
+            "fn main() { create_account!(pk, access_rules = a1, access_rules = a2); }",
+            "duplicate `access_rules` argument in create_account!",
+        ),
+        (
+            "fn main() { create_account!(pk, bucket = b1, bucket = b2); }",
+            "duplicate `bucket` argument in create_account!",
+        ),
+        (
+            r#"fn main() { publish_template!(wasm, metadata = "00", metadata = "11"); }"#,
+            "duplicate `metadata` argument in publish_template!",
+        ),
+    ];
+
+    for (manifest, expected) in cases {
+        let err = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default())
+            .err()
+            .unwrap_or_else(|| panic!("expected duplicate keyword error for {manifest}"));
+        assert!(err.to_string().contains(expected), "unexpected error: {err}");
+    }
+}

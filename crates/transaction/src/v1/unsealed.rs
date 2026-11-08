@@ -14,11 +14,19 @@ use crate::{
     Blobs,
     Instruction,
     IntoSigned,
+    MAX_SIGNATURES_PER_TRANSACTION,
     Transaction,
     TransactionSealSignature,
     signable::Signable,
     v1::{signature::TransactionSignature, transaction::TransactionV1, unsigned::UnsignedTransactionV1},
 };
+
+pub(crate) fn decode_signatures<'b, C>(
+    d: &mut minicbor::Decoder<'b>,
+    ctx: &mut C,
+) -> Result<Vec<TransactionSignature>, minicbor::decode::Error> {
+    tari_bor::adapters::bounded_vec::decode(d, ctx, MAX_SIGNATURES_PER_TRANSACTION)
+}
 
 #[derive(Debug, Clone, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -27,6 +35,7 @@ pub struct UnsealedTransactionV1 {
     #[n(0)]
     transaction: UnsignedTransactionV1,
     #[n(1)]
+    #[cbor(decode_with = "decode_signatures")]
     signatures: Vec<TransactionSignature>,
 }
 

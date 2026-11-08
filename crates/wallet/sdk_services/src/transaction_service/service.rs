@@ -33,7 +33,7 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_shutdown::ShutdownSignal;
 use tokio::{
-    sync::{Semaphore, mpsc, watch},
+    sync::{Semaphore, broadcast, mpsc, watch},
     time,
     time::MissedTickBehavior,
 };
@@ -203,9 +203,20 @@ where
                         error!(target: LOG_TARGET, "Error handling request: {}", err);
                     }
                 },
-                Ok(event) = events_subscription.recv() => {
-                    if let Err(e) = self.on_event(event) {
-                        error!(target: LOG_TARGET, "Error handling event: {}", e);
+                result = events_subscription.recv() => {
+                    match result {
+                        Ok(event) => {
+                            if let Err(e) = self.on_event(event) {
+                                error!(target: LOG_TARGET, "Error handling event: {}", e);
+                            }
+                        },
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(target: LOG_TARGET, "Transaction service lagged behind by {} event(s)", n);
+                            self.check_all_on_next_tick = true;
+                        },
+                        Err(broadcast::error::RecvError::Closed) => {
+                            break Ok(());
+                        },
                     }
                 },
 
@@ -327,13 +338,15 @@ where
             .as_ref()
             .map(|c| c.linked_accounts.as_slice())
             .unwrap_or_default();
-        // The poll submits a stored transaction, so the lock is linked first: an error returned from here on means
-        // the wallet holds no transaction for the caller's inputs.
-        if let Some(lock_id) = lock_id {
-            transaction_api.locks_set_transaction_id(lock_id, transaction.calculate_id())?;
-        }
-        let transaction_id =
-            transaction_api.insert_new_transaction(transaction, new_account_info, linked_accounts, false)?;
+        // The poll submits any stored transaction, so the lock is linked in the write that stores it: an error
+        // returned from here on means the wallet holds no transaction for the caller's inputs.
+        let transaction_id = transaction_api.insert_new_transaction(
+            transaction,
+            new_account_info,
+            linked_accounts,
+            false,
+            lock_id.as_slice(),
+        )?;
 
         // A poll can submit the transaction while this call waits on the validator set, so the context is in place
         // before the submission starts.

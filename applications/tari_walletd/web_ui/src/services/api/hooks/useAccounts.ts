@@ -326,7 +326,7 @@ export const useMintTestnetFaucetNfts = () => {
 
 export const useAccountsList = (offset: number, limit: number, enabled: boolean = true) => {
   return useQuery({
-    queryKey: ["accounts"],
+    queryKey: ["accounts", offset, limit],
     queryFn: () => accountsList({ offset, limit }),
     enabled,
   });

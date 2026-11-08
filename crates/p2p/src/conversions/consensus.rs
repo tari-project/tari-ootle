@@ -84,6 +84,7 @@ use tari_ootle_storage::{
         ForeignProposalAtom,
         LeaderFee,
         LocalOnlyAtom,
+        LockedEpoch,
         MultiShardAtom,
         SubstateCreated,
         SubstateDestroyed,
@@ -92,7 +93,7 @@ use tari_ootle_storage::{
 };
 use tari_ootle_transaction::TransactionId;
 use tari_sidechain::{QcSignatures, SignerBitmap, ValidatorBlockSignature};
-use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
     encoding::{decode_from_slice, encode_to_vec},
@@ -817,7 +818,34 @@ impl From<&MultiShardAtom> for proto::consensus::MultiShardAtom {
             fee: value.transaction_fee,
             leader_fee: value.leader_fee.as_ref().map(|a| a.into()),
             fee_intent_only: value.fee_intent_only,
+            locked_epoch: Some((&value.locked_epoch).into()),
         }
+    }
+}
+
+impl From<&LockedEpoch> for proto::consensus::LockedEpoch {
+    fn from(value: &LockedEpoch) -> Self {
+        Self {
+            epoch: value.epoch().as_u64(),
+            hash: value.hash().as_slice().to_vec(),
+            exhaust_burn_rate_bps: u32::from(value.exhaust_burn_rate().as_bps()),
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::LockedEpoch> for LockedEpoch {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::LockedEpoch) -> Result<Self, Self::Error> {
+        let exhaust_burn_rate = u16::try_from(value.exhaust_burn_rate_bps)
+            .ok()
+            .and_then(ExhaustBurnRate::try_new)
+            .ok_or_else(|| anyhow!("exhaust burn rate {} is above the ceiling", value.exhaust_burn_rate_bps))?;
+        Ok(LockedEpoch::new(
+            Epoch(value.epoch),
+            Hash32::try_from(value.hash).context("LockedEpoch::hash")?,
+            exhaust_burn_rate,
+        ))
     }
 }
 
@@ -836,6 +864,10 @@ impl TryFrom<proto::consensus::MultiShardAtom> for MultiShardAtom {
             transaction_fee: value.fee,
             leader_fee: value.leader_fee.map(TryInto::try_into).transpose()?,
             fee_intent_only: value.fee_intent_only,
+            locked_epoch: value
+                .locked_epoch
+                .ok_or_else(|| anyhow!("locked epoch not provided"))?
+                .try_into()?,
         })
     }
 }
@@ -971,6 +1003,7 @@ impl From<AbortReason> for proto::consensus::AbortReason {
             AbortReason::ValidityWindowTooLong => Self::ValidityWindowTooLong,
             AbortReason::InputPledgeTooLarge => Self::InputPledgeTooLarge,
             AbortReason::GovernanceCallAfterPinnedEpoch => Self::GovernanceCallAfterPinnedEpoch,
+            AbortReason::InputLoadTooLarge => Self::InputLoadTooLarge,
         }
     }
 }
@@ -993,6 +1026,7 @@ impl TryFrom<proto::consensus::AbortReason> for AbortReason {
             proto::consensus::AbortReason::ValidityWindowTooLong => Ok(Self::ValidityWindowTooLong),
             proto::consensus::AbortReason::InputPledgeTooLarge => Ok(Self::InputPledgeTooLarge),
             proto::consensus::AbortReason::GovernanceCallAfterPinnedEpoch => Ok(Self::GovernanceCallAfterPinnedEpoch),
+            proto::consensus::AbortReason::InputLoadTooLarge => Ok(Self::InputLoadTooLarge),
         }
     }
 }
@@ -1430,6 +1464,11 @@ mod tests {
                 transaction_fee: 0,
                 leader_fee: None,
                 fee_intent_only: false,
+                locked_epoch: LockedEpoch::new(
+                    Epoch(3),
+                    Hash32::from_array([seed; 32]),
+                    ExhaustBurnRate::try_new(500).unwrap(),
+                ),
             })
         }
 

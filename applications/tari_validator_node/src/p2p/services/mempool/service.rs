@@ -60,14 +60,34 @@ const MAX_CONCURRENT_PREWARM_WAITS: usize = 64;
 /// re-gossiped transaction costs a lookup, not against correctness.
 pub const MEM_MAX_TRANSACTIONS_DEDUP: usize = 1_000_000;
 
+pub(super) trait Gossip {
+    async fn report(&mut self, validation: GossipValidation, acceptance: MessageAcceptance);
+    async fn forward(&mut self, msg: NewTransactionMessage) -> Result<(), MempoolError>;
+    fn get_num_incoming_messages(&self) -> usize;
+}
+
+impl Gossip for MempoolGossip {
+    async fn report(&mut self, validation: GossipValidation, acceptance: MessageAcceptance) {
+        Self::report(self, validation, acceptance).await;
+    }
+
+    async fn forward(&mut self, msg: NewTransactionMessage) -> Result<(), MempoolError> {
+        Self::forward(self, msg).await
+    }
+
+    fn get_num_incoming_messages(&self) -> usize {
+        Self::get_num_incoming_messages(self)
+    }
+}
+
 #[derive(Debug)]
-pub struct MempoolService<TValidator, TStateStore> {
+pub struct MempoolService<TValidator, TStateStore, TGossip = MempoolGossip> {
     transactions: SeenTransactions,
     mempool_requests: mpsc::Receiver<MempoolRequest>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     before_execute_validator: TValidator,
     state_store: TStateStore,
-    gossip: MempoolGossip,
+    gossip: TGossip,
     consensus_handle: ConsensusHandle,
     template_prewarmer: TemplatePrewarmer,
     prewarm_waits: Arc<Semaphore>,
@@ -75,7 +95,7 @@ pub struct MempoolService<TValidator, TStateStore> {
     metrics: PrometheusMempoolMetrics,
 }
 
-impl<TValidator, TStateStore> MempoolService<TValidator, TStateStore>
+impl<TValidator, TStateStore> MempoolService<TValidator, TStateStore, MempoolGossip>
 where
     TValidator: Validator<Transaction, Context = Epoch, Error = TransactionValidationError>,
     TStateStore: StateStore,
@@ -166,7 +186,14 @@ where
         info!(target: LOG_TARGET, "💤 Mempool service shutting down");
         Ok(())
     }
+}
 
+impl<TValidator, TStateStore, TGossip> MempoolService<TValidator, TStateStore, TGossip>
+where
+    TValidator: Validator<Transaction, Context = Epoch, Error = TransactionValidationError>,
+    TStateStore: StateStore,
+    TGossip: Gossip,
+{
     async fn handle_request(&mut self, request: MempoolRequest) {
         match request {
             MempoolRequest::SubmitTransaction { transaction, reply } => {
@@ -278,8 +305,15 @@ where
 
         // The epoch-dependent rules are checked here, alongside the structural ones, so that a
         // transaction outside its validity window is refused before it is admitted or re-gossiped
-        // rather than after. Both feed the single acceptance verdict below.
-        let current_epoch = self.consensus_handle.current_view().get_epoch();
+        // rather than after. Both feed the single acceptance verdict below. While consensus is not
+        // running, its view is still at Epoch(0) or the last epoch it ran in, so the current epoch
+        // comes from the epoch manager instead.
+        let is_running = self.consensus_handle.is_running();
+        let current_epoch = if is_running {
+            self.consensus_handle.current_view().get_epoch()
+        } else {
+            self.epoch_manager.current_epoch().await?
+        };
         let validation_result = self.before_execute_validator.validate(&current_epoch, &transaction);
 
         // Reported here rather than at the end of this function: everything below is about whether
@@ -305,6 +339,17 @@ where
             #[cfg(feature = "metrics")]
             self.metrics.on_transaction_validation_error(&tx_id, &e);
             return Err(e.into());
+        }
+
+        // While the consensus worker is not running, it either discards rx_new_transactions (in Idle)
+        // or leaves the bounded rx_new_transactions channel unread, which would block this service's
+        // select! loop once full. A local submission is propagated without admitting it locally or
+        // handing it to consensus.
+        if !is_running {
+            if is_local {
+                self.propagate(tx_id, transaction).await;
+            }
+            return Ok(());
         }
 
         let local_committee_shard = self.epoch_manager.get_local_committee_info(current_epoch).await?;
@@ -536,10 +581,132 @@ fn handle<T, E: Display>(reply: oneshot::Sender<Result<T, E>>, result: Result<T,
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Mutex, atomic::AtomicU64};
+
+    use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
+    use tari_epoch_manager::service::CommitteeCache;
+    use tari_ootle_common_types::services::template_provider::TemplateProvider;
+    use tari_ootle_template_provider::ResidentTemplateProvider;
+    use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+    use tari_template_lib::types::TemplateAddress;
+
     use super::*;
 
     fn id(n: u8) -> TransactionId {
         TransactionId::new([n; 32])
+    }
+
+    #[derive(Default)]
+    struct RecordingGossip {
+        forwarded: Vec<TransactionId>,
+    }
+
+    impl Gossip for RecordingGossip {
+        async fn report(&mut self, _validation: GossipValidation, _acceptance: MessageAcceptance) {}
+
+        async fn forward(&mut self, msg: NewTransactionMessage) -> Result<(), MempoolError> {
+            self.forwarded.push(msg.transaction.calculate_id());
+            Ok(())
+        }
+
+        fn get_num_incoming_messages(&self) -> usize {
+            0
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingValidator {
+        validated_epochs: Mutex<Vec<Epoch>>,
+    }
+
+    impl Validator<Transaction> for RecordingValidator {
+        type Context = Epoch;
+        type Error = TransactionValidationError;
+
+        fn validate(&self, context: &Self::Context, _item: &Transaction) -> Result<(), Self::Error> {
+            self.validated_epochs.lock().unwrap().push(*context);
+            Ok(())
+        }
+    }
+
+    #[derive(Clone)]
+    struct NoopTemplateProvider;
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("unused")]
+    struct UnusedError;
+
+    impl TemplateProvider for NoopTemplateProvider {
+        type Error = UnusedError;
+        type Template = ();
+
+        fn get_template(&self, _id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
+            Ok(None)
+        }
+    }
+
+    impl ResidentTemplateProvider for NoopTemplateProvider {
+        fn is_resident(&self, _address: &TemplateAddress) -> bool {
+            true
+        }
+    }
+
+    #[tokio::test]
+    async fn a_local_submission_while_consensus_is_not_running_is_propagated_without_admission() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<PeerAddress>::open(dir.path(), DatabaseOptions::default()).unwrap();
+        let (_tx_req, rx_req) = mpsc::channel(1);
+        let (tx_epoch_request, rx_epoch_request) = mpsc::channel(1);
+        // Drop the epoch-manager request receiver so any regression that calls `get_local_committee_info`
+        // while consensus is not running fails immediately with `SendError` instead of hanging.
+        drop(rx_epoch_request);
+        let (tx_epoch_events, _) = broadcast::channel(1);
+        let epoch_manager = EpochManagerHandle::new(
+            tx_epoch_request,
+            tx_epoch_events.downgrade(),
+            Arc::new(AtomicU64::new(7)),
+            CommitteeCache::new(),
+        );
+        let (tx_consensus_events, _) = broadcast::channel(1);
+        let consensus_handle = ConsensusHandle::for_test(&tx_consensus_events);
+        assert!(!consensus_handle.is_running());
+
+        let template_prewarmer = crate::template_prewarm::spawn(
+            NoopTemplateProvider,
+            store.clone(),
+            #[cfg(feature = "metrics")]
+            &mut prometheus_client::registry::Registry::default(),
+        );
+        let mut service = MempoolService {
+            transactions: SeenTransactions::new(MEM_MAX_TRANSACTIONS_DEDUP),
+            mempool_requests: rx_req,
+            epoch_manager,
+            before_execute_validator: RecordingValidator::default(),
+            state_store: store,
+            gossip: RecordingGossip::default(),
+            consensus_handle,
+            template_prewarmer,
+            prewarm_waits: Arc::new(Semaphore::new(MAX_CONCURRENT_PREWARM_WAITS)),
+            #[cfg(feature = "metrics")]
+            metrics: PrometheusMempoolMetrics::new(&mut prometheus_client::registry::Registry::default()),
+        };
+
+        let secret = RistrettoSecretKey::random(&mut rand::rng());
+        let transaction = Transaction::builder_localnet(Epoch(7)).build_and_seal(&secret);
+        let tx_id = transaction.calculate_id();
+
+        service.handle_new_transaction_from_local(transaction).await.unwrap();
+
+        assert_eq!(
+            *service.before_execute_validator.validated_epochs.lock().unwrap(),
+            vec![Epoch(7)],
+            "validation must use the epoch manager's current epoch while consensus is not running",
+        );
+        assert_eq!(service.gossip.forwarded, vec![tx_id]);
+        assert!(
+            !service.transactions.contains(&tx_id),
+            "a non-running validator must not admit the transaction into SeenTransactions",
+        );
     }
 
     #[test]

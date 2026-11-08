@@ -50,7 +50,9 @@ mod template {
     }
 
     impl TwoResourceLiquidityPool {
-        // Creates a new two-resource liquidity pool component for the resources A and B
+        // Creates a new two-resource liquidity pool component for the resources A and B.
+        // `address_allocation` must come from the transaction manifest (`AllocateAddress`) or from this template. The
+        // engine rejects an allocation that another template made when the pool component is created.
         pub fn create(
             owner_rule: OwnerRule,
             contribute_and_redeem_rule: AccessRule,
@@ -212,8 +214,8 @@ mod template {
             let contributed_b = bucket_b.take(b_contribution);
 
             // deposit the liquidity to the pool
-            self.vault_a.deposit(contributed_a);
-            self.vault_b.deposit(contributed_b);
+            self.deposit_revealed(pool_a, contributed_a);
+            self.deposit_revealed(pool_b, contributed_b);
 
             emit_event("contribute", metadata![
                 "resource_a" => resource_a,

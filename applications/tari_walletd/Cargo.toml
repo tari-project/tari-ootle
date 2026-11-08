@@ -46,6 +46,7 @@ dashmap = { workspace = true }
 either = { workspace = true }
 hex = { workspace = true }
 humantime-serde = { workspace = true }
+mini-moka = { workspace = true }
 futures = { workspace = true }
 include_dir = { workspace = true, optional = true }
 indexmap = { workspace = true }

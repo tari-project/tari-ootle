@@ -125,6 +125,7 @@ impl ProposedBlockChangeSet {
     }
 
     pub fn set_no_vote(&mut self, no_vote_reason: NoVoteReason) -> &mut Self {
+        self.quorum_decision = None;
         self.no_vote_reason = Some(no_vote_reason);
         self
     }
@@ -650,7 +651,7 @@ impl TransactionChangeSet {
 
 #[cfg(test)]
 mod tests {
-    use std::{mem::size_of, time::Duration};
+    use std::{mem::size_of, num::NonZeroU64, time::Duration};
 
     use tari_consensus_types::Decision;
     use tari_engine_types::{
@@ -663,6 +664,23 @@ mod tests {
     use tari_template_lib_types::ComponentAddress;
 
     use super::*;
+
+    #[test]
+    fn a_no_vote_clears_the_quorum_decision() {
+        let leaf = LeafBlock {
+            block_id: BlockId::zero(),
+            height: NodeHeight(1),
+            epoch: Epoch(1),
+            shard_group: ShardGroup::all_shards(NumPreshards::P256),
+        };
+        let mut change_set = ProposedBlockChangeSet::new(leaf);
+        change_set.set_quorum_decision(QuorumDecision::Accept);
+
+        change_set.set_no_vote(NoVoteReason::AlreadyVotedAtHeight);
+
+        assert_eq!(change_set.quorum_decision(), None);
+        assert!(!change_set.is_accept());
+    }
 
     #[test]
     fn taking_executions_keeps_the_pending_transaction_update() {
@@ -714,13 +732,25 @@ mod tests {
         };
         let mut change_set = ProposedBlockChangeSet::new(leaf);
         let mut switched = local_prepared_record();
-        switched.set_fee_intent_only(true);
+        switched
+            .set_fee_intent_only(true)
+            .set_transaction_fee(19)
+            .set_exhaust_burn(1);
+        let involved = NonZeroU64::new(2).unwrap();
+        let fee_intent_leader_fee = switched.calculate_leader_fee(involved);
+        switched.set_leader_fee(fee_intent_leader_fee.clone());
         change_set.set_next_transaction_update(switched).unwrap();
 
         let mut batched = local_prepared_record();
+        batched.set_transaction_fee(38).set_exhaust_burn(2);
+        let full_leader_fee = batched.calculate_leader_fee(involved);
+        batched.set_leader_fee(full_leader_fee);
         change_set.apply_transaction_update(&mut batched);
 
         assert!(batched.is_fee_intent_only());
+        assert_eq!(batched.transaction_fee(), 19);
+        assert_eq!(batched.exhaust_burn(), 1);
+        assert_eq!(batched.leader_fee(), Some(&fee_intent_leader_fee));
     }
 
     /// A foreign proposal can switch a transaction to its fee-intent commit, recording that execution, before another

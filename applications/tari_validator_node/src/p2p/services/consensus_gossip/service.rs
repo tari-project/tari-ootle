@@ -75,6 +75,7 @@ impl ConsensusGossipService {
                 result = self.consensus_events.recv() => {
                     match result {
                         Ok(HotstuffEvent::EpochChanged { registered_shard_group, .. }) => {
+                            initial_subscription_complete = true;
                             if registered_shard_group.is_some() {
                                 self.subscribe().await?;
                             } else {
@@ -139,12 +140,7 @@ impl ConsensusGossipService {
         let (message_id, propagation_source) = gossip.validation_key();
         let from = gossip.source;
 
-        let decoded = self
-            .codec
-            .decode_from(&mut gossip.message.data.as_slice())
-            .await
-            .map_err(anyhow::Error::from)
-            .and_then(|(_, msg)| decode_gossiped_message(msg));
+        let decoded = decode_gossip_payload(&mut self.codec, &gossip.message.data).await;
 
         // gossipsub withholds the message from the mesh until a verdict is reported. A message that
         // is not a well-formed broadcast is withheld and counted against the peer that sent it;
@@ -196,6 +192,21 @@ impl ConsensusGossipService {
 
 pub(super) fn topic() -> String {
     TOPIC_PREFIX.to_string()
+}
+
+async fn decode_gossip_payload(
+    codec: &mut ProstCodec<proto::consensus::HotStuffMessage>,
+    data: &[u8],
+) -> anyhow::Result<HotstuffMessage> {
+    let mut reader = data;
+    let (_, msg) = codec.decode_from(&mut reader).await?;
+    if !reader.is_empty() {
+        return Err(anyhow::anyhow!(
+            "Consensus gossip payload has {} trailing byte(s)",
+            reader.len()
+        ));
+    }
+    decode_gossiped_message(msg)
 }
 
 /// Converts a message received on the consensus topic, refusing any kind consensus never broadcasts before
@@ -255,5 +266,25 @@ mod tests {
         };
         let err = decode_gossiped_message(msg).unwrap_err();
         assert!(err.to_string().contains("point to point"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_gossip_payload_with_trailing_bytes_is_refused() {
+        let mut codec = ProstCodec::<HotStuffMessage>::default();
+        let msg = HotStuffMessage {
+            message: Some(Message::ForeignProposalNotification(ForeignProposalNotification {
+                block_id: vec![1; 32],
+                epoch: 1,
+                shard_groups: vec![],
+                shard_group: 0,
+            })),
+        };
+        let mut buf = Vec::new();
+        codec.encode_into(&msg, &mut buf).await.unwrap();
+        assert!(decode_gossip_payload(&mut codec, &buf).await.is_ok());
+
+        buf.extend_from_slice(&[0xaa, 0xbb]);
+        let err = decode_gossip_payload(&mut codec, &buf).await.unwrap_err();
+        assert!(err.to_string().contains("trailing byte(s)"), "{err}");
     }
 }

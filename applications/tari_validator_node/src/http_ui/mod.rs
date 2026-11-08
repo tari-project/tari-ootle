@@ -77,19 +77,18 @@ mod enabled {
         let path = path.strip_prefix('/').unwrap_or(path);
 
         // Unknown paths get index.html so that the SPA router can resolve them
-        if let Some(body) = PROJECT_DIR
+        if let Some(file) = PROJECT_DIR
             .get_file(path)
             .or_else(|| PROJECT_DIR.get_file("index.html"))
-            .map(|file| file.contents())
         {
-            let mime_type =
-                mime_guess::from_path(path).first_or_else(|| mime_guess::Mime::from_str("text/html").unwrap());
+            let mime_type = mime_guess::from_path(file.path())
+                .first_or_else(|| mime_guess::Mime::from_str("text/html").unwrap());
             let content_type =
                 HeaderValue::from_str(mime_type.as_ref()).unwrap_or_else(|_| HeaderValue::from_static("text/html"));
             return Response::builder()
                 .header(header::CONTENT_TYPE, content_type)
                 .status(StatusCode::OK)
-                .body(Body::from(body))
+                .body(Body::from(file.contents()))
                 .unwrap();
         }
         html_response(default_page(

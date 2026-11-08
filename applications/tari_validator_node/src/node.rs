@@ -58,6 +58,7 @@ impl ValidatorNode {
         let mut hotstuff_events_closed = false;
         let mut epoch_events_closed = false;
 
+        let mut service_error = None;
         loop {
             let metrics = tokio::runtime::Handle::current().metrics();
             info!(
@@ -125,8 +126,15 @@ impl ValidatorNode {
                         },
                         Err(err) => {
                             error!(target: LOG_TARGET, "Error in service: {}", err);
-                            self.services.diagnostics.emit(diag_event!(error, "node.task_failed", "A service task failed: {err}", error => &err));
-                            return Err(err);
+                            self.services.diagnostics.emit(diag_event!(
+                                error,
+                                "node.task_failed",
+                                "A service task failed: {err}",
+                                error => &err
+                            ));
+                            shutdown.trigger();
+                            service_error = Some(err);
+                            break;
                         }
                     }
                 }
@@ -135,17 +143,26 @@ impl ValidatorNode {
 
         // Just exit ASAP on panic
         info!(target: LOG_TARGET, "💤 Waiting for all services to shut down... ctrl+c to force shutdown");
-        tokio::select! {
+        let join_res = tokio::select! {
             _ = tokio::signal::ctrl_c() => {
                 // Second SIGINT forces shutdown
                 warn!(target: LOG_TARGET, "💤 Shutdown NOW");
                 process::exit(1);
             },
             res = tokio::time::timeout(Duration::from_secs(20), self.services.join_all()) => {
-                res.context("Timeout waiting for all workers to end")??;
-                info!(target: LOG_TARGET, "🏁 All services have exited cleanly");
+                res.context("Timeout waiting for all workers to end").and_then(|r| r)
             }
+        };
+
+        if let Some(err) = service_error {
+            if let Err(join_err) = join_res {
+                warn!(target: LOG_TARGET, "Error while shutting down services after task failure: {join_err}");
+            }
+            return Err(err);
         }
+
+        join_res?;
+        info!(target: LOG_TARGET, "🏁 All services have exited cleanly");
 
         Ok(())
     }

@@ -33,6 +33,7 @@ use tari_common::{
     DefaultConfigLoader,
     SubConfigPath,
     configuration::{CommonConfig, ConfigList, StringList},
+    exit_codes::{ExitCode, ExitError},
 };
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_logging::LoggingConfig;
@@ -122,7 +123,7 @@ pub struct ValidatorNodeConfig {
     pub json_rpc_allowed_hosts: StringList,
     /// Template config
     pub templates: TemplateConfig,
-    /// Fee claim public key
+    /// Wallet-provided fee claim public key. A nonzero key is required to start the validator.
     pub fee_claim_public_key: RistrettoPublicKey,
     /// The burn rate council this node writes into genesis. Genesis is part of what every node on a
     /// network agrees on, so every node must be configured with the same council, or none: with none
@@ -273,6 +274,17 @@ fn default_diagnostics_max_age_secs() -> u64 {
 }
 
 impl ValidatorNodeConfig {
+    pub fn validate_fee_claim_public_key(&self) -> Result<(), ExitError> {
+        if self.fee_claim_public_key == RistrettoPublicKey::default() {
+            return Err(ExitError::new(
+                ExitCode::ConfigError,
+                "validator_node.fee_claim_public_key must be configured with a public key from your wallet before \
+                 starting the validator",
+            ));
+        }
+        Ok(())
+    }
+
     /// Database options for the state store this node opens.
     ///
     /// The memory budget is one capacity covering the block cache and memtables together, split so
@@ -355,7 +367,6 @@ impl Default for ValidatorNodeConfig {
             enable_permissive_cors: false,
             json_rpc_allowed_hosts: StringList::default(),
             templates: TemplateConfig::default(),
-            // Burn your fees
             fee_claim_public_key: RistrettoPublicKey::default(),
             genesis_council: GenesisCouncilConfig::default(),
             dont_create_id: false,
@@ -459,4 +470,21 @@ fn default_state_sync_progress_timeout_secs() -> u64 {
 
 fn default_state_sync_min_throughput_bytes_per_sec() -> u64 {
     tari_rpc_state_sync::DEFAULT_SYNC_MIN_THROUGHPUT_BYTES_PER_SEC
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_app_utilities::keypair::RistrettoKeypair;
+
+    use super::*;
+
+    #[test]
+    fn a_wallet_claim_key_is_required_for_startup() {
+        let mut config = ValidatorNodeConfig::default();
+        assert!(config.validate_fee_claim_public_key().is_err());
+        let wallet_key = RistrettoKeypair::random(&mut rand::rng());
+        config.fee_claim_public_key = wallet_key.public_key().clone();
+        config.validate_fee_claim_public_key().unwrap();
+        assert_eq!(&config.fee_claim_public_key, wallet_key.public_key());
+    }
 }

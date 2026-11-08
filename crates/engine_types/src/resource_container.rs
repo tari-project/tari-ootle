@@ -1314,8 +1314,7 @@ mod tests {
 
         // Duplicate confidential commitment against locked_commitments is rejected.
         let c1 = PedersenCommitmentBytes::from([1u8; 32]);
-        let mut conf_dest =
-            ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c1], Amount::from(0u64));
+        let mut conf_dest = ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c1], Amount::from(0u64));
         let _proof = conf_dest.lock_all().unwrap();
         let dup_conf = ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c1], Amount::from(0u64));
         let err = conf_dest.deposit(dup_conf).unwrap_err();
@@ -1323,10 +1322,8 @@ mod tests {
 
         // Confidential deposit whose revealed sum overflows leaves the destination commitment set unchanged.
         let c2 = PedersenCommitmentBytes::from([2u8; 32]);
-        let mut overflow_dest =
-            ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c1], Amount::MAX);
-        let incoming =
-            ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c2], Amount::from(1u64));
+        let mut overflow_dest = ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c1], Amount::MAX);
+        let incoming = ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c2], Amount::from(1u64));
         let err = overflow_dest.deposit(incoming).unwrap_err();
         assert!(matches!(err, ResourceError::BalanceOverflow { operate: "deposit", .. }));
         assert_eq!(overflow_dest.get_commitment_count(), 1);

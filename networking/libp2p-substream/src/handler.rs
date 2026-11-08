@@ -121,7 +121,10 @@ impl Handler {
     ) {
         let (stream, protocol) = outbound.protocol;
         let stream_id = outbound.info;
-        let _request = self.take_requested_stream(stream_id);
+        let Some(_request) = self.take_requested_stream(stream_id) else {
+            tracing::warn!("outbound stream {stream_id} negotiated without a pending request");
+            return;
+        };
 
         self.pending_events.push_back(Event::SubstreamOpen {
             peer_id: self.peer_id,

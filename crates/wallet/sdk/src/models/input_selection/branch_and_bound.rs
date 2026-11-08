@@ -140,20 +140,12 @@ fn select_bounded<A: Into<Amount>, K: Clone>(
 
         // if total already meets or exceeds target → potential solution
         if target <= state.total {
-            match best_sum {
-                Some(best) if state.total < best => {
-                    best_sum = Some(state.total);
-                    best_keys = state.selected;
-                    let change = state.total - target;
-                    if change == 0 {
-                        break; // optimal solution found
-                    }
-                },
-                None => {
-                    best_sum = Some(state.total);
-                    best_keys = state.selected;
-                },
-                _ => {},
+            if best_sum.is_none_or(|best| state.total < best) {
+                best_sum = Some(state.total);
+                best_keys = state.selected;
+                if state.total == target {
+                    break; // optimal solution found
+                }
             }
             continue;
         }
@@ -163,9 +155,12 @@ fn select_bounded<A: Into<Amount>, K: Clone>(
             continue;
         }
 
-        // upper bound: even if we add everything left, can we reach target?
-        if target > state.total + remaining_sums[state.index] {
-            continue; // impossible to reach target → prune
+        // upper bound: even if we take the largest remaining items up to `max_inputs`, can we reach target?
+        let slots_left = max_inputs.saturating_sub(state.selected.len());
+        let max_remaining_index = state.index.saturating_add(slots_left).min(items.len());
+        let max_remaining = remaining_sums[state.index] - remaining_sums[max_remaining_index];
+        if target > state.total + max_remaining {
+            continue; // impossible to reach target within `max_inputs` → prune
         }
 
         // --- Branch 2: skip current item ---
@@ -525,5 +520,28 @@ mod tests {
         assert!(select_bounded(&inputs, 40_500u64, 40, 0).is_none());
         // ...and exactly `max_inputs` of them do reach it
         assert!(select(&inputs, 40_000u64, 40).is_some());
+    }
+
+    #[test]
+    fn upper_bound_prunes_using_remaining_input_slots() {
+        let mut inputs = vec![
+            KeyedInput {
+                key: 0usize,
+                value: 100,
+            },
+            KeyedInput { key: 1usize, value: 90 },
+            KeyedInput { key: 2usize, value: 80 },
+        ];
+        for i in 3..53 {
+            inputs.push(KeyedInput { key: i, value: 10 });
+        }
+
+        // With max_inputs = 2 and target = 170, once 100 is selected, only 1 slot remains and the remaining
+        // items at index >= 3 have value 10 (max total 110 < 170). Bounding the upper-bound lookahead by
+        // `max_inputs - selected.len()` prunes that subtree immediately so the exact match 90 + 80 = 170
+        // is reached within a small state budget.
+        let result = select_bounded(&inputs, 170u64, 2, 15).unwrap();
+        assert_eq!(result.total_value, 170);
+        assert_eq!(result.selected_keys, vec![&1, &2]);
     }
 }

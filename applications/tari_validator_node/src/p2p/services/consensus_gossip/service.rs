@@ -114,6 +114,7 @@ impl ConsensusGossipService {
                                 initial_subscription_complete = true;
                             }
                         },
+                        Ok(EpochManagerEvent::PendingActivation { .. }) => {},
                         Err(broadcast::error::RecvError::Lagged(n)) => {
                             warn!(target: LOG_TARGET, "Epoch manager events receiver lagged by {} messages", n);
                         },

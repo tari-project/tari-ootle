@@ -101,6 +101,9 @@ pub struct ProposedBlockChangeSet {
     proposed_foreign_proposals: Vec<BlockId>,
     proposed_utxo_mints: Vec<ClaimedOutputTombstoneAddress>,
     no_vote_reason: Option<NoVoteReason>,
+    /// Why this node withholds its vote from a block it accepts. Such a block carries a value this node ratifies
+    /// against its own view, and that view does not confirm it; the committee may still commit the block.
+    abstention: Option<NoVoteReason>,
 }
 
 impl ProposedBlockChangeSet {
@@ -116,6 +119,7 @@ impl ProposedBlockChangeSet {
             proposed_foreign_proposals: Vec::new(),
             proposed_utxo_mints: Vec::new(),
             no_vote_reason: None,
+            abstention: None,
         }
     }
 
@@ -132,6 +136,17 @@ impl ProposedBlockChangeSet {
 
     pub fn no_vote_reason(&self) -> Option<&NoVoteReason> {
         self.no_vote_reason.as_ref()
+    }
+
+    /// Withholds this node's vote from the block without rejecting it: the change set is still saved if the block is
+    /// otherwise accepted. The first abstention recorded is kept.
+    pub fn abstain(&mut self, reason: NoVoteReason) -> &mut Self {
+        self.abstention.get_or_insert(reason);
+        self
+    }
+
+    pub fn abstention(&self) -> Option<&NoVoteReason> {
+        self.abstention.as_ref()
     }
 
     pub fn clear(&mut self) {
@@ -210,6 +225,7 @@ impl ProposedBlockChangeSet {
             self.proposed_utxo_mints.shrink_to(MEM_MAX_PROPOSED_UTXO_MINTS_SIZE);
         }
         self.no_vote_reason = None;
+        self.abstention = None;
     }
 
     pub fn set_state_tree_diffs(&mut self, diffs: IndexMap<Shard, PendingShardStateTreeDiff>) -> &mut Self {
@@ -460,6 +476,8 @@ impl ProposedBlockChangeSet {
         }
 
         let _timer = TraceTimer::debug(LOG_TARGET, "ProposedBlockChangeSet::save");
+        tx.blocks_set_executed(self.block.block_id())?;
+
         // Store the block diff
         BlockDiff::insert(tx, &self.block.block_id, &self.local_substate_changes)?;
 

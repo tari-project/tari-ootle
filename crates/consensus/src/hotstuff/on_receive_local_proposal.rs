@@ -547,7 +547,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         }
 
         // If accepted, the changeset is already saved, otherwise we log everything here for debugging
-        if !process_result.block_decision.is_accept() {
+        if !change_set.is_accept() {
             change_set.log_everything_dropped();
         }
         // Clear and reuse the memory allocated for changeset

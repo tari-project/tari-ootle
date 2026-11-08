@@ -20,6 +20,7 @@ use libp2p::{
         DialError,
         DialFailure,
         FromSwarm,
+        ListenFailure,
         NetworkBehaviour,
         NotifyHandler,
         THandler,
@@ -160,7 +161,7 @@ where TCodec: Codec + Send + Clone + 'static
         self.connected.retain(|_, connections| !connections.is_empty());
 
         // Shrink the capacity of empty queues if they exceed the threshold.
-        if self.connected.capacity() > EMPTY_QUEUE_SHRINK_THRESHOLD {
+        if self.connected.is_empty() && self.connected.capacity() > EMPTY_QUEUE_SHRINK_THRESHOLD {
             self.connected.shrink_to_fit();
         }
     }
@@ -169,6 +170,29 @@ where TCodec: Codec + Send + Clone + 'static
         let stream_id = self.next_outbound_stream_id;
         self.next_outbound_stream_id = self.next_outbound_stream_id.wrapping_add(1);
         stream_id
+    }
+
+    fn remove_connection(
+        &mut self,
+        peer_id: PeerId,
+        connection_id: ConnectionId,
+    ) -> Option<Connection<TCodec::Message>> {
+        self.pending_events.retain(|event| {
+            !matches!(
+                event,
+                ToSwarm::NotifyHandler {
+                    handler: NotifyHandler::One(id),
+                    ..
+                } if *id == connection_id
+            )
+        });
+        let connections = self.connected.get_mut(&peer_id)?;
+        let pos = connections.connections.iter().position(|c| c.id == connection_id)?;
+        let connection = connections.connections.remove(pos);
+        if connections.is_empty() {
+            self.connected.remove(&peer_id);
+        }
+        Some(connection)
     }
 
     fn on_connection_closed(
@@ -180,20 +204,7 @@ where TCodec: Codec + Send + Clone + 'static
             ..
         }: ConnectionClosed,
     ) {
-        let Some(connections) = self.connected.get_mut(&peer_id) else {
-            tracing::warn!(
-                "Expected peer entry for peer ID ({peer_id}) before closing connection with connection ID \
-                 {connection_id}."
-            );
-            return;
-        };
-
-        let Some(connection) = connections
-            .connections
-            .iter()
-            .position(|c| c.id == connection_id)
-            .map(|p: usize| connections.connections.remove(p))
-        else {
+        let Some(connection) = self.remove_connection(peer_id, connection_id) else {
             tracing::warn!(
                 "Expected connection entry for connection ID ({connection_id}) before closing connection with peer \
                  {peer_id}."
@@ -201,10 +212,10 @@ where TCodec: Codec + Send + Clone + 'static
             return;
         };
 
-        debug_assert_eq!(connections.is_empty(), remaining_established == 0);
-        if connections.is_empty() {
-            self.connected.remove(&peer_id);
-        }
+        debug_assert_eq!(
+            self.connected.get(&peer_id).is_none_or(Connections::is_empty),
+            remaining_established == 0
+        );
 
         if let Some(sink) = connection.pending_sink {
             self.pending_events
@@ -213,6 +224,43 @@ where TCodec: Codec + Send + Clone + 'static
                     stream_id: sink.stream_id(),
                     error: Error::ConnectionClosed,
                 }));
+        }
+        if let Some(sink) = connection.message_sink {
+            self.pending_events
+                .push_back(ToSwarm::GenerateEvent(Event::StreamClosed {
+                    peer_id,
+                    stream_id: sink.stream_id(),
+                }));
+        }
+    }
+
+    fn on_listen_failure(
+        &mut self,
+        ListenFailure {
+            peer_id,
+            connection_id,
+            ..
+        }: ListenFailure,
+    ) {
+        let Some(peer_id) = peer_id else {
+            return;
+        };
+        if let Some(connection) = self.remove_connection(peer_id, connection_id) {
+            if let Some(sink) = connection.pending_sink {
+                self.pending_events
+                    .push_back(ToSwarm::GenerateEvent(Event::OutboundFailure {
+                        peer_id,
+                        stream_id: sink.stream_id(),
+                        error: Error::ConnectionClosed,
+                    }));
+            }
+            if let Some(sink) = connection.message_sink {
+                self.pending_events
+                    .push_back(ToSwarm::GenerateEvent(Event::StreamClosed {
+                        peer_id,
+                        stream_id: sink.stream_id(),
+                    }));
+            }
         }
     }
 
@@ -233,7 +281,35 @@ where TCodec: Codec + Send + Clone + 'static
         }
     }
 
-    fn on_dial_failure(&mut self, DialFailure { peer_id, error, .. }: DialFailure) {
+    fn on_dial_failure(
+        &mut self,
+        DialFailure {
+            peer_id,
+            error,
+            connection_id,
+        }: DialFailure,
+    ) {
+        if let Some(peer) = peer_id &&
+            let Some(connection) = self.remove_connection(peer, connection_id)
+        {
+            if let Some(sink) = connection.pending_sink {
+                self.pending_events
+                    .push_back(ToSwarm::GenerateEvent(Event::OutboundFailure {
+                        peer_id: peer,
+                        stream_id: sink.stream_id(),
+                        error: Error::DialFailure,
+                    }));
+            }
+            if let Some(sink) = connection.message_sink {
+                self.pending_events
+                    .push_back(ToSwarm::GenerateEvent(Event::StreamClosed {
+                        peer_id: peer,
+                        stream_id: sink.stream_id(),
+                    }));
+            }
+            return;
+        }
+
         if matches!(error, DialError::DialPeerConditionFalse(_)) {
             return;
         }
@@ -313,6 +389,7 @@ where TCodec: Codec + Send + Clone + 'static
             FromSwarm::ConnectionClosed(connection_closed) => self.on_connection_closed(connection_closed),
             FromSwarm::AddressChange(address_change) => self.on_address_change(address_change),
             FromSwarm::DialFailure(dial_failure) => self.on_dial_failure(dial_failure),
+            FromSwarm::ListenFailure(listen_failure) => self.on_listen_failure(listen_failure),
             _ => {},
         }
     }
@@ -635,5 +712,111 @@ mod tests {
             handler.poll(&mut cx).is_pending(),
             "a closed pending dial stream should not open an outbound substream when the connection establishes"
         );
+    }
+
+    #[test]
+    fn connection_close_drops_queued_notify_handler_and_closes_active_stream() {
+        use libp2p::core::ConnectedPoint;
+
+        let mut behaviour = Behaviour::<TestCodec>::new(StreamProtocol::new("/test/1"), Config::default());
+        let peer_id = PeerId::random();
+        let addr: Multiaddr = "/memory/1".parse().unwrap();
+        let endpoint = ConnectedPoint::Dialer {
+            address: addr.clone(),
+            role_override: Endpoint::Dialer,
+            port_use: PortUse::Reuse,
+        };
+
+        // Case 1: Connection closes while NotifyHandler is still queued in pending_events.
+        let conn1 = ConnectionId::new_unchecked(1);
+        behaviour
+            .handle_established_outbound_connection(conn1, peer_id, &addr, Endpoint::Dialer, PortUse::Reuse)
+            .unwrap();
+        let pending_sink = behaviour.obtain_message_channel(peer_id);
+        assert!(!pending_sink.is_closed());
+
+        behaviour.on_swarm_event(FromSwarm::ConnectionClosed(ConnectionClosed {
+            peer_id,
+            connection_id: conn1,
+            endpoint: &endpoint,
+            cause: None,
+            remaining_established: 0,
+        }));
+        assert!(
+            pending_sink.is_closed(),
+            "closing a connection must drop any queued NotifyHandler stream for it"
+        );
+        assert!(matches!(
+            poll_event(&mut behaviour),
+            ToSwarm::GenerateEvent(Event::OutboundFailure {
+                peer_id: p,
+                stream_id,
+                error: Error::ConnectionClosed,
+            }) if p == peer_id && stream_id == pending_sink.stream_id()
+        ));
+
+        // Case 2: Connection closes while an active outbound stream is open.
+        let conn2 = ConnectionId::new_unchecked(2);
+        behaviour
+            .handle_established_outbound_connection(conn2, peer_id, &addr, Endpoint::Dialer, PortUse::Reuse)
+            .unwrap();
+        let active_sink = behaviour.obtain_message_channel(peer_id);
+        let ToSwarm::NotifyHandler { event: _stream, .. } = poll_event(&mut behaviour) else {
+            panic!("expected NotifyHandler for new stream");
+        };
+        behaviour.on_connection_handler_event(peer_id, conn2, Event::OutboundStreamOpened {
+            peer_id,
+            stream_id: active_sink.stream_id(),
+        });
+        let _opened = poll_event(&mut behaviour);
+
+        behaviour.on_swarm_event(FromSwarm::ConnectionClosed(ConnectionClosed {
+            peer_id,
+            connection_id: conn2,
+            endpoint: &endpoint,
+            cause: None,
+            remaining_established: 0,
+        }));
+        assert!(matches!(
+            poll_event(&mut behaviour),
+            ToSwarm::GenerateEvent(Event::StreamClosed {
+                peer_id: p,
+                stream_id,
+            }) if p == peer_id && stream_id == active_sink.stream_id()
+        ));
+    }
+
+    #[test]
+    fn denied_outbound_connection_is_removed_and_reports_dial_failure() {
+        let mut behaviour = Behaviour::<TestCodec>::new(StreamProtocol::new("/test/1"), Config::default());
+        let peer_id = PeerId::random();
+        let addr: Multiaddr = "/memory/1".parse().unwrap();
+
+        let sink = behaviour.obtain_message_channel(peer_id);
+        let ToSwarm::Dial { opts } = poll_event(&mut behaviour) else {
+            panic!("expected Dial event");
+        };
+        let connection_id = opts.connection_id();
+
+        let handler = behaviour
+            .handle_established_outbound_connection(connection_id, peer_id, &addr, Endpoint::Dialer, PortUse::Reuse)
+            .unwrap();
+        drop(handler);
+
+        behaviour.on_swarm_event(FromSwarm::DialFailure(DialFailure {
+            peer_id: Some(peer_id),
+            error: &DialError::Aborted,
+            connection_id,
+        }));
+
+        assert!(!behaviour.connected.contains_key(&peer_id));
+        assert!(matches!(
+            poll_event(&mut behaviour),
+            ToSwarm::GenerateEvent(Event::OutboundFailure {
+                peer_id: p,
+                stream_id,
+                error: Error::DialFailure,
+            }) if p == peer_id && stream_id == sink.stream_id()
+        ));
     }
 }

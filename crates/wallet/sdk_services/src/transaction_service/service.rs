@@ -33,7 +33,7 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_shutdown::ShutdownSignal;
 use tokio::{
-    sync::{Semaphore, mpsc, watch},
+    sync::{Semaphore, broadcast, mpsc, watch},
     time,
     time::MissedTickBehavior,
 };
@@ -203,9 +203,20 @@ where
                         error!(target: LOG_TARGET, "Error handling request: {}", err);
                     }
                 },
-                Ok(event) = events_subscription.recv() => {
-                    if let Err(e) = self.on_event(event) {
-                        error!(target: LOG_TARGET, "Error handling event: {}", e);
+                result = events_subscription.recv() => {
+                    match result {
+                        Ok(event) => {
+                            if let Err(e) = self.on_event(event) {
+                                error!(target: LOG_TARGET, "Error handling event: {}", e);
+                            }
+                        },
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(target: LOG_TARGET, "Transaction service lagged behind by {} event(s)", n);
+                            self.check_all_on_next_tick = true;
+                        },
+                        Err(broadcast::error::RecvError::Closed) => {
+                            break Ok(());
+                        },
                     }
                 },
 

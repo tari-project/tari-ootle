@@ -293,15 +293,18 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     /// is discarded with the transaction if the frame fails, so it is neither a side effect on state nor a source of
     /// non-determinism.
     ///
-    /// The lists contain only WASM host ops (each backed by an `EngineOp`), because a restricted frame only exists
-    /// while template WASM is executing — instruction-level operations such as `pay_fee` and `publish_template` have
-    /// no `EngineOp`, run only at the top level, and so can never execute in a restricted context. `call_invoke` is
+    /// The lists contain WASM host ops (each backed by an `EngineOp`) as well as host-initiated re-entry into WASM
+    /// (`invoke_resource_access_hook` and `evaluate_spend_script`), which must be refused before it runs because it
+    /// happens before any write lock. Instruction-level operations such as `pay_fee` and `publish_template` have no
+    /// `EngineOp`, run only at the top level, and so can never execute in a restricted context. `call_invoke` is
     /// also blocked at the frame level (`allow_cross_template_calls == false`) and listed here for defence in depth.
     /// `allocate_address_invoke` is also refused by `WorkingState::new_address_allocation`; listing it here refuses
     /// the op before it draws an address from the id provider.
     fn enforce_frame_restrictions(&self, function: &'static str) -> Result<(), RuntimeError> {
         const FORBIDDEN_IN_READ_ONLY: &[&str] = &[
             "call_invoke",
+            "invoke_resource_access_hook",
+            "evaluate_spend_script",
             "generate_random_invoke",
             "generate_uuid",
             "proof_invoke",
@@ -310,6 +313,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         ];
         const FORBIDDEN_IN_OWN_COMPONENT: &[&str] = &[
             "call_invoke",
+            "invoke_resource_access_hook",
+            "evaluate_spend_script",
             "proof_invoke",
             "bucket_invoke",
             "allocate_address_invoke",
@@ -1207,6 +1212,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         view: &Rc<StatementSpendView>,
         witness_data: &[u8],
     ) -> Result<(), RuntimeError> {
+        self.invoke_modules_on_runtime_call("evaluate_spend_script")?;
         // (T2) Authoritative spend-time validation. A revealed leaf is untrusted spender data, so the function shape
         // and bound-arg count are validated immediately before invoking.
         self.validate_template_function(tf)?;
@@ -1229,9 +1235,9 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
 
         // Make the introspection context reachable for the duration of the call, and restrict the predicate's frame
         // to a read-only, non-cross-template sandbox.
-        *self.spend_exec_context.borrow_mut() = Some(exec);
+        let prev_exec_context = self.spend_exec_context.replace(Some(exec));
         let result = self.invoke_template_function(&tf.template, &tf.function, args, Some(FrameWriteMode::ReadOnly));
-        *self.spend_exec_context.borrow_mut() = None;
+        *self.spend_exec_context.borrow_mut() = prev_exec_context;
 
         result
             .map(|_| ())
@@ -1762,10 +1768,21 @@ where
                 args.assert_no_args("Component::GetTemplateAddress")?;
 
                 self.tracker.write_with(|state| {
-                    let locked = state.read_lock_substate(SubstateId::Component(component_address))?;
+                    let current_component_lock = state
+                        .current_call_scope()?
+                        .get_current_component_lock()
+                        .filter(|l| *l.substate_id() == component_address)
+                        .cloned();
+                    let is_already_locked = current_component_lock.is_some();
+                    let locked = match current_component_lock {
+                        Some(lock) => lock,
+                        None => state.read_lock_substate(SubstateId::Component(component_address))?,
+                    };
                     let component = state.get_component(&locked)?;
                     let template_address = *component.template_address();
-                    state.unlock_substate(locked)?;
+                    if !is_already_locked {
+                        state.unlock_substate(locked)?;
+                    }
                     Ok(InvokeResult::encode(&template_address)?)
                 })
             },
@@ -2893,26 +2910,26 @@ where
                     return Err(RuntimeError::FeePaymentInMainIntent);
                 }
 
-                // Charge for the statement's verification cost, exactly like the
-                // `stealth_transfer` method does.
-                if let Some(ref statement) = arg.statement {
-                    self.tracker.account_fee_intent_stealth_transfer()?;
-                    let has_view_key = self.tracker.write_with(|state| {
-                        state.account_stealth_transfer(statement)?;
-                        let resource_lock = state.read_lock_substate(SubstateId::Resource(TARI_TOKEN))?;
-                        let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
-                        state.unlock_substate(resource_lock)?;
-                        Ok::<_, RuntimeError>(has_view_key)
-                    })?;
-                    self.tracker
-                        .charge_native_execution(stealth::transfer_native_points(statement, has_view_key))?;
-                }
+                self.tracker
+                    .read_with(|state| state.check_write_allowed(&SubstateId::Vault(vault_id)))?;
 
-                // Authorise the spent inputs before the fee transfer executes — the same mandatory pre-execute gate as
-                // `stealth_transfer`, so a rejection leaves the inputs unspent. Fees are always paid in TARI.
-                if let Some(ref statement) = arg.statement {
-                    self.verify_input_authorizations(TARI_TOKEN.into(), statement)?;
-                }
+                // Charge for the statement's verification cost and authorise the spent inputs before the fee transfer
+                // executes — the same mandatory pre-execute gate as `stealth_transfer`, so a rejection leaves the
+                // inputs unspent. Fees are always paid in TARI.
+                let admitted_transfer = match arg.statement {
+                    Some(statement) => {
+                        self.tracker.account_fee_intent_stealth_transfer()?;
+                        let admitted = self
+                            .tracker
+                            .write_with(|state| state.account_stealth_transfer(statement))?;
+                        // TARI has no view key, so the viewable-balance surcharge never applies to a fee payment.
+                        self.tracker
+                            .charge_native_execution(stealth::transfer_native_points(admitted.statement(), false))?;
+                        self.verify_input_authorizations(TARI_TOKEN.into(), admitted.statement())?;
+                        Some(admitted)
+                    },
+                    None => None,
+                };
 
                 self.tracker.write_with_authorization(|state_mut| {
                     let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
@@ -2950,9 +2967,8 @@ where
                         let withdrawn = vault_mut.withdraw(arg.amount)?;
                         container.deposit(withdrawn)?;
                     }
-                    if let Some(statement) = arg.statement &&
-                        let Some(revealed) =
-                            state_mut.execute_stealth_transfer(TARI_TOKEN.into(), statement, None)?
+                    if let Some(admitted) = admitted_transfer &&
+                        let Some(revealed) = state_mut.execute_stealth_transfer(TARI_TOKEN.into(), admitted, None)?
                     {
                         container.deposit(revealed)?;
                     }
@@ -4254,8 +4270,14 @@ where
         // only creation-time invariant is that an output is spendable by at least one path (`spend_key` or
         // `condition_root` is `Some`), enforced by `validate_stealth_outputs_statement` during execution.
 
-        // The fee intent runs on free-compute credit, so the transfers it may perform are capped. Checked first, so
-        // an over-cap fee intent is rejected before any substate read, charge or crypto. Both the `StealthTransfer`
+        let address = self.tracker.read_with(|state| {
+            let address = state.resolve_resource_address_ref(resource_address.clone())?;
+            state.check_write_allowed(&SubstateId::Resource(address))?;
+            Ok::<_, RuntimeError>(address)
+        })?;
+
+        // The fee intent runs on free-compute credit, so the transfers it may perform are capped. Checked before any
+        // resource read, charge or crypto so an over-cap fee intent is rejected up front. Both the `StealthTransfer`
         // instruction and a template's `ResourceManager::stealth_transfer` reach here, so neither route escapes it.
         self.tracker.account_fee_intent_stealth_transfer()?;
 
@@ -4263,17 +4285,16 @@ where
         // allowance before any of it runs (the authorisation pass below included), so a transaction
         // that will not pay traps here without extracting the crypto work. The resource peek is a
         // cheap substate read that determines whether the viewable-balance surcharge applies.
-        let (address, has_view_key) = self.tracker.write_with(|state| {
-            state.account_stealth_transfer(&statement)?;
-            let address = state.resolve_resource_address_ref(resource_address.clone())?;
+        let (admitted, has_view_key) = self.tracker.write_with(|state| {
+            let admitted = state.account_stealth_transfer(statement)?;
             let resource_lock = state.read_lock_substate(SubstateId::Resource(address))?;
             let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
             state.unlock_substate(resource_lock)?;
-            Ok::<_, RuntimeError>((address, has_view_key))
+            Ok::<_, RuntimeError>((admitted, has_view_key))
         })?;
         self.tracker
             .charge_native_execution(tari_engine_types::stealth::transfer_native_points(
-                &statement,
+                admitted.statement(),
                 has_view_key,
             ))?;
 
@@ -4287,11 +4308,11 @@ where
         // their values to be in range; `execute_stealth_transfer` below range-proofs those same `statement` outputs.
         // Both run pre-commit in this one atomic call, so the two MUST stay coupled — decoupling them would reopen a
         // wraparound forgery in the covenant check.
-        self.verify_input_authorizations(resource_address.clone(), &statement)?;
+        self.verify_input_authorizations(resource_address.clone(), admitted.statement())?;
 
         self.tracker.write_with_authorization(|state_mut| {
             let Some(container) =
-                state_mut.execute_stealth_transfer(resource_address, statement, revealed_funds_bucket_id)?
+                state_mut.execute_stealth_transfer(resource_address, admitted, revealed_funds_bucket_id)?
             else {
                 return Ok(None);
             };
@@ -4718,5 +4739,231 @@ mod tests {
             runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args),
             Err(RuntimeError::InvalidArgument { argument, .. }) if argument.ends_with("PayFeeArg")
         ));
+    }
+
+    #[test]
+    fn restricted_frames_forbid_auth_hooks_spend_scripts_and_stealth_transfers() {
+        let statement =
+            StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
+        let vault_id = tari_template_lib::types::VaultId::new([1u8; 32].into());
+        let pay_fee_args = EngineArgs::from(vec![
+            tari_bor::encode(&PayFeeArg {
+                amount: Amount::zero(),
+                statement: Some(statement.clone()),
+            })
+            .unwrap()
+            .into(),
+        ]);
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address: TemplateAddress::default(),
+                    module_name: "Test".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id: EntityId::default(),
+                },
+                Some(FrameWriteMode::ReadOnly),
+            )
+            .unwrap();
+        runtime.tracker.write_with(|state| {
+            state
+                .current_call_scope_mut()
+                .unwrap()
+                .add_substate_to_referenced(vault_id.into());
+        });
+
+        assert!(matches!(
+            runtime.enforce_frame_restrictions("invoke_resource_access_hook"),
+            Err(RuntimeError::ForbiddenInReadOnlyContext {
+                operation: "invoke_resource_access_hook"
+            })
+        ));
+        assert!(matches!(
+            runtime.enforce_frame_restrictions("evaluate_spend_script"),
+            Err(RuntimeError::ForbiddenInReadOnlyContext {
+                operation: "evaluate_spend_script"
+            })
+        ));
+        assert!(matches!(
+            runtime.stealth_transfer(TARI_TOKEN.into(), statement.clone(), None),
+            Err(RuntimeError::WriteInReadOnlyContext)
+        ));
+        assert!(matches!(
+            runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args.clone()),
+            Err(RuntimeError::WriteInReadOnlyContext)
+        ));
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address: TemplateAddress::default(),
+                    module_name: "Test".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id: EntityId::default(),
+                },
+                Some(FrameWriteMode::OwnComponent),
+            )
+            .unwrap();
+        runtime.tracker.write_with(|state| {
+            state
+                .current_call_scope_mut()
+                .unwrap()
+                .add_substate_to_referenced(vault_id.into());
+        });
+
+        assert!(matches!(
+            runtime.enforce_frame_restrictions("invoke_resource_access_hook"),
+            Err(RuntimeError::ForbiddenInRestrictedFrame {
+                operation: "invoke_resource_access_hook",
+                ..
+            })
+        ));
+        assert!(matches!(
+            runtime.enforce_frame_restrictions("evaluate_spend_script"),
+            Err(RuntimeError::ForbiddenInRestrictedFrame {
+                operation: "evaluate_spend_script",
+                ..
+            })
+        ));
+        assert!(matches!(
+            runtime.stealth_transfer(TARI_TOKEN.into(), statement, None),
+            Err(RuntimeError::WriteOutsideOwnComponent { .. })
+        ));
+        assert!(matches!(
+            runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args),
+            Err(RuntimeError::WriteOutsideOwnComponent { .. })
+        ));
+    }
+
+    fn create_test_component(
+        runtime: &RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        template_address: TemplateAddress,
+        module_name: &str,
+        entity_id: EntityId,
+    ) -> ComponentAddress {
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address,
+                    module_name: module_name.to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+        let component_address = runtime
+            .tracker
+            .new_component(
+                tari_bor::Value::Null,
+                SubstateOwnerRule::None,
+                ComponentAccessRules::new(),
+                None,
+                UpdateRule::Locked,
+            )
+            .unwrap();
+        runtime
+            .pop_call_frame(
+                &IndexedWellKnownTypes::from_value(&tari_bor::to_value(&component_address).unwrap()).unwrap(),
+            )
+            .unwrap();
+        component_address
+    }
+
+    #[test]
+    fn get_template_address_succeeds_on_write_locked_current_component_and_migration() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let expected_template = TemplateAddress::from_array([7u8; 32]);
+        let other_template = TemplateAddress::from_array([8u8; 32]);
+        let migrated_template = TemplateAddress::from_array([9u8; 32]);
+        let entity_id = EntityId::default();
+
+        let component_address = create_test_component(&runtime, expected_template, "Test", entity_id);
+        let other_component_address = create_test_component(
+            &runtime,
+            other_template,
+            "Other",
+            EntityId::new([1u8; EntityId::LENGTH]),
+        );
+
+        // Simulate a `&mut self` component method holding a Write lock on `component_address`.
+        let component_lock = runtime.lock_component(component_address, LockFlag::Write).unwrap();
+        let arg_scope =
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&other_component_address).unwrap()).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address: expected_template,
+                    module_name: "Test".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock,
+                    arg_scope: Box::new(arg_scope),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+
+        let invoke_res = runtime
+            .component_invoke(
+                ComponentRef::Ref(component_address),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let actual_template: TemplateAddress = invoke_res.decode().unwrap();
+        assert_eq!(actual_template, expected_template);
+
+        // Querying a different component's template address still acquires and releases a temporary read lock.
+        let other_res = runtime
+            .component_invoke(
+                ComponentRef::Ref(other_component_address),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let actual_other_template: TemplateAddress = other_res.decode().unwrap();
+        assert_eq!(actual_other_template, other_template);
+
+        // Ensure the frame's write lock is still held so subsequent `SetState` and `pop_call_frame` succeed.
+        runtime
+            .component_invoke(
+                ComponentRef::Ref(component_address),
+                ComponentAction::SetState,
+                EngineArgs::from(vec![tari_bor::encode(&tari_bor::Value::Null).unwrap().into()]),
+            )
+            .unwrap();
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+
+        // Simulate a component migration holding a Write lock on `component_address`.
+        let migration_lock = runtime.lock_component(component_address, LockFlag::Write).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::MigrationContext {
+                    template_address: migrated_template,
+                    module_name: "TestV2".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: migration_lock,
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+        runtime.update_component_template(migrated_template).unwrap();
+
+        let migrated_res = runtime
+            .component_invoke(
+                ComponentRef::Ref(component_address),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let actual_migrated: TemplateAddress = migrated_res.decode().unwrap();
+        assert_eq!(actual_migrated, migrated_template);
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
     }
 }

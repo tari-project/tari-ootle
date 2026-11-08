@@ -415,7 +415,11 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 "CALL FRAME before:\n{}",
                 state.current_call_scope()?,
             );
-            state.check_all_substates_in_scope(push_frame.arg_scope())?;
+            if restrict_to == Some(FrameWriteMode::ReadOnly) {
+                state.check_read_only_args_in_scope(push_frame.arg_scope())?;
+            } else {
+                state.check_all_substates_in_scope(push_frame.arg_scope())?;
+            }
 
             let mut new_frame = push_frame.into_new_call_frame();
             // Restricted before the push, so the push installs neither signer badges nor a loan into a confined

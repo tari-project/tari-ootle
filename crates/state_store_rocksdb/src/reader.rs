@@ -1939,17 +1939,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
     ) -> Result<Vec<StateVersionProof>, StorageError> {
         let cf = self.db().cf(StateVersionProofCf)?;
         let start = cf.encode_key(&(shard, from));
-        let end = match to.checked_add(1) {
-            Some(after_to) => cf.encode_key(&(shard, after_to)),
-            None => match shard.as_u32().checked_add(1) {
-                Some(next_shard) => cf.encode_key(&(Shard::from(next_shard), 0)),
-                None => {
-                    let mut end = cf.encode_key(&(Shard::max(), Version::MAX)).to_vec();
-                    end.push(0);
-                    end.into()
-                },
-            },
-        };
+        let end = cf.encode_key(&(shard, to.saturating_add(1)));
         let proofs = cf
             .range_iterator(Ordering::Ascending, start..end)
             .map(|res| res.map(|(_, proof)| proof))
@@ -2188,14 +2178,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         let cf = self.db().cf(ValidatorLivenessLogCf)?;
         let start = cf.encode_key(&(epoch, *public_key, NodeHeight::zero()));
         // The upper bound is exclusive and the query is inclusive of `as_of`.
-        let end = match as_of.checked_add(NodeHeight(1)) {
-            Some(after_as_of) => cf.encode_key(&(epoch, *public_key, after_as_of)),
-            None => {
-                let mut end = cf.encode_key(&(epoch, *public_key, NodeHeight::max())).to_vec();
-                end.push(0);
-                end.into()
-            },
-        };
+        let end = cf.encode_key(&(epoch, *public_key, as_of.saturating_add(NodeHeight(1))));
         let counters = cf
             .range_iterator(Ordering::Descending, start..end)
             .next()

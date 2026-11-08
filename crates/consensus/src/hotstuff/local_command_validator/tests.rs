@@ -2538,6 +2538,31 @@ mod some_accept {
     }
 
     #[test]
+    fn an_all_accept_for_an_aborted_transaction_reports_the_local_abort_decision() {
+        let (replica, rec) = aborted_after_local_accept();
+        let atom = MultiShardAtom {
+            decision: Decision::Commit,
+            ..rec.get_current_multi_shard_atom().unwrap()
+        };
+
+        let evaluation = replica.evaluate_after(&[Command::AllAccept(atom)], |change_set| {
+            change_set.set_next_transaction_update(rec).unwrap();
+        });
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::DecisionDisagreement {
+                    local: Decision::Abort(AbortReason::ExecutionFailure),
+                    remote: Decision::Commit,
+                })
+            ),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
+
+    #[test]
     fn a_some_accept_with_a_forged_abort_reason_is_refused() {
         let (replica, rec) = aborted_after_local_accept();
         let atom = MultiShardAtom {

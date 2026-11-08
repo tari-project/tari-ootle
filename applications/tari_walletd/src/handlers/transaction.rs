@@ -256,7 +256,9 @@ async fn submit_inner(
 
     let transaction = sdk.signer_api().sign(req.seal_signer, transaction)?;
 
-    // Linked locks are finalized or released when the transaction resolves.
+    // Linked locks are finalized or released when the transaction resolves. The claim check shares this write with the
+    // link because a transaction request claims a lock by listing it, which leaves the lock row as it was: the service
+    // re-links the same locks when it stores the transaction, and that link cannot see a request's claim.
     let tx_id = transaction.calculate_id();
     if !req.lock_ids.is_empty() {
         sdk.store().with_write_tx(|tx| {

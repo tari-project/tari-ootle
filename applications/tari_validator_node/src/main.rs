@@ -54,7 +54,13 @@ fn load_seed_words(
                     format!("Failed to read seed words file {}: {e}", path.display()),
                 )
             })?;
-            Ok(Some(cli::parse_seed_words(content.reveal())))
+            let words = content.reveal().trim().parse().map_err(|e| {
+                ExitError::new(
+                    ExitCode::ConfigError,
+                    format!("Seed words file {} does not hold a seed phrase: {e}", path.display()),
+                )
+            })?;
+            Ok(Some(words))
         },
         (None, None) => Ok(None),
     }
@@ -255,7 +261,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn seed_file_accepts_multiline_whitespace() {
+    fn seed_file_accepts_a_trailing_newline() {
         use tari_common_types::seeds::{
             cipher_seed::CipherSeed,
             mnemonic::{Mnemonic, MnemonicLanguage},
@@ -265,7 +271,7 @@ mod tests {
         let words = CipherSeed::random()
             .to_mnemonic(MnemonicLanguage::English, None)
             .unwrap();
-        fs::write(&path, format!("  {}\n", words.join("\n\t").reveal())).unwrap();
+        fs::write(&path, format!("{}\n", words.join(" ").reveal())).unwrap();
         assert_eq!(load_seed_words(None, Some(&path)).unwrap().unwrap(), words);
         assert_eq!(load_seed_words(Some(words.clone()), None).unwrap().unwrap(), words);
         assert!(load_seed_words(Some(words), Some(&path)).is_err());

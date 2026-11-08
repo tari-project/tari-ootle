@@ -28,7 +28,7 @@ use tari_common::{
     configuration::{ConfigOverrideProvider, Network as L1Network},
 };
 use tari_common_types::seeds::seed_words::SeedWords;
-use tari_crypto::tari_utilities::{SafePassword, hidden::Hidden};
+use tari_crypto::tari_utilities::SafePassword;
 use tari_ootle_app_utilities::{
     common_cli_args::CommonCliArgs,
     p2p_config::{PeerSeedsConfig, ReachabilityMode},
@@ -87,12 +87,7 @@ pub struct Cli {
     #[clap(long)]
     pub allow_past_protocol_activation: bool,
     /// 24-word seed phrase to restore or initialize the validator node identity
-    #[clap(
-        long,
-        env = "TARI_VN_SEED_WORDS",
-        conflicts_with = "seed-words-file",
-        parse(from_str = parse_seed_words)
-    )]
+    #[clap(long, env = "TARI_VN_SEED_WORDS", conflicts_with = "seed-words-file")]
     pub seed_words: Option<SeedWords>,
     /// Path to a file containing 24-word seed phrase
     #[clap(long, env = "TARI_VN_SEED_WORDS_FILE")]
@@ -203,7 +198,7 @@ pub enum Subcommand {
     /// Generate an identity keypair if one does not exist and exit
     GenerateIdentity {
         /// Optional 24-word seed phrase to restore the identity from
-        #[clap(long, conflicts_with = "seed-words-file", parse(from_str = parse_seed_words))]
+        #[clap(long, conflicts_with = "seed-words-file")]
         seed_words: Option<SeedWords>,
         /// Optional path to a file containing 24 seed words
         #[clap(long)]
@@ -215,11 +210,6 @@ pub enum Subcommand {
         #[clap(long)]
         overwrite: bool,
     },
-}
-
-/// Splits a seed phrase on any whitespace, so spaces, tabs and newlines all separate words.
-pub fn parse_seed_words(s: &str) -> SeedWords {
-    SeedWords::new(s.split_whitespace().map(|w| Hidden::hide(w.to_string())).collect())
 }
 
 #[cfg(test)]
@@ -260,8 +250,8 @@ mod tests {
         let cli = Cli::parse_from([
             "tari_validator_node",
             "--seed-words",
-            " abandon  abandon\tabandon abandon abandon abandon abandon abandon abandon abandon abandon abandon \
-             abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon\nart ",
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon \
+             abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art",
             "--seed-passphrase",
             "hunter2",
         ]);

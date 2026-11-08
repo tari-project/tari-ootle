@@ -4882,8 +4882,12 @@ mod tests {
         let entity_id = EntityId::default();
 
         let component_address = create_test_component(&runtime, expected_template, "Test", entity_id);
-        let other_component_address =
-            create_test_component(&runtime, other_template, "Other", EntityId::new([1u8; EntityId::LENGTH]));
+        let other_component_address = create_test_component(
+            &runtime,
+            other_template,
+            "Other",
+            EntityId::new([1u8; EntityId::LENGTH]),
+        );
 
         // Simulate a `&mut self` component method holding a Write lock on `component_address`.
         let component_lock = runtime.lock_component(component_address, LockFlag::Write).unwrap();

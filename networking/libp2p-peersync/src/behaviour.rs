@@ -133,17 +133,29 @@ where TPeerStore: PeerStore
     }
 
     pub async fn want_peers<I: IntoIterator<Item = PeerId>>(&mut self, peers: I) -> Result<(), Error> {
+        let local_peer_id = self.local_peer_record.to_peer_id();
         self.want_peers.clear();
-        self.want_peers.extend(peers);
+        self.want_peers
+            .extend(peers.into_iter().filter(|id| *id != local_peer_id));
         shrink_hash_set_if_required(&mut self.want_peers);
         if self.want_peers.is_empty() {
             self.remaining_want_peers.clear();
             shrink_hash_set_if_required(&mut self.remaining_want_peers);
-            return Ok(());
+        } else {
+            // None - no more to add, we've already added them above
+            self.add_want_peers(None).await?;
         }
-
-        // None - no more to add, we've already added them above
-        self.add_want_peers(None).await?;
+        if self.remaining_want_peers.is_empty() {
+            let list = Arc::new(WantList::new());
+            self.pending_events.reserve(self.active_outbound_connections.len());
+            for (peer_id, conn_id) in &self.active_outbound_connections {
+                self.pending_events.push_back(ToSwarm::NotifyHandler {
+                    peer_id: *peer_id,
+                    handler: NotifyHandler::One(*conn_id),
+                    event: HandlerAction::WantPeers(list.clone()),
+                });
+            }
+        }
         Ok(())
     }
 
@@ -160,7 +172,7 @@ where TPeerStore: PeerStore
         if !self.remaining_want_peers.is_empty() {
             let list = Arc::new(self.remaining_want_peers.clone());
             // Notify all handlers
-            self.pending_events.reserve(self.remaining_want_peers.len());
+            self.pending_events.reserve(self.active_outbound_connections.len());
             for (peer_id, conn_id) in &self.active_outbound_connections {
                 self.pending_events.push_back(ToSwarm::NotifyHandler {
                     peer_id: *peer_id,
@@ -289,15 +301,11 @@ where TPeerStore: PeerStore
                 if self.local_peer_record.add_address(addr_confirmed.addr.clone()) =>
             {
                 self.handle_update_local_record();
-                self.pending_events
-                    .push_back(ToSwarm::GenerateEvent(Event::LocalPeerRecordUpdated));
             },
             FromSwarm::ExternalAddrExpired(addr_expired)
                 if self.local_peer_record.remove_address(addr_expired.addr) =>
             {
                 self.handle_update_local_record();
-                self.pending_events
-                    .push_back(ToSwarm::GenerateEvent(Event::LocalPeerRecordUpdated));
             },
             _ => {},
         }
@@ -428,5 +436,35 @@ mod tests {
 
         close_connection(&mut behaviour, peer_id, outbound_conn);
         assert!(!behaviour.active_outbound_connections.contains_key(&peer_id));
+    }
+
+    #[test]
+    fn want_peers_excludes_local_peer_and_notifies_handlers_when_cleared() {
+        block_on(async {
+            let mut behaviour = Behaviour::new(Keypair::generate_ed25519(), MemoryPeerStore::new(), Config::default());
+            let local_peer = behaviour.local_peer_record().to_peer_id();
+            let remote_peer = PeerId::random();
+            let conn_id = ConnectionId::new_unchecked(1);
+            behaviour
+                .handle_established_outbound_connection(
+                    conn_id,
+                    remote_peer,
+                    &"/ip4/127.0.0.1/tcp/9302".parse().unwrap(),
+                    Endpoint::Dialer,
+                    PortUse::New,
+                )
+                .unwrap();
+
+            behaviour.want_peers([local_peer, remote_peer]).await.unwrap();
+            assert!(!behaviour.want_peers.contains(&local_peer));
+            assert!(behaviour.want_peers.contains(&remote_peer));
+            assert_eq!(behaviour.pending_events.len(), 1);
+            behaviour.pending_events.clear();
+
+            behaviour.want_peers([local_peer]).await.unwrap();
+            assert!(behaviour.want_peers.is_empty());
+            assert!(behaviour.remaining_want_peers.is_empty());
+            assert_eq!(behaviour.pending_events.len(), 1);
+        });
     }
 }

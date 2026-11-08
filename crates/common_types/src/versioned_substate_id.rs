@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tari_engine_types::{SubstateVersion, substate::SubstateId};
 use tari_template_lib_types::TransactionReceiptAddress;
 
-use crate::{NumPreshards, ShardGroup, SubstateAddress, ToSubstateAddress, displayable::Displayable, shard::Shard};
+use crate::{NumPreshards, ShardGroup, SubstateAddress, ToSubstateAddress, shard::Shard};
 
 #[derive(
     Debug, Clone, Deserialize, Serialize, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen,
@@ -85,6 +85,9 @@ impl SubstateRequirement {
     }
 
     pub fn to_shard_group(&self, num_shards: NumPreshards, num_committees: u32) -> Option<ShardGroup> {
+        if self.substate_id.is_global() {
+            return None;
+        }
         self.to_substate_address()
             .map(|a| a.to_shard_group(num_shards, num_committees))
     }
@@ -289,7 +292,10 @@ impl std::hash::Hash for SubstateRequirementRef<'_> {
 
 impl Display for SubstateRequirementRef<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.substate_id, self.version.display())
+        match self.version {
+            Some(v) => write!(f, "{}:{}", self.substate_id, v),
+            None => write!(f, "{}:?", self.substate_id),
+        }
     }
 }
 
@@ -588,5 +594,31 @@ mod tests {
 
         assert!(VersionedSubstateId::from_str(&id.to_string()).is_err());
         assert!(VersionedSubstateId::from_str(&format!("{id}:?")).is_err());
+    }
+
+    #[test]
+    fn substate_requirement_ref_display_matches_owned_and_round_trips() {
+        let id = SubstateId::Component(ComponentAddress::new(ObjectKey::from_array([9; 32])));
+        for req in [
+            SubstateRequirement::unversioned(id.clone()),
+            SubstateRequirement::versioned(id, SubstateVersion::new(5)),
+        ] {
+            let as_ref = req.as_ref();
+            assert_eq!(as_ref.to_string(), req.to_string());
+            let parsed = SubstateRequirement::from_str(&as_ref.to_string()).unwrap();
+            assert_eq!(parsed.substate_id(), req.substate_id());
+            assert_eq!(parsed.version(), req.version());
+        }
+    }
+
+    #[test]
+    fn global_substate_requirement_has_global_shard_and_no_shard_group() {
+        use tari_engine_types::published_template::PublishedTemplateAddress;
+        use tari_template_lib_types::Hash32;
+
+        let global_id = SubstateId::Template(PublishedTemplateAddress::from_hash(Hash32::from_array([0xff; 32])));
+        let req = SubstateRequirement::versioned(global_id, SubstateVersion::ZERO);
+        assert_eq!(req.to_shard(NumPreshards::P256), Some(Shard::global()));
+        assert_eq!(req.to_shard_group(NumPreshards::P256, 4), None);
     }
 }

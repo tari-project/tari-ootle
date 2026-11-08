@@ -28,10 +28,67 @@ use serde::{Deserialize, Serialize};
 
 type BoundedByteVec<const MAX: usize> = BoundedVec<u8, 0, MAX, witnesses::Empty<MAX>>;
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(transparent)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct MaxSizeBytes<const MAX: usize> {
     inner: BoundedByteVec<MAX>,
+}
+
+impl<const MAX: usize> Serialize for MaxSizeBytes<MAX> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where S: serde::Serializer {
+        if serializer.is_human_readable() {
+            Serialize::serialize(self.inner.as_slice(), serializer)
+        } else {
+            serializer.serialize_bytes(self.inner.as_slice())
+        }
+    }
+}
+
+impl<'de, const MAX: usize> Deserialize<'de> for MaxSizeBytes<MAX> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where D: serde::Deserializer<'de> {
+        struct MaxSizeBytesVisitor<const MAX: usize>;
+
+        impl<'de, const MAX: usize> serde::de::Visitor<'de> for MaxSizeBytesVisitor<MAX> {
+            type Value = MaxSizeBytes<MAX>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(formatter, "at most {MAX} bytes")
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where E: serde::de::Error {
+                MaxSizeBytes::from_bytes_checked(v)
+                    .ok_or_else(|| E::custom(format!("MaxSizeBytes<{MAX}> exceeded: got {} bytes", v.len())))
+            }
+
+            fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+            where E: serde::de::Error {
+                MaxSizeBytes::from_vec(v).map_err(E::custom)
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where A: serde::de::SeqAccess<'de> {
+                let cap = seq.size_hint().unwrap_or(0).min(MAX).min(64);
+                let mut bytes = Vec::with_capacity(cap);
+                while let Some(b) = seq.next_element::<u8>()? {
+                    if bytes.len() == MAX {
+                        return Err(serde::de::Error::custom(format!(
+                            "MaxSizeBytes<{MAX}> exceeded: more than {MAX} bytes"
+                        )));
+                    }
+                    bytes.push(b);
+                }
+                MaxSizeBytes::from_vec(bytes).map_err(serde::de::Error::custom)
+            }
+        }
+
+        if deserializer.is_human_readable() {
+            deserializer.deserialize_seq(MaxSizeBytesVisitor::<MAX>)
+        } else {
+            deserializer.deserialize_bytes(MaxSizeBytesVisitor::<MAX>)
+        }
+    }
 }
 
 impl<const MAX: usize> MaxSizeBytes<MAX> {
@@ -133,10 +190,18 @@ impl<C, const MAX: usize> minicbor::Encode<C> for MaxSizeBytes<MAX> {
 
 impl<'b, C, const MAX: usize> minicbor::Decode<'b, C> for MaxSizeBytes<MAX> {
     fn decode(d: &mut minicbor::Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        let bytes = d.bytes()?;
-        MaxSizeBytes::from_bytes_checked(bytes).ok_or_else(|| {
-            minicbor::decode::Error::message(format!("MaxSizeBytes<{MAX}> exceeded: got {} bytes", bytes.len()))
-        })
+        let mut out = Vec::new();
+        for chunk in d.bytes_iter()? {
+            let chunk = chunk?;
+            let new_len = out.len().saturating_add(chunk.len());
+            if new_len > MAX {
+                return Err(minicbor::decode::Error::message(format!(
+                    "MaxSizeBytes<{MAX}> exceeded: got {new_len} bytes"
+                )));
+            }
+            out.extend_from_slice(chunk);
+        }
+        Ok(MaxSizeBytes::from_vec(out).expect("length checked <= MAX"))
     }
 }
 
@@ -170,4 +235,47 @@ impl<const MAX: usize> Default for MaxSizeBytes<MAX> {
 pub enum MaxSizeBytesError {
     #[error("Invalid Bytes length: expected {expected}, got {actual}")]
     MaxSizeBytesLengthError { expected: usize, actual: usize },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serde_cbor_and_minicbor_are_wire_compatible_byte_strings() {
+        let original = MaxSizeBytes::<8>::from_vec(vec![1, 2, 3, 4, 5]).unwrap();
+
+        let minicbor_bytes = tari_bor::encode(&original).unwrap();
+        let serde_cbor_bytes = tari_bor::serde_codec::to_vec(&original).unwrap();
+        assert_eq!(minicbor_bytes, serde_cbor_bytes);
+
+        let value: tari_bor::Value = tari_bor::decode_exact(&serde_cbor_bytes).unwrap();
+        assert_eq!(value, tari_bor::Value::Bytes(vec![1, 2, 3, 4, 5]));
+
+        let from_minicbor: MaxSizeBytes<8> = tari_bor::serde_codec::from_slice(&minicbor_bytes).unwrap();
+        assert_eq!(from_minicbor, original);
+
+        let from_serde_cbor: MaxSizeBytes<8> = tari_bor::decode_exact(&serde_cbor_bytes).unwrap();
+        assert_eq!(from_serde_cbor, original);
+    }
+
+    #[test]
+    fn json_and_indefinite_cbor_enforce_max_length() {
+        let original = MaxSizeBytes::<4>::from_vec(vec![10, 20, 30]).unwrap();
+        let json = serde_json::to_string(&original).unwrap();
+        assert_eq!(json, "[10,20,30]");
+        let decoded: MaxSizeBytes<4> = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, original);
+
+        assert!(serde_json::from_str::<MaxSizeBytes<4>>("[1,2,3,4,5]").is_err());
+
+        // Indefinite-length CBOR byte string: 0x5f, chunk [1, 2] (0x42 01 02), chunk [3, 4] (0x42 03 04), break (0xff)
+        let indef_ok = [0x5f, 0x42, 0x01, 0x02, 0x42, 0x03, 0x04, 0xff];
+        let decoded_indef: MaxSizeBytes<4> = tari_bor::decode_exact(&indef_ok).unwrap();
+        assert_eq!(decoded_indef.as_ref(), &[1, 2, 3, 4]);
+
+        // Indefinite-length CBOR byte string exceeding MAX = 4
+        let indef_too_long = [0x5f, 0x42, 0x01, 0x02, 0x43, 0x03, 0x04, 0x05, 0xff];
+        assert!(tari_bor::decode_exact::<MaxSizeBytes<4>>(&indef_too_long).is_err());
+    }
 }

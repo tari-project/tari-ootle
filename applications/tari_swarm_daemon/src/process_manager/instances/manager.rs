@@ -268,7 +268,7 @@ impl InstanceManager {
         fs::create_dir_all(&base_path).await.context("create_dir_all in fork")?;
 
         // Special handling to set the claim public key if we find a file containing one
-        if instance_type.is_validator() {
+        if instance_type.is_validator() && !instance_settings.contains_key(CLAIM_PUBLIC_KEY_SETTINGS_KEY) {
             let claim_public_key_file = processes_path.join(CLAIM_KEY_FILE_NAME);
             if claim_public_key_file.exists() {
                 let file = File::open(&claim_public_key_file)
@@ -584,6 +584,12 @@ impl InstanceManager {
                 new_settings.extend(instance_config.settings.clone());
 
                 if let Some(instance) = self.instances_mut().find(|inst| inst.name() == expected_name) {
+                    if instance.instance_type().is_validator() &&
+                        !new_settings.contains_key(CLAIM_PUBLIC_KEY_SETTINGS_KEY) &&
+                        let Some(claim_key) = instance.settings().get(CLAIM_PUBLIC_KEY_SETTINGS_KEY)
+                    {
+                        new_settings.insert(CLAIM_PUBLIC_KEY_SETTINGS_KEY.to_string(), claim_key.clone());
+                    }
                     let settings_changed = *instance.settings() != new_settings;
                     let envs_changed = instance.envs() != instance_config.envs;
                     if settings_changed || envs_changed {
@@ -765,5 +771,83 @@ mod tests {
         assert!(err.contains("no fee claim public key"), "{err}");
         assert!(err.contains(CLAIM_KEY_FILE_NAME), "{err}");
         assert_eq!(manager.instances().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn validator_claim_key_respects_explicit_override_and_config_reload() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_path = temp_dir.path().to_path_buf();
+        let node_exec = stub_executable(&base_path).await;
+        let vn_exec = Executable {
+            instance_type: InstanceType::TariValidatorNode,
+            path: node_exec.path.clone(),
+        };
+        let processes_path = base_path.join("processes");
+        fs::create_dir_all(&processes_path).await.unwrap();
+        fs::write(
+            processes_path.join(CLAIM_KEY_FILE_NAME),
+            r#"{"account_public_key":"file-claim-key"}"#,
+        )
+        .await
+        .unwrap();
+
+        let vn_config = InstanceConfig::new(InstanceType::TariValidatorNode);
+        let vn_default_name = vn_config.instance_name(0);
+        let mut manager = InstanceManager::new(
+            base_path,
+            Network::LocalNet,
+            HashMap::new(),
+            vec![vn_config.clone()],
+            47200,
+        );
+        manager
+            .create_instance(
+                &node_exec,
+                InstanceType::MinoTariNode,
+                "bn".to_string(),
+                HashMap::new(),
+            )
+            .await
+            .unwrap();
+
+        let default_vn_id = manager
+            .create_instance(
+                &vn_exec,
+                InstanceType::TariValidatorNode,
+                vn_default_name,
+                HashMap::new(),
+            )
+            .await
+            .unwrap();
+        let custom_settings =
+            HashMap::from([(CLAIM_PUBLIC_KEY_SETTINGS_KEY.to_string(), "custom-claim-key".to_string())]);
+        let override_vn_id = manager
+            .create_instance(
+                &vn_exec,
+                InstanceType::TariValidatorNode,
+                "vn-override".to_string(),
+                custom_settings,
+            )
+            .await
+            .unwrap();
+
+        let default_vn = manager.instances().find(|i| i.id() == default_vn_id).unwrap();
+        assert_eq!(
+            default_vn.settings().get(CLAIM_PUBLIC_KEY_SETTINGS_KEY),
+            Some(&"file-claim-key".to_string())
+        );
+        let override_vn = manager.instances().find(|i| i.id() == override_vn_id).unwrap();
+        assert_eq!(
+            override_vn.settings().get(CLAIM_PUBLIC_KEY_SETTINGS_KEY),
+            Some(&"custom-claim-key".to_string())
+        );
+
+        manager.apply_config_update(HashMap::new(), &[vn_config]);
+        let default_vn = manager.instances().find(|i| i.id() == default_vn_id).unwrap();
+        assert!(!default_vn.is_config_dirty());
+        assert_eq!(
+            default_vn.settings().get(CLAIM_PUBLIC_KEY_SETTINGS_KEY),
+            Some(&"file-claim-key".to_string())
+        );
     }
 }

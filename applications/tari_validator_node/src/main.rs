@@ -66,6 +66,19 @@ fn load_seed_words(
     }
 }
 
+fn resolve_seed_words_args<'a>(
+    cli_seed_words: Option<SeedWords>,
+    cli_seed_words_file: Option<&'a Path>,
+    subcommand_seed_words: Option<SeedWords>,
+    subcommand_seed_words_file: Option<&'a Path>,
+) -> (Option<SeedWords>, Option<&'a Path>) {
+    if subcommand_seed_words.is_some() || subcommand_seed_words_file.is_some() {
+        (subcommand_seed_words, subcommand_seed_words_file)
+    } else {
+        (cli_seed_words, cli_seed_words_file)
+    }
+}
+
 #[cfg(feature = "tokio_debug")]
 const DEBUG_PORT: u16 = console_subscriber::Server::DEFAULT_PORT;
 
@@ -143,8 +156,13 @@ async fn main() -> anyhow::Result<()> {
             seed_passphrase,
             overwrite,
         }) => {
-            let seed_words_file_arg = seed_words_file.as_deref().or(cli.seed_words_file.as_deref());
-            let parsed_seed_words = load_seed_words(seed_words.or(cli.seed_words), seed_words_file_arg)?;
+            let (seed_words_arg, seed_words_file_arg) = resolve_seed_words_args(
+                cli.seed_words,
+                cli.seed_words_file.as_deref(),
+                seed_words,
+                seed_words_file.as_deref(),
+            );
+            let parsed_seed_words = load_seed_words(seed_words_arg, seed_words_file_arg)?;
 
             let keypair = setup_validator_keypair(
                 &config.validator_node.identity_file,
@@ -274,9 +292,26 @@ mod tests {
         fs::write(&path, format!("{}\n", words.join(" ").reveal())).unwrap();
         assert_eq!(load_seed_words(None, Some(&path)).unwrap().unwrap(), words);
         assert_eq!(load_seed_words(Some(words.clone()), None).unwrap().unwrap(), words);
-        assert!(load_seed_words(Some(words), Some(&path)).is_err());
+        assert!(load_seed_words(Some(words.clone()), Some(&path)).is_err());
         assert!(load_seed_words(None, None).unwrap().is_none());
         assert!(load_seed_words(None, Some(&dir.path().join("missing.txt"))).is_err());
+
+        let other_words = CipherSeed::random()
+            .to_mnemonic(MnemonicLanguage::English, None)
+            .unwrap();
+        let (resolved_words, resolved_file) =
+            resolve_seed_words_args(Some(other_words.clone()), None, None, Some(path.as_path()));
+        assert_eq!(
+            load_seed_words(resolved_words, resolved_file).unwrap().unwrap(),
+            words
+        );
+
+        let (resolved_words, resolved_file) =
+            resolve_seed_words_args(None, Some(path.as_path()), Some(other_words.clone()), None);
+        assert_eq!(
+            load_seed_words(resolved_words, resolved_file).unwrap().unwrap(),
+            other_words
+        );
     }
 
     const CHILD_DIR_VAR: &str = "OOTLE_VN_PANIC_TEST_DIR";

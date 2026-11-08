@@ -89,10 +89,8 @@ pub async fn list(
             })),
         };
 
-    let mut num_returned = 0;
-    for result in iter.skip(skip) {
+    for result in iter.skip(skip).take(page_size) {
         let ((_, _, block_id), block) = result?;
-        num_returned += 1;
         let mut flags = Vec::new();
         if block.is_committed() {
             flags.push("✅");
@@ -128,9 +126,6 @@ pub async fn list(
             "state_hash": hex::encode(block.header().state_merkle_root()),
             "epoch_hash": hex::encode(block.header().epoch_hash()),
         }));
-        if num_returned == page_size {
-            break;
-        }
     }
     let total = cf.count(OPERATION)?;
     table.set_total_entries(total);

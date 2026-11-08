@@ -57,13 +57,15 @@ impl Config {
     }
 
     pub fn get_registration_file(&self) -> PathBuf {
-        self.vn_base_dir
+        self.base_dir
+            .join(&self.vn_base_dir)
             .join(self.network.as_key_str())
             .join("registration.json")
     }
 
     pub fn get_layer_one_transaction_path(&self) -> PathBuf {
-        self.vn_base_dir
+        self.base_dir
+            .join(&self.vn_base_dir)
             .join(self.network.as_key_str())
             .join("data")
             .join("layer_one_transactions")
@@ -140,4 +142,86 @@ pub fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
         },
         watch_dirs: vec![],
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::{Commands, CommonCli, InitArgs};
+
+    fn sample_cli(init_args: InitArgs) -> Cli {
+        Cli {
+            common: CommonCli {
+                base_dir: PathBuf::from("data/watcher"),
+                config_path: PathBuf::from("config.toml"),
+                validator_dir: PathBuf::from("validator"),
+                network: Some(Network::LocalNet),
+            },
+            command: Commands::Init(init_args),
+        }
+    }
+
+    #[test]
+    fn init_args_apply_disables_auto_register_for_unmanaged_or_no_auto_register() {
+        let unmanaged = InitArgs {
+            unmanaged: true,
+            no_auto_register: false,
+            no_auto_restart: false,
+            force: false,
+        };
+        let mut cfg = get_base_config(&sample_cli(unmanaged.clone())).unwrap();
+        unmanaged.apply(&mut cfg);
+        assert!(!cfg.auto_register);
+        assert!(matches!(cfg.auto_start, AutoStart::Never));
+
+        let no_reg = InitArgs {
+            unmanaged: false,
+            no_auto_register: true,
+            no_auto_restart: false,
+            force: false,
+        };
+        let mut cfg = get_base_config(&sample_cli(no_reg.clone())).unwrap();
+        no_reg.apply(&mut cfg);
+        assert!(!cfg.auto_register);
+        assert!(matches!(cfg.auto_start, AutoStart::Always));
+
+        let default_init = InitArgs {
+            unmanaged: false,
+            no_auto_register: false,
+            no_auto_restart: false,
+            force: false,
+        };
+        let mut cfg = get_base_config(&sample_cli(default_init.clone())).unwrap();
+        default_init.apply(&mut cfg);
+        assert!(cfg.auto_register);
+    }
+
+    #[test]
+    fn registration_and_layer_one_paths_resolve_relative_vn_base_dir_against_base_dir() {
+        let init_args = InitArgs {
+            unmanaged: false,
+            no_auto_register: false,
+            no_auto_restart: false,
+            force: false,
+        };
+        let mut cfg = get_base_config(&sample_cli(init_args)).unwrap();
+        cfg.base_dir = PathBuf::from("data/watcher");
+        cfg.vn_base_dir = PathBuf::from("validator");
+
+        assert_eq!(
+            cfg.get_registration_file(),
+            PathBuf::from("data/watcher")
+                .join("validator")
+                .join("localnet")
+                .join("registration.json")
+        );
+        assert_eq!(
+            cfg.get_layer_one_transaction_path(),
+            PathBuf::from("data/watcher")
+                .join("validator")
+                .join("localnet")
+                .join("data")
+                .join("layer_one_transactions")
+        );
+    }
 }

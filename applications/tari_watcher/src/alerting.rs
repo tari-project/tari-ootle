@@ -31,6 +31,12 @@ pub struct MatterMostNotifier {
     pub client: reqwest::Client,
 }
 
+impl MatterMostNotifier {
+    fn endpoint_url(&self, endpoint: &str) -> String {
+        format!("{}{}", self.server_url.as_str().trim_end_matches('/'), endpoint)
+    }
+}
+
 impl Alerting for MatterMostNotifier {
     async fn alert(&mut self, message: &str) -> Result<()> {
         if self.credentials.is_empty() {
@@ -41,7 +47,7 @@ impl Alerting for MatterMostNotifier {
         }
 
         const POST_ENDPOINT: &str = "/api/v4/posts";
-        let url = format!("{}{}", self.server_url, POST_ENDPOINT);
+        let url = self.endpoint_url(POST_ENDPOINT);
         let req = json!({
             "channel_id": self.channel_id,
             "message": message,
@@ -69,10 +75,10 @@ impl Alerting for MatterMostNotifier {
             bail!("Credentials field is empty");
         }
 
-        let url = format!("{}{}", self.server_url, PING_ENDPOINT);
+        let url = self.endpoint_url(PING_ENDPOINT);
         let resp = self
             .client
-            .get(url.clone())
+            .get(url)
             .header("Authorization", format!("Bearer {}", self.credentials))
             .send()
             .await?;
@@ -145,4 +151,29 @@ impl Alerting for TelegramNotifier {
     // fn stats(&self) -> Result<u64> {
     //     Ok(self.alerts_sent)
     // }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mattermost_endpoint_url_avoids_double_slash() {
+        let notifier = MatterMostNotifier {
+            server_url: Url::parse("https://some.corporation.com").unwrap(),
+            channel_id: "chan".to_string(),
+            credentials: "token".to_string(),
+            alerts_sent: 0,
+            client: reqwest::Client::new(),
+        };
+
+        assert_eq!(
+            notifier.endpoint_url("/api/v4/posts"),
+            "https://some.corporation.com/api/v4/posts"
+        );
+        assert_eq!(
+            notifier.endpoint_url("/api/v4/users/me"),
+            "https://some.corporation.com/api/v4/users/me"
+        );
+    }
 }

@@ -97,7 +97,7 @@ pub struct InitArgs {
 
 impl InitArgs {
     pub fn apply(&self, config: &mut Config) {
-        config.auto_register = !self.unmanaged || !self.no_auto_register;
+        config.auto_register = !self.unmanaged && !self.no_auto_register;
         if self.unmanaged {
             config.auto_start = AutoStart::Never;
         } else if self.no_auto_restart {

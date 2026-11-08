@@ -324,8 +324,7 @@ impl ResourceContainer {
                         "Confidential deposit contained duplicate commitment".to_string(),
                     ));
                 }
-                let new_revealed =
-                    checked_deposit(*revealed_amount, *locked_revealed_amount, other_amount, "deposit")?;
+                let new_revealed = checked_deposit(*revealed_amount, *locked_revealed_amount, other_amount, "deposit")?;
                 commitments.extend(other_commitments);
                 *revealed_amount = new_revealed;
             },
@@ -1203,11 +1202,8 @@ mod tests {
         let c1 = PedersenCommitmentBytes::from_bytes(&[1u8; 32]).unwrap();
         let c2 = PedersenCommitmentBytes::from_bytes(&[2u8; 32]).unwrap();
         let c_missing = PedersenCommitmentBytes::from_bytes(&[9u8; 32]).unwrap();
-        let mut container = ResourceContainer::confidential(
-            PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-            [c1, c2],
-            Amount::from(100u64),
-        );
+        let mut container =
+            ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c1, c2], Amount::from(100u64));
 
         let err = container
             .recall_confidential_commitments(&[c1, c_missing].into_iter().collect(), Amount::from(40u64))
@@ -1224,16 +1220,8 @@ mod tests {
     fn deposit_and_unlock_reject_partial_or_duplicate_mutations_atomically() {
         let c1 = PedersenCommitmentBytes::from_bytes(&[1u8; 32]).unwrap();
         let c2 = PedersenCommitmentBytes::from_bytes(&[2u8; 32]).unwrap();
-        let mut conf = ResourceContainer::confidential(
-            PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-            [c1],
-            Amount::from(10u64),
-        );
-        let overflow_deposit = ResourceContainer::confidential(
-            PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-            [c2],
-            Amount::MAX,
-        );
+        let mut conf = ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c1], Amount::from(10u64));
+        let overflow_deposit = ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c2], Amount::MAX);
         let err = conf.deposit(overflow_deposit).unwrap_err();
         assert!(matches!(err, ResourceError::BalanceOverflow { .. }));
         assert_eq!(

@@ -282,7 +282,7 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
             include_proof: false,
         };
 
-        let resp = client.get_substate(request).await?;
+        let mut resp = client.get_substate(request).await?;
         let status = SubstateStatus::try_from(resp.status).map_err(|e| {
             ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
                 "Node returned invalid substate status {}: {e}",
@@ -295,15 +295,7 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
         //     let qc = QuorumCertificate::try_from(&qc)?;
         // }
 
-        match status {
-            SubstateStatus::Up => Ok(SubstateResult::Up {
-                substate: EncodedSubstate::new(resp.version, Encoded::from_bytes(resp.substate)),
-            }),
-            SubstateStatus::Down => Ok(SubstateResult::Down {
-                version: SubstateVersion::new(resp.version),
-            }),
-            SubstateStatus::DoesNotExist => Ok(SubstateResult::DoesNotExist),
-        }
+        decode_single_substate(substate_req, status, &mut resp)
     }
 
     async fn get_substate_with_proof(
@@ -325,17 +317,9 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
             ))
         })?;
 
-        let proof = decode_substate_proof(status, &mut resp);
+        let proof = decode_substate_proof(status, &mut resp)?;
 
-        let result = match status {
-            SubstateStatus::Up => SubstateResult::Up {
-                substate: EncodedSubstate::new(resp.version, Encoded::from_bytes(std::mem::take(&mut resp.substate))),
-            },
-            SubstateStatus::Down => SubstateResult::Down {
-                version: SubstateVersion::new(resp.version),
-            },
-            SubstateStatus::DoesNotExist => SubstateResult::DoesNotExist,
-        };
+        let result = decode_single_substate(substate_req, status, &mut resp)?;
 
         Ok((result, proof))
     }
@@ -458,19 +442,96 @@ where
     Ok(batch)
 }
 
+fn decode_single_substate(
+    substate_req: SubstateRequirementRef<'_>,
+    status: SubstateStatus,
+    resp: &mut GetSubstateResponse,
+) -> Result<SubstateResult, ValidatorNodeRpcClientError> {
+    if matches!(status, SubstateStatus::Up | SubstateStatus::Down) && !resp.address.is_empty() {
+        let answered_id = SubstateId::from_bytes(&resp.address)
+            .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!("{e}")))?;
+        if answered_id != *substate_req.substate_id() {
+            return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+                "Node answered for {answered_id} when {} was requested",
+                substate_req.substate_id()
+            )));
+        }
+    }
+
+    match status {
+        SubstateStatus::Up => {
+            if resp.substate.is_empty() {
+                return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+                    "Node returned an Up substate for {} with empty substate bytes",
+                    substate_req.substate_id()
+                )));
+            }
+            Ok(SubstateResult::Up {
+                substate: EncodedSubstate::new(resp.version, Encoded::from_bytes(std::mem::take(&mut resp.substate))),
+            })
+        },
+        SubstateStatus::Down => {
+            if !resp.substate.is_empty() {
+                return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+                    "Node returned a Down substate for {} with non-empty substate bytes",
+                    substate_req.substate_id()
+                )));
+            }
+            Ok(SubstateResult::Down {
+                version: SubstateVersion::new(resp.version),
+            })
+        },
+        SubstateStatus::DoesNotExist => {
+            if !resp.substate.is_empty() || !resp.address.is_empty() {
+                return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+                    "Node returned a DoesNotExist response for {} with substate data",
+                    substate_req.substate_id()
+                )));
+            }
+            Ok(SubstateResult::DoesNotExist)
+        },
+    }
+}
+
 /// The proof a single-substate response carries, taken out of `resp`. The responder omits the commit proof when it has
 /// nothing committed to anchor against.
-fn decode_substate_proof(status: SubstateStatus, resp: &mut GetSubstateResponse) -> Option<SubstateProofData> {
-    if resp.commit_proof.is_empty() {
-        return None;
+fn decode_substate_proof(
+    status: SubstateStatus,
+    resp: &mut GetSubstateResponse,
+) -> Result<Option<SubstateProofData>, ValidatorNodeRpcClientError> {
+    if status == SubstateStatus::DoesNotExist {
+        if !resp.commit_proof.is_empty() ||
+            !resp.substate_value_proof.is_empty() ||
+            !resp.substate_down_proof.is_empty()
+        {
+            return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+                "Node returned proof bytes alongside a DoesNotExist substate response"
+            )));
+        }
+        return Ok(None);
     }
-    Some(SubstateProofData {
+
+    if resp.commit_proof.is_empty() && resp.substate_value_proof.is_empty() && resp.substate_down_proof.is_empty() {
+        return Ok(None);
+    }
+
+    if resp.commit_proof.is_empty() || resp.substate_value_proof.is_empty() {
+        return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+            "Node returned an incomplete substate proof (commit_proof_present={}, substate_value_proof_present={})",
+            !resp.commit_proof.is_empty(),
+            !resp.substate_value_proof.is_empty()
+        )));
+    }
+
+    Ok(Some(SubstateProofData {
         substate_value_proof: std::mem::take(&mut resp.substate_value_proof),
         commit_proof: std::mem::take(&mut resp.commit_proof),
         proof_epoch: resp.proof_epoch,
-        substate_down_proof: Some(std::mem::take(&mut resp.substate_down_proof)).filter(|proof| !proof.is_empty()),
+        substate_down_proof: (status == SubstateStatus::Down)
+            .then(|| std::mem::take(&mut resp.substate_down_proof))
+            .filter(|proof| !proof.is_empty()),
         destroyed_at_state_version: (status == SubstateStatus::Down).then_some(resp.destroyed_at_state_version),
-    })
+    }))
 }
 
 fn decode_batched_substate(proven: proto::rpc::ProvenSubstate) -> Result<BatchedSubstate, ValidatorNodeRpcClientError> {
@@ -483,10 +544,20 @@ fn decode_batched_substate(proven: proto::rpc::ProvenSubstate) -> Result<Batched
     // A batch always answers with the head version, which is down when the substate's latest version
     // has been spent. Only an up substate carries a value.
     let result = if substate.destroyed.is_some() {
+        if !substate.substate.is_empty() {
+            return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+                "Batched Down substate {substate_id} must not carry substate bytes"
+            )));
+        }
         SubstateResult::Down {
             version: SubstateVersion::new(substate.version),
         }
     } else {
+        if substate.substate.is_empty() {
+            return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+                "Batched Up substate {substate_id} has empty substate bytes"
+            )));
+        }
         SubstateResult::Up {
             substate: EncodedSubstate::new(substate.version, Encoded::from_bytes(substate.substate)),
         }
@@ -754,7 +825,7 @@ mod tests {
             substate_down_proof: vec![3, 4],
             ..Default::default()
         });
-        let proof = decode_substate_proof(SubstateStatus::Down, &mut resp).unwrap();
+        let proof = decode_substate_proof(SubstateStatus::Down, &mut resp).unwrap().unwrap();
         assert_eq!(proof.substate_down_proof, Some(vec![3, 4]));
         assert_eq!(proof.destroyed_at_state_version, Some(9));
         assert_eq!(proof.commit_proof, vec![2]);
@@ -768,7 +839,7 @@ mod tests {
             commit_proof: vec![2],
             ..Default::default()
         });
-        let proof = decode_substate_proof(SubstateStatus::Up, &mut resp).unwrap();
+        let proof = decode_substate_proof(SubstateStatus::Up, &mut resp).unwrap().unwrap();
         assert_eq!(proof.substate_down_proof, None);
         assert_eq!(proof.destroyed_at_state_version, None);
 
@@ -776,7 +847,11 @@ mod tests {
             status: SubstateStatus::Down as i32,
             ..Default::default()
         });
-        assert!(decode_substate_proof(SubstateStatus::Down, &mut unanchored).is_none());
+        assert!(
+            decode_substate_proof(SubstateStatus::Down, &mut unanchored)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -797,5 +872,129 @@ mod tests {
         });
         let batched = decode_batched_substate(destroyed).unwrap();
         assert!(matches!(batched.result, SubstateResult::Down { .. }));
+    }
+
+    #[test]
+    fn decode_substate_proof_ignores_down_proof_on_up_and_rejects_incomplete_or_nonexistent_proof() {
+        let mut up_with_down_proof = over_the_wire(&GetSubstateResponse {
+            status: SubstateStatus::Up as i32,
+            substate_value_proof: vec![1],
+            commit_proof: vec![2],
+            substate_down_proof: vec![3, 4],
+            ..Default::default()
+        });
+        let proof = decode_substate_proof(SubstateStatus::Up, &mut up_with_down_proof)
+            .unwrap()
+            .unwrap();
+        assert_eq!(proof.substate_down_proof, None);
+
+        let mut missing_value_proof = over_the_wire(&GetSubstateResponse {
+            status: SubstateStatus::Up as i32,
+            commit_proof: vec![2],
+            ..Default::default()
+        });
+        assert!(decode_substate_proof(SubstateStatus::Up, &mut missing_value_proof).is_err());
+
+        let mut missing_commit_proof = over_the_wire(&GetSubstateResponse {
+            status: SubstateStatus::Up as i32,
+            substate_value_proof: vec![1],
+            ..Default::default()
+        });
+        assert!(decode_substate_proof(SubstateStatus::Up, &mut missing_commit_proof).is_err());
+
+        let mut nexist_without_proof = over_the_wire(&GetSubstateResponse {
+            status: SubstateStatus::DoesNotExist as i32,
+            ..Default::default()
+        });
+        assert!(
+            decode_substate_proof(SubstateStatus::DoesNotExist, &mut nexist_without_proof)
+                .unwrap()
+                .is_none()
+        );
+
+        let mut nexist_with_proof = over_the_wire(&GetSubstateResponse {
+            status: SubstateStatus::DoesNotExist as i32,
+            substate_value_proof: vec![1],
+            commit_proof: vec![2],
+            ..Default::default()
+        });
+        assert!(decode_substate_proof(SubstateStatus::DoesNotExist, &mut nexist_with_proof).is_err());
+    }
+
+    #[test]
+    fn decode_batched_substate_rejects_empty_up_and_non_empty_down() {
+        let empty_up = over_the_wire(&proto::rpc::ProvenSubstate {
+            substate: Some(proto::consensus::Substate {
+                substate_id: substate_id().to_bytes(),
+                version: 1,
+                substate: vec![],
+                created: None,
+                destroyed: None,
+            }),
+            substate_value_proof: vec![],
+            proof_epoch: 0,
+        });
+        assert!(decode_batched_substate(empty_up).is_err());
+
+        let non_empty_down = over_the_wire(&proto::rpc::ProvenSubstate {
+            substate: Some(proto::consensus::Substate {
+                substate_id: substate_id().to_bytes(),
+                version: 2,
+                substate: vec![1, 2, 3],
+                created: None,
+                destroyed: Some(proto::consensus::SubstateDestroyedMetadata {
+                    at_epoch: None,
+                    at_state_version: 5,
+                }),
+            }),
+            substate_value_proof: vec![],
+            proof_epoch: 0,
+        });
+        assert!(decode_batched_substate(non_empty_down).is_err());
+    }
+
+    #[test]
+    fn decode_single_substate_validates_payload_and_address() {
+        let id = substate_id();
+        let req = SubstateRequirementRef::new(&id, None);
+        let mut empty_up = GetSubstateResponse::default();
+        assert!(decode_single_substate(req, SubstateStatus::Up, &mut empty_up).is_err());
+
+        let mut mismatched_addr = GetSubstateResponse {
+            address: other_substate_id().to_bytes(),
+            substate: vec![1],
+            ..Default::default()
+        };
+        assert!(decode_single_substate(req, SubstateStatus::Up, &mut mismatched_addr).is_err());
+
+        let mut non_empty_down = GetSubstateResponse {
+            address: id.to_bytes(),
+            version: 3,
+            substate: vec![1],
+            ..Default::default()
+        };
+        assert!(decode_single_substate(req, SubstateStatus::Down, &mut non_empty_down).is_err());
+
+        let mut nexist_with_addr = GetSubstateResponse {
+            address: id.to_bytes(),
+            ..Default::default()
+        };
+        assert!(decode_single_substate(req, SubstateStatus::DoesNotExist, &mut nexist_with_addr).is_err());
+
+        let mut nexist_with_bytes = GetSubstateResponse {
+            substate: vec![1],
+            ..Default::default()
+        };
+        assert!(decode_single_substate(req, SubstateStatus::DoesNotExist, &mut nexist_with_bytes).is_err());
+
+        let mut valid_up = GetSubstateResponse {
+            address: id.to_bytes(),
+            version: 2,
+            substate: vec![9, 9],
+            ..Default::default()
+        };
+        let res = decode_single_substate(req, SubstateStatus::Up, &mut valid_up).unwrap();
+        assert!(matches!(res, SubstateResult::Up { .. }));
+        assert_eq!(res.version(), Some(SubstateVersion::new(2)));
     }
 }

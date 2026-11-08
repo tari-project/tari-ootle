@@ -760,10 +760,11 @@ fn an_up_and_a_down_of_one_address_in_one_version_collapse_to_no_leaf_regardless
 
     // Whether the Up is listed before the Down or the Down before the Up, a substate created and
     // destroyed within the same state version must collapse to no leaf in the JMT.
-    for changes in [
-        vec![change(1, Some(30)), change(2, Some(40)), change(2, None)],
-        vec![change(1, Some(30)), change(2, None), change(2, Some(40))],
-    ] {
+    for changes in [vec![change(1, Some(30)), change(2, Some(40)), change(2, None)], vec![
+        change(1, Some(30)),
+        change(2, None),
+        change(2, Some(40)),
+    ]] {
         let mut store = MemoryTreeStore::<StateTreePayload>::new();
         let root = SpreadPrefixStateTree::new(&mut store)
             .put_substate_changes(None, 1, changes)
@@ -832,18 +833,29 @@ fn root_state_tree_rejects_non_monotonic_versions() {
 
 #[test]
 fn duplicate_leaf_keys_are_rejected_in_merkle_root_and_root_proof_tree() {
-    use tari_state_tree::{RootProofTree, RootStateTree, compute_merkle_root_for_hashes, memory_store::MemoryTreeStore};
+    use tari_state_tree::{
+        RootProofTree,
+        RootStateTree,
+        compute_merkle_root_for_hashes,
+        memory_store::MemoryTreeStore,
+    };
 
     let h = hash_value_from_seed(1);
 
     let err = compute_merkle_root_for_hashes([h, h]).unwrap_err();
-    assert!(matches!(err, StateTreeError::DuplicateLeafKey { key } if key == h), "{err:?}");
+    assert!(
+        matches!(err, StateTreeError::DuplicateLeafKey { key } if key == h),
+        "{err:?}"
+    );
 
     let err = match RootProofTree::build([h, h]) {
         Ok(_) => panic!("expected DuplicateLeafKey error"),
         Err(err) => err,
     };
-    assert!(matches!(err, StateTreeError::DuplicateLeafKey { key } if key == h), "{err:?}");
+    assert!(
+        matches!(err, StateTreeError::DuplicateLeafKey { key } if key == h),
+        "{err:?}"
+    );
 
     let mut store = MemoryTreeStore::<()>::new();
     let err = RootStateTree::new(&mut store).put_changes(None, 1, [h, h]).unwrap_err();

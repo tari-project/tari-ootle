@@ -11,9 +11,10 @@ use crate::BoxedTransactionBuilder;
 
 /// How many transactions are built at once.
 ///
-/// An indexed parallel collect returns a chunk in index order, and that order is the file: faucet
-/// transaction `i` spends the faucet state left by `i - 1`, entry `i` of a seeded flood is account
-/// `i`, and `--skip` resumes a prefix of the same sequence.
+/// An indexed parallel collect returns a chunk in index order, and chunks are written in sequence,
+/// so file position `i` is builder index `i`. Any prefix of a seeded file therefore covers accounts
+/// `0..k`: a faucet file that is only partly submitted, or resumed with `--skip`, has funded those
+/// accounts, which is the range a transfers flood of length `k` reads.
 const BUILD_CHUNK: usize = 1024;
 
 pub fn write_transactions<W: Write>(

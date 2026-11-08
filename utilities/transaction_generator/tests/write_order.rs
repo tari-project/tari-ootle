@@ -1,11 +1,10 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-//! A generated file is the sequence `0..n`, not the order the builders happened to finish in.
+//! Frame `i` of a generated file is the transaction built for index `i`.
 //!
-//! Faucet transaction `i` spends the faucet state left by `i - 1`, a transfers flood's entry `i`
-//! spends account `i`, and `--skip` resumes a prefix of that sequence. The builder for a smaller
-//! index is delayed here so it finishes last; the file must still come out in index order.
+//! File position `i` is builder index `i`, so any prefix of the file covers accounts `0..k`. The
+//! builder for a smaller index is delayed here so it finishes last.
 
 use std::{
     io::{Cursor, Seek, SeekFrom},

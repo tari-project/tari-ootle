@@ -211,6 +211,11 @@ where
             self.transaction_manager
                 .uncommitted_templates()
                 .record(change_set.block(), change_set.local_substate_changes());
+            if let Some(reason) = change_set.abstention() &&
+                let Err(err) = tx.diagnostics_add_no_vote(*valid_block.id(), reason.clone())
+            {
+                error!(target: LOG_TARGET, "Failed to save no vote reason: {err}");
+            }
         } else {
             warn!(
                 target: LOG_TARGET,
@@ -225,9 +230,6 @@ where
         } else if let Some(reason) = change_set.no_vote_reason() {
             (None, Some(reason.clone()))
         } else if let Some(reason) = change_set.abstention() {
-            if let Err(err) = tx.diagnostics_add_no_vote(*valid_block.id(), reason.clone()) {
-                error!(target: LOG_TARGET, "Failed to save no vote reason: {err}");
-            }
             (None, Some(reason.clone()))
         } else {
             (change_set.quorum_decision(), None)

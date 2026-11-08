@@ -3,7 +3,10 @@
 
 //! Version 1 records which uncommitted blocks have a saved change set, and consensus refuses to commit a block
 //! without one. Version 0 kept no such record, so this migration records one for every uncommitted block the database
-//! holds, which commits them as version 0 would have.
+//! holds, which commits them as version 0 would have. That includes a block this node declined before the upgrade:
+//! version 0 saved no change set for such a block, and it still commits with none of its state changes applied. Only
+//! blocks already stored at the upgrade are affected; every block stored after it is recorded only when its change
+//! set is saved.
 
 use log::*;
 use tari_ootle_common_types::NodeAddressable;

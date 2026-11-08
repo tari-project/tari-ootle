@@ -55,6 +55,8 @@ impl ValidatorNode {
     pub async fn start(mut self, shutdown: Shutdown) -> Result<(), anyhow::Error> {
         let mut hotstuff_events = self.services.consensus_handle.subscribe_to_hotstuff_events()?;
         let mut epoch_manager_events = self.services.epoch_manager.subscribe();
+        let mut hotstuff_events_closed = false;
+        let mut epoch_events_closed = false;
 
         loop {
             let metrics = tokio::runtime::Handle::current().metrics();
@@ -80,7 +82,7 @@ impl ValidatorNode {
                     break;
                 },
 
-                result = hotstuff_events.recv() => match result {
+                result = hotstuff_events.recv(), if !hotstuff_events_closed => match result {
                     Ok(event) => if let Err(err) = self.handle_hotstuff_event(event).await {
                         error!(target: LOG_TARGET, "Error handling hotstuff event: {}", err);
                     },
@@ -88,11 +90,12 @@ impl ValidatorNode {
                         warn!(target: LOG_TARGET, "Hotstuff event subscriber lagged by {} event(s)", n);
                     },
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        debug!(target: LOG_TARGET, "Hotstuff event stream closed");
+                        warn!(target: LOG_TARGET, "Hotstuff event stream closed");
+                        hotstuff_events_closed = true;
                     },
                 },
 
-                result = epoch_manager_events.recv() => match result {
+                result = epoch_manager_events.recv(), if !epoch_events_closed => match result {
                     Ok(event) => if let Err(err) = self.handle_epoch_manager_event(event).await {
                         error!(target: LOG_TARGET, "Error handling epoch manager event: {}", err);
                     },
@@ -100,7 +103,8 @@ impl ValidatorNode {
                         warn!(target: LOG_TARGET, "Epoch manager event subscriber lagged by {} event(s)", n);
                     },
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        debug!(target: LOG_TARGET, "Epoch manager event stream closed");
+                        warn!(target: LOG_TARGET, "Epoch manager event stream closed");
+                        epoch_events_closed = true;
                     },
                 },
 

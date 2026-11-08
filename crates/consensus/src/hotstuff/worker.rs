@@ -518,7 +518,9 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                         warn!(target: LOG_TARGET, "Epoch manager event subscriber lagged by {} event(s)", n);
                     },
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        debug!(target: LOG_TARGET, "Epoch manager event stream closed");
+                        return Err(HotStuffError::InternalChannelClosed {
+                            context: "receiving epoch manager event",
+                        });
                     },
                 },
 

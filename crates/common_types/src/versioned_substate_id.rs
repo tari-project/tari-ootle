@@ -84,6 +84,8 @@ impl SubstateRequirement {
         self.to_substate_address().map(|a| a.to_shard(num_shards))
     }
 
+    /// Returns the shard group that this `SubstateRequirement` belongs to, or `None` if the version is
+    /// not known or if the substate is global (since global substates belong to every shard group).
     pub fn to_shard_group(&self, num_shards: NumPreshards, num_committees: u32) -> Option<ShardGroup> {
         if self.substate_id.is_global() {
             return None;

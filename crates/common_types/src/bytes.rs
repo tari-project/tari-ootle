@@ -190,18 +190,10 @@ impl<C, const MAX: usize> minicbor::Encode<C> for MaxSizeBytes<MAX> {
 
 impl<'b, C, const MAX: usize> minicbor::Decode<'b, C> for MaxSizeBytes<MAX> {
     fn decode(d: &mut minicbor::Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        let mut out = Vec::new();
-        for chunk in d.bytes_iter()? {
-            let chunk = chunk?;
-            let new_len = out.len().saturating_add(chunk.len());
-            if new_len > MAX {
-                return Err(minicbor::decode::Error::message(format!(
-                    "MaxSizeBytes<{MAX}> exceeded: got {new_len} bytes"
-                )));
-            }
-            out.extend_from_slice(chunk);
-        }
-        Ok(MaxSizeBytes::from_vec(out).expect("length checked <= MAX"))
+        let bytes = d.bytes()?;
+        MaxSizeBytes::from_bytes_checked(bytes).ok_or_else(|| {
+            minicbor::decode::Error::message(format!("MaxSizeBytes<{MAX}> exceeded: got {} bytes", bytes.len()))
+        })
     }
 }
 
@@ -260,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn json_and_indefinite_cbor_enforce_max_length() {
+    fn json_and_cbor_enforce_max_length_and_reject_indefinite_bytes() {
         let original = MaxSizeBytes::<4>::from_vec(vec![10, 20, 30]).unwrap();
         let json = serde_json::to_string(&original).unwrap();
         assert_eq!(json, "[10,20,30]");
@@ -269,13 +261,13 @@ mod tests {
 
         assert!(serde_json::from_str::<MaxSizeBytes<4>>("[1,2,3,4,5]").is_err());
 
-        // Indefinite-length CBOR byte string: 0x5f, chunk [1, 2] (0x42 01 02), chunk [3, 4] (0x42 03 04), break (0xff)
-        let indef_ok = [0x5f, 0x42, 0x01, 0x02, 0x42, 0x03, 0x04, 0xff];
-        let decoded_indef: MaxSizeBytes<4> = tari_bor::decode_exact(&indef_ok).unwrap();
-        assert_eq!(decoded_indef.as_ref(), &[1, 2, 3, 4]);
+        // Definite-length CBOR byte string exceeding MAX = 4 (0x45 = 5-byte string)
+        let def_too_long = [0x45, 0x01, 0x02, 0x03, 0x04, 0x05];
+        assert!(tari_bor::decode_exact::<MaxSizeBytes<4>>(&def_too_long).is_err());
+        assert!(tari_bor::serde_codec::from_slice::<MaxSizeBytes<4>>(&def_too_long).is_err());
 
-        // Indefinite-length CBOR byte string exceeding MAX = 4
-        let indef_too_long = [0x5f, 0x42, 0x01, 0x02, 0x43, 0x03, 0x04, 0x05, 0xff];
-        assert!(tari_bor::decode_exact::<MaxSizeBytes<4>>(&indef_too_long).is_err());
+        // Indefinite-length CBOR byte string is rejected to preserve a single canonical wire encoding
+        let indef = [0x5f, 0x42, 0x01, 0x02, 0x42, 0x03, 0x04, 0xff];
+        assert!(tari_bor::decode_exact::<MaxSizeBytes<4>>(&indef).is_err());
     }
 }

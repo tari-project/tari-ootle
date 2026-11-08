@@ -113,11 +113,24 @@ impl CommitteeReadTally {
                         if self.exclusion.is_none() && self.requested_version == Some(version) {
                             self.exclusion = proof;
                         }
-                        let count = self.unproven_downs.entry(version).or_default();
-                        *count += 1;
+                        let count = {
+                            let count = self.unproven_downs.entry(version).or_default();
+                            *count += 1;
+                            *count
+                        };
                         // With f = 0 the threshold is one member, whose word must not preempt a member still
                         // proving an Up. Such a Down is answered only once every member has responded.
-                        if self.f > 0 && *count > self.f {
+                        // Likewise, on a head read, when a newer unproven Up (up_version > version) or a newer
+                        // unproven Down (other_version > version) has already been observed, a Down of an
+                        // older version names a spent version, not the head, so it must not settle the read early.
+                        let superseded_by_up = self
+                            .unproven_up
+                            .as_ref()
+                            .and_then(|up| up.version())
+                            .is_some_and(|up_version| up_version > version);
+                        let superseded_by_newer_down =
+                            self.unproven_downs.keys().any(|&other_version| other_version > version);
+                        if self.f > 0 && count > self.f && !superseded_by_up && !superseded_by_newer_down {
                             return Some(self.unproven_down(version));
                         }
                         return None;
@@ -137,7 +150,11 @@ impl CommitteeReadTally {
                 },
                 SubstateResult::DoesNotExist => {
                     self.num_nexist += 1;
-                    (self.f > 0 && self.num_nexist > self.f).then_some(SubstateLookupResult {
+                    (self.f > 0 &&
+                        self.num_nexist > self.f &&
+                        self.unproven_up.is_none() &&
+                        self.unproven_downs.is_empty())
+                    .then_some(SubstateLookupResult {
                         result: SubstateResult::DoesNotExist,
                         verified: false,
                         proof: None,
@@ -176,9 +193,12 @@ impl CommitteeReadTally {
 
     /// The answer once every member has responded without settling the read.
     pub fn conclude(mut self, describe: impl std::fmt::Display) -> Result<SubstateLookupResult, IndexerError> {
-        // Only with f = 0 can a version reach the threshold without having settled the read when it did.
-        // A Down of a version no later than an Up held unproven names a spent version, not the head,
-        // so the Up answers instead.
+        // A version reaches conclude above threshold when f = 0, or when f > 0 and an already-observed
+        // newer Up or Down deferred early settlement in observe.
+        // A Down of a version strictly earlier than an Up held unproven (up_version > *version) names
+        // a spent version, not the head, so the newer Up answers instead. For the same version
+        // (up_version == *version), Down(v) comes after Up(v) (v was up and has since been spent),
+        // so a threshold of agreeing Downs outranks an unproven Up(v).
         if let Some(version) = self
             .unproven_downs
             .iter()
@@ -189,7 +209,7 @@ impl CommitteeReadTally {
                 self.unproven_up
                     .as_ref()
                     .and_then(|up| up.version())
-                    .is_none_or(|up_version| up_version < *version)
+                    .is_none_or(|up_version| up_version <= *version)
             })
         {
             return Ok(self.unproven_down(version));
@@ -806,5 +826,79 @@ mod tests {
             ),
             "{result:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn f_plus_one_unproven_downs_of_an_older_version_do_not_preempt_a_newer_up() {
+        let result = race(4, 1, true, None, vec![
+            (0, Ok((up(5), None))),
+            (1, Ok((down(3), None))),
+            (2, Ok((down(3), None))),
+            (3, Err(error())),
+        ])
+        .await
+        .unwrap();
+        assert!(matches!(result.result, SubstateResult::Up { .. }));
+        assert_eq!(result.result.version(), Some(SubstateVersion::new(5)));
+        assert!(!result.verified);
+    }
+
+    #[tokio::test]
+    async fn f_plus_one_unproven_downs_of_an_older_version_do_not_preempt_a_newer_down() {
+        let result = race(4, 1, true, None, vec![
+            (0, Ok((down(5), None))),
+            (1, Ok((down(3), None))),
+            (2, Ok((down(3), None))),
+            (3, Ok((up(5), proven()))),
+        ])
+        .await
+        .unwrap();
+        assert!(matches!(result.result, SubstateResult::Up { .. }));
+        assert_eq!(result.result.version(), Some(SubstateVersion::new(5)));
+        assert!(result.verified);
+    }
+
+    #[tokio::test]
+    async fn f_plus_one_nonexistence_does_not_preempt_an_observed_up_or_down() {
+        let result = race(4, 1, true, None, vec![
+            (0, Ok((up(2), None))),
+            (1, Ok((SubstateResult::DoesNotExist, None))),
+            (2, Ok((SubstateResult::DoesNotExist, None))),
+            (3, Err(error())),
+        ])
+        .await
+        .unwrap();
+        assert!(matches!(result.result, SubstateResult::Up { .. }));
+        assert_eq!(result.result.version(), Some(SubstateVersion::new(2)));
+        assert!(!result.verified);
+    }
+
+    #[tokio::test]
+    async fn an_unproven_up_does_not_block_f_plus_one_unproven_downs_of_the_same_version() {
+        // For the same version, Down(3) comes after Up(3): v3 was up and has since been spent.
+        // One lagging/Byzantine unproven Up(3) must not block f + 1 members agreeing on Down(3).
+        let mut committee = Committee::new(vec![
+            (0, Ok((up(3), None))),
+            (1, Ok((down(3), None))),
+            (2, Ok((down(3), None))),
+            (3, Err(error())),
+        ]);
+        let started = committee.started.clone();
+        let fetch = committee.fetch();
+        let result = race_committee((0..4).map(fetch), 1, CommitteeReadTally::new(4, true, None), "test")
+            .await
+            .unwrap();
+        assert!(matches!(result.result, SubstateResult::Down { .. }));
+        assert_eq!(result.result.version(), Some(SubstateVersion::new(3)));
+        assert!(!result.verified);
+        assert_eq!(started.load(Ordering::SeqCst), 3, "settled as soon as f + 1 Down(3) arrived");
+
+        // Same-version precedence in conclude (e.g., when f = 0):
+        let result = race(2, 1, true, None, vec![(0, Ok((up(3), None))), (1, Ok((down(3), None)))])
+            .await
+            .unwrap();
+        assert!(matches!(result.result, SubstateResult::Down { .. }));
+        assert_eq!(result.result.version(), Some(SubstateVersion::new(3)));
+        assert!(!result.verified);
     }
 }

@@ -110,7 +110,9 @@ impl LockedSubstateValue {
 
     pub fn satisfies_requirements<'a, T: Into<SubstateRequirementRef<'a>>>(&self, requirement: T) -> bool {
         let requirement = requirement.into();
-        requirement.version().is_none_or(|v| v == self.lock.version()) && *requirement.substate_id() == self.substate_id
+        self.lock.is_input() &&
+            requirement.version().is_none_or(|v| v == self.lock.version()) &&
+            *requirement.substate_id() == self.substate_id
     }
 
     pub fn satisfies_lock_intent<T: LockIntent>(&self, lock_intent: T) -> bool {
@@ -163,5 +165,38 @@ impl Display for LockedSubstateValue {
             "LockedSubstate(substate_id: {}, lock: {})",
             self.substate_id, self.lock,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_template_lib::types::{ComponentAddress, ObjectKey};
+
+    use super::*;
+
+    #[test]
+    fn output_lock_does_not_satisfy_input_requirement() {
+        let substate_id = SubstateId::Component(ComponentAddress::new(ObjectKey::from_array([7u8; ObjectKey::LENGTH])));
+        let version = SubstateVersion::new(1);
+        let versioned_req = SubstateRequirementRef::new(&substate_id, Some(version));
+        let unversioned_req = SubstateRequirementRef::new(&substate_id, None);
+
+        let output_lock = LockedSubstateValue {
+            substate_id: substate_id.clone(),
+            lock: SubstateLock::new(TransactionId::default(), version, SubstateLockType::Output, false),
+            value: None,
+        };
+        assert!(!output_lock.satisfies_requirements(versioned_req));
+        assert!(!output_lock.satisfies_requirements(unversioned_req));
+
+        for lock_type in [SubstateLockType::Read, SubstateLockType::Write] {
+            let input_lock = LockedSubstateValue {
+                substate_id: substate_id.clone(),
+                lock: SubstateLock::new(TransactionId::default(), version, lock_type, false),
+                value: None,
+            };
+            assert!(input_lock.satisfies_requirements(versioned_req));
+            assert!(input_lock.satisfies_requirements(unversioned_req));
+        }
     }
 }

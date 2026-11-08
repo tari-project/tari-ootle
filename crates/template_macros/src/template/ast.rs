@@ -23,7 +23,6 @@
 use std::fmt::{Debug, Formatter};
 
 use proc_macro2::Span;
-use quote::ToTokens;
 use syn::{
     Error,
     Field,
@@ -124,8 +123,15 @@ impl TemplateAst {
                     }
                 },
                 Item::Impl(impl_item) => {
-                    if let Type::Path(path) = &*impl_item.self_ty {
-                        let template_name_ref = template_name.as_ref().expect("struct not defined before impl");
+                    if impl_item.trait_.is_none() &&
+                        let Type::Path(path) = &*impl_item.self_ty
+                    {
+                        let Some(template_name_ref) = template_name.as_ref() else {
+                            return Err(Error::new(
+                                impl_item.span(),
+                                "template struct must be defined before its impl block",
+                            ));
+                        };
                         if path.path.is_ident(template_name_ref) {
                             for impl_item_mut in &mut impl_item.items {
                                 if let Some(func) = Self::get_function_from_item(impl_item_mut) {
@@ -367,9 +373,24 @@ fn has_explicit_cbor_index<'a, I: IntoIterator<Item = &'a syn::Attribute>>(attrs
             return true;
         }
         if attr.path().is_ident("cbor") {
-            // Crude but effective: parse the tokens and look for `n(...)` or `b(...)`.
-            let s = attr.to_token_stream().to_string();
-            if s.contains("n (") || s.contains("b (") {
+            let mut found = false;
+            let _ = attr.parse_nested_meta(|meta| {
+                if (meta.path.is_ident("n") || meta.path.is_ident("b")) &&
+                    meta.input.peek(syn::token::Paren)
+                {
+                    found = true;
+                }
+                if meta.input.peek(syn::token::Paren) {
+                    let content;
+                    syn::parenthesized!(content in meta.input);
+                    let _: proc_macro2::TokenStream = content.parse()?;
+                } else if meta.input.peek(syn::Token![=]) {
+                    let _: syn::Token![=] = meta.input.parse()?;
+                    let _: syn::Expr = meta.input.parse()?;
+                }
+                Ok(())
+            });
+            if found {
                 return true;
             }
         }
@@ -445,7 +466,7 @@ impl TemplateAst {
                     is_migration: m.attrs.iter().any(|attr| attr.path().is_ident("migration")),
                 })
             },
-            _ => todo!("get_function_from_item does not support anything other than functions/methods"),
+            _ => None,
         }
     }
 

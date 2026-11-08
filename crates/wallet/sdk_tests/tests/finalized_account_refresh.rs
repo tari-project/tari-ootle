@@ -19,7 +19,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::{Epoch, SubstateVersion};
 use tari_ootle_light_client::test_fixtures::ValidatorSetFixture;
 use tari_ootle_transaction::TransactionId;
-use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId, NonFungibleToken, WalletEvent};
+use tari_ootle_wallet_sdk::models::{BalanceChangeSource, KeyBranch, KeyId, NonFungibleToken, WalletEvent};
 use tari_ootle_wallet_sdk_services::{account_monitor::AccountScanner, notify::Notify};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::types::{
@@ -201,14 +201,24 @@ async fn process_result_updates_existing_nft_mutable_data_and_notifies_account_c
     let updated = test
         .sdk()
         .non_fungible_api()
-        .nft_get_by_id(&resource_address(), &nft_id)
+        .get(resource_address(), nft_id.clone())
         .unwrap();
     assert_eq!(updated.mutable_data, tari_bor::Value::Integer(2.into()));
     assert!(matches!(sub.try_recv().unwrap(), WalletEvent::AccountChangedOnChain(_)));
 
-    // Case 2: Both the vault (with unchanged NFT set/balance) and the NFT substate appear in the diff.
-    let mut vault_and_nft_diff = SubstateDiff::new();
-    vault_and_nft_diff.up(
+    // Case 2: Account, vault (with unchanged NFT set and balance), and NFT substate appear in the diff.
+    test.sdk()
+        .accounts_api()
+        .update_vault_balance_and_record_change(
+            held,
+            SubstateVersion::ZERO,
+            Amount::from(1u64),
+            Amount::zero(),
+            BalanceChangeSource::Scan,
+        )
+        .unwrap();
+    let mut account_vault_and_nft_diff = diff_with_account(&[held]);
+    account_vault_and_nft_diff.up(
         SubstateId::Vault(held),
         Substate::new(
             SubstateVersion::new(1),
@@ -218,8 +228,8 @@ async fn process_result_updates_existing_nft_mutable_data_and_notifies_account_c
             )),
         ),
     );
-    vault_and_nft_diff.up(
-        SubstateId::NonFungible(nft_address),
+    account_vault_and_nft_diff.up(
+        SubstateId::NonFungible(nft_address.clone()),
         Substate::new(
             SubstateVersion::new(2),
             NonFungibleContainer::new(
@@ -229,15 +239,50 @@ async fn process_result_updates_existing_nft_mutable_data_and_notifies_account_c
         ),
     );
     scanner
-        .process_result(TransactionId::default(), &vault_and_nft_diff, None)
+        .process_result(TransactionId::default(), &account_vault_and_nft_diff, None)
         .await
         .unwrap();
 
     let updated = test
         .sdk()
         .non_fungible_api()
-        .nft_get_by_id(&resource_address(), &nft_id)
+        .get(resource_address(), nft_id.clone())
         .unwrap();
     assert_eq!(updated.mutable_data, tari_bor::Value::Integer(3.into()));
+    assert!(matches!(sub.try_recv().unwrap(), WalletEvent::AccountChangedOnChain(_)));
+
+    // Case 3: Vault is in the diff without an account substate or substate record, so neither vault loop refreshes it.
+    let mut unrefreshed_vault_and_nft_diff = SubstateDiff::new();
+    unrefreshed_vault_and_nft_diff.up(
+        SubstateId::Vault(held),
+        Substate::new(
+            SubstateVersion::new(2),
+            Vault::new(ResourceContainer::non_fungible(
+                resource_address(),
+                BTreeSet::from([nft_id.clone()]),
+            )),
+        ),
+    );
+    unrefreshed_vault_and_nft_diff.up(
+        SubstateId::NonFungible(nft_address),
+        Substate::new(
+            SubstateVersion::new(3),
+            NonFungibleContainer::new(
+                tari_bor::Value::Text("immutable".to_string()),
+                tari_bor::Value::Integer(4.into()),
+            ),
+        ),
+    );
+    scanner
+        .process_result(TransactionId::default(), &unrefreshed_vault_and_nft_diff, None)
+        .await
+        .unwrap();
+
+    let updated = test
+        .sdk()
+        .non_fungible_api()
+        .get(resource_address(), nft_id)
+        .unwrap();
+    assert_eq!(updated.mutable_data, tari_bor::Value::Integer(4.into()));
     assert!(matches!(sub.try_recv().unwrap(), WalletEvent::AccountChangedOnChain(_)));
 }

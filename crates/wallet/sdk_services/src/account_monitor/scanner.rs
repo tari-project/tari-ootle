@@ -687,7 +687,7 @@ where TSpec: WalletSdkSpec
             .filter(|(a, _)| a.is_vault())
             .map(|(a, s)| (a.as_vault_id().unwrap(), s))
             .collect::<HashMap<_, _>>();
-        let diff_vault_ids = vaults.keys().copied().collect::<HashSet<_>>();
+        let mut refreshed_vault_ids = HashSet::new();
 
         let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
         let utxos = diff
@@ -753,6 +753,7 @@ where TSpec: WalletSdkSpec
 
                     let updated_nfts = updated_nfts_for_vault(vault, diff);
 
+                    refreshed_vault_ids.insert(*vault_id);
                     has_changed |= self
                         .refresh_vault(
                             account_address,
@@ -823,6 +824,7 @@ where TSpec: WalletSdkSpec
             let updated_nfts = updated_nfts_for_vault(vault, diff);
 
             // Update the vault balance / confidential outputs
+            refreshed_vault_ids.insert(vault_id);
             self.refresh_vault(
                 account_addr,
                 vault_id,
@@ -845,7 +847,7 @@ where TSpec: WalletSdkSpec
             else {
                 continue;
             };
-            if diff_vault_ids.contains(&stored_nft.vault_id) {
+            if refreshed_vault_ids.contains(&stored_nft.vault_id) {
                 continue;
             }
             let updated_token = build_non_fungible_token(

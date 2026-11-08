@@ -459,28 +459,80 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         epoch: Epoch,
     ) -> Result<(), Self::Error> {
         use crate::global::schema::{committees, validator_nodes};
+        let epoch_i64 = epoch.as_u64() as i64;
         // This is probably not the most robust way of doing this. Ideally you would pass the validator ID to the
         // function and use that to insert into the committees table.
-        let validator_id = validator_nodes::table
-            .select(validator_nodes::id)
+        let candidates = validator_nodes::table
+            .select((validator_nodes::id, validator_nodes::public_key))
             .filter(validator_nodes::shard_key.eq(shard_key.as_bytes()))
-            .filter(validator_nodes::start_epoch.le(epoch.as_u64() as i64))
+            .filter(validator_nodes::start_epoch.le(epoch_i64))
             .filter(
                 validator_nodes::end_epoch
                     .is_null()
-                    .or(validator_nodes::end_epoch.gt(epoch.as_u64() as i64)),
+                    .or(validator_nodes::end_epoch.gt(epoch_i64)),
             )
             .order_by((validator_nodes::start_epoch.desc(), validator_nodes::id.desc()))
-            .first::<i32>(tx.connection())
+            .load::<(i32, Vec<u8>)>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
                 operation: "validator_nodes_set_committee_bucket",
             })?;
 
+        let mut selected = None;
+        for (candidate_id, candidate_pk) in candidates {
+            let latest_id_for_pk = validator_nodes::table
+                .select(validator_nodes::id)
+                .filter(validator_nodes::public_key.eq(&candidate_pk))
+                .filter(validator_nodes::start_epoch.le(epoch_i64))
+                .filter(
+                    validator_nodes::end_epoch
+                        .is_null()
+                        .or(validator_nodes::end_epoch.gt(epoch_i64)),
+                )
+                .order_by((validator_nodes::start_epoch.desc(), validator_nodes::id.desc()))
+                .first::<i32>(tx.connection())
+                .map_err(|source| SqliteStorageError::DieselError {
+                    source,
+                    operation: "validator_nodes_set_committee_bucket",
+                })?;
+            if latest_id_for_pk == candidate_id {
+                selected = Some((candidate_id, candidate_pk));
+                break;
+            }
+        }
+
+        let (validator_id, validator_pk) = selected.ok_or(SqliteStorageError::DieselError {
+            source: diesel::result::Error::NotFound,
+            operation: "validator_nodes_set_committee_bucket",
+        })?;
+
+        // Remove any prior committee assignment for this epoch attached to an older registration row of the same
+        // validator (or shard key) so re-running committee assignment after a re-registration replaces rather than
+        // duplicates the validator's committee entry.
+        let stale_validator_ids = validator_nodes::table
+            .select(validator_nodes::id)
+            .filter(
+                validator_nodes::public_key
+                    .eq(&validator_pk)
+                    .or(validator_nodes::shard_key.eq(shard_key.as_bytes())),
+            )
+            .filter(validator_nodes::id.ne(validator_id));
+
+        diesel::delete(
+            committees::table
+                .filter(committees::epoch.eq(epoch_i64))
+                .filter(committees::validator_node_id.eq_any(stale_validator_ids)),
+        )
+        .execute(tx.connection())
+        .map_err(|source| SqliteStorageError::DieselError {
+            source,
+            operation: "delete::stale_committee_bucket",
+        })?;
+
         diesel::insert_into(committees::table)
             .values((
                 committees::validator_node_id.eq(validator_id),
-                committees::epoch.eq(epoch.as_u64() as i64),
+                committees::epoch.eq(epoch_i64),
                 committees::shard_start.eq(shard_group.start().as_u32() as i32),
                 committees::shard_end.eq(shard_group.end().as_u32() as i32),
             ))
@@ -782,6 +834,19 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
     ) -> Result<(), Self::Error> {
         use crate::global::schema::block_headers;
 
+        let epoch = i64::try_from(header.epoch.as_u64()).map_err(|_| SqliteStorageError::ConversionError {
+            reason: format!(
+                "Epoch {} of block header {} exceeds the i64 column range",
+                header.epoch, header.block_hash
+            ),
+        })?;
+        let height = i64::try_from(header.height).map_err(|_| SqliteStorageError::ConversionError {
+            reason: format!(
+                "Height {} of block header {} exceeds the i64 column range",
+                header.height, header.block_hash
+            ),
+        })?;
+
         // Idempotent insert: the base-layer scanner may re-scan previously seen heights after a
         // base-layer reorg (see base_layer/oracle.rs::handle_reorg, which rewinds the scan position
         // to the fork point), in which case this insert would otherwise fail the UNIQUE(block_hash,
@@ -789,8 +854,8 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         // epoch) identifies the row.
         diesel::insert_into(block_headers::table)
             .values((
-                block_headers::epoch.eq(header.epoch.as_u64() as i64),
-                block_headers::height.eq(header.height as i64),
+                block_headers::epoch.eq(epoch),
+                block_headers::height.eq(height),
                 block_headers::block_hash.eq(header.block_hash.as_bytes()),
                 block_headers::block_output_merkle_root.eq(header.block_output_merkle_root.as_bytes()),
                 block_headers::validator_node_merkle_root.eq(header.validator_node_merkle_root.as_bytes()),
@@ -817,6 +882,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         let header = block_headers::table
             .filter(block_headers::block_hash.eq(block_hash.as_ref()))
             .filter(block_headers::epoch.le(max_epoch.as_u64() as i64))
+            .order_by((block_headers::epoch.desc(), block_headers::id.desc()))
             .first::<models::BlockHeaderModel>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,

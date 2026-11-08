@@ -44,6 +44,6 @@ pub fn read_transactions<R: Read + Seek + Send + 'static>(
 
 pub fn read_number_of_transactions<R: Read>(reader: &mut R) -> anyhow::Result<u64> {
     let mut len_bytes = [0u8; 8];
-    reader.read_exact(&mut len_bytes).unwrap();
+    reader.read_exact(&mut len_bytes)?;
     Ok(u64::from_le_bytes(len_bytes))
 }

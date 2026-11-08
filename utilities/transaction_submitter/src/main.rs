@@ -69,20 +69,17 @@ async fn stress_test(args: StressTestArgs) -> anyhow::Result<Option<StressTestRe
         args.transaction_file.display(),
         num_transactions
     );
-    if args
-        .num_transactions
-        .map(|n| n.saturating_add(args.skip_transactions.unwrap_or(0)) > num_transactions)
-        .unwrap_or(false)
-    {
+    let skip = args.skip_transactions.unwrap_or(0);
+    let requested = args.num_transactions.map_or(skip, |n| n.saturating_add(skip));
+    if requested > num_transactions {
         bail!(
             "The transaction file only contains {} transactions, but you requested {}",
             num_transactions,
-            args.num_transactions
-                .unwrap_or(num_transactions)
-                .saturating_add(args.skip_transactions.unwrap_or(0))
+            requested
         );
     }
-    let num_transactions = cmp::min(num_transactions, args.num_transactions.unwrap_or(num_transactions));
+    let available = num_transactions - skip;
+    let num_transactions = cmp::min(available, args.num_transactions.unwrap_or(available));
     if !args.no_confirm {
         print!("{} transactions will be submitted. Continue? [y/N]: ", num_transactions);
         std::io::stdout().flush()?;
@@ -431,11 +428,13 @@ async fn check_validity_window(client: &IndexerClient, transaction_file: &Path, 
 }
 
 fn print_summary(summary: &StressTestResultSummary) {
-    println!("Summary:");
-    println!(
-        "  Success rate: {:.2}%",
+    let success_rate = if summary.num_transactions == 0 {
+        0.0
+    } else {
         summary.num_committed as f64 / summary.num_transactions as f64 * 100.0
-    );
+    };
+    println!("Summary:");
+    println!("  Success rate: {:.2}%", success_rate);
     println!("  Transactions submitted: {}", summary.num_transactions);
     println!("  Fully committed: {}", summary.num_committed);
     println!("  Fee charged, execution rejected: {}", summary.num_execution_rejected);
@@ -451,12 +450,16 @@ fn print_summary(summary: &StressTestResultSummary) {
         .map(|n| Duration::from_nanos(n.try_into().unwrap_or(u64::MAX)))
         .map(|n| format!("{:.2?}", n))
         .unwrap_or_else(|| "--".to_string());
+    let fastest = if summary.num_executed() == 0 {
+        "--".to_string()
+    } else {
+        format!("{:.2?}", summary.fastest_execution_time)
+    };
 
     println!(
-        "  Execution time over {} executed: total {:.2?} (slowest: {:.2?}, fastest: {:.2?}, Avg: {avg})",
+        "  Execution time over {} executed: total {:.2?} (slowest: {:.2?}, fastest: {fastest}, Avg: {avg})",
         summary.num_executed(),
         summary.total_execution_time,
         summary.slowest_execution_time,
-        summary.fastest_execution_time
     );
 }

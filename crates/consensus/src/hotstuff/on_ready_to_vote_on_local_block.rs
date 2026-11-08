@@ -1938,6 +1938,8 @@ mod tests {
                         block.insert(tx)?;
                     }
                     foreign_proposal.save(tx)?;
+                    // The committed block was accepted, so its change set was saved.
+                    tx.blocks_set_executed(committed.id())?;
                     for block in [&committed, &fork] {
                         tx.foreign_proposals_set_status(
                             foreign_proposal.block_id(),

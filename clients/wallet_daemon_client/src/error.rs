@@ -62,9 +62,26 @@ impl WalletDaemonClientError {
 
 impl IsNotFoundError for WalletDaemonClientError {
     fn is_not_found_error(&self) -> bool {
-        match self {
-            Self::RequestFailedWithStatus { code, .. } => *code == 404,
-            _ => false,
-        }
+        matches!(self, Self::RequestFailedWithStatus { code: 404, .. })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_error_code_maps_401_to_unauthorized_and_other_codes_to_status() {
+        let unauthorized = WalletDaemonClientError::from_error_code(401, "invalid token".to_string());
+        assert!(unauthorized.is_unauthorized());
+        assert!(!unauthorized.is_not_found_error());
+
+        let not_found = WalletDaemonClientError::from_error_code(404, "missing".to_string());
+        assert!(!not_found.is_unauthorized());
+        assert!(not_found.is_not_found_error());
+
+        let other = WalletDaemonClientError::from_error_code(500, "internal".to_string());
+        assert!(!other.is_unauthorized());
+        assert!(!other.is_not_found_error());
     }
 }

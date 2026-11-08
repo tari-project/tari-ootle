@@ -945,25 +945,39 @@ pub struct BalanceEntry {
 
 impl BalanceEntry {
     pub fn to_balance_string(&self) -> String {
-        let symbol = self.token_symbol.as_deref().unwrap_or_default();
+        let symbol = self.token_symbol.as_deref().map(str::trim).unwrap_or_default();
+        let total = self.balance.saturating_add(self.confidential_balance);
         match self.resource_type {
             ResourceType::Fungible => {
-                format!("{} {}", self.balance, symbol)
+                if symbol.is_empty() {
+                    self.balance.to_string()
+                } else {
+                    format!("{} {}", self.balance, symbol)
+                }
             },
             ResourceType::NonFungible => {
-                format!("{} {} tokens", self.balance, symbol)
+                if symbol.is_empty() {
+                    format!("{} tokens", self.balance)
+                } else {
+                    format!("{} {} tokens", self.balance, symbol)
+                }
             },
             ResourceType::Confidential => {
-                format!(
-                    "{} revealed + {} blinded = {} {}",
-                    self.balance,
-                    self.confidential_balance,
-                    self.balance + self.confidential_balance,
-                    symbol
-                )
+                if symbol.is_empty() {
+                    format!("{} revealed + {} blinded = {}", self.balance, self.confidential_balance, total)
+                } else {
+                    format!(
+                        "{} revealed + {} blinded = {} {}",
+                        self.balance, self.confidential_balance, total, symbol
+                    )
+                }
             },
             ResourceType::Stealth => {
-                format!("{} {} (stealth)", self.balance + self.confidential_balance, symbol)
+                if symbol.is_empty() {
+                    format!("{} (stealth)", total)
+                } else {
+                    format!("{} {} (stealth)", total, symbol)
+                }
             },
         }
     }
@@ -2691,5 +2705,68 @@ mod tests {
         let debug_str = format!("{with_token:?}");
         assert!(!debug_str.contains(secret), "Debug output must not leak setup_token");
         assert!(debug_str.contains("<redacted>"));
+    }
+
+    #[test]
+    fn balance_entry_to_balance_string_handles_missing_symbol_and_saturates_overflow() {
+        let resource_address = tari_template_lib_types::constants::STEALTH_TARI_RESOURCE_ADDRESS;
+        let make_entry = |resource_type, balance, confidential_balance, token_symbol: Option<&str>| BalanceEntry {
+            vault_address: None,
+            resource_address,
+            balance,
+            resource_type,
+            confidential_balance,
+            token_symbol: token_symbol.map(str::to_string),
+            divisibility: 6,
+        };
+
+        assert_eq!(
+            make_entry(ResourceType::Fungible, Amount::from(100u64), Amount::zero(), None).to_balance_string(),
+            "100"
+        );
+        assert_eq!(
+            make_entry(
+                ResourceType::Fungible,
+                Amount::from(100u64),
+                Amount::zero(),
+                Some("XTR")
+            )
+            .to_balance_string(),
+            "100 XTR"
+        );
+        assert_eq!(
+            make_entry(ResourceType::NonFungible, Amount::from(5u64), Amount::zero(), None).to_balance_string(),
+            "5 tokens"
+        );
+        assert_eq!(
+            make_entry(
+                ResourceType::NonFungible,
+                Amount::from(5u64),
+                Amount::zero(),
+                Some("NFT")
+            )
+            .to_balance_string(),
+            "5 NFT tokens"
+        );
+        assert_eq!(
+            make_entry(
+                ResourceType::Confidential,
+                Amount::from(10u64),
+                Amount::from(20u64),
+                None
+            )
+            .to_balance_string(),
+            "10 revealed + 20 blinded = 30"
+        );
+        assert_eq!(
+            make_entry(
+                ResourceType::Stealth,
+                Amount::MAX,
+                Amount::from(1u64),
+                Some("XTR")
+            )
+            .to_balance_string(),
+            format!("{} XTR (stealth)", Amount::MAX)
+        );
     }
 }

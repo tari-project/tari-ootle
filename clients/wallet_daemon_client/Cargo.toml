@@ -32,3 +32,7 @@ zeroize = { workspace = true, features = ["serde", "simd"] }
 
 [features]
 ts = ["ts-rs", "tari_ootle_wallet_sdk/ts", "tari_ootle_common_types/ts", "tari_ootle_address/ts", "tari_template_lib_types/ts", "tari_ootle_template_metadata/ts"]
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+

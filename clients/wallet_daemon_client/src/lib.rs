@@ -257,10 +257,22 @@ fn parse_cookie(path: &Path, raw: &str) -> Result<EncodedJwtString, WalletDaemon
             details: "cookie file is empty".to_string(),
         });
     }
-    if !trimmed.starts_with(COOKIE_TOKEN_PREFIX) {
+    let Some(body) = trimmed.strip_prefix(COOKIE_TOKEN_PREFIX) else {
         return Err(WalletDaemonClientError::CookieFileError {
             path: path.to_path_buf(),
             details: format!("cookie token does not start with expected prefix '{COOKIE_TOKEN_PREFIX}'"),
+        });
+    };
+    if body.is_empty() {
+        return Err(WalletDaemonClientError::CookieFileError {
+            path: path.to_path_buf(),
+            details: "cookie token body is empty".to_string(),
+        });
+    }
+    if body.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(WalletDaemonClientError::CookieFileError {
+            path: path.to_path_buf(),
+            details: "cookie token contains invalid whitespace or control characters".to_string(),
         });
     }
     Ok(EncodedJwtString::from(trimmed.to_string()))
@@ -1175,6 +1187,20 @@ impl WalletDaemonClient {
             builder = builder.header(AUTHORIZATION, format!("Bearer {}", token.as_str()));
         }
         let resp = builder.body(request_json.to_string()).send().await?;
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            let body = resp.text().await.unwrap_or_default();
+            if let Ok(val) = serde_json::from_str::<json::Value>(&body) {
+                return jsonrpc_result(val);
+            }
+            return Err(WalletDaemonClientError::Unauthorized {
+                message: if body.trim().is_empty() {
+                    status.to_string()
+                } else {
+                    body
+                },
+            });
+        }
         let val = resp.json().await?;
         jsonrpc_result(val)
     }
@@ -1200,7 +1226,7 @@ impl WalletDaemonClient {
 }
 
 fn jsonrpc_result(val: json::Value) -> Result<json::Value, WalletDaemonClientError> {
-    if let Some(err) = val.get("error") {
+    if let Some(err) = val.get("error").filter(|e| !e.is_null()) {
         let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
         let message = err
             .get("message")
@@ -1220,7 +1246,12 @@ fn jsonrpc_result(val: json::Value) -> Result<json::Value, WalletDaemonClientErr
 
 #[cfg(test)]
 mod tests {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     use super::*;
 
@@ -1273,6 +1304,18 @@ mod tests {
             Err(WalletDaemonClientError::CookieFileError { .. })
         ));
 
+        fs::write(&path, "tc_").unwrap();
+        assert!(matches!(
+            read_cookie_file(&path),
+            Err(WalletDaemonClientError::CookieFileError { .. })
+        ));
+
+        fs::write(&path, "tc_abc def").unwrap();
+        assert!(matches!(
+            read_cookie_file(&path),
+            Err(WalletDaemonClientError::CookieFileError { .. })
+        ));
+
         let _unused = fs::remove_dir_all(&dir);
     }
 
@@ -1285,5 +1328,84 @@ mod tests {
         assert!(client.auth_token().is_none());
 
         let _unused = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn jsonrpc_result_ignores_null_error_and_extracts_result() {
+        let val = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": { "ok": true },
+            "error": null
+        });
+        let res = jsonrpc_result(val).unwrap();
+        assert_eq!(res, serde_json::json!({ "ok": true }));
+    }
+
+    #[test]
+    fn jsonrpc_result_maps_error_codes_correctly() {
+        let unauth = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": { "code": 401, "message": "Token expired" }
+        });
+        let err = jsonrpc_result(unauth).unwrap_err();
+        assert!(err.is_unauthorized());
+
+        let missing = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": null
+        });
+        assert!(matches!(
+            jsonrpc_result(missing),
+            Err(WalletDaemonClientError::InvalidResponse { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn jrpc_call_maps_http_401_json_non_json_and_empty_bodies_to_unauthorized() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let bodies = [
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":401,"message":"Token expired"}}"#,
+            "Invalid bearer token",
+            "",
+        ];
+        let server = thread::spawn(move || {
+            for body in bodies {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf);
+                let resp = format!(
+                    "HTTP/1.1 401 Unauthorized\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream.write_all(resp.as_bytes()).unwrap();
+            }
+        });
+
+        let mut client = WalletDaemonClient::connect(format!("http://{addr}"), None).unwrap();
+
+        let err_json = client.jrpc_call("accounts.list", &serde_json::json!({})).await.unwrap_err();
+        assert!(matches!(
+            &err_json,
+            WalletDaemonClientError::Unauthorized { message } if message == "Token expired"
+        ));
+
+        let err_text = client.jrpc_call("accounts.list", &serde_json::json!({})).await.unwrap_err();
+        assert!(matches!(
+            &err_text,
+            WalletDaemonClientError::Unauthorized { message } if message == "Invalid bearer token"
+        ));
+
+        let err_empty = client.jrpc_call("accounts.list", &serde_json::json!({})).await.unwrap_err();
+        assert!(matches!(
+            &err_empty,
+            WalletDaemonClientError::Unauthorized { message } if message == "401 Unauthorized"
+        ));
+
+        server.join().unwrap();
     }
 }

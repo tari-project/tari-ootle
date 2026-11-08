@@ -73,17 +73,16 @@ pub async fn list_watched_templates(
     let store = context.read_only_store();
     let mut templates = Vec::with_capacity(context.watched_templates().len());
     for addr in context.watched_templates() {
-        if let Some(template) = store
+        let template_name = store
             .get_template_catalogue_entry(addr)
             .await
             .optional()
             .map_err(ErrorResponse::anyhow)?
-        {
-            templates.push(WatchedTemplateItem {
-                template_address: *addr,
-                template_name: Some(template.template_name),
-            });
-        }
+            .map(|template| template.template_name);
+        templates.push(WatchedTemplateItem {
+            template_address: *addr,
+            template_name,
+        });
     }
     Ok(Json(ListWatchedTemplatesResponse { templates }))
 }

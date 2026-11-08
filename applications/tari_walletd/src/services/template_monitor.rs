@@ -7,7 +7,7 @@ use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_wallet_sdk::{WalletSdk, WalletSdkSpec, models::WalletEvent};
 use tari_ootle_wallet_sdk_services::notify::Notify;
 use tari_shutdown::ShutdownSignal;
-use tokio::task;
+use tokio::{sync::broadcast, task};
 
 const LOG_TARGET: &str = "tari::ootle_wallet_daemon::services::template_monitor";
 
@@ -88,9 +88,19 @@ where TSpec: WalletSdkSpec
                     break Ok(());
                 }
 
-                Ok(event) = events_subscription.recv() => {
-                    if let Err(error) = self.handle_wallet_event(event).await {
-                        error!(target: LOG_TARGET, "Error handling event: {}", error);
+                result = events_subscription.recv() => {
+                    match result {
+                        Ok(event) => {
+                            if let Err(error) = self.handle_wallet_event(event).await {
+                                error!(target: LOG_TARGET, "Error handling event: {}", error);
+                            }
+                        },
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(target: LOG_TARGET, "Template monitor lagged behind by {} event(s)", n);
+                        },
+                        Err(broadcast::error::RecvError::Closed) => {
+                            break Ok(());
+                        },
                     }
                 }
             }

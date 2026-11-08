@@ -137,7 +137,7 @@ use crate::{
         lock_conflict,
         parked_block,
         pending_state_tree_diff::ShardStateTreeDiff,
-        state_sync_rewind_point::{StateSyncMissingValueCf, StateSyncRewindPointCf},
+        state_sync_rewind_point::{StateSyncMissingValueByShardQuery, StateSyncRewindPointCf},
         state_transition,
         state_transition::StateTransitionType,
         state_tree,
@@ -1786,10 +1786,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         const OPERATION: &str = "state_transitions_get_n_after";
 
         let query = self.db().cf(state_transition::ByShardAndStateVersionQuery)?;
-        let mut iter = query.query_range_iterator(
-            Ordering::Ascending,
-            (req_shard, state_version)..(Shard::max(), Version::MAX),
-        );
+        let mut iter = query.query_start_range_iterator(Ordering::Ascending, &(req_shard, state_version));
         let substate_cf = self.db().cf(SubstateCf)?;
 
         // NOTE: The state version may not have any transitions
@@ -1985,11 +1982,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         shard: Shard,
         from: Version,
     ) -> Result<Option<(SubstateAddress, Version)>, StorageError> {
-        let cf = self.db().cf(StateSyncMissingValueCf)?;
-        let start = cf.encode_key(&(shard, SubstateAddress::zero()));
-        let end = cf.encode_key(&(shard, SubstateAddress::max()));
+        let query = self.db().cf(StateSyncMissingValueByShardQuery)?;
         let mut earliest = None::<(SubstateAddress, Version)>;
-        for entry in cf.range_iterator(Ordering::Ascending, start..end) {
+        for entry in query.query_prefix_range_iterator(Ordering::Ascending, &shard) {
             let ((_, address), created_at) = entry?;
             if created_at >= from && earliest.is_none_or(|(_, version)| created_at < version) {
                 earliest = Some((address, created_at));

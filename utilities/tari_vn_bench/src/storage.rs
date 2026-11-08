@@ -166,18 +166,64 @@ fn measure_sequential_write(path: &Path, target_bytes: u64) -> anyhow::Result<f6
 fn filesystem_for(path: &Path) -> Option<String> {
     let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let mounts = fs::read_to_string("/proc/mounts").ok()?;
+    filesystem_for_in_mounts(&target, &mounts)
+}
 
+fn filesystem_for_in_mounts(target: &Path, mounts: &str) -> Option<String> {
     let mut best: Option<(usize, String)> = None;
     for line in mounts.lines() {
         let mut fields = line.split_whitespace();
-        let (_device, mount_point, fs_type) = (fields.next()?, fields.next()?, fields.next()?);
-        let mount_path = PathBuf::from(mount_point);
+        let (Some(_device), Some(mount_point), Some(fs_type)) = (fields.next(), fields.next(), fields.next()) else {
+            continue;
+        };
+        if fs_type == "rootfs" {
+            continue;
+        }
+        let mount_path = PathBuf::from(unescape_mount_path(mount_point));
         if target.starts_with(&mount_path) {
             let depth = mount_path.components().count();
-            if best.as_ref().is_none_or(|(best_depth, _)| depth > *best_depth) {
+            if best.as_ref().is_none_or(|(best_depth, _)| depth >= *best_depth) {
                 best = Some((depth, fs_type.to_string()));
             }
         }
     }
     best.map(|(_, fs_type)| fs_type)
+}
+
+fn unescape_mount_path(raw: &str) -> String {
+    raw.replace("\\040", " ")
+        .replace("\\011", "\t")
+        .replace("\\012", "\n")
+        .replace("\\134", "\\")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::filesystem_for_in_mounts;
+
+    #[test]
+    fn filesystem_for_in_mounts_handles_rootfs_overmounts_and_escaped_spaces() {
+        let mounts = "\
+rootfs / rootfs rw 0 0
+/dev/sda1 / ext4 rw,relatime 0 0
+
+/dev/sdb1 /var/lib/tari xfs rw,relatime 0 0
+tmpfs /var/lib/tari tmpfs rw,nosuid 0 0
+/dev/sdc1 /mnt/tari\\040data ext4 rw,relatime 0 0
+";
+        assert_eq!(
+            filesystem_for_in_mounts(Path::new("/var/log"), mounts).as_deref(),
+            Some("ext4")
+        );
+        assert_eq!(
+            filesystem_for_in_mounts(Path::new("/var/lib/tari/db"), mounts).as_deref(),
+            Some("tmpfs")
+        );
+        assert_eq!(
+            filesystem_for_in_mounts(Path::new("/mnt/tari data/vn"), mounts).as_deref(),
+            Some("ext4")
+        );
+    }
 }

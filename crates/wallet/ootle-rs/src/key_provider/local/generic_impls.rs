@@ -201,6 +201,11 @@ where LocalKeyProvider<C>: StealthOutputStatementFactory + InputDecryptor + Send
                     output_amount: total_output_amount,
                 });
             }
+        } else if total_revealed_input.is_zero() || total_revealed_input != total_output_amount {
+            return Err(StealthProviderError::UnbalancedTransfer {
+                total_revealed_input,
+                output_amount: total_output_amount,
+            });
         }
 
         Ok(StealthTransferStatement {
@@ -493,6 +498,39 @@ mod tests {
         assert!(statement.balance_proof.is_none());
     }
 
+    #[tokio::test]
+    async fn an_unbalanced_revealed_only_transfer_is_rejected() {
+        let provider = PrivateKeyProvider::random(Network::LocalNet);
+
+        let err = provider
+            .create_transfer_statement(ResolvedStealthTransferSpec {
+                inputs: vec![],
+                revealed_input_amount: Amount::from(VALUE),
+                outputs: vec![],
+                revealed_output: Some(RevealedOutput::new(Amount::from(VALUE - 1), a_receiver())),
+            })
+            .await
+            .expect_err("an unbalanced revealed-only transfer must be rejected");
+        assert!(
+            matches!(err, StealthProviderError::UnbalancedTransfer { .. }),
+            "expected UnbalancedTransfer, got {err:?}"
+        );
+
+        let empty_err = provider
+            .create_transfer_statement(ResolvedStealthTransferSpec {
+                inputs: vec![],
+                revealed_input_amount: Amount::zero(),
+                outputs: vec![],
+                revealed_output: None,
+            })
+            .await
+            .expect_err("an empty transfer with no inputs must be rejected");
+        assert!(
+            matches!(empty_err, StealthProviderError::UnbalancedTransfer { .. }),
+            "expected UnbalancedTransfer, got {empty_err:?}"
+        );
+    }
+
     /// A statement built by one wallet does not validate against another wallet's input: the mask
     /// recovered from a foreign output is not the one the commitment was built with.
     #[tokio::test]
@@ -585,6 +623,23 @@ mod tests {
         assert_eq!(statement.inputs_statement.inputs.len(), 1);
         assert_eq!(statement.inputs_statement.inputs[0].commitment, commitment);
         validate_transfer(&statement, None).expect("the engine must accept the burn claim statement");
+
+        let err = provider
+            .create_burn_claim_statement(BurnClaimStatementSpec {
+                commitment,
+                encrypted_data: StealthCryptoApi::new()
+                    .encrypt_value_and_mask(VALUE, &mask, &account_pk, &sender_offset_secret, None)
+                    .expect("encrypting the burn output must succeed"),
+                sender_offset_public_key,
+                output: output_to_self(&provider, VALUE),
+                revealed_output: Some(RevealedOutput::new(Amount::from(u128::from(FEE)), a_receiver())),
+            })
+            .await
+            .expect_err("an unbalanced burn claim must be rejected");
+        assert!(
+            matches!(err, StealthProviderError::UnbalancedTransfer { .. }),
+            "expected UnbalancedTransfer, got {err:?}"
+        );
     }
 
     /// `stealth_public_key` must agree with the key the signing methods actually use, since authorization signatures

@@ -35,8 +35,9 @@ use tari_bor::{decode_exact, encode_into_writer, encoded_len};
 use crate::{
     ops::EngineOp,
     rust::{
-        alloc_internal::{Layout, alloc, dealloc},
+        alloc_internal::{Layout, alloc, dealloc, handle_alloc_error},
         prelude::*,
+        slice,
         vec::Vec,
     },
 };
@@ -80,8 +81,8 @@ where
 /// Takes ownership of a length-prefixed block of memory allocated by `tari_alloc` and provides access to the data.
 /// This is used when WASM is responsible for freeing memory.
 pub struct OwnedData {
-    alloc_size: usize,
-    prefixed_data: Vec<u8>,
+    ptr: *mut u8,
+    len: usize,
 }
 
 impl OwnedData {
@@ -93,8 +94,8 @@ impl OwnedData {
     pub unsafe fn owned_from_ptr(ptr: *mut u8) -> Self {
         if ptr.is_null() {
             return Self {
-                alloc_size: 0,
-                prefixed_data: Vec::new(),
+                ptr: core::ptr::null_mut(),
+                len: 0,
             };
         }
         // SAFETY: The pointer is assumed to be valid and points to a length-prefixed block of memory allocated
@@ -103,19 +104,43 @@ impl OwnedData {
             let len_offset = ptr.sub(USIZE_SIZE).cast::<usize>();
             // SAFETY: pointer allocated by tari_alloc is usize-aligned
             let alloc_size = len_offset.read();
-            // Take ownership of the entire allocation (len and data) and deallocate it at the end of the function
-            let data = Vec::from_raw_parts(len_offset.cast::<u8>(), alloc_size, alloc_size);
-            Self {
-                alloc_size,
-                prefixed_data: data,
-            }
+            let len = alloc_size.checked_sub(USIZE_SIZE).expect("ALLOC_SIZE_UNDERFLOW");
+            Self { ptr, len }
         }
     }
 
     pub fn data(&self) -> &[u8] {
-        // Skip the length prefix and return a slice of the data
-        // alloc_size = usize_size + data_len
-        &self.prefixed_data[USIZE_SIZE..self.alloc_size]
+        if self.ptr.is_null() {
+            return &[];
+        }
+        // SAFETY: `self.ptr` points to `self.len` initialized payload bytes after the `USIZE_SIZE` prefix.
+        unsafe { slice::from_raw_parts(self.ptr, self.len) }
+    }
+}
+
+impl Drop for OwnedData {
+    fn drop(&mut self) {
+        // SAFETY: `self.ptr` is either null or a valid pointer allocated by `tari_alloc`.
+        unsafe {
+            tari_free(self.ptr);
+        }
+    }
+}
+
+struct SliceWriter<'a> {
+    buf: &'a mut [u8],
+    pos: usize,
+}
+
+impl minicbor::encode::Write for SliceWriter<'_> {
+    type Error = &'static str;
+
+    fn write_all(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+        let end = self.pos.checked_add(buf.len()).ok_or("ENCD_OVERFLOW")?;
+        let dest = self.buf.get_mut(self.pos..end).ok_or("ENCD_OOB")?;
+        dest.copy_from_slice(buf);
+        self.pos = end;
+        Ok(())
     }
 }
 
@@ -124,17 +149,27 @@ impl OwnedData {
 pub fn alloc_and_encode<T: Encode<()> + CborLen<()> + ?Sized>(val: &T) -> *mut u8 {
     let len = encoded_len(val);
     let ptr = internal_alloc(len);
-    let mut buf = unsafe { Vec::from_raw_parts(ptr, 0, len) };
-    encode_into_writer(val, &mut buf).expect("ENCDFAIL");
-    wrap_ptr(buf)
+    // SAFETY: `internal_alloc(len)` returns a valid pointer to `len` writable bytes.
+    let buf = unsafe { slice::from_raw_parts_mut(ptr, len) };
+    let mut writer = SliceWriter { buf, pos: 0 };
+    if minicbor::encode(val, &mut writer).is_err() || writer.pos != len {
+        unsafe {
+            tari_free(ptr);
+        }
+        panic!("ENCDFAIL");
+    }
+    ptr
 }
 
 fn internal_alloc(size: usize) -> *mut u8 {
-    let alloc_size = size + USIZE_SIZE;
+    let alloc_size = size.checked_add(USIZE_SIZE).expect("ALLOC_OVERFLOW");
+    let layout = Layout::from_size_align(alloc_size, USIZE_ALIGN).expect("ALLOC_LAYOUT");
     unsafe {
         // memory layout: [size] [allocation]
-        let layout = Layout::from_size_align_unchecked(alloc_size, USIZE_ALIGN);
         let ptr = alloc(layout);
+        if ptr.is_null() {
+            handle_alloc_error(layout);
+        }
 
         // SAFETY: ptr is usize-aligned and we've allocated sufficient memory
         ptr.cast::<usize>().write(alloc_size);
@@ -144,7 +179,7 @@ fn internal_alloc(size: usize) -> *mut u8 {
     }
 }
 
-/// Allocates a length-prefixed block of memory of length `len` + 4 bytes.
+/// Allocates a length-prefixed block of memory of length `len` + `size_of::<usize>()` bytes.
 #[unsafe(no_mangle)]
 pub extern "C" fn tari_alloc(size: usize) -> *mut u8 {
     internal_alloc(size)
@@ -162,10 +197,41 @@ pub unsafe extern "C" fn tari_free(ptr: *mut u8) {
             // read the length prefix to determine the size of the allocation
             let alloc_ptr = ptr.sub(USIZE_SIZE);
             let alloc_size = alloc_ptr.cast::<usize>().read();
+            assert!(alloc_size >= USIZE_SIZE, "FREE_SIZE_UNDERFLOW");
 
             // SAFETY: Caller must ensure that ptr is a valid pointer to a block of memory allocated by `tari_alloc`.
-            let layout = Layout::from_size_align_unchecked(alloc_size, USIZE_ALIGN);
+            let layout = Layout::from_size_align(alloc_size, USIZE_ALIGN).expect("FREE_LAYOUT");
             dealloc(alloc_ptr, layout);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alloc_and_encode_round_trips_through_owned_data() {
+        let payload = vec![1u8, 2, 3, 4, 5, 6, 7, 8];
+        let ptr = alloc_and_encode(&payload);
+        assert!(!ptr.is_null());
+
+        let owned = unsafe { OwnedData::owned_from_ptr(ptr) };
+        let decoded: Vec<u8> = decode_exact(owned.data()).unwrap();
+        assert_eq!(decoded, payload);
+    }
+
+    #[test]
+    fn owned_data_from_null_ptr_returns_empty_slice_and_drops_safely() {
+        let owned = unsafe { OwnedData::owned_from_ptr(core::ptr::null_mut()) };
+        assert!(owned.data().is_empty());
+    }
+
+    #[test]
+    fn alloc_and_encode_zero_sized_value_round_trips() {
+        let ptr = alloc_and_encode(&());
+        assert!(!ptr.is_null());
+        let owned = unsafe { OwnedData::owned_from_ptr(ptr) };
+        let (): () = decode_exact(owned.data()).unwrap();
     }
 }

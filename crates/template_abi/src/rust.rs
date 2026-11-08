@@ -25,7 +25,7 @@ mod no_std {
     extern crate alloc;
 
     pub mod alloc_internal {
-        pub use super::alloc::alloc::{Layout, alloc, alloc_zeroed, dealloc};
+        pub use super::alloc::alloc::{Layout, alloc, alloc_zeroed, dealloc, handle_alloc_error};
     }
 
     pub use alloc::{boxed, format, str, string, vec};
@@ -95,7 +95,7 @@ mod rust_std {
     };
 
     pub mod alloc_internal {
-        pub use ::std::alloc::{Layout, alloc, alloc_zeroed, dealloc};
+        pub use ::std::alloc::{Layout, alloc, alloc_zeroed, dealloc, handle_alloc_error};
     }
 
     pub mod collections {

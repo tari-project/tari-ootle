@@ -470,7 +470,7 @@ fn calc_stealth_statement_weight(statement: &StealthTransferStatement) -> u64 {
     // An input contributes a commitment aggregation and a substate lookup.
     const WEIGHT_PER_INPUT: u64 = 1;
     // Every script-path `TemplateFunction` atom instantiates and invokes a WASM template in
-    // `TransactionProcessor::evaluate_spend_script`, so each carries `INVOCATION_FLOOR`.
+    // `RuntimeInterfaceImpl::evaluate_spend_script` (`tari_engine`), so each carries `INVOCATION_FLOOR`.
     let invocation_weight = statement.script_path_template_functions().count() as u64 * INVOCATION_FLOOR;
 
     // Outputs carry no weight term. Weight is a size/IO measure; an output's cost is its native verification, which

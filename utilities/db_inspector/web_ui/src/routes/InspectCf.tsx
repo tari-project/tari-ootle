@@ -36,11 +36,14 @@ function estimateWidth(labelLength: number, data: Row[], getter: (row: Row) => a
     2000,
     data.reduce((acc, row) => {
       const value = getter(row);
+      if (value === undefined || value === null) {
+        return acc;
+      }
       if (typeof value === "string") {
         return Math.max(acc, value.length * 8);
       }
 
-      return Math.max(acc, value.toString().length * 8);
+      return Math.max(acc, String(value).length * 8);
     }, labelLength * 15),
   );
 }

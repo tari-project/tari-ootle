@@ -104,6 +104,17 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         column_families::epoch_checkpoint::EpochCheckpointCf,
         column_families::lock_conflict::LockConflictCf,
         column_families::lock_conflict::LockConflictBlockIdIndex,
+        column_families::substate_down_proof::SubstateDownProofCf,
+        column_families::substate_down_proof::SubstateDownProofEpochIndex,
+        column_families::state_version_proof::StateVersionProofCf,
+        column_families::state_version_proof::BlockCommitProofCf,
+        column_families::state_version_proof::StateVersionProofRetentionCf,
+        column_families::state_version_proof::StateVersionProofEpochIndex,
+        column_families::state_version_proof::BlockCommitProofCitationCf,
+        column_families::rollback_history::RollbackHistoryCf,
+        column_families::state_sync_rewind_point::StateSyncRewindPointCf,
+        column_families::state_sync_rewind_point::StateSyncMissingValueCf,
+        column_families::validator_liveness_log::ValidatorLivenessLogCf,
         column_families::validator_node_epoch_stats::ValidatorNodeEpochStatsCf,
         column_families::diagnostic_no_vote::DiagnosticsNoVoteCf,
         column_families::diagnostic_event::DiagnosticEventCf,
@@ -201,14 +212,20 @@ pub fn register_all_cfs(context: &mut HandlerContext) -> &mut HandlerContext {
         .register_cf(column_families::substate::UnprunedDownedValuesIndex)
         .register_cf(column_families::substate_down_proof::SubstateDownProofCf)
         .register_cf(column_families::substate_down_proof::SubstateDownProofEpochIndex)
+        .register_cf(column_families::state_version_proof::StateVersionProofCf)
+        .register_cf(column_families::state_version_proof::BlockCommitProofCf)
         .register_cf(column_families::state_version_proof::StateVersionProofRetentionCf)
         .register_cf(column_families::state_version_proof::StateVersionProofEpochIndex)
         .register_cf(column_families::state_version_proof::BlockCommitProofCitationCf)
+        .register_cf(column_families::rollback_history::RollbackHistoryCf)
+        .register_cf(column_families::state_sync_rewind_point::StateSyncRewindPointCf)
+        .register_cf(column_families::state_sync_rewind_point::StateSyncMissingValueCf)
         .register_cf(column_families::substate_locks::BlockLockSetCf)
         .register_cf(column_families::transaction::TransactionCf)
         .register_cf(column_families::transaction_pool::TransactionPoolCf)
         .register_cf(column_families::transaction_pool_state_update::TransactionPoolStateUpdateCf)
         .register_cf(column_families::transaction_pool_state_update::TransactionPoolStateUpdateDebugHistoryCf)
+        .register_cf(column_families::validator_liveness_log::ValidatorLivenessLogCf)
         .register_cf(column_families::validator_node_epoch_stats::ValidatorNodeEpochStatsCf)
         .register_cf(column_families::vote_equivocation::VoteEquivocationCf)
 }

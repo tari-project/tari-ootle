@@ -69,6 +69,10 @@ impl TableResponse {
         self
     }
 
+    pub fn num_rows(&self) -> usize {
+        self.rows.len()
+    }
+
     pub fn with_columns<I: IntoIterator<Item = Column>>(&mut self, columns: I) -> &mut Self {
         self.columns = columns.into_iter().collect();
         self

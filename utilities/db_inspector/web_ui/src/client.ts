@@ -32,12 +32,14 @@ async function getRequest(path: string, params: Params = {}) {
   });
 
   if (!response.ok) {
+    let details = "";
     try {
       const resp = await response.json();
-      throw new Error(`${resp.status}: ${resp.message}`);
+      details = `${resp.code ?? response.status}: ${resp.message ?? response.statusText}`;
     } catch (e) {
-      throw new Error(`Error: ${response.status}: ${response.statusText} ${e}`);
+      details = `${response.status}: ${response.statusText} (${e})`;
     }
+    throw new Error(details);
   }
 
   return await response.json();
@@ -49,11 +51,14 @@ export function RestClient() {
       return await getRequest("databases");
     },
     listColumnFamilies: async (dbName: string) => {
-      return await getRequest("databases/" + dbName + "/column-families");
+      return await getRequest(`databases/${encodeURIComponent(dbName)}/column-families`);
     },
 
     listCfItems: async (dbName: string, cfName: string, params: Params = {}) => {
-      return await getRequest(`databases/${dbName}/column-families/${cfName}`, params);
+      return await getRequest(
+        `databases/${encodeURIComponent(dbName)}/column-families/${encodeURIComponent(cfName)}`,
+        params,
+      );
     },
   };
 }

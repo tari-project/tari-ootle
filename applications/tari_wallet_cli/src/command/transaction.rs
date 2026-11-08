@@ -957,11 +957,9 @@ fn build_manifest_transaction(
         .with_min_epoch(min_epoch);
 
     if let Some(account) = dump_account {
-        builder = builder.put_last_instruction_output_on_workspace("bucket").call_method(
-            account,
-            "deposit",
-            args![Workspace("bucket")],
-        );
+        builder = builder
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")]);
     }
 
     let mut transaction = builder.build_unsigned();

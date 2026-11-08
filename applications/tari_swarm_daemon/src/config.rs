@@ -65,8 +65,10 @@ impl Config {
     }
 
     fn overrides_from_cli(&mut self, cli: &Cli) {
-        if let Commands::Start(ref overrides) = cli.command {
-            self.skip_registration = overrides.skip_registration;
+        if let Commands::Start(ref overrides) = cli.command &&
+            overrides.skip_registration
+        {
+            self.skip_registration = true;
         }
         if let Some(ref base_dir) = cli.common.base_dir {
             self.base_dir.clone_from(base_dir);
@@ -249,7 +251,7 @@ impl ExecutableConfig {
     pub fn get_executable_path(&self) -> Option<PathBuf> {
         self.execuable_path
             .clone()
-            .or_else(|| self.compile.as_ref().map(|c| c.target_dir().join(&c.package_name)))
+            .or_else(|| self.compile.as_ref().map(CompileConfig::bin_path))
     }
 }
 
@@ -291,6 +293,38 @@ fn add_ext(path: PathBuf) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::{CommonCli, Overrides};
+
+    fn sample_config() -> Config {
+        Config {
+            base_dir: PathBuf::from("data/swarm"),
+            start_port: 12000,
+            network: Network::LocalNet,
+            settings: HashMap::new(),
+            webserver: WebserverConfig::default(),
+            processes: ProcessesConfig {
+                force_compile: true,
+                instances: vec![],
+                executables: vec![],
+            },
+            skip_registration: false,
+            enable_manual_validator_connect: false,
+            public_ip: None,
+            log_to_file: false,
+        }
+    }
+
+    fn sample_overrides(skip_registration: bool) -> Overrides {
+        Overrides {
+            webui_listen_address: None,
+            no_compile: false,
+            binaries_root: None,
+            start_port: None,
+            skip_registration,
+            wallet_daemon_auth: None,
+            wallet_seed_words: None,
+        }
+    }
 
     #[test]
     fn run_to_completion_is_read_from_the_config_and_off_by_default() {
@@ -315,5 +349,44 @@ mod tests {
         .unwrap();
         assert!(!node.run_to_completion);
         assert!(!toml::to_string(&node).unwrap().contains("run_to_completion"));
+    }
+
+    #[test]
+    fn get_executable_path_uses_compile_bin_path() {
+        let compile = CompileConfig {
+            working_dir: Some(PathBuf::from("../tari")),
+            package_name: "minotari_node".to_string(),
+            target_dir: None,
+            features: vec![],
+            envs: vec![],
+        };
+        let exec = ExecutableConfig {
+            instance_type: InstanceType::MinoTariNode,
+            execuable_path: None,
+            compile: Some(compile.clone()),
+        };
+
+        assert_eq!(exec.get_executable_path(), Some(compile.bin_path()));
+    }
+
+    #[test]
+    fn skip_registration_is_preserved_and_overridden_from_cli() {
+        let mut config = sample_config();
+        config.skip_registration = true;
+
+        let cli_without_flag = Cli {
+            common: CommonCli {
+                base_dir: None,
+                config_path: PathBuf::from("./config.toml"),
+                network: None,
+            },
+            command: Commands::Start(sample_overrides(false)),
+        };
+        config.overrides_from_cli(&cli_without_flag);
+        assert!(config.skip_registration);
+
+        let mut config_default = sample_config();
+        sample_overrides(true).apply(&mut config_default).unwrap();
+        assert!(config_default.skip_registration);
     }
 }

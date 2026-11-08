@@ -469,6 +469,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         let index_cf = self.db().cf(block::EpochHeightIndex)?;
         index_cf.delete(&(block.epoch(), block.height(), *block.id()), OPERATION)?;
+        self.db().cf(block::ExecutedBlockIndex)?.delete(block_id, OPERATION)?;
 
         // TODO: could lead to orphan chains left in DB - need to recursively remove all children
         let chain_cf = self.db().cf(PendingChainIndex)?;
@@ -476,6 +477,13 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let parent_child_cf = self.db().cf(chain::PendingParentChildIndex)?;
         parent_child_cf.delete(&(*block.parent(), *block.id()), OPERATION)?;
 
+        Ok(())
+    }
+
+    fn blocks_set_executed(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
+        self.db()
+            .cf(block::ExecutedBlockIndex)?
+            .put(block_id, &(), "blocks_set_executed")?;
         Ok(())
     }
 
@@ -498,6 +506,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             block.set_commit_qc(*qc_id);
             // The block is committed, remove it from the pending chain
             self.db().cf(PendingChainIndex)?.delete(block_id, OPERATION)?;
+            self.db().cf(block::ExecutedBlockIndex)?.delete(block_id, OPERATION)?;
             self.db()
                 .cf(chain::PendingParentChildIndex)?
                 .delete(&(*block.parent(), *block_id), OPERATION)?;
@@ -2459,6 +2468,7 @@ mod cleanup {
         let cf = db.cf(BlockCf)?;
         let committed_cf = db.cf(chain::CommittedParentChildChainIndex)?;
         let index_cf = db.cf(block::EpochHeightIndex)?;
+        let executed_cf = db.cf(block::ExecutedBlockIndex)?;
 
         // Don't delete epoch 0 blocks (i.e the zero block)
         let keys =
@@ -2470,6 +2480,7 @@ mod cleanup {
             cf.delete(&block_id, OPERATION)?;
             committed_cf.delete(&block_id, OPERATION)?;
             index_cf.delete(&(epoch, height, block_id), OPERATION)?;
+            executed_cf.delete(&block_id, OPERATION)?;
         }
         Ok(count)
     }

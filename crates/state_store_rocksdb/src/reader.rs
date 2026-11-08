@@ -1011,6 +1011,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         Ok(exists)
     }
 
+    fn blocks_is_executed(&self, block_id: &BlockId) -> Result<bool, StorageError> {
+        let executed = self
+            .db()
+            .cf(block::ExecutedBlockIndex)?
+            .exists(block_id, "blocks_is_executed")?;
+        Ok(executed)
+    }
+
     fn blocks_is_pending_ancestor(&self, descendant: &BlockId, ancestor: &BlockId) -> Result<bool, StorageError> {
         const OPERATION: &str = "blocks_is_ancestor";
         // Defensive checks, technically not needed as this will return false if the blocks do not exist.

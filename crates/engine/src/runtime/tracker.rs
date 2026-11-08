@@ -662,14 +662,13 @@ impl<TStore: StateReader> StateTracker<TStore> {
         // the whole payment against the larger total.
         let commit_fees = fee_intent_fees.as_ref().unwrap_or_else(|| state.fee_state());
         if !commit_fees.is_dry_run() && !commit_fees.is_paid_in_full() {
-            let fee_state = state.fee_state();
             // Whatever rejected the main intent is why the transaction failed and stays the reason
             // reported; the shortfall below only decides that not even the fee intent survives it.
             let reason = reason.unwrap_or_else(|| {
                 RejectReason::InsufficientFeesPaid(format!(
                     "Committing requires {} but {} paid",
-                    fee_state.total_charges(),
-                    fee_state.total_payments()
+                    commit_fees.total_charges(),
+                    commit_fees.total_payments()
                 ))
             });
 
@@ -900,5 +899,115 @@ mod tests {
 
         assert!(tracker.take_last_instruction_output().is_none());
         tracker.read_with(|state| assert_eq!(state.workspace().all_ids_iter().count(), 0));
+    }
+
+    #[test]
+    fn fee_checkpoint_succeeds_after_workspace_proof_was_already_dropped() {
+        use tari_engine_types::{
+            proof::{ContainerRef, LockedResource},
+            resource_container::ResourceContainer,
+        };
+        use tari_template_lib::{
+            models::{Proof, ProofId},
+            types::{Amount, constants::STEALTH_TARI_RESOURCE_ADDRESS},
+        };
+
+        let tracker = StateTracker::new(
+            MemoryStateStore::new(),
+            [(VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(0))]
+                .into_iter()
+                .collect(),
+            CallScope::new(),
+            HashSet::new(),
+            Hash32::zero(),
+            Hash32::zero(),
+            TransactionWeight::new(0),
+            DeclaredInputLoad::default(),
+            WasmMeteringRate::unmetered(),
+            ExhaustBurnRate::new(0),
+            FeeScale::default(),
+            Network::LocalNet,
+            true,
+        );
+
+        let proof_id = ProofId::from(0u32);
+        tracker.write_with(|state| {
+            state
+                .new_proof(
+                    proof_id,
+                    LockedResource::new(
+                        ContainerRef::Runtime,
+                        ResourceContainer::public_fungible(STEALTH_TARI_RESOURCE_ADDRESS, Amount::from(10u64)),
+                    ),
+                )
+                .unwrap();
+            let item = IndexedValue::from_type(&Proof::from_id(proof_id)).unwrap();
+            state.workspace_mut().insert(1, item).unwrap();
+            state.drop_proof(proof_id).unwrap();
+        });
+
+        tracker.fee_checkpoint().unwrap();
+    }
+
+    #[test]
+    fn finalize_reports_commit_fees_when_fee_intent_fallback_is_unpaid() {
+        use tari_engine_types::{fees::FeeSource, resource_container::ResourceContainer};
+        use tari_template_lib::types::{Amount, constants::STEALTH_TARI_RESOURCE_ADDRESS};
+
+        let tracker = StateTracker::new(
+            MemoryStateStore::new(),
+            [(VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(0))]
+                .into_iter()
+                .collect(),
+            CallScope::new(),
+            HashSet::new(),
+            Hash32::zero(),
+            Hash32::zero(),
+            TransactionWeight::new(0),
+            DeclaredInputLoad::default(),
+            WasmMeteringRate::unmetered(),
+            ExhaustBurnRate::new(0),
+            FeeScale::default(),
+            Network::LocalNet,
+            false,
+        );
+
+        tracker.write_with(|state| {
+            state
+                .pay_fee(
+                    ResourceContainer::stealth(STEALTH_TARI_RESOURCE_ADDRESS, Amount::from(100u64)),
+                    None,
+                )
+                .unwrap();
+            state.fee_state_mut().add_charge(FeeSource::Initial, 100);
+        });
+        tracker.fee_checkpoint().unwrap();
+
+        tracker.write_with(|state| {
+            state
+                .pay_fee(
+                    ResourceContainer::stealth(STEALTH_TARI_RESOURCE_ADDRESS, Amount::from(200u64)),
+                    None,
+                )
+                .unwrap();
+            state.fee_state_mut().add_charge(FeeSource::RuntimeCall, 50);
+        });
+
+        let committed = tracker.select_finalized_state(None).unwrap();
+        let mut fallback = tracker.select_fee_intent_fallback(&committed).unwrap();
+        fallback
+            .fee_intent_chargeable_state()
+            .unwrap()
+            .fee_state_mut()
+            .add_charge(FeeSource::Storage, 250);
+
+        let result = tracker.finalize(fallback).unwrap();
+        let TransactionResult::Reject(reason) = result.result else {
+            panic!("expected Reject, got {:?}", result.result);
+        };
+        assert_eq!(
+            reason,
+            RejectReason::InsufficientFeesPaid("Committing requires 350 but 100 paid".to_string())
+        );
     }
 }

@@ -62,6 +62,10 @@ impl Workspace {
         mem::take(&mut self.proofs)
     }
 
+    pub fn remove_proof(&mut self, proof_id: &ProofId) -> bool {
+        self.proofs.shift_remove(proof_id)
+    }
+
     pub fn clear_items(&mut self) {
         self.items.clear();
     }

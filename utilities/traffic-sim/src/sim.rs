@@ -186,6 +186,7 @@ impl TrafficSim {
         let addrs = resp.instances.into_iter().filter_map(|instance| {
             if !instance.is_running {
                 log::info!("WARN: stopped wallet instance: {}", instance.name);
+                return None;
             }
             let rpc_port = instance.ports.get("jrpc")?;
             Some((instance.name, format!("http://localhost:{}/json_rpc", rpc_port)))
@@ -415,8 +416,7 @@ impl TrafficSim {
     ) -> anyhow::Result<()> {
         let mut exchange_wallet = self.connect_exchange_wallet().await?;
 
-        let resp = exchange_wallet.client.accounts_get("sim_default".into()).await?;
-        // let resp = exchange_wallet.client.accounts_get_default().await?;
+        let resp = exchange_wallet.client.accounts_get_default().await?;
         let exchange_account = AccountWithAddress::new(resp.account, resp.address);
         let exchange_account_key_id = exchange_account
             .account

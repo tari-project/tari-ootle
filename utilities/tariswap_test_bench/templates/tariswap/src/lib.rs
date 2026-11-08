@@ -150,10 +150,10 @@ mod tariswap {
             let b_balance = self.get_pool_balance(b_resource);
 
             // calculate the amount of tokens to take from each pool
-            let decimals = Amount::from(1_000_000u64);
-            let lp_ratio = (lp_bucket.amount() * decimals) / (self.lp_total_supply() * decimals);
-            let a_amount = (lp_ratio.div_ceil(decimals)) * a_balance;
-            let b_amount = (lp_ratio.div_ceil(decimals)) * b_balance;
+            let lp_amount = lp_bucket.amount();
+            let total_supply = self.lp_total_supply();
+            let a_amount = (lp_amount * a_balance) / total_supply;
+            let b_amount = (lp_amount * b_balance) / total_supply;
 
             // burn the LP tokens
             lp_bucket.burn();

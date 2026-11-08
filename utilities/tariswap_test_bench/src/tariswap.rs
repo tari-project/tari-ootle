@@ -109,7 +109,7 @@ impl Runner {
         const BATCH_SIZE: usize = 100;
         let mut tx_ids = Vec::with_capacity(BATCH_SIZE);
 
-        for i in 0..(tariswaps.len() / BATCH_SIZE) {
+        for i in 0..tariswaps.len().div_ceil(BATCH_SIZE) {
             let _timer = TraceTimer::info("tariswap", "add_liquidity")
                 .with_iterations(BATCH_SIZE.min(tariswaps.len().saturating_sub(i * BATCH_SIZE)));
 
@@ -182,7 +182,7 @@ impl Runner {
             info!(
                 "⏳️ Added liquidity to pools {}-{}",
                 i * BATCH_SIZE,
-                (i + 1) * BATCH_SIZE
+                ((i + 1) * BATCH_SIZE).min(tariswaps.len())
             );
         }
 
@@ -208,8 +208,8 @@ impl Runner {
                 account,
                 lp_vault,
                 SubstateVersion::ZERO,
-                tariswaps[0].lp_resource_address,
-                ResourceType::NonFungible,
+                lp_resource,
+                ResourceType::Fungible,
                 Some("LP".to_string()),
                 0,
             )?;
@@ -290,7 +290,7 @@ impl Runner {
 
             for (j, tx_id) in tx_ids.drain(..).enumerate() {
                 self.wait_for_transaction(tx_id).await?;
-                info!("Swap {n} for {amount_a_for_b} XTR -> FAUCET", n = (i + 1) * (j + 1));
+                info!("Swap {n} for {amount_a_for_b} XTR -> FAUCET", n = i * 200 + j + 1);
             }
         }
 
@@ -339,7 +339,7 @@ impl Runner {
 
             for (j, tx_id) in tx_ids.drain(..).enumerate() {
                 self.wait_for_transaction(tx_id).await?;
-                info!("Swap {n} for {amount_b_for_a} FAUCET -> XTR", n = (i + 1) * (j + 1) * 2);
+                info!("Swap {n} for {amount_b_for_a} FAUCET -> XTR", n = i * 200 + j + 1);
             }
         }
 

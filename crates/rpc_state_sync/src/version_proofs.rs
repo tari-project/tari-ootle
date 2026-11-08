@@ -105,25 +105,23 @@ impl ProofSchedule {
 
     /// Rejects a batch at `state_version` if the stream owes a proof for an earlier version.
     pub fn check_batch(&self, state_version: Version) -> Result<(), RpcStateSyncError> {
-        if let Some(next_point) = self.next_point &&
-            next_point < state_version &&
-            next_point <= self.last
-        {
-            return Err(RpcStateSyncError::InvalidResponse(anyhow!(
-                "Peer streamed v{state_version} without proving v{next_point}"
-            )));
-        }
-        Ok(())
+        self.check_owed_before(state_version, "streamed")
     }
 
     /// Rejects a proof of `state_version` if the stream still owes a proof for an earlier version.
     pub fn check_proof(&self, state_version: Version) -> Result<(), RpcStateSyncError> {
+        self.check_owed_before(state_version, "proved")
+    }
+
+    /// Rejects a message at `state_version` if the stream owes a proof for an earlier version. `verb` names what the
+    /// peer did at `state_version`.
+    fn check_owed_before(&self, state_version: Version, verb: &str) -> Result<(), RpcStateSyncError> {
         if let Some(next_point) = self.next_point &&
             next_point < state_version &&
             next_point <= self.last
         {
             return Err(RpcStateSyncError::InvalidResponse(anyhow!(
-                "Peer proved v{state_version} without proving v{next_point}"
+                "Peer {verb} v{state_version} without proving v{next_point}"
             )));
         }
         Ok(())

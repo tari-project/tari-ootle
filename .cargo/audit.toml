@@ -9,6 +9,6 @@ ignore = [
     "RUSTSEC-2023-0071",
     # crypto-bigint 0.5.5 via `webrtc -> dtls -> p256/p384` (ephemeral ECDH only; blocked on `dtls` moving to `p256` 0.14).
     "RUSTSEC-2026-0387",
-    # memmap2 0.6.2 unchecked pointer offset; direct dependencies use 0.9.11; transitive copy pinned via `wasmer 7.5.0 -> shared-buffer 0.1.4` (#2276); blocked on wasmer/shared-buffer upgrading memmap2.
+    # memmap2 0.6.2 unchecked pointer offset; direct dependencies pin "0.9" (>= 0.9.11); transitive copy pinned via `wasmer 7.5.0 -> shared-buffer 0.1.4` (#2276); blocked on wasmer/shared-buffer upgrading memmap2.
     "RUSTSEC-2026-0186",
 ]

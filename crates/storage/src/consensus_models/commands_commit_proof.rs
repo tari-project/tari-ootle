@@ -56,6 +56,15 @@ impl CommandsCommitProof {
         })
     }
 
+    /// Carries by its hash every full command that a proof generated for `shard_group` would carry by its hash, so the
+    /// proof holds the commands in the form [`CommandOrHash::for_shard_group`] gives. Each entry's merkle leaf is
+    /// unchanged.
+    pub fn prune_for_shard_group(&mut self, shard_group: ShardGroup) -> Result<(), UnknownProtocolVersionError> {
+        match self {
+            Self::V1(proof) => proof.prune_for_shard_group(shard_group),
+        }
+    }
+
     pub fn sidechain_block_commit_proof(&self) -> &SidechainBlockCommitProof {
         match self {
             Self::V1(proof) => proof.commit_proof(),
@@ -108,6 +117,18 @@ impl CommandsCommitProofV1 {
 
     pub fn protocol_version(&self) -> Result<ProtocolVersion, UnknownProtocolVersionError> {
         ProtocolVersion::try_from(self.commit_proof.header.protocol_version)
+    }
+
+    pub fn prune_for_shard_group(&mut self, shard_group: ShardGroup) -> Result<(), UnknownProtocolVersionError> {
+        let protocol_version = self.protocol_version()?;
+        for entry in &mut self.commands {
+            if let CommandOrHash::Command(command) = entry &&
+                let Some(pruned) = CommandOrHash::pruned_for_shard_group(protocol_version, command, shard_group)
+            {
+                *entry = CommandOrHash::Pruned(pruned);
+            }
+        }
+        Ok(())
     }
 
     pub fn validate_committed(
@@ -275,19 +296,32 @@ impl CommandOrHash {
     /// The form a foreign commit proof for `shard_group` carries `command` in, for a block proposed under
     /// `protocol_version`.
     pub fn for_shard_group(protocol_version: ProtocolVersion, command: &Command, shard_group: ShardGroup) -> Self {
+        match Self::pruned_for_shard_group(protocol_version, command, shard_group) {
+            Some(pruned) => Self::Pruned(pruned),
+            None => Self::Command(command.clone()),
+        }
+    }
+
+    /// The pruned form of `command` if a foreign commit proof for `shard_group` carries it only by its hash, or `None`
+    /// if the proof carries it in full.
+    fn pruned_for_shard_group(
+        protocol_version: ProtocolVersion,
+        command: &Command,
+        shard_group: ShardGroup,
+    ) -> Option<PrunedCommand> {
         let full_command_shard_groups = command.full_command_shard_groups();
         if full_command_shard_groups.contains(&shard_group) {
-            return Self::Command(command.clone());
+            return None;
         }
         match protocol_version {
             ProtocolVersion::V0 | ProtocolVersion::V1 => match command {
-                Command::EndEpoch(_) => Self::Command(command.clone()),
+                Command::EndEpoch(_) => None,
                 Command::LocalOnly(_) |
                 Command::LocalPrepare(_) |
                 Command::LocalAccept(_) |
                 Command::AllAccept(_) |
                 Command::SomeAccept(_) |
-                Command::ForeignProposal(_) => Self::Pruned(PrunedCommand {
+                Command::ForeignProposal(_) => Some(PrunedCommand {
                     hash: command.hash(protocol_version),
                     full_command_shard_groups,
                 }),
@@ -556,6 +590,31 @@ mod tests {
             proof.validate_well_formed(),
             Err(ForeignProposalCommitProofError::CommandOutOfOrder { .. })
         ));
+    }
+
+    #[test]
+    fn pruning_a_proof_carrying_every_command_in_full_gives_the_proof_generated_for_the_shard_group() {
+        for shard_group in [input_group(), output_group(), uninvolved_group()] {
+            let commands = commands();
+            let entries = commands.iter().cloned().map(CommandOrHash::Command).collect();
+            let mut proof = CommandsCommitProof::V1(proof(ProtocolVersion::V0, &commands, entries));
+            proof.prune_for_shard_group(shard_group).unwrap();
+            assert_eq!(
+                proof,
+                CommandsCommitProof::V1(honest_proof(ProtocolVersion::V0, shard_group)),
+                "{shard_group}"
+            );
+        }
+    }
+
+    #[test]
+    fn pruning_leaves_a_proof_generated_for_the_shard_group_unchanged() {
+        for shard_group in [input_group(), output_group(), uninvolved_group()] {
+            let honest = CommandsCommitProof::V1(honest_proof(ProtocolVersion::V0, shard_group));
+            let mut pruned = honest.clone();
+            pruned.prune_for_shard_group(shard_group).unwrap();
+            assert_eq!(pruned, honest, "{shard_group}");
+        }
     }
 
     #[test]

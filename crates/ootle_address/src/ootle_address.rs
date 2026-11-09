@@ -88,7 +88,7 @@ impl OotleAddress {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(self.byte_length());
+        let mut buf = Vec::with_capacity(Self::MIN_BYTE_LENGTH);
         self.encode_to_writer(&mut buf).unwrap();
         buf
     }
@@ -237,7 +237,7 @@ impl OotleAddress {
 
     pub fn to_bech32_string(&self) -> String {
         let tag_len = self.destination_tag_len();
-        let mut s = String::with_capacity(119 + (tag_len * 8).div_ceil(5));
+        let mut s = String::with_capacity(119 + tag_len);
         self.encode_bech32_to_fmt(&mut s).unwrap();
         s
     }

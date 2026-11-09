@@ -204,14 +204,7 @@ impl TemplateMetadata {
 
     /// Decode metadata from CBOR bytes.
     pub fn from_cbor(bytes: &[u8]) -> Result<Self, TemplateMetadataError> {
-        let metadata: Self = tari_bor::decode_exact(bytes).map_err(TemplateMetadataError::CborDecode)?;
-        if metadata.schema_version != SCHEMA_VERSION {
-            return Err(TemplateMetadataError::UnsupportedSchemaVersion {
-                found: metadata.schema_version,
-                expected: SCHEMA_VERSION,
-            });
-        }
-        Ok(metadata)
+        tari_bor::decode_exact(bytes).map_err(TemplateMetadataError::CborDecode)
     }
 
     /// Serialize this metadata as a JSON string.
@@ -223,14 +216,7 @@ impl TemplateMetadata {
     /// Deserialize metadata from a JSON string.
     #[cfg(feature = "json")]
     pub fn from_json(json: &str) -> Result<Self, TemplateMetadataError> {
-        let metadata: Self = serde_json::from_str(json).map_err(TemplateMetadataError::JsonDecode)?;
-        if metadata.schema_version != SCHEMA_VERSION {
-            return Err(TemplateMetadataError::UnsupportedSchemaVersion {
-                found: metadata.schema_version,
-                expected: SCHEMA_VERSION,
-            });
-        }
-        Ok(metadata)
+        serde_json::from_str(json).map_err(TemplateMetadataError::JsonDecode)
     }
 
     /// Compute the domain-separated SHA-256 multihash of the CBOR-encoded metadata.
@@ -255,8 +241,6 @@ pub enum TemplateMetadataError {
     #[cfg(feature = "json")]
     #[error("JSON decoding error: {0}")]
     JsonDecode(serde_json::Error),
-    #[error("Unsupported template metadata schema version {found} (expected {expected})")]
-    UnsupportedSchemaVersion { found: u32, expected: u32 },
 }
 
 #[cfg(test)]
@@ -424,20 +408,5 @@ mod tests {
         let err = TemplateMetadata::from_cbor(&cbor).unwrap_err();
         assert!(matches!(err, TemplateMetadataError::CborDecode(_)));
         assert!(err.to_string().contains("remaining on input"));
-    }
-
-    #[test]
-    fn rejects_unsupported_schema_version() {
-        let mut metadata = TemplateMetadata::new("version-test".to_string(), "0.1.0".to_string());
-        metadata.schema_version = SCHEMA_VERSION + 1;
-        let cbor = metadata.to_cbor().unwrap();
-        let err = TemplateMetadata::from_cbor(&cbor).unwrap_err();
-        assert!(matches!(
-            err,
-            TemplateMetadataError::UnsupportedSchemaVersion {
-                found,
-                expected: SCHEMA_VERSION,
-            } if found == SCHEMA_VERSION + 1
-        ));
     }
 }

@@ -173,7 +173,7 @@ impl ShardStateVersions {
 
         let inner_mut: &mut [StateVersion] = self.inner.as_mut();
         for (i, _) in bitmap.into_iter().enumerate().filter(|(_, v)| *v) {
-            inner_mut[i] += 1.into();
+            inner_mut[i] = StateVersion::new(inner_mut[i].as_u64() + 1);
         }
         self
     }
@@ -219,8 +219,13 @@ mod tests {
         assert!(v.is_none());
 
         assert!(ShardStateVersions::shard_to_index(ShardGroup::new_unchecked(10, 5), Shard::global()).is_none());
+        assert!(ShardStateVersions::shard_to_index(ShardGroup::new_unchecked(10, 5), Shard::from(7)).is_none());
         assert!(
             ShardStateVersions::shard_to_index(ShardGroup::new_unchecked(1, (MAX_SHARDS + 1) as u32), Shard::global())
+                .is_none()
+        );
+        assert!(
+            ShardStateVersions::shard_to_index(ShardGroup::new_unchecked(1, (MAX_SHARDS + 1) as u32), Shard::from(1))
                 .is_none()
         );
     }

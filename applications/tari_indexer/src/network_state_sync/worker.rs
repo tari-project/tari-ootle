@@ -974,8 +974,8 @@ impl NetworkWideStateSync {
             Ok(Some(probe)) => {
                 self.consensus_epoch.observe(probe.tip.shard_group, probe.tip.epoch);
                 self.observe_tip(&probe);
-                // Record the quorum-signed state root so the read path can skip re-validating
-                // commit proofs for this tip. A failure here must not abort the state sync.
+                // Record the quorum-signed state root so the read path knows how recent anchors
+                // citing it are. A failure here must not abort the state sync.
                 if let Err(e) = self.persist_verified_tip(probe.tip).await {
                     warn!(target: LOG_TARGET, "⚠️ Failed to record verified state root for shard group {}: {}", shard_group, e);
                 }

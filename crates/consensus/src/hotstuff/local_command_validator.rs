@@ -464,11 +464,12 @@ where
         };
 
         let forced_abort = abort_if_local_prepared_expired(&mut tx_rec, block.epoch()).or_else(|| {
-            (atom.decision.is_abort() && next_epoch_changes_layout)
+            let is_waiting =
+                next_epoch_changes_layout && !tx_rec.is_ready_for_pending_stage(local_committee_info.shard_group());
+            (atom.decision.is_abort() && is_waiting)
                 .then(|| abort_local_prepared_for_epoch_end(&mut tx_rec))
                 .flatten()
         });
-        let is_forced_abort = forced_abort.is_some();
         if let Some(execution) = forced_abort {
             proposed_block_change_set.add_abort_execution(*tx_rec.id(), execution);
         }
@@ -648,12 +649,6 @@ where
             }
         }
 
-        // CONSENSUS RULE: a forced abort accepts any abort the leader proposes. A leader whose oracle does not yet
-        // report the layout change aborts for its own reason, such as a lock failure, and the record takes that
-        // reason so that its later SomeAccept matches.
-        if is_forced_abort && atom.decision.is_abort() {
-            tx_rec.set_local_decision(atom.decision);
-        }
         if tx_rec.current_decision() != atom.decision {
             warn!(
                 target: LOG_TARGET,

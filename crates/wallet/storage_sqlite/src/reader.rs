@@ -2556,4 +2556,156 @@ mod tests {
         let mut tx = store.create_read_tx().unwrap();
         assert!(tx.webauthn_has_any_registration().unwrap());
     }
+
+    /// A store holding one account and one resource.
+    fn store_with_account_and_resource() -> (SqliteWalletStore, ComponentAddress, ResourceAddress) {
+        use std::collections::HashSet;
+
+        use tari_ootle_common_types::Epoch;
+        use tari_ootle_wallet_sdk::models::KeyBranch;
+        use tari_template_lib_types::ObjectKey;
+
+        let store = SqliteWalletStore::try_open(":memory:").unwrap();
+        store.run_migrations().unwrap();
+
+        let acct = ComponentAddress::from_array([1u8; 32]);
+        let resource = ResourceAddress::new(ObjectKey::from_array([9u8; ObjectKey::LENGTH]));
+        {
+            let mut tx = store.create_write_tx().unwrap();
+            tx.accounts_insert(
+                Some("a"),
+                &acct,
+                KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+                Some(KeyId::derived(KeyBranch::Account, 0)),
+                &RistrettoPublicKeyBytes::from([1u8; 32]),
+                &HashSet::new(),
+                Epoch(0),
+                true,
+                false,
+            )
+            .unwrap();
+            sql_query(format!(
+                "INSERT INTO resources (address, resource_type, owner_rule, access_rules, divisibility, metadata) \
+                 VALUES ('{resource}', 'Confidential', '{{}}', '{{}}', 0, '{{}}')"
+            ))
+            .execute(tx.connection())
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        (store, acct, resource)
+    }
+
+    #[test]
+    fn reader_queries_round_trip_u64_max_amounts() {
+        use tari_ootle_common_types::SubstateVersion;
+        use tari_ootle_wallet_sdk::models::KeyBranch;
+        use tari_template_lib_types::ResourceType;
+
+        let (store, acct, resource) = store_with_account_and_resource();
+        let vault = VaultId::new([10u8; 32].into());
+        let view_key = KeyId::derived(KeyBranch::ViewOnlyKey, 0);
+        let owner_key = Some(KeyId::derived(KeyBranch::Account, 0));
+
+        {
+            let mut tx = store.create_write_tx().unwrap();
+            tx.vaults_insert(VaultModel {
+                account_address: acct,
+                id: vault,
+                vault_version: SubstateVersion::new(0),
+                resource_address: resource,
+                resource_type: ResourceType::Confidential,
+                revealed_balance: Amount::ZERO,
+                locked_revealed_balance: Amount::ZERO,
+                confidential_balance: Amount::ZERO,
+                token_symbol: None,
+                divisibility: 0,
+            })
+            .unwrap();
+
+            let mut stealth = locked_stealth_output(acct, resource, 1, (view_key, owner_key), 1);
+            stealth.value = u64::MAX;
+            stealth.minimum_value_promise = u64::MAX;
+            stealth.status = OutputStatus::Unspent;
+            stealth.lock_id = None;
+            tx.stealth_outputs_insert(&stealth).unwrap();
+
+            let mut confidential = locked_confidential_output(acct, vault, 2, (view_key, owner_key), 1);
+            confidential.value = Amount::from(u64::MAX);
+            confidential.status = OutputStatus::Unspent;
+            confidential.lock_id = None;
+            tx.confidential_outputs_insert(confidential).unwrap();
+            tx.commit().unwrap();
+        }
+
+        let mut tx = store.create_read_tx().unwrap();
+        assert_eq!(tx.confidential_outputs_get_unspent_balance(&vault).unwrap(), u64::MAX);
+        assert_eq!(
+            tx.stealth_outputs_get_unspent_balance(&resource).unwrap().balance,
+            Amount::from(u64::MAX)
+        );
+        let confidential_outputs = tx
+            .confidential_outputs_get_by_account_and_status(&acct, OutputStatus::Unspent)
+            .unwrap();
+        assert_eq!(confidential_outputs.len(), 1);
+        assert_eq!(confidential_outputs[0].value, Amount::from(u64::MAX));
+        let stealth_outputs = tx
+            .stealth_outputs_get_unspent_by_account(&acct, Some(&resource), false)
+            .unwrap();
+        assert_eq!(stealth_outputs.len(), 1);
+        assert_eq!(stealth_outputs[0].value, u64::MAX);
+    }
+
+    #[test]
+    fn reader_queries_round_trip_u32_max_shards_and_tags_and_u64_max_versions() {
+        use tari_ootle_common_types::Epoch;
+        use tari_ootle_wallet_sdk::models::UtxoUnspent;
+
+        let (store, acct, resource) = store_with_account_and_resource();
+        // The writer stores u32 as i32 and u64 as i64 by bit reinterpretation, so maxima are stored negative.
+        let max_shard = Shard::from(u32::MAX);
+        let max_version = StateVersion::new(u64::MAX);
+        let max_claim = ClaimedStateVersion {
+            state_version: max_version,
+            first_state_version: max_version,
+            verified_epoch: Some(Epoch(u64::MAX)),
+        };
+
+        {
+            let mut tx = store.create_write_tx().unwrap();
+            tx.shard_state_version_set_many(&acct, &resource, [(max_shard, max_version)])
+                .unwrap();
+            tx.shard_state_version_claims_set_many(&acct, &resource, [(max_shard, max_claim)])
+                .unwrap();
+            tx.utxo_process_queue_extend(&resource, [(
+                UtxoUnspent {
+                    tag: UtxoTag::new(u32::MAX),
+                    public_nonce: RistrettoPublicKeyBytes::default(),
+                },
+                QueuedUtxo {
+                    account: acct,
+                    unspent_at: Some((max_shard, max_version)),
+                },
+            )])
+            .unwrap();
+
+            tx.commit().unwrap();
+        }
+
+        let mut tx = store.create_read_tx().unwrap();
+        assert_eq!(
+            tx.shard_state_version_get(&acct, &resource).unwrap(),
+            HashMap::from([(max_shard, max_version)])
+        );
+        assert_eq!(
+            tx.shard_state_version_claims_get(&acct, &resource).unwrap(),
+            HashMap::from([(max_shard, max_claim)])
+        );
+        let batch = tx.utxo_process_queue_fetch_batch(None, 10).unwrap();
+        let queued = batch
+            .entries
+            .get(&resource)
+            .and_then(|entries| entries.get(&(UtxoTag::new(u32::MAX), RistrettoPublicKeyBytes::default())))
+            .unwrap();
+        assert_eq!(queued.unspent_at, Some((max_shard, max_version)));
+    }
 }

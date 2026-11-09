@@ -33,7 +33,7 @@ use super::{
     BadgeUsage,
     TransferFeeParams,
     error::StealthTransferApiError,
-    params::{InputSelection, StealthTransferParams, TransferStatementSpec},
+    params::{InputSelection, StealthTransferParams, TransferStatementSpec, validate_transfer_outputs},
     types::{InputsToSpend, StaticallyPricedShape, StealthOutputToCreate, StealthTransferOutput, TransferStatements},
 };
 use crate::{
@@ -148,9 +148,10 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         lock_id: WalletLockId,
         specs: &[TransferStatementSpec],
     ) -> Result<TransferStatements, StealthTransferApiError> {
+        let network = self.config_api.get_network()?;
         let mut checked = Vec::with_capacity(specs.len());
         for spec in specs {
-            checked.push(self.check_statement_spec(spec).await?);
+            checked.push(self.check_statement_spec(spec, network).await?);
         }
 
         let mut statements = Vec::with_capacity(specs.len());
@@ -209,6 +210,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
     async fn check_statement_spec(
         &self,
         spec: &TransferStatementSpec,
+        network: Network,
     ) -> Result<CheckedStatementSpec, StealthTransferApiError> {
         let Some(sender_key_id) = spec.sender.owner_key_id() else {
             return Err(StealthTransferApiError::InvalidParameter {
@@ -217,14 +219,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             });
         };
 
-        for output in &spec.outputs {
-            output
-                .validate_pay_to()
-                .map_err(|reason| StealthTransferApiError::InvalidParameter {
-                    param: "pay_to",
-                    reason,
-                })?;
-        }
+        validate_transfer_outputs(&spec.outputs, network)?;
 
         let total_amount = spec
             .total_output_amount()

@@ -231,6 +231,9 @@ where TSpec: WalletSdkSpec
         &self,
         params: ConfidentialTransferParams,
     ) -> Result<TransferOutput, ConfidentialTransferApiError> {
+        let network = self.config_api.get_network()?;
+        params.validate(network)?;
+
         let from_account = self.accounts_api.get_account_by_address(&params.from_account)?;
         let to_account = self
             .accounts_api
@@ -432,7 +435,6 @@ where TSpec: WalletSdkSpec
             Amount::zero(),
         )?;
 
-        let network = self.config_api.get_network()?;
         let transaction = Transaction::builder(network.as_byte(), params.max_epoch)
             .with_dry_run(params.is_dry_run)
             // TODO: we assume that from_account has TARI
@@ -567,6 +569,51 @@ pub struct ConfidentialTransferParams {
 }
 
 impl ConfidentialTransferParams {
+    pub fn validate(&self, network: ootle_network::Network) -> Result<(), ConfidentialTransferApiError> {
+        if !self.amount.is_positive() {
+            return Err(ConfidentialTransferApiError::InvalidParameter {
+                param: "amount",
+                reason: "Transfer amount must be positive".to_string(),
+            });
+        }
+
+        if !self.output_to_revealed && self.amount.to_u64_checked().is_none() {
+            return Err(ConfidentialTransferApiError::AmountOverflow {
+                param: "confidential_amount",
+                details: "Confidential amount exceeds u64. This is currently a limitation due to the format of \
+                          EncryptedData"
+                    .to_string(),
+            });
+        }
+
+        if self.amount.checked_add(Amount::from(self.max_fee)).is_none() {
+            return Err(ConfidentialTransferApiError::AmountOverflow {
+                param: "amount",
+                details: format!("Transfer amount plus max_fee ({}) exceeds Amount::MAX", self.max_fee),
+            });
+        }
+
+        if self.destination_address.network() != network {
+            return Err(ConfidentialTransferApiError::InvalidParameter {
+                param: "destination_address",
+                reason: format!(
+                    "Destination address network ({}) does not match wallet network ({})",
+                    self.destination_address.network(),
+                    network
+                ),
+            });
+        }
+
+        self.destination_address
+            .validate()
+            .map_err(|e| ConfidentialTransferApiError::InvalidParameter {
+                param: "destination_address",
+                reason: format!("Invalid destination address: {e}"),
+            })?;
+
+        Ok(())
+    }
+
     pub fn confidential_amount(&self) -> Amount {
         if self.output_to_revealed {
             Amount::zero()
@@ -582,11 +629,9 @@ impl ConfidentialTransferParams {
             Amount::zero()
         }
     }
-}
 
-impl ConfidentialTransferParams {
     pub fn total_amount(&self) -> Amount {
-        self.amount + self.max_fee
+        self.amount.saturating_add(Amount::from(self.max_fee))
     }
 }
 
@@ -659,4 +704,84 @@ pub struct ResolvedAccountDetails {
     pub address: ComponentAddress,
     pub vaults: Vec<VaultId>,
     pub exists_on_chain: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use ootle_network::Network;
+    use tari_template_lib::types::{ObjectKey, constants::STEALTH_TARI_RESOURCE_ADDRESS};
+
+    use super::*;
+
+    fn valid_address(network: Network) -> OotleAddress {
+        let (_, view_only) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let (_, account) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        OotleAddress::new(network, view_only.to_byte_type(), account.to_byte_type())
+    }
+
+    fn base_params() -> ConfidentialTransferParams {
+        ConfidentialTransferParams {
+            from_account: ComponentAddress::new(ObjectKey::from_array([1u8; 32])),
+            input_selection: UtxoInputSelection::PreferConfidential,
+            amount: Amount::from(100u64),
+            destination_address: valid_address(Network::LocalNet),
+            resource_address: STEALTH_TARI_RESOURCE_ADDRESS,
+            max_fee: 1000,
+            output_to_revealed: false,
+            proof_from_resource: None,
+            memo: None,
+            max_epoch: Epoch(10),
+            is_dry_run: false,
+        }
+    }
+
+    #[test]
+    fn validate_accepts_valid_params() {
+        base_params().validate(Network::LocalNet).unwrap();
+    }
+
+    #[test]
+    fn validate_rejects_zero_amount() {
+        let mut params = base_params();
+        params.amount = Amount::zero();
+        let err = params.validate(Network::LocalNet).unwrap_err();
+        assert!(matches!(err, ConfidentialTransferApiError::InvalidParameter {
+            param: "amount",
+            ..
+        }));
+    }
+
+    #[test]
+    fn validate_rejects_wrong_network_destination_address() {
+        let params = base_params();
+        let err = params.validate(Network::MainNet).unwrap_err();
+        assert!(matches!(err, ConfidentialTransferApiError::InvalidParameter {
+            param: "destination_address",
+            ..
+        }));
+    }
+
+    #[test]
+    fn validate_rejects_confidential_amount_exceeding_u64() {
+        let mut params = base_params();
+        params.amount = Amount::new(u128::from(u64::MAX) + 1);
+        let err = params.validate(Network::LocalNet).unwrap_err();
+        assert!(matches!(err, ConfidentialTransferApiError::AmountOverflow {
+            param: "confidential_amount",
+            ..
+        }));
+    }
+
+    #[test]
+    fn total_amount_saturates_instead_of_panicking() {
+        let mut params = base_params();
+        params.output_to_revealed = true;
+        params.amount = Amount::MAX;
+        params.max_fee = 1;
+        assert_eq!(params.total_amount(), Amount::MAX);
+        assert!(matches!(
+            params.validate(Network::LocalNet).unwrap_err(),
+            ConfidentialTransferApiError::AmountOverflow { param: "amount", .. }
+        ));
+    }
 }

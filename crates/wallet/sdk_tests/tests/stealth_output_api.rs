@@ -1028,3 +1028,52 @@ async fn stealth_transfer_with_revealed_fee_swap_declares_swap_vault_input() {
         "revealed fee swap must declare swap resource vault as write input"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_transfer_statements_rejects_wrong_network_destination() {
+    use tari_ootle_address::OotleAddress;
+    use tari_ootle_wallet_sdk::{
+        Network,
+        apis::stealth_transfer::{InputSelection, StealthTransferApiError, TransferStatementSpec},
+    };
+
+    let test = Test::new();
+    let sdk = test.sdk();
+    let owner_account = sdk
+        .accounts_api()
+        .get_account_by_address(&Test::test_account_address())
+        .unwrap();
+    let lock = test.new_lock();
+
+    let (_, view_only) = random_keypair();
+    let (_, account_pk) = random_keypair();
+    let wrong_network_address =
+        OotleAddress::new(Network::MainNet, view_only.to_byte_type(), account_pk.to_byte_type());
+
+    let spec = TransferStatementSpec {
+        sender: owner_account,
+        resource_address: STEALTH_TARI_RESOURCE_ADDRESS,
+        input_selection: InputSelection::Selection(UtxoInputSelection::PreferConfidential),
+        outputs: vec![TransferOutput {
+            address: wrong_network_address,
+            revealed_amount: Amount::zero(),
+            blinded_amount: 100,
+            memo: None,
+            pay_to: PayTo::StealthPublicKey,
+        }],
+    };
+
+    let err = sdk
+        .stealth_transfer_api()
+        .create_transfer_statements(lock.id(), &[spec])
+        .await
+        .err()
+        .expect("wrong-network destination address must be rejected by create_transfer_statements");
+    assert!(
+        matches!(err, StealthTransferApiError::InvalidParameter {
+            param: "destination_address",
+            ..
+        }),
+        "expected InvalidParameter for destination_address, got: {err}"
+    );
+}

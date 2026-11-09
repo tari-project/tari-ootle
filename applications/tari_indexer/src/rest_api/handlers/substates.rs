@@ -211,6 +211,17 @@ pub async fn fetch_substates(
     Extension(context): Extension<HandlerContext>,
     Json(req): Json<GetSubstatesRequest>,
 ) -> HandlerResult<Json<GetSubstatesResponse>> {
+    if !context
+        .epoch_manager()
+        .is_initial_scanning_complete()
+        .await
+        .map_err(ErrorResponse::anyhow)?
+    {
+        return Err(ErrorResponse::service_unavailable(
+            "Indexer is still syncing. Please try again later.",
+        ));
+    }
+
     let GetSubstatesRequest {
         requests,
         cached_only,

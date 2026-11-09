@@ -52,12 +52,13 @@ pub async fn list(
             Box::new(cf.iterator(ordering, OPERATION))
         };
 
+    let has_key_prefix = StateTreeCf::key_prefix().is_some();
     let row_limit = req.limit.unwrap_or(1_000);
     let row_skip = req.page.unwrap_or(0).saturating_mul(row_limit);
     for result in iter.skip(row_skip).take(row_limit) {
         let ((shard, node_key), node) = result?;
         let encoded_key = cf.encode_key(&(shard, node_key.clone()));
-        let key_hex = hex::encode(&encoded_key);
+        let key_hex = hex::encode(&encoded_key[usize::from(has_key_prefix)..]);
         match node {
             tari_jellyfish::Node::Internal(node) => {
                 table.add_row(json!({

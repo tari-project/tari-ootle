@@ -51,13 +51,14 @@ pub async fn list(
             Box::new(cf.iterator(ordering, OPERATION))
         };
 
+    let has_key_prefix = column_families::foreign_substate_pledge::ForeignSubstatePledgeCf::key_prefix().is_some();
     let page_size = req.limit.unwrap_or(1_000);
     let skip = req.page.unwrap_or(0).saturating_mul(page_size);
     for result in iter.skip(skip).take(page_size) {
         let ((tx_id, substate_addr), data) = result?;
         let encoded_key = cf.encode_key(&(tx_id, substate_addr));
         table.add_row(json!({
-            "id": hex::encode(encoded_key),
+            "id": hex::encode(&encoded_key[usize::from(has_key_prefix)..]),
             "tx_id": tx_id,
             "substate_id": data.versioned_substate_id(),
             "value": data.substate_value(),

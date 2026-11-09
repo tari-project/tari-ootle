@@ -39,25 +39,22 @@ pub fn run(state: &mut State) {
 }
 
 pub fn command_fail<const N: usize, E: Into<AppStatus>>(comm: &mut Comm<N>, e: E) {
-    let res = match e.into() {
+    let _ = match e.into() {
         AppStatus::OotleStatusWord(status) => comm.begin_response().send(Reply(status.to_status())),
         AppStatus::StatusWords(status) => comm.begin_response().send(status),
         AppStatus::StatusWithMessage { message, status } => {
             NbglStatus::new().text(&message).show(comm, false);
+            show_menu_main(comm);
             comm.begin_response().send(status)
         },
         AppStatus::OotleStatusWithMessages { messages, status } => {
             for msg in messages {
                 NbglStatus::new().text(&msg).show(comm, false);
             }
+            show_menu_main(comm);
             comm.begin_response().send(Reply(status.to_status()))
         },
     };
-
-    if let Err(e) = res {
-        // If sending the response fails, there's not much we can do. Panic
-        panic!("Failed to send response: {:?}", e);
-    }
 }
 
 pub fn handle<T, R, F, const N: usize>(state_mut: &mut State, mut command: Command<N>, handler: F)
@@ -68,9 +65,7 @@ where
 {
     match handle_inner(state_mut, &mut command, handler) {
         Ok(data) => {
-            command.reply(&data, StatusWords::Ok).unwrap_or_else(|e| {
-                panic!("Failed to send response: {:?}", e);
-            });
+            let _ = command.reply(&data, StatusWords::Ok);
         },
         Err(e) => {
             command_fail(command.into_comm(), e);
@@ -88,6 +83,7 @@ where
     R: BorshSerialize,
     F: FnOnce(&mut State, T) -> Result<R, AppStatus>,
 {
+    state_mut.reset();
     let data = command.get_data();
     let payload = match T::try_from_slice(data) {
         Ok(p) => p,
@@ -108,7 +104,8 @@ pub fn handle_apdu_request<const N: usize>(state_mut: &mut State, command: Comma
             Instruction::SignTransaction => handle_sign(state_mut, command, &request),
         },
         Err(e) => {
-            command.into_response().send(e).unwrap();
+            state_mut.reset();
+            let _ = command.into_response().send(e);
         },
     }
 }
@@ -128,7 +125,9 @@ fn handle_sign<const N: usize>(state_mut: &mut State, command: Command<N>, reque
         },
         Ok(ChunkResult::ReadyToSign(review)) => {
             let comm = command.into_comm();
-            if !confirm_sign(comm, &review) {
+            let approved = confirm_sign(comm, &review);
+            show_menu_main(comm);
+            if !approved {
                 command_fail(comm, AppStatus::OotleStatusWord(OotleStatusWord::UserRejected));
                 return;
             }

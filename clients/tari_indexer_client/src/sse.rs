@@ -306,7 +306,7 @@ impl EventBuffer {
         self.event_type.push_str(event_type);
     }
 
-    /// Extends internal data with given data.
+    /// Records the data payload for the current `data:` line (including empty `data:` lines).
     fn push_data(&mut self, data: &str) {
         if self.has_data {
             self.data.push('\n');

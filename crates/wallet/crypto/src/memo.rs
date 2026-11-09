@@ -103,9 +103,16 @@ impl Memo {
     }
 
     /// Create a new `Memo::DestinationTagAndBytes` from a destination tag and message. If the combined length exceeds
-    /// the maximum allowed length, the message is truncated to fit.
+    /// the maximum allowed length, the message is truncated at the nearest UTF-8 character boundary to fit.
     pub fn new_destination_tag_and_message_truncate<P: AsRef<[u8]>>(destination_tag: P, msg: &str) -> Option<Self> {
-        Self::new_destination_tag_and_bytes_truncate(destination_tag, msg.as_bytes())
+        let tag = destination_tag.as_ref();
+        let available_len = (Self::MAX_BYTES_LENGTH - 1).checked_sub(tag.len())?; // -1 for length prefix byte
+        let truncated = if msg.len() > available_len {
+            &msg[..msg.floor_char_boundary(available_len)]
+        } else {
+            msg
+        };
+        Self::new_destination_tag_and_bytes(destination_tag, truncated.as_bytes())
     }
 
     /// Create a new `Memo::DestinationTagAndBytes` from a destination tag and bytes. If the combined length exceeds
@@ -427,8 +434,10 @@ fn split_sender_address(body: &[u8]) -> Option<(&[u8], &[u8], &[u8])> {
     let account_key = &body[..32];
     let view_key = &body[32..SENDER_ADDRESS_KEYS_LENGTH];
     let destination_tag_len = body[SENDER_ADDRESS_KEYS_LENGTH] as usize;
-    let destination_tag =
-        body.get(SENDER_ADDRESS_KEYS_LENGTH + 1..SENDER_ADDRESS_KEYS_LENGTH + 1 + destination_tag_len)?;
+    if body.len() != SENDER_ADDRESS_KEYS_LENGTH + 1 + destination_tag_len {
+        return None;
+    }
+    let destination_tag = &body[SENDER_ADDRESS_KEYS_LENGTH + 1..];
     Some((account_key, view_key, destination_tag))
 }
 
@@ -633,5 +642,32 @@ mod tests {
         // DestinationTag length (10) exceeds actual data length (5)
         let encoded = [vec![MemoTag::DestinationTagAndBytes as u8, 10u8], vec![1u8; 5]].concat();
         let _err = Memo::decode_from(&mut encoded.as_slice()).unwrap_err();
+    }
+
+    #[test]
+    fn it_truncates_destination_tag_and_message_on_utf8_char_boundary() {
+        let tag = [1u8; 250];
+        // Available message length is (253 - 1) - 250 = 2 bytes.
+        // "€" is 3 bytes in UTF-8 (0xE2 0x82 0xAC); "a€" is 4 bytes, so only "a" fits without splitting "€".
+        let memo = Memo::new_destination_tag_and_message_truncate(tag, "a€").unwrap();
+        let (decoded_tag, decoded_msg) = memo.as_destination_tag_and_message().unwrap();
+        assert_eq!(decoded_tag, &tag);
+        assert_eq!(decoded_msg, "a");
+        assert_eq!(memo.as_utf8_str(), Some("a"));
+    }
+
+    #[test]
+    fn it_rejects_malformed_sender_address_body_in_as_sender_address() {
+        // Declared destination_tag_len exceeds remaining bytes (declared 65, actual 64)
+        let mut body = vec![0u8; SENDER_ADDRESS_MAX_LENGTH];
+        body[SENDER_ADDRESS_KEYS_LENGTH] = 65;
+        let memo = Memo::SenderAddress(MaxBytes::new_checked(body).unwrap());
+        assert!(memo.as_sender_address().is_none());
+
+        // Trailing bytes beyond declared destination_tag_len (declared 2, actual 4)
+        let mut body_with_trailing = vec![0u8; SENDER_ADDRESS_KEYS_LENGTH + 1 + 4];
+        body_with_trailing[SENDER_ADDRESS_KEYS_LENGTH] = 2;
+        let memo = Memo::SenderAddress(MaxBytes::new_checked(body_with_trailing).unwrap());
+        assert!(memo.as_sender_address().is_none());
     }
 }

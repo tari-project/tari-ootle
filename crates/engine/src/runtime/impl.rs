@@ -3973,6 +3973,10 @@ where
                         .map(|public_key| id_provider.derive_new_component_address(&template, public_key))
                         .unwrap_or_else(|| id_provider.new_component_address())?;
 
+                    if state.substate_exists(&SubstateId::Component(address))? {
+                        return Err(RuntimeError::ComponentAlreadyExists { address });
+                    }
+
                     let id = state.new_address_allocation(address)?;
                     Ok(InvokeResult::encode(&ComponentAddressAllocation::new(id))?)
                 },

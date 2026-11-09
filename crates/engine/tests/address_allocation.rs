@@ -328,3 +328,31 @@ fn it_lets_a_callee_forward_and_store_a_pending_address_it_was_given() {
         vec![],
     );
 }
+
+#[test]
+fn it_rejects_allocation_if_component_already_exists() {
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/address_allocation"]);
+    let template_addr = test.get_template_address("AddressAllocationTest");
+    let pk = test.to_public_key_bytes();
+
+    // First transaction creates the component for `pk`
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(template_addr, "create_with_pk", args![pk])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    // Second transaction attempts to allocate an address for the same `pk`
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(template_addr, "allocate_only_for_pk", args![pk])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let expected_addr = derive_component_address_from_public_key(&template_addr, &pk);
+    assert_reject_reason(reason, RuntimeError::ComponentAlreadyExists {
+        address: expected_addr,
+    });
+}

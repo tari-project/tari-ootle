@@ -74,11 +74,15 @@ pub async fn handle_list(
     token: Option<&Bearer>,
     req: ListNftsRequest,
 ) -> Result<ListNftsResponse, anyhow::Error> {
-    context.authorize(token, &[Permission::Nfts(Crud::Read, None)])?;
+    let granted = context.check_auth(token)?;
     let ListNftsRequest { account, limit, offset } = req;
     let sdk = context.wallet_sdk();
     let account = get_account_or_default(account.as_ref(), &sdk.accounts_api())?;
     let account = account.account;
+    enforce_scopes(&granted, &[
+        Permission::Nfts(Crud::Read, None),
+        Permission::Accounts(Crud::Read, Some(account.component_address)),
+    ])?;
 
     let non_fungible_api = sdk.non_fungible_api();
 
@@ -639,5 +643,39 @@ mod tests {
                 "fee payer {fee_payer} is within scope of '{permissions}', got: {err}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn list_requires_account_read_scope_for_target_account() {
+        let test = setup().await;
+        let bearer_only_a = test.bearer(&format!("nfts:read,accounts:read:{}", test.account_a));
+
+        handle_list(&test.context, Some(&bearer_only_a), ListNftsRequest {
+            account: Some(ComponentAddressOrName::ComponentAddress(test.account_a)),
+            limit: 10,
+            offset: 0,
+        })
+        .await
+        .expect("account_a is within scope");
+
+        let err = handle_list(&test.context, Some(&bearer_only_a), ListNftsRequest {
+            account: Some(ComponentAddressOrName::ComponentAddress(test.account_b)),
+            limit: 10,
+            offset: 0,
+        })
+        .await
+        .expect_err("account_b is outside accounts:read scope");
+        let auth_err = err
+            .downcast_ref::<AuthError>()
+            .unwrap_or_else(|| panic!("expected an AuthError, got: {err}"));
+        assert!(
+            matches!(
+                auth_err,
+                AuthError::InsufficientPermissions {
+                    required: Permission::Accounts(Crud::Read, Some(addr)),
+                } if *addr == test.account_b
+            ),
+            "unexpected auth error: {auth_err}"
+        );
     }
 }

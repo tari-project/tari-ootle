@@ -14,7 +14,7 @@ pub(super) enum TransactionServiceRequest {
     SubmitTransaction {
         transaction: Transaction,
         context: Option<TransactionContext>,
-        lock_id: Option<WalletLockId>,
+        lock_ids: Vec<WalletLockId>,
         reply: Reply<Result<TransactionId, TransactionServiceError>>,
     },
 
@@ -61,12 +61,22 @@ impl TransactionServiceHandle {
         context: Option<TransactionContext>,
         lock_id: Option<WalletLockId>,
     ) -> Result<TransactionId, TransactionServiceError> {
+        self.submit_transaction_with_locks(transaction, context, lock_id.into_iter().collect())
+            .await
+    }
+
+    pub async fn submit_transaction_with_locks(
+        &self,
+        transaction: Transaction,
+        context: Option<TransactionContext>,
+        lock_ids: Vec<WalletLockId>,
+    ) -> Result<TransactionId, TransactionServiceError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.sender
             .send(TransactionServiceRequest::SubmitTransaction {
                 transaction,
                 context,
-                lock_id,
+                lock_ids,
                 reply: reply_tx,
             })
             .await

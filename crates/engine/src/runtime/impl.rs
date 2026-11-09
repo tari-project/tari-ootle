@@ -143,7 +143,7 @@ use tari_template_lib::{
         },
         bytes::Bytes,
         constants::{TARI_TOKEN, TOKEN_SYMBOL},
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag, ValueKnowledgeProof},
         engine_args::IntrinsicId,
         stealth::{
             AtomicCondition,
@@ -2597,9 +2597,33 @@ where
                         }));
                     }
 
-                    // The value proof is the burner's proof that they hold the UTXO's opening (or the resource's
-                    // secret view key), so it is required whether or not the resource tracks its total supply.
                     let commitment = arg.utxo_id.into_commitment_bytes();
+
+                    // The output's creator chose its mask, so a mask-knowledge proof shows knowledge of the opening
+                    // but not ownership. It authorises a burn only together with the UTXO's key-path spend authority.
+                    // A view-key proof needs the resource's secret view key and stands on its own.
+                    if matches!(arg.value_proof.knowledge_proof, ValueKnowledgeProof::Commitment { .. }) {
+                        let Some(spend_key) = utxo_mut.output().and_then(|o| o.auth.spend_key()).copied() else {
+                            return Err(RuntimeError::ResourceError(ResourceError::UtxoBurnFailed {
+                                id: arg.utxo_id,
+                                details: "a mask-knowledge value proof can only burn a UTXO that has a spend key"
+                                    .to_string(),
+                            }));
+                        };
+                        let badge = NonFungibleAddress::from_public_key(spend_key);
+                        if !state_mut.base_call_scope().auth_scope().contains_badge(&badge) {
+                            return Err(RuntimeError::ResourceError(
+                                ResourceError::RequiredSignatureMissingForStealthUtxo {
+                                    commitment,
+                                    public_key: spend_key,
+                                },
+                            ));
+                        }
+                    }
+
+                    let utxo_mut = state_mut.get_utxo_mut(&utxo_lock)?;
+                    // The value proof is required whether or not the resource tracks its total supply, since it is
+                    // what limits burns to the UTXO owner or the view-key holder.
                     // Burning discards the output, so the proof is validated against the viewable balance first
                     let elgamal_proof = utxo_mut
                         .output
@@ -3972,6 +3996,10 @@ where
                         .as_ref()
                         .map(|public_key| id_provider.derive_new_component_address(&template, public_key))
                         .unwrap_or_else(|| id_provider.new_component_address())?;
+
+                    if state.substate_exists(&SubstateId::Component(address))? {
+                        return Err(RuntimeError::ComponentAlreadyExists { address });
+                    }
 
                     let id = state.new_address_allocation(address)?;
                     Ok(InvokeResult::encode(&ComponentAddressAllocation::new(id))?)

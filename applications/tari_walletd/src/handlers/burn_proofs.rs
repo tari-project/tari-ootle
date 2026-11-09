@@ -100,11 +100,17 @@ pub async fn handle_list(
                 },
                 Err(e) => {
                     warn!(target: LOG_TARGET, "Failed to parse burn proof {}: {}", path.display(), e);
+                    if req.filter_by_public_key.is_some() {
+                        continue;
+                    }
                     None
                 },
             },
             Err(e) => {
                 warn!(target: LOG_TARGET, "Failed to read burn proof {}: {}", path.display(), e);
+                if req.filter_by_public_key.is_some() {
+                    continue;
+                }
                 None
             },
         };

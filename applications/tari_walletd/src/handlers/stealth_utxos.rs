@@ -4,6 +4,7 @@
 use axum_extra::headers::authorization::Bearer;
 use indexmap::IndexMap;
 use log::info;
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_address::{DestinationTag, Network, OotleAddress};
 use tari_ootle_wallet_crypto::memo::Memo;
 use tari_ootle_walletd_client::{
@@ -94,26 +95,26 @@ pub async fn handle_decrypt_value(
         ));
     }
 
+    // Get view secret key
+    let view_key = sdk.key_manager_api().get_key(req.view_key_id)?;
+
     let utxo_ids = req
         .ids
-        .into_iter()
-        .map(|id| UtxoAddress::new(req.resource_address, id))
-        .map(Into::into)
+        .iter()
+        .copied()
+        .map(|id| SubstateId::from(UtxoAddress::new(req.resource_address, id)))
         .collect::<Vec<_>>();
 
     let substates = sdk.substate_api().get_substates_from_network(&utxo_ids).await?;
 
-    // Get view secret key
-    let view_key = sdk.key_manager_api().get_key(req.view_key_id)?;
-
     let value_range = ValueRangeRequest::resolve(req.minimum_expected_value, req.maximum_expected_value);
 
-    // NOTE: we iterate in a random order (HashMap) but collect into a deterministic order (IndexMap) so that the
-    // results are always in the same order for the same input
-    let proofs = substates
-        .iter()
-        .filter_map(|(id, s)| {
-            let id = id.as_utxo_address().map(|a| a.into_contents().id)?;
+    let proofs = req
+        .ids
+        .into_iter()
+        .filter_map(|id| {
+            let substate_id = SubstateId::from(UtxoAddress::new(req.resource_address, id));
+            let s = substates.get(&substate_id)?;
             let output = s
                 .substate_value()
                 .as_utxo()

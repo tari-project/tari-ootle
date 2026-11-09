@@ -323,24 +323,40 @@ async fn a_substate_older_than_the_version_asked_for_is_refused() {
 }
 
 #[tokio::test]
-async fn sign_act_fetches_enforce_proof_verification_even_under_indexer_trust_mode() {
-    let (_sets, network, test) = walked_wallet(IndexerTrust::Trust).await;
+async fn sign_act_fetches_respect_indexer_trust_mode() {
+    // Under IndexerTrust::Trust (the default), sign-act fetches succeed even without proofs
+    let (_sets, network, test_trust) = walked_wallet(IndexerTrust::Trust).await;
     let (id, value) = substate(1);
     // Indexer serves the substate without a proof
     network.serve_substate(id.clone(), VERSION, value.clone(), None);
 
-    // In IndexerTrust::Trust mode, passive fetch succeeds
-    let passive = test
+    let passive = test_trust
         .sdk()
         .substate_api()
-        .fetch_substate_from_network(&id, None)
+        .fetch_substate_for_signing(&id, None)
         .await
         .unwrap();
     assert_eq!(tombstone_value(&passive.substate), tombstone_value(&value));
 
-    // BUT fetch_substate_for_signing fails closed because it requires proof verification
-    let err = match test.sdk().substate_api().fetch_substate_for_signing(&id, None).await {
-        Ok(_) => panic!("expected fetch_substate_for_signing to fail closed on unproven substate"),
+    let fetched = test_trust
+        .sdk()
+        .substate_api()
+        .get_substates_for_signing(std::slice::from_ref(&id))
+        .await
+        .unwrap();
+    assert_eq!(tombstone_value(fetched[&id].substate_value()), tombstone_value(&value));
+
+    // Under IndexerTrust::Verify, sign-act fetches require proof verification and fail closed
+    let (_sets, network_verify, test_verify) = walked_wallet(IndexerTrust::Verify).await;
+    network_verify.serve_substate(id.clone(), VERSION, value.clone(), None);
+
+    let err = match test_verify
+        .sdk()
+        .substate_api()
+        .fetch_substate_for_signing(&id, None)
+        .await
+    {
+        Ok(_) => panic!("expected fetch_substate_for_signing to fail closed on unproven substate under Verify mode"),
         Err(err) => err,
     };
     assert!(
@@ -348,14 +364,13 @@ async fn sign_act_fetches_enforce_proof_verification_even_under_indexer_trust_mo
         "expected SubstateUnproven, got: {err}"
     );
 
-    // AND get_substates_for_signing also fails closed
-    let err2 = match test
+    let err2 = match test_verify
         .sdk()
         .substate_api()
         .get_substates_for_signing(std::slice::from_ref(&id))
         .await
     {
-        Ok(_) => panic!("expected get_substates_for_signing to fail closed on unproven substate"),
+        Ok(_) => panic!("expected get_substates_for_signing to fail closed on unproven substate under Verify mode"),
         Err(err) => err,
     };
     assert!(
@@ -366,7 +381,7 @@ async fn sign_act_fetches_enforce_proof_verification_even_under_indexer_trust_mo
 
 #[tokio::test]
 async fn sign_act_fetches_succeed_when_substate_is_properly_proven() {
-    let (sets, network, test) = walked_wallet(IndexerTrust::Trust).await;
+    let (sets, network, test) = walked_wallet(IndexerTrust::Verify).await;
     let (id, value) = substate(1);
     let proof = substate_proof(&sets[4], &id, VERSION, &value);
     network.serve_substate(id.clone(), VERSION, value.clone(), Some(proof));

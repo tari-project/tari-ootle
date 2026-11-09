@@ -443,18 +443,20 @@ impl InstanceManager {
 
     pub async fn wait(&mut self, id: InstanceId) -> anyhow::Result<ExitStatus> {
         let instance = self.get_instance_mut(id).ok_or_else(|| anyhow!("Instance not found"))?;
-        let status = instance.child_mut().wait().await?;
-        Ok(status)
+        instance.wait().await
     }
 
     pub async fn start_instance(&mut self, id: InstanceId, executable: &Executable) -> anyhow::Result<()> {
         let instance = self
-            .instances()
+            .instances_mut()
             .find(|i| i.id() == id)
             .ok_or_else(|| anyhow!("Instance not found"))?;
 
+        instance.terminate().await?;
+
         let instance_type = instance.instance_type();
         let instance_name = instance.name().to_string();
+        let process_dir = instance.process_dir().clone();
         let settings = instance.settings().clone();
         let ports = instance.allocated_ports().clone();
         let envs = instance.envs().to_vec();
@@ -465,7 +467,7 @@ impl InstanceManager {
             executable,
             instance_type,
             instance_name,
-            None,
+            Some(process_dir),
             envs,
             settings,
             Some(ports),

@@ -173,7 +173,7 @@ impl ShardStateVersions {
 
         let inner_mut: &mut [StateVersion] = self.inner.as_mut();
         for (i, _) in bitmap.into_iter().enumerate().filter(|(_, v)| *v) {
-            inner_mut[i] = StateVersion::new(inner_mut[i].as_u64().saturating_add(1));
+            inner_mut[i] += 1.into();
         }
         self
     }

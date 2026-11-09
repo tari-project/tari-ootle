@@ -84,7 +84,7 @@ impl Shard {
         let num_shards = num_shards.as_u32();
         // A shard beyond the preshard count has no range of its own; it is folded into the last shard so an
         // untrusted value cannot push `start` past the address space.
-        let shard = self.0.clamp(1, num_shards);
+        let shard = self.0.min(num_shards);
         let shard_index = U256::from(shard - 1);
         // `num_shards` is a power of two, so `shard_size = 2^(256 - log2(num_shards))`. We compute it as
         // `(U256::MAX >> log2(num_shards)) + 1` to sidestep the 2^256 overflow.

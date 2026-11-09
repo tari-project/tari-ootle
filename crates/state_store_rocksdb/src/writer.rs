@@ -2056,25 +2056,26 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         transaction_ids: I,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "lock_conflicts_remove_by_transaction_ids";
-        let mut transaction_ids = transaction_ids.into_iter().peekable();
-        if transaction_ids.peek().is_none() {
+        let transaction_ids = transaction_ids.into_iter().collect::<HashSet<_>>();
+        if transaction_ids.is_empty() {
             return Ok(());
         }
 
         let db = self.db();
         let cf = db.cf(LockConflictCf)?;
         let index_cf = db.cf(lock_conflict::LockConflictBlockIdIndex)?;
-        let query = db.cf(lock_conflict::ByTransactionIdQuery)?;
 
-        for tx_id in transaction_ids {
-            for key in query.query_prefix_range_keys(Ordering::Ascending, tx_id)? {
-                cf.delete(&key, OPERATION)?;
-                // Delete if the dependent transaction and depending transaction are swapped
-                let (transaction_id, block_id, depends_on_tx_id) = key;
-                cf.delete(&(depends_on_tx_id, block_id, transaction_id), OPERATION)?;
-                index_cf.delete(&(block_id, transaction_id, depends_on_tx_id), OPERATION)?;
-                index_cf.delete(&(block_id, depends_on_tx_id, transaction_id), OPERATION)?;
+        let mut keys_to_remove = Vec::new();
+        for result in cf.key_iterator(Ordering::Ascending, OPERATION) {
+            let key @ (transaction_id, _, depends_on_tx_id) = result?;
+            if transaction_ids.contains(&transaction_id) || transaction_ids.contains(&depends_on_tx_id) {
+                keys_to_remove.push(key);
             }
+        }
+
+        for key @ (transaction_id, block_id, depends_on_tx_id) in keys_to_remove {
+            cf.delete(&key, OPERATION)?;
+            index_cf.delete(&(block_id, transaction_id, depends_on_tx_id), OPERATION)?;
         }
 
         Ok(())
@@ -2091,7 +2092,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             index_cf.delete(&key, OPERATION)?;
             let (block_id, transaction_id, depends_on_tx) = key;
             cf.delete(&(transaction_id, block_id, depends_on_tx), OPERATION)?;
-            cf.delete(&(depends_on_tx, block_id, transaction_id), OPERATION)?;
         }
 
         Ok(())

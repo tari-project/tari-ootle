@@ -96,7 +96,10 @@ impl ConfidentialCryptoApi {
     ) -> Result<ConfidentialOutputStatement, ConfidentialCryptoApiError> {
         let proof = confidential::create_output_statement(
             Some(statement).filter(|s| s.amount > 0),
-            revealed_amount.into(),
+            revealed_amount
+                .into()
+                .non_negative_checked()
+                .ok_or(ConfidentialCryptoApiError::NegativeAmount)?,
             None,
             Amount::zero(),
         )?;

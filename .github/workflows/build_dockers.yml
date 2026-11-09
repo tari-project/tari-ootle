@@ -27,7 +27,7 @@ env:
 jobs:
   build:
     name: Build and push ootle images (linux/amd64)
-    runs-on: [ self-hosted, ubuntu-high-cpu ]
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
@@ -142,8 +142,8 @@ jobs:
           echo "${{ steps.meta_walletd.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-  # Signing runs on a GitHub-hosted runner so the self-hosted runner, which also runs pull request
-  # jobs, never holds an OIDC signing token.
+  # Signing is its own job so only this job holds the OIDC signing token, not the one that runs the
+  # Docker build.
   sign:
     name: Sign images
     needs: build

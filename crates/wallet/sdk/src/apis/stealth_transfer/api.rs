@@ -81,6 +81,17 @@ fn merged_statement_fits_credit(num_inputs: usize, num_outputs: usize, has_view_
     transfer_native_points_for_shape(num_inputs, num_outputs, has_view_key) <= budget
 }
 
+fn can_attempt_merged_statement(
+    has_fee_swap: bool,
+    resource_address: ResourceAddress,
+    num_blinded_outputs: usize,
+    has_view_key: bool,
+) -> bool {
+    !has_fee_swap &&
+        resource_address == TARI_TOKEN &&
+        merged_statement_fits_credit(0, num_blinded_outputs, has_view_key)
+}
+
 pub struct StealthTransferApi<'a, TSpec: WalletSdkSpec> {
     accounts_api: AccountsApi<'a, TSpec>,
     outputs_api: StealthOutputsApi<'a, TSpec>,
@@ -148,9 +159,10 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         lock_id: WalletLockId,
         specs: &[TransferStatementSpec],
     ) -> Result<TransferStatements, StealthTransferApiError> {
+        let network = self.config_api.get_network()?;
         let mut checked = Vec::with_capacity(specs.len());
         for spec in specs {
-            checked.push(self.check_statement_spec(spec).await?);
+            checked.push(self.check_statement_spec(spec, network).await?);
         }
 
         let mut statements = Vec::with_capacity(specs.len());
@@ -209,6 +221,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
     async fn check_statement_spec(
         &self,
         spec: &TransferStatementSpec,
+        network: Network,
     ) -> Result<CheckedStatementSpec, StealthTransferApiError> {
         let Some(sender_key_id) = spec.sender.owner_key_id() else {
             return Err(StealthTransferApiError::InvalidParameter {
@@ -217,28 +230,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             });
         };
 
-        for output in &spec.outputs {
-            output
-                .validate_pay_to()
-                .map_err(|reason| StealthTransferApiError::InvalidParameter {
-                    param: "pay_to",
-                    reason,
-                })?;
-        }
-
-        let total_amount = spec
-            .total_output_amount()
-            .ok_or_else(|| StealthTransferApiError::InvalidParameter {
-                param: "outputs",
-                reason: "total output amount exceeds the maximum amount".to_string(),
-            })?;
-        let revealed_amount =
-            Amount::sum_from_positive(spec.outputs.iter().map(|o| o.revealed_amount)).ok_or_else(|| {
-                StealthTransferApiError::InvalidParameter {
-                    param: "outputs",
-                    reason: "total revealed output amount exceeds the maximum amount".to_string(),
-                }
-            })?;
+        let (total_amount, revealed_amount) = spec.validate(network)?;
 
         let resource = self.substate_api.fetch_resource(spec.resource_address).await?;
         if !resource.resource_type().is_stealth() {
@@ -711,6 +703,15 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
 
         // We need to fetch the resource substate to check if there is a view key present.
         let resource = self.substate_api.fetch_resource(params.resource_address).await?;
+        if !resource.resource_type().is_stealth() {
+            return Err(StealthTransferApiError::InvalidParameter {
+                param: "resource_address",
+                reason: format!(
+                    "Resource is not a stealth resource (type: {})",
+                    resource.resource_type()
+                ),
+            });
+        }
 
         // Resolve the swap pool's dependent substates (e.g. its vaults) before entering the critical section
         let swap_pool_deps = if let Some(swap) = params.fee_params.pay_fee_with_swap.as_ref() {
@@ -763,8 +764,15 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             // statement, doing in one statement what otherwise takes two. It requires the fee and the
             // transfer resource to coincide, and the merged statement's whole verification then runs in
             // the fee intent ahead of `pay_fee`, funded by FREE_COMPUTE_GRACE_POINTS alone.
-            let merge_candidate =
-                params.fee_params.pay_fee_with_swap.is_none() && params.resource_address == TARI_TOKEN;
+            // A merge is attempted only if the blinded outputs alone fit the fee-intent credit; the
+            // post-selection fallback locks the fee a second time.
+            let num_blinded_outputs = params.outputs.iter().filter(|o| o.blinded_amount > 0).count();
+            let merge_candidate = can_attempt_merged_statement(
+                params.fee_params.pay_fee_with_swap.is_some(),
+                params.resource_address,
+                num_blinded_outputs,
+                resource_has_view_key,
+            );
 
             // On the separate-statement path the fee half must run before transfer input selection, so
             // that its change output reaches the store in time for the transfer to be able to spend it.
@@ -805,7 +813,6 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             // separate-statement shape is genuinely cheaper, since only the fee statement's inputs are
             // funded by the credit and the transfer's move to the payment-funded main intent.
             if merge_candidate {
-                let num_blinded_outputs = params.outputs.iter().filter(|o| o.blinded_amount > 0).count();
                 let has_change =
                     inputs_to_spend.total_amount() > params.total_output_amount_with_fee(merged_fee_amount)?;
                 let num_outputs = num_blinded_outputs + usize::from(has_change);
@@ -1499,8 +1506,13 @@ fn withdraw_from_account<D>(
 #[cfg(test)]
 mod merged_credit_tests {
     use tari_engine_types::limits::{FREE_COMPUTE_GRACE_POINTS, NativeExecutionPoints as P};
+    use tari_template_lib::types::{ObjectKey, ResourceAddress, constants::TARI_TOKEN};
 
-    use super::{MERGED_STATEMENT_CREDIT_UTILISATION_PERCENT, merged_statement_fits_credit};
+    use super::{
+        MERGED_STATEMENT_CREDIT_UTILISATION_PERCENT,
+        can_attempt_merged_statement,
+        merged_statement_fits_credit,
+    };
 
     fn budget() -> u64 {
         FREE_COMPUTE_GRACE_POINTS / 100 * MERGED_STATEMENT_CREDIT_UTILISATION_PERCENT
@@ -1535,5 +1547,15 @@ mod merged_credit_tests {
         // The per-output ElGamal surcharge lowers the output ceiling for view-key resources.
         assert!(merged_statement_fits_credit(0, 3, false));
         assert!(!merged_statement_fits_credit(0, 3, true));
+    }
+
+    #[test]
+    fn can_attempt_merged_statement_rejects_unmergeable_output_count_up_front() {
+        let non_tari = ResourceAddress::new(ObjectKey::from_array([9u8; ObjectKey::LENGTH]));
+        assert!(can_attempt_merged_statement(false, TARI_TOKEN, 3, false));
+        assert!(!can_attempt_merged_statement(false, TARI_TOKEN, 4, false));
+        assert!(!can_attempt_merged_statement(false, TARI_TOKEN, 3, true));
+        assert!(!can_attempt_merged_statement(true, TARI_TOKEN, 1, false));
+        assert!(!can_attempt_merged_statement(false, non_tari, 1, false));
     }
 }

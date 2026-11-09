@@ -997,6 +997,17 @@ mod tests {
         )
     }
 
+    /// `header` with `secret` as its proposer, carrying the proposer's signature over the block id.
+    fn signed_by(mut header: SidechainBlockHeader, secret: &tari_sidechain::PrivateKey) -> SidechainBlockHeader {
+        header.proposed_by = CompressedPublicKey::from_secret_key(secret);
+        let block_id = header.calculate_block_id();
+        let nonce_seed = [secret.as_bytes(), block_id.as_slice()].concat();
+        let nonce = tari_sidechain::PrivateKey::from_uniform_bytes(&nonce_seed).unwrap();
+        let signature = DecodedValidatorBlockSignature::sign_with_nonce_and_message(secret, nonce, block_id).unwrap();
+        header.signature = ValidatorBlockSignature::new_from_schnorr(signature);
+        header
+    }
+
     /// The 3-chain of certificates that commits `header`. Every member of the committee `secrets` signs the first two,
     /// and the members at `last_signers` sign the one that justifies `header`.
     fn committing_qcs(
@@ -1339,26 +1350,29 @@ mod tests {
             timeout_certificate_id: None,
             is_dummy: false,
         };
-        let header = SidechainBlockHeader {
-            network: network.as_byte(),
-            protocol_version: 0,
-            parent_id: Default::default(),
-            justify_id: Default::default(),
-            height: 1,
-            epoch: 6,
-            epoch_hash: Default::default(),
-            shard_group: tari_sidechain::ShardGroup {
-                start: group_a.start().as_u32(),
-                end_inclusive: group_a.end().as_u32(),
+        let header = signed_by(
+            SidechainBlockHeader {
+                network: network.as_byte(),
+                protocol_version: 0,
+                parent_id: Default::default(),
+                justify_id: Default::default(),
+                height: 1,
+                epoch: 6,
+                epoch_hash: Default::default(),
+                shard_group: tari_sidechain::ShardGroup {
+                    start: group_a.start().as_u32(),
+                    end_inclusive: group_a.end().as_u32(),
+                },
+                proposed_by: Default::default(),
+                state_merkle_root: Default::default(),
+                command_merkle_root: *block_a.command_merkle_root(),
+                transaction_merkle_root: Default::default(),
+                signature: Default::default(),
+                accumulated_data: Default::default(),
+                metadata_hash: metadata.calculate_hash(),
             },
-            proposed_by: Default::default(),
-            state_merkle_root: Default::default(),
-            command_merkle_root: *block_a.command_merkle_root(),
-            transaction_merkle_root: Default::default(),
-            signature: Default::default(),
-            accumulated_data: Default::default(),
-            metadata_hash: metadata.calculate_hash(),
-        };
+            &secrets[0],
+        );
         let proof_elements = committing_qcs(&header, &secrets, &[0, 1, 2, 3]);
         let commit_proof =
             CommandsCommitProof::new_latest(vec![CommandOrHash::Command(local_accept)], SidechainBlockCommitProof {

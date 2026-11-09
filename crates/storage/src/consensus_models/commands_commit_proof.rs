@@ -487,7 +487,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_committed_rejects_empty_commands_and_zero_height_header() {
+    fn validate_committed_rejects_a_malformed_or_unsigned_header() {
         struct EmptyCommittee;
         impl SigningCommittee for EmptyCommittee {
             fn len(&self) -> usize {
@@ -518,6 +518,15 @@ mod tests {
         assert!(
             matches!(&height_err, ForeignProposalCommitProofError::Invalid(e) if e.to_string().contains("Header height is 0")),
             "unexpected error: {height_err}"
+        );
+
+        let unsigned = honest_proof(ProtocolVersion::V0, uninvolved_group());
+        let signature_err = unsigned
+            .validate_committed(Network::LocalNet, VotePower::of(1), &EmptyCommittee)
+            .unwrap_err();
+        assert!(
+            matches!(&signature_err, ForeignProposalCommitProofError::Invalid(e) if e.to_string().contains("Signature verification failed")),
+            "unexpected error: {signature_err}"
         );
     }
 }

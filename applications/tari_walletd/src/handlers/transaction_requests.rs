@@ -912,11 +912,16 @@ mod tests {
     async fn a_request_stored_for_submission_is_submitted_when_the_indexer_is_unreachable() {
         let daemon = TestDaemon::start_with_transaction_service().await;
         let tool = daemon.api_key("htlc-swap-tool", "transaction_requests:create");
-        let lock_id = lock_for(&daemon, owner_of(&daemon, &tool));
-        let request_id = handle_create(&daemon.context, Some(&tool), create_request(vec![lock_id], 60 * 60))
-            .await
-            .unwrap()
-            .request_id;
+        let first_lock = lock_for(&daemon, owner_of(&daemon, &tool));
+        let second_lock = lock_for(&daemon, owner_of(&daemon, &tool));
+        let request_id = handle_create(
+            &daemon.context,
+            Some(&tool),
+            create_request(vec![first_lock, second_lock], 60 * 60),
+        )
+        .await
+        .unwrap()
+        .request_id;
         handle_approve(
             &daemon.context,
             Some(&daemon.session),
@@ -957,7 +962,8 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert_eq!(get_lock(&daemon, lock_id).transaction_id, Some(transaction_id));
+        assert_eq!(get_lock(&daemon, first_lock).transaction_id, Some(transaction_id));
+        assert_eq!(get_lock(&daemon, second_lock).transaction_id, Some(transaction_id));
         assert_eq!(
             daemon
                 .context

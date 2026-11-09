@@ -28,8 +28,10 @@ const LOG_TARGET: &str = "tari::ootle::app_utilities::epoch_oracle_config";
 /// claimable, and with it on the state root, unless every node resyncs.
 pub const MAINNET_START_HEIGHT: u64 = 380_400;
 
-/// The MainNet validator set for the hybrid oracle. Existing entries are fixed once MainNet runs, for the same reason
-/// as [`MAINNET_START_HEIGHT`]. A claim key rotates through the validator's `claim_key_changes`.
+/// The default MainNet validator set for the hybrid oracle, used when `epoch_oracle.configured` sets no source. A
+/// configured set replaces it, and every node must run the same set: nodes derive each other's claim keys from it, so
+/// a node that differs computes a different state root. Existing entries are fixed once MainNet runs. A claim key
+/// rotates through the validator's `claim_key_changes`.
 const MAINNET_ORACLE_CONFIG_JSON: &str = include_str!("mainnet_epoch_oracle.json");
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -51,10 +53,10 @@ impl SubConfigPath for EpochOracleConfig {
 impl EpochOracleConfig {
     /// The oracle settings a node on `network` runs with.
     ///
-    /// On MainNet the oracle type, scan start height and validator set are fixed in the release, and configured
-    /// values for them are ignored with a warning. Every node must agree on them: the start height decides which
-    /// burns are claimable and the validator set derives each validator's claim key, so a node that differs computes
-    /// a different state root. The base node URL and scanning interval stay configurable.
+    /// On MainNet the oracle type and scan start height are fixed in the release, and configured values for them are
+    /// ignored with a warning: the start height decides which burns are claimable, so a node that differs computes a
+    /// different state root. The validator set is the configured one, or the release's default when none is
+    /// configured. The base node URL and scanning interval stay configurable.
     pub fn for_network(&self, network: Network) -> Self {
         if network != Network::MainNet {
             return self.clone();
@@ -74,13 +76,15 @@ impl EpochOracleConfig {
                  {MAINNET_START_HEIGHT}"
             );
         }
-        if self.configured.config_file.is_some() || self.configured.config_json.is_some() {
-            warn!(
-                target: LOG_TARGET,
-                "Ignoring configured epoch oracle validator set: MainNet's validator set is fixed in the release. \
-                 Remove `epoch_oracle.configured` and --epoch-oracle-config from this node's configuration."
-            );
-        }
+        let configured = if self.configured.config_file.is_some() || self.configured.config_json.is_some() {
+            info!(target: LOG_TARGET, "Using the configured MainNet epoch oracle validator set");
+            self.configured.clone()
+        } else {
+            ConfiguredOracleConfig {
+                config_file: None,
+                config_json: Some(MAINNET_ORACLE_CONFIG_JSON.to_string()),
+            }
+        };
 
         Self {
             override_from: self.override_from.clone(),
@@ -89,10 +93,7 @@ impl EpochOracleConfig {
                 start_height: MAINNET_START_HEIGHT,
                 ..self.base_layer.clone()
             },
-            configured: ConfiguredOracleConfig {
-                config_file: None,
-                config_json: Some(MAINNET_ORACLE_CONFIG_JSON.to_string()),
-            },
+            configured,
         }
     }
 }
@@ -242,13 +243,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mainnet_replaces_configured_oracle_settings() {
+    async fn mainnet_replaces_configured_oracle_type_and_start_height() {
         let mut config = load(Some("esmeralda"));
         config.base_layer.base_node_grpc_url = Some("http://10.0.0.1:18102".parse().unwrap());
         config.base_layer.scanning_interval = Duration::from_secs(3);
-        config
-            .configured
-            .set_config_file_override(PathBuf::from("/does/not/exist/oracle.json"));
+        config.configured = ConfiguredOracleConfig::default();
 
         let mainnet = config.for_network(Network::MainNet);
         assert_eq!(mainnet.oracle_type, EpochOracleType::Hybrid);
@@ -260,7 +259,19 @@ mod tests {
         assert_eq!(mainnet.base_layer.scanning_interval, Duration::from_secs(3));
 
         let oracle = mainnet.configured.load().await.unwrap();
-        assert_eq!(oracle.validators.len(), 6);
+        assert_eq!(oracle.validators.len(), 7);
+    }
+
+    #[tokio::test]
+    async fn mainnet_keeps_a_configured_validator_set() {
+        let config = load(Some("esmeralda"));
+        let mainnet = config.for_network(Network::MainNet);
+        assert_eq!(mainnet.oracle_type, EpochOracleType::Hybrid);
+        assert_eq!(mainnet.base_layer.start_height, MAINNET_START_HEIGHT);
+        assert_eq!(mainnet.configured.config_json, config.configured.config_json);
+
+        let oracle = mainnet.configured.load().await.unwrap();
+        assert_eq!(oracle.validators.len(), 4);
     }
 
     #[tokio::test]

@@ -118,6 +118,27 @@ fn validate_elgamal_knowledge_proof(
         details: "Resource does not have a view key".to_string(),
     })?;
 
+    if *view_key == RistrettoPublicKey::default() {
+        return Err(ResourceError::InvalidValueProof {
+            commitment: *commitment_bytes,
+            details: "View key cannot be the identity point".to_string(),
+        });
+    }
+
+    if elgamal.public_nonce.is_zero() {
+        return Err(ResourceError::InvalidValueProof {
+            commitment: *commitment_bytes,
+            details: "ElGamal public nonce cannot be the identity point".to_string(),
+        });
+    }
+
+    if public_nonce_g.is_zero() || public_nonce_r.is_zero() {
+        return Err(ResourceError::InvalidValueProof {
+            commitment: *commitment_bytes,
+            details: "Proof public nonce cannot be the identity point".to_string(),
+        });
+    }
+
     let encrypted: RistrettoPublicKey =
         elgamal
             .encrypted
@@ -407,6 +428,57 @@ mod tests {
                 },
                 _ => panic!("Unexpected error type {err}"),
             }
+        }
+
+        #[test]
+        fn it_rejects_identity_points_in_elgamal_proof() {
+            let value = Amount::from(1000u128);
+            let utxo = new_viewable_utxo(value);
+            let proof = generate_proof(&utxo, value, &utxo.view_secret);
+
+            // Identity view key
+            let identity_pk = RistrettoPublicKey::default();
+            assert!(
+                validate_value_proof(
+                    &utxo.commitment_bytes,
+                    Some(&identity_pk),
+                    Some(&utxo.balance_bytes),
+                    &proof,
+                )
+                .is_err()
+            );
+
+            // Identity ElGamal public nonce
+            let mut zero_nonce_balance = utxo.balance_bytes.clone();
+            zero_nonce_balance.public_nonce = RistrettoPublicKeyBytes::zero();
+            assert!(
+                validate_value_proof(
+                    &utxo.commitment_bytes,
+                    Some(&utxo.view_key),
+                    Some(&zero_nonce_balance),
+                    &proof,
+                )
+                .is_err()
+            );
+
+            // Identity proof nonces
+            let zero_proof = CommitmentValueProof {
+                value,
+                knowledge_proof: ValueKnowledgeProof::ElgamalEncrypted {
+                    public_nonce_g: RistrettoPublicKeyBytes::zero(),
+                    public_nonce_r: RistrettoPublicKeyBytes::zero(),
+                    s_p: Scalar32Bytes::zero(),
+                },
+            };
+            assert!(
+                validate_value_proof(
+                    &utxo.commitment_bytes,
+                    Some(&utxo.view_key),
+                    Some(&utxo.balance_bytes),
+                    &zero_proof,
+                )
+                .is_err()
+            );
         }
     }
 }

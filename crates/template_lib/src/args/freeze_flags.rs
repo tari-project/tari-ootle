@@ -34,6 +34,7 @@ impl VaultFreezeFlags {
         Self(ALL_FLAGS)
     }
 
+    #[must_use]
     pub const fn validate(self) -> bool {
         self.0 & Self::all().0 == self.0
     }

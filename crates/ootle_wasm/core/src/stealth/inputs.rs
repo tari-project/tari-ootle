@@ -8,6 +8,8 @@
 //! so Python (or any other client) can assemble a `StealthInputsStatement` from raw commitment bytes
 //! without hand-crafting JSON.
 
+use std::collections::BTreeSet;
+
 use tari_crypto::{ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
 use tari_ootle_wallet_crypto::stealth::script_path_witness_with_data;
 use tari_template_lib_types::{
@@ -46,6 +48,7 @@ pub fn build_stealth_inputs_statement(
         .chunks_exact(PedersenCommitmentBytes::length())
         .map(|chunk| commitment_bytes_from_bytes(chunk).map(StealthInput::new))
         .collect::<Result<Vec<_>, _>>()?;
+    ensure_unique_input_commitments(&inputs)?;
 
     let statement = StealthInputsStatement {
         inputs,
@@ -67,11 +70,25 @@ pub fn build_stealth_inputs_statement_from_inputs(
     revealed_amount_microtari: u64,
 ) -> Result<String, OotleWasmError> {
     let inputs: Vec<StealthInput> = serde_json::from_str(inputs_json)?;
+    ensure_unique_input_commitments(&inputs)?;
     let statement = StealthInputsStatement {
         inputs,
         revealed_amount: Amount::from_u64(revealed_amount_microtari),
     };
     Ok(serde_json::to_string(&statement)?)
+}
+
+fn ensure_unique_input_commitments(inputs: &[StealthInput]) -> Result<(), OotleWasmError> {
+    let mut seen = BTreeSet::new();
+    for input in inputs {
+        if !seen.insert(input.commitment) {
+            return Err(OotleWasmError::Stealth(format!(
+                "Input commitment {} appears more than once",
+                input.commitment
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Build a script-path [`SpendWitness`](tari_template_lib_types::stealth::SpendWitness) revealing `leaf`
@@ -155,6 +172,20 @@ mod tests {
     fn rejects_non_multiple_of_32() {
         let err = build_stealth_inputs_statement(&[0u8; 33], 0).unwrap_err();
         assert!(matches!(err, OotleWasmError::InvalidByteLength { .. }));
+    }
+
+    #[test]
+    fn rejects_duplicate_input_commitments() {
+        let dup = [7u8; 64];
+        let err = build_stealth_inputs_statement(&dup, 0).unwrap_err();
+        assert!(matches!(err, OotleWasmError::Stealth(_)));
+
+        let commitment_hex = hex::encode([7u8; 32]);
+        let inputs_json = format!(
+            r#"[{{"commitment":"{commitment_hex}","witness":"KeyPath"}},{{"commitment":"{commitment_hex}","witness":"KeyPath"}}]"#
+        );
+        let err = build_stealth_inputs_statement_from_inputs(&inputs_json, 0).unwrap_err();
+        assert!(matches!(err, OotleWasmError::Stealth(_)));
     }
 
     #[test]

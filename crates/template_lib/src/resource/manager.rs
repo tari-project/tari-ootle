@@ -1084,9 +1084,16 @@ impl ResourceManager {
 
     /// Burns the stealth UTXO, permanently removing it from circulation. A frozen UTXO cannot be burnt.
     ///
-    /// `value_proof` must prove the UTXO's value, which only the UTXO owner or the secret view key holder can
-    /// produce, so burns are limited to them regardless of the access rules (i.e. if burns are limited to an
-    /// "admin" badge, the admin can only burn funds if they have the secret view key or burn their own funds).
+    /// `value_proof` must prove the UTXO's value, and the resource's `Burn` access rule must also be met. The proof
+    /// takes one of two forms:
+    /// - a mask-knowledge proof (`ValueKnowledgeProof::Commitment`): the transaction must also be signed by the UTXO's
+    ///   key-path spend key. A UTXO without a spend key (script path only) cannot be burnt this way; its owner spends
+    ///   it into a bucket and burns the bucket instead.
+    /// - a view-key proof (`ValueKnowledgeProof::ElgamalEncrypted`): proves knowledge of the resource's secret view
+    ///   key, which lets the issuer burn any UTXO of the resource.
+    ///
+    /// So if burns are limited to an "admin" badge, the admin can only burn their own funds or, with the secret view
+    /// key, any holder's funds.
     pub fn burn_utxo(&self, utxo_id: UtxoId, value_proof: CommitmentValueProof) {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
             resource_ref: self.resource_address.into(),

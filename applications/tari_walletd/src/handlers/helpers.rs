@@ -396,11 +396,14 @@ pub(super) fn general_error<T: Display>(details: T) -> anyhow::Error {
     application_error(ApplicationErrorCode::GeneralError, details)
 }
 
-/// Reject anything that isn't a single, non-`..` path component, so caller-supplied
-/// names cannot escape the burn-proof directory via `Path::join`.
+/// Accepts only a single `Component::Normal` path component containing no `/` or `\` separator, so
+/// caller-supplied names cannot escape the burn-proof directory via `Path::join`. `.` and `..` parse as
+/// `CurDir` and `ParentDir` and are rejected; names such as `a..b.json` are accepted.
 pub(crate) fn validate_burn_proof_file_name(file_name: &str) -> anyhow::Result<()> {
-    let p = Path::new(file_name);
-    if p.components().count() != 1 || file_name.contains("..") {
+    let mut components = Path::new(file_name).components();
+    let is_single_normal =
+        matches!(components.next(), Some(std::path::Component::Normal(_))) && components.next().is_none();
+    if !is_single_normal || file_name.contains(['/', '\\']) {
         return Err(anyhow!("Invalid file name"));
     }
     Ok(())
@@ -486,5 +489,32 @@ mod tests {
             .unwrap_err();
         assert!(!is_not_found_code(&err));
         assert!(err.downcast_ref::<TestError>().is_some());
+    }
+
+    #[test]
+    fn validate_burn_proof_file_name_accepts_only_plain_file_names() {
+        assert!(validate_burn_proof_file_name("proof.json").is_ok());
+        assert!(validate_burn_proof_file_name("0123-deadbeef.json").is_ok());
+        assert!(validate_burn_proof_file_name("a..b.json").is_ok());
+        assert!(validate_burn_proof_file_name("..json").is_ok());
+
+        for invalid in [
+            "",
+            ".",
+            "..",
+            "/",
+            "\\",
+            "sub/proof.json",
+            "sub\\proof.json",
+            "sub/",
+            "sub/.",
+            "../proof.json",
+            "..\\proof.json",
+        ] {
+            assert!(
+                validate_burn_proof_file_name(invalid).is_err(),
+                "expected '{invalid}' to be rejected"
+            );
+        }
     }
 }

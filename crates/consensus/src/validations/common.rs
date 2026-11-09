@@ -494,10 +494,10 @@ fn check_proposal_certificate_signatures<TConsensusSpec: ConsensusSpec>(
 
     match pc.signatures() {
         QcSignatures::Schnorr { signers, signatures } => {
-            let members = quorum_signers(&qc_id, &signers, committee)?;
+            let members = quorum_signers(&qc_id, signers, committee)?;
             let block_id = pc.calculate_block_id();
             for (member, signature) in members.into_iter().zip(signatures) {
-                let signature = to_signature_bytes(&signature)
+                let signature = to_signature_bytes(signature)
                     .map(|signature| ValidatorSignatureBytes::new(member.public_key, signature))
                     .ok_or_else(|| ProposalValidationError::QcInvalidSignature { qc: qc_id() })?;
                 let message = ProposalVoteMessage::new(

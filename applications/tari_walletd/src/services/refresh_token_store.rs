@@ -67,6 +67,9 @@ impl RefreshTokenStore {
     pub async fn new_token(&self, permissions: Permissions, exp: u64) -> RefreshToken {
         let mut write = self.tokens.write().await;
         clear_expired_tokens(&mut write);
+        // A full store evicts the session closest to expiry: the memory bound costs that session its refresh,
+        // and its holder logs in again. Rejecting the login instead would let anyone able to call
+        // `auth.request` (anyone at all on a no-auth daemon) lock every user out for the expiry window.
         let max_tokens = self.max_tokens.max(1);
         while write.len() >= max_tokens {
             let Some(oldest_key) = write.iter().min_by_key(|(_, data)| data.expires_at).map(|(k, _)| *k) else {
@@ -152,11 +155,11 @@ mod tests {
     #[tokio::test]
     async fn refresh_token_store_caps_capacity_and_filters_expired_entries() {
         let store = RefreshTokenStore::new(Duration::from_secs(60)).with_max_tokens(2);
-        let first = store.new_token(Permissions::none(), 1).await;
+        let first = store.new_token(Permissions::default(), 1).await;
         tokio::time::sleep(Duration::from_millis(2)).await;
-        let second = store.new_token(Permissions::none(), 2).await;
+        let second = store.new_token(Permissions::default(), 2).await;
         tokio::time::sleep(Duration::from_millis(2)).await;
-        let third = store.new_token(Permissions::none(), 3).await;
+        let third = store.new_token(Permissions::default(), 3).await;
 
         let first_str = uuid::Uuid::from_bytes_ref(&first.0).to_string();
         let second_str = uuid::Uuid::from_bytes_ref(&second.0).to_string();
@@ -168,7 +171,7 @@ mod tests {
         assert_eq!(store.to_vec().await.len(), 2);
 
         let short_store = RefreshTokenStore::new(Duration::from_millis(1));
-        short_store.new_token(Permissions::none(), 1).await;
+        short_store.new_token(Permissions::default(), 1).await;
         tokio::time::sleep(Duration::from_millis(5)).await;
         assert!(short_store.to_vec().await.is_empty());
     }

@@ -39,7 +39,6 @@ use crate::{
     status::AppStatus,
 };
 
-
 /// Everything needed to render the review screen and sign once approved.
 pub struct SignReview {
     pub message: [u8; 64],
@@ -87,10 +86,6 @@ pub fn process_chunk(state: &mut State, p1: u8, p2: u8, data: &[u8]) -> Result<C
 
 fn start_stream(state: &mut State, data: &[u8]) -> Result<(), AppStatus> {
     let header = SignTransactionHeader::try_from_slice(data).map_err(|_| bad_request())?;
-    // Stealth one-time keys are only defined over the account branch (matching `get_public_key`).
-    if header.stealth_public_nonce.is_some() && !matches!(header.key_type, KeyType::Account) {
-        return Err(bad_request());
-    }
     let hasher = MessageHasher::new(header.mode).map_err(|_| hash_fail())?;
     *state = State::SigningTransaction(SigningState {
         hasher,

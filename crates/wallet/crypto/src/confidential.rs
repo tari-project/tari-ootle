@@ -1,6 +1,8 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::HashSet;
+
 use ootle_byte_type::ToByteType;
 use tari_crypto::{ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
 use tari_engine_types::crypto::commit_u64_amount;
@@ -44,14 +46,45 @@ pub fn create_withdraw_proof(
         change_statement,
         change_revealed_amount,
     )?;
+    if let (Some(output), Some(change)) = (&output_proof.output, &output_proof.change_statement) &&
+        output.commitment == change.commitment
+    {
+        return Err(WalletCryptoError::InvalidArgument {
+            name: "outputs",
+            details: format!(
+                "Output commitment {} matches change commitment",
+                output.commitment
+            ),
+        });
+    }
+
+    let mut seen_inputs = HashSet::with_capacity(inputs.len());
     let (input_commitments, agg_input_mask) = inputs.iter().try_fold(
         (Vec::with_capacity(inputs.len()), RistrettoSecretKey::default()),
         |(mut commitments, agg_input), input| {
-            let commitment = commit_u64_amount(&input.mask, input.value);
-            commitments.push(commitment.to_byte_type());
+            let commitment = commit_u64_amount(&input.mask, input.value).to_byte_type();
+            if !seen_inputs.insert(commitment) {
+                return Err(WalletCryptoError::InvalidArgument {
+                    name: "inputs",
+                    details: format!("Input commitment {commitment} appears more than once"),
+                });
+            }
+            commitments.push(commitment);
             Ok::<_, WalletCryptoError>((commitments, agg_input + &input.mask))
         },
     )?;
+
+    for output in output_proof.output.iter().chain(output_proof.change_statement.iter()) {
+        if seen_inputs.contains(&output.commitment) {
+            return Err(WalletCryptoError::InvalidArgument {
+                name: "outputs",
+                details: format!(
+                    "Output commitment {} collides with an input commitment",
+                    output.commitment
+                ),
+            });
+        }
+    }
 
     let output_revealed_amount = output_proof.output_revealed_amount + output_proof.change_revealed_amount;
     let balance_proof = generate_confidential_balance_proof(
@@ -247,5 +280,73 @@ mod tests {
         validate_confidential_statement(&proof, None).unwrap_err();
         proof.output.as_mut().unwrap().minimum_value_promise = 1000;
         validate_confidential_statement(&proof, None).unwrap_err();
+    }
+
+    #[test]
+    fn create_withdraw_proof_rejects_duplicate_inputs_and_commitment_collisions() {
+        let mask = RistrettoSecretKey::random(&mut rand::rng());
+        let input = MaskAndValue::new(100, mask.clone());
+
+        // 1. Duplicate input commitments are rejected.
+        let err = create_withdraw_proof(
+            &[input.clone(), input.clone()],
+            Amount::zero(),
+            None,
+            Amount::from(200u64),
+            None,
+            Amount::zero(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, WalletCryptoError::InvalidArgument { name: "inputs", .. }),
+            "unexpected error: {err:?}"
+        );
+
+        // 2. Identical output and change commitments are rejected.
+        let mut out_witness = witness(100, 1);
+        out_witness.mask = mask.clone();
+        let err = create_withdraw_proof(
+            &[],
+            Amount::from(200u64),
+            Some(&out_witness),
+            Amount::zero(),
+            Some(&out_witness),
+            Amount::zero(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, WalletCryptoError::InvalidArgument { name: "outputs", .. }),
+            "unexpected error: {err:?}"
+        );
+
+        // 3. Output commitment colliding with an input commitment is rejected.
+        let err = create_withdraw_proof(
+            &[input.clone()],
+            Amount::zero(),
+            Some(&out_witness),
+            Amount::zero(),
+            None,
+            Amount::zero(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, WalletCryptoError::InvalidArgument { name: "outputs", .. }),
+            "unexpected error: {err:?}"
+        );
+
+        // 4. Change commitment colliding with an input commitment is rejected.
+        let err = create_withdraw_proof(
+            &[input],
+            Amount::zero(),
+            None,
+            Amount::zero(),
+            Some(&out_witness),
+            Amount::zero(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, WalletCryptoError::InvalidArgument { name: "outputs", .. }),
+            "unexpected error: {err:?}"
+        );
     }
 }

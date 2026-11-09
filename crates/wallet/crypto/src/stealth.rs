@@ -3,8 +3,8 @@
 
 use std::collections::HashSet;
 
-use ootle_byte_type::ToByteType;
-use tari_crypto::ristretto::RistrettoSecretKey;
+use ootle_byte_type::{ConvertFromByteType, ToByteType};
+use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
 /// The canonical digest for a
 /// [`BuiltinPredicate::HashLock`](tari_template_lib_types::stealth::BuiltinPredicate::HashLock)
 /// preimage, re-exported so a wallet can build a hashlock condition without depending on `tari_engine_types`.
@@ -116,6 +116,10 @@ pub fn script_path_witness_with_data(
             ),
         });
     }
+    validate_condition_structure(leaf).map_err(|e| WalletCryptoError::InvalidArgument {
+        name: "leaf",
+        details: e.to_string(),
+    })?;
     let tree = MerkleTree::from_conditions(conditions).map_err(|e| WalletCryptoError::InvalidArgument {
         name: "conditions",
         details: e.to_string(),
@@ -144,13 +148,22 @@ where
     Outputs: IntoIterator<Item = &'a StealthOutputWitness> + Clone,
     Outputs::IntoIter: ExactSizeIterator,
 {
-    if let Some(revealed) = revealed_output &&
-        !revealed.amount.is_positive()
-    {
-        return Err(WalletCryptoError::InvalidArgument {
-            name: "revealed_output",
-            details: format!("Revealed output amount must be positive: {}", revealed.amount),
-        });
+    if let Some(revealed) = revealed_output {
+        if !revealed.amount.is_positive() {
+            return Err(WalletCryptoError::InvalidArgument {
+                name: "revealed_output",
+                details: format!("Revealed output amount must be positive: {}", revealed.amount),
+            });
+        }
+        if RistrettoPublicKey::convert_from_byte_type(&revealed.receiver).is_err() {
+            return Err(WalletCryptoError::InvalidArgument {
+                name: "revealed_output",
+                details: format!(
+                    "Revealed output receiver is not a canonical public key: {}",
+                    revealed.receiver
+                ),
+            });
+        }
     }
 
     let inputs = inputs.into_iter().collect::<Vec<_>>();
@@ -164,6 +177,21 @@ where
     let mut agg_input_mask = RistrettoSecretKey::default();
     let mut seen = HashSet::with_capacity(num_inputs);
     for input in &inputs {
+        match (&input.witness, input.condition_root) {
+            (SpendWitness::KeyPath, Some(_)) => {
+                return Err(WalletCryptoError::InvalidArgument {
+                    name: "inputs",
+                    details: "Key-path input witness must not specify a condition_root".to_string(),
+                });
+            },
+            (SpendWitness::ScriptPath { .. }, None) => {
+                return Err(WalletCryptoError::InvalidArgument {
+                    name: "inputs",
+                    details: "Script-path input witness is missing its committed condition_root".to_string(),
+                });
+            },
+            _ => {},
+        }
         let commitment = input.mask_and_value.to_commitment().to_byte_type();
         // The excess and the aggregate mask both fold the inputs positionally, so a UTXO listed twice would be
         // spent twice over. Rejecting it here rather than dropping it keeps the caller's mistake legible: the
@@ -180,6 +208,23 @@ where
             witness: input.witness.clone(),
         });
         agg_input_mask = agg_input_mask + &input.mask_and_value.mask;
+    }
+
+    let mut seen_outputs = HashSet::with_capacity(num_outputs);
+    for output in &outputs_statement.outputs {
+        let commitment = *output.commitment();
+        if seen.contains(&commitment) {
+            return Err(WalletCryptoError::InvalidArgument {
+                name: "outputs",
+                details: format!("Output commitment {commitment} collides with an input commitment"),
+            });
+        }
+        if !seen_outputs.insert(commitment) {
+            return Err(WalletCryptoError::InvalidArgument {
+                name: "outputs",
+                details: format!("Output commitment {commitment} appears more than once"),
+            });
+        }
     }
 
     let agg_output_mask = output_witnesses
@@ -467,5 +512,119 @@ mod tests {
         validate_stealth_outputs_statement(&proof, None).unwrap_err();
         proof.outputs[0].output.minimum_value_promise = 1000;
         validate_stealth_outputs_statement(&proof, None).unwrap_err();
+    }
+
+    #[test]
+    fn create_transfer_statement_rejects_commitment_collisions_invalid_receiver_and_witness_mismatch() {
+        let mask = RistrettoSecretKey::random(&mut rand::rng());
+        let input = StealthInputWitness::new(MaskAndValue {
+            mask: mask.clone(),
+            value: 100,
+        });
+        let output = StealthOutputWitness {
+            witness: OutputWitness {
+                amount: 100,
+                minimum_value_promise: 1,
+                mask: mask.clone(),
+                sender_public_nonce: Default::default(),
+                encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
+                resource_view_key: None,
+            },
+            auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::default()),
+            tag: UtxoTag::new(0),
+        };
+
+        // 1. Output commitment colliding with an input commitment is rejected.
+        let err = create_transfer_statement(
+            [input.clone()],
+            Amount::zero(),
+            [&output],
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, WalletCryptoError::InvalidArgument { name: "outputs", .. }),
+            "unexpected error: {err:?}"
+        );
+
+        // 2. Duplicate output commitments are rejected.
+        let err = create_transfer_statement(
+            std::iter::empty(),
+            Amount::from(200u64),
+            [&output, &output],
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, WalletCryptoError::InvalidArgument { name: "outputs", .. }),
+            "unexpected error: {err:?}"
+        );
+
+        // 3. Non-canonical revealed output receiver is rejected.
+        let non_canonical_receiver = RistrettoPublicKeyBytes::from([0xffu8; 32]);
+        let err = create_transfer_statement(
+            [input.clone()],
+            Amount::zero(),
+            &[] as &[StealthOutputWitness],
+            Some(RevealedOutput::new(Amount::from(100u64), non_canonical_receiver)),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                WalletCryptoError::InvalidArgument {
+                    name: "revealed_output",
+                    ..
+                }
+            ),
+            "unexpected error: {err:?}"
+        );
+
+        // 4. KeyPath witness with condition_root = Some(...) is rejected.
+        let mut mismatched_key_input = input.clone();
+        mismatched_key_input.condition_root = Some(Hash32::from_array([1u8; 32]));
+        let err = create_transfer_statement(
+            [mismatched_key_input],
+            Amount::zero(),
+            &[] as &[StealthOutputWitness],
+            Some(RevealedOutput::new(
+                Amount::from(100u64),
+                RistrettoPublicKeyBytes::default(),
+            )),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, WalletCryptoError::InvalidArgument { name: "inputs", .. }),
+            "unexpected error: {err:?}"
+        );
+
+        // 5. ScriptPath witness with condition_root = None is rejected.
+        let leaf = SpendCondition::access_rule(AccessRule::AllowAll);
+        let (script_witness, root) = script_path_witness(std::slice::from_ref(&leaf), &leaf).unwrap();
+        let mut mismatched_script_input =
+            StealthInputWitness::with_script_path(MaskAndValue { mask, value: 100 }, script_witness, root);
+        mismatched_script_input.condition_root = None;
+        let err = create_transfer_statement(
+            [mismatched_script_input],
+            Amount::zero(),
+            &[] as &[StealthOutputWitness],
+            Some(RevealedOutput::new(
+                Amount::from(100u64),
+                RistrettoPublicKeyBytes::default(),
+            )),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, WalletCryptoError::InvalidArgument { name: "inputs", .. }),
+            "unexpected error: {err:?}"
+        );
+
+        // 6. script_path_witness_with_data rejects a leaf that exceeds the structural node limit.
+        let oversized_leaf = SpendCondition::access_rule(access_rule_with_requirements(MAX_ACCESS_RULE_NODES - 1));
+        let err = script_path_witness(std::slice::from_ref(&oversized_leaf), &oversized_leaf).unwrap_err();
+        assert!(
+            matches!(err, WalletCryptoError::InvalidArgument { name: "leaf", .. }),
+            "unexpected error: {err:?}"
+        );
     }
 }

@@ -73,10 +73,7 @@ impl StealthCryptoApi {
     {
         let stmt = stealth::create_transfer_statement(
             inputs,
-            input_revealed_amount
-                .into()
-                .non_negative_checked()
-                .ok_or(StealthCryptoApiError::NegativeAmount)?,
+            input_revealed_amount.into(),
             output_statements,
             revealed_output,
         )?;
@@ -178,6 +175,7 @@ impl StealthCryptoApi {
 
     /// `claimant_pk` is the stealth claim public key `C = H(r·P)·G + P` carried in the L1 burn
     /// proof — the key the `ownership_proof` Schnorr signature commits to.
+    #[must_use]
     pub fn validate_burn_claim_ownership_proof(
         &self,
         network: Network,
@@ -228,6 +226,4 @@ pub enum StealthCryptoApiError {
     WalletCryptoError(#[from] WalletCryptoError),
     #[error("Confidential proof error: {0}")]
     ConfidentialProofError(#[from] StealthProofError),
-    #[error("Negative amount")]
-    NegativeAmount,
 }

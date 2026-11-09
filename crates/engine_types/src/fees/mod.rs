@@ -466,6 +466,9 @@ pub struct FeeBreakdown {
 
 impl FeeBreakdown {
     pub fn add(&mut self, source: FeeSource, amount: u64) {
+        if amount == 0 {
+            return;
+        }
         match self.breakdown.entry(source) {
             Entry::Occupied(entry) => {
                 let total = entry.into_mut();
@@ -602,5 +605,20 @@ mod tests {
 
         assert!(minicbor::len(&realistic) <= widest);
         assert!(minicbor::len(FeeReceipt::default()) <= widest);
+    }
+
+    #[test]
+    fn add_ignores_zero_charges() {
+        let mut breakdown = FeeBreakdown::default();
+        breakdown.add(FeeSource::InputFanout, 0);
+        breakdown.add(FeeSource::InputLoad, 0);
+        assert_eq!(breakdown.iter().count(), 0);
+
+        breakdown.add(FeeSource::Initial, 100);
+        breakdown.add(FeeSource::Initial, 0);
+        assert_eq!(
+            breakdown.iter().collect::<Vec<_>>(),
+            vec![(&FeeSource::Initial, &100)]
+        );
     }
 }

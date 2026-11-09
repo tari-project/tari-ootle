@@ -68,13 +68,6 @@ impl StealthTransferParams {
         }
 
         for output in &self.outputs {
-            if output.revealed_amount.is_negative() {
-                return Err(StealthTransferApiError::InvalidParameter {
-                    param: "revealed_output_amount",
-                    reason: "Revealed output amount must be non-negative".to_string(),
-                });
-            }
-
             if output.blinded_amount == 0 && output.revealed_amount.is_zero() {
                 return Err(StealthTransferApiError::InvalidParameter {
                     param: "blinded_output_amount and revealed_output_amount",

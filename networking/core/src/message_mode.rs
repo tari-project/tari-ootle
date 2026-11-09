@@ -158,10 +158,10 @@ impl GossipQueueSender {
 
     fn try_send(&self, msg: GossipMessage) -> Result<(), GossipSendError> {
         let len = msg.message.data.len();
-        let full = |msg: &GossipMessage| {
+        let full = |topic: String| {
             self.budget.record_drop(len);
             GossipSendError::QueueFull {
-                topic: msg.message.topic.to_string(),
+                topic,
                 queued_messages: self.queued_messages(),
                 queued_bytes: self.queued_bytes(),
                 len,
@@ -169,13 +169,17 @@ impl GossipQueueSender {
         };
 
         let Some(permit) = self.budget.reserve(len) else {
-            return Err(full(&msg));
+            return Err(full(msg.message.topic.to_string()));
         };
 
         match self.tx.try_send(msg.with_queue_permit(permit)) {
             Ok(()) => Ok(()),
-            // The rejected message carries its permit, so the reservation is released as it drops.
-            Err(mpsc::error::TrySendError::Full(msg)) => Err(full(&msg)),
+            // The rejected message carries its permit, so drop it before reading `queued_bytes()`.
+            Err(mpsc::error::TrySendError::Full(msg)) => {
+                let topic = msg.message.topic.to_string();
+                drop(msg);
+                Err(full(topic))
+            },
             Err(mpsc::error::TrySendError::Closed(_)) => Err(GossipSendError::InboundGossipChannelClosed),
         }
     }
@@ -268,8 +272,11 @@ impl MessageQueueSender {
             _queue_permit: Some(permit),
         }) {
             Ok(()) => Ok(()),
-            // The rejected message carries its permit, so the reservation is released as it drops.
-            Err(mpsc::error::TrySendError::Full(_)) => Err(full()),
+            // The rejected message carries its permit, so drop it before reading `queued_bytes()`.
+            Err(mpsc::error::TrySendError::Full(msg)) => {
+                drop(msg);
+                Err(full())
+            },
             Err(mpsc::error::TrySendError::Closed(_)) => Err(MessageSendError::InboundMessageChannelClosed),
         }
     }
@@ -318,11 +325,11 @@ impl QueueAccounting {
 
     /// Reserves `len` bytes, or `None` when that would exceed the budget.
     fn reserve(&self, len: usize) -> Option<QueuePermit> {
-        let previous = self.queued.fetch_add(len, Ordering::AcqRel);
-        if previous.saturating_add(len) > self.max {
-            self.queued.fetch_sub(len, Ordering::AcqRel);
-            return None;
-        }
+        self.queued
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                current.checked_add(len).filter(|&next| next <= self.max)
+            })
+            .ok()?;
         Some(QueuePermit {
             queued_bytes: self.queued.clone(),
             len,
@@ -498,8 +505,31 @@ mod tests {
         tx.try_send(message(1)).unwrap();
         tx.try_send(message(1)).unwrap();
 
-        let err = tx.try_send(message(1)).unwrap_err();
-        assert!(matches!(err, GossipSendError::QueueFull { .. }));
+        let err = tx.try_send(message(10)).unwrap_err();
+        assert!(matches!(
+            err,
+            GossipSendError::QueueFull {
+                queued_messages: 2,
+                queued_bytes: 2,
+                len: 10,
+                ..
+            }
+        ));
         assert_eq!(tx.queued_bytes(), 2, "the rejected message released its reservation");
+
+        let (msg_tx, _msg_rx) = message_queue(1, 1024 * 1024);
+        let peer = PeerId::random();
+        msg_tx.try_send(peer, Bytes::from_static(&[0u8; 4])).unwrap();
+        let err = msg_tx.try_send(peer, Bytes::from_static(&[0u8; 10])).unwrap_err();
+        assert!(matches!(
+            err,
+            MessageSendError::QueueFull {
+                queued_messages: 1,
+                queued_bytes: 4,
+                len: 10,
+                ..
+            }
+        ));
+        assert_eq!(msg_tx.queued_bytes(), 4);
     }
 }

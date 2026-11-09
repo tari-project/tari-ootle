@@ -27,6 +27,7 @@ use tari_ootle_wallet_sdk::{
         TransactionStatus,
         WalletEvent,
         WalletLockId,
+        WalletTransaction,
     },
     storage::{ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
@@ -82,6 +83,7 @@ use crate::{
             not_found,
             transaction_rejected,
             validate_transaction_for_approval,
+            validate_transaction_for_network,
         },
         transaction_requests::{ensure_free_locks_of, ensure_locks_owned_by},
     },
@@ -528,20 +530,7 @@ async fn submit_dry_run_inner(
     req: TransactionSubmitDryRunRequest,
 ) -> Result<TransactionSubmitDryRunResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    req.transaction
-        .validate_blob_references()
-        .map_err(|e| invalid_params("transaction.blobs", Some(e.to_string())))?;
-    let network = context.config().network;
-    if req.transaction.network() != network.as_byte() {
-        return Err(invalid_params(
-            "transaction.network",
-            Some(format!(
-                "the transaction is for network byte {:#04x}, but this wallet is on {network} ({:#04x})",
-                req.transaction.network(),
-                network.as_byte()
-            )),
-        ));
-    }
+    validate_transaction_for_network(context.config().network, &req.transaction)?;
     validate_epoch_bounds(&req.transaction)?;
     ensure_transaction_signers(sdk, &req.seal_signer, &req.other_signers)?;
     reject_detect_inputs_with_signatures(req.detect_inputs, &req.signatures)?;
@@ -832,24 +821,9 @@ pub async fn handle_wait_result(
 ) -> Result<TransactionWaitResultResponse, anyhow::Error> {
     context.authorize(token, &[Permission::Transactions(Crud::Read)])?;
     let mut events = context.notifier().subscribe();
-    let mut transaction = context
-        .wallet_sdk()
-        .transaction_api()
-        .get(req.transaction_id)
-        .optional()?
-        .ok_or_else(|| not_found(format!("Transaction {}", req.transaction_id)))?;
-
-    // A transaction rejected before consensus has no finalize result and emits no further events.
-    let has_outcome =
-        transaction.finalize.is_some() || matches!(transaction.status, TransactionStatus::InvalidTransaction);
-    if has_outcome {
-        return Ok(TransactionWaitResultResponse {
-            transaction_id: req.transaction_id,
-            result: transaction.finalize,
-            status: transaction.status,
-            final_fee: transaction.final_fee.unwrap_or_default(),
-            timed_out: false,
-        });
+    let mut transaction = get_wallet_transaction(context, req.transaction_id)?;
+    if let Some(outcome) = outcome_of(&transaction) {
+        return Ok(outcome);
     }
 
     let mut timeout = match req.timeout_secs {
@@ -869,22 +843,9 @@ pub async fn handle_wait_result(
                             "wait_result lagged by {n} events while waiting on {}; re-checking store",
                             req.transaction_id
                         );
-                        transaction = context
-                            .wallet_sdk()
-                            .transaction_api()
-                            .get(req.transaction_id)
-                            .optional()?
-                            .ok_or_else(|| not_found(format!("Transaction {}", req.transaction_id)))?;
-                        if transaction.finalize.is_some() ||
-                            matches!(transaction.status, TransactionStatus::InvalidTransaction)
-                        {
-                            return Ok(TransactionWaitResultResponse {
-                                transaction_id: req.transaction_id,
-                                result: transaction.finalize,
-                                status: transaction.status,
-                                final_fee: transaction.final_fee.unwrap_or_default(),
-                                timed_out: false,
-                            });
+                        transaction = get_wallet_transaction(context, req.transaction_id)?;
+                        if let Some(outcome) = outcome_of(&transaction) {
+                            return Ok(outcome);
                         }
                         continue;
                     },
@@ -925,6 +886,32 @@ pub async fn handle_wait_result(
             },
         };
     }
+}
+
+fn get_wallet_transaction(
+    context: &HandlerContext,
+    transaction_id: TransactionId,
+) -> Result<WalletTransaction, anyhow::Error> {
+    context
+        .wallet_sdk()
+        .transaction_api()
+        .get(transaction_id)
+        .optional()?
+        .ok_or_else(|| not_found(format!("Transaction {transaction_id}")))
+}
+
+/// The wait result for a stored transaction that has an outcome: a finalize result, or rejection before consensus.
+/// A transaction rejected before consensus has no finalize result and emits no further events.
+fn outcome_of(transaction: &WalletTransaction) -> Option<TransactionWaitResultResponse> {
+    let has_outcome =
+        transaction.finalize.is_some() || matches!(transaction.status, TransactionStatus::InvalidTransaction);
+    has_outcome.then(|| TransactionWaitResultResponse {
+        transaction_id: transaction.id,
+        result: transaction.finalize.clone(),
+        status: transaction.status,
+        final_fee: transaction.final_fee.unwrap_or_default(),
+        timed_out: false,
+    })
 }
 
 pub async fn handle_publish_template(

@@ -449,6 +449,10 @@ impl ProposalValidationError {
     /// which commands it sends in full, so two messages carrying the same block can differ in them. An error in that
     /// part says nothing about the block, so nothing is recorded against its block id and another delivery of the
     /// block is still accepted.
+    ///
+    /// `FutureEpoch` is the local node's own condition: it has not yet reached the epoch window of the signed header.
+    /// Recording that against the block id would refuse the proposal after this node catches up, so the message is
+    /// turned away and a later delivery is evaluated afresh.
     pub fn rejects_message_not_block(&self) -> bool {
         matches!(
             self,

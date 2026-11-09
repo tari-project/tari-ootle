@@ -11,6 +11,7 @@ use tari_consensus_types::{
     HighestSeenBlock,
     LastProposed,
     LeafBlock,
+    PcId,
     ProposalCertificate,
     TimeoutCertificate,
 };
@@ -474,12 +475,13 @@ where TConsensusSpec: ConsensusSpec
 
         let mut substate_store =
             PendingSubstateStore::init(tx, state_anchor_leaf, self.config.consensus_constants.num_preshards)?
-                .with_pledge_budget(self.config.consensus_constants.max_block_pledge_bytes);
+                .with_pledge_budget(self.config.consensus_constants.max_block_pledge_bytes)
+                .with_input_load_budget(self.config.consensus_constants.max_block_input_load_bytes);
 
         let mut executed_transactions = HashMap::new();
 
         let proposal_filter = epoch_end_drain.proposal_filter(epoch, local_committee_info.shard_group());
-        let batch = if should_not_propose_commands {
+        let mut batch = if should_not_propose_commands {
             ProposalBatch::default()
         } else {
             self.fetch_next_proposal_batch(tx, state_anchor_leaf, next_height, &proposal_filter)?
@@ -500,65 +502,17 @@ where TConsensusSpec: ConsensusSpec
 
         // NOTE: the block for the change set is not used.
         let mut change_set = ProposedBlockChangeSet::new(state_anchor_leaf);
-        let mut invalid_foreign_proposals = Vec::new();
-        let mut dropped_foreign_proposals = false;
-
-        // No need to include evidence from justified block if no transactions are included in the next block
-        if !batch.transactions.is_empty() {
-            // A replica evaluates this block as: the newly justified block, then the commands in block order
-            // (foreign proposals sort before the transaction commands, see `BlockCommands`), all against
-            // a single change set. The commands generated below must be derived from that same sequence, or
-            // the proposer commits to an atom no replica can reproduce and the block is unvotable.
-            // TODO: we dont need to process transactions here that are not in the batch
-            process_newly_justified_block(tx, &justify_block, high_qc_id, local_committee_info, &mut change_set)?;
-
-            // A failed `process_foreign_block` leaves whatever it wrote before the error behind, and the
-            // transaction commands below are derived from the change set, so that partial state would shape
-            // atoms no replica reproduces. Restoring this snapshot is what keeps a rejected foreign proposal
-            // from reaching them.
-            let mut change_set_before_foreign_proposals =
-                (!batch.foreign_proposals.is_empty()).then(|| change_set.clone());
-
-            for fp in &batch.foreign_proposals {
-                // Resolves pending transaction pool records along the chain the substate store is built on:
-                // the justify block under a dummy chain, the extended leaf otherwise. A replica's store is
-                // built on the block it is evaluating, whose parent chain runs back through any dummies to
-                // the justify block.
-                if let Err(err) =
-                    process_foreign_block(tx, fp, local_committee_info, &mut substate_store, &mut change_set)
-                {
-                    // Dropping the proposals is safe for every error class and is what keeps a block whose
-                    // commands no replica can reproduce off the wire. Propagating instead would take the
-                    // whole consensus loop down over a remote committee's proposal.
-                    warn!(
-                        target: LOG_TARGET,
-                        "⚠️❌ Foreign proposal {} failed to process while proposing: {err}. Dropping every \
-                         foreign proposal from this block.",
-                        fp.to_atom().block_id,
-                    );
-
-                    // Only a validation failure condemns the proposal: it is a property of the proposal
-                    // itself, so every leader reaches the same verdict. Every other error is a statement
-                    // about this node, and a proposal discarded on one would never be proposed again.
-                    if err.validation_error().is_some() {
-                        invalid_foreign_proposals.push(fp.to_atom().block_id);
-                    }
-
-                    change_set = change_set_before_foreign_proposals
-                        .take()
-                        .expect("snapshot is taken whenever there is a foreign proposal to restore from");
-                    // The proposals already applied to the discarded change set are not re-applied, so none
-                    // of them may be proposed here. They keep their `New` status and are proposed again next
-                    // round.
-                    commands.retain(|cmd| !matches!(cmd, Command::ForeignProposal(_)));
-                    dropped_foreign_proposals = true;
-                    break;
-                }
-            }
-
-            // Add all (ABORT) executions that may have resulted from foreign proposals
-            executed_transactions.extend(change_set.take_transaction_executions());
-        }
+        let invalid_foreign_proposals = process_proposal_batch_foreign_proposals(
+            tx,
+            &justify_block,
+            high_qc_id,
+            local_committee_info,
+            &mut substate_store,
+            &mut batch,
+            &mut commands,
+            &mut change_set,
+            &mut executed_transactions,
+        )?;
 
         let locked_epoch = LockedEpoch::new(
             highest_seen_block.epoch(),
@@ -813,14 +767,7 @@ where TConsensusSpec: ConsensusSpec
 
         Ok(NextBlock {
             block: next_block,
-            // A proposal the block no longer carries a command for must not ride along on the wire: a
-            // replica that has not seen it stores it as `New` on receipt, which re-seeds the committee with
-            // a proposal this node has just condemned.
-            foreign_proposals: if dropped_foreign_proposals {
-                Vec::new()
-            } else {
-                batch.foreign_proposals
-            },
+            foreign_proposals: batch.foreign_proposals,
             executed_transactions,
             lock_conflicts,
             invalid_foreign_proposals,
@@ -988,6 +935,15 @@ where TConsensusSpec: ConsensusSpec
                 info!(
                     target: LOG_TARGET,
                     "📦 PROPOSE: transaction {} would take the block's pledge to {total_bytes} bytes, past the \
+                     {max_bytes} budget. Deferring it to a later block",
+                    pool_tx.id(),
+                );
+                Ok(None)
+            },
+            PreparedTransaction::InputLoadBudgetReached { total_bytes, max_bytes } => {
+                info!(
+                    target: LOG_TARGET,
+                    "📦 PROPOSE: transaction {} would take the input bytes the block loads to {total_bytes}, past the \
                      {max_bytes} budget. Deferring it to a later block",
                     pool_tx.id(),
                 );
@@ -1287,6 +1243,84 @@ where TConsensusSpec: ConsensusSpec
     }
 }
 
+/// Evaluates the newly justified block and any foreign proposals in `batch` against `change_set`.
+///
+/// If a foreign proposal fails `process_foreign_block`, every foreign proposal is stripped from `commands` and
+/// `batch.foreign_proposals`, `change_set` is restored to its pre-foreign-proposal snapshot, and any proposal that
+/// failed with a validation error is returned so the caller marks it `Invalid`.
+#[allow(clippy::too_many_arguments)]
+fn process_proposal_batch_foreign_proposals<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    justify_block: &Block,
+    high_qc_id: PcId,
+    local_committee_info: &CommitteeInfo,
+    substate_store: &mut PendingSubstateStore<TTx>,
+    batch: &mut ProposalBatch,
+    commands: &mut Vec<Command>,
+    change_set: &mut ProposedBlockChangeSet,
+    executed_transactions: &mut HashMap<TransactionId, TransactionExecution>,
+) -> Result<Vec<BlockId>, HotStuffError> {
+    let mut invalid_foreign_proposals = Vec::new();
+
+    if !batch.transactions.is_empty() || !batch.foreign_proposals.is_empty() {
+        // A replica evaluates this block as: the newly justified block, then the commands in block order
+        // (foreign proposals sort before the transaction commands, see `BlockCommands`), all against
+        // a single change set. The commands generated below must be derived from that same sequence, or
+        // the proposer commits to an atom no replica can reproduce and the block is unvotable.
+        // TODO: we dont need to process transactions here that are not in the batch
+        process_newly_justified_block(tx, justify_block, high_qc_id, local_committee_info, change_set)?;
+
+        // A failed `process_foreign_block` leaves whatever it wrote before the error behind, and the
+        // transaction commands below are derived from the change set, so that partial state would shape
+        // atoms no replica reproduces. Restoring this snapshot is what keeps a rejected foreign proposal
+        // from reaching them.
+        let mut change_set_before_foreign_proposals = (!batch.foreign_proposals.is_empty()).then(|| change_set.clone());
+
+        for fp in &batch.foreign_proposals {
+            // Resolves pending transaction pool records along the chain the substate store is built on:
+            // the justify block under a dummy chain, the extended leaf otherwise. A replica's store is
+            // built on the block it is evaluating, whose parent chain runs back through any dummies to
+            // the justify block.
+            if let Err(err) = process_foreign_block(tx, fp, local_committee_info, substate_store, change_set) {
+                // Dropping the proposals is safe for every error class and is what keeps a block whose
+                // commands no replica can reproduce off the wire. Propagating instead would take the
+                // whole consensus loop down over a remote committee's proposal.
+                warn!(
+                    target: LOG_TARGET,
+                    "⚠️❌ Foreign proposal {} failed to process while proposing: {err}. Dropping every \
+                     foreign proposal from this block.",
+                    fp.to_atom().block_id,
+                );
+
+                // Only a validation failure condemns the proposal: it is a property of the proposal
+                // itself, so every leader reaches the same verdict. Every other error is a statement
+                // about this node, and a proposal discarded on one would never be proposed again.
+                if err.validation_error().is_some() {
+                    invalid_foreign_proposals.push(fp.to_atom().block_id);
+                }
+
+                *change_set = change_set_before_foreign_proposals
+                    .take()
+                    .expect("snapshot is taken whenever there is a foreign proposal to restore from");
+                // The proposals already applied to the discarded change set are not re-applied, so none
+                // of them may be proposed here. They keep their `New` status and are proposed again next
+                // round.
+                commands.retain(|cmd| !matches!(cmd, Command::ForeignProposal(_)));
+                // A proposal the block no longer carries a command for must not ride along on the wire: a
+                // replica that has not seen it stores it as `New` on receipt, which re-seeds the committee with
+                // a proposal this node has just condemned.
+                batch.foreign_proposals.clear();
+                break;
+            }
+        }
+
+        // Add all (ABORT) executions that may have resulted from foreign proposals
+        executed_transactions.extend(change_set.take_transaction_executions());
+    }
+
+    Ok(invalid_foreign_proposals)
+}
+
 #[derive(Default)]
 struct ProposalBatch {
     pub foreign_proposals: Vec<ForeignProposal>,
@@ -1489,6 +1523,115 @@ mod tests {
             assert_eq!(subtract_weight_checked(Some(40), 100), None);
             // Once None, it stays None.
             assert_eq!(subtract_weight_checked(None, 1), None);
+        }
+    }
+
+    mod process_proposal_batch_foreign_proposals {
+        use tari_engine_types::fees::ExhaustBurnRate;
+        use tari_ootle_common_types::{NumPreshards, ProtocolVersion, ShardGroup, VotePower};
+        use tari_ootle_storage::consensus_models::{BlockHeaderMetadata, BlockPledge, CommandsCommitProof};
+        use tari_ootle_transaction::Network;
+        use tari_sidechain::{FixedHash, SidechainBlockCommitProof, SidechainBlockHeader};
+        use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+
+        use super::*;
+
+        const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
+        const NETWORK: Network = Network::LocalNet;
+
+        fn foreign_proposal_with_unknown_protocol_version() -> ForeignProposal {
+            let metadata = BlockHeaderMetadata {
+                total_leader_fee: 0,
+                timestamp: 0,
+                extra_data: ExtraData::new(),
+                timeout_certificate_id: None,
+                is_dummy: false,
+            };
+            let header = SidechainBlockHeader {
+                network: NETWORK.as_byte(),
+                protocol_version: u32::MAX,
+                parent_id: Default::default(),
+                justify_id: Default::default(),
+                height: 1,
+                epoch: 0,
+                epoch_hash: Default::default(),
+                shard_group: tari_sidechain::ShardGroup {
+                    start: 128,
+                    end_inclusive: 255,
+                },
+                proposed_by: Default::default(),
+                state_merkle_root: Default::default(),
+                command_merkle_root: Default::default(),
+                transaction_merkle_root: Default::default(),
+                signature: Default::default(),
+                accumulated_data: Default::default(),
+                metadata_hash: metadata.calculate_hash(),
+            };
+            let commit_proof = CommandsCommitProof::new_latest(vec![], SidechainBlockCommitProof {
+                header,
+                proof_elements: vec![],
+            });
+            ForeignProposal::new(commit_proof, BlockPledge::default(), metadata)
+        }
+
+        #[test]
+        fn an_invalid_foreign_proposal_with_no_local_transactions_is_dropped_and_condemned() {
+            let tmp = tempfile::tempdir().unwrap();
+            let store = RocksDbStateStore::<String>::open(tmp.path(), DatabaseOptions::default()).unwrap();
+            let mut zero = Block::zero_block(NETWORK, NUM_PRESHARDS);
+            let local_group = ShardGroup::new(0, 127);
+            let genesis = Block::genesis(
+                NETWORK,
+                ProtocolVersion::V0,
+                Epoch(0),
+                FixedHash::zero(),
+                local_group,
+                FixedHash::zero(),
+                None,
+                ExhaustBurnRate::new(0),
+            );
+            store
+                .with_write_tx(|tx| {
+                    zero.justify().save(tx)?;
+                    zero.insert(tx)?;
+                    zero.add_justify_qc(tx, &PcId::zero())?;
+                    genesis.justify().save(tx)?;
+                    genesis.insert(tx)
+                })
+                .unwrap();
+
+            let fp = foreign_proposal_with_unknown_protocol_version();
+            let atom = fp.to_atom();
+            let mut batch = ProposalBatch {
+                foreign_proposals: vec![fp],
+                transactions: vec![],
+                commands: vec![],
+            };
+            let mut commands = vec![Command::ForeignProposal(atom.clone())];
+            let committee_info = CommitteeInfo::new(NUM_PRESHARDS, 1, 2, local_group, Epoch(0), VotePower::of(1));
+
+            let invalid_foreign_proposals = store
+                .with_read_tx(|tx| {
+                    let mut substate_store = PendingSubstateStore::init(tx, genesis.as_leaf(), NUM_PRESHARDS).unwrap();
+                    let mut change_set = ProposedBlockChangeSet::new(genesis.as_leaf());
+                    let mut executed_transactions = HashMap::new();
+                    process_proposal_batch_foreign_proposals(
+                        tx,
+                        &genesis,
+                        genesis.justify().calculate_id(),
+                        &committee_info,
+                        &mut substate_store,
+                        &mut batch,
+                        &mut commands,
+                        &mut change_set,
+                        &mut executed_transactions,
+                    )
+                })
+                .unwrap();
+
+            assert!(commands.is_empty(), "block must carry no ForeignProposal command");
+            assert_eq!(invalid_foreign_proposals, vec![atom.block_id]);
+            assert!(batch.foreign_proposals.is_empty());
         }
     }
 }

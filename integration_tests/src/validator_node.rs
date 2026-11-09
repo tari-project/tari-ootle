@@ -36,7 +36,7 @@ use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_ootle_address::Network;
 use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
-    keypair::create_new_keypair,
+    keypair::{RistrettoKeypair, create_new_keypair},
     p2p_config::PeerSeedsConfig,
 };
 use tari_ootle_common_types::layer_one_transaction::{LayerOneTransactionDef, ValidatorRegistrationParams};
@@ -67,6 +67,8 @@ pub struct ValidatorNodeProcess {
     pub handle: task::JoinHandle<Result<(), anyhow::Error>>,
     pub temp_dir_path: PathBuf,
     pub shutdown: Shutdown,
+    /// Reused on respawn so the node keeps claiming fees to the same key.
+    pub fee_claim_public_key: RistrettoPublicKey,
 }
 
 impl ValidatorNodeProcess {
@@ -132,7 +134,8 @@ pub async fn spawn_validator_node(
             });
             account.address.account_public_key().try_from_byte_type().unwrap()
         })
-        .unwrap_or_default();
+        // A validator requires a fee claim key; scenarios that never claim fees get an unclaimed one
+        .unwrap_or_else(|| RistrettoKeypair::random(&mut rand::rng()).public_key().clone());
     let temp_dir = get_base_dir_for_scenario(
         "validator_node",
         world.current_scenario_name.as_ref().unwrap(),
@@ -154,7 +157,8 @@ pub async fn spawn_validator_node(
 /// Restart a previously-stopped validator node against its existing data directory.
 /// Takes the existing `temp_dir` / `base_node_grpc_port` from the VN being replaced;
 /// fresh p2p / json-rpc ports are OS-assigned. Keypair is loaded from the identity
-/// file so the VN's public key and L1 registration stay stable.
+/// file so the VN's public key and L1 registration stay stable, and the fee claim key is the
+/// one the VN first started with.
 ///
 /// Caller is responsible for re-wiring peers — this function does not touch
 /// `world.validator_nodes` for any other VN.
@@ -163,19 +167,13 @@ pub async fn respawn_validator_node(world: &mut TariWorld, validator_node_name: 
         .validator_nodes
         .shift_remove(&validator_node_name)
         .unwrap_or_else(|| panic!("Validator node {validator_node_name} not found for respawn"));
-    let fee_claim_public_key = world
-        .wallet_accounts
-        .values()
-        .next()
-        .map(|a| a.address.account_public_key().try_from_byte_type().unwrap())
-        .unwrap_or_default();
     let peer_seeds = collect_peer_seeds(world);
 
     spawn_validator_node_process(ValidatorSpawn {
         name: validator_node_name,
         temp_dir: old.temp_dir_path,
         base_node_grpc_port: old.base_node_grpc_port,
-        fee_claim_public_key,
+        fee_claim_public_key: old.fee_claim_public_key,
         peer_seeds,
         localnet_consensus_constants_file: world.consensus_constants_file.clone(),
     })
@@ -213,6 +211,7 @@ async fn spawn_validator_node_process(spawn: ValidatorSpawn) -> ValidatorNodePro
     let handle = task::spawn({
         let shutdown = shutdown.clone();
         let temp_dir = temp_dir.clone();
+        let fee_claim_public_key = fee_claim_public_key.clone();
         async move {
             let mut config = ApplicationConfig {
                 common: CommonConfig::default(),
@@ -260,6 +259,7 @@ async fn spawn_validator_node_process(spawn: ValidatorSpawn) -> ValidatorNodePro
         json_rpc_port,
         temp_dir_path: temp_dir,
         shutdown,
+        fee_claim_public_key,
     }
 }
 

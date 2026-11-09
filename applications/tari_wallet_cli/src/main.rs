@@ -71,7 +71,7 @@ pub fn multiaddr_to_http_url(multiaddr: Multiaddr) -> anyhow::Result<Url> {
 
     let ip = match ip {
         Protocol::Ip4(ip) => ip.to_string(),
-        Protocol::Ip6(ip) => ip.to_string(),
+        Protocol::Ip6(ip) => format!("[{ip}]"),
         Protocol::Dns4(ip) | Protocol::Dns(ip) | Protocol::Dnsaddr(ip) | Protocol::Dns6(ip) => ip.to_string(),
         _ => return Err(anyhow!("Invalid multiaddr")),
     };
@@ -90,4 +90,30 @@ pub fn multiaddr_to_http_url(multiaddr: Multiaddr) -> anyhow::Result<Url> {
 
     let url = Url::parse(&format!("{}://{}:{}", scheme, ip, port))?;
     Ok(url)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn multiaddr_to_http_url_formats_ipv4_ipv6_and_dns() {
+        let ipv4: Multiaddr = "/ip4/127.0.0.1/tcp/5100".parse().unwrap();
+        assert_eq!(multiaddr_to_http_url(ipv4).unwrap().as_str(), "http://127.0.0.1:5100/");
+
+        let ipv6_loopback: Multiaddr = "/ip6/::1/tcp/5100".parse().unwrap();
+        assert_eq!(
+            multiaddr_to_http_url(ipv6_loopback).unwrap().as_str(),
+            "http://[::1]:5100/"
+        );
+
+        let ipv6_https: Multiaddr = "/ip6/2001:db8::1/tcp/5100/https".parse().unwrap();
+        assert_eq!(
+            multiaddr_to_http_url(ipv6_https).unwrap().as_str(),
+            "https://[2001:db8::1]:5100/"
+        );
+
+        let dns: Multiaddr = "/dns4/localhost/tcp/5100".parse().unwrap();
+        assert_eq!(multiaddr_to_http_url(dns).unwrap().as_str(), "http://localhost:5100/");
+    }
 }

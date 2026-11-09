@@ -25,13 +25,11 @@ use xxhash_rust::xxh3::Xxh3Builder;
 pub struct PassthroughHasher(u64);
 
 impl Hasher for PassthroughHasher {
-    /// XOR-folds `bytes` into a `u64` in 8-byte chunks.
-    ///
-    /// For a 32-byte key this performs 4 XOR operations, giving good avalanche
-    /// across the full key without any multiplication or branching.
+    /// Rotates the running state and XOR-folds `bytes` into it in 8-byte chunks, so every field of
+    /// a multi-write key contributes to the hash.
     #[inline]
     fn write(&mut self, bytes: &[u8]) {
-        let mut h = 0u64;
+        let mut h = self.0.rotate_left(13);
         for chunk in bytes.chunks(8) {
             let mut buf = [0u8; 8];
             buf[..chunk.len()].copy_from_slice(chunk);
@@ -130,5 +128,42 @@ mod tests {
         let keys_in: Vec<u32> = m.keys().copied().collect();
         let keys_out: Vec<u32> = decoded.keys().copied().collect();
         assert_eq!(keys_in, keys_out, "IndexMap iteration order must round-trip");
+    }
+
+    #[test]
+    fn passthrough_hasher_accumulates_multiple_writes_for_composite_keys() {
+        use core::hash::BuildHasher;
+
+        use crate::{NonFungibleAddress, NonFungibleId, ObjectKey, ResourceAddress};
+
+        let hasher_builder = BuildHasherDefault::<PassthroughHasher>::default();
+        // Every 8-byte chunk differs, as in a hash-derived key. A key of four identical chunks XOR-folds to zero.
+        let resource = |seed: u8| {
+            ResourceAddress::new(ObjectKey::from_array(core::array::from_fn(|i| {
+                seed.wrapping_mul(i as u8 + 1)
+            })))
+        };
+        let res_a = resource(0x11);
+        let res_b = resource(0x22);
+        let badge_res = resource(0x33);
+
+        let str_badge_1 = NonFungibleAddress::new(badge_res, NonFungibleId::from_string("spender_alpha"));
+        let str_badge_2 = NonFungibleAddress::new(badge_res, NonFungibleId::from_string("spender_beta"));
+
+        let hash_of = |key: &(ResourceAddress, NonFungibleAddress)| hasher_builder.hash_one(key);
+
+        let h_a1 = hash_of(&(res_a, str_badge_1.clone()));
+        let h_a2 = hash_of(&(res_a, str_badge_2));
+        let h_b1 = hash_of(&(res_b, str_badge_1.clone()));
+
+        assert_ne!(h_a1, 0xff);
+        assert_ne!(h_a1, h_a2);
+        assert_ne!(h_a1, h_b1);
+
+        let mut map: PrehashedMap<(ResourceAddress, NonFungibleAddress), u64> = PrehashedMap::default();
+        map.insert((res_a, str_badge_1.clone()), 10);
+        map.insert((res_b, str_badge_1.clone()), 20);
+        assert_eq!(map.get(&(res_a, str_badge_1.clone())), Some(&10));
+        assert_eq!(map.get(&(res_b, str_badge_1)), Some(&20));
     }
 }

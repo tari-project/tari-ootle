@@ -137,7 +137,7 @@ use crate::{
         lock_conflict,
         parked_block,
         pending_state_tree_diff::ShardStateTreeDiff,
-        state_sync_rewind_point::{StateSyncMissingValueCf, StateSyncRewindPointCf},
+        state_sync_rewind_point::{StateSyncMissingValueByShardQuery, StateSyncRewindPointCf},
         state_transition,
         state_transition::StateTransitionType,
         state_tree,
@@ -1011,6 +1011,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         Ok(exists)
     }
 
+    fn blocks_is_executed(&self, block_id: &BlockId) -> Result<bool, StorageError> {
+        let executed = self
+            .db()
+            .cf(block::ExecutedBlockIndex)?
+            .exists(block_id, "blocks_is_executed")?;
+        Ok(executed)
+    }
+
     fn blocks_is_pending_ancestor(&self, descendant: &BlockId, ancestor: &BlockId) -> Result<bool, StorageError> {
         const OPERATION: &str = "blocks_is_ancestor";
         // Defensive checks, technically not needed as this will return false if the blocks do not exist.
@@ -1621,16 +1629,28 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         let substates_cf = self.db().cf(SubstateCf)?;
         let mut locked_substates = Vec::with_capacity(held.len());
         for (_, substate_id, lock) in held {
-            let substate = substates_cf
-                .get(
-                    &SubstateAddress::from_substate_id(substate_id, lock.version()),
-                    OPERATION,
-                )
-                .optional()?;
+            let pending_value = scope.ancestry().iter().find_map(|block_id| {
+                pending
+                    .block_diffs
+                    .get(block_id)?
+                    .version_up(substate_id, lock.version())?
+                    .up_substate()
+                    .map(|s| s.substate_value().clone())
+            });
+            let value = match pending_value {
+                Some(value) => Some(value),
+                None => substates_cf
+                    .get(
+                        &SubstateAddress::from_substate_id(substate_id, lock.version()),
+                        OPERATION,
+                    )
+                    .optional()?
+                    .and_then(|s| s.into_substate_value()),
+            };
             locked_substates.push(LockedSubstateValue {
                 substate_id: substate_id.clone(),
                 lock,
-                value: substate.and_then(|s| s.into_substate_value()),
+                value,
             });
         }
 
@@ -1774,10 +1794,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         const OPERATION: &str = "state_transitions_get_n_after";
 
         let query = self.db().cf(state_transition::ByShardAndStateVersionQuery)?;
-        let mut iter = query.query_range_iterator(
-            Ordering::Ascending,
-            (req_shard, state_version)..(Shard::max(), Version::MAX),
-        );
+        let mut iter = query.query_start_range_iterator(Ordering::Ascending, &(req_shard, state_version));
         let substate_cf = self.db().cf(SubstateCf)?;
 
         // NOTE: The state version may not have any transitions
@@ -1973,11 +1990,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         shard: Shard,
         from: Version,
     ) -> Result<Option<(SubstateAddress, Version)>, StorageError> {
-        let cf = self.db().cf(StateSyncMissingValueCf)?;
-        let start = cf.encode_key(&(shard, SubstateAddress::zero()));
-        let end = cf.encode_key(&(shard, SubstateAddress::max()));
+        let query = self.db().cf(StateSyncMissingValueByShardQuery)?;
         let mut earliest = None::<(SubstateAddress, Version)>;
-        for entry in cf.range_iterator(Ordering::Ascending, start..end) {
+        for entry in query.query_prefix_range_iterator(Ordering::Ascending, &shard) {
             let ((_, address), created_at) = entry?;
             if created_at >= from && earliest.is_none_or(|(_, version)| created_at < version) {
                 earliest = Some((address, created_at));

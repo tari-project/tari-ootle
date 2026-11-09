@@ -35,6 +35,9 @@ mod spend_scripts {
         /// Unconditionally authorises the spend.
         pub fn always_ok(_ctx: SpendContext) {}
 
+        /// Unconditionally authorises the spend, ignoring a bound byte-vector argument.
+        pub fn always_ok_with_bytes(_ignored: Vec<u8>, _ctx: SpendContext) {}
+
         /// Unconditionally rejects the spend.
         pub fn always_reject(_ctx: SpendContext) {
             panic!("spend always rejected");
@@ -115,6 +118,16 @@ mod spend_scripts {
                 .disable_total_supply_tracking()
                 .initial_supply(1u32)
         }
+
+        /// Creates a fungible resource guarded by an authorization hook on `component`.
+        pub fn create_hooked_mintable_resource(component: ComponentAddress) -> Bucket {
+            ResourceBuilder::public_fungible()
+                .mintable(rule!(allow_all), LOCKED)
+                .with_authorization_hook(component, "auth_hook")
+                .initial_supply(1u32)
+        }
+
+        pub fn auth_hook(&self, _action: ResourceAuthAction, _caller: AuthHookCaller) {}
 
         /// Attempts a cross-template call. `call_invoke` is on the read-only deny-list (and cross-template calls are
         /// disabled at the frame level), so this always aborts the spend before the target runs.

@@ -12,54 +12,6 @@
 /// `Value` decoder already applies in `value.rs`.
 pub(crate) const MAX_PREALLOC: u64 = 64;
 
-/// Adapter that lets `Box<[T]>` participate in minicbor derives via `#[cbor(with = "boxed_slice")]`.
-/// On the wire this matches the canonical encoding of `Vec<T>` — a length-prefixed array.
-pub mod boxed_slice {
-    #[cfg(not(feature = "std"))]
-    use alloc::{boxed::Box, vec::Vec};
-
-    use minicbor::{CborLen, Decode, Decoder, Encode, Encoder};
-
-    pub fn encode<C, T, W>(xs: &[T], e: &mut Encoder<W>, ctx: &mut C) -> Result<(), minicbor::encode::Error<W::Error>>
-    where
-        T: Encode<C>,
-        W: minicbor::encode::Write,
-    {
-        e.array(xs.len() as u64)?;
-        for x in xs {
-            x.encode(e, ctx)?;
-        }
-        Ok(())
-    }
-
-    pub fn decode<'b, C, T>(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Box<[T]>, minicbor::decode::Error>
-    where T: Decode<'b, C> {
-        decode_with_fn(d, ctx, T::decode)
-    }
-
-    /// Like [`decode`], but decodes each element with a caller-supplied function rather than the
-    /// element's [`Decode`] impl. This lets a self-recursive type thread decode state — such as a
-    /// nesting-depth bound — through the element decode, which a derived `Decode` cannot. The
-    /// `MAX_PREALLOC` cap on the untrusted length header still applies.
-    pub fn decode_with_fn<'b, C, T>(
-        d: &mut Decoder<'b>,
-        ctx: &mut C,
-        decode_elem: impl FnMut(&mut Decoder<'b>, &mut C) -> Result<T, minicbor::decode::Error>,
-    ) -> Result<Box<[T]>, minicbor::decode::Error> {
-        super::bounded_vec::decode_with_fn(d, ctx, usize::MAX, decode_elem).map(Vec::into_boxed_slice)
-    }
-
-    pub fn cbor_len<C, T>(xs: &[T], ctx: &mut C) -> usize
-    where T: CborLen<C> {
-        let n = xs.len() as u64;
-        let mut total = <u64 as CborLen<C>>::cbor_len(&n, ctx);
-        for x in xs {
-            total += x.cbor_len(ctx);
-        }
-        total
-    }
-}
-
 /// Decodes a `Vec<T>` that may hold at most a caller-chosen number of elements.
 ///
 /// [`MAX_PREALLOC`] stops a dishonest length header from reserving memory, but elements that are really
@@ -156,9 +108,30 @@ pub mod indexset_codec {
         T: Decode<'b, C> + Hash + Eq,
         S: BuildHasher + Default,
     {
+        decode_bounded(d, ctx, usize::MAX)
+    }
+
+    /// Decodes a set of at most `max_len` elements. A definite-length array over the bound is refused
+    /// from its header, before any element is decoded; an indefinite-length one as soon as it passes it.
+    pub fn decode_bounded<'b, C, T, S>(
+        d: &mut Decoder<'b>,
+        ctx: &mut C,
+        max_len: usize,
+    ) -> Result<IndexSet<T, S>, minicbor::decode::Error>
+    where
+        T: Decode<'b, C> + Hash + Eq,
+        S: BuildHasher + Default,
+    {
+        #[cfg(not(feature = "std"))]
+        use alloc::format;
+
+        let too_many = || minicbor::decode::Error::message(format!("set holds more than {max_len} elements"));
         let len = d.array()?;
         match len {
             Some(n) => {
+                if n > max_len as u64 {
+                    return Err(too_many());
+                }
                 let mut out = IndexSet::with_capacity_and_hasher(n.min(super::MAX_PREALLOC) as usize, S::default());
                 for _ in 0..n {
                     let v = T::decode(d, ctx)?;
@@ -174,6 +147,9 @@ pub mod indexset_codec {
                     if matches!(d.datatype()?, minicbor::data::Type::Break) {
                         d.skip()?;
                         break;
+                    }
+                    if out.len() == max_len {
+                        return Err(too_many());
                     }
                     let v = T::decode(d, ctx)?;
                     if !out.insert(v) {
@@ -337,6 +313,10 @@ pub mod serde_bridge {
 
 #[cfg(test)]
 mod alloc_cap_tests {
+    #[cfg(not(feature = "std"))]
+    use alloc::boxed::Box;
+
+    #[cfg(feature = "indexmap")]
     use minicbor::Decoder;
 
     // CBOR array/map headers claiming u64::MAX elements with no element bytes following. With the
@@ -348,8 +328,7 @@ mod alloc_cap_tests {
 
     #[test]
     fn boxed_slice_rejects_dishonest_length_without_oom() {
-        let mut d = Decoder::new(&HUGE_ARRAY_HEADER);
-        assert!(super::boxed_slice::decode::<(), u8>(&mut d, &mut ()).is_err());
+        assert!(minicbor::decode::<Box<[u8]>>(&HUGE_ARRAY_HEADER).is_err());
     }
 
     #[cfg(feature = "indexmap")]

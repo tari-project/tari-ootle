@@ -37,39 +37,46 @@ struct OrphanPlan {
 }
 
 /// Denies one committee member the first proposal to carry a command for the transaction, and records what
-/// that block said.
+/// that block said. From then on that block never reaches the member, in a proposal or in a catch-up response:
+/// a member that asked to catch up before the block was proposed is otherwise sent it as the responder's leaf,
+/// votes for it, and completes its quorum.
 fn withhold_first_command_for(plan: Arc<Mutex<OrphanPlan>>) -> MessageFilter {
     let observer = TestAddress::new(OBSERVER);
     let committee: Vec<TestAddress> = COMMITTEE.into_iter().map(TestAddress::new).collect();
 
     Box::new(move |from, to, msg| {
-        let HotstuffMessage::Proposal(proposal) = msg else {
-            return true;
+        let (block, is_proposal) = match msg {
+            HotstuffMessage::Proposal(proposal) => (&proposal.block, true),
+            HotstuffMessage::CatchUpSyncResponse(response) => (&response.block, false),
+            _ => return true,
         };
-        // The proposer already holds its own block, so starving it changes nothing.
-        if to == from || *to == observer || !committee.contains(to) {
-            return true;
-        }
         let mut plan = plan.lock().unwrap();
-        if plan.orphan_block_id.is_some() {
+        if let Some(orphan_block_id) = plan.orphan_block_id {
+            let is_orphan_to_starved = plan.starved.as_ref() == Some(to) && orphan_block_id == *block.id();
+            if is_orphan_to_starved {
+                log::info!("🔇 Withholding {block} from {to} again");
+            }
+            return !is_orphan_to_starved;
+        }
+        // The proposer already holds its own block, so starving it changes nothing.
+        if !is_proposal || to == from || *to == observer || !committee.contains(to) {
             return true;
         }
         let Some(transaction_id) = plan.transaction_id else {
             return true;
         };
-        let Some(command) = proposal
-            .block
+        let Some(command) = block
             .commands()
             .iter()
             .find(|cmd| cmd.transaction().is_some_and(|atom| *atom.id() == transaction_id))
         else {
             return true;
         };
-        log::info!("🔇 Withholding {} from {to}", proposal.block);
+        log::info!("🔇 Withholding {block} from {to}");
         plan.starved = Some(to.clone());
         plan.orphan_command = Some(command.to_string());
-        plan.orphan_height = Some(proposal.block.height());
-        plan.orphan_block_id = Some(*proposal.block.id());
+        plan.orphan_height = Some(block.height());
+        plan.orphan_block_id = Some(*block.id());
         false
     })
 }

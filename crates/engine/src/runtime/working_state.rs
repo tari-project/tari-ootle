@@ -94,6 +94,16 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::engine::runtime::working_state";
 
+/// A [`StealthTransferStatement`] that has passed [`WorkingState::account_stealth_transfer`].
+#[derive(Debug)]
+pub(super) struct AdmittedStealthTransfer(StealthTransferStatement);
+
+impl AdmittedStealthTransfer {
+    pub(super) fn statement(&self) -> &StealthTransferStatement {
+        &self.0
+    }
+}
+
 /// The view of a transaction's state that a runtime module is given when charging for it.
 ///
 /// Exposes what a charge computed from the state needs to read — what will be persisted, and the fee
@@ -342,7 +352,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
     /// The single chokepoint for the frame write mode. In `OwnComponent` mode the only permitted write is to the
     /// component locked at frame push, and that goes through the existing lock rather than a new one, so every
     /// request for a new write lock or a new substate is refused.
-    fn check_write_allowed(&self, addr: &SubstateId) -> Result<(), RuntimeError> {
+    pub(super) fn check_write_allowed(&self, addr: &SubstateId) -> Result<(), RuntimeError> {
         match self.current_frame_write_mode() {
             FrameWriteMode::Full => Ok(()),
             FrameWriteMode::OwnComponent => Err(RuntimeError::WriteOutsideOwnComponent {
@@ -2052,6 +2062,22 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     pub fn check_all_substates_in_scope(&self, value: &IndexedWellKnownTypes) -> Result<(), RuntimeError> {
+        self.check_substates_in_scope(value, false)
+    }
+
+    /// [`Self::check_all_substates_in_scope`] for the arguments of a read-only frame, which may also name any substate
+    /// in the transaction's base scope. A spend script's bound arguments are committed in a UTXO's condition root, so
+    /// they name substates the transaction declared, which the frame that spends the UTXO need not hold. A read-only
+    /// frame's references end with it: none passes back to its caller.
+    pub fn check_read_only_args_in_scope(&self, value: &IndexedWellKnownTypes) -> Result<(), RuntimeError> {
+        self.check_substates_in_scope(value, true)
+    }
+
+    fn check_substates_in_scope(
+        &self,
+        value: &IndexedWellKnownTypes,
+        include_base_scope: bool,
+    ) -> Result<(), RuntimeError> {
         let scope = self.current_call_scope()?;
 
         for id in value.referenced_substates() {
@@ -2063,7 +2089,8 @@ impl<TStore: StateReader> WorkingState<TStore> {
                         return Err(RuntimeError::RootSubstateNotFound { id });
                     }
                 }
-            } else if !scope.is_substate_in_scope(&id) &&
+            } else if !(scope.is_substate_in_scope(&id) ||
+                include_base_scope && self.initial_call_scope.is_substate_in_scope(&id)) &&
                 // The substate could be an allocated address
                 self.get_allocated_address_by_address(id.clone()).is_none()
             {
@@ -2332,17 +2359,27 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
-    pub fn execute_stealth_transfer(
+    /// Enforces the stealth-transfer limits and accounts this transfer against the per-transaction totals. Must be
+    /// called before the transfer's input authorization, hooks and proof crypto run, so an over-limit transaction is
+    /// rejected before that work is done.
+    pub(super) fn account_stealth_transfer(
         &mut self,
-        resource_address: ResourceAddressRef,
         statement: StealthTransferStatement,
-        revealed_funds_bucket_id: Option<BucketId>,
-    ) -> Result<Option<ResourceContainer>, RuntimeError> {
+    ) -> Result<AdmittedStealthTransfer, RuntimeError> {
         check_stealth_transfer_limits(&limits::STEALTH_LIMITS, &statement)?;
-        // Bound the aggregate stealth work across the whole transaction before doing this transfer's crypto, so a
-        // single transaction cannot stack enough native verification to stall the proposing leader.
         self.stealth_totals
             .account_transfer(&limits::STEALTH_LIMITS, &statement)?;
+        Ok(AdmittedStealthTransfer(statement))
+    }
+
+    /// Executes an admitted stealth transfer.
+    pub(super) fn execute_stealth_transfer(
+        &mut self,
+        resource_address: ResourceAddressRef,
+        transfer: AdmittedStealthTransfer,
+        revealed_funds_bucket_id: Option<BucketId>,
+    ) -> Result<Option<ResourceContainer>, RuntimeError> {
+        let AdmittedStealthTransfer(statement) = transfer;
         let resource_address = self.resolve_resource_address_ref(resource_address)?;
 
         let resource_lock = self.read_lock_substate(SubstateId::Resource(resource_address))?;
@@ -2526,11 +2563,15 @@ mod tests {
             ObjectKey,
             SubstateOwnerRule,
             access_rules::{ComponentAccessRules, UpdateRule},
+            crypto::RistrettoPublicKeyBytes,
         },
     };
 
     use super::*;
-    use crate::{runtime::scope::PushCallFrame, state_store::memory::MemoryStateStore};
+    use crate::{
+        runtime::{error::ArgumentValidationError, scope::PushCallFrame},
+        state_store::memory::MemoryStateStore,
+    };
 
     fn test_working_state() -> WorkingState<MemoryStateStore> {
         WorkingState::new(
@@ -2664,5 +2705,33 @@ mod tests {
         }
         assert_eq!(exhaust_burn_share(100, ExhaustBurnRate::new(500)), 5);
         assert_eq!(exhaust_burn_share(105, ExhaustBurnRate::new(500)), 5);
+    }
+
+    #[test]
+    fn account_stealth_transfer_enforces_statement_and_transaction_limits() {
+        let mut state = test_working_state();
+        let valid =
+            StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
+
+        let mut too_many_inputs = valid.clone();
+        too_many_inputs.inputs_statement.inputs = (0..=limits::STEALTH_LIMITS.max_inputs)
+            .map(|_| StealthInput::new(PedersenCommitmentBytes::from_bytes(&[0u8; 32]).unwrap()))
+            .collect();
+        assert!(matches!(
+            state.account_stealth_transfer(too_many_inputs),
+            Err(RuntimeError::ArgumentValidationError(
+                ArgumentValidationError::MaxStealthInputsExceeded { .. }
+            ))
+        ));
+
+        for _ in 0..limits::STEALTH_LIMITS.max_transfers_per_transaction {
+            state.account_stealth_transfer(valid.clone()).unwrap();
+        }
+        assert!(matches!(
+            state.account_stealth_transfer(valid),
+            Err(RuntimeError::ArgumentValidationError(
+                ArgumentValidationError::MaxStealthTransfersPerTransactionExceeded { .. }
+            ))
+        ));
     }
 }

@@ -567,7 +567,7 @@ where
         tx: &mut TStore::WriteTransaction<'_>,
         diff: &SubstateDiff,
     ) -> Result<(), TransactionApiError> {
-        let mut downed_substates_with_parents = HashMap::with_capacity(diff.down_len());
+        let mut downed_substates = HashMap::with_capacity(diff.down_len());
         for (id, _) in diff.down_iter() {
             if id.is_claimed_output_tombstone() {
                 // Should never happen
@@ -580,9 +580,7 @@ where
                 continue;
             };
 
-            if let Some(parent) = downed.parent_address {
-                downed_substates_with_parents.insert(downed.substate_id.into_substate_id(), parent);
-            }
+            downed_substates.insert(downed.substate_id.clone().into_substate_id(), downed);
         }
 
         let (components, mut other_substates) = diff.up_iter().partition::<Vec<_>, _>(|(addr, _)| addr.is_component());
@@ -609,9 +607,9 @@ where
                 if let Some(pos) = other_substates.iter().position(|(addr, _)| *addr == owned_id) {
                     let (_, child) = other_substates.swap_remove(pos);
                     // If there was a previous parent for this substate, we keep it as is.
-                    let parent = downed_substates_with_parents
+                    let parent = downed_substates
                         .get(&owned_id)
-                        .cloned()
+                        .and_then(|s| s.parent_address.clone())
                         .unwrap_or_else(|| component_addr.clone());
 
                     if let Some(vault_id) = owned_id.as_vault_id() {
@@ -647,13 +645,21 @@ where
                         continue;
                     }
 
-                    let maybe_substate = tx.substates_get(&owned_id).optional()?;
+                    let referenced_substates = if owned_id.is_non_fungible() {
+                        extract_non_fungible_references(child)?
+                    } else {
+                        let maybe_substate = tx
+                            .substates_get(&owned_id)
+                            .optional()?
+                            .or_else(|| downed_substates.get(&owned_id).cloned());
+                        maybe_substate
+                            .map(|s| s.referenced_substates.into_iter().collect())
+                            .unwrap_or_default()
+                    };
                     tx.substates_upsert_child(
                         &parent,
                         VersionedSubstateIdRef::new(&owned_id, child.version()),
-                        maybe_substate
-                            .map(|s| s.referenced_substates.into_iter().collect())
-                            .unwrap_or_default(),
+                        referenced_substates,
                     )?;
                 }
             }
@@ -662,7 +668,11 @@ where
         for (id, substate) in other_substates {
             match id {
                 SubstateId::Component(_) => unreachable!(),
-                SubstateId::Resource(_) => match tx.substates_get(id).optional()? {
+                SubstateId::Resource(_) => match tx
+                    .substates_get(id)
+                    .optional()?
+                    .or_else(|| downed_substates.get(id).cloned())
+                {
                     Some(known_substate) => {
                         tx.substates_upsert_root(
                             VersionedSubstateIdRef::new(id, substate.version()),
@@ -699,26 +709,32 @@ where
                             }
                         },
                         None => {
-                            // We don't know the parent account of this vault.
-                            debug!(target: LOG_TARGET, "Vault {} does not have a parent", vault_id);
-                            // tx.substates_upsert_root(
-                            //     VersionedSubstateIdRef::new(id, substate.version()),
-                            //     [(*substate
-                            //         .substate_value()
-                            //         .vault()
-                            //         .expect("should be vault")
-                            //         .resource_address())
-                            //     .into()]
-                            //     .into_iter()
-                            //     .collect(),
-                            //     None,
-                            //     None,
-                            // )?;
+                            let vault = substate.substate_value().vault().ok_or_else(|| {
+                                TransactionApiError::InvalidTransactionQueryResponse {
+                                    details: format!("Substate {id} in the transaction diff is not a vault"),
+                                }
+                            })?;
+                            let referenced = [(*vault.resource_address()).into()].into_iter().collect();
+                            if let Some(parent) = downed_substates.get(id).and_then(|d| d.parent_address.as_ref()) {
+                                tx.substates_upsert_child(
+                                    parent,
+                                    VersionedSubstateIdRef::new(id, substate.version()),
+                                    referenced,
+                                )?;
+                            } else {
+                                debug!(target: LOG_TARGET, "Vault {} does not have a parent", vault_id);
+                                tx.substates_upsert_root(
+                                    VersionedSubstateIdRef::new(id, substate.version()),
+                                    referenced,
+                                    None,
+                                    None,
+                                )?;
+                            }
                         },
                     }
                     continue;
                 },
-                SubstateId::ClaimedOutputTombstone(_) => {
+                SubstateId::ClaimedOutputTombstone(_) | SubstateId::ValidatorFeePool(_) => {
                     tx.substates_upsert_root(
                         VersionedSubstateIdRef::new(id, substate.version()),
                         [TARI_TOKEN.into()].into_iter().collect(),
@@ -728,31 +744,14 @@ where
                 },
                 SubstateId::NonFungible(nft) => {
                     let resource_address = nft.resource_address();
-                    let referenced_data = substate
-                        .substate_value()
-                        .non_fungible()
-                        .and_then(|s| s.contents())
-                        .map(|c| IndexedWellKnownTypes::from_value(c.data()))
-                        .transpose()
-                        .map_err(TransactionApiError::IndexedValueError)?;
-                    let referenced_mdata = substate
-                        .substate_value()
-                        .non_fungible()
-                        .and_then(|s| s.contents())
-                        .map(|c| IndexedWellKnownTypes::from_value(c.mutable_data()))
-                        .transpose()
-                        .map_err(TransactionApiError::IndexedValueError)?;
+                    let referenced_substates = extract_non_fungible_references(substate)?;
                     tx.substates_upsert_child(
                         &SubstateId::Resource(*resource_address),
                         VersionedSubstateIdRef::new(id, substate.version()),
-                        referenced_data
-                            .into_iter()
-                            .chain(referenced_mdata)
-                            .flat_map(|s| s.into_referenced_substates())
-                            .collect(),
+                        referenced_substates,
                     )?;
                 },
-                SubstateId::TransactionReceipt(_) | SubstateId::Template(_) | SubstateId::ValidatorFeePool(_) => {
+                SubstateId::TransactionReceipt(_) | SubstateId::Template(_) => {
                     tx.substates_upsert_root(
                         VersionedSubstateIdRef::new(id, substate.version()),
                         Default::default(),
@@ -781,6 +780,30 @@ where
 
         Ok(())
     }
+}
+
+fn extract_non_fungible_references(
+    substate: &tari_engine_types::substate::Substate,
+) -> Result<HashSet<SubstateId>, TransactionApiError> {
+    let referenced_data = substate
+        .substate_value()
+        .non_fungible()
+        .and_then(|s| s.contents())
+        .map(|c| IndexedWellKnownTypes::from_value(c.data()))
+        .transpose()
+        .map_err(TransactionApiError::IndexedValueError)?;
+    let referenced_mdata = substate
+        .substate_value()
+        .non_fungible()
+        .and_then(|s| s.contents())
+        .map(|c| IndexedWellKnownTypes::from_value(c.mutable_data()))
+        .transpose()
+        .map_err(TransactionApiError::IndexedValueError)?;
+    Ok(referenced_data
+        .into_iter()
+        .chain(referenced_mdata)
+        .flat_map(|s| s.into_referenced_substates())
+        .collect())
 }
 
 /// What [`TransactionApi::submit_transaction`] did with a transaction.

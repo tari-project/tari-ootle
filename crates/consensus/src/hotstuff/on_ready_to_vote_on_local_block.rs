@@ -2026,10 +2026,7 @@ mod tests {
         fn a_foreign_proposal_command_with_mismatched_shard_group_is_rejected() {
             let mut fixture = VoterFixture::new();
             let foreign_proposal = foreign_proposal_record();
-            fixture
-                .store
-                .with_write_tx(|tx| foreign_proposal.save(tx))
-                .unwrap();
+            fixture.store.with_write_tx(|tx| foreign_proposal.save(tx)).unwrap();
 
             let mut atom = foreign_proposal.to_atom();
             atom.shard_group = ShardGroup::new(128, 255);

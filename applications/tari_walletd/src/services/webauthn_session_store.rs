@@ -83,6 +83,7 @@ impl<T: SessionData + Clone> SessionStore<T> {
         let mut sessions = self.sessions.write().await;
         sessions
             .remove(session_id)
+            .filter(|session| !self.is_expired(session))
             .ok_or_else(|| SessionStoreError::SessionNotFound {
                 session_id: session_id.to_string(),
             })
@@ -177,12 +178,15 @@ mod tests {
     async fn expired_sessions_are_not_returned_and_are_pruned_on_add() {
         let store = SessionStore::new(Duration::from_millis(1), 64);
         let expired = store.add(TestSession(Instant::now())).await.unwrap();
+        let expired_for_remove = store.add(TestSession(Instant::now())).await.unwrap();
         tokio::time::sleep(Duration::from_millis(5)).await;
         assert!(store.get(&expired).await.is_err());
+        assert!(store.remove(&expired_for_remove).await.is_err());
 
         store.add(TestSession(Instant::now())).await.unwrap();
         let sessions = store.sessions.read().await;
         assert!(!sessions.by_id.contains_key(&expired));
+        assert!(!sessions.by_id.contains_key(&expired_for_remove));
         assert_eq!(sessions.by_age.len(), 1);
     }
 

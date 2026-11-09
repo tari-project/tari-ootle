@@ -1,7 +1,9 @@
 # Kept in step with the `[advisories]` section of `deny.toml` so `.github/workflows/audit.yml`
 # (`rustsec/audit-check`, which invokes `cargo audit` rather than `cargo deny`) honours the same
 # documented exceptions. See `deny.toml` for the full per-binary reachability and upgrade-blocker
-# rationale for each entry.
+# rationale for each security vulnerability entry. Note that transitive unmaintained-crate
+# advisories live only here because `cargo audit` lacks workspace scoping while `deny.toml` skips
+# them via `unmaintained = "workspace"`.
 
 [advisories]
 ignore = [
@@ -9,4 +11,6 @@ ignore = [
     "RUSTSEC-2023-0071",
     # crypto-bigint 0.5.5 via `webrtc -> dtls -> p256/p384` (ephemeral ECDH only; blocked on `dtls` moving to `p256` 0.14).
     "RUSTSEC-2026-0387",
+    # pin-utils unmaintained (archived upstream); transitive via `hyper` 1.8.1 and `nix` 0.26.4 (macro helpers only; blocked on upstream releases).
+    "RUSTSEC-2026-0441",
 ]

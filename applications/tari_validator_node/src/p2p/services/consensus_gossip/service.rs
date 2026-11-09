@@ -280,7 +280,7 @@ mod tests {
             })),
         };
         let mut buf = Vec::new();
-        codec.encode_into(&msg, &mut buf).await.unwrap();
+        codec.encode_to(&mut buf, msg).await.unwrap();
         assert!(decode_gossip_payload(&mut codec, &buf).await.is_ok());
 
         buf.extend_from_slice(&[0xaa, 0xbb]);

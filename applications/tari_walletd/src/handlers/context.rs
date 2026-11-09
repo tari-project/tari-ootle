@@ -704,6 +704,37 @@ mod max_fee_limit_tests {
 }
 
 #[cfg(test)]
+mod current_epoch_tests {
+    use tari_ootle_light_client::test_fixtures::ValidatorSetFixture;
+    use tari_ootle_wallet_sdk::IndexerTrust;
+
+    use super::*;
+    use crate::handlers::test_support::{FakeIndexer, TestDaemon};
+
+    /// An indexer whose latest checkpoints end epoch 1, and that claims the network is in epoch 50.
+    async fn indexer_ahead_of_its_checkpoints() -> FakeIndexer {
+        let indexer = FakeIndexer::spawn().await;
+        indexer.end_epoch(&ValidatorSetFixture::new(1), &ValidatorSetFixture::new(2));
+        indexer.claim_current_epoch(Epoch(50));
+        indexer
+    }
+
+    #[tokio::test]
+    async fn a_verifying_wallet_reads_the_epoch_of_its_trusted_validator_set() {
+        let indexer = indexer_ahead_of_its_checkpoints().await;
+        let daemon = TestDaemon::start_with_indexer(&indexer, IndexerTrust::Verify).await;
+        assert_eq!(daemon.context.current_epoch().await.unwrap(), Epoch(2));
+    }
+
+    #[tokio::test]
+    async fn a_trusting_wallet_reads_the_epoch_the_indexer_claims() {
+        let indexer = indexer_ahead_of_its_checkpoints().await;
+        let daemon = TestDaemon::start_with_indexer(&indexer, IndexerTrust::Trust).await;
+        assert_eq!(daemon.context.current_epoch().await.unwrap(), Epoch(50));
+    }
+}
+
+#[cfg(test)]
 mod cookie_auth_tests {
     use axum_extra::headers::Authorization;
     use tari_ootle_walletd_client::{

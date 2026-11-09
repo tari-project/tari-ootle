@@ -257,6 +257,11 @@ impl ResourceContainer {
                 actual: *other.resource_address(),
             });
         }
+        if other.has_locked_funds() {
+            return Err(ResourceError::InvariantError(
+                "Cannot deposit a resource container with locked funds".to_string(),
+            ));
+        }
 
         match (self, other) {
             (
@@ -270,7 +275,11 @@ impl ResourceContainer {
                 *amount = checked_deposit(*amount, *locked_amount, other_amount, "deposit")?;
             },
             (
-                Self::NonFungible { token_ids, .. },
+                Self::NonFungible {
+                    token_ids,
+                    locked_token_ids,
+                    ..
+                },
                 Self::NonFungible {
                     token_ids: other_token_ids,
                     ..
@@ -283,12 +292,21 @@ impl ResourceContainer {
                         "Non-fungible deposit would exceed maximum number of tokens".to_string(),
                     ));
                 }
+                if other_token_ids
+                    .iter()
+                    .any(|id| token_ids.contains(id) || locked_token_ids.contains(id))
+                {
+                    return Err(ResourceError::InvariantError(
+                        "Non-fungible deposit contained duplicate token".to_string(),
+                    ));
+                }
                 token_ids.extend(other_token_ids);
             },
             (
                 Self::Confidential {
                     commitments,
                     revealed_amount,
+                    locked_commitments,
                     locked_revealed_amount,
                     ..
                 },
@@ -298,14 +316,17 @@ impl ResourceContainer {
                     ..
                 },
             ) => {
-                for commit in other_commitments {
-                    if !commitments.insert(commit) {
-                        return Err(ResourceError::InvariantError(
-                            "Confidential deposit contained duplicate commitment".to_string(),
-                        ));
-                    }
+                if other_commitments
+                    .iter()
+                    .any(|c| commitments.contains(c) || locked_commitments.contains(c))
+                {
+                    return Err(ResourceError::InvariantError(
+                        "Confidential deposit contained duplicate commitment".to_string(),
+                    ));
                 }
-                *revealed_amount = checked_deposit(*revealed_amount, *locked_revealed_amount, other_amount, "deposit")?;
+                let new_revealed = checked_deposit(*revealed_amount, *locked_revealed_amount, other_amount, "deposit")?;
+                commitments.extend(other_commitments);
+                *revealed_amount = new_revealed;
             },
             (
                 Self::Stealth {
@@ -418,14 +439,19 @@ impl ResourceContainer {
                 "Cannot withdraw by NFT token id from a fungible resource".to_string(),
             )),
             Self::NonFungible { token_ids, .. } => {
+                for id in ids {
+                    if !token_ids.contains(id) {
+                        return Err(ResourceError::NonFungibleTokenIdNotFound { token: id.clone() });
+                    }
+                }
                 let taken_tokens = ids
                     .iter()
                     .map(|id| {
                         token_ids
                             .take(id)
-                            .ok_or_else(|| ResourceError::NonFungibleTokenIdNotFound { token: id.clone() })
+                            .expect("checked above that every requested token id is present")
                     })
-                    .collect::<Result<_, _>>()?;
+                    .collect();
                 Ok(Self::non_fungible(*self.resource_address(), taken_tokens))
             },
             Self::Confidential { .. } => Err(ResourceError::OperationNotAllowed(
@@ -463,20 +489,23 @@ impl ResourceContainer {
                 address,
                 commitments,
                 revealed_amount,
+                locked_commitments,
                 locked_revealed_amount,
                 ..
             } => {
                 let address = *address;
                 let mut inputs = Vec::with_capacity(proof.inputs.len());
                 let mut spent_commitments = Vec::with_capacity(proof.inputs.len());
+                let mut seen_inputs = BTreeSet::new();
                 for input in &proof.inputs {
                     let commitment = PedersenCommitment::from_canonical_bytes(input.as_bytes()).map_err(|_| {
                         ResourceError::InvalidConfidentialProof {
                             details: "Malformed input commitment".to_string(),
                         }
                     })?;
-                    // Set membership is the spend authorization: only commitments the vault owns can be spent.
-                    if commitments.remove(input) {
+                    // Set membership is the spend authorization: only commitments the vault owns can be spent,
+                    // and the same commitment cannot be spent twice in one proof.
+                    if commitments.contains(input) && seen_inputs.insert(*input) {
                         inputs.push(commitment);
                         spent_commitments.push(*input);
                     } else {
@@ -504,22 +533,34 @@ impl ResourceContainer {
 
                 // Revealed change always returns to the container, so the balance proof — not a sufficiency check —
                 // is what constrains it. Only the sum can fail here.
-                *revealed_amount = checked_deposit(
+                let new_revealed_amount = checked_deposit(
                     *revealed_amount - validated_proof.input_revealed_amount,
                     *locked_revealed_amount,
                     validated_proof.change_revealed_amount,
                     "withdraw_confidential change",
                 )?;
 
-                let mut created_outputs = Vec::new();
-
-                if let Some(change) = validated_proof.change_output {
+                if let Some(ref change) = validated_proof.change_output {
                     let change_commitment = change.commitment.to_byte_type();
-                    if !commitments.insert(change_commitment) {
+                    if locked_commitments.contains(&change_commitment) ||
+                        (commitments.contains(&change_commitment) && !seen_inputs.contains(&change_commitment))
+                    {
                         return Err(ResourceError::InvariantError(
                             "Confidential withdraw contained duplicate commitment in change commitment".to_string(),
                         ));
                     }
+                }
+
+                for spent in &spent_commitments {
+                    commitments.remove(spent);
+                }
+                *revealed_amount = new_revealed_amount;
+
+                let mut created_outputs = Vec::new();
+
+                if let Some(change) = validated_proof.change_output {
+                    let change_commitment = change.commitment.to_byte_type();
+                    commitments.insert(change_commitment);
                     created_outputs.push((change_commitment, change.into_output_body()));
                 }
 
@@ -569,6 +610,17 @@ impl ResourceContainer {
                     });
                 }
 
+                for commitment in commitments {
+                    if !existing_commitments.contains(commitment) {
+                        return Err(ResourceError::InvalidConfidentialProof {
+                            details: format!(
+                                "recall_confidential_commitments: input commitment {} not found in resource",
+                                commitment,
+                            ),
+                        });
+                    }
+                }
+
                 *existing_revealed_amount -= revealed_amount;
 
                 let recalled = commitments
@@ -576,18 +628,10 @@ impl ResourceContainer {
                     .map(|commitment| {
                         // The recalled commitment moves to the returned container; its ConfidentialOutput substate is
                         // not downed (recall is a move, not a spend).
-                        if existing_commitments.remove(commitment) {
-                            Ok(*commitment)
-                        } else {
-                            Err(ResourceError::InvalidConfidentialProof {
-                                details: format!(
-                                    "recall_confidential_commitments: input commitment {} not found in resource",
-                                    commitment,
-                                ),
-                            })
-                        }
+                        existing_commitments.remove(commitment);
+                        *commitment
                     })
-                    .collect::<Result<Vec<_>, ResourceError>>()?;
+                    .collect::<Vec<_>>();
 
                 Ok(Self::confidential(*self.resource_address(), recalled, revealed_amount))
             },
@@ -735,11 +779,16 @@ impl ResourceContainer {
                     });
                 }
                 for token in container.non_fungible_token_ids() {
-                    let token = locked_token_ids.take(token).ok_or_else(|| {
-                        ResourceError::InvariantError(format!(
+                    if !locked_token_ids.contains(token) {
+                        return Err(ResourceError::InvariantError(format!(
                             "unlock: tried to unlock token {token} that was not locked",
-                        ))
-                    })?;
+                        )));
+                    }
+                }
+                for token in container.non_fungible_token_ids() {
+                    let token = locked_token_ids
+                        .take(token)
+                        .expect("checked above that token is locked");
                     token_ids.insert(token);
                 }
             },
@@ -771,18 +820,23 @@ impl ResourceContainer {
                 }
 
                 for commitment in container.get_confidential_commitments().into_iter().flatten() {
-                    if !locked_commitments.remove(commitment) {
+                    if !locked_commitments.contains(commitment) {
                         return Err(ResourceError::InvariantError(
                             "unlock: tried to unlock commitment that was not locked".to_string(),
                         ));
                     }
-                    if !commitments.insert(*commitment) {
+                    if commitments.contains(commitment) {
                         return Err(ResourceError::InvariantError(
                             "unlock: container contained duplicate commitment".to_string(),
                         ));
                     }
                 }
-                *revealed_amount = checked_add(*revealed_amount, container.unlocked_amount(), "unlock")?;
+                let new_revealed = checked_add(*revealed_amount, container.unlocked_amount(), "unlock")?;
+                for commitment in container.get_confidential_commitments().into_iter().flatten() {
+                    locked_commitments.remove(commitment);
+                    commitments.insert(*commitment);
+                }
+                *revealed_amount = new_revealed;
                 *locked_revealed_amount -= container.unlocked_amount();
             },
             Self::Stealth {
@@ -824,14 +878,18 @@ impl ResourceContainer {
                 locked_token_ids,
                 ..
             } => {
+                for id in &ids {
+                    if !token_ids.contains(id) {
+                        return Err(ResourceError::NonFungibleTokenIdNotFound { token: id.clone() });
+                    }
+                }
                 let mut newly_locked = BTreeSet::new();
                 for id in ids {
-                    if let Some(token) = token_ids.take(&id) {
-                        newly_locked.insert(token.clone());
-                        locked_token_ids.insert(token);
-                    } else {
-                        return Err(ResourceError::NonFungibleTokenIdNotFound { token: id });
-                    }
+                    let token = token_ids
+                        .take(&id)
+                        .expect("checked above that every requested token id is present");
+                    newly_locked.insert(token.clone());
+                    locked_token_ids.insert(token);
                 }
                 Ok(Self::non_fungible(*self.resource_address(), newly_locked))
             },
@@ -1094,5 +1152,120 @@ mod tests {
             assert_eq!(container.unlocked_amount(), Amount::from(1u64), "{ty}");
             assert_eq!(container.locked_amount(), Amount::MAX, "{ty}");
         }
+    }
+
+    #[test]
+    fn withdraw_by_ids_missing_token_leaves_existing_tokens_intact() {
+        let id1 = NonFungibleId::from_u32(1);
+        let id2 = NonFungibleId::from_u32(2);
+        let missing = NonFungibleId::from_u32(99);
+        let mut container = ResourceContainer::non_fungible(
+            PUBLIC_IDENTITY_RESOURCE_ADDRESS,
+            [id1.clone(), id2.clone()].into_iter().collect(),
+        );
+
+        let err = container
+            .withdraw_by_ids(&[id1.clone(), missing].into_iter().collect())
+            .unwrap_err();
+        assert!(matches!(err, ResourceError::NonFungibleTokenIdNotFound { .. }));
+        assert_eq!(
+            container.non_fungible_token_ids(),
+            &[id1, id2].into_iter().collect::<BTreeSet<_>>(),
+            "failed withdraw_by_ids must not drop earlier tokens"
+        );
+    }
+
+    #[test]
+    fn lock_by_non_fungible_ids_missing_token_does_not_partially_lock() {
+        let id1 = NonFungibleId::from_u32(1);
+        let id2 = NonFungibleId::from_u32(2);
+        let missing = NonFungibleId::from_u32(99);
+        let mut container = ResourceContainer::non_fungible(
+            PUBLIC_IDENTITY_RESOURCE_ADDRESS,
+            [id1.clone(), id2.clone()].into_iter().collect(),
+        );
+
+        let err = container
+            .lock_by_non_fungible_ids([id1.clone(), missing].into_iter().collect())
+            .unwrap_err();
+        assert!(matches!(err, ResourceError::NonFungibleTokenIdNotFound { .. }));
+        assert_eq!(
+            container.non_fungible_token_ids(),
+            &[id1, id2].into_iter().collect::<BTreeSet<_>>(),
+            "failed lock_by_non_fungible_ids must leave all tokens unlocked"
+        );
+        assert!(!container.has_locked_funds());
+    }
+
+    #[test]
+    fn recall_confidential_commitments_missing_commitment_preserves_balance_and_commitments() {
+        let c1 = PedersenCommitmentBytes::from_bytes(&[1u8; 32]).unwrap();
+        let c2 = PedersenCommitmentBytes::from_bytes(&[2u8; 32]).unwrap();
+        let c_missing = PedersenCommitmentBytes::from_bytes(&[9u8; 32]).unwrap();
+        let mut container =
+            ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c1, c2], Amount::from(100u64));
+
+        let err = container
+            .recall_confidential_commitments(&[c1, c_missing].into_iter().collect(), Amount::from(40u64))
+            .unwrap_err();
+        assert!(matches!(err, ResourceError::InvalidConfidentialProof { .. }));
+        assert_eq!(container.unlocked_amount(), Amount::from(100u64));
+        assert_eq!(
+            container.get_confidential_commitments().unwrap(),
+            &[c1, c2].into_iter().collect::<BTreeSet<_>>()
+        );
+    }
+
+    #[test]
+    fn deposit_and_unlock_reject_partial_or_duplicate_mutations_atomically() {
+        let c1 = PedersenCommitmentBytes::from_bytes(&[1u8; 32]).unwrap();
+        let c2 = PedersenCommitmentBytes::from_bytes(&[2u8; 32]).unwrap();
+        let mut conf = ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c1], Amount::from(10u64));
+        let overflow_deposit = ResourceContainer::confidential(PUBLIC_IDENTITY_RESOURCE_ADDRESS, [c2], Amount::MAX);
+        let err = conf.deposit(overflow_deposit).unwrap_err();
+        assert!(matches!(err, ResourceError::BalanceOverflow { .. }));
+        assert_eq!(
+            conf.get_confidential_commitments().unwrap(),
+            &[c1].into_iter().collect::<BTreeSet<_>>(),
+            "failed confidential deposit must not insert commitments before balance check"
+        );
+
+        let id1 = NonFungibleId::from_u32(1);
+        let id2 = NonFungibleId::from_u32(2);
+        let mut nft = ResourceContainer::non_fungible(
+            PUBLIC_IDENTITY_RESOURCE_ADDRESS,
+            [id1.clone(), id2.clone()].into_iter().collect(),
+        );
+        let dup_nft = ResourceContainer::non_fungible(
+            PUBLIC_IDENTITY_RESOURCE_ADDRESS,
+            [NonFungibleId::from_u32(3), id1.clone()].into_iter().collect(),
+        );
+        let err = nft.deposit(dup_nft).unwrap_err();
+        assert!(matches!(err, ResourceError::InvariantError(_)));
+        assert_eq!(
+            nft.non_fungible_token_ids(),
+            &[id1.clone(), id2.clone()].into_iter().collect::<BTreeSet<_>>()
+        );
+
+        let _locked = nft
+            .lock_by_non_fungible_ids([id1.clone(), id2].into_iter().collect())
+            .unwrap();
+        let bad_unlock = ResourceContainer::non_fungible(
+            PUBLIC_IDENTITY_RESOURCE_ADDRESS,
+            [id1, NonFungibleId::from_u32(99)].into_iter().collect(),
+        );
+        let err = nft.unlock(bad_unlock).unwrap_err();
+        assert!(matches!(err, ResourceError::InvariantError(_)));
+        assert!(nft.non_fungible_token_ids().is_empty());
+        assert_eq!(nft.locked_amount(), Amount::from(2u64));
+
+        let mut target_fungible =
+            ResourceContainer::public_fungible(PUBLIC_IDENTITY_RESOURCE_ADDRESS, Amount::from(50u64));
+        let mut incoming_with_lock =
+            ResourceContainer::public_fungible(PUBLIC_IDENTITY_RESOURCE_ADDRESS, Amount::from(20u64));
+        let _proof = incoming_with_lock.lock_by_amount(Amount::from(5u64)).unwrap();
+        let err = target_fungible.deposit(incoming_with_lock).unwrap_err();
+        assert!(matches!(err, ResourceError::InvariantError(_)));
+        assert_eq!(target_fungible.unlocked_amount(), Amount::from(50u64));
     }
 }

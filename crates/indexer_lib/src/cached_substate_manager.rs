@@ -45,6 +45,7 @@ use tari_ootle_common_types::{
     committee::Committee,
     displayable::Displayable,
     optional::Optional,
+    substate_type::SubstateType,
 };
 use tari_ootle_storage::{
     DownProofAnchor,
@@ -842,7 +843,7 @@ where
 
             // One anchor covers the whole batch, so the commit proof is validated against the
             // committee at most once per batch and each result costs only its Merkle path.
-            match self.verify_substate_batch(&batch, &member.address).await {
+            match self.verify_substate_batch(&batch, chunk, &member.address).await {
                 Ok(BatchTrust::NotRequired) => return Ok((batch, false)),
                 Ok(BatchTrust::Proven) => return Ok((batch, true)),
                 Ok(BatchTrust::Unanchored) => {
@@ -890,12 +891,35 @@ where
     /// or one too old to prove anything, proves nothing, which is not misbehaviour and is reported as
     /// [`BatchTrust::Unanchored`] or [`BatchTrust::Stale`] for the caller to weigh against what other
     /// members offer.
-    async fn verify_substate_batch(&self, batch: &SubstateBatch, vn_addr: &TAddr) -> Result<BatchTrust, IndexerError> {
-        let values = batch
-            .substates
-            .iter()
-            .map(|substate| Self::validate_substate_result(&substate.result, &substate.substate_id, vn_addr))
-            .collect::<Result<Vec<_>, _>>()?;
+    async fn verify_substate_batch(
+        &self,
+        batch: &SubstateBatch,
+        requested: &[&SubstateId],
+        vn_addr: &TAddr,
+    ) -> Result<BatchTrust, IndexerError> {
+        let mut expected = requested.iter().copied().collect::<HashSet<_>>();
+        let mut verified_entries = Vec::with_capacity(batch.substates.len());
+        for substate in &batch.substates {
+            if !expected.remove(&substate.substate_id) {
+                return Err(IndexerError::UnrequestedSubstateInBatch {
+                    vn: vn_addr.to_string(),
+                    substate_id: substate.substate_id.clone(),
+                });
+            }
+            // A batch returns only substates it holds a record of; the ids it holds none for come
+            // back as `missing`, which no proof can settle.
+            let version = match &substate.result {
+                SubstateResult::Up { substate: up } => up.version(),
+                SubstateResult::Down { version } => *version,
+                SubstateResult::DoesNotExist => {
+                    return Err(IndexerError::SubstateProofVerificationFailed {
+                        details: format!("{} was returned as DoesNotExist in a batch", substate.substate_id),
+                    });
+                },
+            };
+            let value = Self::validate_substate_result(&substate.result, &substate.substate_id, vn_addr)?;
+            verified_entries.push((substate, version, value));
+        }
         if !self.verify_substate_proofs {
             return Ok(BatchTrust::NotRequired);
         }
@@ -906,7 +930,7 @@ where
         let Some(trusted_root) = self.trusted_root_from_commit_proof(commit_proof).await? else {
             return Ok(BatchTrust::Stale);
         };
-        for (substate, value) in batch.substates.iter().zip(&values) {
+        for (substate, version, value) in &verified_entries {
             let Some(value_proof) = &substate.value_proof else {
                 return Err(IndexerError::SubstateProofVerificationFailed {
                     details: format!(
@@ -915,22 +939,10 @@ where
                     ),
                 });
             };
-            let version = match &substate.result {
-                SubstateResult::Up { substate: up } => up.version(),
-                SubstateResult::Down { version } => *version,
-                // A batch returns only substates it holds a record of; the ids it holds none for come
-                // back as `missing`, which no proof can settle. Anything else here would be cached as
-                // verified without a proof having been checked.
-                SubstateResult::DoesNotExist => {
-                    return Err(IndexerError::SubstateProofVerificationFailed {
-                        details: format!("{} was returned as DoesNotExist in a batch", substate.substate_id),
-                    });
-                },
-            };
             verify_substate_value_proof_against_root(
                 value_proof,
                 &substate.substate_id,
-                version,
+                *version,
                 value.as_ref(),
                 self.network,
                 self.num_preshards,
@@ -1099,7 +1111,7 @@ where
     }
 
     /// The value of `result` decoded, or `None` when it is not up. A member whose value does not decode, or that serves
-    /// a template whose content derives another address than `substate_id`, is disqualified.
+    /// a non-template value or a template whose content derives another address than `substate_id`, is disqualified.
     fn validate_substate_result(
         result: &SubstateResult,
         substate_id: &SubstateId,
@@ -1109,9 +1121,14 @@ where
             return Ok(None);
         };
         let value = Self::decode_value(substate, substate_id, vn_addr)?;
-        if let Some(expected_addr) = substate_id.as_template() &&
-            let Some(template) = value.published_template()
-        {
+        if let Some(expected_addr) = substate_id.as_template() {
+            let Some(template) = value.published_template() else {
+                return Err(IndexerError::UnexpectedSubstateType {
+                    vn: vn_addr.to_string(),
+                    substate_id: substate_id.clone(),
+                    actual: SubstateType::from(&value),
+                });
+            };
             let derived = template.to_template_address();
             if derived != expected_addr {
                 return Err(IndexerError::TemplateAddressMismatch {
@@ -1508,6 +1525,8 @@ mod tests {
         member_responses: HashMap<(Addr, SubstateId), SubstateResult>,
         /// The proof a member serves on a proven read in place of the one `down_with_proof` or `up_with_proof` holds.
         member_proofs: HashMap<Addr, SubstateProofData>,
+        /// Member-specific batches returned by `get_substates_batch`.
+        member_batches: HashMap<Addr, SubstateBatch>,
     }
 
     impl FakeNetwork {
@@ -1612,6 +1631,11 @@ mod tests {
                 .lock()
                 .unwrap()
                 .extend(substate_ids.iter().map(|&id| id.clone()));
+            if let Some(addr) = &self.1 &&
+                let Some(batch) = self.0.member_batches.get(addr)
+            {
+                return Ok(batch.clone());
+            }
             if let Some(batch) = &self.0.proven_batch {
                 return Ok(batch.clone());
             }
@@ -3950,5 +3974,209 @@ mod tests {
         assert!(found.contains_key(&ids[0]));
         assert_eq!(network.batch_requests.load(Ordering::Relaxed), 1);
         assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn non_template_value_for_template_id_is_rejected_and_falls_back_to_honest_member() {
+        let (template_id, legit_template, _) = template_fixtures();
+        let legitimate_address = legit_template.to_template_address();
+        let non_template = Substate::new(0, SubstateValue::NonFungible(NonFungibleContainer::no_data()));
+
+        for verify_proofs in [false, true] {
+            let malicious_only = HashMap::from([(
+                ("vn_malicious".to_string(), template_id.clone()),
+                SubstateResult::Up {
+                    substate: encoded(non_template.clone()),
+                },
+            )]);
+            let (manager_single, _) = manager_with_members(
+                FakeNetwork {
+                    member_responses: malicious_only,
+                    ..Default::default()
+                },
+                vec!["vn_malicious".to_string()],
+            );
+            let manager_single = manager_single.with_substate_proof_verification(verify_proofs);
+
+            let err = manager_single.get_substate(&template_id, None).await.unwrap_err();
+            assert!(
+                matches!(err, IndexerError::UnexpectedSubstateType {
+                    actual: SubstateType::NonFungible,
+                    ..
+                }),
+                "expected UnexpectedSubstateType when single member serves non-template value \
+                 (verify_proofs={verify_proofs}), got {err:?}"
+            );
+
+            for _ in 0..8 {
+                let member_responses = HashMap::from([
+                    (("vn_malicious".to_string(), template_id.clone()), SubstateResult::Up {
+                        substate: encoded(non_template.clone()),
+                    }),
+                    (("vn_honest".to_string(), template_id.clone()), SubstateResult::Up {
+                        substate: encoded(Substate::new(0, SubstateValue::Template(legit_template.clone()))),
+                    }),
+                ]);
+                let (manager, _) = manager_with_members(
+                    FakeNetwork {
+                        member_responses,
+                        ..Default::default()
+                    },
+                    vec!["vn_malicious".to_string(), "vn_honest".to_string()],
+                );
+                let manager = manager.with_substate_proof_verification(verify_proofs);
+
+                let single = manager.get_substate(&template_id, None).await.unwrap();
+                let value = single.result.into_up().unwrap().value().decode().unwrap();
+                let template = value.published_template().expect("published template value");
+                assert_eq!(template.to_template_address(), legitimate_address);
+
+                let batched = manager
+                    .fetch_and_cache_substates(std::slice::from_ref(&template_id))
+                    .await
+                    .unwrap();
+                let value = batched[&template_id].substate.value().decode().unwrap();
+                let template = value.published_template().expect("published template value");
+                assert_eq!(template.to_template_address(), legitimate_address);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn batch_with_does_not_exist_entry_is_rejected_in_all_proof_modes() {
+        let id = component_id(1);
+        let honest = encoded(live(std::slice::from_ref(&id)).remove(&id).unwrap());
+
+        for verify_proofs in [false, true] {
+            for _ in 0..8 {
+                let member_batches = HashMap::from([("vn_malicious".to_string(), SubstateBatch {
+                    commit_proof: None,
+                    substates: vec![tari_validator_node_rpc::client::BatchedSubstate {
+                        substate_id: id.clone(),
+                        result: SubstateResult::DoesNotExist,
+                        value_proof: None,
+                        proof_epoch: 0,
+                    }],
+                    missing: vec![],
+                })]);
+                let (manager, _) = manager_with_members(
+                    FakeNetwork {
+                        live: live(std::slice::from_ref(&id)),
+                        member_batches,
+                        ..Default::default()
+                    },
+                    vec!["vn_malicious".to_string(), "vn_honest".to_string()],
+                );
+                let manager = manager.with_substate_proof_verification(verify_proofs);
+
+                let results = manager
+                    .fetch_and_cache_substates(std::slice::from_ref(&id))
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    results.get(&id).map(|p| &p.substate),
+                    Some(&honest),
+                    "verify_proofs={verify_proofs}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn batch_with_unrequested_or_duplicate_substate_is_rejected() {
+        let requested_id = component_id(1);
+        let unrequested_id = component_id(2);
+        let honest = encoded(live(std::slice::from_ref(&requested_id)).remove(&requested_id).unwrap());
+        let unrequested = encoded(
+            live(std::slice::from_ref(&unrequested_id))
+                .remove(&unrequested_id)
+                .unwrap(),
+        );
+
+        let invalid_batches = [
+            SubstateBatch {
+                commit_proof: None,
+                substates: vec![
+                    tari_validator_node_rpc::client::BatchedSubstate {
+                        substate_id: requested_id.clone(),
+                        result: SubstateResult::Up {
+                            substate: honest.clone(),
+                        },
+                        value_proof: None,
+                        proof_epoch: 0,
+                    },
+                    tari_validator_node_rpc::client::BatchedSubstate {
+                        substate_id: unrequested_id.clone(),
+                        result: SubstateResult::Up {
+                            substate: unrequested.clone(),
+                        },
+                        value_proof: None,
+                        proof_epoch: 0,
+                    },
+                ],
+                missing: vec![],
+            },
+            SubstateBatch {
+                commit_proof: None,
+                substates: vec![
+                    tari_validator_node_rpc::client::BatchedSubstate {
+                        substate_id: requested_id.clone(),
+                        result: SubstateResult::Up {
+                            substate: honest.clone(),
+                        },
+                        value_proof: None,
+                        proof_epoch: 0,
+                    },
+                    tari_validator_node_rpc::client::BatchedSubstate {
+                        substate_id: requested_id.clone(),
+                        result: SubstateResult::Down {
+                            version: SubstateVersion::ZERO,
+                        },
+                        value_proof: None,
+                        proof_epoch: 0,
+                    },
+                ],
+                missing: vec![],
+            },
+        ];
+
+        for verify_proofs in [false, true] {
+            for (bad_batch, expected_bad_id) in [
+                (&invalid_batches[0], &unrequested_id),
+                (&invalid_batches[1], &requested_id),
+            ] {
+                for _ in 0..8 {
+                    let member_batches = HashMap::from([("vn_malicious".to_string(), bad_batch.clone())]);
+                    let (manager, _) = manager_with_members(
+                        FakeNetwork {
+                            live: live(std::slice::from_ref(&requested_id)),
+                            member_batches,
+                            ..Default::default()
+                        },
+                        vec!["vn_malicious".to_string(), "vn_honest".to_string()],
+                    );
+                    let manager = manager.with_substate_proof_verification(verify_proofs);
+
+                    let err = manager
+                        .verify_substate_batch(bad_batch, &[&requested_id], &"vn_malicious".to_string())
+                        .await
+                        .unwrap_err();
+                    assert!(matches!(
+                        err,
+                        IndexerError::UnrequestedSubstateInBatch { ref vn, ref substate_id }
+                            if vn == "vn_malicious" && substate_id == expected_bad_id
+                    ));
+
+                    let results = manager
+                        .fetch_and_cache_substates(std::slice::from_ref(&requested_id))
+                        .await
+                        .unwrap();
+                    assert_eq!(results.len(), 1);
+                    assert_eq!(results[&requested_id].substate, honest);
+                    assert!(!results.contains_key(&unrequested_id));
+                    assert!(!manager.substate_cache.0.lock().unwrap().contains_key(&unrequested_id));
+                }
+            }
+        }
     }
 }

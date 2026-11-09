@@ -369,11 +369,11 @@ mod tests {
     #[test]
     fn rejects_missing_method_key() {
         let item: syn::TraitItemFn = parse_quote! {
-            #[rpc]
+            #[rpc()]
             async fn foo(&self, req: Request<u32>) -> Result<Response<u32>, RpcStatus>;
         };
         let err = parse_method(item).unwrap_err();
-        assert!(err.to_string().contains("expected #[rpc(method = ...)]"), "{err}");
+        assert!(err.to_string().contains("requires `method = <number>`"), "{err}");
     }
 
     #[test]
@@ -407,6 +407,6 @@ mod tests {
             async fn foo(self, req: Request<u32>) -> Result<Response<u32>, RpcStatus>;
         };
         let err = parse_method(item).unwrap_err();
-        assert!(err.to_string().contains("by-value `self` is not supported"), "{err}");
+        assert!(err.to_string().contains("Method receiver must be an immutable reference"), "{err}");
     }
 }

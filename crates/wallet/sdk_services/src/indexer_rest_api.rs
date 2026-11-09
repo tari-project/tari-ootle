@@ -585,6 +585,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         let network = self.clone();
         let stream = stream.map(move |res| {
             let res = res.map_err(|e| {
+                // A transport failure shows when the stream is reopened; a malformed stream reopens without error.
                 if !matches!(e, ProtobufStreamError::ReqwestError(_)) {
                     network.record_health(&client.endpoint, IndexerHealth::Unavailable);
                 }

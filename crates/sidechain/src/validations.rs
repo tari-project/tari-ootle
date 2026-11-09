@@ -86,9 +86,10 @@ pub fn check_proof_elements(
     Ok(())
 }
 
-/// Validates that `proof_elements` form a 3-chain of quorum certificates that, followed by any chain links, descends
-/// to `header`. A proof that passes proves `header` only once each of its quorum certificates is validated against a
-/// committee, as [`check_proof_elements`] does.
+/// Validates that `proof_elements` form a 3-chain of quorum certificates in `header.epoch` with consecutive descending
+/// heights that, followed by any chain links, descends to `header` at `header.height`. A proof that passes proves
+/// `header` only once each of its quorum certificates is validated against a committee, as [`check_proof_elements`]
+/// does.
 pub fn check_proof_structure(
     header: &SidechainBlockHeader,
     proof_elements: &[CommitProofElement],
@@ -166,13 +167,6 @@ pub fn check_proof_structure(
         });
     };
 
-    if last_parent.is_none() {
-        // Not reachable because we check length of proof elements above
-        return Err(SidechainProofValidationError::InvalidProof {
-            details: "BUG: Proof must contain at least proof element (last_parent == None)".to_string(),
-        });
-    }
-
     let justified = match last_elem {
         CommitProofElement::QuorumCertificate(qc) => qc.calculate_justified_block(),
         CommitProofElement::ChainLinks(links) => {
@@ -194,6 +188,71 @@ pub fn check_proof_structure(
                  {justified}"
             ),
         });
+    }
+
+    check_proof_epochs_and_heights(header, proof_elements, last_elem)
+}
+
+fn check_proof_epochs_and_heights(
+    header: &SidechainBlockHeader,
+    proof_elements: &[CommitProofElement],
+    last_elem: &CommitProofElement,
+) -> Result<(), SidechainProofValidationError> {
+    let mut last_qc_height = None::<u64>;
+    for elem in proof_elements {
+        if let CommitProofElement::QuorumCertificate(qc) = elem {
+            if qc.epoch != header.epoch {
+                return Err(SidechainProofValidationError::InvalidProof {
+                    details: format!(
+                        "Quorum certificate is for epoch {}, but header is at epoch {}",
+                        qc.epoch, header.epoch
+                    ),
+                });
+            }
+            if let Some(prev_height) = last_qc_height &&
+                qc.height.checked_add(1) != Some(prev_height)
+            {
+                return Err(SidechainProofValidationError::InvalidProof {
+                    details: format!(
+                        "Quorum certificate height {} is not one less than the preceding quorum certificate height \
+                         {prev_height}",
+                        qc.height
+                    ),
+                });
+            }
+            last_qc_height = Some(qc.height);
+        }
+    }
+
+    match last_elem {
+        CommitProofElement::QuorumCertificate(qc) => {
+            if qc.height != header.height {
+                return Err(SidechainProofValidationError::InvalidProof {
+                    details: format!(
+                        "Final quorum certificate height {} does not match header height {}",
+                        qc.height, header.height
+                    ),
+                });
+            }
+        },
+        CommitProofElement::ChainLinks(links) => {
+            let expected_qc_height = header
+                .height
+                .checked_add(links.len() as u64)
+                .and_then(|h| h.checked_add(1));
+            if let Some(last_qc_height) = last_qc_height &&
+                expected_qc_height != Some(last_qc_height)
+            {
+                return Err(SidechainProofValidationError::InvalidProof {
+                    details: format!(
+                        "Quorum certificate height {last_qc_height} cannot descend through {} chain links to header \
+                         height {}",
+                        links.len(),
+                        header.height
+                    ),
+                });
+            }
+        },
     }
 
     Ok(())
@@ -218,10 +277,7 @@ pub fn check_proof_elements_num_qcs(
         .count();
     if num_qcs < expected_len {
         return Err(SidechainProofValidationError::InvalidProof {
-            details: format!(
-                "Expected at least {} QC proof elements, but got {}",
-                expected_len, num_qcs
-            ),
+            details: format!("Expected at least {expected_len} QC proof elements, but got {num_qcs}"),
         });
     }
     Ok(())

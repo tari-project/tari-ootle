@@ -3,6 +3,7 @@
 
 use tari_jellyfish::JmtHashScheme;
 use tari_sidechain::{
+    ChainLink,
     CommitProofElement,
     FixedHash,
     MAX_PROOF_ELEMS,
@@ -598,5 +599,118 @@ fn it_rejects_a_qc_whose_epoch_differs_from_the_header_epoch() {
     assert!(
         err.to_string().contains("Quorum certificate is for epoch"),
         "Expected the QC epoch mismatch error, got: {err}"
+    );
+}
+
+#[test]
+fn it_rejects_a_qc_for_another_epoch_before_checking_any_signature() {
+    let mut proof = load_fixture::<SidechainBlockCommitProof>("commit_proof.json");
+    let Some(CommitProofElement::QuorumCertificate(qc)) = proof.proof_elements.first_mut() else {
+        panic!("fixture begins with a quorum certificate");
+    };
+    qc.epoch = proof.header.epoch.wrapping_add(1);
+    let err = proof
+        .validate_committed(FIXTURE_NETWORK, 4, &UnconsultedCommittee)
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("Quorum certificate is for epoch 2, but header is at epoch 1"),
+        "Expected epoch mismatch error, got: {err}"
+    );
+}
+
+#[test]
+fn it_rejects_qcs_with_non_consecutive_heights_before_checking_any_signature() {
+    let mut proof = load_fixture::<SidechainBlockCommitProof>("commit_proof.json");
+    let Some(CommitProofElement::QuorumCertificate(first)) = proof.proof_elements.first_mut() else {
+        panic!("fixture begins with a quorum certificate");
+    };
+    first.height = proof.header.height;
+    let err = proof
+        .validate_committed(FIXTURE_NETWORK, 4, &UnconsultedCommittee)
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("is not one less than the preceding quorum certificate height"),
+        "Expected height ordering error, got: {err}"
+    );
+}
+
+#[test]
+fn it_rejects_final_qc_whose_height_differs_from_header_height() {
+    let mut proof = load_fixture::<SidechainBlockCommitProof>("commit_proof.json");
+    for elem in &mut proof.proof_elements {
+        if let CommitProofElement::QuorumCertificate(qc) = elem {
+            qc.height += 1;
+        }
+    }
+    let err = proof
+        .validate_committed(FIXTURE_NETWORK, 4, &UnconsultedCommittee)
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("Final quorum certificate height 21 does not match header height 20"),
+        "Expected final QC height mismatch error, got: {err}"
+    );
+}
+
+#[test]
+fn it_rejects_chain_links_whose_length_does_not_reach_header_height() {
+    let mut proof = load_fixture::<SidechainBlockCommitProof>("commit_proof.json");
+    let header_id = proof.header.calculate_block_id();
+    let link = ChainLink {
+        header_hash: FixedHash::from([0xd1; 32]),
+        parent_id: header_id,
+    };
+    let mut parent_id = link.calc_block_id();
+    for elem in proof.proof_elements.iter_mut().rev() {
+        if let CommitProofElement::QuorumCertificate(qc) = elem {
+            qc.parent_id = parent_id;
+            parent_id = qc.calculate_justified_block();
+        }
+    }
+    proof.proof_elements.push(CommitProofElement::ChainLinks(vec![link]));
+
+    let err = proof
+        .validate_committed(FIXTURE_NETWORK, 4, &UnconsultedCommittee)
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("Quorum certificate height 20 cannot descend through 1 chain links to header height 20"),
+        "Expected chain links height mismatch error, got: {err}"
+    );
+}
+
+#[test]
+fn it_reports_actual_qc_count_and_justified_block_id_in_structural_errors() {
+    let mut proof = load_fixture::<SidechainBlockCommitProof>("commit_proof.json");
+    let last_justified = match proof.proof_elements.last().unwrap() {
+        CommitProofElement::QuorumCertificate(qc) => qc.calculate_justified_block(),
+        CommitProofElement::ChainLinks(_) => unreachable!(),
+    };
+    proof.header.height = proof.header.height.wrapping_add(1);
+    let err = proof
+        .validate_committed(FIXTURE_NETWORK, 4, &UnconsultedCommittee)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains(&format!("got {last_justified}")),
+        "Expected justified block ID in error message, got: {err}"
+    );
+
+    let mut short_qcs = load_fixture::<SidechainBlockCommitProof>("commit_proof.json");
+    short_qcs.proof_elements.truncate(2);
+    short_qcs
+        .proof_elements
+        .push(CommitProofElement::ChainLinks(vec![ChainLink {
+            header_hash: FixedHash::zero(),
+            parent_id: FixedHash::zero(),
+        }]));
+    let err = short_qcs
+        .validate_committed(FIXTURE_NETWORK, 4, &UnconsultedCommittee)
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("Expected at least 3 QC proof elements, but got 2"),
+        "Expected actual QC count in error message, got: {err}"
     );
 }

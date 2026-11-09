@@ -1,6 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::HashSet;
+
 use anyhow::anyhow;
 use minicbor::{CborLen, Decode, Encode};
 use ootle_network::Network;
@@ -172,6 +174,33 @@ impl CommandsCommitProofV1 {
         Ok(())
     }
 
+    /// The command merkle root is computed over the set of leaves, so it cannot tell a list from one that repeats or
+    /// reorders its entries. A block's commands are key-unique and in block order (see [`BlockCommands`]), so the
+    /// proof must name each command once and carry its full commands in that order.
+    ///
+    /// [`BlockCommands`]: crate::consensus_models::BlockCommands
+    fn validate_commands_canonical(&self) -> Result<(), ForeignProposalCommitProofError> {
+        let protocol_version = self.protocol_version()?;
+        let mut leaves = HashSet::with_capacity(self.commands.len());
+        let mut previous: Option<&Command> = None;
+        for entry in &self.commands {
+            let leaf = entry.merkle_leaf(protocol_version);
+            if !leaves.insert(leaf) {
+                return Err(ForeignProposalCommitProofError::RepeatedCommand { leaf });
+            }
+            if let Some(command) = entry.command() {
+                if let Some(previous) = previous.filter(|p| p.as_ordering() >= command.as_ordering()) {
+                    return Err(ForeignProposalCommitProofError::CommandOutOfOrder {
+                        previous: previous.to_string(),
+                        command: command.to_string(),
+                    });
+                }
+                previous = Some(command);
+            }
+        }
+        Ok(())
+    }
+
     fn validate_well_formed(&self) -> Result<(), ForeignProposalCommitProofError> {
         const MAX_COMMANDS: usize = 1000;
 
@@ -187,6 +216,8 @@ impl CommandsCommitProofV1 {
                 self.commands.len()
             )));
         }
+
+        self.validate_commands_canonical()?;
 
         // Since CompressedPublicKey is a variable length vec, we make double sure that the length is correct.
         if self
@@ -367,7 +398,7 @@ mod tests {
         }
     }
 
-    fn atom() -> MultiShardAtom {
+    fn atom(id: u8) -> MultiShardAtom {
         let mut evidence = Evidence::empty();
         evidence.add_shard_group(input_group()).insert(
             SubstateId::Component(ComponentAddress::from_array([1; ObjectKey::LENGTH])),
@@ -380,7 +411,7 @@ mod tests {
             SubstateVersion::ZERO,
         );
         MultiShardAtom {
-            id: TransactionId::new([3; 32]),
+            id: TransactionId::new([id; 32]),
             decision: Decision::Commit,
             evidence,
             transaction_fee: 0,
@@ -390,11 +421,12 @@ mod tests {
         }
     }
 
+    /// The commands of a block, in block order.
     fn commands() -> Vec<Command> {
         vec![
-            Command::LocalPrepare(atom()),
-            Command::LocalAccept(atom()),
-            Command::AllAccept(atom()),
+            Command::LocalPrepare(atom(3)),
+            Command::LocalAccept(atom(4)),
+            Command::AllAccept(atom(5)),
             Command::EndEpoch(EndEpochAtom::new(FixedHash::zero())),
         ]
     }
@@ -476,6 +508,57 @@ mod tests {
     }
 
     #[test]
+    fn an_honest_proof_is_well_formed_for_every_shard_group() {
+        for shard_group in [input_group(), output_group(), uninvolved_group()] {
+            honest_proof(ProtocolVersion::V0, shard_group)
+                .validate_well_formed()
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_proof_that_repeats_a_command_is_not_well_formed() {
+        let local_accept = &commands()[1];
+        let pruned_local_accept = CommandOrHash::Pruned(PrunedCommand {
+            hash: local_accept.hash(ProtocolVersion::V0),
+            full_command_shard_groups: local_accept.full_command_shard_groups(),
+        });
+        let cases = [
+            (
+                "repeated full entry",
+                input_group(),
+                CommandOrHash::Command(local_accept.clone()),
+            ),
+            ("repeated pruned entry", uninvolved_group(), pruned_local_accept.clone()),
+            ("full entry repeated as pruned", input_group(), pruned_local_accept),
+        ];
+        for (case, shard_group, repeat) in cases {
+            let mut proof = honest_proof(ProtocolVersion::V0, shard_group);
+            proof.commands.insert(2, repeat);
+            proof.validate_command_merkle_root().unwrap();
+            assert!(
+                matches!(
+                    proof.validate_well_formed(),
+                    Err(ForeignProposalCommitProofError::RepeatedCommand { leaf })
+                        if leaf == local_accept.merkle_leaf(ProtocolVersion::V0)
+                ),
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_proof_that_carries_commands_out_of_block_order_is_not_well_formed() {
+        let mut proof = honest_proof(ProtocolVersion::V0, input_group());
+        proof.commands.swap(0, 1);
+        proof.validate_command_merkle_root().unwrap();
+        assert!(matches!(
+            proof.validate_well_formed(),
+            Err(ForeignProposalCommitProofError::CommandOutOfOrder { .. })
+        ));
+    }
+
+    #[test]
     fn an_end_epoch_command_keeps_its_bare_hash_leaf_and_is_carried_in_full() {
         let end_epoch = &commands()[3];
         assert_eq!(
@@ -541,6 +624,10 @@ pub enum ForeignProposalCommitProofError {
     UnknownProtocolVersion(#[from] UnknownProtocolVersionError),
     #[error("Sidechain Proof Validation Error: {0}")]
     SidechainProofValidationError(#[from] SidechainProofValidationError),
+    #[error("The commit proof lists the command with merkle leaf {leaf} more than once")]
+    RepeatedCommand { leaf: FixedHash },
+    #[error("The commit proof lists command {command} after {previous}, but block order places it first")]
+    CommandOutOfOrder { previous: String, command: String },
     #[error("The foreign proposal was invalid: {0}")]
     Invalid(#[from] anyhow::Error),
 }

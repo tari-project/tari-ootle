@@ -98,7 +98,7 @@ impl From<LocalPeerRecord> for SignedPeerRecord {
     fn from(value: LocalPeerRecord) -> Self {
         Self {
             addresses: value.addresses.into_iter().collect(),
-            updated_at: Duration::from_secs(value.updated_at.as_secs()),
+            updated_at: value.updated_at,
             signature: value.signature,
         }
     }
@@ -114,7 +114,7 @@ pub struct LocalPeerRecord {
 
 impl LocalPeerRecord {
     pub fn new(keypair: Arc<identity::Keypair>) -> Self {
-        let updated_at = Duration::from_secs(epoch_time_now().as_secs());
+        let updated_at = epoch_time_now();
         let addresses = HashSet::new();
         let signature = sign_peer_rec(&keypair, &addresses, &updated_at);
         Self {
@@ -155,7 +155,7 @@ impl LocalPeerRecord {
     }
 
     fn sign(&mut self) {
-        self.updated_at = Duration::from_secs(epoch_time_now().as_secs());
+        self.updated_at = epoch_time_now();
         self.signature = sign_peer_rec(&self.keypair, &self.addresses, &self.updated_at);
     }
 }
@@ -262,14 +262,5 @@ mod tests {
         };
         assert!(future_rec.is_valid());
         assert!(!future_rec.is_updated_at_within(Duration::from_secs(300)));
-    }
-
-    #[test]
-    fn local_peer_record_updated_at_is_whole_seconds() {
-        let keypair = Arc::new(identity::Keypair::generate_ed25519());
-        let mut local_rec = LocalPeerRecord::new(keypair);
-        local_rec.add_address("/ip4/127.0.0.1/tcp/8000".parse().unwrap());
-        let signed = SignedPeerRecord::from(local_rec);
-        assert_eq!(signed.updated_at.subsec_nanos(), 0);
     }
 }

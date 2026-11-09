@@ -442,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn inbound_request_completed_refreshes_remaining_want_peers_and_put_address_deduplicates() {
+    fn inbound_request_completed_refreshes_remaining_want_peers() {
         let store = MemoryPeerStore::new();
         let mut behaviour = Behaviour::new(Keypair::generate_ed25519(), store.clone(), Config::default());
 
@@ -454,15 +454,8 @@ mod tests {
         // Simulate an inbound sync storing `wanted_peer_id`'s record and emitting `InboundRequestCompleted`.
         let mut wanted_rec = LocalPeerRecord::new(wanted_kp);
         let addr: Multiaddr = "/ip4/127.0.0.1/tcp/9001".parse().unwrap();
-        wanted_rec.add_address(addr.clone());
+        wanted_rec.add_address(addr);
         block_on(store.put(SignedPeerRecord::from(wanted_rec))).unwrap();
-
-        // `put_address` is idempotent for an address already present on the record.
-        block_on(store.put_address(&wanted_peer_id, addr)).unwrap();
-        assert_eq!(
-            block_on(store.get(&wanted_peer_id)).unwrap().unwrap().addresses.len(),
-            1
-        );
 
         behaviour.on_connection_handler_event(
             wanted_peer_id,

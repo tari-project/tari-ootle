@@ -32,8 +32,8 @@ impl VerifiedCheckpoint {
         self.shard_group
     }
 
-    /// The state version `shard` reached at the end of the epoch, or `None` for a shard outside the checkpoint's
-    /// shard group (unless `shard` is the global shard, which every shard group's checkpoint commits).
+    /// The state version `shard` reached at the end of the epoch, for the global shard or a shard in the checkpoint's
+    /// shard group; `None` for any other shard.
     pub fn shard_state_version(&self, shard: Shard) -> Option<StateVersion> {
         self.shard_group
             .contains_or_global(&shard)

@@ -13,6 +13,7 @@ use tari_ootle_common_types::{
     Epoch,
     InputDeclaration,
     SubstateRequirement,
+    engine_types::substate::{SubstateDiff, SubstateId},
     optional::Optional,
     response_status::ResponseErrorStatus,
 };
@@ -339,7 +340,7 @@ fn unlink_locks_of_unstored_transaction(
     })
 }
 
-fn validate_epoch_bounds(transaction: &UnsignedTransaction) -> Result<(), anyhow::Error> {
+pub(super) fn validate_epoch_bounds(transaction: &UnsignedTransaction) -> Result<(), anyhow::Error> {
     if let Some(min_epoch) = transaction.min_epoch() &&
         min_epoch > transaction.max_epoch()
     {
@@ -484,6 +485,8 @@ pub async fn handle_detect_inputs(
     req: TransactionDetectInputsRequest,
 ) -> Result<TransactionDetectInputsResponse, anyhow::Error> {
     context.authorize(token, &[Permission::Transactions(Crud::Read)])?;
+    validate_transaction_for_network(context.config().network, &req.transaction)?;
+    validate_epoch_bounds(&req.transaction)?;
     let sdk = context.wallet_sdk();
 
     let substates = req.transaction.to_referenced_substates()?;
@@ -1025,7 +1028,7 @@ where
     match dry_run {
         Ok(result) => match result.finalize.accept() {
             Some(diff) => {
-                let written = diff.down_iter().map(|(id, _)| id).collect::<HashSet<_>>();
+                let written = written_substates(diff);
                 sign(unsigned.narrow_to_reads(|decl| !written.contains(decl.substate_id())))
             },
             None => sign(unsigned),
@@ -1035,6 +1038,20 @@ where
             sign(unsigned)
         },
     }
+}
+
+/// Substates mutated by an accepted dry-run `diff`: every downed substate plus any `ValidatorFeePool`
+/// debited via `ClaimValidatorFees` (`diff.validator_fee_withdrawals()`), which the engine mutates in
+/// place (`mutate_unpersisted`) without emitting a down entry.
+fn written_substates(diff: &SubstateDiff) -> HashSet<SubstateId> {
+    diff.down_iter()
+        .map(|(id, _)| id.clone())
+        .chain(
+            diff.validator_fee_withdrawals()
+                .iter()
+                .map(|w| SubstateId::ValidatorFeePool(w.address)),
+        )
+        .collect()
 }
 
 /// Signs with each additional signing key, then seals with the seal signer.
@@ -1097,11 +1114,7 @@ fn resolve_metadata_hash(
 mod tests {
     use tari_crypto::ristretto::RistrettoSecretKey;
     use tari_ootle_address::Network;
-    use tari_ootle_common_types::{
-        SubstateVersion,
-        engine_types::substate::SubstateId,
-        signature::Sr25519SignatureBytes,
-    };
+    use tari_ootle_common_types::{SubstateVersion, signature::Sr25519SignatureBytes};
     use tari_ootle_transaction::{ComponentReference, Instruction, TransactionBuilder};
     use tari_ootle_wallet_sdk::{
         apis::key_manager::KeyManagerApiError,
@@ -1307,6 +1320,36 @@ mod tests {
 
         assert_eq!(decl.version(), None);
         assert!(decl.is_read());
+    }
+
+    #[test]
+    fn written_substates_includes_validator_fee_withdrawals_when_narrowing_to_reads() {
+        use tari_ootle_common_types::engine_types::ValidatorFeeWithdrawal;
+        use tari_template_lib_types::ValidatorFeePoolAddress;
+
+        let read_only_comp = component(1);
+        let mutated_comp = component(2);
+        let fee_pool_addr = ValidatorFeePoolAddress::from_array([3; 32]);
+        let fee_pool_id = SubstateId::ValidatorFeePool(fee_pool_addr);
+
+        let mut diff = SubstateDiff::new();
+        diff.down(mutated_comp.clone(), SubstateVersion::new(0));
+        diff.set_once_fee_withdrawals(vec![ValidatorFeeWithdrawal {
+            address: fee_pool_addr,
+            amount: 500,
+        }]);
+
+        let written = written_substates(&diff);
+        let unsigned = UnsignedTransaction::new(Network::LocalNet.as_byte(), Epoch(100)).with_inputs([
+            InputDeclaration::write(read_only_comp.clone()),
+            InputDeclaration::write(mutated_comp.clone()),
+            InputDeclaration::write(fee_pool_id.clone()),
+        ]);
+        let narrowed = unsigned.narrow_to_reads(|decl| !written.contains(decl.substate_id()));
+
+        assert!(narrowed.inputs().get(&read_only_comp).unwrap().is_read());
+        assert!(narrowed.inputs().get(&mutated_comp).unwrap().is_write());
+        assert!(narrowed.inputs().get(&fee_pool_id).unwrap().is_write());
     }
 
     fn submit_request(seal_signer: KeyId, other_signers: Vec<KeyId>) -> TransactionSubmitRequest {

@@ -817,7 +817,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         self.fee_checkpoint.borrow().is_some()
     }
 
-    /// Accounts one more stealth transfer against [`limits::StealthLimits::max_fee_intent_transfers`]; a no-op once
+    /// Admits one more stealth transfer against [`limits::StealthLimits::max_fee_intent_transfers`]; a no-op once
     /// the fee intent is over. Called before the transfer's native cost is charged and before any of its crypto runs,
     /// so an over-cap fee intent is rejected without the work being performed.
     ///
@@ -825,7 +825,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
     /// calling `ResourceManager::stealth_transfer` — both reach this through `RuntimeInterfaceImpl::stealth_transfer`.
     /// Counting instructions alone would leave the WASM route uncapped, and so make the more expensive route the way
     /// to exceed the limit.
-    pub(super) fn account_fee_intent_stealth_transfer(&self) -> Result<(), RuntimeError> {
+    pub(super) fn admit_fee_intent_stealth_transfer(&self) -> Result<(), RuntimeError> {
         if self.is_fee_intent_checkpointed() {
             return Ok(());
         }

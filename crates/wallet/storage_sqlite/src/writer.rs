@@ -1567,12 +1567,6 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             // No-op
             return Ok(());
         }
-        if amount_to_lock.is_negative() {
-            return Err(WalletStorageError::bad_query(
-                OPERATION,
-                "amount to lock cannot be negative",
-            ));
-        }
 
         self.ensure_lock_exists(lock_id)?;
         let vault_str = vault_id.to_string();

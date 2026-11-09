@@ -73,12 +73,6 @@ impl CommandsCommitProof {
         }
     }
 
-    pub fn validate_header(&self) -> Result<(), ForeignProposalCommitProofError> {
-        match self {
-            Self::V1(proof) => proof.validate_header(),
-        }
-    }
-
     /// Validates the proof against `committee`, the committee expected to have signed its certificates.
     pub fn validate_committed(
         &self,
@@ -120,13 +114,14 @@ impl CommandsCommitProofV1 {
         quorum_threshold: VotePower,
         committee: &dyn SigningCommittee,
     ) -> Result<(), ForeignProposalCommitProofError> {
+        self.validate_header()?;
         self.validate_command_merkle_root()?;
         self.commit_proof
             .validate_committed(network.as_byte(), quorum_threshold.value(), committee)?;
         Ok(())
     }
 
-    pub fn validate_header(&self) -> Result<(), ForeignProposalCommitProofError> {
+    fn validate_header(&self) -> Result<(), ForeignProposalCommitProofError> {
         self.validate_well_formed()?;
         let header = &self.commit_proof.header;
         if header.height == 0 {
@@ -489,6 +484,50 @@ mod tests {
         );
         let proof = honest_proof(ProtocolVersion::V0, uninvolved_group());
         assert_eq!(proof.commands[3], CommandOrHash::Command(end_epoch.clone()));
+    }
+
+    #[test]
+    fn validate_committed_rejects_a_malformed_or_unsigned_header() {
+        struct EmptyCommittee;
+        impl SigningCommittee for EmptyCommittee {
+            fn len(&self) -> usize {
+                0
+            }
+
+            fn member(&self, _index: usize) -> Option<(&[u8], u64)> {
+                None
+            }
+        }
+
+        let mut empty_cmds = honest_proof(ProtocolVersion::V0, uninvolved_group());
+        empty_cmds.commands.clear();
+        empty_cmds.commit_proof.header.command_merkle_root = FixedHash::zero();
+        let empty_err = empty_cmds
+            .validate_committed(Network::LocalNet, VotePower::of(1), &EmptyCommittee)
+            .unwrap_err();
+        assert!(
+            matches!(&empty_err, ForeignProposalCommitProofError::Invalid(e) if e.to_string().contains("must have at least one command")),
+            "unexpected error: {empty_err}"
+        );
+
+        let mut zero_height = honest_proof(ProtocolVersion::V0, uninvolved_group());
+        zero_height.commit_proof.header.height = 0;
+        let height_err = zero_height
+            .validate_committed(Network::LocalNet, VotePower::of(1), &EmptyCommittee)
+            .unwrap_err();
+        assert!(
+            matches!(&height_err, ForeignProposalCommitProofError::Invalid(e) if e.to_string().contains("Header height is 0")),
+            "unexpected error: {height_err}"
+        );
+
+        let unsigned = honest_proof(ProtocolVersion::V0, uninvolved_group());
+        let signature_err = unsigned
+            .validate_committed(Network::LocalNet, VotePower::of(1), &EmptyCommittee)
+            .unwrap_err();
+        assert!(
+            matches!(&signature_err, ForeignProposalCommitProofError::Invalid(e) if e.to_string().contains("Signature verification failed")),
+            "unexpected error: {signature_err}"
+        );
     }
 }
 

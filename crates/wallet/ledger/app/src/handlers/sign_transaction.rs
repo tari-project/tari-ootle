@@ -39,43 +39,8 @@ use crate::{
     status::AppStatus,
 };
 
-/// Canonical field order for an authorization signature. Matches
-/// `tari_ootle_transaction::TransactionSignature::signing_preimage_v1`.
-const ADD_SIGNER_SEQ: &[SigningField] = &[
-    SigningField::SchemaVersion,
-    SigningField::SealSigner,
-    SigningField::Network,
-    SigningField::FeeInstructions,
-    SigningField::Instructions,
-    SigningField::Inputs,
-    SigningField::MinEpoch,
-    SigningField::MaxEpoch,
-    SigningField::MainSigner,
-    SigningField::DryRun,
-    SigningField::BlobHashes,
-];
-
-/// Canonical field order for a seal signature. Matches
-/// `tari_ootle_transaction::TransactionSealSignature::signing_preimage_v1`.
-const SEAL_SEQ: &[SigningField] = &[
-    SigningField::SchemaVersion,
-    SigningField::Network,
-    SigningField::FeeInstructions,
-    SigningField::Instructions,
-    SigningField::Inputs,
-    SigningField::MinEpoch,
-    SigningField::MaxEpoch,
-    SigningField::MainSigner,
-    SigningField::DryRun,
-    SigningField::BlobHashes,
-    SigningField::Signatures,
-];
-
 fn expected_seq(mode: SignMode) -> &'static [SigningField] {
-    match mode {
-        SignMode::AddSigner => ADD_SIGNER_SEQ,
-        SignMode::Seal => SEAL_SEQ,
-    }
+    mode.expected_fields()
 }
 
 /// Everything needed to render the review screen and sign once approved.
@@ -110,21 +75,30 @@ const fn hash_fail() -> AppStatus {
 
 /// Process one `SignTransaction` APDU, identified by its `P1`/`P2` and data payload.
 pub fn process_chunk(state: &mut State, p1: u8, p2: u8, data: &[u8]) -> Result<ChunkResult, AppStatus> {
-    match FrameKind::try_from(p2).map_err(|_| bad_request())? {
-        FrameKind::Header => {
-            start_stream(state, data)?;
-            Ok(ChunkResult::Ack)
-        },
-        FrameKind::Segment => {
-            process_segment(state, p1, data)?;
-            Ok(ChunkResult::Ack)
-        },
-        FrameKind::Finalize => finalize(state),
+    let result = FrameKind::try_from(p2)
+        .map_err(|_| bad_request())
+        .and_then(|frame_kind| match frame_kind {
+            FrameKind::Header => {
+                start_stream(state, data)?;
+                Ok(ChunkResult::Ack)
+            },
+            FrameKind::Segment => {
+                process_segment(state, p1, data)?;
+                Ok(ChunkResult::Ack)
+            },
+            FrameKind::Finalize => finalize(state),
+        });
+    if result.is_err() {
+        state.reset();
     }
+    result
 }
 
 fn start_stream(state: &mut State, data: &[u8]) -> Result<(), AppStatus> {
     let header = SignTransactionHeader::try_from_slice(data).map_err(|_| bad_request())?;
+    if header.stealth_public_nonce.is_some() && !matches!(header.key_type, KeyType::Account) {
+        return Err(bad_request());
+    }
     let hasher = MessageHasher::new(header.mode).map_err(|_| hash_fail())?;
     *state = State::SigningTransaction(SigningState {
         hasher,

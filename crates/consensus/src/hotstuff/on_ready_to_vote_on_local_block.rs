@@ -23,9 +23,11 @@ use tari_ootle_storage::{
         Command,
         CommittedBlockProof,
         ForeignProposalAtom,
+        ForeignProposalRecord,
         ForeignProposalStatus,
         NoVoteReason,
         PendingShardStateTreeDiff,
+        ProposalOrigin,
         SubstateRecord,
         TransactionPool,
         TransactionPoolRecord,
@@ -122,6 +124,7 @@ where
         // a transaction from LocalPrepared (see `abort_local_prepared_for_epoch_end`) and requires the end-of-epoch
         // block to leave none there (see `check_epoch_end_drained`).
         next_epoch_changes_layout: bool,
+        origin: ProposalOrigin,
         change_set: &mut ProposedBlockChangeSet,
     ) -> Result<BlockDecision, HotStuffError> {
         let _timer =
@@ -174,25 +177,25 @@ where
         let processed_blocks =
             process_newly_justified_block(&**tx, &justified_block, block_qc_id, local_committee_info, change_set)?;
 
-        if self.should_vote(&**tx, valid_block.block())? {
-            let parent = valid_block.block().get_parent(&**tx)?;
+        // A block at a height this node has already voted at may still be the one the committee certifies, and
+        // committing it applies its change set. It is therefore decided on, and its change set saved, whether or not
+        // this node may vote for it. Blocks first imported through catch-up have already been certified by the
+        // committee and are never voted on by the caller, so their decision is reported even at or below
+        // `last_voted`.
+        let may_vote = origin.is_catch_up() || self.should_vote(&**tx, valid_block.block())?;
+        let parent = valid_block.block().get_parent(&**tx)?;
+        self.decide_what_to_vote(
+            &**tx,
+            &parent,
+            valid_block.block(),
+            local_committee_info,
+            proposer_claim_public_key_bytes,
+            can_propose_epoch_end,
+            local_next_epoch,
+            next_epoch_changes_layout,
+            change_set,
+        )?;
 
-            self.decide_what_to_vote(
-                &**tx,
-                &parent,
-                valid_block.block(),
-                local_committee_info,
-                proposer_claim_public_key_bytes,
-                can_propose_epoch_end,
-                local_next_epoch,
-                next_epoch_changes_layout,
-                change_set,
-            )?;
-        } else {
-            change_set.set_no_vote(NoVoteReason::AlreadyVotedAtHeight);
-        }
-
-        let quorum_decision = change_set.quorum_decision();
         if change_set.is_accept() {
             // A justified block and its walked ancestors are stamped only by an accepted proposal, whose change set
             // carries their evidence. A later justification walks back to the first stamped ancestor.
@@ -209,6 +212,11 @@ where
             self.transaction_manager
                 .uncommitted_templates()
                 .record(change_set.block(), change_set.local_substate_changes());
+            if let Some(reason) = change_set.abstention() &&
+                let Err(err) = tx.diagnostics_add_no_vote(*valid_block.id(), reason.clone())
+            {
+                error!(target: LOG_TARGET, "Failed to save no vote reason: {err}");
+            }
         } else {
             warn!(
                 target: LOG_TARGET,
@@ -218,13 +226,23 @@ where
             );
         }
 
+        let (local_decision, no_vote_reason) = if !may_vote {
+            (None, Some(NoVoteReason::AlreadyVotedAtHeight))
+        } else if let Some(reason) = change_set.no_vote_reason() {
+            (None, Some(reason.clone()))
+        } else if let Some(reason) = change_set.abstention() {
+            (None, Some(reason.clone()))
+        } else {
+            (change_set.quorum_decision(), None)
+        };
+
         Ok(BlockDecision {
-            local_decision: quorum_decision,
+            local_decision,
             commit_blocks,
             finalized_transactions,
             high_pc: high_qc,
             new_high_tc: maybe_high_tc,
-            no_vote_reason: change_set.no_vote_reason().cloned(),
+            no_vote_reason,
         })
     }
 
@@ -411,6 +429,10 @@ where
 
                     continue;
                 },
+                // The values an EndEpoch commits the next epoch to are ratified against this node's own view of the
+                // next epoch. Where that view does not confirm a value, the node abstains: it keeps the block's change
+                // set and withholds its vote. The committee may commit the block on the votes of members that do
+                // confirm it, and this node then commits it too, which requires its change set.
                 Command::EndEpoch(atom) => {
                     if !can_propose_epoch_end {
                         warn!(
@@ -418,8 +440,7 @@ where
                             "❌ EpochEvent::End command received for block {} but it is not the next epoch",
                             block.id(),
                         );
-                        proposed_block_change_set.set_no_vote(NoVoteReason::NotEndOfEpoch);
-                        return Ok(());
+                        proposed_block_change_set.abstain(NoVoteReason::NotEndOfEpoch);
                     }
                     if block.commands().len() > 1 {
                         warn!(
@@ -453,11 +474,10 @@ where
                                 atom.next_epoch_hash(),
                                 local,
                             );
-                            proposed_block_change_set.set_no_vote(NoVoteReason::EndOfEpochHashMismatch {
+                            proposed_block_change_set.abstain(NoVoteReason::EndOfEpochHashMismatch {
                                 local,
                                 proposed: *atom.next_epoch_hash(),
                             });
-                            return Ok(());
                         },
                         None => {
                             warn!(
@@ -465,8 +485,7 @@ where
                                 "❌ NO VOTE: EndEpoch in block {} but our oracle has not yet observed the next epoch boundary block",
                                 block.id(),
                             );
-                            proposed_block_change_set.set_no_vote(NoVoteReason::EndOfEpochHashNotObserved);
-                            return Ok(());
+                            proposed_block_change_set.abstain(NoVoteReason::EndOfEpochHashNotObserved);
                         },
                     }
 
@@ -486,11 +505,10 @@ where
                                 proposed.as_bps(),
                                 local_rate.as_bps(),
                             );
-                            proposed_block_change_set.set_no_vote(NoVoteReason::EndOfEpochBurnRateMismatch {
+                            proposed_block_change_set.abstain(NoVoteReason::EndOfEpochBurnRateMismatch {
                                 local_bps: local_rate.as_bps(),
                                 proposed_bps: proposed.as_bps(),
                             });
-                            return Ok(());
                         },
                         None => {
                             warn!(
@@ -511,8 +529,11 @@ where
                         block.next_epoch_validator_set_hash(),
                     ) {
                         warn!(target: LOG_TARGET, "❌ NO VOTE: {reason} (block {})", block.id());
-                        proposed_block_change_set.set_no_vote(reason);
-                        return Ok(());
+                        if matches!(reason, NoVoteReason::EndOfEpochValidatorSetMissing) {
+                            proposed_block_change_set.set_no_vote(reason);
+                            return Ok(());
+                        }
+                        proposed_block_change_set.abstain(reason);
                     }
 
                     continue;
@@ -708,17 +729,18 @@ where
             return Ok(Some(reason));
         }
 
-        // Case: cannot re-propose if it is already committed
-        // TODO: if this is already proposed we need to reject if it is already proposed in the current block's
-        // commit->leaf chain Currently we allow it to be proposed again
-        if matches!(fp.status(), ForeignProposalStatus::Confirmed) {
+        // CONSENSUS RULE: the stored record must be one an honest proposer would select (see
+        // `check_foreign_proposal_record`)
+        if let Some(reason) = check_foreign_proposal_record(fp_atom, &fp) {
             warn!(
                 target: LOG_TARGET,
-                "❌ NO VOTE: Foreign proposal {block_id} has status {status}.",
+                "❌ NO VOTE: Foreign proposal {block_id} (status={status}, atom_shard_group={atom_sg}, proposal_shard_group={proposal_sg}): {reason}",
                 block_id = fp_atom.block_id,
                 status = fp.status(),
+                atom_sg = fp_atom.shard_group,
+                proposal_sg = fp.proposal().shard_group_unchecked(),
             );
-            return Ok(Some(NoVoteReason::ForeignProposalAlreadyConfirmed));
+            return Ok(Some(reason));
         }
 
         if let Err(err) = process_foreign_block(
@@ -824,6 +846,17 @@ where
             // Nothing to do here for empty dummy blocks. Just mark the block as committed.
             block.commit_block_without_state_changes(tx, commit_qc_id)?;
             return Ok(vec![]);
+        }
+
+        // Committing a block applies the change set this node saved when it accepted the block. A block it holds no
+        // change set for can only be committed by taking the committee's state through sync.
+        if !tx.blocks_is_executed(block.id())? {
+            return Err(HotStuffError::NeedsSync {
+                reason: format!(
+                    "the committee committed block {block}, which this node did not accept, so it holds none of the \
+                     block's state changes"
+                ),
+            });
         }
 
         info!(target: LOG_TARGET, "🌳 Finalizing block {}", block);
@@ -1000,7 +1033,8 @@ fn check_no_commands_after_epoch_end<TTx: StateStoreReadTransaction>(
 /// Consensus rule: an end-of-epoch block that changes the number of committees may not leave a transaction in
 /// `LocalPrepared` on the chain it extends. Validators move to new shard groups at such a boundary and drop their
 /// transaction pools, so that transaction would keep its substate locks with no record left to finalize it. The rule
-/// cannot wedge the epoch: a replica that sees such a next epoch accepts the abort of these transactions (see
+/// cannot wedge the epoch: a transaction that is ready for LocalAccept can be accepted as usual, and a replica that
+/// sees such a next epoch accepts the abort of one still waiting on foreign shard groups (see
 /// [`abort_local_prepared_for_epoch_end`]), so a leader can always clear them first.
 ///
 /// The pool is read with the pending updates of the chain ending at `justify_block_id`, the block the end-of-epoch
@@ -1016,6 +1050,40 @@ fn check_epoch_end_drained<TTx: StateStoreReadTransaction>(
     let is_prepared_in_flight =
         tx.transaction_pool_any_in_chain(justify_block_id, |rec| rec.current_stage().is_local_prepared())?;
     Ok(is_prepared_in_flight.then_some(NoVoteReason::EndOfEpochWithTransactionsInLocalPrepared))
+}
+
+/// Consensus rule: a `ForeignProposal` command atom must reference a stored proposal that is neither confirmed nor
+/// marked invalid, whose committed header names the same shard group as the atom, and whose commit proof carries at
+/// least one command entry.
+///
+/// A proposal is stored as `New` only once `validate_foreign_proposal_contents` accepts it, which refuses an empty
+/// commit proof, so every `New` record a proposer selects passes this check.
+pub(super) fn check_foreign_proposal_record(
+    fp_atom: &ForeignProposalAtom,
+    fp: &ForeignProposalRecord,
+) -> Option<NoVoteReason> {
+    if matches!(fp.status(), ForeignProposalStatus::Confirmed) {
+        return Some(NoVoteReason::ForeignProposalAlreadyConfirmed);
+    }
+    if matches!(fp.status(), ForeignProposalStatus::Invalid) {
+        return Some(NoVoteReason::ForeignProposalInvalid {
+            block_id: fp_atom.block_id,
+        });
+    }
+    let Some(actual_shard_group) = fp.proposal().shard_group_checked() else {
+        return Some(NoVoteReason::ForeignProposalProcessingFailed);
+    };
+    if actual_shard_group != fp_atom.shard_group {
+        return Some(NoVoteReason::ForeignProposalShardGroupMismatch {
+            block_id: fp_atom.block_id,
+            atom: fp_atom.shard_group,
+            actual: actual_shard_group,
+        });
+    }
+    if fp.proposal().commit_proof().commands().is_empty() {
+        return Some(NoVoteReason::ForeignProposalProcessingFailed);
+    }
+    None
 }
 
 /// Consensus rule: a leader may only move a transaction out of its current stage once the shard groups involved in it
@@ -1708,6 +1776,7 @@ mod tests {
                             false,
                             LocalNextEpochView::default(),
                             false,
+                            ProposalOrigin::Live,
                             &mut change_set,
                         )
                     })
@@ -1906,6 +1975,8 @@ mod tests {
                         block.insert(tx)?;
                     }
                     foreign_proposal.save(tx)?;
+                    // The committed block was accepted, so its change set was saved.
+                    tx.blocks_set_executed(committed.id())?;
                     for block in [&committed, &fork] {
                         tx.foreign_proposals_set_status(
                             foreign_proposal.block_id(),
@@ -1932,6 +2003,174 @@ mod tests {
 
             assert_eq!(record.status(), ForeignProposalStatus::Confirmed);
             assert_eq!(record.proposed_in_block(), Some(committed.id()));
+        }
+
+        #[test]
+        fn a_foreign_proposal_command_for_an_invalid_foreign_proposal_is_rejected() {
+            let mut fixture = VoterFixture::new();
+            let foreign_proposal = foreign_proposal_record();
+            fixture
+                .store
+                .with_write_tx(|tx| {
+                    foreign_proposal.save(tx)?;
+                    tx.foreign_proposals_set_status(foreign_proposal.block_id(), ForeignProposalStatus::Invalid, None)
+                })
+                .unwrap();
+
+            let commands = BlockCommands::init([Command::ForeignProposal(foreign_proposal.to_atom())]).unwrap();
+            let block = fixture.make_block(
+                &fixture.genesis,
+                &fixture.genesis,
+                NodeHeight(1),
+                commands,
+                FixedHash::zero(),
+                10,
+            );
+            let decision = fixture.handle_block(&block);
+            assert!(decision.local_decision.is_none());
+            assert!(
+                matches!(
+                    decision.no_vote_reason,
+                    Some(NoVoteReason::ForeignProposalInvalid { block_id }) if block_id == *foreign_proposal.block_id()
+                ),
+                "unexpected no_vote_reason: {:?}",
+                decision.no_vote_reason
+            );
+        }
+
+        #[test]
+        fn a_foreign_proposal_command_with_mismatched_shard_group_is_rejected() {
+            let mut fixture = VoterFixture::new();
+            let foreign_proposal = foreign_proposal_record();
+            fixture.store.with_write_tx(|tx| foreign_proposal.save(tx)).unwrap();
+
+            let forged_shard_group = ShardGroup::new(128, 255);
+            assert_ne!(forged_shard_group, foreign_proposal.shard_group_unchecked());
+            let mut atom = foreign_proposal.to_atom();
+            atom.shard_group = forged_shard_group;
+            let commands = BlockCommands::init([Command::ForeignProposal(atom)]).unwrap();
+            let block = fixture.make_block(
+                &fixture.genesis,
+                &fixture.genesis,
+                NodeHeight(1),
+                commands,
+                FixedHash::zero(),
+                10,
+            );
+            let decision = fixture.handle_block(&block);
+            assert!(decision.local_decision.is_none());
+            assert!(
+                matches!(
+                    decision.no_vote_reason,
+                    Some(NoVoteReason::ForeignProposalShardGroupMismatch { block_id, atom, actual })
+                        if block_id == *foreign_proposal.block_id()
+                            && atom == forged_shard_group
+                            && actual == foreign_proposal.shard_group_unchecked()
+                ),
+                "unexpected no_vote_reason: {:?}",
+                decision.no_vote_reason
+            );
+        }
+    }
+
+    mod check_foreign_proposal_record {
+        use tari_common_types::types::CompressedPublicKey;
+        use tari_ootle_storage::consensus_models::{
+            BlockHeaderMetadata,
+            BlockPledge,
+            CommandOrHash,
+            CommandsCommitProof,
+            ForeignProposal,
+            ForeignProposalAtom,
+            ForeignProposalRecord,
+            ForeignProposalStatus,
+            PrunedCommand,
+        };
+        use tari_sidechain::{FixedHash, SidechainBlockCommitProof, SidechainBlockHeader};
+
+        use super::*;
+
+        fn make_record(
+            shard_group: ShardGroup,
+            commands: Vec<CommandOrHash>,
+            status: ForeignProposalStatus,
+        ) -> ForeignProposalRecord {
+            let commit_proof = CommandsCommitProof::new_latest(commands, SidechainBlockCommitProof {
+                header: SidechainBlockHeader {
+                    network: 0,
+                    protocol_version: 0,
+                    parent_id: Default::default(),
+                    justify_id: Default::default(),
+                    height: 1,
+                    epoch: 1,
+                    epoch_hash: Default::default(),
+                    shard_group: tari_sidechain::ShardGroup {
+                        start: shard_group.start().as_u32(),
+                        end_inclusive: shard_group.end().as_u32(),
+                    },
+                    proposed_by: CompressedPublicKey::default(),
+                    state_merkle_root: Default::default(),
+                    command_merkle_root: Default::default(),
+                    transaction_merkle_root: Default::default(),
+                    signature: Default::default(),
+                    accumulated_data: Default::default(),
+                    metadata_hash: Default::default(),
+                },
+                proof_elements: vec![],
+            });
+            let proposal = ForeignProposal::new(commit_proof, BlockPledge::default(), BlockHeaderMetadata {
+                total_leader_fee: 0,
+                timestamp: 0,
+                extra_data: Default::default(),
+                timeout_certificate_id: None,
+                is_dummy: false,
+            });
+            let block_id = proposal.calculate_block_id();
+            ForeignProposalRecord::load(block_id, proposal, None, status)
+        }
+
+        #[test]
+        fn rejects_invalid_or_confirmed_or_mismatched_shard_group_or_empty_commands() {
+            let sg_a = ShardGroup::new(0, 63);
+            let sg_b = ShardGroup::new(64, 127);
+            let non_empty_cmds = vec![CommandOrHash::Pruned(PrunedCommand {
+                hash: FixedHash::from([1u8; 32]),
+                full_command_shard_groups: vec![],
+            })];
+
+            let valid_rec = make_record(sg_a, non_empty_cmds.clone(), ForeignProposalStatus::New);
+            let atom = ForeignProposalAtom {
+                block_id: *valid_rec.block_id(),
+                shard_group: sg_a,
+            };
+            assert!(check_foreign_proposal_record(&atom, &valid_rec).is_none());
+
+            let invalid_rec = make_record(sg_a, non_empty_cmds.clone(), ForeignProposalStatus::Invalid);
+            assert!(matches!(
+                check_foreign_proposal_record(&atom, &invalid_rec),
+                Some(NoVoteReason::ForeignProposalInvalid { .. })
+            ));
+
+            let confirmed_rec = make_record(sg_a, non_empty_cmds.clone(), ForeignProposalStatus::Confirmed);
+            assert!(matches!(
+                check_foreign_proposal_record(&atom, &confirmed_rec),
+                Some(NoVoteReason::ForeignProposalAlreadyConfirmed)
+            ));
+
+            let wrong_sg_atom = ForeignProposalAtom {
+                block_id: *valid_rec.block_id(),
+                shard_group: sg_b,
+            };
+            assert!(matches!(
+                check_foreign_proposal_record(&wrong_sg_atom, &valid_rec),
+                Some(NoVoteReason::ForeignProposalShardGroupMismatch { .. })
+            ));
+
+            let empty_cmds_rec = make_record(sg_a, vec![], ForeignProposalStatus::New);
+            assert!(matches!(
+                check_foreign_proposal_record(&atom, &empty_cmds_rec),
+                Some(NoVoteReason::ForeignProposalProcessingFailed)
+            ));
         }
     }
 }

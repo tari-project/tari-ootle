@@ -55,7 +55,7 @@ use tari_ootle_storage::{
     verify_substate_down_proof_against_roots,
     verify_substate_value_proof_against_root,
 };
-use tari_sidechain::FixedHash;
+use tari_sidechain::{FixedHash, hashing::tari_consensus_hasher};
 use tari_validator_node_rpc::client::{
     SubstateBatch,
     SubstateProofData,
@@ -83,15 +83,12 @@ pub const DEFAULT_CACHE_TTL: Duration = Duration::from_secs(900);
 /// caller feels as an absence: a substate it is waiting for stays missing until this expires.
 pub const DEFAULT_NEGATIVE_CACHE_TTL: Duration = Duration::from_secs(60);
 
-/// A store of committee-validated shard-group state merkle roots that the read path consults to
-/// avoid re-validating a served commit proof's QC chain when its root is already trusted.
+/// A store of committee-validated shard-group tips, keyed by `state_merkle_root` scoped by
+/// `(epoch, shard_group)`, that the read path consults for how recent an anchor is.
 ///
-/// The trust decision is keyed on the 32-byte `state_merkle_root` scoped by `(epoch, shard_group)`:
-/// a node cannot produce a substate value proof that verifies against a root a quorum already
-/// signed, so reusing such a root is exactly as sound as re-validating the commit proof.
-///
-/// The heights of the recorded tips are also what bounds how old an anchor may be: see
-/// [`ANCHOR_HEIGHT_TOLERANCE`].
+/// A recorded root is only as recent as the block it was recorded at, and the heights of the
+/// recorded tips bound how old an anchor may be: see [`ANCHOR_HEIGHT_TOLERANCE`]. A served commit
+/// proof is validated whether or not its root is recorded, since it is cached and served with the read.
 #[async_trait]
 pub trait TrustedRootStore: std::fmt::Debug + Send + Sync + 'static {
     /// The height of the block `root` was recorded at, if `root` is a recorded, committee-validated state merkle
@@ -106,7 +103,7 @@ pub trait TrustedRootStore: std::fmt::Debug + Send + Sync + 'static {
     /// The height of the highest tip recorded at `epoch` for any shard group overlapping `shard_group`.
     async fn latest_height(&self, epoch: Epoch, shard_group: ShardGroup) -> Result<Option<NodeHeight>, IndexerError>;
 
-    /// Records a newly committee-validated tip so subsequent reads at this root hit the fast path.
+    /// Records a newly committee-validated tip.
     async fn record(&self, tip: VerifiedBlockTip) -> Result<(), IndexerError>;
 }
 
@@ -217,16 +214,15 @@ pub struct CachedSubstateManager<TEpochManager, TVnClient, TSubstateCache> {
     /// shard group committee, or they are rejected (fail-closed). The negative `DoesNotExist` case
     /// is not provable and is left to the existing f+1 agreement.
     verify_substate_proofs: bool,
-    /// When set, lets a read skip re-validating a served commit proof whose root is already trusted,
-    /// and is warmed with newly-validated roots. See [`TrustedRootStore`].
+    /// When set, bounds how old an anchor may be to prove a read, and is warmed with newly-validated
+    /// roots. See [`TrustedRootStore`].
     trusted_root_store: Option<Arc<dyn TrustedRootStore>>,
     /// Whether this manager writes what it fetches into the substate cache. A manager that does not verify proofs
     /// must not write into a cache that a verifying manager shares, or its unverified results would be served as
     /// that manager's.
     cache_writes: bool,
-    /// Tips of commit proofs this manager validated, by the block they commit. A block id is the hash of the header
-    /// the committee signed, so a later commit proof of the same block yields the same tip. Bounded by
-    /// [`VALIDATED_TIP_MEMO_SIZE`].
+    /// Tips of commit proofs this manager validated, by [`validated_tip_memo_key`] of their encoding, so that serving
+    /// the same bytes again costs no validation. Bounded by [`VALIDATED_TIP_MEMO_SIZE`].
     validated_tips: Arc<std::sync::Mutex<HashMap<FixedHash, VerifiedBlockTip>>>,
     /// The network's preshard count, from its consensus constants: it maps a substate to its shard, both to route a
     /// read and to check that a proof is anchored to a root whose shard group holds the substate.
@@ -288,8 +284,8 @@ where
         self
     }
 
-    /// Sets the trusted-root store used to skip commit-proof re-validation on a store hit (and warmed
-    /// on a miss). Only meaningful together with [`Self::with_substate_proof_verification`].
+    /// Sets the trusted-root store that bounds how old an anchor may be, warmed with every newly validated
+    /// tip. Only meaningful together with [`Self::with_substate_proof_verification`].
     pub fn with_trusted_root_store(mut self, store: Arc<dyn TrustedRootStore>) -> Self {
         self.trusted_root_store = Some(store);
         self
@@ -1275,6 +1271,9 @@ where
     /// A value proof against the root shows what was live at its block, so the root answers a read
     /// only while that block is recent. `None` when it is not: see [`Self::anchor_epoch_is_live`] and
     /// [`Self::anchor_height_is_recent`].
+    ///
+    /// The commit proof is validated even when its root is already trusted: it is cached and served with the read, and
+    /// a client that verifies it trusts only what its signatures commit.
     async fn trusted_root_from_commit_proof(
         &self,
         commit_proof: &[u8],
@@ -1294,25 +1293,13 @@ where
             return Ok(None);
         }
 
-        // Fast path: if this exact (epoch, shard_group, root) was already committee-validated and
-        // recorded in the trusted-root store, skip re-validating the commit proof's QC chain (and the
-        // committee lookup). A node cannot forge a value proof that verifies against a root a quorum
-        // already signed, so this is as sound as the full path. The header's height is not what the
-        // committee signed here, so the root is as recent as the block it was recorded at.
+        // A root recorded earlier is only as recent as the block it was recorded at, even when a later block cites it.
         let recorded_height = match &self.trusted_root_store {
             Some(store) => store.trusted_root_height(epoch, shard_group, root).await?,
             None => None,
         };
-        let height = match recorded_height {
-            Some(height) => {
-                debug!(
-                    target: LOG_TARGET,
-                    "trusted-root HIT at epoch {epoch} {shard_group}: skipped commit-proof validation"
-                );
-                height
-            },
-            None => self.validated_tip_from_commit_proof(commit_proof_bytes).await?.height,
-        };
+        let validated_height = self.validated_tip_from_commit_proof(commit_proof_bytes).await?.height;
+        let height = recorded_height.map_or(validated_height, |recorded| recorded.min(validated_height));
 
         if !self.anchor_height_is_recent(epoch, shard_group, height).await? {
             debug!(
@@ -1371,11 +1358,11 @@ where
     /// Validates `commit_proof` against its shard group committee, so that every field of the returned tip, its height
     /// included, is one the committee signed. Records the tip in the trusted-root store.
     async fn validated_tip_from_commit_proof(&self, commit_proof: &[u8]) -> Result<VerifiedBlockTip, IndexerError> {
-        let commit_proof = decode_commit_proof(commit_proof)?;
-        let block_id = commit_proof.block_id();
-        if let Some(tip) = self.remembered_tip(&block_id) {
+        let memo_key = validated_tip_memo_key(commit_proof);
+        if let Some(tip) = self.remembered_tip(&memo_key) {
             return Ok(tip);
         }
+        let commit_proof = decode_commit_proof(commit_proof)?;
         let epoch = commit_proof.epoch();
         let shard_group = commit_proof
             .shard_group()
@@ -1390,13 +1377,13 @@ where
             .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
         debug!(
             target: LOG_TARGET,
-            "trusted-root MISS at epoch {epoch} {shard_group}: validated commit proof"
+            "Validated commit proof at epoch {epoch} {shard_group}"
         );
 
-        self.remember_tip(block_id, verified_tip);
+        self.remember_tip(memo_key, verified_tip);
 
-        // Warm the store so subsequent reads at this tip hit the fast path. A write that fails or
-        // stalls must neither fail nor hold up an otherwise-verified read.
+        // Warm the store so later reads know how recent this root is. A write that fails or stalls
+        // must neither fail nor hold up an otherwise-verified read.
         if let Some(store) = &self.trusted_root_store {
             let trusted = store
                 .trusted_root_height(epoch, shard_group, verified_tip.state_merkle_root)
@@ -1420,15 +1407,15 @@ where
         Ok(verified_tip)
     }
 
-    fn remembered_tip(&self, block_id: &FixedHash) -> Option<VerifiedBlockTip> {
+    fn remembered_tip(&self, memo_key: &FixedHash) -> Option<VerifiedBlockTip> {
         self.validated_tips
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(block_id)
+            .get(memo_key)
             .copied()
     }
 
-    fn remember_tip(&self, block_id: FixedHash, tip: VerifiedBlockTip) {
+    fn remember_tip(&self, memo_key: FixedHash, tip: VerifiedBlockTip) {
         let mut tips = self
             .validated_tips
             .lock()
@@ -1436,8 +1423,18 @@ where
         if tips.len() >= VALIDATED_TIP_MEMO_SIZE {
             tips.clear();
         }
-        tips.insert(block_id, tip);
+        tips.insert(memo_key, tip);
     }
+}
+
+/// The key of a validated commit proof in the memo: a hash of its whole encoding, so that a hit vouches for exactly the
+/// bytes that were validated, certificates included.
+fn validated_tip_memo_key(commit_proof: &[u8]) -> FixedHash {
+    FixedHash::new(
+        tari_consensus_hasher("IndexerValidatedCommitProof")
+            .chain(commit_proof)
+            .finalize_into_array(),
+    )
 }
 
 fn decode_commit_proof(commit_proof: &[u8]) -> Result<CommittedBlockProof, IndexerError> {
@@ -1509,6 +1506,17 @@ mod tests {
         up_with_proof: HashMap<SubstateId, (EncodedSubstate, SubstateProofData)>,
         /// Member-specific responses: if (member, substate_id) matches, return this response.
         member_responses: HashMap<(Addr, SubstateId), SubstateResult>,
+        /// The proof a member serves on a proven read in place of the one `down_with_proof` or `up_with_proof` holds.
+        member_proofs: HashMap<Addr, SubstateProofData>,
+    }
+
+    impl FakeNetwork {
+        fn proof_served_by(&self, member: Option<&Addr>, proof: &SubstateProofData) -> SubstateProofData {
+            member
+                .and_then(|member| self.member_proofs.get(member))
+                .unwrap_or(proof)
+                .clone()
+        }
     }
 
     #[derive(Clone)]
@@ -1577,14 +1585,17 @@ mod tests {
                 )));
             }
             if let Some((version, proof)) = self.0.down_with_proof.get(substate_req.substate_id()) {
-                return Ok((SubstateResult::Down { version: *version }, Some(proof.clone())));
+                return Ok((
+                    SubstateResult::Down { version: *version },
+                    Some(self.0.proof_served_by(self.1.as_ref(), proof)),
+                ));
             }
             if let Some((substate, proof)) = self.0.up_with_proof.get(substate_req.substate_id()) {
                 return Ok((
                     SubstateResult::Up {
                         substate: substate.clone(),
                     },
-                    Some(proof.clone()),
+                    Some(self.0.proof_served_by(self.1.as_ref(), proof)),
                 ));
             }
             Ok((self.get_substate(substate_req).await?, None))
@@ -1998,6 +2009,13 @@ mod tests {
             proof_elements: vec![],
         })
         .to_bytes()
+    }
+
+    /// `commit_proof` with its certificates removed: the header of the block it names, which no signature commits.
+    fn stripped(commit_proof: &[u8]) -> Vec<u8> {
+        let mut proof = CommittedBlockProof::from_bytes(commit_proof).unwrap().into_proof();
+        proof.proof_elements.clear();
+        CommittedBlockProof::new(proof).to_bytes()
     }
 
     /// A commit proof of `root` at `height`, its block committed by a 3-chain of certificates each signed by `signers`,
@@ -2549,6 +2567,93 @@ mod tests {
         }
         // One lookup for each of the two commit proofs a down proof cites.
         assert_eq!(lookups.load(Ordering::Relaxed), 2);
+    }
+
+    /// A validated commit proof vouches only for its own bytes. A copy of it stripped of its certificates, as the
+    /// anchor of a down proof or nested in it, disqualifies the member serving it, and a read settles on a member whose
+    /// proof is signed.
+    #[tokio::test]
+    async fn a_stripped_copy_of_a_validated_commit_proof_disqualifies_its_member() {
+        use tari_crypto::tari_utilities::ByteArray;
+
+        let keys = (1..=4)
+            .map(tari_ootle_common_types::crypto::create_key_pair_from_seed)
+            .collect::<Vec<_>>();
+        let committee = Committee::new(
+            keys.iter()
+                .enumerate()
+                .map(|(i, (_, public))| CommitteeMember {
+                    address: format!("vn{i}"),
+                    public_key: RistrettoPublicKeyBytes::from_bytes(public.as_bytes()).unwrap(),
+                    vote_power: VotePower::of(1),
+                })
+                .collect(),
+        );
+        let signers = keys[..3].iter().map(|(secret, _)| secret.clone()).collect::<Vec<_>>();
+        let (id, down_proof, _, r2_root) = global_down_proof_signed_by(group(1, 2), &committee, &signers);
+        let honest = SubstateProofData {
+            substate_value_proof: vec![],
+            commit_proof: signed_commit_proof(group(1, 2), 4, r2_root, &committee, &signers),
+            proof_epoch: 0,
+            substate_down_proof: Some(down_proof.clone()),
+            destroyed_at_state_version: Some(2),
+        };
+        let mut nested: tari_state_tree::SubstateDownProof = tari_bor::serde_codec::from_slice(&down_proof).unwrap();
+        nested.up_commit_proof = stripped(&nested.up_commit_proof);
+        let stripped_anchor = SubstateProofData {
+            commit_proof: stripped(&honest.commit_proof),
+            ..honest.clone()
+        };
+        let stripped_nested = SubstateProofData {
+            substate_down_proof: Some(tari_bor::serde_codec::to_vec(&nested).unwrap()),
+            ..honest.clone()
+        };
+
+        let (mut manager, _) = manager(FakeNetwork {
+            down_with_proof: [(id.clone(), (SubstateVersion::ZERO, honest.clone()))].into(),
+            member_proofs: [
+                ("vn1".to_string(), stripped_anchor),
+                ("vn2".to_string(), stripped_nested),
+            ]
+            .into(),
+            ..Default::default()
+        });
+        manager.committee_provider.0 = Arc::new(committee);
+        let manager = manager.with_substate_proof_verification(true);
+        let is_honest = |proof: &SubstateProofData| {
+            proof.commit_proof == honest.commit_proof && proof.substate_down_proof == honest.substate_down_proof
+        };
+
+        let (_, proof) = manager
+            .get_substate_from_vn(
+                &"vn0".to_string(),
+                SubstateRequirementRef::new(&id, Some(SubstateVersion::ZERO)),
+            )
+            .await
+            .unwrap();
+        assert!(proof.is_some_and(|proof| is_honest(&proof)));
+        for member in ["vn1", "vn2"] {
+            let result = manager
+                .get_substate_from_vn(
+                    &member.to_string(),
+                    SubstateRequirementRef::new(&id, Some(SubstateVersion::ZERO)),
+                )
+                .await;
+            assert!(
+                matches!(result, Err(IndexerError::SubstateProofVerificationFailed { .. })),
+                "{member}: {result:?}"
+            );
+        }
+
+        // Members are raced in random order, so repeat to put a stripped one first.
+        for _ in 0..16 {
+            let lookup = manager
+                .get_substate_with_proof(&id, Some(SubstateVersion::ZERO))
+                .await
+                .unwrap();
+            assert!(lookup.verified);
+            assert!(lookup.proof.is_some_and(|proof| is_honest(&proof)));
+        }
     }
 
     /// A head read cannot be settled by a down proof, so its down proof is not checked: an invalid one is an unproven
@@ -3295,6 +3400,21 @@ mod tests {
         SubstateId,
         CachedSubstateManager<FakeEpochManager, FakeClient, FakeCache>,
     ) {
+        anchored_up_setup_with_members(current_epoch, anchor_height, recorded, serve, |_, _| HashMap::new())
+    }
+
+    /// As [`anchored_up_setup_serving`], with the members `member_proofs` names serving the proofs it gives for them,
+    /// given the honest proof and its anchor's root, in its place.
+    fn anchored_up_setup_with_members(
+        current_epoch: Epoch,
+        anchor_height: u64,
+        recorded: impl FnOnce(FixedHash) -> Vec<(Epoch, ShardGroup, u64, FixedHash)>,
+        serve: impl FnOnce(EncodedSubstate) -> EncodedSubstate,
+        member_proofs: impl FnOnce(&SubstateProofData, tari_state_tree::TreeHash) -> HashMap<Addr, SubstateProofData>,
+    ) -> (
+        SubstateId,
+        CachedSubstateManager<FakeEpochManager, FakeClient, FakeCache>,
+    ) {
         use tari_crypto::tari_utilities::ByteArray;
 
         let keys = (1..=4)
@@ -3315,18 +3435,17 @@ mod tests {
         let id = component_id(1);
         let (substate, value_proof, root) = proven_up(&id);
         let commit_proof = signed_commit_proof(all_shards(), anchor_height, root, &committee, &signers);
+        let proof = SubstateProofData {
+            substate_value_proof: value_proof,
+            commit_proof,
+            proof_epoch: PROOF_EPOCH.as_u64(),
+            substate_down_proof: None,
+            destroyed_at_state_version: None,
+        };
+        let member_proofs = member_proofs(&proof, root);
         let (mut manager, _) = manager(FakeNetwork {
-            up_with_proof: [(
-                id.clone(),
-                (serve(encoded(substate)), SubstateProofData {
-                    substate_value_proof: value_proof,
-                    commit_proof,
-                    proof_epoch: PROOF_EPOCH.as_u64(),
-                    substate_down_proof: None,
-                    destroyed_at_state_version: None,
-                }),
-            )]
-            .into(),
+            up_with_proof: [(id.clone(), (serve(encoded(substate)), proof))].into(),
+            member_proofs,
             ..Default::default()
         });
         manager.committee_provider.0 = Arc::new(committee);
@@ -3502,6 +3621,61 @@ mod tests {
         assert!(proves_read(&manager, &id).await);
     }
 
+    /// A root the trusted-root store vouches for does not vouch for a commit proof citing it. One stripped of its
+    /// certificates, or one claiming a block its committee never signed, disqualifies the member serving it, whether
+    /// this manager validated the root or the store already held it, and the read is cached with a signed proof.
+    #[tokio::test]
+    async fn an_unsigned_commit_proof_of_a_trusted_root_disqualifies_its_member() {
+        for validated_first in [false, true] {
+            // Members are raced in random order, so repeat to put an unsigned one first.
+            for _ in 0..8 {
+                let mut honest_commit_proof = vec![];
+                let (id, manager) = anchored_up_setup_with_members(
+                    PROOF_EPOCH,
+                    4,
+                    |root| vec![(PROOF_EPOCH, all_shards(), 4, root)],
+                    |substate| substate,
+                    |honest, root| {
+                        honest_commit_proof.clone_from(&honest.commit_proof);
+                        [
+                            ("vn1".to_string(), SubstateProofData {
+                                commit_proof: stripped(&honest.commit_proof),
+                                ..honest.clone()
+                            }),
+                            ("vn2".to_string(), SubstateProofData {
+                                commit_proof: unsigned_commit_proof(all_shards(), 5, root),
+                                ..honest.clone()
+                            }),
+                        ]
+                        .into()
+                    },
+                );
+                if validated_first {
+                    assert!(proves_read(&manager, &id).await);
+                }
+                for member in ["vn1", "vn2"] {
+                    let result = manager
+                        .get_substate_from_vn(&member.to_string(), SubstateRequirementRef::new(&id, None))
+                        .await;
+                    assert!(
+                        matches!(result, Err(IndexerError::SubstateProofVerificationFailed { .. })),
+                        "{member}: {result:?}"
+                    );
+                }
+
+                let lookup = manager.get_substate_with_proof(&id, None).await.unwrap();
+                assert!(lookup.verified);
+                assert!(
+                    lookup
+                        .proof
+                        .is_some_and(|proof| proof.commit_proof == honest_commit_proof)
+                );
+                let cached = manager.read_live_proof(&id, SubstateVersion::ZERO).await.unwrap();
+                assert!(cached.is_some_and(|proof| proof.commit_proof == honest_commit_proof));
+            }
+        }
+    }
+
     /// A root the store vouches for is as old as the block it was recorded at, whatever height the header citing it
     /// claims.
     #[tokio::test]
@@ -3518,12 +3692,28 @@ mod tests {
     /// A batch anchored well behind the latest validated tip proves nothing, so its results are served unproven.
     #[tokio::test]
     async fn a_batch_anchored_far_behind_the_latest_validated_tip_is_unproven() {
+        use tari_crypto::tari_utilities::ByteArray;
+
+        let keys = (1..=4)
+            .map(tari_ootle_common_types::crypto::create_key_pair_from_seed)
+            .collect::<Vec<_>>();
+        let committee = Committee::new(
+            keys.iter()
+                .enumerate()
+                .map(|(i, (_, public))| CommitteeMember {
+                    address: format!("vn{i}"),
+                    public_key: RistrettoPublicKeyBytes::from_bytes(public.as_bytes()).unwrap(),
+                    vote_power: VotePower::of(1),
+                })
+                .collect(),
+        );
+        let signers = keys[..3].iter().map(|(secret, _)| secret.clone()).collect::<Vec<_>>();
         for (latest_height, proven) in [(100, false), (10, true)] {
             let id = component_id(1);
             let (substate, value_proof, root) = proven_up(&id);
-            let (manager, _) = manager(FakeNetwork {
+            let (mut manager, _) = manager(FakeNetwork {
                 proven_batch: Some(SubstateBatch {
-                    commit_proof: Some(unsigned_commit_proof(all_shards(), 4, root)),
+                    commit_proof: Some(signed_commit_proof(all_shards(), 4, root, &committee, &signers)),
                     substates: vec![tari_validator_node_rpc::client::BatchedSubstate {
                         substate_id: id.clone(),
                         result: SubstateResult::Up {
@@ -3536,7 +3726,7 @@ mod tests {
                 }),
                 ..Default::default()
             });
-            // The unsigned anchor's root is recorded, standing in for a validated one.
+            manager.committee_provider.0 = Arc::new(committee.clone());
             let store = RecordedTips::with([
                 (PROOF_EPOCH, all_shards(), 4, FixedHash::new(root.into_array())),
                 (PROOF_EPOCH, all_shards(), latest_height, NEWER_ROOT),

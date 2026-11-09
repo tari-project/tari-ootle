@@ -9,6 +9,7 @@ use tokio::process::Command;
 
 use crate::process_definitions::{
     ARGS_SETTINGS_KEY,
+    CLAIM_KEY_FILE_NAME,
     ProcessContext,
     ProcessDefinition,
     wallet_daemon,
@@ -28,7 +29,7 @@ impl WalletDaemonCreateAccount {
 impl ProcessDefinition for WalletDaemonCreateAccount {
     async fn get_command(&self, context: ProcessContext<'_>) -> anyhow::Result<Command> {
         let mut command = Command::new(context.bin());
-        let output_path = context.processes_path().join("claim_key.json");
+        let output_path = context.processes_path().join(CLAIM_KEY_FILE_NAME);
 
         command
             .envs(context.environment())

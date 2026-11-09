@@ -457,12 +457,7 @@ pub fn check_quorum_certificate_signatures<TConsensusSpec: ConsensusSpec>(
     // QC that justifies it is exempt from quorum/signature validation. Only a `ProposalCertificate` in
     // canonical genesis shape (height zero, zero parent, zero header hash) qualifies for the exemption;
     // everything else - including a `TimeoutCertificate` - falls through to the checks below.
-    if let Some(pc) = qc.as_proposal_certificate() &&
-        pc.height().is_zero() &&
-        *pc.signatures() == ProposalCertificate::genesis_signatures() &&
-        pc.justifies_zero_block() &&
-        pc.parent_id().is_zero()
-    {
+    if qc.as_proposal_certificate().is_some_and(|pc| pc.justifies_zero_block()) {
         return Ok(());
     }
 

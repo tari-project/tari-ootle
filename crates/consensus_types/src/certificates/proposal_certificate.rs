@@ -104,10 +104,13 @@ impl ProposalCertificate {
 }
 
 impl ProposalCertificate {
+    /// Returns `true` if this certificate has the canonical genesis shape that justifies an epoch's zero block
+    /// (`height == 0`, `parent_id.is_zero()`, `header_hash == FixedHash::zero()`, `signatures == genesis_signatures()`,
+    /// and `decision.is_accept()`).
     pub fn justifies_zero_block(&self) -> bool {
         self.height.is_zero() &&
             self.parent_id.is_zero() &&
-            self.header_hash.as_slice().iter().all(|b| *b == 0) &&
+            self.header_hash == FixedHash::zero() &&
             self.signatures == Self::genesis_signatures() &&
             self.decision.is_accept()
     }
@@ -225,5 +228,20 @@ mod tests {
             QuorumDecision::Reject,
         );
         assert!(!reject.justifies_zero_block());
+
+        // Non-empty signer bitmap / signatures with zero header_hash, height, and parent_id is not a genesis certificate.
+        let non_empty_sigs = ProposalCertificate::new(
+            FixedHash::zero(),
+            BlockId::zero(),
+            NodeHeight::zero(),
+            Epoch(3),
+            shard_group(),
+            QcSignatures::Schnorr {
+                signers: SignerBitmap::from_bytes(&[1u8]).unwrap(),
+                signatures: vec![],
+            },
+            QuorumDecision::Accept,
+        );
+        assert!(!non_empty_sigs.justifies_zero_block());
     }
 }

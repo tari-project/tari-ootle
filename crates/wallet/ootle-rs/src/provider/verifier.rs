@@ -1275,14 +1275,16 @@ mod tests {
         }
 
         let (sets, indexer, provider) = walked_provider(IndexerTrust::Verify).await;
-        serve_proven(&sets, &indexer, &account.into(), account_component(&[vault]));
+        let vault2 = VaultId::from_hex(&"55".repeat(32)).unwrap();
+        serve_proven(&sets, &indexer, &account.into(), account_component(&[vault, vault2]));
         serve_proven(&sets, &indexer, &vault.into(), tari_vault(100));
+        serve_proven(&sets, &indexer, &vault2.into(), tari_vault(250));
         assert_eq!(
             provider.get_account_balance(account, TARI_TOKEN).await.unwrap(),
-            Amount::from(100u64)
+            Amount::from(350u64)
         );
         let balances = provider.get_account_balances(account).await.unwrap();
-        assert_eq!(balances, HashMap::from([(TARI_TOKEN, Amount::from(100u64))]));
+        assert_eq!(balances, HashMap::from([(TARI_TOKEN, Amount::from(350u64))]));
     }
 
     #[tokio::test]

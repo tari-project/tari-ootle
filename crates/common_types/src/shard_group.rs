@@ -12,6 +12,7 @@ use std::{
 use borsh::BorshSerialize;
 use minicbor::{CborLen, Decode, Decoder, Encode, decode};
 use serde::{Deserialize, Deserializer, Serialize};
+use tari_engine_types::SubstateVersion;
 
 use crate::{NumPreshards, SubstateAddress, shard::Shard, uint::U256};
 
@@ -207,7 +208,10 @@ impl ShardGroup {
         let end = if end_shard == num_shards {
             SubstateAddress::max()
         } else {
-            SubstateAddress::from_u256_zero_version(U256::from(end_shard) * shard_size - U256::ONE)
+            SubstateAddress::from_u256(
+                U256::from(end_shard) * shard_size - U256::ONE,
+                SubstateVersion::new(u64::MAX),
+            )
         };
         SubstateAddress::from_u256_zero_version(start)..=end
     }
@@ -318,6 +322,13 @@ mod tests {
         let range = sg.to_substate_address_range(NumPreshards::P64);
         assert_eq!(*range.start(), SubstateAddress::zero());
         assert_eq!(*range.end(), SubstateAddress::max());
+
+        let non_final_sg = ShardGroup::new(1, 32);
+        let non_final_range = non_final_sg.to_substate_address_range(NumPreshards::P64);
+        let upper_key = non_final_range.end().to_u256();
+        let addr_v10 = SubstateAddress::from_u256(upper_key, SubstateVersion::new(10));
+        assert!(non_final_sg.contains(&addr_v10.to_shard(NumPreshards::P64)));
+        assert!(non_final_range.contains(&addr_v10));
     }
 
     #[test]

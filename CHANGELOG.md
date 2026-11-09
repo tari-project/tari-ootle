@@ -3,6 +3,37 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.52.0](https://github.com/tari-project/tari-ootle/compare/v0.51.0...v0.52.0) (2026-11-09)
+
+An L1 burn claim now yields a bucket of revealed TARI, so a burn can no longer be made unclaimable
+by occupying its UTXO address, and consensus certificate and command list checks tighten.
+
+### ⚠️ Upgrade notes
+
+- **Validators, indexers and wallets upgrade together.** A claim transaction built by a 0.51 wallet
+  fails on the upgraded network, and the engine change takes effect with no activation epoch. No
+  reset. (#3633)
+- **`ClaimBurn` returns a bucket of `claim.value` revealed TARI** and no longer creates a stealth
+  UTXO at the burn commitment. The transaction must move the bucket on: the standard claim passes it
+  as the revealed input of a stealth transfer to the account. A claim that leaves the bucket in the
+  workspace is rejected. (#3633)
+- **App and SDK developers:**
+  - `Instruction::ClaimBurn` drops `output_data`, and `ClaimBurnOutputData` is removed;
+    `TransactionBuilder::claim_burn` takes only the proof.
+  - In `ootle-rs`, `ClaimBurn::new(provider, claim_proof, max_epoch)` drops `encrypted_data`.
+  - `BurnClaimKeyProvider` keeps only `derive_burn_claim_secret`.
+  - The TS bindings change to match. (#3633)
+
+### Bug fixes
+
+- **engine:** the party that makes an L1 burn can no longer block its claim by creating or
+  spending a UTXO at the burn commitment. (#3633)
+- **consensus:** a certificate justifies the zero block only in the canonical genesis shape, and a
+  stored foreign proposal's command list must be in block form, so it is the same whichever peer
+  relayed it. (#3470, #3626)
+- **consensus:** a failed in-place substate update leaves no orphan `Down` change, and version
+  overflow in the change log is an error instead of a panic. (#3472)
+
 ## [0.51.0](https://github.com/tari-project/tari-ootle/compare/v0.50.1...v0.51.0) (2026-11-09)
 
 Validators can restore their node identity from a seed phrase and must name a wallet key to claim

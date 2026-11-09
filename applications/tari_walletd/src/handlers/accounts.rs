@@ -763,11 +763,7 @@ fn build_claim_burn_transaction(
     is_dry_run: bool,
     input_pricing: &DeclaredInputPricing,
 ) -> Result<Transaction, anyhow::Error> {
-    // The claim reveals the burn's value in a bucket, so the claim is built from the proof alone
-    let ClaimBurnProofContents {
-        encrypted_data: _,
-        claim_proof,
-    } = proof_contents;
+    let ClaimBurnProofContents { claim_proof } = proof_contents;
 
     let account_owner_key_id = account
         .owner_key_id()
@@ -3933,8 +3929,7 @@ mod claim_burn_fee_tests {
     }
 
     /// An L1 burn of `value` made out to the test account, as the L1 wallet would produce it: a stealth
-    /// claim key derived from the account key, an ownership proof by the commitment's mask, and the
-    /// value and mask encrypted to the account.
+    /// claim key derived from the account key and an ownership proof by the commitment's mask.
     fn burn_to_account(test: &ClaimTest, value: u64) -> ClaimBurnProofContents {
         let crypto = test.sdk.stealth_crypto_api();
         let account_key = test
@@ -3948,9 +3943,6 @@ mod claim_burn_fee_tests {
 
         let mask = RistrettoSecretKey::random(&mut rand::rng());
         let commitment = commit_u64_amount(&mask, value).to_byte_type();
-        let encrypted_data = crypto
-            .encrypt_value_and_mask(value, &mask, &sender_offset_public_key, account_key.secret(), None)
-            .unwrap();
         let sidechain_id: Option<&[u8]> = None;
         let message = ownership_proof_hasher64(Network::LocalNet)
             .chain(&commitment.as_bytes())
@@ -3996,7 +3988,6 @@ mod claim_burn_fee_tests {
                     block_output_proof: mmr_proof(),
                 },
             },
-            encrypted_data,
         }
     }
 

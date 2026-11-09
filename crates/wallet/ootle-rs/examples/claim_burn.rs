@@ -20,7 +20,7 @@
 //! Burn tTARI on the L1 (minotari) wallet to that claim key (e.g. `create_burn_transaction` with
 //! `claim_public_key = <printed key>`). Once mined, fetch the proof (`get_burn_claim_proof`) and
 //! save it as JSON in the wallet daemon's `ClaimBurnProofContents` shape:
-//! `{ "claim_proof": { ... }, "encrypted_data": "..." }`. Then re-run with the proof file (this
+//! `{ "claim_proof": { ... } }`. Then re-run with the proof file (this
 //! step requires a running indexer):
 //!
 //! ```bash
@@ -49,8 +49,8 @@ use tari_ootle_transaction::Epoch;
 /// MicroTARI revealed from the claimed funds to pay the transaction fee.
 const MAX_FEE: u64 = 2000;
 
-/// The L2 burn proof contents, as produced for the burned output. This reads the claim proof out of the
-/// wallet daemon's `ClaimBurnProofContents` serde shape.
+/// The L2 burn proof contents, as produced for the burned output. This matches the wallet daemon's
+/// `ClaimBurnProofContents` serde shape.
 #[derive(serde::Deserialize)]
 struct BurnProofFile {
     claim_proof: MinotariBurnClaimProof,
@@ -80,7 +80,7 @@ async fn main() {
         println!("  1. Burn tTARI on the L1 (minotari) wallet to the claim public key above");
         println!("     (create_burn_transaction with claim_public_key = the key above).");
         println!("  2. Once mined, fetch the proof (get_burn_claim_proof) and save it as JSON:");
-        println!("       {{ \"claim_proof\": {{ ... }}, \"encrypted_data\": \"...\" }}");
+        println!("       {{ \"claim_proof\": {{ ... }} }}");
         println!("  3. Re-run with the proof file:");
         println!("       cargo run -p ootle-rs --example claim_burn -- ./burn_proof.json");
         return;

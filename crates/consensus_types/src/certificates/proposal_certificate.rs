@@ -237,7 +237,7 @@ mod tests {
             Epoch(3),
             shard_group(),
             QcSignatures::Schnorr {
-                signers: SignerBitmap::from_bytes(&[1u8]).unwrap(),
+                signers: SignerBitmap::from_bytes(vec![1]),
                 signatures: vec![],
             },
             QuorumDecision::Accept,

@@ -54,7 +54,7 @@ impl Runner {
             .up_iter()
             .filter_map(|(addr, _)| addr.as_vault_id())
             .find(|addr| *addr != fee_vault.id)
-            .ok_or_else(|| anyhow::anyhow!("Faucet Resource address not found"))?;
+            .ok_or_else(|| anyhow::anyhow!("Faucet Vault address not found"))?;
 
         info!("✅ Faucet {component_address} created with {resource_address} and {vault_address}");
 

@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_template_abi::rust::collections::HashMap;
+use tari_template_abi::rust::collections::BTreeMap;
 use tari_template_lib::prelude::*;
 
 #[template]
@@ -30,7 +30,7 @@ mod tariswap {
 
     // Constant product AMM
     pub struct TariSwapPool {
-        pools: HashMap<ResourceAddress, Vault>,
+        pools: BTreeMap<ResourceAddress, Vault>,
         lp_resource: ResourceAddress,
         fee: u16,
     }
@@ -49,7 +49,7 @@ mod tariswap {
             assert!(valid_fee_range.contains(&fee), "Invalid fee {}", fee);
 
             // create the vaults to store the funds
-            let mut pools = HashMap::new();
+            let mut pools = BTreeMap::new();
             pools.insert(a_addr, Vault::new_empty(a_addr));
             pools.insert(b_addr, Vault::new_empty(b_addr));
 
@@ -151,9 +151,11 @@ mod tariswap {
 
             // calculate the amount of tokens to take from each pool
             let decimals = Amount::from(1_000_000u64);
-            let lp_ratio = (lp_bucket.amount() * decimals) / (self.lp_total_supply() * decimals);
-            let a_amount = (lp_ratio.div_ceil(decimals)) * a_balance;
-            let b_amount = (lp_ratio.div_ceil(decimals)) * b_balance;
+            let lp_ratio = (lp_bucket.amount() * decimals)
+                .checked_div(self.lp_total_supply())
+                .expect("lp total supply is zero");
+            let a_amount = (lp_ratio * a_balance).div_ceil(decimals);
+            let b_amount = (lp_ratio * b_balance).div_ceil(decimals);
 
             // burn the LP tokens
             lp_bucket.burn();
@@ -172,8 +174,8 @@ mod tariswap {
             *self.pools.keys().nth(1).unwrap()
         }
 
-        pub fn get_pool_balances(&self) -> HashMap<ResourceAddress, Amount> {
-            let mut balances = HashMap::new();
+        pub fn get_pool_balances(&self) -> BTreeMap<ResourceAddress, Amount> {
+            let mut balances = BTreeMap::new();
 
             for (resource, vault) in &self.pools {
                 balances.insert(*resource, vault.balance());

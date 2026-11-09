@@ -1055,8 +1055,16 @@ where
                 .and_then(|conns| {
                     conns
                         .iter()
-                        .find(|c| c.connection_id == connection_id && c.endpoint.is_dialer())
-                        .or_else(|| conns.iter().find(|c| c.endpoint.is_dialer()))
+                        .find(|c| {
+                            c.connection_id == connection_id &&
+                                c.endpoint.is_dialer() &&
+                                !is_through_relay_address(c.endpoint.get_remote_address())
+                        })
+                        .or_else(|| {
+                            conns.iter().find(|c| {
+                                c.endpoint.is_dialer() && !is_through_relay_address(c.endpoint.get_remote_address())
+                            })
+                        })
                         .map(|c| c.endpoint.get_remote_address().clone())
                 })
                 .or_else(|| {

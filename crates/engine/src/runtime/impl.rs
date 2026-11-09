@@ -2804,7 +2804,7 @@ where
 
                     // Enforce confidential limits before the withdraw's proof crypto runs.
                     if let VaultWithdrawArg::Confidential { proof } = &arg {
-                        state.account_confidential_withdraw(proof)?;
+                        state.admit_confidential_withdraw(proof)?;
                     }
 
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
@@ -2942,10 +2942,10 @@ where
                 // inputs unspent. Fees are always paid in TARI.
                 let admitted_transfer = match arg.statement {
                     Some(statement) => {
-                        self.tracker.account_fee_intent_stealth_transfer()?;
+                        self.tracker.admit_fee_intent_stealth_transfer()?;
                         let admitted = self
                             .tracker
-                            .write_with(|state| state.account_stealth_transfer(statement))?;
+                            .write_with(|state| state.admit_stealth_transfer(statement))?;
                         // TARI has no view key, so the viewable-balance surcharge never applies to a fee payment.
                         self.tracker
                             .charge_native_execution(stealth::transfer_native_points(admitted.statement(), false))?;
@@ -3252,7 +3252,7 @@ where
                                 e
                             ),
                         })?;
-                    state.account_confidential_withdraw(&proof)?;
+                    state.admit_confidential_withdraw(&proof)?;
                     let bucket_mut = state.get_bucket_mut(bucket_id)?;
                     let (resource, effects) = bucket_mut.take_confidential(proof, view_key.as_ref())?;
                     let resource_address = *resource.resource_address();
@@ -4307,14 +4307,14 @@ where
         // The fee intent runs on free-compute credit, so the transfers it may perform are capped. Checked before any
         // resource read, charge or crypto so an over-cap fee intent is rejected up front. Both the `StealthTransfer`
         // instruction and a template's `ResourceManager::stealth_transfer` reach here, so neither route escapes it.
-        self.tracker.account_fee_intent_stealth_transfer()?;
+        self.tracker.admit_fee_intent_stealth_transfer()?;
 
         // The whole statement's native verification cost is charged against the payment-funded
         // allowance before any of it runs (the authorisation pass below included), so a transaction
         // that will not pay traps here without extracting the crypto work. The resource peek is a
         // cheap substate read that determines whether the viewable-balance surcharge applies.
         let (admitted, has_view_key) = self.tracker.write_with(|state| {
-            let admitted = state.account_stealth_transfer(statement)?;
+            let admitted = state.admit_stealth_transfer(statement)?;
             let resource_lock = state.read_lock_substate(SubstateId::Resource(address))?;
             let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
             state.unlock_substate(resource_lock)?;

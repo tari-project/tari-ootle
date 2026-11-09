@@ -210,14 +210,6 @@ fn basic_validations(transfer: &StealthTransferStatement) -> Result<(), Resource
 
     validate_covenant_claims(transfer)?;
 
-    if transfer.inputs_statement.revealed_amount.is_negative() {
-        return Err(ResourceError::InvalidBalanceProof {
-            details: format!(
-                "Revealed input amount must be non-negative: {}",
-                transfer.inputs_statement.revealed_amount
-            ),
-        });
-    }
     if let Some(revealed) = transfer.outputs_statement.revealed_output {
         // The presence of this field and the presence of a revealed bucket are the same fact, which holds only while
         // `None` is the sole encoding of "no revealed output".

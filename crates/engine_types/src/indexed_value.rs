@@ -620,6 +620,9 @@ fn get_value_by_path<'a>(value: &'a tari_bor::Value, path: &str) -> Option<&'a t
         if part == "$" {
             continue;
         }
+        while let tari_bor::Value::Tag(_, inner) = value {
+            value = inner;
+        }
         match value {
             tari_bor::Value::Map(map) => {
                 value = &map
@@ -754,6 +757,10 @@ mod tests {
         // TestStruct.sub_structs = #[n(5)], Vec index 1, then SubStruct.buckets = #[n(0)]
         let buckets: Vec<BucketId> = indexed.get_value("$.5.1.0").unwrap().unwrap();
         assert_eq!(buckets, vec![1.into(), 2.into()]);
+
+        // TestStruct.metadata = #[n(8)] (encoded as Value::Tag(BinaryTag::Metadata, Map)), key "owner"
+        let owner: ComponentAddress = indexed.get_value("$.8.owner").unwrap().unwrap();
+        assert_eq!(owner, addrs[0]);
     }
 
     /// An `Amount` above `u64::MAX` encodes as a CBOR bignum, which is a tagged value the indexer

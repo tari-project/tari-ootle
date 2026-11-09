@@ -239,6 +239,9 @@ pub fn parse_workspace_key(key: BuilderWorkspaceKey) -> Result<ParsedBuilderWork
     // Only support name.n format for now
     match key.split_once('.') {
         Some((name, offset)) => {
+            if name.is_empty() {
+                return Err(ParseWorkspaceKeyError::EmptyKey);
+            }
             let offset = offset
                 .parse::<usize>()
                 .map_err(|_| ParseWorkspaceKeyError::InvalidOffsetInteger)?;
@@ -299,5 +302,33 @@ mod tests {
         assert_eq!(args[0], NamedArg::workspace("ws"));
         assert_eq!(args[1], NamedArg::blob("data"));
         assert_eq!(args[2], NamedArg::literal(tari_bor::to_value(&42u64).unwrap()).unwrap());
+    }
+
+    #[test]
+    fn parse_workspace_key_rejects_empty_names_and_invalid_offsets() {
+        let parsed = parse_workspace_key("bucket.2".to_string()).unwrap();
+        assert_eq!(parsed.name, "bucket");
+        assert_eq!(parsed.offset, Some(2));
+
+        let parsed = parse_workspace_key("bucket".to_string()).unwrap();
+        assert_eq!(parsed.name, "bucket");
+        assert_eq!(parsed.offset, None);
+
+        assert!(matches!(
+            parse_workspace_key(String::new()),
+            Err(ParseWorkspaceKeyError::EmptyKey)
+        ));
+        assert!(matches!(
+            parse_workspace_key(".0".to_string()),
+            Err(ParseWorkspaceKeyError::EmptyKey)
+        ));
+        assert!(matches!(
+            parse_workspace_key("bucket.".to_string()),
+            Err(ParseWorkspaceKeyError::InvalidOffsetInteger)
+        ));
+        assert!(matches!(
+            parse_workspace_key("bucket.abc".to_string()),
+            Err(ParseWorkspaceKeyError::InvalidOffsetInteger)
+        ));
     }
 }

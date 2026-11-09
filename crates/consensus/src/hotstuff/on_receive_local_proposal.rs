@@ -63,7 +63,12 @@ use crate::{
     messages::{ForeignProposalNotificationMessage, HotstuffMessage, ProposalMessage, VoteMessage},
     tracing::TraceTimer,
     traits::{CertificateStore, ConsensusSpec, OutboundMessaging, ValidatorSignerService, hooks::ConsensusHooks},
-    validations::{authenticate_foreign_proposal, check_proposed_by_leader, is_authenticated_commit_proof_stored},
+    validations::{
+        are_block_foreign_proposals_matched,
+        authenticate_foreign_proposal,
+        check_proposed_by_leader,
+        is_authenticated_commit_proof_stored,
+    },
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_receive_local_proposal";
@@ -249,6 +254,19 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             // We do not trigger an immediate leader failure for an invalid block
             return Ok(None);
         };
+
+        if !self
+            .store
+            .with_read_tx(|tx| are_block_foreign_proposals_matched(tx, valid_block.block(), &foreign_proposals))?
+        {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️❌ Rejecting proposal for block {}: embedded foreign proposals do not match the block's \
+                 foreign proposal commands",
+                valid_block,
+            );
+            return Ok(None);
+        }
 
         if !self.are_foreign_proposals_authentic(&foreign_proposals).await? {
             // An unauthenticated proposal says nothing about its block id, so nothing is recorded against it, leaving
@@ -547,7 +565,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         }
 
         // If accepted, the changeset is already saved, otherwise we log everything here for debugging
-        if !process_result.block_decision.is_accept() {
+        if !change_set.is_accept() {
             change_set.log_everything_dropped();
         }
         // Clear and reuse the memory allocated for changeset
@@ -821,6 +839,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     genesis.as_last_executed().set(tx)?;
                     genesis.as_last_voted().set(tx)?;
                     genesis.justify().as_high_pc().set(tx)?;
+                    genesis.commit_block_without_state_changes(tx, &genesis.justify().calculate_id())?;
                 }
 
                 Ok::<_, HotStuffError>(())

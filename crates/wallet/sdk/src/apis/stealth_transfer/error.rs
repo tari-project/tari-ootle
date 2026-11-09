@@ -61,6 +61,13 @@ pub enum StealthTransferApiError {
 
 impl IsNotFoundError for StealthTransferApiError {
     fn is_not_found_error(&self) -> bool {
-        matches!(self, Self::StoreError(e) if e.is_not_found_error() )
+        matches!(self, Self::StoreError(e) if e.is_not_found_error()) ||
+            matches!(self, Self::OutputsApi(e) if e.is_not_found_error()) ||
+            matches!(self, Self::SubstateApi(e) if e.is_not_found_error()) ||
+            matches!(self, Self::KeyManagerApi(e) if e.is_not_found_error()) ||
+            matches!(self, Self::Accounts(e) if e.is_not_found_error()) ||
+            matches!(self, Self::ConfigApi(e) if e.is_not_found_error()) ||
+            matches!(self, Self::LocksApiError(e) if e.is_not_found_error()) ||
+            matches!(self, Self::BadgeVaultNotFound { .. })
     }
 }

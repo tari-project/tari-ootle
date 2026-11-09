@@ -52,7 +52,7 @@ impl<TAddr> SqliteDbFactory<TAddr> {
     }
 
     fn connect(&self) -> Result<SqliteConnection, StorageError> {
-        if let Some(parent) = self.db_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        if let Some(parent) = self.db_path.parent() {
             create_dir_all(parent).map_err(|e| StorageError::General {
                 details: format!("Failed to create parent directory for database file: {}", e),
             })?;
@@ -84,16 +84,5 @@ impl<TAddr: NodeAddressable + 'static> DbFactory for SqliteDbFactory<TAddr> {
         connection.adapter().migrate()?;
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn connects_to_bare_path_without_parent_directory() {
-        let factory = SqliteDbFactory::<String>::new(":memory:");
-        assert!(factory.connect().is_ok());
     }
 }

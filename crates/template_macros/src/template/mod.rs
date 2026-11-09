@@ -141,8 +141,9 @@ mod tests {
             }
         "#;
         let out = expand(src, TemplateOptions::default());
-        assert!(!out.contains("# [n (0)] # [cbor (n (7))]") && !out.contains("#[n(0)]"), "{out}");
-        assert!(out.contains("n(1)") || out.contains("n (1)"), "{out}");
+        // Injected tags are appended after existing attributes.
+        assert!(!out.contains("# [cbor (n (7))] # [n (0)]"), "{out}");
+        assert!(out.contains("# [cbor (encode_with = \"my_fn\")] # [n (1)]"), "{out}");
     }
 
     #[test]
@@ -165,8 +166,7 @@ mod tests {
         let out = expand(src, TemplateOptions::default());
         assert!(out.contains("(rtn . 0 ,)") || out.contains("(rtn.0,)"), "{out}");
         assert!(
-            out.contains("component_manager . get_state :: < (u32 , u64) >") ||
-                out.contains("get_state::<(u32, u64)>"),
+            out.contains("component_manager . get_state :: < (u32 , u64) >") || out.contains("get_state::<(u32, u64)>"),
             "{out}"
         );
     }

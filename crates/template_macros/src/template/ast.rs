@@ -374,19 +374,21 @@ fn has_explicit_cbor_index<'a, I: IntoIterator<Item = &'a syn::Attribute>>(attrs
         }
         if attr.path().is_ident("cbor") {
             let mut found = false;
-            let _ = attr.parse_nested_meta(|meta| {
-                if (meta.path.is_ident("n") || meta.path.is_ident("b")) &&
-                    meta.input.peek(syn::token::Paren)
-                {
-                    found = true;
-                }
+            // minicbor's derive reports malformed `cbor(..)` attributes, so a parse error here only
+            // stops the scan.
+            let _parse_result = attr.parse_nested_meta(|meta| {
                 if meta.input.peek(syn::token::Paren) {
+                    if meta.path.is_ident("n") || meta.path.is_ident("b") {
+                        found = true;
+                    }
                     let content;
                     syn::parenthesized!(content in meta.input);
-                    let _: proc_macro2::TokenStream = content.parse()?;
+                    content.parse::<proc_macro2::TokenStream>()?;
                 } else if meta.input.peek(syn::Token![=]) {
-                    let _: syn::Token![=] = meta.input.parse()?;
-                    let _: syn::Expr = meta.input.parse()?;
+                    meta.input.parse::<syn::Token![=]>()?;
+                    meta.input.parse::<syn::Expr>()?;
+                } else {
+                    // Flag item such as `skip` or `transparent`.
                 }
                 Ok(())
             });
@@ -574,6 +576,39 @@ impl Debug for TypeAst {
                 write!(f, "Tuple {{ name: {:?}, type_tuple: {:?} }}", name, type_tuple)
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod cbor_index_tests {
+    use syn::{Attribute, parse_quote};
+
+    use super::has_explicit_cbor_index;
+
+    fn detects(attr: Attribute) -> bool {
+        has_explicit_cbor_index([&attr])
+    }
+
+    #[test]
+    fn detects_bare_index_attributes() {
+        assert!(detects(parse_quote!(#[n(3)])));
+        assert!(detects(parse_quote!(#[b(3)])));
+    }
+
+    #[test]
+    fn detects_nested_cbor_index() {
+        assert!(detects(parse_quote!(#[cbor(n(7))])));
+        assert!(detects(parse_quote!(#[cbor(b(1))])));
+        assert!(detects(parse_quote!(#[cbor(with = "codec", n(2))])));
+    }
+
+    #[test]
+    fn ignores_cbor_attributes_without_an_index() {
+        assert!(!detects(parse_quote!(#[cbor(encode_with = "f")])));
+        assert!(!detects(parse_quote!(#[cbor(skip)])));
+        assert!(!detects(parse_quote!(#[cbor(tag(42))])));
+        // A bound string mentioning `Fn (..)` is a literal, not an index item.
+        assert!(!detects(parse_quote!(#[cbor(decode_bound = "T: Fn (u8)")])));
     }
 }
 

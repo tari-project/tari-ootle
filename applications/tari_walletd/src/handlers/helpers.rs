@@ -230,6 +230,24 @@ pub(super) fn validate_transaction_for_approval(
     network: Network,
     transaction: &UnsignedTransaction,
 ) -> Result<(), anyhow::Error> {
+    validate_transaction_for_network(network, transaction)?;
+
+    if transaction.is_dry_run() {
+        return Err(invalid_params(
+            "transaction.dry_run",
+            Some("a dry-run transaction cannot be committed, so this wallet never signs it"),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Checks a transaction's blob references resolve and its network byte is `network`. Dry runs and approvals share
+/// these rules.
+pub(super) fn validate_transaction_for_network(
+    network: Network,
+    transaction: &UnsignedTransaction,
+) -> Result<(), anyhow::Error> {
     transaction
         .validate_blob_references()
         .map_err(|e| invalid_params("transaction.blobs", Some(e.to_string())))?;
@@ -242,13 +260,6 @@ pub(super) fn validate_transaction_for_approval(
                 transaction.network(),
                 network.as_byte()
             )),
-        ));
-    }
-
-    if transaction.is_dry_run() {
-        return Err(invalid_params(
-            "transaction.dry_run",
-            Some("a dry-run transaction cannot be committed, so this wallet never signs it"),
         ));
     }
 

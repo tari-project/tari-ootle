@@ -18,7 +18,7 @@ use tari_ootle_transaction::{TRANSACTION_SIGNING_CONTEXT, TransactionMessage};
 use tari_ootle_wallet_crypto::{
     DecryptedData,
     StealthCryptoApi,
-    balance_proof::generate_stealth_balance_proof_signature,
+    balance_proof::{generate_stealth_balance_proof_signature, validate_balance_proof_signature},
     encrypted_data,
     kdfs,
 };
@@ -220,6 +220,8 @@ impl BurnClaimKeyProvider for LocalKeyProvider<OotleSecretKey> {
         &self,
         spec: BurnClaimStatementSpec,
     ) -> StealthResult<StealthTransferStatement> {
+        let total_output_amount =
+            Amount::from(spec.output.amount.get()) + spec.revealed_output.as_ref().map_or(Amount::zero(), |r| r.amount);
         let BurnClaimStatementSpec {
             commitment,
             encrypted_data,
@@ -251,6 +253,13 @@ impl BurnClaimKeyProvider for LocalKeyProvider<OotleSecretKey> {
             &outputs_statement,
             &covenant_claims,
         );
+
+        if !validate_balance_proof_signature(&balance_proof, &inputs_statement, &outputs_statement, &covenant_claims) {
+            return Err(StealthProviderError::UnbalancedBurnClaim {
+                burned_amount: Amount::from(u128::from(decrypted.value())),
+                output_amount: total_output_amount,
+            });
+        }
 
         Ok(StealthTransferStatement {
             inputs_statement,

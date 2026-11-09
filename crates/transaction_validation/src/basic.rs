@@ -33,6 +33,17 @@ impl Validator<Transaction> for BasicValidations {
             });
         }
 
+        if let Some(min_epoch) = transaction.min_epoch() {
+            let max_epoch = transaction.max_epoch();
+            if min_epoch > max_epoch {
+                warn!(
+                    target: LOG_TARGET,
+                    "BasicValidations - FAIL: min_epoch ({min_epoch}) > max_epoch ({max_epoch})"
+                );
+                return Err(TransactionValidationError::MinEpochGreaterThanMaxEpoch { min_epoch, max_epoch });
+            }
+        }
+
         if let Some(index) = transaction
             .fee_instructions()
             .iter()
@@ -164,5 +175,19 @@ mod tests {
                 .build_and_seal(&PrivateKey::from(1u64));
             BasicValidations::new().validate(&(), &tx).unwrap();
         }
+    }
+
+    #[test]
+    fn rejects_min_epoch_greater_than_max_epoch() {
+        let tx = Transaction::builder_localnet(Epoch(10))
+            .with_min_epoch(Some(Epoch(20)))
+            .pay_fee_from_component(account(), Amount::new(1000))
+            .build_and_seal(&PrivateKey::from(1u64));
+        let err = BasicValidations::new().validate(&(), &tx).unwrap_err();
+        assert!(matches!(err, TransactionValidationError::MinEpochGreaterThanMaxEpoch {
+            min_epoch: Epoch(20),
+            max_epoch: Epoch(10),
+        }));
+        assert!(err.is_sender_fault());
     }
 }

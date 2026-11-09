@@ -3,6 +3,7 @@
 
 use std::{
     collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
+    ops::Deref,
     time::{Duration, Instant},
 };
 
@@ -14,6 +15,7 @@ use tari_ootle_common_types::{Epoch, NodeAddressable, ShardGroup, committee::Com
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
+    StateStoreWriteTransaction,
     consensus_models::{
         Block,
         CommandOrHash,
@@ -117,29 +119,9 @@ where TConsensusSpec: ConsensusSpec
             return Ok(());
         }
 
-        let is_saved = self.store.with_write_tx(|tx| {
-            if let Err(err) = self.validate_and_save(tx, &proposal, local_committee_info) {
-                if err
-                    .validation_error()
-                    .is_some_and(|err| err.rejects_message_not_block())
-                {
-                    // Nothing is recorded against the block id, so another delivery of the block is still accepted. A
-                    // pending request for the block is retried with another member of the foreign committee when it
-                    // times out.
-                    warn!(target: LOG_TARGET, "⚠️ Discarding foreign proposal: {}", err);
-                    return Ok(false);
-                }
-                error!(target: LOG_TARGET, "❌ Error validating and saving foreign proposal: {}", err);
-                // Should not cause consensus to crash and should commit the Invalid proposal status
-                proposal.save(tx)?;
-                proposal.update_status(tx, ForeignProposalStatus::Invalid, None)?;
-                // TODO: reattempt from different node? and then abort on persistent failure
-                // If we miss a foreign proposal, we want to implement the ability to request it - so we could just rely
-                // on that functionality without doing anything extra here
-                return Ok(true);
-            }
-            Ok::<_, HotStuffError>(true)
-        })?;
+        let is_saved = self
+            .store
+            .with_write_tx(|tx| record_received_foreign_proposal(tx, &mut proposal, local_committee_info))?;
         if !is_saved {
             return Ok(());
         }
@@ -497,77 +479,144 @@ where TConsensusSpec: ConsensusSpec
         Ok(())
     }
 
-    pub fn validate_and_save(
+    pub fn validate_and_save<TTx>(
         &self,
-        tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
+        tx: &mut TTx,
         proposal: &ForeignProposalRecord,
         local_committee_info: &CommitteeInfo,
-    ) -> Result<(), HotStuffError> {
-        if let Err(err) = self.validate_foreign_proposal(proposal.proposal(), local_committee_info) {
-            // TODO: handle this case. Perhaps, by aborting all transactions that are affected by this block (we known
-            // the justify QC is valid)
-            warn!(
-                target: LOG_TARGET,
-                "⚠️❌ FOREIGN PROPOSAL: Invalid proposal: {}. Ignoring {}.",
-                err,
-                proposal,
-            );
-            return Err(err.into());
-        }
-
-        info!(
-            target: LOG_TARGET,
-            "🧩 Receive FOREIGN PROPOSAL {}",
-            proposal
-        );
-
-        proposal.save(tx)?;
-
-        Ok(())
-    }
-
-    fn validate_foreign_proposal(
-        &self,
-        proposal: &ForeignProposal,
-        local_committee_info: &CommitteeInfo,
-    ) -> Result<(), ProposalValidationError> {
-        // Callers authenticate the proposal against its committee with `check_foreign_proposal` before this runs.
-        // TODO: these should be in the validator helper module.
-        let epoch = local_committee_info.epoch();
-        let window = Epoch(FOREIGN_PROPOSAL_EPOCH_WINDOW);
-        let epoch_range = epoch.saturating_sub(window)..=epoch + window;
-
-        if !epoch_range.contains(&proposal.epoch()) {
-            warn!(
-                target: LOG_TARGET,
-                "⚠️ FOREIGN PROPOSAL: Invalid proposal epoch: {}. Current epoch: {}",
-                proposal.epoch(),
-                local_committee_info.epoch(),
-            );
-            return Err(ProposalValidationError::ForeignProposalInvalid {
-                block_id: proposal.calculate_block_id(),
-                shard_group: proposal.shard_group_unchecked(),
-                details: anyhow!(
-                    "Foreign node proposal epoch is not within range of the current epoch. Current epoch: {}, block \
-                     epoch: {}",
-                    local_committee_info.epoch(),
-                    proposal.epoch(),
-                ),
-            });
-        }
-
-        validate_foreign_proposal_contents(proposal, local_committee_info.shard_group())?;
-
-        Ok(())
+    ) -> Result<(), HotStuffError>
+    where
+        TTx: StateStoreWriteTransaction + Deref,
+        TTx::Target: StateStoreReadTransaction,
+    {
+        validate_and_save(tx, proposal, local_committee_info)
     }
 }
 
-/// Checks what the relayer of an authenticated foreign proposal chose to send for the local shard group: the pledges
-/// match the values the evidence commits to, and every command the local shard group needs is carried in full.
+/// Validates and stores a foreign proposal received in reply to a request, returning whether the block id now has a
+/// record. A proposal that fails on its block is recorded as `Invalid`; one whose message is at fault, or that is
+/// ahead of the local epoch, leaves no record so that another delivery is evaluated afresh.
+fn record_received_foreign_proposal<TTx>(
+    tx: &mut TTx,
+    proposal: &mut ForeignProposalRecord,
+    local_committee_info: &CommitteeInfo,
+) -> Result<bool, HotStuffError>
+where
+    TTx: StateStoreWriteTransaction + Deref,
+    TTx::Target: StateStoreReadTransaction,
+{
+    let Err(err) = validate_and_save(tx, proposal, local_committee_info) else {
+        return Ok(true);
+    };
+    if err
+        .validation_error()
+        .is_some_and(|err| err.rejects_message_not_block())
+    {
+        // Nothing is recorded against the block id, so another delivery of the block is still accepted. A pending
+        // request for the block is retried with another member of the foreign committee when it times out.
+        warn!(target: LOG_TARGET, "⚠️ Discarding foreign proposal: {}", err);
+        return Ok(false);
+    }
+    error!(target: LOG_TARGET, "❌ Error validating and saving foreign proposal: {}", err);
+    // Should not cause consensus to crash and should commit the Invalid proposal status
+    proposal.save(tx)?;
+    proposal.update_status(tx, ForeignProposalStatus::Invalid, None)?;
+    // TODO: reattempt from different node? and then abort on persistent failure
+    // If we miss a foreign proposal, we want to implement the ability to request it - so we could just rely
+    // on that functionality without doing anything extra here
+    Ok(true)
+}
+
+fn validate_and_save<TTx>(
+    tx: &mut TTx,
+    proposal: &ForeignProposalRecord,
+    local_committee_info: &CommitteeInfo,
+) -> Result<(), HotStuffError>
+where
+    TTx: StateStoreWriteTransaction + Deref,
+    TTx::Target: StateStoreReadTransaction,
+{
+    if let Err(err) = validate_foreign_proposal(proposal.proposal(), local_committee_info) {
+        // TODO: handle this case. Perhaps, by aborting all transactions that are affected by this block (we known
+        // the justify QC is valid)
+        warn!(
+            target: LOG_TARGET,
+            "⚠️❌ FOREIGN PROPOSAL: Invalid proposal: {}. Ignoring {}.",
+            err,
+            proposal,
+        );
+        return Err(err.into());
+    }
+
+    info!(
+        target: LOG_TARGET,
+        "🧩 Receive FOREIGN PROPOSAL {}",
+        proposal
+    );
+
+    proposal.save(tx)?;
+
+    Ok(())
+}
+
+fn validate_foreign_proposal(
+    proposal: &ForeignProposal,
+    local_committee_info: &CommitteeInfo,
+) -> Result<(), ProposalValidationError> {
+    // Callers authenticate the proposal against its committee with `check_foreign_proposal` before this runs.
+    // TODO: these should be in the validator helper module.
+    let epoch = local_committee_info.epoch();
+    let window = Epoch(FOREIGN_PROPOSAL_EPOCH_WINDOW);
+    let epoch_range = epoch.saturating_sub(window)..=epoch + window;
+
+    if !epoch_range.contains(&proposal.epoch()) {
+        warn!(
+            target: LOG_TARGET,
+            "⚠️ FOREIGN PROPOSAL: Invalid proposal epoch: {}. Current epoch: {}",
+            proposal.epoch(),
+            local_committee_info.epoch(),
+        );
+        if proposal.epoch() > *epoch_range.end() {
+            return Err(ProposalValidationError::FutureEpoch {
+                block_id: proposal.calculate_block_id(),
+                current_epoch: epoch,
+                block_epoch: proposal.epoch(),
+            });
+        }
+        return Err(ProposalValidationError::ForeignProposalInvalid {
+            block_id: proposal.calculate_block_id(),
+            shard_group: proposal.shard_group_unchecked(),
+            details: anyhow!(
+                "Foreign node proposal epoch is not within range of the current epoch. Current epoch: {}, block \
+                 epoch: {}",
+                local_committee_info.epoch(),
+                proposal.epoch(),
+            ),
+        });
+    }
+
+    validate_foreign_proposal_contents(proposal, local_committee_info.shard_group())?;
+
+    Ok(())
+}
+
+/// Checks an authenticated foreign proposal for the local shard group: its commit proof carries at least one command,
+/// and in what the relayer chose to send, the pledges match the values the evidence commits to and every command the
+/// local shard group needs is carried in full.
+///
+/// Every path that stores a foreign proposal as `New` runs this, and proposers select only `New` proposals, so a rule
+/// enforced here holds for the proposer and for the voters' `check_foreign_proposal_record`.
+#[allow(clippy::too_many_lines)]
 pub(super) fn validate_foreign_proposal_contents(
     proposal: &ForeignProposal,
     local_shard_group: ShardGroup,
 ) -> Result<(), ProposalValidationError> {
+    // The command root in the signed header fixes the commands, so an empty proof is a property of the block
+    if proposal.commit_proof().commands().is_empty() {
+        return Err(ProposalValidationError::NoTransactionsInCommittee {
+            block_id: proposal.calculate_block_id(),
+        });
+    }
     let foreign_shard_group = proposal.shard_group_checked().ok_or_else(|| {
             warn!(
                 target: LOG_TARGET,
@@ -1248,5 +1297,179 @@ mod tests {
         pending.remove(&shared);
         assert!(!pending.is_awaiting_reply(&shared, &foreign));
         assert!(!pending.unretried.by_notifier.contains_key(&second));
+    }
+
+    #[test]
+    fn future_epoch_error_rejects_message_without_poisoning_block_id() {
+        let err = ProposalValidationError::FutureEpoch {
+            block_id: block_id(1),
+            current_epoch: Epoch(1),
+            block_epoch: Epoch(10),
+        };
+        assert!(err.rejects_message_not_block());
+    }
+
+    mod received_proposal {
+        use tari_common_types::types::CompressedPublicKey;
+        use tari_ootle_storage::consensus_models::{BlockHeaderMetadata, BlockPledge, PrunedCommand};
+        use tari_sidechain::{FixedHash, SidechainBlockCommitProof, SidechainBlockHeader};
+        use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+
+        use super::*;
+        use crate::hotstuff::on_ready_to_vote_on_local_block::check_foreign_proposal_record;
+
+        const LOCAL_EPOCH: Epoch = Epoch(5);
+        const WINDOW: u64 = FOREIGN_PROPOSAL_EPOCH_WINDOW;
+
+        fn local_committee_info() -> CommitteeInfo {
+            CommitteeInfo::new(
+                NumPreshards::P64,
+                1,
+                2,
+                ShardGroup::new(0, 31),
+                LOCAL_EPOCH,
+                VotePower::of(1),
+            )
+        }
+
+        fn foreign_shard_group() -> ShardGroup {
+            ShardGroup::new(32, 63)
+        }
+
+        /// One pruned command that no shard group needs in full, so the contents check has nothing to look up.
+        fn one_command() -> Vec<CommandOrHash> {
+            vec![CommandOrHash::Pruned(PrunedCommand {
+                hash: FixedHash::from([1u8; 32]),
+                full_command_shard_groups: vec![],
+            })]
+        }
+
+        fn proposal(epoch: Epoch, commands: Vec<CommandOrHash>) -> ForeignProposalRecord {
+            let shard_group = foreign_shard_group();
+            let metadata = BlockHeaderMetadata {
+                total_leader_fee: 0,
+                timestamp: 0,
+                extra_data: Default::default(),
+                timeout_certificate_id: None,
+                is_dummy: false,
+            };
+            let commit_proof = CommandsCommitProof::new_latest(commands, SidechainBlockCommitProof {
+                header: SidechainBlockHeader {
+                    network: 0,
+                    protocol_version: 0,
+                    parent_id: Default::default(),
+                    justify_id: Default::default(),
+                    height: 1,
+                    epoch: epoch.as_u64(),
+                    epoch_hash: Default::default(),
+                    shard_group: tari_sidechain::ShardGroup {
+                        start: shard_group.start().as_u32(),
+                        end_inclusive: shard_group.end().as_u32(),
+                    },
+                    proposed_by: CompressedPublicKey::default(),
+                    state_merkle_root: Default::default(),
+                    command_merkle_root: Default::default(),
+                    transaction_merkle_root: Default::default(),
+                    signature: Default::default(),
+                    accumulated_data: Default::default(),
+                    metadata_hash: metadata.calculate_hash(),
+                },
+                proof_elements: vec![],
+            });
+            ForeignProposalRecord::new(ForeignProposal::new(commit_proof, BlockPledge::default(), metadata))
+        }
+
+        /// Runs the reply path's write transaction for `proposal` and returns whether it reported a record, with the
+        /// record stored afterwards.
+        fn record(mut proposal: ForeignProposalRecord) -> (bool, Option<ForeignProposalRecord>) {
+            let tmp = tempfile::tempdir().unwrap();
+            let store = RocksDbStateStore::<String>::open(tmp.path(), DatabaseOptions::default()).unwrap();
+            let is_recorded = store
+                .with_write_tx(|tx| record_received_foreign_proposal(tx, &mut proposal, &local_committee_info()))
+                .unwrap();
+            let stored = store
+                .with_read_tx(|tx| {
+                    let mut found = ForeignProposalRecord::get_any(tx, [proposal.block_id()])?;
+                    Ok::<_, HotStuffError>(found.pop())
+                })
+                .unwrap();
+            (is_recorded, stored)
+        }
+
+        #[test]
+        fn the_epoch_window_turns_away_a_future_proposal_and_condemns_a_past_one() {
+            let info = local_committee_info();
+            for epoch in [
+                LOCAL_EPOCH.saturating_sub(WINDOW),
+                LOCAL_EPOCH,
+                LOCAL_EPOCH.saturating_add(WINDOW),
+            ] {
+                validate_foreign_proposal(proposal(epoch, one_command()).proposal(), &info)
+                    .unwrap_or_else(|err| panic!("epoch {epoch} is within the window: {err}"));
+            }
+
+            let future = validate_foreign_proposal(
+                proposal(LOCAL_EPOCH.saturating_add(WINDOW + 1), one_command()).proposal(),
+                &info,
+            )
+            .unwrap_err();
+            assert!(
+                matches!(future, ProposalValidationError::FutureEpoch { .. }),
+                "{future:?}"
+            );
+            assert!(future.rejects_message_not_block());
+
+            let past = validate_foreign_proposal(
+                proposal(LOCAL_EPOCH.saturating_sub(WINDOW + 1), one_command()).proposal(),
+                &info,
+            )
+            .unwrap_err();
+            assert!(
+                matches!(past, ProposalValidationError::ForeignProposalInvalid { .. }),
+                "{past:?}"
+            );
+            assert!(!past.rejects_message_not_block());
+        }
+
+        #[test]
+        fn a_future_epoch_proposal_leaves_no_record() {
+            let (is_recorded, stored) = record(proposal(LOCAL_EPOCH.saturating_add(WINDOW + 1), one_command()));
+            assert!(!is_recorded);
+            assert!(stored.is_none(), "{stored:?}");
+        }
+
+        #[test]
+        fn a_past_epoch_proposal_is_recorded_invalid() {
+            let (is_recorded, stored) = record(proposal(LOCAL_EPOCH.saturating_sub(WINDOW + 1), one_command()));
+            assert!(is_recorded);
+            assert_eq!(stored.unwrap().status(), ForeignProposalStatus::Invalid);
+        }
+
+        #[test]
+        fn an_empty_commit_proof_is_recorded_invalid() {
+            let empty = proposal(LOCAL_EPOCH, vec![]);
+            let err =
+                validate_foreign_proposal_contents(empty.proposal(), local_committee_info().shard_group()).unwrap_err();
+            assert!(
+                matches!(err, ProposalValidationError::NoTransactionsInCommittee { .. }),
+                "{err:?}"
+            );
+            assert!(!err.rejects_message_not_block());
+
+            let (is_recorded, stored) = record(empty);
+            assert!(is_recorded);
+            assert_eq!(stored.unwrap().status(), ForeignProposalStatus::Invalid);
+        }
+
+        /// A proposer selects `New` records and puts `to_atom()` in its block, so what is stored as `New` must pass
+        /// the voters' check of the record.
+        #[test]
+        fn a_proposal_stored_as_new_passes_the_voters_record_check() {
+            let (is_recorded, stored) = record(proposal(LOCAL_EPOCH, one_command()));
+            assert!(is_recorded);
+            let stored = stored.unwrap();
+            assert_eq!(stored.status(), ForeignProposalStatus::New);
+            assert!(check_foreign_proposal_record(&stored.to_atom(), &stored).is_none());
+        }
     }
 }

@@ -23,6 +23,7 @@ use tari_ootle_storage::{
         Command,
         CommittedBlockProof,
         ForeignProposalAtom,
+        ForeignProposalRecord,
         ForeignProposalStatus,
         NoVoteReason,
         PendingShardStateTreeDiff,
@@ -728,17 +729,18 @@ where
             return Ok(Some(reason));
         }
 
-        // Case: cannot re-propose if it is already committed
-        // TODO: if this is already proposed we need to reject if it is already proposed in the current block's
-        // commit->leaf chain Currently we allow it to be proposed again
-        if matches!(fp.status(), ForeignProposalStatus::Confirmed) {
+        // CONSENSUS RULE: the stored record must be one an honest proposer would select (see
+        // `check_foreign_proposal_record`)
+        if let Some(reason) = check_foreign_proposal_record(fp_atom, &fp) {
             warn!(
                 target: LOG_TARGET,
-                "❌ NO VOTE: Foreign proposal {block_id} has status {status}.",
+                "❌ NO VOTE: Foreign proposal {block_id} (status={status}, atom_shard_group={atom_sg}, proposal_shard_group={proposal_sg}): {reason}",
                 block_id = fp_atom.block_id,
                 status = fp.status(),
+                atom_sg = fp_atom.shard_group,
+                proposal_sg = fp.proposal().shard_group_unchecked(),
             );
-            return Ok(Some(NoVoteReason::ForeignProposalAlreadyConfirmed));
+            return Ok(Some(reason));
         }
 
         if fp.status().is_invalid() {
@@ -1067,6 +1069,28 @@ fn check_epoch_end_drained<TTx: StateStoreReadTransaction>(
     let is_prepared_in_flight =
         tx.transaction_pool_any_in_chain(justify_block_id, |rec| rec.current_stage().is_local_prepared())?;
     Ok(is_prepared_in_flight.then_some(NoVoteReason::EndOfEpochWithTransactionsInLocalPrepared))
+}
+
+/// Consensus rule: a `ForeignProposal` command atom must reference a stored proposal that is neither confirmed nor
+/// marked invalid, whose committed header names the same shard group as the atom, and whose commit proof carries at
+/// least one command entry.
+///
+/// A proposal is stored as `New` only once `validate_foreign_proposal_contents` accepts it, which refuses an empty
+/// commit proof, so every `New` record a proposer selects passes this check.
+pub(super) fn check_foreign_proposal_record(
+    fp_atom: &ForeignProposalAtom,
+    fp: &ForeignProposalRecord,
+) -> Option<NoVoteReason> {
+    if matches!(fp.status(), ForeignProposalStatus::Confirmed) {
+        return Some(NoVoteReason::ForeignProposalAlreadyConfirmed);
+    }
+    if matches!(fp.status(), ForeignProposalStatus::Invalid) ||
+        fp.proposal().shard_group_checked() != Some(fp_atom.shard_group) ||
+        fp.proposal().commit_proof().commands().is_empty()
+    {
+        return Some(NoVoteReason::ForeignProposalProcessingFailed);
+    }
+    None
 }
 
 /// Consensus rule: a leader may only move a transaction out of its current stage once the shard groups involved in it
@@ -2053,6 +2077,107 @@ mod tests {
                 "unexpected no_vote_reason: {:?}",
                 decision.no_vote_reason
             );
+        }
+    }
+
+    mod check_foreign_proposal_record {
+        use tari_common_types::types::CompressedPublicKey;
+        use tari_ootle_storage::consensus_models::{
+            BlockHeaderMetadata,
+            BlockPledge,
+            CommandOrHash,
+            CommandsCommitProof,
+            ForeignProposal,
+            ForeignProposalAtom,
+            ForeignProposalRecord,
+            ForeignProposalStatus,
+            PrunedCommand,
+        };
+        use tari_sidechain::{FixedHash, SidechainBlockCommitProof, SidechainBlockHeader};
+
+        use super::*;
+
+        fn make_record(
+            shard_group: ShardGroup,
+            commands: Vec<CommandOrHash>,
+            status: ForeignProposalStatus,
+        ) -> ForeignProposalRecord {
+            let commit_proof = CommandsCommitProof::new_latest(commands, SidechainBlockCommitProof {
+                header: SidechainBlockHeader {
+                    network: 0,
+                    protocol_version: 0,
+                    parent_id: Default::default(),
+                    justify_id: Default::default(),
+                    height: 1,
+                    epoch: 1,
+                    epoch_hash: Default::default(),
+                    shard_group: tari_sidechain::ShardGroup {
+                        start: shard_group.start().as_u32(),
+                        end_inclusive: shard_group.end().as_u32(),
+                    },
+                    proposed_by: CompressedPublicKey::default(),
+                    state_merkle_root: Default::default(),
+                    command_merkle_root: Default::default(),
+                    transaction_merkle_root: Default::default(),
+                    signature: Default::default(),
+                    accumulated_data: Default::default(),
+                    metadata_hash: Default::default(),
+                },
+                proof_elements: vec![],
+            });
+            let proposal = ForeignProposal::new(commit_proof, BlockPledge::default(), BlockHeaderMetadata {
+                total_leader_fee: 0,
+                timestamp: 0,
+                extra_data: Default::default(),
+                timeout_certificate_id: None,
+                is_dummy: false,
+            });
+            let block_id = proposal.calculate_block_id();
+            ForeignProposalRecord::load(block_id, proposal, None, status)
+        }
+
+        #[test]
+        fn rejects_invalid_or_confirmed_or_mismatched_shard_group_or_empty_commands() {
+            let sg_a = ShardGroup::new(0, 63);
+            let sg_b = ShardGroup::new(64, 127);
+            let non_empty_cmds = vec![CommandOrHash::Pruned(PrunedCommand {
+                hash: FixedHash::from([1u8; 32]),
+                full_command_shard_groups: vec![],
+            })];
+
+            let valid_rec = make_record(sg_a, non_empty_cmds.clone(), ForeignProposalStatus::New);
+            let atom = ForeignProposalAtom {
+                block_id: *valid_rec.block_id(),
+                shard_group: sg_a,
+            };
+            assert!(check_foreign_proposal_record(&atom, &valid_rec).is_none());
+
+            let invalid_rec = make_record(sg_a, non_empty_cmds.clone(), ForeignProposalStatus::Invalid);
+            assert!(matches!(
+                check_foreign_proposal_record(&atom, &invalid_rec),
+                Some(NoVoteReason::ForeignProposalProcessingFailed)
+            ));
+
+            let confirmed_rec = make_record(sg_a, non_empty_cmds.clone(), ForeignProposalStatus::Confirmed);
+            assert!(matches!(
+                check_foreign_proposal_record(&atom, &confirmed_rec),
+                Some(NoVoteReason::ForeignProposalAlreadyConfirmed)
+            ));
+
+            let wrong_sg_atom = ForeignProposalAtom {
+                block_id: *valid_rec.block_id(),
+                shard_group: sg_b,
+            };
+            assert!(matches!(
+                check_foreign_proposal_record(&wrong_sg_atom, &valid_rec),
+                Some(NoVoteReason::ForeignProposalProcessingFailed)
+            ));
+
+            let empty_cmds_rec = make_record(sg_a, vec![], ForeignProposalStatus::New);
+            assert!(matches!(
+                check_foreign_proposal_record(&atom, &empty_cmds_rec),
+                Some(NoVoteReason::ForeignProposalProcessingFailed)
+            ));
         }
     }
 }

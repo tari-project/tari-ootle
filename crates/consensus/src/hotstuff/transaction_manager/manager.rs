@@ -2222,7 +2222,10 @@ mod tests {
         let transaction = TransactionRecord::new(
             Transaction::builder_localnet(Epoch(2))
                 .add_input(SubstateRequirement::unversioned(local_first.clone()))
-                .add_input(SubstateRequirement::versioned(local_second.clone(), SubstateVersion::ZERO))
+                .add_input(SubstateRequirement::versioned(
+                    local_second.clone(),
+                    SubstateVersion::ZERO,
+                ))
                 .add_input(SubstateRequirement::unversioned(foreign))
                 .build_and_seal(&PrivateKey::from(1u64)),
         );

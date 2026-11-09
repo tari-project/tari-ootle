@@ -2322,7 +2322,9 @@ mod local_accept_from_local_prepared {
             .map(component_id)
             .find(|id| {
                 *id != local_input &&
-                    local.contains(&VersionedSubstateId::new(id.clone(), SubstateVersion::ZERO).to_shard(NUM_PRESHARDS))
+                    local.contains(
+                        &VersionedSubstateId::new(id.clone(), SubstateVersion::ZERO).to_shard(NUM_PRESHARDS),
+                    )
             })
             .unwrap();
         replica.add_substate(&existing_output);
@@ -2398,8 +2400,8 @@ mod local_accept_from_local_prepared {
         replica
             .store
             .with_read_tx(|tx| {
-                let mut substate_store = PendingSubstateStore::init(tx, replica.candidate.as_leaf(), NUM_PRESHARDS)?
-                    .with_pledge_budget(0);
+                let mut substate_store =
+                    PendingSubstateStore::init(tx, replica.candidate.as_leaf(), NUM_PRESHARDS)?.with_pledge_budget(0);
                 let change_set = ProposedBlockChangeSet::new(replica.candidate.as_leaf());
                 let mut executed = HashMap::new();
                 let command = propose_local_accept_transaction(
@@ -2414,7 +2416,11 @@ mod local_accept_from_local_prepared {
                 .unwrap();
                 assert!(command.is_none(), "expected deferral, got {command:?}");
                 assert_eq!(substate_store.pledge_bytes(), 0);
-                assert!(substate_store.new_locks().is_empty(), "{:?}", substate_store.new_locks());
+                assert!(
+                    substate_store.new_locks().is_empty(),
+                    "{:?}",
+                    substate_store.new_locks()
+                );
                 Ok::<_, StorageError>(())
             })
             .unwrap();

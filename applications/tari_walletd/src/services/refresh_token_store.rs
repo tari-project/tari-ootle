@@ -69,11 +69,7 @@ impl RefreshTokenStore {
         clear_expired_tokens(&mut write);
         let max_tokens = self.max_tokens.max(1);
         while write.len() >= max_tokens {
-            let Some(oldest_key) = write
-                .iter()
-                .min_by_key(|(_, data)| data.expires_at)
-                .map(|(k, _)| *k)
-            else {
+            let Some(oldest_key) = write.iter().min_by_key(|(_, data)| data.expires_at).map(|(k, _)| *k) else {
                 break;
             };
             write.remove(&oldest_key);

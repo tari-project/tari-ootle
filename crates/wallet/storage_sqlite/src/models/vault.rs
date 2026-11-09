@@ -80,7 +80,7 @@ impl Vault {
                     item: "vault.confidential_balance",
                     details: format!("Invalid confidential balance: {}", e),
                 })?,
-            divisibility: u8::try_from(self.divisibility as u32).map_err(|e| WalletStorageError::DecodingError {
+            divisibility: u8::try_from(self.divisibility).map_err(|e| WalletStorageError::DecodingError {
                 operation: "try_into_vault",
                 item: "vault.divisibility",
                 details: format!("Invalid divisibility: {}", e),

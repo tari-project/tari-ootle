@@ -52,12 +52,14 @@ impl<TAddr> SqliteDbFactory<TAddr> {
     }
 
     fn connect(&self) -> Result<SqliteConnection, StorageError> {
-        if let Some(parent) = self.db_path.parent() {
+        if let Some(parent) = self.db_path.parent().filter(|p| !p.as_os_str().is_empty()) {
             create_dir_all(parent).map_err(|e| StorageError::General {
                 details: format!("Failed to create parent directory for database file: {}", e),
             })?;
         }
-        let database_url = self.db_path.to_str().expect("database_url utf-8 error");
+        let database_url = self.db_path.to_str().ok_or_else(|| StorageError::General {
+            details: format!("Database path {} is not valid UTF-8", self.db_path.display()),
+        })?;
         let connection = SqliteConnection::establish(database_url).map_err(SqliteStorageError::from)?;
         Ok(connection)
     }
@@ -82,5 +84,16 @@ impl<TAddr: NodeAddressable + 'static> DbFactory for SqliteDbFactory<TAddr> {
         connection.adapter().migrate()?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connects_to_bare_path_without_parent_directory() {
+        let factory = SqliteDbFactory::<String>::new(":memory:");
+        assert!(factory.connect().is_ok());
     }
 }

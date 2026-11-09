@@ -569,6 +569,7 @@ impl Replica {
                     evaluation.decisions.push(rec.current_decision());
                     evaluation.executed.push(change_set.transaction_execution(id).is_some());
                 }
+                evaluation.pledge_bytes = substate_store.pledge_bytes();
                 let (changes, _) = substate_store.into_parts();
                 evaluation.ups = changes
                     .iter()
@@ -782,6 +783,7 @@ struct Evaluation {
     no_vote: Option<NoVoteReason>,
     total_leader_fee: u64,
     total_exhaust_burn: u128,
+    pledge_bytes: usize,
     /// The pending stage of each transaction voted for.
     stages: Vec<TransactionPoolStage>,
     /// The pending decision of each transaction voted for.
@@ -1116,6 +1118,32 @@ mod local_only {
             extra_downs: vec![VersionedSubstateId::new(spent, SubstateVersion::ZERO)],
             ..Default::default()
         });
+
+        let evaluation = replica.evaluate_local_only(&[committing(first), committing(second)]);
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::ConflictingTransactionProposed { transaction_id, .. }) if transaction_id == second
+            ),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
+
+    #[test]
+    fn a_transaction_writing_what_an_earlier_one_in_the_block_read_locked_is_refused() {
+        let replica = Replica::new();
+        let shared = component_id(0x20);
+        let other = component_id(0x21);
+        replica.add_substate(&shared);
+        replica.add_substate(&other);
+        let first = replica.pool_transaction(1, &[&other], Script {
+            commit: true,
+            extra_reads: vec![shared.clone()],
+            ..Default::default()
+        });
+        let second = replica.pool_transaction(2, &[&shared], commits());
 
         let evaluation = replica.evaluate_local_only(&[committing(first), committing(second)]);
 
@@ -2086,6 +2114,7 @@ fn prepared_cross_shard_creating_an_existing_output() -> (Replica, TransactionPo
 
 mod local_accept_from_local_prepared {
     use super::*;
+    use crate::hotstuff::on_propose::propose_local_accept_transaction;
 
     fn evaluate_accept(replica: &Replica, rec: TransactionPoolRecord, atom: MultiShardAtom) -> Evaluation {
         replica.evaluate_after(&[Command::LocalAccept(atom)], |change_set| {
@@ -2329,6 +2358,122 @@ mod local_accept_from_local_prepared {
             "{:?}",
             evaluation.no_vote
         );
+    }
+
+    #[test]
+    fn an_accept_whose_output_lock_fails_aborts_without_pledging_inputs() {
+        let (local, foreign) = local_and_foreign_halves();
+        let replica = Replica::in_committee(local, 2);
+        let local_input = component_id_in(local);
+        let foreign_input = component_id_in(foreign);
+        replica.add_substate(&local_input);
+        // Pick a second component in the local shard group that already exists so locking it as a new output fails
+        let existing_output = (0x20..=u8::MAX)
+            .map(component_id)
+            .find(|id| {
+                *id != local_input &&
+                    local.contains(
+                        &VersionedSubstateId::new(id.clone(), SubstateVersion::ZERO).to_shard(NUM_PRESHARDS),
+                    )
+            })
+            .unwrap();
+        replica.add_substate(&existing_output);
+
+        let id = replica.pool_transaction(1, &[&local_input, &foreign_input], Script {
+            commit: true,
+            new_outputs: vec![existing_output],
+            fee_intent: false,
+            ..Default::default()
+        });
+        let prepare = multishard_atom(&replica.honest_new_multishard_command(&id));
+        replica.prepare_in_parent(&prepare);
+        replica.receive_input_pledges(&id, foreign, &[&foreign_input]);
+
+        let mut ready_rec = replica.pending_record(&id);
+        ready_rec
+            .evidence_mut()
+            .add_shard_group(foreign)
+            .set_prepare_qc(PcId::zero());
+        ready_rec.set_ready(true);
+
+        let proposed = replica
+            .store
+            .with_read_tx(|tx| {
+                let mut substate_store = PendingSubstateStore::init(tx, replica.candidate.as_leaf(), NUM_PRESHARDS)?;
+                let change_set = ProposedBlockChangeSet::new(replica.candidate.as_leaf());
+                let mut executed = HashMap::new();
+                let command = propose_local_accept_transaction(
+                    &replica.manager,
+                    &replica.candidate.as_leaf(),
+                    &replica.committee,
+                    &change_set,
+                    ready_rec.clone(),
+                    &mut substate_store,
+                    &mut executed,
+                )
+                .unwrap()
+                .expect("proposes an aborting LocalAccept");
+                assert_eq!(substate_store.pledge_bytes(), 0);
+                assert!(substate_store.new_locks().is_empty());
+                Ok::<_, StorageError>(command)
+            })
+            .unwrap();
+
+        let evaluation = replica.evaluate_after(&[proposed], |change_set| {
+            change_set.set_next_transaction_update(ready_rec).unwrap();
+        });
+
+        assert_voted(&evaluation, TransactionPoolStage::LocalAccepted, true);
+        assert_eq!(evaluation.pledge_bytes, 0);
+    }
+
+    #[test]
+    fn a_proposer_deferring_an_accept_over_the_block_pledge_budget_releases_its_output_locks() {
+        let (local, foreign) = local_and_foreign_halves();
+        let replica = Replica::in_committee(local, 2);
+        let local_input = component_id_in(local);
+        let foreign_input = component_id_in(foreign);
+        replica.add_substate(&local_input);
+
+        let id = replica.pool_transaction(1, &[&local_input, &foreign_input], commits());
+        let prepare = multishard_atom(&replica.honest_new_multishard_command(&id));
+        replica.prepare_in_parent(&prepare);
+        replica.receive_input_pledges(&id, foreign, &[&foreign_input]);
+
+        let mut ready_rec = replica.pending_record(&id);
+        ready_rec
+            .evidence_mut()
+            .add_shard_group(foreign)
+            .set_prepare_qc(PcId::zero());
+        ready_rec.set_ready(true);
+
+        replica
+            .store
+            .with_read_tx(|tx| {
+                let mut substate_store =
+                    PendingSubstateStore::init(tx, replica.candidate.as_leaf(), NUM_PRESHARDS)?.with_pledge_budget(0);
+                let change_set = ProposedBlockChangeSet::new(replica.candidate.as_leaf());
+                let mut executed = HashMap::new();
+                let command = propose_local_accept_transaction(
+                    &replica.manager,
+                    &replica.candidate.as_leaf(),
+                    &replica.committee,
+                    &change_set,
+                    ready_rec,
+                    &mut substate_store,
+                    &mut executed,
+                )
+                .unwrap();
+                assert!(command.is_none(), "expected deferral, got {command:?}");
+                assert_eq!(substate_store.pledge_bytes(), 0);
+                assert!(
+                    substate_store.new_locks().is_empty(),
+                    "{:?}",
+                    substate_store.new_locks()
+                );
+                Ok::<_, StorageError>(())
+            })
+            .unwrap();
     }
 }
 

@@ -22,17 +22,49 @@
 
 mod cli;
 
-use std::{fs, fs::OpenOptions, io::Write, panic, time::SystemTime};
+use std::{fs, fs::OpenOptions, io::Write, panic, path::Path, time::SystemTime};
 
 use clap::Parser;
 use log::*;
-use tari_ootle_app_utilities::{configuration::load_configuration, keypair::setup_keypair_prompt};
+use tari_common::exit_codes::{ExitCode, ExitError};
+use tari_common_types::seeds::seed_words::SeedWords;
+use tari_crypto::tari_utilities::hidden::Hidden;
+use tari_ootle_app_utilities::{configuration::load_configuration, keypair::setup_validator_keypair};
 use tari_shutdown::Shutdown;
 use tari_validator_node::{ApplicationConfig, node, run_validator_node};
 
 use crate::cli::Cli;
 
 const LOG_TARGET: &str = "tari::validator_node::app";
+
+fn load_seed_words(
+    seed_words: Option<SeedWords>,
+    seed_words_file: Option<&Path>,
+) -> Result<Option<SeedWords>, ExitError> {
+    match (seed_words, seed_words_file) {
+        (Some(_), Some(_)) => Err(ExitError::new(
+            ExitCode::ConfigError,
+            "Specify either seed words or a seed words file",
+        )),
+        (Some(words), None) => Ok(Some(words)),
+        (None, Some(path)) => {
+            let content = fs::read_to_string(path).map(Hidden::hide).map_err(|e| {
+                ExitError::new(
+                    ExitCode::ConfigError,
+                    format!("Failed to read seed words file {}: {e}", path.display()),
+                )
+            })?;
+            let words = content.reveal().trim().parse().map_err(|e| {
+                ExitError::new(
+                    ExitCode::ConfigError,
+                    format!("Seed words file {} does not hold a seed phrase: {e}", path.display()),
+                )
+            })?;
+            Ok(Some(words))
+        },
+        (None, None) => Ok(None),
+    }
+}
 
 #[cfg(feature = "tokio_debug")]
 const DEBUG_PORT: u16 = console_subscriber::Server::DEFAULT_PORT;
@@ -90,25 +122,47 @@ async fn main() -> anyhow::Result<()> {
             return Ok(());
         },
         Some(cli::Subcommand::Start) | None => {
+            config.validator_node.validate_fee_claim_public_key()?;
             let shutdown = Shutdown::new();
-            let keypair = setup_keypair_prompt(
+            let parsed_seed_words = load_seed_words(cli.seed_words, cli.seed_words_file.as_deref())?;
+
+            let keypair = setup_validator_keypair(
                 &config.validator_node.identity_file,
+                parsed_seed_words.as_ref(),
+                cli.seed_passphrase,
                 !config.validator_node.dont_create_id,
+                false,
             )?;
 
             run_validator_node(keypair, config, shutdown).await?;
             info!(target: LOG_TARGET, "Validator node shutdown successfully");
         },
-        Some(cli::Subcommand::GenerateIdentity) => {
-            let keypair = setup_keypair_prompt(
+        Some(cli::Subcommand::GenerateIdentity {
+            seed_words,
+            seed_words_file,
+            seed_passphrase,
+            overwrite,
+        }) => {
+            let seed_words_file_arg = seed_words_file.as_deref().or(cli.seed_words_file.as_deref());
+            let parsed_seed_words = load_seed_words(seed_words.or(cli.seed_words), seed_words_file_arg)?;
+
+            let keypair = setup_validator_keypair(
                 &config.validator_node.identity_file,
-                !config.validator_node.dont_create_id,
+                parsed_seed_words.as_ref(),
+                seed_passphrase.or(cli.seed_passphrase),
+                true,
+                overwrite,
             )?;
 
             info!(
                 target: LOG_TARGET,
-                "Generated identity with public key: {}",
+                "Node identity ready with public key: {}",
                 keypair.public_key()
+            );
+            info!(
+                target: LOG_TARGET,
+                "Node peer address: {}",
+                keypair.to_peer_address()
             );
         },
     }
@@ -205,6 +259,25 @@ mod tests {
     use tari_validator_node::logging::default_logging_config;
 
     use super::*;
+
+    #[test]
+    fn seed_file_accepts_a_trailing_newline() {
+        use tari_common_types::seeds::{
+            cipher_seed::CipherSeed,
+            mnemonic::{Mnemonic, MnemonicLanguage},
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("seed.txt");
+        let words = CipherSeed::random()
+            .to_mnemonic(MnemonicLanguage::English, None)
+            .unwrap();
+        fs::write(&path, format!("{}\n", words.join(" ").reveal())).unwrap();
+        assert_eq!(load_seed_words(None, Some(&path)).unwrap().unwrap(), words);
+        assert_eq!(load_seed_words(Some(words.clone()), None).unwrap().unwrap(), words);
+        assert!(load_seed_words(Some(words), Some(&path)).is_err());
+        assert!(load_seed_words(None, None).unwrap().is_none());
+        assert!(load_seed_words(None, Some(&dir.path().join("missing.txt"))).is_err());
+    }
 
     const CHILD_DIR_VAR: &str = "OOTLE_VN_PANIC_TEST_DIR";
     const PANIC_MESSAGE: &str = "panic-flush-test-4f1c";

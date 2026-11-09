@@ -83,7 +83,7 @@ impl BookKeepingKey {
 /// A node refuses a stored version above this one. It migrates one below it where a migration from that version
 /// exists, and refuses it otherwise. Any incompatible on-disk change must bump this, so that the node refuses databases
 /// it cannot use rather than reading them under the wrong schema.
-pub const CURRENT_SCHEMA_VERSION: u64 = 0;
+pub const CURRENT_SCHEMA_VERSION: u64 = 1;
 
 pub struct DatabaseMigrationVersion;
 

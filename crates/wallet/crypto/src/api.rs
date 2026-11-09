@@ -178,6 +178,7 @@ impl StealthCryptoApi {
 
     /// `claimant_pk` is the stealth claim public key `C = H(r·P)·G + P` carried in the L1 burn
     /// proof — the key the `ownership_proof` Schnorr signature commits to.
+    #[must_use]
     pub fn validate_burn_claim_ownership_proof(
         &self,
         network: Network,

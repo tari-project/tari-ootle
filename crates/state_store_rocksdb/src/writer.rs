@@ -469,6 +469,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         let index_cf = self.db().cf(block::EpochHeightIndex)?;
         index_cf.delete(&(block.epoch(), block.height(), *block.id()), OPERATION)?;
+        self.db().cf(block::ExecutedBlockIndex)?.delete(block_id, OPERATION)?;
 
         // TODO: could lead to orphan chains left in DB - need to recursively remove all children
         let chain_cf = self.db().cf(PendingChainIndex)?;
@@ -476,6 +477,13 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let parent_child_cf = self.db().cf(chain::PendingParentChildIndex)?;
         parent_child_cf.delete(&(*block.parent(), *block.id()), OPERATION)?;
 
+        Ok(())
+    }
+
+    fn blocks_set_executed(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
+        self.db()
+            .cf(block::ExecutedBlockIndex)?
+            .put(block_id, &(), "blocks_set_executed")?;
         Ok(())
     }
 
@@ -498,6 +506,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             block.set_commit_qc(*qc_id);
             // The block is committed, remove it from the pending chain
             self.db().cf(PendingChainIndex)?.delete(block_id, OPERATION)?;
+            self.db().cf(block::ExecutedBlockIndex)?.delete(block_id, OPERATION)?;
             self.db()
                 .cf(chain::PendingParentChildIndex)?
                 .delete(&(*block.parent(), *block_id), OPERATION)?;
@@ -2047,25 +2056,26 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         transaction_ids: I,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "lock_conflicts_remove_by_transaction_ids";
-        let mut transaction_ids = transaction_ids.into_iter().peekable();
-        if transaction_ids.peek().is_none() {
+        let transaction_ids = transaction_ids.into_iter().collect::<HashSet<_>>();
+        if transaction_ids.is_empty() {
             return Ok(());
         }
 
         let db = self.db();
         let cf = db.cf(LockConflictCf)?;
         let index_cf = db.cf(lock_conflict::LockConflictBlockIdIndex)?;
-        let query = db.cf(lock_conflict::ByTransactionIdQuery)?;
 
-        for tx_id in transaction_ids {
-            for key in query.query_prefix_range_keys(Ordering::Ascending, tx_id)? {
-                cf.delete(&key, OPERATION)?;
-                // Delete if the dependent transaction and depending transaction are swapped
-                let (transaction_id, block_id, depends_on_tx_id) = key;
-                cf.delete(&(depends_on_tx_id, block_id, transaction_id), OPERATION)?;
-                index_cf.delete(&(block_id, transaction_id, depends_on_tx_id), OPERATION)?;
-                index_cf.delete(&(block_id, depends_on_tx_id, transaction_id), OPERATION)?;
+        let mut keys_to_remove = Vec::new();
+        for result in cf.key_iterator(Ordering::Ascending, OPERATION) {
+            let key @ (transaction_id, _, depends_on_tx_id) = result?;
+            if transaction_ids.contains(&transaction_id) || transaction_ids.contains(&depends_on_tx_id) {
+                keys_to_remove.push(key);
             }
+        }
+
+        for key @ (transaction_id, block_id, depends_on_tx_id) in keys_to_remove {
+            cf.delete(&key, OPERATION)?;
+            index_cf.delete(&(block_id, transaction_id, depends_on_tx_id), OPERATION)?;
         }
 
         Ok(())
@@ -2082,7 +2092,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             index_cf.delete(&key, OPERATION)?;
             let (block_id, transaction_id, depends_on_tx) = key;
             cf.delete(&(transaction_id, block_id, depends_on_tx), OPERATION)?;
-            cf.delete(&(depends_on_tx, block_id, transaction_id), OPERATION)?;
         }
 
         Ok(())
@@ -2459,6 +2468,7 @@ mod cleanup {
         let cf = db.cf(BlockCf)?;
         let committed_cf = db.cf(chain::CommittedParentChildChainIndex)?;
         let index_cf = db.cf(block::EpochHeightIndex)?;
+        let executed_cf = db.cf(block::ExecutedBlockIndex)?;
 
         // Don't delete epoch 0 blocks (i.e the zero block)
         let keys =
@@ -2470,6 +2480,7 @@ mod cleanup {
             cf.delete(&block_id, OPERATION)?;
             committed_cf.delete(&block_id, OPERATION)?;
             index_cf.delete(&(epoch, height, block_id), OPERATION)?;
+            executed_cf.delete(&block_id, OPERATION)?;
         }
         Ok(count)
     }

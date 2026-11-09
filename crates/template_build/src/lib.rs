@@ -178,9 +178,21 @@ impl TemplateMetadataBuilder {
         if let Some(ref tags) = self.tags {
             metadata.tags = tags.clone();
         }
+        let mut deduped_tags = Vec::with_capacity(metadata.tags.len());
+        for t in metadata.tags.drain(..) {
+            let norm = t.trim().to_lowercase();
+            if !norm.is_empty() && !deduped_tags.contains(&norm) {
+                deduped_tags.push(norm);
+            }
+        }
+        metadata.tags = deduped_tags;
+
         if let Some(ref category) = self.category {
-            let cat = category.trim().to_lowercase();
-            metadata.category = (!cat.is_empty()).then_some(cat);
+            metadata.category = Some(category.clone());
+        }
+        if let Some(cat) = metadata.category.take() {
+            let norm = cat.trim().to_lowercase();
+            metadata.category = (!norm.is_empty()).then_some(norm);
         }
         if let Some(ref repository) = self.repository {
             metadata.repository =

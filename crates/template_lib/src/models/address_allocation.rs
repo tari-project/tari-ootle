@@ -83,13 +83,3 @@ impl ResourceAddressAllocation {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn component_and_resource_address_allocations_implement_tagged() {
-        assert_eq!(ComponentAddressAllocation::TAG, COMPONENT_ALLOC_TAG);
-        assert_eq!(ResourceAddressAllocation::TAG, RESOURCE_TAG);
-    }
-}

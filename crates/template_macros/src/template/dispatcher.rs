@@ -176,14 +176,31 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst, stateless: bool
             },
             TypeAst::Tuple { type_tuple, .. } => {
                 let error_failed_decode_arg = PanicDiagnostic::ArgDecode { index: i }.panic_format_string();
-                args.push(parse_quote! { #arg_ident });
-                stmts.extend([
-                    parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
-                    parse_quote! {
-                        let #arg_ident = decode_exact::<#type_tuple>(next_arg)
-                            .unwrap_or_else(|e| panic!(#error_failed_decode_arg, e));
-                    },
-                ]);
+                if i == 0 && ast.is_migration {
+                    stmts.extend([
+                        parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
+                        parse_quote! {
+                            let component_address = decode_exact::<::tari_template_lib::types::ComponentAddress>(next_arg)
+                                .unwrap_or_else(|e| panic!(#error_failed_decode_component, e));
+                        },
+                        parse_quote! {
+                            let component_manager = engine().component_manager(component_address);
+                        },
+                        parse_quote! {
+                            let old_state = component_manager.get_state::<#type_tuple>();
+                        },
+                    ]);
+                    args.push(parse_quote! { old_state });
+                } else {
+                    args.push(parse_quote! { #arg_ident });
+                    stmts.extend([
+                        parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
+                        parse_quote! {
+                            let #arg_ident = decode_exact::<#type_tuple>(next_arg)
+                                .unwrap_or_else(|e| panic!(#error_failed_decode_arg, e));
+                        },
+                    ]);
+                }
             },
         }
     }
@@ -274,51 +291,65 @@ fn replace_self_in_single_value(type_path: &TypePath) -> Option<Stmt> {
 }
 
 fn replace_self_in_tuple(type_tuple: &TypeTuple) -> Stmt {
+    let tuple_expr = replace_self_in_tuple_expr(parse_quote!(rtn), type_tuple);
+    parse_quote! {
+        let rtn = #tuple_expr;
+    }
+}
+
+fn replace_self_in_tuple_expr(base_expr: Expr, type_tuple: &TypeTuple) -> Expr {
+    if type_tuple.elems.is_empty() {
+        return parse_quote! { () };
+    }
+
     // build the expressions for each element in the tuple
     let elems: Vec<Expr> = type_tuple
         .elems
         .iter()
         .enumerate()
-        .map(|(i, t)| match t {
-            syn::Type::Path(path) => {
-                let ident = path
-                    .path
-                    .segments
-                    .first()
-                    .expect("path segments is empty")
-                    .ident
-                    .clone();
-                let field_expr = build_tuple_field_expr("rtn".to_string(), i as u32);
-                if ident == "Self" {
-                    // When we return self we use default rules - which only permit the owner of the component to call
-                    // methods
-                    parse_quote! {
-                        engine().create_component(
-                            #field_expr,
-                            ::tari_template_lib::template_macro_deps::OwnerRule::default(),
-                            ::tari_template_lib::template_macro_deps::ComponentAccessRules::new(),
-                            None,
-                            ::tari_template_lib::template_macro_deps::UpdateRule::Locked,
-                        )
+        .map(|(i, t)| {
+            let field_expr = build_tuple_field_expr(base_expr.clone(), i as u32);
+            match t {
+                syn::Type::Path(path) => {
+                    let ident = path
+                        .path
+                        .segments
+                        .first()
+                        .expect("path segments is empty")
+                        .ident
+                        .clone();
+                    if ident == "Self" {
+                        // When we return self we use default rules - which only permit the owner of the component to
+                        // call methods
+                        parse_quote! {
+                            engine().create_component(
+                                #field_expr,
+                                ::tari_template_lib::template_macro_deps::OwnerRule::default(),
+                                ::tari_template_lib::template_macro_deps::ComponentAccessRules::new(),
+                                None,
+                                ::tari_template_lib::template_macro_deps::UpdateRule::Locked,
+                            )
+                        }
+                    } else {
+                        field_expr
                     }
-                } else {
-                    field_expr
-                }
-            },
-            _ => todo!("replace_self_in_tuple only supports paths"),
+                },
+                syn::Type::Tuple(subtuple) => replace_self_in_tuple_expr(field_expr, subtuple),
+                _ => todo!("replace_self_in_tuple only supports paths and tuples"),
+            }
         })
         .collect();
 
-    parse_quote! {
-        let rtn = (#(#elems),*);
+    if elems.len() == 1 {
+        parse_quote! { (#(#elems,)*) }
+    } else {
+        parse_quote! { (#(#elems),*) }
     }
 }
 
-fn build_tuple_field_expr(name: String, i: u32) -> Expr {
-    let name = Ident::new(&name, Span::call_site());
-
+fn build_tuple_field_expr(base: Expr, i: u32) -> Expr {
     let mut field_expr: ExprField = parse_quote! {
-        #name.0
+        #base.0
     };
 
     match field_expr.member {

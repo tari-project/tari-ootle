@@ -126,6 +126,7 @@ pub fn bor_encode(transaction: Transaction) -> Result<Vec<u8>, OotleSdkError> {
 /// Verifies every signature on a sealed transaction (the seal signature and all authorization
 /// signatures). A thin wrapper so tests need not reach into the internal type.
 #[cfg(test)]
+#[must_use]
 pub(crate) fn verify_all_signatures(transaction: &Transaction) -> bool {
     transaction.verify_all_signatures()
 }

@@ -487,6 +487,16 @@ impl Replica {
         self.evaluate_in_block(commands, |_| {}, &[], true)
     }
 
+    /// Evaluates `commands` like [`Self::evaluate_with_outputs_locked`], in a block whose next epoch changes the
+    /// number of committees.
+    fn evaluate_with_outputs_locked_before_layout_change(
+        &self,
+        commands: &[Command],
+        outputs: &[VersionedSubstateId],
+    ) -> Evaluation {
+        self.evaluate_in_block(commands, |_| {}, outputs, true)
+    }
+
     fn evaluate_in_block(
         &self,
         commands: &[Command],
@@ -567,7 +577,11 @@ impl Replica {
                         .unwrap();
                     evaluation.stages.push(rec.current_stage());
                     evaluation.decisions.push(rec.current_decision());
-                    evaluation.executed.push(change_set.transaction_execution(id).is_some());
+                    let execution = change_set.transaction_execution(id);
+                    evaluation.executed.push(execution.is_some());
+                    evaluation
+                        .reject_reasons
+                        .push(execution.and_then(|execution| execution.result().finalize.reject().cloned()));
                 }
                 evaluation.pledge_bytes = substate_store.pledge_bytes();
                 let (changes, _) = substate_store.into_parts();
@@ -790,6 +804,8 @@ struct Evaluation {
     decisions: Vec<Decision>,
     /// Whether each transaction voted for has an execution in the block.
     executed: Vec<bool>,
+    /// The reject reason of each voted-for transaction's execution in the block, if it has a rejected execution.
+    reject_reasons: Vec<Option<RejectReason>>,
     /// The substates the block puts up.
     ups: Vec<SubstateId>,
 }
@@ -3021,40 +3037,63 @@ mod local_accept_after_a_lock_failure {
 mod local_accept_before_a_layout_change {
     use super::*;
 
-    /// A replica that has prepared [`executing_cross_shard`]'s transaction and the LocalAccept a proposer sends for
-    /// it when its own epoch oracle reports that the next epoch changes the number of committees.
-    fn forced_epoch_end_abort() -> (Replica, MultiShardAtom) {
-        let (replica, id) = executing_cross_shard();
-        let prepare = multishard_atom(&replica.honest_new_multishard_command(&id));
-        replica.prepare_in_parent(&prepare);
+    /// The LocalAccept a proposer sends for `prepare`'s transaction when its own epoch oracle reports that the next
+    /// epoch changes the number of committees.
+    fn epoch_end_abort(prepare: MultiShardAtom) -> MultiShardAtom {
         let mut evidence = prepare.evidence.clone();
         evidence.abort();
-        let accept = MultiShardAtom {
+        MultiShardAtom {
             decision: Decision::Abort(AbortReason::EpochExpired),
             evidence,
             transaction_fee: 0,
             leader_fee: None,
             ..prepare
-        };
-        (replica, accept)
+        }
+    }
+
+    /// A replica that has prepared [`pledging_cross_shard`]'s transaction, which is still waiting on the other shard
+    /// group to prepare, and the epoch-end abort a proposer sends for it.
+    fn waiting_on_a_foreign_shard_group() -> (Replica, MultiShardAtom) {
+        let (replica, id) = pledging_cross_shard();
+        let prepare = multishard_atom(&replica.honest_new_multishard_command(&id));
+        replica.prepare_in_parent(&prepare);
+        let local = replica.committee.shard_group();
+        assert!(!replica.pending_record(&id).is_ready_for_pending_stage(local));
+        (replica, epoch_end_abort(prepare))
+    }
+
+    /// A replica that has prepared [`executing_cross_shard`]'s transaction, whose only input shard group is the local
+    /// one, so it is ready for LocalAccept, and the epoch-end abort a proposer sends for it.
+    fn ready_for_local_accept() -> (Replica, MultiShardAtom) {
+        let (replica, id) = executing_cross_shard();
+        let prepare = multishard_atom(&replica.honest_new_multishard_command(&id));
+        replica.prepare_in_parent(&prepare);
+        let local = replica.committee.shard_group();
+        assert!(replica.pending_record(&id).is_ready_for_pending_stage(local));
+        (replica, epoch_end_abort(prepare))
     }
 
     #[test]
-    fn a_forced_abort_is_voted_for() {
-        let (replica, accept) = forced_epoch_end_abort();
+    fn a_forced_abort_of_a_transaction_waiting_on_a_foreign_shard_group_is_voted_for() {
+        let (replica, accept) = waiting_on_a_foreign_shard_group();
 
         let evaluation = replica.evaluate_before_layout_change(&[Command::LocalAccept(accept)]);
 
         assert!(evaluation.no_vote.is_none(), "{:?}", evaluation.no_vote);
         assert_eq!(evaluation.stages, [TransactionPoolStage::LocalAccepted]);
         assert_eq!(evaluation.decisions, [Decision::Abort(AbortReason::EpochExpired)]);
+        assert!(
+            matches!(evaluation.reject_reasons.as_slice(), [Some(RejectReason::Abort {
+                reason: AbortReason::EpochExpired
+            })]),
+            "{:?}",
+            evaluation.reject_reasons
+        );
     }
 
-    /// A proposer whose oracle does not yet report the layout change aborts the transaction for its own reason. The
-    /// replica takes that reason, so the transaction's SomeAccept matches the proposer's.
     #[test]
-    fn an_abort_for_the_proposers_own_reason_is_voted_for_and_recorded() {
-        let (replica, accept) = forced_epoch_end_abort();
+    fn a_forced_abort_for_a_different_reason_is_refused() {
+        let (replica, accept) = waiting_on_a_foreign_shard_group();
         let atom = MultiShardAtom {
             decision: Decision::Abort(AbortReason::LockOutputsFailed),
             ..accept
@@ -3062,14 +3101,62 @@ mod local_accept_before_a_layout_change {
 
         let evaluation = replica.evaluate_before_layout_change(&[Command::LocalAccept(atom)]);
 
-        assert!(evaluation.no_vote.is_none(), "{:?}", evaluation.no_vote);
-        assert_eq!(evaluation.stages, [TransactionPoolStage::LocalAccepted]);
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::DecisionDisagreement {
+                    local: Decision::Abort(AbortReason::EpochExpired),
+                    remote: Decision::Abort(AbortReason::LockOutputsFailed),
+                })
+            ),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
+
+    #[test]
+    fn a_forced_abort_of_a_ready_transaction_is_refused() {
+        let (replica, accept) = ready_for_local_accept();
+
+        let evaluation = replica.evaluate_before_layout_change(&[Command::LocalAccept(accept)]);
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::DecisionDisagreement {
+                    local: Decision::Commit,
+                    remote: Decision::Abort(AbortReason::EpochExpired),
+                })
+            ),
+            "{:?}",
+            evaluation.no_vote
+        );
+    }
+
+    /// A ready transaction is executed as at any other time, so its failure to lock outputs is what it records.
+    #[test]
+    fn a_ready_transaction_failing_to_lock_outputs_is_executed_and_recorded() {
+        let failure = LockFailure::new();
+
+        let evaluation = failure.replica.evaluate_with_outputs_locked_before_layout_change(
+            &[Command::LocalAccept(failure.accept.clone())],
+            std::slice::from_ref(&failure.locked_output),
+        );
+
+        assert_voted(&evaluation, TransactionPoolStage::LocalAccepted, true);
         assert_eq!(evaluation.decisions, [Decision::Abort(AbortReason::LockOutputsFailed)]);
+        assert!(
+            matches!(evaluation.reject_reasons.as_slice(), [Some(
+                RejectReason::FailedToLockOutputs(_)
+            )]),
+            "{:?}",
+            evaluation.reject_reasons
+        );
     }
 
     #[test]
     fn a_commit_is_refused() {
-        let (replica, accept) = forced_epoch_end_abort();
+        let (replica, accept) = waiting_on_a_foreign_shard_group();
         let atom = MultiShardAtom {
             decision: Decision::Commit,
             ..accept

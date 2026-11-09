@@ -50,12 +50,6 @@ pub fn validate_confidential_statement(
     proof: &ConfidentialOutputStatement,
     view_key: Option<&RistrettoPublicKey>,
 ) -> Result<ValidatedConfidentialProof, ResourceError> {
-    if proof.output_revealed_amount.is_negative() || proof.change_revealed_amount.is_negative() {
-        return Err(ResourceError::InvalidConfidentialProof {
-            details: "Revealed amounts must be positive".to_string(),
-        });
-    }
-
     if proof
         .output
         .iter()

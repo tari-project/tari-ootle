@@ -186,6 +186,18 @@ impl<'a, R: 'a + TreeStoreReader<P>, P: Clone> JellyfishMerkleTree<'a, R, P> {
         persisted_version: Option<Version>,
         version: Version,
     ) -> Result<(TreeHash, TreeUpdateBatch<P>), JmtStorageError> {
+        let value_set = value_set.into_iter().collect::<BTreeMap<_, _>>();
+        self.batch_put_value_map(&value_set, persisted_version, version)
+    }
+
+    /// [`batch_put_value_set`](Self::batch_put_value_set) for a caller that already holds its changes in a map keyed
+    /// by leaf key, which saves collecting them into a second one.
+    pub fn batch_put_value_map(
+        &self,
+        value_set: &BTreeMap<LeafKey, Option<(TreeHash, P)>>,
+        persisted_version: Option<Version>,
+        version: Version,
+    ) -> Result<(TreeHash, TreeUpdateBatch<P>), JmtStorageError> {
         // Writing at or below the persisted version would record live nodes as stale and write their replacements
         // under the same keys, so pruning the stale index would delete the live tree.
         if let Some(persisted_version) = persisted_version.filter(|p| version <= *p) {
@@ -194,7 +206,6 @@ impl<'a, R: 'a + TreeStoreReader<P>, P: Clone> JellyfishMerkleTree<'a, R, P> {
                 version,
             });
         }
-        let value_set = value_set.into_iter().collect::<BTreeMap<_, _>>();
         let deduped_and_sorted_kvs = value_set.iter().map(|(k, v)| (k, v.as_ref())).collect::<Vec<_>>();
 
         let mut batch = TreeUpdateBatch::new();

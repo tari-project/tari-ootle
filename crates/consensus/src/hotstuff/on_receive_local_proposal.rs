@@ -63,7 +63,12 @@ use crate::{
     messages::{ForeignProposalNotificationMessage, HotstuffMessage, ProposalMessage, VoteMessage},
     tracing::TraceTimer,
     traits::{CertificateStore, ConsensusSpec, OutboundMessaging, ValidatorSignerService, hooks::ConsensusHooks},
-    validations::{authenticate_foreign_proposal, check_proposed_by_leader, is_authenticated_commit_proof_stored},
+    validations::{
+        are_block_foreign_proposals_matched,
+        authenticate_foreign_proposal,
+        check_proposed_by_leader,
+        is_authenticated_commit_proof_stored,
+    },
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_receive_local_proposal";
@@ -249,6 +254,19 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             // We do not trigger an immediate leader failure for an invalid block
             return Ok(None);
         };
+
+        if !self
+            .store
+            .with_read_tx(|tx| are_block_foreign_proposals_matched(tx, valid_block.block(), &foreign_proposals))?
+        {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️❌ Rejecting proposal for block {}: embedded foreign proposals do not match the block's \
+                 foreign proposal commands",
+                valid_block,
+            );
+            return Ok(None);
+        }
 
         if !self.are_foreign_proposals_authentic(&foreign_proposals).await? {
             // An unauthenticated proposal says nothing about its block id, so nothing is recorded against it, leaving
@@ -519,6 +537,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     can_propose_epoch_end,
                     local_next_epoch,
                     next_epoch_changes_layout,
+                    origin,
                     &mut change_set,
                 )?;
 
@@ -546,7 +565,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         }
 
         // If accepted, the changeset is already saved, otherwise we log everything here for debugging
-        if !process_result.block_decision.is_accept() {
+        if !change_set.is_accept() {
             change_set.log_everything_dropped();
         }
         // Clear and reuse the memory allocated for changeset
@@ -820,6 +839,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     genesis.as_last_executed().set(tx)?;
                     genesis.as_last_voted().set(tx)?;
                     genesis.justify().as_high_pc().set(tx)?;
+                    genesis.commit_block_without_state_changes(tx, &genesis.justify().calculate_id())?;
                 }
 
                 Ok::<_, HotStuffError>(())
@@ -1287,8 +1307,8 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
     // The notification is gossiped on a single network-wide topic, so it only needs to be published once. The target
     // shard groups are carried in the message and receivers that are not in the audience ignore it.
     // TODO: all local VNs will broadcast this. Perhaps we can reduce this to $f+1$.
-    // The shard groups are sorted so that the encoded payload is deterministic: every local VN produces identical
-    // bytes for the same block, allowing gossipsub's content-addressed message id to deduplicate the broadcasts.
+    // Gossip message ids are scoped to the author, so each local VN's broadcast propagates separately and receivers
+    // deduplicate them by block id. The shard groups are sorted so that the encoded payload is deterministic.
     let mut shard_groups = non_local_shard_groups.into_iter().collect::<Vec<_>>();
     shard_groups.sort_by_key(|sg| sg.encode_as_u32());
     if let Err(err) = outbound_messaging

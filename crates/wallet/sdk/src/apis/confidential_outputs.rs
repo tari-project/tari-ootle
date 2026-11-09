@@ -317,6 +317,8 @@ pub enum ConfidentialOutputsApiError {
 
 impl IsNotFoundError for ConfidentialOutputsApiError {
     fn is_not_found_error(&self) -> bool {
-        matches!(self, Self::StoreError(e) if e.is_not_found_error() )
+        matches!(self, Self::StoreError(e) if e.is_not_found_error()) ||
+            matches!(self, Self::KeyManager(e) if e.is_not_found_error()) ||
+            matches!(self, Self::Accounts(e) if e.is_not_found_error())
     }
 }

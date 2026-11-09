@@ -94,7 +94,7 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::engine::runtime::working_state";
 
-/// A [`StealthTransferStatement`] that has passed [`WorkingState::account_stealth_transfer`].
+/// A [`StealthTransferStatement`] that has passed [`WorkingState::admit_stealth_transfer`].
 #[derive(Debug)]
 pub(super) struct AdmittedStealthTransfer(StealthTransferStatement);
 
@@ -869,13 +869,12 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
-    /// Enforces the confidential-withdraw limits and accounts this withdraw against the per-transaction totals. Must be
+    /// Enforces the confidential-withdraw limits and counts this withdraw against the per-transaction totals. Must be
     /// called before the withdraw's proof crypto runs, so an over-limit transaction is rejected before the unmetered
     /// verification and substate-access work is done.
-    pub fn account_confidential_withdraw(&mut self, proof: &ConfidentialWithdrawProof) -> Result<(), RuntimeError> {
+    pub fn admit_confidential_withdraw(&mut self, proof: &ConfidentialWithdrawProof) -> Result<(), RuntimeError> {
         check_confidential_withdraw_limits(&limits::CONFIDENTIAL_LIMITS, proof)?;
-        self.confidential_totals
-            .account_withdraw(&limits::CONFIDENTIAL_LIMITS, proof)?;
+        self.confidential_totals.admit(&limits::CONFIDENTIAL_LIMITS, proof)?;
         Ok(())
     }
 
@@ -2359,16 +2358,15 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
-    /// Enforces the stealth-transfer limits and accounts this transfer against the per-transaction totals. Must be
+    /// Enforces the stealth-transfer limits and counts this transfer against the per-transaction totals. Must be
     /// called before the transfer's input authorization, hooks and proof crypto run, so an over-limit transaction is
     /// rejected before that work is done.
-    pub(super) fn account_stealth_transfer(
+    pub(super) fn admit_stealth_transfer(
         &mut self,
         statement: StealthTransferStatement,
     ) -> Result<AdmittedStealthTransfer, RuntimeError> {
         check_stealth_transfer_limits(&limits::STEALTH_LIMITS, &statement)?;
-        self.stealth_totals
-            .account_transfer(&limits::STEALTH_LIMITS, &statement)?;
+        self.stealth_totals.admit(&limits::STEALTH_LIMITS, &statement)?;
         Ok(AdmittedStealthTransfer(statement))
     }
 
@@ -2708,7 +2706,7 @@ mod tests {
     }
 
     #[test]
-    fn account_stealth_transfer_enforces_statement_and_transaction_limits() {
+    fn admit_stealth_transfer_enforces_statement_and_transaction_limits() {
         let mut state = test_working_state();
         let valid =
             StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
@@ -2718,17 +2716,17 @@ mod tests {
             .map(|_| StealthInput::new(PedersenCommitmentBytes::from_bytes(&[0u8; 32]).unwrap()))
             .collect();
         assert!(matches!(
-            state.account_stealth_transfer(too_many_inputs),
+            state.admit_stealth_transfer(too_many_inputs),
             Err(RuntimeError::ArgumentValidationError(
                 ArgumentValidationError::MaxStealthInputsExceeded { .. }
             ))
         ));
 
         for _ in 0..limits::STEALTH_LIMITS.max_transfers_per_transaction {
-            state.account_stealth_transfer(valid.clone()).unwrap();
+            state.admit_stealth_transfer(valid.clone()).unwrap();
         }
         assert!(matches!(
-            state.account_stealth_transfer(valid),
+            state.admit_stealth_transfer(valid),
             Err(RuntimeError::ArgumentValidationError(
                 ArgumentValidationError::MaxStealthTransfersPerTransactionExceeded { .. }
             ))

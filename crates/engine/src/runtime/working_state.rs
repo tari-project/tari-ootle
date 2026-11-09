@@ -1059,13 +1059,6 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
         let resource_container = match mint_arg {
             MintArg::Fungible { amount } => {
-                if amount.is_negative() {
-                    return Err(RuntimeError::InvalidAmount {
-                        amount,
-                        reason: "Amount must be positive".to_string(),
-                    });
-                }
-
                 debug!(
                     target: LOG_TARGET,
                     "Minting {} fungible tokens on resource: {}", amount, resource_address
@@ -1146,13 +1139,6 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 container
             },
             MintArg::Stealth { amount } => {
-                if amount.is_negative() {
-                    return Err(RuntimeError::InvalidAmount {
-                        amount,
-                        reason: "Stealth mint amount must be positive".to_string(),
-                    });
-                }
-
                 debug!(
                     target: LOG_TARGET,
                     "Minting {} revealed stealth tokens on resource: {}", amount, resource_address
@@ -1236,13 +1222,6 @@ impl<TStore: StateReader> WorkingState<TStore> {
         let resource_container = match resource_discriminator {
             ResourceDiscriminator::Everything => vault_mut.recall_all()?,
             ResourceDiscriminator::Fungible { amount } => {
-                if amount.is_negative() {
-                    return Err(RuntimeError::InvalidAmount {
-                        amount: *amount,
-                        reason: "Amount must be positive".to_string(),
-                    });
-                }
-
                 if !vault_mut.resource_type().is_public_fungible() && !vault_mut.resource_type().is_stealth() {
                     return Err(RuntimeError::InvalidArgument {
                         argument: "resource",

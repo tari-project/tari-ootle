@@ -73,10 +73,7 @@ impl StealthCryptoApi {
     {
         let stmt = stealth::create_transfer_statement(
             inputs,
-            input_revealed_amount
-                .into()
-                .non_negative_checked()
-                .ok_or(StealthCryptoApiError::NegativeAmount)?,
+            input_revealed_amount.into(),
             output_statements,
             revealed_output,
         )?;
@@ -229,6 +226,4 @@ pub enum StealthCryptoApiError {
     WalletCryptoError(#[from] WalletCryptoError),
     #[error("Confidential proof error: {0}")]
     ConfidentialProofError(#[from] StealthProofError),
-    #[error("Negative amount")]
-    NegativeAmount,
 }

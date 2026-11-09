@@ -1422,9 +1422,6 @@ pub async fn handle_confidential_transfer(
     let sdk = context.wallet_sdk().clone();
     let notifier = context.notifier().clone();
 
-    if req.amount.is_negative() {
-        return Err(invalid_params("amount", Some("must be positive")));
-    }
     let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
     enforce_scopes(&granted, &[Permission::Transfer(
         Crud::Create,

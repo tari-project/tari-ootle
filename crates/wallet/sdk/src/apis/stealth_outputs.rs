@@ -152,13 +152,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         amount: A,
         max_inputs: usize,
     ) -> Result<(Vec<InputSpendData>, Amount), StealthOutputsApiError> {
-        let amount = amount
-            .into()
-            .non_negative_checked()
-            .ok_or_else(|| StealthOutputsApiError::InvalidParameter {
-                param: "amount",
-                reason: "lock_outputs_for_at_least_amount: Amount must be non-negative".to_string(),
-            })?;
+        let amount = amount.into();
         if amount.is_zero() {
             return Ok((Vec::new(), Amount::zero()));
         }
@@ -398,12 +392,6 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         selection_algo: InputSelectionAlgorithm,
         max_inputs: usize,
     ) -> Result<Selection, StealthOutputsApiError> {
-        if amount.is_negative() {
-            return Err(StealthOutputsApiError::InvalidParameter {
-                param: "amount",
-                reason: "lock_outputs_internal: Amount cannot be negative".to_string(),
-            });
-        }
         // A selection's inputs are spent by one statement, so no selection may be given more than one statement can
         // carry — the per-transaction total is the sum of the budgets, not a bound on any one of them.
         if max_inputs == 0 || max_inputs > MAX_TRANSFER_INPUTS {

@@ -144,12 +144,6 @@ where
     Outputs: IntoIterator<Item = &'a StealthOutputWitness> + Clone,
     Outputs::IntoIter: ExactSizeIterator,
 {
-    if revealed_input_amount.is_negative() {
-        return Err(WalletCryptoError::InvalidArgument {
-            name: "revealed_input_amount",
-            details: format!("Revealed input amount must be non-negative: {revealed_input_amount}"),
-        });
-    }
     if let Some(revealed) = revealed_output &&
         !revealed.amount.is_positive()
     {

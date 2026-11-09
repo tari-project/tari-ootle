@@ -143,7 +143,7 @@ use tari_template_lib::{
         },
         bytes::Bytes,
         constants::{TARI_TOKEN, TOKEN_SYMBOL},
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag, ValueKnowledgeProof},
         engine_args::IntrinsicId,
         stealth::{
             AtomicCondition,
@@ -560,6 +560,17 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             return Ok(());
         }
 
+        // The hook frame's scope comes from the arguments as they stand before the acting component's state is
+        // attached, so the hook receives that state as data only. The acting component's frame validated the state
+        // when it wrote it, and the substates it names belong to the acting component: a root substate among them
+        // may be absent from this transaction, and none of them enter the hook frame's scope.
+        let hook_arg_scope = [
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&action)?)?,
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&auth_caller)?)?,
+        ]
+        .into_iter()
+        .collect();
+
         if let Some(component) = auth_caller.component().copied() {
             self.invoke_modules_on_runtime_call("load_component")?;
             self.charge_component_load(component)?;
@@ -592,6 +603,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             &auth_hook.method,
             args,
             Some(FrameWriteMode::OwnComponent),
+            Some(hook_arg_scope),
         );
         if !resource_was_in_scope {
             self.tracker.write_with(|state_mut| {
@@ -688,12 +700,15 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         Runtime::new(Rc::new(self.clone()))
     }
 
+    /// Calls `method` on `component_address`. `arg_scope`, when given, is the callee frame's argument scope in
+    /// place of the one derived from `args`.
     fn invoke_component_method(
         &self,
         component_address: ComponentAddress,
         method: &str,
         args: Vec<Bytes>,
         restrict_frame_to: Option<FrameWriteMode>,
+        arg_scope: Option<IndexedWellKnownTypes>,
     ) -> Result<IndexedValue, RuntimeError> {
         let call_runtime = self.for_nested_call();
 
@@ -704,6 +719,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             method,
             args.into_iter().map(InstructionArg::Literal).collect(),
             restrict_frame_to,
+            arg_scope,
         )
         .map_err(|e| RuntimeError::CrossTemplateCallMethodError {
             component_address,
@@ -2597,9 +2613,33 @@ where
                         }));
                     }
 
-                    // The value proof is the burner's proof that they hold the UTXO's opening (or the resource's
-                    // secret view key), so it is required whether or not the resource tracks its total supply.
                     let commitment = arg.utxo_id.into_commitment_bytes();
+
+                    // The output's creator chose its mask, so a mask-knowledge proof shows knowledge of the opening
+                    // but not ownership. It authorises a burn only together with the UTXO's key-path spend authority.
+                    // A view-key proof needs the resource's secret view key and stands on its own.
+                    if matches!(arg.value_proof.knowledge_proof, ValueKnowledgeProof::Commitment { .. }) {
+                        let Some(spend_key) = utxo_mut.output().and_then(|o| o.auth.spend_key()).copied() else {
+                            return Err(RuntimeError::ResourceError(ResourceError::UtxoBurnFailed {
+                                id: arg.utxo_id,
+                                details: "a mask-knowledge value proof can only burn a UTXO that has a spend key"
+                                    .to_string(),
+                            }));
+                        };
+                        let badge = NonFungibleAddress::from_public_key(spend_key);
+                        if !state_mut.base_call_scope().auth_scope().contains_badge(&badge) {
+                            return Err(RuntimeError::ResourceError(
+                                ResourceError::RequiredSignatureMissingForStealthUtxo {
+                                    commitment,
+                                    public_key: spend_key,
+                                },
+                            ));
+                        }
+                    }
+
+                    let utxo_mut = state_mut.get_utxo_mut(&utxo_lock)?;
+                    // The value proof is required whether or not the resource tracks its total supply, since it is
+                    // what limits burns to the UTXO owner or the view-key holder.
                     // Burning discards the output, so the proof is validated against the viewable balance first
                     let elgamal_proof = utxo_mut
                         .output
@@ -2780,7 +2820,7 @@ where
 
                     // Enforce confidential limits before the withdraw's proof crypto runs.
                     if let VaultWithdrawArg::Confidential { proof } = &arg {
-                        state.account_confidential_withdraw(proof)?;
+                        state.admit_confidential_withdraw(proof)?;
                     }
 
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
@@ -2918,10 +2958,10 @@ where
                 // inputs unspent. Fees are always paid in TARI.
                 let admitted_transfer = match arg.statement {
                     Some(statement) => {
-                        self.tracker.account_fee_intent_stealth_transfer()?;
+                        self.tracker.admit_fee_intent_stealth_transfer()?;
                         let admitted = self
                             .tracker
-                            .write_with(|state| state.account_stealth_transfer(statement))?;
+                            .write_with(|state| state.admit_stealth_transfer(statement))?;
                         // TARI has no view key, so the viewable-balance surcharge never applies to a fee payment.
                         self.tracker
                             .charge_native_execution(stealth::transfer_native_points(admitted.statement(), false))?;
@@ -3228,7 +3268,7 @@ where
                                 e
                             ),
                         })?;
-                    state.account_confidential_withdraw(&proof)?;
+                    state.admit_confidential_withdraw(&proof)?;
                     let bucket_mut = state.get_bucket_mut(bucket_id)?;
                     let (resource, effects) = bucket_mut.take_confidential(proof, view_key.as_ref())?;
                     let resource_address = *resource.resource_address();
@@ -3973,6 +4013,10 @@ where
                         .map(|public_key| id_provider.derive_new_component_address(&template, public_key))
                         .unwrap_or_else(|| id_provider.new_component_address())?;
 
+                    if state.substate_exists(&SubstateId::Component(address))? {
+                        return Err(RuntimeError::ComponentAlreadyExists { address });
+                    }
+
                     let id = state.new_address_allocation(address)?;
                     Ok(InvokeResult::encode(&ComponentAddressAllocation::new(id))?)
                 },
@@ -4024,7 +4068,7 @@ where
                     args,
                 } = args.assert_one_arg()?;
 
-                self.invoke_component_method(component_address, &method, args, None)?
+                self.invoke_component_method(component_address, &method, args, None, None)?
             },
         };
 
@@ -4279,14 +4323,14 @@ where
         // The fee intent runs on free-compute credit, so the transfers it may perform are capped. Checked before any
         // resource read, charge or crypto so an over-cap fee intent is rejected up front. Both the `StealthTransfer`
         // instruction and a template's `ResourceManager::stealth_transfer` reach here, so neither route escapes it.
-        self.tracker.account_fee_intent_stealth_transfer()?;
+        self.tracker.admit_fee_intent_stealth_transfer()?;
 
         // The whole statement's native verification cost is charged against the payment-funded
         // allowance before any of it runs (the authorisation pass below included), so a transaction
         // that will not pay traps here without extracting the crypto work. The resource peek is a
         // cheap substate read that determines whether the viewable-balance surcharge applies.
         let (admitted, has_view_key) = self.tracker.write_with(|state| {
-            let admitted = state.account_stealth_transfer(statement)?;
+            let admitted = state.admit_stealth_transfer(statement)?;
             let resource_lock = state.read_lock_substate(SubstateId::Resource(address))?;
             let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
             state.unlock_substate(resource_lock)?;

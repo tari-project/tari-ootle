@@ -801,6 +801,11 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         self.log.changes()
     }
 
+    /// The latest change to `id` made by the block being built.
+    pub fn block_change(&self, id: &SubstateId) -> Option<&SubstateChange> {
+        self.log.get_head(id)
+    }
+
     pub fn generate_shard_state_change_bitmap(&self) -> Vec<bool> {
         let shard_group = self.chain.parent_block.shard_group();
         let mut bitmap = iter::repeat_n(false, shard_group.len() + 1).collect::<Vec<_>>();

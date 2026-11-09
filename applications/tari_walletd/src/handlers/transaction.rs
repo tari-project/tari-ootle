@@ -1779,7 +1779,8 @@ mod tests {
                 )
             })
             .unwrap();
-        for _ in 0..16 {
+        // The test notifier's capacity of 10 rounds up to a 16-slot broadcast buffer, so 32 events overflow it.
+        for _ in 0..32 {
             daemon.context.notifier().notify(AuthLoginRequestEvent);
         }
 

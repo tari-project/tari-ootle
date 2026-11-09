@@ -106,3 +106,30 @@ impl GossipValidation {
         self.key
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use libp2p::gossipsub;
+    use tari_ootle_transaction::Transaction;
+
+    use super::*;
+    use crate::NewTransactionMessage;
+
+    #[tokio::test]
+    async fn decode_rejects_trailing_bytes_after_frame() {
+        let codec = TransactionGossipCodec::new();
+        let msg = TariMessage::NewTransaction(Box::new(NewTransactionMessage {
+            transaction: Transaction::builder_localnet().build_and_seal(&Default::default()),
+        }));
+        let mut data = codec.encode(msg).await.unwrap();
+        data.extend_from_slice(&[0xde, 0xad]);
+        let gossip_msg = gossipsub::Message {
+            source: None,
+            data,
+            sequence_number: None,
+            topic: gossipsub::IdentTopic::new(TRANSACTION_TOPIC).hash(),
+        };
+        let err = codec.decode(gossip_msg).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+}

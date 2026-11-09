@@ -152,3 +152,41 @@ fn it_rejects_outputs_less_than_inputs() {
         "expected UnbalancedWithdraw, got {err:?}"
     );
 }
+
+#[test]
+fn it_rejects_duplicate_input_commitments() {
+    let input = MaskAndValue::new(500, random_mask());
+
+    let err = create_withdraw_proof(
+        &[input.clone(), input],
+        Amount::zero(),
+        Some(&witness(1_000)),
+        Amount::zero(),
+        None,
+        Amount::zero(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, WalletCryptoError::InvalidArgument { name: "inputs", .. }),
+        "expected InvalidArgument(inputs), got {err:?}"
+    );
+}
+
+#[test]
+fn it_rejects_oversized_revealed_amounts() {
+    let input = MaskAndValue::new(500, random_mask());
+    let oversized = Amount::new(u128::from(u64::MAX) + 1);
+    let err = create_withdraw_proof(
+        &[input],
+        oversized,
+        Some(&witness(500)),
+        oversized,
+        None,
+        Amount::zero(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, WalletCryptoError::InvalidArgument { name: "amounts", .. }),
+        "expected InvalidArgument(amounts), got {err:?}"
+    );
+}

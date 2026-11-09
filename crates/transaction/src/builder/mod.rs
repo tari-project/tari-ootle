@@ -414,6 +414,10 @@ impl<D> TransactionBuilder<D> {
     /// builder's. Fee instructions from `other` are NOT merged — fees should be managed on the
     /// outer builder.
     ///
+    /// The merged inputs are the union of both builders' declared inputs. `other`'s instructions
+    /// keep the inputs `other` declared for them, so this builder's auto-fill setting applies only
+    /// to instructions added to it directly.
+    ///
     /// This is the low-level primitive behind the higher-level `chain` method on
     /// `OotleInvoke`.
     ///
@@ -475,7 +479,6 @@ impl<D> TransactionBuilder<D> {
         for mut instruction in other_tx.into_instructions() {
             instruction.remap_workspace_ids(workspace_id_offset);
             instruction.remap_blob_ids(blob_id_offset);
-            self.add_inputs_for_instruction(&instruction);
             self.unsigned_transaction.instructions_mut().push(instruction);
         }
 
@@ -1009,34 +1012,20 @@ impl<D> TransactionBuilder<D> {
     fn add_inputs_for_raw_arg<F>(&mut self, bytes: &[u8], make_declaration: F)
     where F: FnMut(SubstateId) -> InputDeclaration {
         if let Ok(indexed) = IndexedValue::from_raw(bytes) {
-            self.add_inputs_for_indexed_value(&indexed, make_declaration);
+            declare_inputs(
+                self.unsigned_transaction.inputs_mut(),
+                indexed
+                    .referenced_substates()
+                    .filter(SubstateId::is_declarable_input)
+                    .map(make_declaration),
+            );
         }
-    }
-
-    fn add_inputs_for_indexed_value<F>(&mut self, indexed: &IndexedValue, make_declaration: F)
-    where F: FnMut(SubstateId) -> InputDeclaration {
-        declare_inputs(
-            self.unsigned_transaction.inputs_mut(),
-            indexed
-                .referenced_substates()
-                .filter(SubstateId::is_declarable_input)
-                .map(make_declaration),
-        );
     }
 
     fn add_inputs_for_args(&mut self, args: &[InstructionArg]) {
         for arg in args {
-            let indexed = match arg {
-                InstructionArg::Literal(bytes) => IndexedValue::from_raw(bytes).ok(),
-                InstructionArg::Blob(idx) => self
-                    .unsigned_transaction
-                    .blobs()
-                    .get(*idx)
-                    .and_then(|blob| IndexedValue::from_raw(blob).ok()),
-                InstructionArg::Workspace(_) => None,
-            };
-            if let Some(indexed) = indexed {
-                self.add_inputs_for_indexed_value(&indexed, InputDeclaration::write);
+            if let Some(bytes) = arg.as_literal_bytes() {
+                self.add_inputs_for_raw_arg(bytes, InputDeclaration::write);
             }
         }
     }

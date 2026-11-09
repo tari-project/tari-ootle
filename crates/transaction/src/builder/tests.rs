@@ -784,26 +784,43 @@ fn stealth_transfer_resolves_workspace_resource_offset() {
 }
 
 #[test]
-fn auto_fill_inputs_collects_substates_from_blobs_and_merged_builders() {
-    use tari_ootle_common_types::InputDeclaration;
-
+fn auto_fill_inputs_leaves_blob_arguments_undeclared() {
     let blob_comp = ComponentAddress::from_array([3; 32]);
-    let merged_comp = ComponentAddress::from_array([4; 32]);
-    let merged_arg_comp = ComponentAddress::from_array([5; 32]);
-
     let blob_bytes = tari_bor::encode(&blob_comp).unwrap();
-
-    let other = Transaction::builder_localnet(Epoch(1)).call_method(merged_comp, "mutate", args![merged_arg_comp]);
 
     let tx = Transaction::builder_localnet(Epoch(1))
         .with_auto_fill_inputs()
         .add_blob("arg_blob", blob_bytes)
         .call_function(TemplateAddress::default(), "f", args![Blob("arg_blob")])
+        .build_unsigned();
+
+    assert!(
+        tx.inputs().is_empty(),
+        "an address inside a blob argument must not be auto-declared, got {:?}",
+        tx.inputs()
+    );
+}
+
+#[test]
+fn merge_keeps_other_builders_declared_inputs() {
+    use tari_ootle_common_types::InputDeclaration;
+
+    let merged_comp = ComponentAddress::from_array([4; 32]);
+    let merged_arg_comp = ComponentAddress::from_array([5; 32]);
+
+    let other = Transaction::builder_localnet(Epoch(1))
+        .add_input(InputDeclaration::read(merged_comp))
+        .call_method(merged_comp, "inspect", args![merged_arg_comp]);
+
+    let tx = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
         .merge(other)
         .build_unsigned();
 
-    assert_eq!(tx.inputs().len(), 3);
-    assert!(tx.inputs().contains(&InputDeclaration::write(blob_comp)));
-    assert!(tx.inputs().contains(&InputDeclaration::write(merged_comp)));
-    assert!(tx.inputs().contains(&InputDeclaration::write(merged_arg_comp)));
+    let declared = tx
+        .inputs()
+        .iter()
+        .map(|decl| (decl.substate_id().clone(), decl.is_write()))
+        .collect::<Vec<_>>();
+    assert_eq!(declared, vec![(merged_comp.into(), false)]);
 }

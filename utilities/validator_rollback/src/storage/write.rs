@@ -137,6 +137,7 @@ where
             .cf(CommittedParentChildChainIndex)?
             .delete(block_id, OPERATION)?;
         tx.db().cf(chain::PendingChainIndex)?.delete(block_id, OPERATION)?;
+        tx.db().cf(block::ExecutedBlockIndex)?.delete(block_id, OPERATION)?;
         // PendingParentChildIndex is keyed by (parent, child). Precise deletion needs the
         // block's parent, which itself may already be gone. Stale entries are benign —
         // all index consumers start from known block_ids and won't reach orphans.

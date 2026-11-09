@@ -233,7 +233,8 @@ impl SubstatePledge {
         let req = req.into();
         // Check if a requirement is met by this pledge. If the requirement does not specify a version, then the version
         // requirement is, by definition, met.
-        req.version.is_none_or(|v| v == self.versioned_substate_id().version()) &&
+        self.is_input() &&
+            req.version.is_none_or(|v| v == self.versioned_substate_id().version()) &&
             self.substate_id() == req.substate_id()
     }
 
@@ -487,5 +488,25 @@ mod tests {
         } else {
             assert_ne!(hash2, hash3);
         }
+    }
+
+    #[test]
+    fn output_pledge_does_not_satisfy_input_requirement() {
+        let id = create_substate_id(7);
+        let output_pledge = SubstatePledge::Output {
+            substate_id: id.clone(),
+        };
+        let versioned_req = SubstateRequirementRef::new(id.substate_id(), Some(id.version()));
+        let unversioned_req = SubstateRequirementRef::new(id.substate_id(), None);
+        assert!(!output_pledge.satisfies_requirement(versioned_req));
+        assert!(!output_pledge.satisfies_requirement(unversioned_req));
+
+        let input_pledge = SubstatePledge::Input {
+            substate_id: id.clone(),
+            is_write: false,
+            substate: Box::new(substate_value(7)),
+        };
+        assert!(input_pledge.satisfies_requirement(versioned_req));
+        assert!(input_pledge.satisfies_requirement(unversioned_req));
     }
 }

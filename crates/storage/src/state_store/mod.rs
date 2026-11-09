@@ -223,6 +223,8 @@ pub trait StateStoreReadTransaction: Sized {
         limit: usize,
     ) -> Result<Vec<Block>, StorageError>;
     fn blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError>;
+    /// True if the change set of the uncommitted block `block_id` has been saved. Committing the block clears this.
+    fn blocks_is_executed(&self, block_id: &BlockId) -> Result<bool, StorageError>;
     fn blocks_is_pending_ancestor(&self, descendant: &BlockId, ancestor: &BlockId) -> Result<bool, StorageError>;
     fn blocks_get_committed_by_parent(&self, parent: &BlockId) -> Result<Block, StorageError>;
     fn blocks_get_pending_ids_by_parent(&self, parent: &BlockId) -> Result<Vec<BlockId>, StorageError>;
@@ -594,6 +596,8 @@ pub trait StateStoreWriteTransaction {
     // -------------------------------- Block -------------------------------- //
     fn blocks_insert(&mut self, block: &Block) -> Result<(), StorageError>;
     fn blocks_delete(&mut self, block_id: &BlockId) -> Result<(), StorageError>;
+    /// Records that the change set of the uncommitted block `block_id` has been saved.
+    fn blocks_set_executed(&mut self, block_id: &BlockId) -> Result<(), StorageError>;
     fn blocks_set_qcs(
         &mut self,
         block_id: &BlockId,

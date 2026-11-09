@@ -547,7 +547,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         }
 
         // If accepted, the changeset is already saved, otherwise we log everything here for debugging
-        if !process_result.block_decision.is_accept() {
+        if !change_set.is_accept() {
             change_set.log_everything_dropped();
         }
         // Clear and reuse the memory allocated for changeset
@@ -821,6 +821,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     genesis.as_last_executed().set(tx)?;
                     genesis.as_last_voted().set(tx)?;
                     genesis.justify().as_high_pc().set(tx)?;
+                    genesis.commit_block_without_state_changes(tx, &genesis.justify().calculate_id())?;
                 }
 
                 Ok::<_, HotStuffError>(())

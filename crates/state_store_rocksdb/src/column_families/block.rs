@@ -44,6 +44,24 @@ impl Cf for EpochHeightIndex {
     }
 }
 
+prefixed!(ExecutedBlockPrefix, KeyPrefix::ExecutedBlocks);
+
+/// The uncommitted blocks whose change set this node has saved. Committing a block applies its saved change set, so a
+/// block that is not in this index cannot be committed.
+pub struct ExecutedBlockIndex;
+
+impl Cf for ExecutedBlockIndex {
+    type Key = BlockId;
+    type KeyCodec = BlockIdCodec;
+    type Prefix = ExecutedBlockPrefix;
+    type Value = ();
+    type ValueCodec = UnitCodec;
+
+    fn name() -> &'static str {
+        BlockCf::name()
+    }
+}
+
 pub struct ByEpochHeightQuery;
 
 impl QueryCf for ByEpochHeightQuery {

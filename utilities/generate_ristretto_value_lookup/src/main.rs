@@ -90,6 +90,21 @@ async fn generate_sorted(
     num_threads: usize,
     bucket_bits: Option<u8>,
 ) -> io::Result<()> {
+    if max < min {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("max ({max}) must be >= min ({min})"),
+        ));
+    }
+    if (max - min).checked_add(1).is_none() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "range [min, max] exceeds u64::MAX entries",
+        ));
+    }
+    if num_threads == 0 {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "jobs must be >= 1"));
+    }
     if !(1..=KEY_LEN as u8).contains(&prefix_len) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -174,6 +189,12 @@ async fn sort_in_memory<W: Write>(
     .await?;
 
     println!("\nPhase 2/2: sorting {count} entries.");
+    if entries.len() as u64 != count {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("generated {} entries, expected {count}", entries.len()),
+        ));
+    }
     let timer = Instant::now();
     entries.sort_unstable();
     let mut record = vec![0u8; header.stride()];
@@ -282,7 +303,7 @@ where F: FnMut(&[(u64, u64)]) -> io::Result<()> {
     let count = (max - min + 1) as usize;
 
     let mut chunks = (min..=max).step_by(CHUNK_SIZE as usize).map(|chunk_start| {
-        let chunk_end = std::cmp::min(chunk_start + CHUNK_SIZE - 1, max);
+        let chunk_end = chunk_start.saturating_add(CHUNK_SIZE - 1).min(max);
         (chunk_start, chunk_end)
     });
 
@@ -496,5 +517,37 @@ mod tests {
     #[tokio::test]
     async fn in_memory_sort_round_trips_through_the_reader() {
         assert_round_trips(1000, 5000, Some(0)).await;
+    }
+
+    #[tokio::test]
+    async fn rejects_zero_jobs_and_invalid_ranges() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("value_lookup.bin");
+
+        let err = generate_sorted(&dest, 0, 10, 8, 0, Some(0)).await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert!(!dest.exists());
+
+        let err = generate_sorted(&dest, 10, 5, 8, 2, Some(0)).await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+
+        let err = generate_sorted(&dest, 0, u64::MAX, 8, 2, Some(0)).await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn handles_range_near_u64_max_without_overflow() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("value_lookup.bin");
+        let min = u64::MAX - 10;
+        let max = u64::MAX;
+        generate_sorted(&dest, min, max, 8, 2, Some(0)).await.unwrap();
+
+        let file = File::open(&dest).unwrap();
+        let lookup = unsafe { SortedPrefixFileLookup::load(&file).unwrap() };
+        assert_eq!(lookup.range(), min..=max);
+        for v in min..=max {
+            assert_eq!(lookup.find_value(&point_bytes(v)), Some(v), "failed at {v}");
+        }
     }
 }

@@ -1,6 +1,8 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::BTreeSet;
+
 use log::warn;
 use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
 use tari_crypto::{
@@ -107,6 +109,26 @@ pub fn validate_balance_proof_signature(
     outputs_statement: &StealthOutputsStatement,
     covenant_claims: &[CovenantBalanceClaim],
 ) -> bool {
+    if signature.public_nonce().is_zero() || signature.signature().is_zero() {
+        warn!(target: LOG_TARGET, "Balance proof public nonce and signature cannot be zero");
+        return false;
+    }
+
+    let mut seen_inputs = BTreeSet::new();
+    for input in &inputs_statement.inputs {
+        if !seen_inputs.insert(input.commitment) {
+            warn!(target: LOG_TARGET, "Duplicate commitment in transfer inputs");
+            return false;
+        }
+    }
+
+    if let Some(revealed) = outputs_statement.revealed_output &&
+        !revealed.amount.is_positive()
+    {
+        warn!(target: LOG_TARGET, "Revealed output amount must be positive");
+        return false;
+    }
+
     let Ok(sig) = EngineSchnorrSignature::convert_from_byte_type(signature) else {
         warn!(target: LOG_TARGET, "Malformed balance proof signature");
         return false;

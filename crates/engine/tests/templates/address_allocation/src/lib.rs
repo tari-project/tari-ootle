@@ -23,6 +23,17 @@ mod template {
             Self::create_from_allocations(component_allocation, resource_allocation)
         }
 
+        pub fn create_with_pk(pk: RistrettoPublicKeyBytes) -> Component<Self> {
+            let component_allocation = CallerContext::allocate_component_address(Some(pk));
+            let resource_allocation = CallerContext::allocate_resource_address();
+            Self::create_from_allocations(component_allocation, resource_allocation)
+        }
+
+        pub fn allocate_only_for_pk(pk: RistrettoPublicKeyBytes) -> ComponentAddress {
+            let component_allocation = CallerContext::allocate_component_address(Some(pk));
+            component_allocation.get_address()
+        }
+
         pub fn create_from_allocations(
             comp_alloc: ComponentAddressAllocation,
             resource: ResourceAddressAllocation,

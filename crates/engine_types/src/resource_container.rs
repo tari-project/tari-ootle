@@ -546,11 +546,17 @@ impl ResourceContainer {
 
                 if let Some(ref change) = validated_proof.change_output {
                     let change_commitment = change.commitment.to_byte_type();
-                    if locked_commitments.contains(&change_commitment) ||
-                        (commitments.contains(&change_commitment) && !seen_inputs.contains(&change_commitment))
-                    {
+                    if commitments.contains(&change_commitment) || locked_commitments.contains(&change_commitment) {
                         return Err(ResourceError::InvariantError(
                             "Confidential withdraw contained duplicate commitment in change commitment".to_string(),
+                        ));
+                    }
+                }
+                if let Some(ref output) = validated_proof.output {
+                    let output_commitment = output.commitment.to_byte_type();
+                    if commitments.contains(&output_commitment) || locked_commitments.contains(&output_commitment) {
+                        return Err(ResourceError::InvariantError(
+                            "Confidential withdraw contained duplicate commitment in output commitment".to_string(),
                         ));
                     }
                 }
@@ -1346,5 +1352,218 @@ mod tests {
         let nft_proof = ResourceContainer::non_fungible(PUBLIC_IDENTITY_RESOURCE_ADDRESS, BTreeSet::from([id1]));
         let err = nft_container.unlock(nft_proof).unwrap_err();
         assert!(matches!(err, ResourceError::InvariantError(_)));
+    }
+
+    #[test]
+    fn withdraw_confidential_rejects_output_or_change_colliding_with_input_unlocked_or_locked_commitments() {
+        use std::iter;
+
+        use tari_crypto::{
+            commitment::ExtensionDegree,
+            extended_range_proof::ExtendedRangeProofService,
+            keys::PublicKey,
+            ristretto::{
+                RistrettoSecretKey,
+                bulletproofs_plus::{RistrettoExtendedMask, RistrettoExtendedWitness},
+            },
+        };
+        use tari_template_lib::types::{EncryptedData, crypto::RangeProofBytes, stealth::UnspentOutput};
+
+        use crate::{
+            crypto::{commit_u64_amount, get_static_range_proof_service, messages},
+            hashing::EngineSchnorrSignature,
+        };
+
+        fn build_unspent(mask: &RistrettoSecretKey, amount: u64) -> (PedersenCommitmentBytes, UnspentOutput) {
+            let commitment = commit_u64_amount(mask, amount).to_byte_type();
+            let sender_public_nonce = RistrettoPublicKey::from_secret_key(mask).to_byte_type();
+            (commitment, UnspentOutput {
+                commitment,
+                sender_public_nonce,
+                encrypted_data: EncryptedData::try_from(vec![0u8; EncryptedData::min_size()]).unwrap(),
+                minimum_value_promise: 1,
+                viewable_balance_proof: None,
+            })
+        }
+
+        fn build_range_proof(witnesses: &[(&RistrettoSecretKey, u64)]) -> RangeProofBytes {
+            let mut extended = witnesses
+                .iter()
+                .map(|(mask, value)| RistrettoExtendedWitness {
+                    mask: RistrettoExtendedMask::assign(ExtensionDegree::DefaultPedersen, vec![(*mask).clone()])
+                        .unwrap(),
+                    value: *value,
+                    minimum_value_promise: 1,
+                })
+                .collect::<Vec<_>>();
+            let agg_factor = extended.len();
+            if !agg_factor.is_power_of_two() {
+                let pad = agg_factor.next_power_of_two() - agg_factor;
+                let default_mask =
+                    RistrettoExtendedMask::assign(ExtensionDegree::DefaultPedersen, vec![RistrettoSecretKey::default()])
+                        .unwrap();
+                extended.extend(iter::repeat_n(
+                    RistrettoExtendedWitness {
+                        mask: default_mask,
+                        value: 0,
+                        minimum_value_promise: 0,
+                    },
+                    pad,
+                ));
+            }
+            let bytes = get_static_range_proof_service(agg_factor)
+                .construct_extended_proof(extended, None)
+                .unwrap();
+            RangeProofBytes::try_from(bytes).unwrap()
+        }
+
+        fn sign_withdraw_proof(
+            inputs: Vec<PedersenCommitmentBytes>,
+            input_masks: &[&RistrettoSecretKey],
+            input_revealed_amount: Amount,
+            output: Option<(&RistrettoSecretKey, u64, UnspentOutput)>,
+            change: Option<(&RistrettoSecretKey, u64, UnspentOutput)>,
+            output_revealed_amount: Amount,
+            change_revealed_amount: Amount,
+        ) -> ConfidentialWithdrawProof {
+            let mut witnesses = Vec::new();
+            if let Some((m, v, _)) = output.as_ref() {
+                witnesses.push((*m, *v));
+            }
+            if let Some((m, v, _)) = change.as_ref() {
+                witnesses.push((*m, *v));
+            }
+            let range_proof = build_range_proof(&witnesses);
+
+            let sum_in = input_masks
+                .iter()
+                .fold(RistrettoSecretKey::default(), |acc, m| acc + *m);
+            let sum_out = output.as_ref().map(|(m, _, _)| (*m).clone()).unwrap_or_default() +
+                change.as_ref().map(|(m, _, _)| (*m).clone()).unwrap_or_default();
+            let secret_excess = sum_in - sum_out;
+            let public_excess = RistrettoPublicKey::from_secret_key(&secret_excess);
+            let total_output_revealed = output_revealed_amount + change_revealed_amount;
+            let nonce_secret = RistrettoSecretKey::from(999u64);
+            let nonce_public = RistrettoPublicKey::from_secret_key(&nonce_secret);
+            let msg = messages::confidential_withdraw64(
+                &public_excess,
+                &nonce_public,
+                &input_revealed_amount,
+                &total_output_revealed,
+            );
+            let balance_proof = EngineSchnorrSignature::sign_raw_uniform(&secret_excess, nonce_secret, &msg)
+                .unwrap()
+                .to_byte_type();
+
+            ConfidentialWithdrawProof {
+                inputs: inputs.try_into().unwrap(),
+                input_revealed_amount,
+                output_proof: ConfidentialOutputStatement {
+                    output: output.map(|(_, _, u)| u),
+                    change_statement: change.map(|(_, _, u)| u),
+                    range_proof,
+                    output_revealed_amount,
+                    change_revealed_amount,
+                },
+                balance_proof,
+            }
+        }
+
+        let mask_in = RistrettoSecretKey::from(11u64);
+        let mask_other = RistrettoSecretKey::from(22u64);
+        let mask_locked = RistrettoSecretKey::from(33u64);
+        let mask_fresh_out = RistrettoSecretKey::from(44u64);
+        let mask_fresh_change = RistrettoSecretKey::from(55u64);
+
+        let (c_in, u_in) = build_unspent(&mask_in, 100);
+        let (c_other, u_other) = build_unspent(&mask_other, 100);
+        let (c_locked, u_locked) = build_unspent(&mask_locked, 100);
+        let (c_fresh_out, u_fresh_out) = build_unspent(&mask_fresh_out, 60);
+        let (c_fresh_change, u_fresh_change) = build_unspent(&mask_fresh_change, 40);
+
+        let mut container = ResourceContainer::Confidential {
+            address: PUBLIC_IDENTITY_RESOURCE_ADDRESS,
+            commitments: BTreeSet::from([c_in, c_other]),
+            revealed_amount: Amount::from(50u64),
+            locked_commitments: BTreeSet::from([c_locked]),
+            locked_revealed_amount: Amount::ZERO,
+        };
+
+        // 1. Change commitment reusing spent input commitment `c_in` must be rejected.
+        let mask_extra_in = RistrettoSecretKey::from(66u64);
+        let (c_extra_in, _) = build_unspent(&mask_extra_in, 40);
+        let mut container_with_extra = container.clone();
+        if let ResourceContainer::Confidential { commitments, .. } = &mut container_with_extra {
+            commitments.insert(c_extra_in);
+        }
+        let reuse_in_as_change = sign_withdraw_proof(
+            vec![c_in, c_extra_in],
+            &[&mask_in, &mask_extra_in],
+            Amount::ZERO,
+            None,
+            Some((&mask_in, 100, u_in.clone())),
+            Amount::from(40u64),
+            Amount::ZERO,
+        );
+        let err = container_with_extra
+            .withdraw_confidential(reuse_in_as_change, None)
+            .unwrap_err();
+        assert!(matches!(err, ResourceError::InvariantError(ref s) if s.contains("change commitment")));
+
+        // 2. Output commitment reusing spent input commitment `c_in` must be rejected.
+        let reuse_in_as_output = sign_withdraw_proof(
+            vec![c_in, c_extra_in],
+            &[&mask_in, &mask_extra_in],
+            Amount::ZERO,
+            Some((&mask_in, 100, u_in)),
+            None,
+            Amount::ZERO,
+            Amount::from(40u64),
+        );
+        let err = container_with_extra
+            .withdraw_confidential(reuse_in_as_output, None)
+            .unwrap_err();
+        assert!(matches!(err, ResourceError::InvariantError(ref s) if s.contains("output commitment")));
+
+        // 3. Output commitment colliding with unspent `c_other` or locked `c_locked` must be rejected.
+        for (dup_mask, dup_unspent) in [(&mask_other, u_other), (&mask_locked, u_locked)] {
+            let proof = sign_withdraw_proof(
+                vec![c_in],
+                &[&mask_in],
+                Amount::ZERO,
+                Some((dup_mask, 100, dup_unspent)),
+                None,
+                Amount::ZERO,
+                Amount::ZERO,
+            );
+            let err = container.withdraw_confidential(proof, None).unwrap_err();
+            assert!(matches!(err, ResourceError::InvariantError(ref s) if s.contains("output commitment")));
+            assert_eq!(
+                container.get_confidential_commitments().unwrap(),
+                &BTreeSet::from([c_in, c_other])
+            );
+        }
+
+        // 4. Fresh distinct output and change commitments succeed.
+        let valid_proof = sign_withdraw_proof(
+            vec![c_in],
+            &[&mask_in],
+            Amount::ZERO,
+            Some((&mask_fresh_out, 60, u_fresh_out)),
+            Some((&mask_fresh_change, 40, u_fresh_change)),
+            Amount::ZERO,
+            Amount::ZERO,
+        );
+        let (out_container, effects) = container.withdraw_confidential(valid_proof, None).unwrap();
+        assert_eq!(
+            out_container.get_confidential_commitments().unwrap(),
+            &BTreeSet::from([c_fresh_out])
+        );
+        assert_eq!(
+            container.get_confidential_commitments().unwrap(),
+            &BTreeSet::from([c_other, c_fresh_change])
+        );
+        assert_eq!(effects.spent_commitments, vec![c_in]);
+        assert_eq!(effects.created_outputs.len(), 2);
     }
 }

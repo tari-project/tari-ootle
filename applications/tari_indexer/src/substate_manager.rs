@@ -186,8 +186,8 @@ pub enum ProvenLookup {
     },
 }
 
-/// Adapts the indexer's sqlite store to [`TrustedRootStore`], which the read path consults to skip
-/// commit-proof re-validation on a trusted-root hit and warms with newly-validated roots.
+/// Adapts the indexer's sqlite store to [`TrustedRootStore`], which the read path consults for how
+/// recent an anchor is and warms with newly-validated roots.
 #[derive(Clone)]
 struct SqliteTrustedRootStore {
     store: SqliteIndexerStore,
@@ -246,8 +246,8 @@ impl SubstateManager {
         substate_cache: SqliteSubstateCache,
     ) -> Self {
         // Consulted only when proof verification is enabled (the dry-run manager has it off, so its
-        // copy is inert). Lets a read skip re-validating a served commit proof when its root is
-        // already trusted, and is warmed with newly-validated roots.
+        // copy is inert). Bounds how old an anchor may be to prove a read, and is warmed with
+        // newly-validated roots.
         let trusted_root_store = Arc::new(SqliteTrustedRootStore {
             store: substate_store.clone(),
         });

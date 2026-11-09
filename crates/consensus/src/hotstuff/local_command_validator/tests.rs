@@ -1981,6 +1981,30 @@ mod all_accept {
         assert_eq!(evaluation.ups, [receipt]);
     }
 
+    /// A foreign LocalAccept earlier in the block that pledges the output the transaction creates in that shard group
+    /// satisfies the foreign-pledge requirement of an AllAccept in the same block.
+    #[test]
+    fn an_all_accept_after_a_foreign_proposal_in_the_block_pledged_the_foreign_output_is_voted_for() {
+        let (_, foreign) = local_and_foreign_halves();
+        let (replica, id) = accepted_cross_shard_with_fee_intent();
+        replica
+            .store
+            .with_write_tx(|tx| tx.foreign_substate_pledges_remove_many([&id]))
+            .unwrap();
+        let (rec, execution) = adopt_foreign_fee_intent_accept(&replica, &id);
+        let output_pledge = SubstatePledge::Output {
+            substate_id: VersionedSubstateId::new(component_id_in(foreign), SubstateVersion::ZERO),
+        };
+
+        let evaluation = replica.evaluate_after(&[Command::AllAccept(all_accept_atom(&rec))], |change_set| {
+            change_set.set_next_transaction_update(rec).unwrap();
+            change_set.add_transaction_execution(id, execution).unwrap();
+            change_set.add_foreign_pledges(&id, foreign, vec![output_pledge]);
+        });
+
+        assert_voted(&evaluation, TransactionPoolStage::AllAccepted, true);
+    }
+
     #[test]
     fn an_accept_of_a_fee_intent_only_transaction_holding_its_full_execution_is_refused() {
         let (replica, id) = accepted_cross_shard_with_fee_intent();
@@ -2185,6 +2209,32 @@ mod local_accept_from_local_prepared {
 
         let evaluation = replica.evaluate_after(&[Command::LocalAccept(accept)], |change_set| {
             change_set.add_transaction_execution(id, execution).unwrap();
+        });
+
+        assert_voted(&evaluation, TransactionPoolStage::LocalAccepted, true);
+    }
+
+    /// A foreign LocalPrepare earlier in the block that pledges the transaction's foreign input satisfies the
+    /// foreign-input-pledge requirement of a LocalAccept in the same block.
+    #[test]
+    fn an_accept_after_a_foreign_proposal_in_the_block_pledged_the_foreign_input_is_voted_for() {
+        let (_, foreign) = local_and_foreign_halves();
+        let foreign_input = component_id_in(foreign);
+        let (replica, rec, abort) = prepared_cross_shard_creating_an_existing_output();
+        let id = *rec.id();
+        replica
+            .store
+            .with_write_tx(|tx| tx.foreign_substate_pledges_remove_many([&id]))
+            .unwrap();
+        let input_pledge = SubstatePledge::Input {
+            substate_id: VersionedSubstateId::new(foreign_input, SubstateVersion::ZERO),
+            is_write: true,
+            substate: Box::new(component_value()),
+        };
+
+        let evaluation = replica.evaluate_after(&[Command::LocalAccept(abort)], |change_set| {
+            change_set.set_next_transaction_update(rec).unwrap();
+            change_set.add_foreign_pledges(&id, foreign, vec![input_pledge]);
         });
 
         assert_voted(&evaluation, TransactionPoolStage::LocalAccepted, true);

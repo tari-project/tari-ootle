@@ -412,15 +412,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             query = query.filter(substates::template_address.eq(template_address.to_string()));
         }
         if let Some(substate_type) = by_type {
-            match substate_type {
-                SubstateType::NonFungible => {
-                    query = query
-                        .filter(substates::address.like(format!("resource_% {}_%", substate_type.as_prefix_str())));
-                },
-                _ => {
-                    query = query.filter(substates::address.like(format!("{}_%", substate_type.as_prefix_str())));
-                },
-            }
+            query = query.filter(substates::address.like(format!("{}_%", substate_type.as_prefix_str())));
         }
         if let Some(limit) = limit {
             query = query.limit(limit as i64);
@@ -1266,19 +1258,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
                     .single_value()
                     .assume_not_null()),
             )
-            .filter(
-                stealth_outputs::status
-                    .eq(OutputStatus::Unspent.as_key_str())
-                    // Also include outputs created within the transaction
-                    .or(stealth_outputs::status
-                        .eq(OutputStatus::LockedUnconfirmed.as_key_str())
-                        .and(stealth_outputs::lock_id.eq(lock_id))),
-            )
-            .filter(stealth_outputs::owner_key_id.is_not_null())
-            // Rows stored before the Burnt status hold a burnt output as Unspent with is_burnt set.
-            .filter(stealth_outputs::is_burnt.eq(false))
-            .filter(stealth_outputs::is_condition_spendable.eq(true))
-            .filter(stealth_outputs::is_frozen.eq(false))
+            .filter(crate::writer::stealth_output_spendable_predicate(lock_id))
             .load_iter::<models::StealthOutput, _>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 

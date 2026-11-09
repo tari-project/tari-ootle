@@ -961,8 +961,8 @@ impl TransactionPoolRecord {
     /// Pins the transaction to `new_epoch` if it precedes the current pin, and returns whether it did.
     ///
     /// Each shard group opens an epoch at the exhaust burn rate it resolved, so two pins in the same epoch can name
-    /// different rates. The lower rate wins the tie, which leaves every shard group holding the same pin whatever
-    /// order the proposals carrying them arrive in.
+    /// different rates. The lower rate (and then the lower epoch hash if rates also tie) wins the tie, which leaves
+    /// every shard group holding the same pin whatever order the proposals carrying them arrive in.
     pub fn update_locked_epoch(&mut self, new_epoch: LockedEpoch) -> bool {
         let pin_order = |pin: &LockedEpoch| (pin.epoch(), pin.exhaust_burn_rate().as_bps(), *pin.hash());
         if self

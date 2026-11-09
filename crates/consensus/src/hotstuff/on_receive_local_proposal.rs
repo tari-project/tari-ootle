@@ -255,9 +255,10 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             return Ok(None);
         };
 
-        if !self.store.with_read_tx(|tx| {
-            are_block_foreign_proposals_matched(tx, valid_block.block(), &foreign_proposals)
-        })? {
+        if !self
+            .store
+            .with_read_tx(|tx| are_block_foreign_proposals_matched(tx, valid_block.block(), &foreign_proposals))?
+        {
             warn!(
                 target: LOG_TARGET,
                 "⚠️❌ Rejecting proposal for block {}: embedded foreign proposals do not match the block's \

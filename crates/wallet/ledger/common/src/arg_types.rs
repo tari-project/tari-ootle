@@ -203,7 +203,7 @@ pub const SEAL_SEQ: &[SigningField] = &[
 ];
 
 impl SignMode {
-    /// The canonical ordered sequence of [`SigningField`]s expected by the device for this mode.
+    /// Returns the canonical ordered sequence of [`SigningField`]s expected by the device for this mode.
     pub const fn expected_fields(self) -> &'static [SigningField] {
         match self {
             SignMode::AddSigner => ADD_SIGNER_SEQ,

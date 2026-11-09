@@ -81,11 +81,11 @@ impl<'t> Table<'t, '_> {
             .titles
             .as_ref()
             .and_then(|titles| titles.get(idx))
-            .map(|t| t.len())
+            .map(|t| t.chars().count())
             .unwrap_or(0);
         let rows_width = self.rows.iter().fold(0, |max, r| {
             if idx < r.len() {
-                cmp::max(max, r.get(idx).map(|r| r.len()).unwrap_or(0))
+                cmp::max(max, r.get(idx).map(|r| r.chars().count()).unwrap_or(0))
             } else {
                 max
             }
@@ -116,8 +116,9 @@ impl<'t> Table<'t, '_> {
         for (i, string) in row.as_ref().iter().enumerate() {
             let s = string.to_string();
             let width = self.col_width(i);
+            let char_len = s.chars().count();
             let pad_left = if i == 0 { "" } else { " " };
-            let pad_right = " ".repeat(width - s.len() + 1);
+            let pad_right = " ".repeat(width.saturating_sub(char_len) + 1);
             out.write_all(pad_left.as_bytes())?;
             out.write_all(s.as_bytes())?;
             out.write_all(pad_right.as_bytes())?;
@@ -129,15 +130,18 @@ impl<'t> Table<'t, '_> {
     }
 
     fn render_separator<T: Write>(&self, out: &mut T) -> io::Result<()> {
-        if let Some(rows_len) = self.rows.first().map(|r| r.len()) {
-            for i in 0..rows_len {
+        if !self.rows.is_empty() {
+            let titles_len = self.titles.as_ref().map_or(0, Vec::len);
+            let max_row_len = self.rows.iter().map(Vec::len).max().unwrap_or(0);
+            let cols_len = cmp::max(titles_len, max_row_len);
+            for i in 0..cols_len {
                 let width = self.col_width(i);
                 let pad_left = if i == 0 { "" } else { " " };
                 out.write_all(pad_left.as_bytes())?;
                 let sep = "-".repeat(width);
                 out.write_all(sep.as_bytes())?;
                 out.write_all(" ".as_bytes())?;
-                if i < rows_len - 1 {
+                if i < cols_len - 1 {
                     out.write_all(self.delim_str.as_bytes())?;
                 }
             }
@@ -188,6 +192,20 @@ mod test {
             String::from_utf8_lossy(&buf.into_inner()),
             "Name    | Age | Telephone Number | Favourite Headwear \n------- | --- | ---------------- | \
              ------------------ \nTrevor  | 132 | +123 12323223    | Pith Helmet        \n\nHatless | 2   \n"
+        );
+    }
+
+    #[test]
+    fn renders_multibyte_utf8_and_full_separator_when_first_row_is_short() {
+        let mut table = Table::new();
+        table.set_titles(vec!["KeyId", "Active"]);
+        table.add_row(table_row![0]);
+        table.add_row(table_row![1, "✅"]);
+        let mut buf = io::Cursor::new(Vec::new());
+        table.render(&mut buf).unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&buf.into_inner()),
+            "KeyId | Active \n----- | ------ \n0     \n1     | ✅      \n"
         );
     }
 }

@@ -77,6 +77,7 @@ use tari_ootle_wallet_sdk::{
     },
     storage::{
         CommittableStore,
+        QueuedEntry,
         QueuedUtxo,
         WalletEventStoreWriter,
         WalletStorageError,
@@ -95,7 +96,7 @@ use tari_template_lib_types::{
     UtxoAddress,
     UtxoId,
     VaultId,
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
 };
 use tari_utilities::hex::Hex;
 use time::{OffsetDateTime, PrimitiveDateTime};
@@ -2110,6 +2111,19 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
+    fn stealth_outputs_delete_invalid(&mut self, address: &UtxoAddress) -> Result<bool, WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_delete_invalid";
+        use crate::schema::stealth_outputs;
+
+        let num_rows = diesel::delete(stealth_outputs::table)
+            .filter(stealth_outputs::resource_address.eq(address.resource_address().to_string()))
+            .filter(stealth_outputs::commitment.eq(serialize_hex(address.id().into_commitment_bytes())))
+            .filter(stealth_outputs::status.eq(OutputStatus::Invalid.as_key_str()))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        Ok(num_rows > 0)
+    }
+
     fn stealth_outputs_mark_as_spent(
         &mut self,
         resource_address: &ResourceAddress,
@@ -3141,16 +3155,16 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                         .zip(state_version)
                         .map(|(shard, version)| (Shard::from(shard as u32), StateVersion::new(version as u64)));
                     let merged = QueuedUtxo::merge_unspent_at(held, unspent_at);
-                    if merged != held {
-                        diesel::update(utxo_process_queue::table.filter(utxo_process_queue::id.eq(id)))
-                            .set((
-                                utxo_process_queue::shard.eq(merged.map(|(shard, _)| shard.as_u32() as i32)),
-                                utxo_process_queue::state_version
-                                    .eq(merged.map(|(_, version)| version.as_u64() as i64)),
-                            ))
-                            .execute(self.connection())
-                            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-                    }
+                    // The pair may now stand for another output with it, so a lookup made before must not
+                    // acknowledge the entry, even when its placement is unchanged.
+                    diesel::update(utxo_process_queue::table.filter(utxo_process_queue::id.eq(id)))
+                        .set((
+                            utxo_process_queue::shard.eq(merged.map(|(shard, _)| shard.as_u32() as i32)),
+                            utxo_process_queue::state_version.eq(merged.map(|(_, version)| version.as_u64() as i64)),
+                            utxo_process_queue::generation.eq(utxo_process_queue::generation + 1),
+                        ))
+                        .execute(self.connection())
+                        .map_err(|e| WalletStorageError::general(OPERATION, e))?;
                 },
             }
         }
@@ -3158,34 +3172,36 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
-    fn utxo_process_queue_remove_item(
-        &mut self,
-        resource_address: ResourceAddress,
-        tag: UtxoTag,
-        public_nonce: RistrettoPublicKeyBytes,
-    ) -> Result<(), WalletStorageError> {
-        const OPERATION: &str = "utxo_process_queue_remove_item";
+    fn utxo_process_queue_ack(&mut self, entries: &[QueuedEntry]) -> Result<usize, WalletStorageError> {
+        const OPERATION: &str = "utxo_process_queue_ack";
         use crate::schema::utxo_process_queue;
 
-        let num_affected = diesel::delete(utxo_process_queue::table)
-            .filter(utxo_process_queue::resource_address.eq(resource_address.to_string()))
-            .filter(utxo_process_queue::utxo_tag.eq(tag.value() as i32))
-            .filter(utxo_process_queue::public_nonce.eq(serialize_hex(public_nonce)))
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-
-        if num_affected == 0 {
-            return Err(WalletStorageError::NotFound {
-                operation: OPERATION,
-                entity: "utxo_process_queue item".to_string(),
-                key: format!(
-                    "resource_address={}, tag={}, public_nonce={}",
-                    resource_address, tag, public_nonce
-                ),
-            });
+        let mut num_removed = 0;
+        for entry in entries {
+            let Ok(id) = i32::try_from(entry.id) else {
+                continue;
+            };
+            num_removed += diesel::delete(utxo_process_queue::table)
+                .filter(utxo_process_queue::id.eq(id))
+                .filter(utxo_process_queue::generation.eq(entry.generation as i64))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
         }
+        Ok(num_removed)
+    }
 
-        Ok(())
+    fn utxo_process_queue_invalidate(
+        &mut self,
+        resource_address: &ResourceAddress,
+    ) -> Result<usize, WalletStorageError> {
+        const OPERATION: &str = "utxo_process_queue_invalidate";
+        use crate::schema::utxo_process_queue;
+
+        diesel::update(utxo_process_queue::table)
+            .filter(utxo_process_queue::resource_address.eq(resource_address.to_string()))
+            .set(utxo_process_queue::generation.eq(utxo_process_queue::generation + 1))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))
     }
 
     // Address book

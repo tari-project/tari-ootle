@@ -366,6 +366,30 @@ impl ChangeLog {
         Ok(num_puts)
     }
 
+    /// Puts UP the version following the DOWN `id`, with the value returned by `creator`.
+    fn create_after_down<TErr, FCreate>(
+        &mut self,
+        id: &VersionedSubstateId,
+        creator: FCreate,
+        num_preshards: NumPreshards,
+    ) -> Result<(), TErr>
+    where
+        TErr: From<SubstateStoreError>,
+        FCreate: FnOnce(Option<VersionedSubstateIdRef<'_>>) -> Result<SubstateValue, TErr>,
+    {
+        let next_version = id
+            .version()
+            .checked_next()
+            .ok_or_else(|| SubstateStoreError::InvariantError {
+                details: format!("Substate {id} cannot be incremented"),
+            })?;
+        let value = creator(Some(id.as_versioned_ref()))?;
+        let next_id = VersionedSubstateId::new(id.substate_id().clone(), next_version);
+        debug!(target: LOG_TARGET, "Creating substate in place: {}", next_id);
+        self.insert_next_up(next_id, value, num_preshards);
+        Ok(())
+    }
+
     /// Applies `updater` to the latest value of `substate_id`, or `creator` if it is DOWN or has never existed.
     ///
     /// A substate the block being built has already changed keeps that change's version: an UP is rewritten in place
@@ -392,16 +416,7 @@ impl ChangeLog {
                 },
                 SubstateChange::Down { id, .. } => {
                     let id = id.clone();
-                    let next_version = id
-                        .version()
-                        .checked_next()
-                        .ok_or_else(|| SubstateStoreError::InvariantError {
-                            details: format!("Substate {id} cannot be incremented"),
-                        })?;
-                    let value = creator(Some(id.as_versioned_ref()))?;
-                    let next_id = VersionedSubstateId::new(id.into_substate_id(), next_version);
-                    debug!(target: LOG_TARGET, "Creating substate in place: {}", next_id);
-                    self.insert_next_up(next_id, value, num_preshards);
+                    self.create_after_down(&id, creator, num_preshards)?;
                 },
             }
             return Ok(());
@@ -416,16 +431,7 @@ impl ChangeLog {
                     self.insert(head_change);
                 },
                 SubstateChange::Down { id, .. } => {
-                    let next_version = id
-                        .version()
-                        .checked_next()
-                        .ok_or_else(|| SubstateStoreError::InvariantError {
-                            details: format!("Substate {id} cannot be incremented"),
-                        })?;
-                    let value = creator(Some(id.as_versioned_ref()))?;
-                    let next_id = VersionedSubstateId::new(id.clone().into_substate_id(), next_version);
-                    debug!(target: LOG_TARGET, "Creating substate in place: {}", next_id);
-                    self.insert_next_up(next_id, value, num_preshards);
+                    self.create_after_down(id, creator, num_preshards)?;
                 },
             }
             return Ok(());
@@ -589,7 +595,10 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(err, SubstateStoreError::InvariantError { .. }));
-        assert!(log.changes().is_empty(), "failed update_in_place must not leave a Down change");
+        assert!(
+            log.changes().is_empty(),
+            "failed update_in_place must not leave a Down change"
+        );
         let still_up = log
             .get(&base, VersionedSubstateIdRef::new(&pool_id, SubstateVersion::ZERO))
             .unwrap();
@@ -600,7 +609,7 @@ mod tests {
     fn update_in_place_over_max_version_down_returns_invariant_error_instead_of_panicking() {
         let pool_addr = ValidatorFeePoolAddress::from_array([9; 32]);
         let pool_id = SubstateId::ValidatorFeePool(pool_addr);
-        let max_ver = SubstateVersion::from(u32::MAX);
+        let max_ver = SubstateVersion::from(u64::MAX);
         let base = SingleUpLayer {
             id: pool_id.clone(),
             substate: Substate::new(

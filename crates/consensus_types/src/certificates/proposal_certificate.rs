@@ -229,7 +229,8 @@ mod tests {
         );
         assert!(!reject.justifies_zero_block());
 
-        // Non-empty signer bitmap / signatures with zero header_hash, height, and parent_id is not a genesis certificate.
+        // Non-empty signer bitmap / signatures with zero header_hash, height, and parent_id is not a genesis
+        // certificate.
         let non_empty_sigs = ProposalCertificate::new(
             FixedHash::zero(),
             BlockId::zero(),

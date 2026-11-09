@@ -3,6 +3,7 @@
 
 use log::{debug, warn};
 use tari_consensus_types::{
+    ProposalCertificate,
     QcId,
     QuorumCertificateRef,
     TcSignatures,

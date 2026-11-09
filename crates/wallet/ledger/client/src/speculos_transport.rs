@@ -39,17 +39,11 @@ impl Exchange for SpeculosTransport {
     async fn exchange<I>(&self, command: &APDUCommand<I>) -> Result<APDUAnswer<Self::AnswerType>, Self::Error>
     where I: Deref<Target = [u8]> + Send + Sync {
         let data = hex::encode(command.serialize());
-        let response = self
-            .inner
-            .post(&self.url)
-            .json(&Request { data })
-            .send()
-            .await?
-            .error_for_status()?;
+        let response = self.inner.post(&self.url).json(&Request { data }).send().await?;
 
         let answer = response.json::<Answer>().await?;
-        let data = hex::decode(answer.data).unwrap_or_default();
-        Ok(APDUAnswer::from_answer(data).unwrap_or_else(|_| APDUAnswer::from_answer(vec![0x6f, 0x00]).unwrap()))
+        let data = hex::decode(answer.data).unwrap();
+        Ok(APDUAnswer::from_answer(data).expect("answer should be valid"))
     }
 }
 

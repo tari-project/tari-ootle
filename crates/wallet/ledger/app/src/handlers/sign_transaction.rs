@@ -39,9 +39,6 @@ use crate::{
     status::AppStatus,
 };
 
-fn expected_seq(mode: SignMode) -> &'static [SigningField] {
-    mode.expected_fields()
-}
 
 /// Everything needed to render the review screen and sign once approved.
 pub struct SignReview {
@@ -117,7 +114,7 @@ fn process_segment(state: &mut State, p1: u8, data: &[u8]) -> Result<(), AppStat
 
     let is_last = (p1 & SEGMENT_LAST_CHUNK) != 0;
     let field = SigningField::try_from(p1 & !SEGMENT_LAST_CHUNK).map_err(|_| bad_request())?;
-    let seq = expected_seq(signing.mode);
+    let seq = signing.mode.expected_fields();
 
     match signing.in_field {
         None => {
@@ -209,7 +206,7 @@ fn finalize(state: &mut State) -> Result<ChunkResult, AppStatus> {
         State::None => return Err(stream_err()),
     };
 
-    if signing.in_field.is_some() || signing.field_cursor != expected_seq(signing.mode).len() {
+    if signing.in_field.is_some() || signing.field_cursor != signing.mode.expected_fields().len() {
         return Err(stream_err());
     }
 

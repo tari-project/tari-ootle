@@ -222,12 +222,16 @@ impl<'a, TStore: StateStore, TValidator: CommitProofValidator> ShardSync<'a, TSt
     /// `written_version`, the last version the stream wrote, and keeps it to re-serve to peers that sync from this
     /// node. Returns the proven version and the epoch of the block that proves it.
     ///
+    /// Every version changes at least one substate and the stream carries every substate, so an honest peer proves a
+    /// version only once the stream has written it: `proof.state_version` must equal `written_version`.
+    ///
     /// Every version at or below the proven one was committed no later than that block, so `written_epoch`, the epoch
     /// of the last version written, must not lie after the block's epoch.
     async fn apply_version_proof(
         &self,
         validator: &TValidator,
         proof: proto::StateVersionProof,
+        start_state_version: Version,
         written_version: Option<Version>,
         written_epoch: Epoch,
     ) -> Result<(Version, Epoch), RpcStateSyncError> {
@@ -245,11 +249,15 @@ impl<'a, TStore: StateStore, TValidator: CommitProofValidator> ShardSync<'a, TSt
                 self.checkpoint_state_version
             )));
         }
-        if state_version < written_version.unwrap_or(0) {
+        if state_version < start_state_version {
             return Err(RpcStateSyncError::InvalidResponse(anyhow!(
-                "Received a proof of v{state_version} for {shard}, outside v{}..=v{}",
-                written_version.unwrap_or(0),
-                self.checkpoint_state_version
+                "Peer proved v{state_version} for {shard}, below the stream's first version v{start_state_version}"
+            )));
+        }
+        if written_version != Some(state_version) {
+            let written = written_version.map_or_else(|| "no version".to_string(), |v| format!("v{v}"));
+            return Err(RpcStateSyncError::InvalidResponse(anyhow!(
+                "Peer proved v{state_version} for {shard} while the stream last wrote {written}"
             )));
         }
         let commit_proof = CommittedBlockProof::from_bytes(&proof.commit_proof)
@@ -289,7 +297,7 @@ impl<'a, TStore: StateStore, TValidator: CommitProofValidator> ShardSync<'a, TSt
                 },
                 shard_root_proof,
             })?;
-            // The state through the written version is now proven, so a later failure rewinds no further back.
+            // Every version through `state_version` is proven, so a later failure rewinds no further back.
             tx.state_sync_rewind_point_remove(shard)
         })?;
         debug!(target: LOG_TARGET, "🛜 ✅ {shard} proven at v{state_version}");
@@ -627,8 +635,15 @@ impl<'a, TStore: StateStore, TValidator: CommitProofValidator> ShardSync<'a, TSt
                             proof.state_version
                         )));
                     }
+                    schedule.check_proof(proof.state_version)?;
                     let (proven, proof_epoch) = self
-                        .apply_version_proof(validator, proof, maybe_persisted_state_version, epoch_floor)
+                        .apply_version_proof(
+                            validator,
+                            proof,
+                            start_state_version,
+                            maybe_persisted_state_version,
+                            epoch_floor,
+                        )
                         .await?;
                     // Every later version is committed after the proving block, so no earlier than its epoch.
                     epoch_floor = proof_epoch;
@@ -3049,5 +3064,73 @@ mod tests {
         assert!(substate(&store, 1).is_some_and(|s| s.is_destroyed()));
         assert_eq!(held_proofs(&store), vec![N]);
         assert_eq!(rewind_point(&store), None);
+    }
+
+    #[tokio::test]
+    async fn a_version_proof_above_the_last_written_version_is_rejected() {
+        let (store, _tmp) = create_store();
+        let v1 = vec![(1, vec![create(HONEST)])];
+        let checkpoint = vec![v1[0].clone(), (N + 1, vec![create(2)])];
+        // The proof carries v1's root and accumulator, which would verify if vN were taken to equal v1.
+        let responses = vec![
+            batch(1, v1[0].1.clone()),
+            version_proof(N, root_after(&v1), acc_after(&v1)),
+            batch(N + 1, vec![create(2)]),
+            complete(N + 1),
+        ];
+
+        let err = sync_with_proofs(&store, &checkpoint, responses).await.unwrap_err();
+
+        assert!(
+            matches!(&err, RpcStateSyncError::InvalidResponse(e) if e.to_string().contains(&format!("Peer proved v{N} for {} while the stream last wrote v1", shard()))),
+            "{err}"
+        );
+        assert_eq!(local_version(&store), None);
+        assert!(held_proofs(&store).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_version_proof_that_skips_an_owed_proof_point_is_rejected() {
+        let (store, _tmp) = create_store();
+        let v1 = vec![(1, vec![create(HONEST)])];
+        let checkpoint = vec![v1[0].clone(), (2 * N, vec![create(2)])];
+        let responses = vec![
+            batch(1, v1[0].1.clone()),
+            version_proof(2 * N, root_after(&v1), acc_after(&v1)),
+            complete(2 * N),
+        ];
+
+        let err = sync_with_proofs(&store, &checkpoint, responses).await.unwrap_err();
+
+        assert!(
+            matches!(&err, RpcStateSyncError::InvalidResponse(e) if e.to_string().contains(&format!("without proving v{N}"))),
+            "{err}"
+        );
+        assert_eq!(local_version(&store), None);
+        assert!(held_proofs(&store).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_version_proof_below_start_state_version_is_rejected() {
+        let (store, _tmp) = create_store();
+        let v1 = vec![(1, vec![create(HONEST)])];
+        sync_honestly(&store, &v1).await;
+        assert_eq!(local_version(&store), Some(1));
+
+        let checkpoint = vec![v1[0].clone(), (2, vec![create(2)])];
+        let err = sync_with_proofs(&store, &checkpoint, vec![
+            version_proof(1, root_after(&v1), acc_after(&v1)),
+            batch(2, vec![create(2)]),
+            complete(2),
+        ])
+        .await
+        .unwrap_err();
+
+        assert!(
+            matches!(&err, RpcStateSyncError::InvalidResponse(e) if e.to_string().contains("below the stream's first version v2")),
+            "{err}"
+        );
+        assert_eq!(local_version(&store), Some(1));
+        assert!(held_proofs(&store).is_empty());
     }
 }

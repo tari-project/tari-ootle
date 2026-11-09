@@ -84,12 +84,13 @@ impl WantList {
         WantList(items)
     }
 
-    /// The stealth want set for the live two-phase driver: the from-account component and its vault
-    /// for the transfer resource, prepended to the per-input stealth-UTXO wants. The account is
-    /// always referenced (the fee is paid from it via `pay_fee_from_component`, and a revealed input
-    /// withdraws from it), so both must be resolved and declared as inputs or the engine rejects the
-    /// tx with the component/vault "not found". [`WantList::from_stealth_inputs`] alone omits them —
-    /// used only by the one-shot path, whose caller supplies every substate up front.
+    /// The stealth want set for the live two-phase driver: the from-account component, its XTR fee
+    /// vault (and its vault for the transfer resource when withdrawing a non-XTR revealed input),
+    /// prepended to the per-input stealth-UTXO wants. The account and XTR vault are always referenced
+    /// (the fee is paid via `pay_fee_from_component`), so they must be resolved and declared as inputs
+    /// or the engine rejects the tx with the component/vault "not found".
+    /// [`WantList::from_stealth_inputs`] alone omits them — used only by the one-shot path, whose
+    /// caller supplies every substate up front.
     pub fn from_stealth_inputs_with_account(intent: &StealthTransferIntent) -> Self {
         let from_account = intent.from_account.as_str().to_string();
         let tari_resource = tari_template_lib_types::constants::TARI_TOKEN.to_string();

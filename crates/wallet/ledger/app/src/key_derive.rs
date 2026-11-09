@@ -14,8 +14,14 @@ use zeroize::Zeroizing;
 
 use crate::{constants::BIP32_COIN_TYPE, status::AppStatus};
 
+/// Maximum BIP-32 unhardened index (`2^31 - 1`); hardened indices set bit 31.
+const MAX_BIP32_INDEX: u64 = 0x7FFF_FFFF;
+
 /// Derive a secret key from a BIP32 path. In case of an error, display an interactive message on the device.
 pub fn derive_from_bip32_key(account: u64, index: u64, key_type: KeyType) -> Result<Scalar, AppStatus> {
+    if account > MAX_BIP32_INDEX || index > MAX_BIP32_INDEX {
+        return Err(AppStatus::OotleStatusWord(OotleStatusWord::BadRequest));
+    }
     let bip32_path = format!("m/44'/{BIP32_COIN_TYPE}'/{account}'/0/{index}'/{}'", key_type.as_u64());
     let path: [u32; 6] = make_bip32_path(bip32_path.as_bytes());
 

@@ -139,46 +139,63 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .get_results::<(i64, bool)>(self.connection())
             .map_err(|e| WalletStorageError::general("key_manager_get_all", e))?;
 
-        Ok(results
+        results
             .into_iter()
-            .map(|(index, is_active)| (index as u64, is_active))
-            .collect())
+            .map(|(index, is_active)| {
+                let index = u64::try_from(index).map_err(|e| WalletStorageError::DecodingError {
+                    operation: "key_manager_get_all",
+                    item: "index",
+                    details: format!("Corrupt db: invalid key manager index '{index}': {e}"),
+                })?;
+                Ok((index, is_active))
+            })
+            .collect()
     }
 
     fn key_manager_get_active_index(&mut self, branch: &str) -> Result<u64, WalletStorageError> {
         use crate::schema::key_manager_states;
 
-        key_manager_states::table
+        let index: i64 = key_manager_states::table
             .select(key_manager_states::index)
             .filter(key_manager_states::branch_seed.eq(branch))
             .filter(key_manager_states::is_active.eq(true))
             .first(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general("key_manager_get_active_index", e))?
-            .map(|index: i64| index as u64)
             .ok_or_else(|| WalletStorageError::NotFound {
                 operation: "key_manager_get_active_index",
                 entity: "key_manager_state".to_string(),
                 key: branch.to_string(),
-            })
+            })?;
+
+        u64::try_from(index).map_err(|e| WalletStorageError::DecodingError {
+            operation: "key_manager_get_active_index",
+            item: "index",
+            details: format!("Corrupt db: invalid key manager index '{index}': {e}"),
+        })
     }
 
     fn key_manager_get_last_index(&mut self, branch: &str) -> Result<u64, WalletStorageError> {
         use crate::schema::key_manager_states;
 
-        key_manager_states::table
+        let index: i64 = key_manager_states::table
             .select(key_manager_states::index)
             .filter(key_manager_states::branch_seed.eq(branch))
             .order(key_manager_states::index.desc())
             .first(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general("key_manager_get_last_index", e))?
-            .map(|index: i64| index as u64)
             .ok_or_else(|| WalletStorageError::NotFound {
                 operation: "key_manager_get_last_index",
                 entity: "key_manager_state".to_string(),
                 key: branch.to_string(),
-            })
+            })?;
+
+        u64::try_from(index).map_err(|e| WalletStorageError::DecodingError {
+            operation: "key_manager_get_last_index",
+            item: "index",
+            details: format!("Corrupt db: invalid key manager index '{index}': {e}"),
+        })
     }
 
     fn key_manager_get_raw_imported_key(&mut self, id: u64) -> Result<(KeyType, Box<[u8]>), WalletStorageError> {
@@ -260,7 +277,12 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 item: "imported_key",
                 details: format!("Failed to parse key type: {}", key_type),
             })?;
-        Ok((id as ImportedKeyId, key_type))
+        let id = ImportedKeyId::try_from(id).map_err(|e| WalletStorageError::DecodingError {
+            operation: OPERATION,
+            item: "imported_key",
+            details: format!("Corrupt db: invalid imported key id '{id}': {e}"),
+        })?;
+        Ok((id, key_type))
     }
 
     // -------------------------------- Config -------------------------------- //
@@ -511,7 +533,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .first::<i64>(self.connection())
             .map_err(|e| WalletStorageError::general("account_count", e))?;
 
-        Ok(count as u64)
+        Ok(u64::try_from(count).unwrap_or(0))
     }
 
     fn accounts_get_by_name(&mut self, name: &str) -> Result<Account, WalletStorageError> {
@@ -915,7 +937,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
         Ok(BalanceChangePage {
             changes,
-            total: total as u64,
+            total: u64::try_from(total).unwrap_or(0),
         })
     }
 
@@ -1015,6 +1037,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
     // -------------------------------- Outputs -------------------------------- //
     fn confidential_outputs_get_unspent_balance(&mut self, vault_address: &VaultId) -> Result<u64, WalletStorageError> {
+        const OPERATION: &str = "outputs_get_unspent_balance";
         use crate::schema::{confidential_outputs, vaults};
 
         let vault_id = vaults::table
@@ -1022,31 +1045,32 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .select(vaults::id)
             .first::<i32>(self.connection())
             .optional()
-            .map_err(|e| WalletStorageError::general("outputs_get_unspent_balance", e))?
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
             .ok_or_else(|| WalletStorageError::NotFound {
-                operation: "outputs_get_unspent_balance",
+                operation: OPERATION,
                 entity: "vault".to_string(),
                 key: vault_address.to_string(),
             })?;
 
-        // `value` is u64 stored in a signed BigInt column; values >= 2^63 wrap to negative.
-        // Reinterpret each row's bits via `as u64` and aggregate in u128 to recover the true total.
-        let balance: u128 = confidential_outputs::table
+        let values = confidential_outputs::table
             .select(confidential_outputs::value)
             .filter(confidential_outputs::vault_id.eq(vault_id))
             .filter(confidential_outputs::status.eq(OutputStatus::Unspent.as_key_str()))
             .load::<i64>(self.connection())
-            .map_err(|e| WalletStorageError::general("outputs_get_unspent_balance", e))?
-            .into_iter()
-            .map(|v| u128::from(v as u64))
-            .sum();
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
-        u64::try_from(balance).map_err(|_| {
-            WalletStorageError::general(
-                "outputs_get_unspent_balance",
-                format!("balance overflow u64: {balance}"),
-            )
-        })
+        let mut balance = 0u128;
+        for v in values {
+            let v = u64::try_from(v).map_err(|e| WalletStorageError::DecodingError {
+                operation: OPERATION,
+                item: "value",
+                details: format!("Corrupt db: invalid output value '{v}': {e}"),
+            })?;
+            balance += u128::from(v);
+        }
+
+        u64::try_from(balance)
+            .map_err(|_| WalletStorageError::general(OPERATION, format!("balance overflow u64: {balance}")))
     }
 
     fn confidential_outputs_get_locked_by_lock_id(
@@ -1158,8 +1182,6 @@ impl WalletStoreReader for ReadTransaction<'_> {
         const OPERATION: &str = "stealth_outputs_get_unspent_balance";
         use crate::schema::stealth_outputs;
 
-        // `value` is u64 stored in a signed BigInt column; values >= 2^63 wrap to negative.
-        // Reinterpret each row's bits via `as u64` and aggregate in u128 to recover the true total.
         let values = stealth_outputs::table
             .select(stealth_outputs::value)
             .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
@@ -1170,7 +1192,15 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         let utxo_count = values.len();
-        let balance: u128 = values.into_iter().map(|v| u128::from(v as u64)).sum();
+        let mut balance = 0u128;
+        for v in values {
+            let v = u64::try_from(v).map_err(|e| WalletStorageError::DecodingError {
+                operation: OPERATION,
+                item: "value",
+                details: format!("Corrupt db: invalid output value '{v}': {e}"),
+            })?;
+            balance += u128::from(v);
+        }
 
         Ok(StealthBalance {
             balance: balance.into(),
@@ -1202,7 +1232,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .first::<i64>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
-        Ok(count as u64)
+        Ok(u64::try_from(count).unwrap_or(0))
     }
 
     fn stealth_outputs_get_unspent_by_account(
@@ -1894,7 +1924,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             })
             .collect::<Vec<AuthoredTemplateModel>>();
 
-        Ok((templates, total_templates_for_key_index as u64))
+        Ok((templates, u64::try_from(total_templates_for_key_index).unwrap_or(0)))
     }
 
     fn shard_state_version_get(
@@ -1928,7 +1958,22 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
         let mut versions = HashMap::with_capacity(row.len());
         for (shard, version) in row {
-            versions.insert(Shard::from(shard as u32), StateVersion::new(version as u64));
+            let shard = u32::try_from(shard)
+                .map(Shard::from)
+                .map_err(|e| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "shard",
+                    details: format!("Corrupt db: invalid shard '{shard}': {e}"),
+                })?;
+            let version =
+                u64::try_from(version)
+                    .map(StateVersion::new)
+                    .map_err(|e| WalletStorageError::DecodingError {
+                        operation: OPERATION,
+                        item: "state_version",
+                        details: format!("Corrupt db: invalid state_version '{version}': {e}"),
+                    })?;
+            versions.insert(shard, version);
         }
         Ok(versions)
     }
@@ -1967,16 +2012,48 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .get_results::<(i32, i64, i64, Option<i64>)>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
-        Ok(rows
-            .into_iter()
-            .map(|(shard, state_version, first_state_version, verified_epoch)| {
-                (Shard::from(shard as u32), ClaimedStateVersion {
-                    state_version: StateVersion::new(state_version as u64),
-                    first_state_version: StateVersion::new(first_state_version as u64),
-                    verified_epoch: verified_epoch.map(|epoch| Epoch(epoch as u64)),
+        let mut claims = HashMap::with_capacity(rows.len());
+        for (shard, state_version, first_state_version, verified_epoch) in rows {
+            let shard = u32::try_from(shard)
+                .map(Shard::from)
+                .map_err(|e| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "shard",
+                    details: format!("Corrupt db: invalid shard '{shard}': {e}"),
+                })?;
+            let state_version =
+                u64::try_from(state_version)
+                    .map(StateVersion::new)
+                    .map_err(|e| WalletStorageError::DecodingError {
+                        operation: OPERATION,
+                        item: "state_version",
+                        details: format!("Corrupt db: invalid state_version '{state_version}': {e}"),
+                    })?;
+            let first_state_version = u64::try_from(first_state_version).map(StateVersion::new).map_err(|e| {
+                WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "first_state_version",
+                    details: format!("Corrupt db: invalid first_state_version '{first_state_version}': {e}"),
+                }
+            })?;
+            let verified_epoch = verified_epoch
+                .map(|epoch| {
+                    u64::try_from(epoch)
+                        .map(Epoch)
+                        .map_err(|e| WalletStorageError::DecodingError {
+                            operation: OPERATION,
+                            item: "verified_epoch",
+                            details: format!("Corrupt db: invalid verified_epoch '{epoch}': {e}"),
+                        })
                 })
-            })
-            .collect())
+                .transpose()?;
+            claims.insert(shard, ClaimedStateVersion {
+                state_version,
+                first_state_version,
+                verified_epoch,
+            });
+        }
+        Ok(claims)
     }
 
     fn utxo_process_queue_fetch_batch(
@@ -2011,9 +2088,27 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
         let mut pair_unspent_at = HashMap::<(String, i32, String), Option<(Shard, StateVersion)>>::new();
         for (resource_address, tag, public_nonce, shard, state_version) in pair_rows {
-            let unspent_at = shard
-                .zip(state_version)
-                .map(|(shard, state_version)| (Shard::from(shard as u32), StateVersion::new(state_version as u64)));
+            let unspent_at = match shard.zip(state_version) {
+                Some((shard, state_version)) => {
+                    let shard =
+                        u32::try_from(shard)
+                            .map(Shard::from)
+                            .map_err(|e| WalletStorageError::DecodingError {
+                                operation: OPERATION,
+                                item: "shard",
+                                details: format!("Corrupt db: invalid shard '{shard}': {e}"),
+                            })?;
+                    let state_version = u64::try_from(state_version).map(StateVersion::new).map_err(|e| {
+                        WalletStorageError::DecodingError {
+                            operation: OPERATION,
+                            item: "state_version",
+                            details: format!("Corrupt db: invalid state_version '{state_version}': {e}"),
+                        }
+                    })?;
+                    Some((shard, state_version))
+                },
+                None => None,
+            };
             pair_unspent_at
                 .entry((resource_address, tag, public_nonce))
                 .and_modify(|merged| *merged = QueuedUtxo::merge_unspent_at(*merged, unspent_at))
@@ -2028,7 +2123,13 @@ impl WalletStoreReader for ReadTransaction<'_> {
                     item: "resource_address",
                     details: format!("Corrupt db: invalid resource address '{}': {}", row.resource_address, e),
                 })?;
-            let tag = UtxoTag::new(row.utxo_tag as u32);
+            let tag = u32::try_from(row.utxo_tag)
+                .map(UtxoTag::new)
+                .map_err(|e| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "utxo_tag",
+                    details: format!("Corrupt db: invalid utxo_tag '{}': {e}", row.utxo_tag),
+                })?;
             let public_nonce = deserialize_hex_try_from(&row.public_nonce)?;
             let account_addr = account_addr.parse().map_err(|e| WalletStorageError::DecodingError {
                 operation: OPERATION,
@@ -2555,5 +2656,120 @@ mod tests {
             .unwrap();
         let mut tx = store.create_read_tx().unwrap();
         assert!(tx.webauthn_has_any_registration().unwrap());
+    }
+
+    #[test]
+    fn reader_queries_reject_negative_unsigned_fields() {
+        use std::collections::HashSet;
+
+        use tari_ootle_common_types::{Epoch, SubstateVersion};
+        use tari_ootle_wallet_sdk::models::KeyBranch;
+        use tari_template_lib_types::{ObjectKey, ResourceType};
+
+        let store = SqliteWalletStore::try_open(":memory:").unwrap();
+        store.run_migrations().unwrap();
+
+        let acct = ComponentAddress::from_array([1u8; 32]);
+        let vault = VaultId::new([10u8; 32].into());
+        let resource = ResourceAddress::new(ObjectKey::from_array([9u8; ObjectKey::LENGTH]));
+        let view_key = KeyId::derived(KeyBranch::ViewOnlyKey, 0);
+        let owner_key = Some(KeyId::derived(KeyBranch::Account, 0));
+
+        {
+            let mut tx = store.create_write_tx().unwrap();
+            tx.accounts_insert(
+                Some("a"),
+                &acct,
+                view_key,
+                owner_key,
+                &RistrettoPublicKeyBytes::from([1u8; 32]),
+                &HashSet::new(),
+                Epoch(0),
+                true,
+                false,
+            )
+            .unwrap();
+            tx.vaults_insert(VaultModel {
+                account_address: acct,
+                id: vault,
+                vault_version: SubstateVersion::new(0),
+                resource_address: resource,
+                resource_type: ResourceType::Confidential,
+                revealed_balance: Amount::ZERO,
+                locked_revealed_balance: Amount::ZERO,
+                confidential_balance: Amount::ZERO,
+                token_symbol: None,
+                divisibility: 0,
+            })
+            .unwrap();
+
+            let mut stealth = locked_stealth_output(acct, resource, 1, (view_key, owner_key), 1);
+            stealth.status = OutputStatus::Unspent;
+            stealth.lock_id = None;
+            tx.stealth_outputs_insert(&stealth).unwrap();
+
+            let mut confidential = locked_confidential_output(acct, vault, 2, (view_key, owner_key), 1);
+            confidential.status = OutputStatus::Unspent;
+            confidential.lock_id = None;
+            tx.confidential_outputs_insert(confidential).unwrap();
+
+            sql_query("UPDATE confidential_outputs SET value = -1")
+                .execute(tx.connection())
+                .unwrap();
+            sql_query("UPDATE stealth_outputs SET value = -1")
+                .execute(tx.connection())
+                .unwrap();
+            sql_query(format!(
+                "INSERT INTO resources (address, resource_type, owner_rule, access_rules, divisibility, metadata) \
+                 VALUES ('{resource}', 'Confidential', '{{}}', '{{}}', 0, '{{}}')"
+            ))
+            .execute(tx.connection())
+            .unwrap();
+            sql_query(
+                "INSERT INTO shard_state_versions (account_id, resource_id, shard, state_version) VALUES (1, 1, -1, 1)",
+            )
+            .execute(tx.connection())
+            .unwrap();
+            sql_query(
+                "INSERT INTO shard_state_version_claims (account_id, resource_id, shard, state_version, \
+                 first_state_version, verified_epoch) VALUES (1, 1, 1, -1, 1, 1)",
+            )
+            .execute(tx.connection())
+            .unwrap();
+            sql_query(format!(
+                "INSERT INTO utxo_process_queue (account_id, utxo_tag, public_nonce, resource_address, shard, \
+                 state_version) VALUES (1, -1, '{}', '{resource}', 1, 1)",
+                serialize_hex(RistrettoPublicKeyBytes::default())
+            ))
+            .execute(tx.connection())
+            .unwrap();
+
+            tx.commit().unwrap();
+        }
+
+        let mut tx = store.create_read_tx().unwrap();
+        assert!(matches!(
+            tx.confidential_outputs_get_unspent_balance(&vault),
+            Err(WalletStorageError::DecodingError { item: "value", .. })
+        ));
+        assert!(matches!(
+            tx.stealth_outputs_get_unspent_balance(&resource),
+            Err(WalletStorageError::DecodingError { item: "value", .. })
+        ));
+        assert!(matches!(
+            tx.shard_state_version_get(&acct, &resource),
+            Err(WalletStorageError::DecodingError { item: "shard", .. })
+        ));
+        assert!(matches!(
+            tx.shard_state_version_claims_get(&acct, &resource),
+            Err(WalletStorageError::DecodingError {
+                item: "state_version",
+                ..
+            })
+        ));
+        assert!(matches!(
+            tx.utxo_process_queue_fetch_batch(None, 10),
+            Err(WalletStorageError::DecodingError { item: "utxo_tag", .. })
+        ));
     }
 }

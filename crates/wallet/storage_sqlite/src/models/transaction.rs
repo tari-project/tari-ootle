@@ -60,7 +60,15 @@ impl TransactionRecord {
                 details: e.to_string(),
             })?,
             finalize: self.result.as_deref().map(deserialize_json).transpose()?,
-            final_fee: self.final_fee.map(|f| f as u64),
+            final_fee: self
+                .final_fee
+                .map(u64::try_from)
+                .transpose()
+                .map_err(|e| WalletStorageError::DecodingError {
+                    operation: "transaction_get",
+                    item: "final_fee",
+                    details: format!("Invalid final_fee: {e}"),
+                })?,
             qcs: self.qcs.map(|q| deserialize_json(&q)).transpose()?.unwrap_or_default(),
             new_account_info: self.new_account_info.as_deref().map(deserialize_json).transpose()?,
             invalid_reason: self.invalid_reason,

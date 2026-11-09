@@ -160,22 +160,30 @@ pub fn parse_finalized_result(raw: &str) -> Result<FinalizedResult, OotleSdkErro
                 }
                 Ok(finalized_from_execute_result(&result))
             },
-            // A commit always carries an execution result, so a missing one is a rejection: fall
-            // back to `abort_details` for the message.
-            None => Ok(FinalizedResult {
-                submit: SubmitResult {
-                    transaction_id: TransactionIdBytes::from_bytes(&[]),
-                    outcome: Some(TransactionOutcome::Reject(RejectReason::from_abort_details(
-                        abort_details.unwrap_or_else(|| "Unknown".to_string()),
-                    ))),
-                },
-                fee_receipt: None,
-                diff_summary: None,
-                events: Vec::new(),
-                logs: Vec::new(),
-                epoch: None,
-                estimated_fee: None,
-            }),
+            // A commit always carries an execution result, so a missing one is only valid for an
+            // abort: surface its canonical abort_code and fall back to `abort_details` (or the
+            // abort reason's Display) for the message.
+            None => {
+                let Decision::Abort(reason) = final_decision else {
+                    return Err(OotleSdkError::Parse(
+                        "indexer Finalized with Commit decision is missing execution_result".to_string(),
+                    ));
+                };
+                let mut reject = RejectReason::from_abort_details(abort_details.unwrap_or_else(|| reason.to_string()));
+                reject.abort_code = Some(crate::types::result::abort_code(&reason).to_string());
+                Ok(FinalizedResult {
+                    submit: SubmitResult {
+                        transaction_id: TransactionIdBytes::from_bytes(&[]),
+                        outcome: Some(TransactionOutcome::Reject(reject)),
+                    },
+                    fee_receipt: None,
+                    diff_summary: None,
+                    events: Vec::new(),
+                    logs: Vec::new(),
+                    epoch: None,
+                    estimated_fee: None,
+                })
+            },
         },
     }
 }
@@ -619,5 +627,45 @@ mod tests {
         let err = parse_finalized_result(&json).unwrap_err();
         assert_eq!(err.code(), "PARSE");
         assert!(err.to_string().contains("disagrees"), "{err}");
+    }
+
+    #[test]
+    fn commit_decision_without_execution_result_is_a_parse_error() {
+        let json = serde_json::json!({
+            "Finalized": {
+                "final_decision": "Commit",
+                "execution_result": null,
+                "execution_time": { "secs": 1, "nanos": 0 },
+                "finalized_time": "2026-06-12 00:00:00.0",
+                "abort_details": null,
+            }
+        })
+        .to_string();
+        let err = parse_finalized_result(&json).unwrap_err();
+        assert_eq!(err.code(), "PARSE");
+        assert!(err.to_string().contains("missing execution_result"), "{err}");
+    }
+
+    #[test]
+    fn abort_decision_without_execution_result_preserves_abort_code() {
+        let json = serde_json::json!({
+            "Finalized": {
+                "final_decision": { "Abort": "EpochExpired" },
+                "execution_result": null,
+                "execution_time": { "secs": 1, "nanos": 0 },
+                "finalized_time": "2026-06-12 00:00:00.0",
+                "abort_details": "expired at epoch 9",
+            }
+        })
+        .to_string();
+        let parsed = parse_finalized_result(&json).unwrap();
+        match parsed.submit.outcome {
+            Some(TransactionOutcome::Reject(ref r)) => {
+                assert_eq!(r.code, "ABORT");
+                assert_eq!(r.abort_code.as_deref(), Some("EPOCH_EXPIRED"));
+                assert_eq!(r.message, "expired at epoch 9");
+            },
+            other => panic!("expected Reject, got {other:?}"),
+        }
     }
 }

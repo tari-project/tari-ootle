@@ -460,7 +460,7 @@ where
                 args,
             } => Self::call_function(template_provider, runtime, &template_address, &function, args, None).map(Some),
             Instruction::CallMethod { call, method, args } => {
-                Self::call_method(template_provider, runtime, call, &method, args, None).map(Some)
+                Self::call_method(template_provider, runtime, call, &method, args, None, None).map(Some)
             },
             // Basically names an output on the workspace so that you can refer to it as an
             // Arg::Variable
@@ -827,7 +827,7 @@ where
 
                 if let Some(workspace_id) = workspace_id {
                     let args = call_args![WorkspaceOffset(workspace_id)];
-                    Self::invoke_component(template, runtime, component, ACCOUNT_DEPOSIT_METHOD, args, None)?;
+                    Self::invoke_component(template, runtime, component, ACCOUNT_DEPOSIT_METHOD, args, None, None)?;
                 }
 
                 // The instruction output is always the ComponentAddress
@@ -984,6 +984,7 @@ where
         method: &str,
         args: Vec<InstructionArg>,
         restrict_frame_to: Option<FrameWriteMode>,
+        arg_scope: Option<IndexedWellKnownTypes>,
     ) -> Result<IndexedValue, TransactionErrorKind> {
         let component = runtime.interface().load_component(call)?;
         let template_address = component.template_address;
@@ -1002,9 +1003,11 @@ where
             .interface()
             .track_template_loaded(&template_address, template.code_size())?;
 
-        Self::invoke_component(template, runtime, component, method, args, restrict_frame_to)
+        Self::invoke_component(template, runtime, component, method, args, restrict_frame_to, arg_scope)
     }
 
+    /// Calls `method` on `component`. The callee frame's argument scope is `arg_scope` when given, and otherwise
+    /// every substate the resolved `args` name.
     fn invoke_component(
         template: LoadedTemplate,
         runtime: &Runtime,
@@ -1012,6 +1015,7 @@ where
         method: &str,
         args: Vec<InstructionArg>,
         restrict_frame_to: Option<FrameWriteMode>,
+        arg_scope: Option<IndexedWellKnownTypes>,
     ) -> Result<IndexedValue, TransactionErrorKind> {
         let template_def = template.shared_template_def();
         let function_def = template_def
@@ -1041,11 +1045,14 @@ where
         let resolved_args = runtime
             .interface()
             .resolve_args(Some(InstructionArg::from_type(&component.address)?), &args)?;
-        let arg_scope = resolved_args
-            .iter()
-            .skip(1)
-            .map(IndexedWellKnownTypes::from_value)
-            .collect::<Result<_, _>>()?;
+        let arg_scope = match arg_scope {
+            Some(arg_scope) => arg_scope,
+            None => resolved_args
+                .iter()
+                .skip(1)
+                .map(IndexedWellKnownTypes::from_value)
+                .collect::<Result<_, _>>()?,
+        };
 
         runtime.interface().push_call_frame(
             PushCallFrame::ForComponent {

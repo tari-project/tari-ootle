@@ -560,6 +560,17 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             return Ok(());
         }
 
+        // The hook frame's scope comes from the arguments as they stand before the acting component's state is
+        // attached, so the hook receives that state as data only. The acting component's frame validated the state
+        // when it wrote it, and the substates it names belong to the acting component: a root substate among them
+        // may be absent from this transaction, and none of them enter the hook frame's scope.
+        let hook_arg_scope = [
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&action)?)?,
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&auth_caller)?)?,
+        ]
+        .into_iter()
+        .collect();
+
         if let Some(component) = auth_caller.component().copied() {
             self.invoke_modules_on_runtime_call("load_component")?;
             self.charge_component_load(component)?;
@@ -592,6 +603,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             &auth_hook.method,
             args,
             Some(FrameWriteMode::OwnComponent),
+            Some(hook_arg_scope),
         );
         if !resource_was_in_scope {
             self.tracker.write_with(|state_mut| {
@@ -688,12 +700,15 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         Runtime::new(Rc::new(self.clone()))
     }
 
+    /// Calls `method` on `component_address`. `arg_scope`, when given, is the callee frame's argument scope in
+    /// place of the one derived from `args`.
     fn invoke_component_method(
         &self,
         component_address: ComponentAddress,
         method: &str,
         args: Vec<Bytes>,
         restrict_frame_to: Option<FrameWriteMode>,
+        arg_scope: Option<IndexedWellKnownTypes>,
     ) -> Result<IndexedValue, RuntimeError> {
         let call_runtime = self.for_nested_call();
 
@@ -704,6 +719,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             method,
             args.into_iter().map(InstructionArg::Literal).collect(),
             restrict_frame_to,
+            arg_scope,
         )
         .map_err(|e| RuntimeError::CrossTemplateCallMethodError {
             component_address,
@@ -4052,7 +4068,7 @@ where
                     args,
                 } = args.assert_one_arg()?;
 
-                self.invoke_component_method(component_address, &method, args, None)?
+                self.invoke_component_method(component_address, &method, args, None, None)?
             },
         };
 

@@ -1,14 +1,14 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use log::*;
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{ProtocolVersion, committee::Committee, optional::Optional};
 use tari_ootle_storage::{
     StateStoreReadTransaction,
-    consensus_models::{CommandsCommitProof, ForeignProposal, ForeignProposalRecord},
+    consensus_models::{Block, CommandsCommitProof, ForeignProposal, ForeignProposalRecord},
 };
 use tari_ootle_transaction::Network;
 
@@ -68,6 +68,39 @@ pub fn is_authenticated_commit_proof_stored<TTx: StateStoreReadTransaction>(
         record.proposal().commit_proof() == proposal.commit_proof() &&
             record.proposal().block_metadata().calculate_hash() == metadata_hash
     }))
+}
+
+/// Returns true if `foreign_proposals` carries no duplicates or proposals `block` does not sequence, and every
+/// foreign proposal `block` sequences is either carried in `foreign_proposals` or already stored.
+pub fn are_block_foreign_proposals_matched<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    block: &Block,
+    foreign_proposals: &[ForeignProposal],
+) -> Result<bool, HotStuffError> {
+    let mut carried = HashSet::with_capacity(foreign_proposals.len());
+    for proposal in foreign_proposals {
+        let Some(shard_group) = proposal.shard_group_checked() else {
+            return Ok(false);
+        };
+        let block_id = proposal.calculate_block_id();
+        if !carried.insert(block_id) {
+            return Ok(false);
+        }
+        if !block
+            .all_foreign_proposals()
+            .any(|atom| atom.block_id == block_id && atom.shard_group == shard_group)
+        {
+            return Ok(false);
+        }
+    }
+
+    for atom in block.all_foreign_proposals() {
+        if !carried.contains(&atom.block_id) && !ForeignProposalRecord::record_exists(tx, &atom.block_id)? {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
 }
 
 /// Checks the proposal against the committee of the shard group its header names, in the proposal's epoch.

@@ -22,7 +22,8 @@ use tari_ootle_storage::consensus_models::{ProposalFilter, TransactionPoolStage}
 ///    cannot be aborted, so after a further drain period `EndEpoch` stops waiting for it. Only a foreign shard group
 ///    that has stopped delivering keeps one there that long.
 ///
-/// Replicas that see such a next epoch check two of these rules: they accept the abort from `LocalPrepared` (see
+/// Replicas that see such a next epoch check two of these rules: they accept the abort of a transaction still waiting
+/// in `LocalPrepared` (see
 /// [`abort_local_prepared_for_epoch_end`](crate::hotstuff::abort_local_prepared_for_epoch_end)), and they do not vote
 /// for an `EndEpoch` that leaves a transaction in `LocalPrepared`. The rest are proposing rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

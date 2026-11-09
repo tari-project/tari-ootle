@@ -1031,7 +1031,8 @@ fn check_no_commands_after_epoch_end<TTx: StateStoreReadTransaction>(
 /// Consensus rule: an end-of-epoch block that changes the number of committees may not leave a transaction in
 /// `LocalPrepared` on the chain it extends. Validators move to new shard groups at such a boundary and drop their
 /// transaction pools, so that transaction would keep its substate locks with no record left to finalize it. The rule
-/// cannot wedge the epoch: a replica that sees such a next epoch accepts the abort of these transactions (see
+/// cannot wedge the epoch: a transaction that is ready for LocalAccept can be accepted as usual, and a replica that
+/// sees such a next epoch accepts the abort of one still waiting on foreign shard groups (see
 /// [`abort_local_prepared_for_epoch_end`]), so a leader can always clear them first.
 ///
 /// The pool is read with the pending updates of the chain ending at `justify_block_id`, the block the end-of-epoch

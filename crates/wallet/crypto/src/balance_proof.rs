@@ -103,6 +103,7 @@ pub fn generate_covenant_balance_proof_signature(
     sig.to_byte_type()
 }
 
+#[must_use]
 pub fn validate_balance_proof_signature(
     signature: &BalanceProofSignature,
     inputs_statement: &StealthInputsStatement,

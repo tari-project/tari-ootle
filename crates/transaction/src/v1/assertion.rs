@@ -83,6 +83,7 @@ pub enum CheckOrd {
 }
 
 impl CheckOrd {
+    #[must_use]
     pub fn check<T: PartialEq<U> + Eq + PartialOrd<U> + Ord, U>(&self, left: T, right: U) -> bool {
         match self {
             CheckOrd::Gt => left > right,

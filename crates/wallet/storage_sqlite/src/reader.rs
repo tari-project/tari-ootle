@@ -139,63 +139,46 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .get_results::<(i64, bool)>(self.connection())
             .map_err(|e| WalletStorageError::general("key_manager_get_all", e))?;
 
-        results
+        Ok(results
             .into_iter()
-            .map(|(index, is_active)| {
-                let index = u64::try_from(index).map_err(|e| WalletStorageError::DecodingError {
-                    operation: "key_manager_get_all",
-                    item: "index",
-                    details: format!("Corrupt db: invalid key manager index '{index}': {e}"),
-                })?;
-                Ok((index, is_active))
-            })
-            .collect()
+            .map(|(index, is_active)| (index as u64, is_active))
+            .collect())
     }
 
     fn key_manager_get_active_index(&mut self, branch: &str) -> Result<u64, WalletStorageError> {
         use crate::schema::key_manager_states;
 
-        let index: i64 = key_manager_states::table
+        key_manager_states::table
             .select(key_manager_states::index)
             .filter(key_manager_states::branch_seed.eq(branch))
             .filter(key_manager_states::is_active.eq(true))
             .first(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general("key_manager_get_active_index", e))?
+            .map(|index: i64| index as u64)
             .ok_or_else(|| WalletStorageError::NotFound {
                 operation: "key_manager_get_active_index",
                 entity: "key_manager_state".to_string(),
                 key: branch.to_string(),
-            })?;
-
-        u64::try_from(index).map_err(|e| WalletStorageError::DecodingError {
-            operation: "key_manager_get_active_index",
-            item: "index",
-            details: format!("Corrupt db: invalid key manager index '{index}': {e}"),
-        })
+            })
     }
 
     fn key_manager_get_last_index(&mut self, branch: &str) -> Result<u64, WalletStorageError> {
         use crate::schema::key_manager_states;
 
-        let index: i64 = key_manager_states::table
+        key_manager_states::table
             .select(key_manager_states::index)
             .filter(key_manager_states::branch_seed.eq(branch))
             .order(key_manager_states::index.desc())
             .first(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general("key_manager_get_last_index", e))?
+            .map(|index: i64| index as u64)
             .ok_or_else(|| WalletStorageError::NotFound {
                 operation: "key_manager_get_last_index",
                 entity: "key_manager_state".to_string(),
                 key: branch.to_string(),
-            })?;
-
-        u64::try_from(index).map_err(|e| WalletStorageError::DecodingError {
-            operation: "key_manager_get_last_index",
-            item: "index",
-            details: format!("Corrupt db: invalid key manager index '{index}': {e}"),
-        })
+            })
     }
 
     fn key_manager_get_raw_imported_key(&mut self, id: u64) -> Result<(KeyType, Box<[u8]>), WalletStorageError> {
@@ -277,12 +260,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 item: "imported_key",
                 details: format!("Failed to parse key type: {}", key_type),
             })?;
-        let id = ImportedKeyId::try_from(id).map_err(|e| WalletStorageError::DecodingError {
-            operation: OPERATION,
-            item: "imported_key",
-            details: format!("Corrupt db: invalid imported key id '{id}': {e}"),
-        })?;
-        Ok((id, key_type))
+        Ok((id as ImportedKeyId, key_type))
     }
 
     // -------------------------------- Config -------------------------------- //
@@ -1950,22 +1928,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
         let mut versions = HashMap::with_capacity(row.len());
         for (shard, version) in row {
-            let shard = u32::try_from(shard)
-                .map(Shard::from)
-                .map_err(|e| WalletStorageError::DecodingError {
-                    operation: OPERATION,
-                    item: "shard",
-                    details: format!("Corrupt db: invalid shard '{shard}': {e}"),
-                })?;
-            let version =
-                u64::try_from(version)
-                    .map(StateVersion::new)
-                    .map_err(|e| WalletStorageError::DecodingError {
-                        operation: OPERATION,
-                        item: "state_version",
-                        details: format!("Corrupt db: invalid state_version '{version}': {e}"),
-                    })?;
-            versions.insert(shard, version);
+            versions.insert(Shard::from(shard as u32), StateVersion::new(version as u64));
         }
         Ok(versions)
     }
@@ -2004,48 +1967,16 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .get_results::<(i32, i64, i64, Option<i64>)>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
-        let mut claims = HashMap::with_capacity(rows.len());
-        for (shard, state_version, first_state_version, verified_epoch) in rows {
-            let shard = u32::try_from(shard)
-                .map(Shard::from)
-                .map_err(|e| WalletStorageError::DecodingError {
-                    operation: OPERATION,
-                    item: "shard",
-                    details: format!("Corrupt db: invalid shard '{shard}': {e}"),
-                })?;
-            let state_version =
-                u64::try_from(state_version)
-                    .map(StateVersion::new)
-                    .map_err(|e| WalletStorageError::DecodingError {
-                        operation: OPERATION,
-                        item: "state_version",
-                        details: format!("Corrupt db: invalid state_version '{state_version}': {e}"),
-                    })?;
-            let first_state_version = u64::try_from(first_state_version).map(StateVersion::new).map_err(|e| {
-                WalletStorageError::DecodingError {
-                    operation: OPERATION,
-                    item: "first_state_version",
-                    details: format!("Corrupt db: invalid first_state_version '{first_state_version}': {e}"),
-                }
-            })?;
-            let verified_epoch = verified_epoch
-                .map(|epoch| {
-                    u64::try_from(epoch)
-                        .map(Epoch)
-                        .map_err(|e| WalletStorageError::DecodingError {
-                            operation: OPERATION,
-                            item: "verified_epoch",
-                            details: format!("Corrupt db: invalid verified_epoch '{epoch}': {e}"),
-                        })
+        Ok(rows
+            .into_iter()
+            .map(|(shard, state_version, first_state_version, verified_epoch)| {
+                (Shard::from(shard as u32), ClaimedStateVersion {
+                    state_version: StateVersion::new(state_version as u64),
+                    first_state_version: StateVersion::new(first_state_version as u64),
+                    verified_epoch: verified_epoch.map(|epoch| Epoch(epoch as u64)),
                 })
-                .transpose()?;
-            claims.insert(shard, ClaimedStateVersion {
-                state_version,
-                first_state_version,
-                verified_epoch,
-            });
-        }
-        Ok(claims)
+            })
+            .collect())
     }
 
     fn utxo_process_queue_fetch_batch(
@@ -2080,27 +2011,9 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
         let mut pair_unspent_at = HashMap::<(String, i32, String), Option<(Shard, StateVersion)>>::new();
         for (resource_address, tag, public_nonce, shard, state_version) in pair_rows {
-            let unspent_at = match shard.zip(state_version) {
-                Some((shard, state_version)) => {
-                    let shard =
-                        u32::try_from(shard)
-                            .map(Shard::from)
-                            .map_err(|e| WalletStorageError::DecodingError {
-                                operation: OPERATION,
-                                item: "shard",
-                                details: format!("Corrupt db: invalid shard '{shard}': {e}"),
-                            })?;
-                    let state_version = u64::try_from(state_version).map(StateVersion::new).map_err(|e| {
-                        WalletStorageError::DecodingError {
-                            operation: OPERATION,
-                            item: "state_version",
-                            details: format!("Corrupt db: invalid state_version '{state_version}': {e}"),
-                        }
-                    })?;
-                    Some((shard, state_version))
-                },
-                None => None,
-            };
+            let unspent_at = shard
+                .zip(state_version)
+                .map(|(shard, state_version)| (Shard::from(shard as u32), StateVersion::new(state_version as u64)));
             pair_unspent_at
                 .entry((resource_address, tag, public_nonce))
                 .and_modify(|merged| *merged = QueuedUtxo::merge_unspent_at(*merged, unspent_at))
@@ -2115,13 +2028,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
                     item: "resource_address",
                     details: format!("Corrupt db: invalid resource address '{}': {}", row.resource_address, e),
                 })?;
-            let tag = u32::try_from(row.utxo_tag)
-                .map(UtxoTag::new)
-                .map_err(|e| WalletStorageError::DecodingError {
-                    operation: OPERATION,
-                    item: "utxo_tag",
-                    details: format!("Corrupt db: invalid utxo_tag '{}': {e}", row.utxo_tag),
-                })?;
+            let tag = UtxoTag::new(row.utxo_tag as u32);
             let public_nonce = deserialize_hex_try_from(&row.public_nonce)?;
             let account_addr = account_addr.parse().map_err(|e| WalletStorageError::DecodingError {
                 operation: OPERATION,
@@ -2650,30 +2557,26 @@ mod tests {
         assert!(tx.webauthn_has_any_registration().unwrap());
     }
 
-    #[test]
-    fn reader_queries_round_trip_u64_max_amounts_and_reject_negative_non_amount_fields() {
+    /// A store holding one account and one resource.
+    fn store_with_account_and_resource() -> (SqliteWalletStore, ComponentAddress, ResourceAddress) {
         use std::collections::HashSet;
 
-        use tari_ootle_common_types::{Epoch, SubstateVersion};
+        use tari_ootle_common_types::Epoch;
         use tari_ootle_wallet_sdk::models::KeyBranch;
-        use tari_template_lib_types::{ObjectKey, ResourceType};
+        use tari_template_lib_types::ObjectKey;
 
         let store = SqliteWalletStore::try_open(":memory:").unwrap();
         store.run_migrations().unwrap();
 
         let acct = ComponentAddress::from_array([1u8; 32]);
-        let vault = VaultId::new([10u8; 32].into());
         let resource = ResourceAddress::new(ObjectKey::from_array([9u8; ObjectKey::LENGTH]));
-        let view_key = KeyId::derived(KeyBranch::ViewOnlyKey, 0);
-        let owner_key = Some(KeyId::derived(KeyBranch::Account, 0));
-
         {
             let mut tx = store.create_write_tx().unwrap();
             tx.accounts_insert(
                 Some("a"),
                 &acct,
-                view_key,
-                owner_key,
+                KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+                Some(KeyId::derived(KeyBranch::Account, 0)),
                 &RistrettoPublicKeyBytes::from([1u8; 32]),
                 &HashSet::new(),
                 Epoch(0),
@@ -2681,6 +2584,30 @@ mod tests {
                 false,
             )
             .unwrap();
+            sql_query(format!(
+                "INSERT INTO resources (address, resource_type, owner_rule, access_rules, divisibility, metadata) \
+                 VALUES ('{resource}', 'Confidential', '{{}}', '{{}}', 0, '{{}}')"
+            ))
+            .execute(tx.connection())
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        (store, acct, resource)
+    }
+
+    #[test]
+    fn reader_queries_round_trip_u64_max_amounts() {
+        use tari_ootle_common_types::SubstateVersion;
+        use tari_ootle_wallet_sdk::models::KeyBranch;
+        use tari_template_lib_types::ResourceType;
+
+        let (store, acct, resource) = store_with_account_and_resource();
+        let vault = VaultId::new([10u8; 32].into());
+        let view_key = KeyId::derived(KeyBranch::ViewOnlyKey, 0);
+        let owner_key = Some(KeyId::derived(KeyBranch::Account, 0));
+
+        {
+            let mut tx = store.create_write_tx().unwrap();
             tx.vaults_insert(VaultModel {
                 account_address: acct,
                 id: vault,
@@ -2707,32 +2634,6 @@ mod tests {
             confidential.status = OutputStatus::Unspent;
             confidential.lock_id = None;
             tx.confidential_outputs_insert(confidential).unwrap();
-
-            sql_query(format!(
-                "INSERT INTO resources (address, resource_type, owner_rule, access_rules, divisibility, metadata) \
-                 VALUES ('{resource}', 'Confidential', '{{}}', '{{}}', 0, '{{}}')"
-            ))
-            .execute(tx.connection())
-            .unwrap();
-            sql_query(
-                "INSERT INTO shard_state_versions (account_id, resource_id, shard, state_version) VALUES (1, 1, -1, 1)",
-            )
-            .execute(tx.connection())
-            .unwrap();
-            sql_query(
-                "INSERT INTO shard_state_version_claims (account_id, resource_id, shard, state_version, \
-                 first_state_version, verified_epoch) VALUES (1, 1, 1, -1, 1, 1)",
-            )
-            .execute(tx.connection())
-            .unwrap();
-            sql_query(format!(
-                "INSERT INTO utxo_process_queue (account_id, utxo_tag, public_nonce, resource_address, shard, \
-                 state_version) VALUES (1, -1, '{}', '{resource}', 1, 1)",
-                serialize_hex(RistrettoPublicKeyBytes::default())
-            ))
-            .execute(tx.connection())
-            .unwrap();
-
             tx.commit().unwrap();
         }
 
@@ -2752,21 +2653,59 @@ mod tests {
             .unwrap();
         assert_eq!(stealth_outputs.len(), 1);
         assert_eq!(stealth_outputs[0].value, u64::MAX);
+    }
 
-        assert!(matches!(
-            tx.shard_state_version_get(&acct, &resource),
-            Err(WalletStorageError::DecodingError { item: "shard", .. })
-        ));
-        assert!(matches!(
-            tx.shard_state_version_claims_get(&acct, &resource),
-            Err(WalletStorageError::DecodingError {
-                item: "state_version",
-                ..
-            })
-        ));
-        assert!(matches!(
-            tx.utxo_process_queue_fetch_batch(None, 10),
-            Err(WalletStorageError::DecodingError { item: "utxo_tag", .. })
-        ));
+    #[test]
+    fn reader_queries_round_trip_u32_max_shards_and_tags_and_u64_max_versions() {
+        use tari_ootle_common_types::Epoch;
+        use tari_ootle_wallet_sdk::models::UtxoUnspent;
+
+        let (store, acct, resource) = store_with_account_and_resource();
+        // The writer stores u32 as i32 and u64 as i64 by bit reinterpretation, so maxima are stored negative.
+        let max_shard = Shard::from(u32::MAX);
+        let max_version = StateVersion::new(u64::MAX);
+        let max_claim = ClaimedStateVersion {
+            state_version: max_version,
+            first_state_version: max_version,
+            verified_epoch: Some(Epoch(u64::MAX)),
+        };
+
+        {
+            let mut tx = store.create_write_tx().unwrap();
+            tx.shard_state_version_set_many(&acct, &resource, [(max_shard, max_version)])
+                .unwrap();
+            tx.shard_state_version_claims_set_many(&acct, &resource, [(max_shard, max_claim)])
+                .unwrap();
+            tx.utxo_process_queue_extend(&resource, [(
+                UtxoUnspent {
+                    tag: UtxoTag::new(u32::MAX),
+                    public_nonce: RistrettoPublicKeyBytes::default(),
+                },
+                QueuedUtxo {
+                    account: acct,
+                    unspent_at: Some((max_shard, max_version)),
+                },
+            )])
+            .unwrap();
+
+            tx.commit().unwrap();
+        }
+
+        let mut tx = store.create_read_tx().unwrap();
+        assert_eq!(
+            tx.shard_state_version_get(&acct, &resource).unwrap(),
+            HashMap::from([(max_shard, max_version)])
+        );
+        assert_eq!(
+            tx.shard_state_version_claims_get(&acct, &resource).unwrap(),
+            HashMap::from([(max_shard, max_claim)])
+        );
+        let batch = tx.utxo_process_queue_fetch_batch(None, 10).unwrap();
+        let queued = batch
+            .entries
+            .get(&resource)
+            .and_then(|entries| entries.get(&(UtxoTag::new(u32::MAX), RistrettoPublicKeyBytes::default())))
+            .unwrap();
+        assert_eq!(queued.unspent_at, Some((max_shard, max_version)));
     }
 }

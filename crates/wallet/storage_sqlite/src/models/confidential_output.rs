@@ -58,7 +58,6 @@ impl ConfidentialOutput {
                     details: "Corrupt db: invalid hex representation".to_string(),
                 }
             })?,
-            // `value` is u64 stored in a signed BigInt column; values >= 2^63 wrap to negative.
             value: (self.value as u64).into(),
             sender_public_nonce: self
                 .sender_public_nonce

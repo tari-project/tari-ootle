@@ -32,13 +32,7 @@ impl Substate {
             item: "address",
             details: e.to_string(),
         })?;
-        let version = u64::try_from(self.version)
-            .map(SubstateVersion::new)
-            .map_err(|e| WalletStorageError::DecodingError {
-                operation: "try_to_record",
-                item: "version",
-                details: e.to_string(),
-            })?;
+        let version = SubstateVersion::new(self.version as u64);
         let parent_address = self
             .parent_address
             .as_ref()
@@ -91,7 +85,7 @@ mod tests {
     }
 
     #[test]
-    fn try_to_record_converts_valid_substate_and_rejects_corrupt_fields() {
+    fn try_to_record_rejects_corrupt_ids_and_round_trips_u64_max_version() {
         let valid = sample_substate();
         let model = valid.try_to_record().unwrap();
         assert_eq!(model.substate_id.version(), SubstateVersion::new(3));
@@ -113,11 +107,9 @@ mod tests {
             })
         ));
 
-        let mut negative_version = sample_substate();
-        negative_version.version = -1;
-        assert!(matches!(
-            negative_version.try_to_record(),
-            Err(WalletStorageError::DecodingError { item: "version", .. })
-        ));
+        let mut max_version = sample_substate();
+        max_version.version = u64::MAX as i64;
+        let model = max_version.try_to_record().unwrap();
+        assert_eq!(model.substate_id.version(), SubstateVersion::new(u64::MAX));
     }
 }

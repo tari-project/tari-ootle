@@ -46,7 +46,7 @@ use tari_ootle_transaction::{
     TransactionId,
     UnsignedTransaction,
     args,
-    args::InstructionArg,
+    args::{InstructionArg, WorkspaceOffsetId},
     call_arg,
 };
 use tari_ootle_wallet_sdk::{apis::confidential_transfer::UtxoInputSelection, crypto::memo::Memo};
@@ -470,21 +470,34 @@ fn build_manifest_transaction(
     max_fee: u64,
     dump_outputs_into: Option<ComponentAddress>,
 ) -> Result<UnsignedTransaction, anyhow::Error> {
-    builder = builder
-        .with_fee_instructions_builder(|builder| {
-            if instructions.fee_instructions.is_empty() {
-                builder.call_method(fee_account, "pay_fee", args![max_fee])
-            } else {
-                builder.with_instructions(instructions.fee_instructions)
-            }
-        })
-        .with_instructions(instructions.instructions);
+    builder = builder.with_fee_instructions_builder(|builder| {
+        if instructions.fee_instructions.is_empty() {
+            builder.call_method(fee_account, "pay_fee", args![max_fee])
+        } else {
+            builder.with_instructions(instructions.fee_instructions)
+        }
+    });
+
+    let last_instruction_is_put = instructions.instructions.last().and_then(|i| match i {
+        Instruction::PutLastInstructionOutputOnWorkspace { key } => Some(*key),
+        _ => None,
+    });
+
+    builder = builder.with_instructions(instructions.instructions);
 
     if let Some(dump_account) = dump_outputs_into {
-        builder =
-            builder
-                .put_last_instruction_output_on_workspace("bucket")
-                .call_method(dump_account, "deposit", args![Workspace("bucket")]);
+        if let Some(key) = last_instruction_is_put {
+            builder = builder.add_instruction(Instruction::CallMethod {
+                call: dump_account.into(),
+                method: "deposit".try_into()?,
+                args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(key))],
+            });
+        } else {
+            builder =
+                builder
+                    .put_last_instruction_output_on_workspace("bucket")
+                    .call_method(dump_account, "deposit", args![Workspace("bucket")]);
+        }
     }
 
     let mut transaction = builder.build_unsigned();
@@ -1156,8 +1169,8 @@ mod tests {
 
         // Hand-off of workspace keys:
         // 0: PutLastInstructionOutputOnWorkspace { key: 0 } (from `let comp = ...`)
-        // 1: PutLastInstructionOutputOnWorkspace { key: 1 } (from dump_outputs_into)
-        // 2: CallMethod deposit with Workspace(1)
+        // Because the manifest ends in a `let` binding, the output is already placed in workspace key 0.
+        // `--dump-outputs-into` reuses key 0 directly and avoids emitting a second PutLastInstructionOutputOnWorkspace.
         assert_eq!(transaction.instructions(), &[
             Instruction::CallFunction {
                 address: template_addr,
@@ -1165,11 +1178,10 @@ mod tests {
                 args: vec![InstructionArg::Blob(0)],
             },
             Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
-            Instruction::PutLastInstructionOutputOnWorkspace { key: 1 },
             Instruction::CallMethod {
                 call: dump_account.into(),
                 method: "deposit".try_into().unwrap(),
-                args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(1))],
+                args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(0))],
             },
         ]);
     }

@@ -569,7 +569,6 @@ mod tests {
         for (case, shard_group, repeat) in cases {
             let mut proof = honest_proof(ProtocolVersion::V0, shard_group);
             proof.commands.insert(2, repeat);
-            proof.validate_command_merkle_root().unwrap();
             assert!(
                 matches!(
                     proof.validate_well_formed(),

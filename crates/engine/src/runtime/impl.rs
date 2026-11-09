@@ -1768,10 +1768,21 @@ where
                 args.assert_no_args("Component::GetTemplateAddress")?;
 
                 self.tracker.write_with(|state| {
-                    let locked = state.read_lock_substate(SubstateId::Component(component_address))?;
+                    let current_component_lock = state
+                        .current_call_scope()?
+                        .get_current_component_lock()
+                        .filter(|l| *l.substate_id() == component_address)
+                        .cloned();
+                    let is_already_locked = current_component_lock.is_some();
+                    let locked = match current_component_lock {
+                        Some(lock) => lock,
+                        None => state.read_lock_substate(SubstateId::Component(component_address))?,
+                    };
                     let component = state.get_component(&locked)?;
                     let template_address = *component.template_address();
-                    state.unlock_substate(locked)?;
+                    if !is_already_locked {
+                        state.unlock_substate(locked)?;
+                    }
                     Ok(InvokeResult::encode(&template_address)?)
                 })
             },
@@ -4825,5 +4836,134 @@ mod tests {
             runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args),
             Err(RuntimeError::WriteOutsideOwnComponent { .. })
         ));
+    }
+
+    fn create_test_component(
+        runtime: &RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        template_address: TemplateAddress,
+        module_name: &str,
+        entity_id: EntityId,
+    ) -> ComponentAddress {
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address,
+                    module_name: module_name.to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+        let component_address = runtime
+            .tracker
+            .new_component(
+                tari_bor::Value::Null,
+                SubstateOwnerRule::None,
+                ComponentAccessRules::new(),
+                None,
+                UpdateRule::Locked,
+            )
+            .unwrap();
+        runtime
+            .pop_call_frame(
+                &IndexedWellKnownTypes::from_value(&tari_bor::to_value(&component_address).unwrap()).unwrap(),
+            )
+            .unwrap();
+        component_address
+    }
+
+    #[test]
+    fn get_template_address_succeeds_on_write_locked_current_component_and_migration() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let expected_template = TemplateAddress::from_array([7u8; 32]);
+        let other_template = TemplateAddress::from_array([8u8; 32]);
+        let migrated_template = TemplateAddress::from_array([9u8; 32]);
+        let entity_id = EntityId::default();
+
+        let component_address = create_test_component(&runtime, expected_template, "Test", entity_id);
+        let other_component_address = create_test_component(
+            &runtime,
+            other_template,
+            "Other",
+            EntityId::new([1u8; EntityId::LENGTH]),
+        );
+
+        // Simulate a `&mut self` component method holding a Write lock on `component_address`.
+        let component_lock = runtime.lock_component(component_address, LockFlag::Write).unwrap();
+        let arg_scope =
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&other_component_address).unwrap()).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address: expected_template,
+                    module_name: "Test".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock,
+                    arg_scope: Box::new(arg_scope),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+
+        let invoke_res = runtime
+            .component_invoke(
+                ComponentRef::Ref(component_address),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let actual_template: TemplateAddress = invoke_res.decode().unwrap();
+        assert_eq!(actual_template, expected_template);
+
+        // Querying a different component's template address still acquires and releases a temporary read lock.
+        let other_res = runtime
+            .component_invoke(
+                ComponentRef::Ref(other_component_address),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let actual_other_template: TemplateAddress = other_res.decode().unwrap();
+        assert_eq!(actual_other_template, other_template);
+
+        // Ensure the frame's write lock is still held so subsequent `SetState` and `pop_call_frame` succeed.
+        runtime
+            .component_invoke(
+                ComponentRef::Ref(component_address),
+                ComponentAction::SetState,
+                EngineArgs::from(vec![tari_bor::encode(&tari_bor::Value::Null).unwrap().into()]),
+            )
+            .unwrap();
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+
+        // Simulate a component migration holding a Write lock on `component_address`.
+        let migration_lock = runtime.lock_component(component_address, LockFlag::Write).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::MigrationContext {
+                    template_address: migrated_template,
+                    module_name: "TestV2".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: migration_lock,
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+        runtime.update_component_template(migrated_template).unwrap();
+
+        let migrated_res = runtime
+            .component_invoke(
+                ComponentRef::Ref(component_address),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let actual_migrated: TemplateAddress = migrated_res.decode().unwrap();
+        assert_eq!(actual_migrated, migrated_template);
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
     }
 }

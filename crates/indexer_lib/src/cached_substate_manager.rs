@@ -335,6 +335,9 @@ where
     ) -> Result<SubstateLookupResult, IndexerError> {
         debug!(target: LOG_TARGET, "get_substate_with_proof: {}v{}", substate_id, specific_version.display());
         if let Some(mut lookup_result) = self.read_fresh_cache_entry(substate_id, specific_version).await? {
+            if !self.verify_substate_proofs {
+                return Ok(lookup_result);
+            }
             match &lookup_result.result {
                 SubstateResult::Up { substate } => {
                     lookup_result.proof = self.read_live_proof(substate_id, substate.version()).await?;
@@ -4242,5 +4245,51 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn get_substate_with_proof_serves_cached_entry_when_proof_verification_is_off() {
+        let up_id = vault_id(1);
+        let down_id = vault_id(2);
+        let mut member_responses = HashMap::new();
+        member_responses.insert(
+            ("vn".to_string(), down_id.clone()),
+            SubstateResult::Down {
+                version: SubstateVersion::new(2),
+            },
+        );
+        let (manager, network) = manager(FakeNetwork {
+            live: live(std::slice::from_ref(&up_id)),
+            member_responses,
+            ..Default::default()
+        });
+
+        let first_up = manager.get_substate_with_proof(&up_id, None).await.unwrap();
+        assert!(matches!(first_up.result, SubstateResult::Up { .. }));
+        assert!(first_up.proof.is_none());
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
+
+        let second_up = manager.get_substate_with_proof(&up_id, None).await.unwrap();
+        assert!(matches!(second_up.result, SubstateResult::Up { .. }));
+        assert!(second_up.proof.is_none());
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
+
+        let first_down = manager.get_substate_with_proof(&down_id, None).await.unwrap();
+        assert!(matches!(
+            first_down.result,
+            SubstateResult::Down { version } if version == SubstateVersion::new(2)
+        ));
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 2);
+
+        let second_down = manager
+            .get_substate_with_proof(&down_id, Some(SubstateVersion::new(1)))
+            .await
+            .unwrap();
+        assert!(matches!(
+            second_down.result,
+            SubstateResult::Down { version } if version == SubstateVersion::new(1)
+        ));
+        assert!(second_down.proof.is_none());
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 2);
     }
 }

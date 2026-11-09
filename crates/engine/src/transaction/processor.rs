@@ -82,6 +82,7 @@ use crate::{
         RuntimeInterfaceImpl,
         RuntimeModule,
         StateTracker,
+        reject_transient_values,
         scope::{CallScope, FrameWriteMode, PushCallFrame},
     },
     state_store::StateReader,
@@ -947,6 +948,12 @@ where
             .iter()
             .map(IndexedWellKnownTypes::from_value)
             .collect::<Result<_, _>>()?;
+        // A read-only frame can neither use nor return a bucket, proof or address allocation. Its only caller is a
+        // spend script, whose bound arguments are committed in a UTXO's condition root and evaluated in a later
+        // transaction, so a transient handle in them can only name an object of the spending transaction.
+        if restrict_frame_to == Some(FrameWriteMode::ReadOnly) {
+            reject_transient_values("Read-only call arguments", &arg_scope)?;
+        }
         let frame = PushCallFrame::Static {
             template_address: *template_address,
             module_name: template.template_name().to_string(),

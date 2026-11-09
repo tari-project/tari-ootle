@@ -181,22 +181,7 @@ async fn an_abort_releases_the_locked_outputs_whatever_its_execution_accepted() 
     *final_decision = Decision::Abort(AbortReason::InsufficientFeesPaid);
     execution_result.as_mut().unwrap().finalize.result = TransactionResult::Accept(spends);
 
-    let test = TestWithNetwork::with_network(CannedTransactionResultInterface::new(query_result));
-    test.add_unspent_output(25u64);
-    test.add_unspent_output(49u64);
-    test.store()
-        .with_write_tx(|tx| tx.transactions_insert(&transaction, None, &[Test::test_account_address()], false))
-        .unwrap();
-    let lock_id = test.new_lock().keep_locked();
-    test.sdk()
-        .confidential_outputs_api()
-        .lock_outputs_by_amount(lock_id, &Test::test_vault_address(), 50u64)
-        .unwrap();
-    test.sdk()
-        .transaction_api()
-        .locks_set_transaction_id(lock_id, transaction_id)
-        .unwrap();
-    assert_eq!(test.get_unspent_balance(), 0);
+    let test = wallet_with_inputs_locked_for_new(CannedTransactionResultInterface::new(query_result), &transaction);
 
     let finalized = test
         .sdk()
@@ -208,6 +193,51 @@ async fn an_abort_releases_the_locked_outputs_whatever_its_execution_accepted() 
 
     assert_eq!(finalized.status, TransactionStatus::Rejected);
     assert_eq!(test.get_unspent_balance(), 74, "both outputs are released, not spent");
+}
+
+#[tokio::test]
+async fn a_committed_transaction_finalizes_all_of_its_locks() {
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+
+    let mut spends = SubstateDiff::new();
+    for amount in [25u64, 49] {
+        let commitment = commit_amount(&Default::default(), amount.into())
+            .unwrap()
+            .to_byte_type();
+        spends.down(
+            SubstateId::ConfidentialOutput(ConfidentialOutputAddress::new(
+                STEALTH_TARI_RESOURCE_ADDRESS,
+                commitment,
+            )),
+            SubstateVersion::ZERO,
+        );
+    }
+    let mut query_result = finalized_result(transaction_id, FeeReceipt::default());
+    let TransactionFinalizedResult::Finalized { execution_result, .. } = &mut query_result.result else {
+        unreachable!()
+    };
+    execution_result.as_mut().unwrap().finalize.result = TransactionResult::Accept(spends);
+
+    let test = wallet_with_inputs_locked_for(CannedTransactionResultInterface::new(query_result), &transaction);
+
+    let finalized = test
+        .sdk()
+        .transaction_api()
+        .check_and_store_finalized_transaction(transaction_id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(finalized.status, TransactionStatus::Accepted);
+    assert_eq!(test.get_unspent_balance(), 0);
+    assert!(
+        test.sdk()
+            .locks_api()
+            .get_locks_by_transaction_id(transaction_id)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 fn pending_result(transaction_id: TransactionId) -> TransactionQueryResult {
@@ -235,26 +265,31 @@ fn wallet_with_inputs_locked_for(
     test
 }
 
-/// A wallet on `network` holding `transaction` not yet submitted, with outputs of 25 and 49 locked for it.
+/// A wallet on `network` holding `transaction` not yet submitted, with outputs of 25 and 49 locked under separate
+/// locks for it.
 fn wallet_with_inputs_locked_for_new(
     network: CannedTransactionResultInterface,
     transaction: &Transaction,
 ) -> TestWithNetwork<CannedTransactionResultInterface> {
     let test = TestWithNetwork::with_network(network);
-    let transaction_id = transaction.calculate_id();
     test.add_unspent_output(25u64);
     test.add_unspent_output(49u64);
-    test.store()
-        .with_write_tx(|tx| tx.transactions_insert(transaction, None, &[Test::test_account_address()], false))
-        .unwrap();
-    let lock_id = test.new_lock().keep_locked();
+    let first_lock = test.new_lock().keep_locked();
     test.sdk()
         .confidential_outputs_api()
-        .lock_outputs_by_amount(lock_id, &Test::test_vault_address(), 50u64)
+        .lock_outputs_by_amount(first_lock, &Test::test_vault_address(), 25u64)
+        .unwrap();
+    let second_lock = test.new_lock().keep_locked();
+    test.sdk()
+        .confidential_outputs_api()
+        .lock_outputs_by_amount(second_lock, &Test::test_vault_address(), 49u64)
         .unwrap();
     test.sdk()
         .transaction_api()
-        .locks_set_transaction_id(lock_id, transaction_id)
+        .insert_new_transaction(transaction.clone(), None, &[Test::test_account_address()], false, &[
+            first_lock,
+            second_lock,
+        ])
         .unwrap();
     assert_eq!(test.get_unspent_balance(), 0);
     test
@@ -475,6 +510,46 @@ async fn the_locks_of_a_stored_transaction_are_left_for_it_to_resolve() {
         .transaction_api()
         .release_locks_of_unstored_transaction(transaction_id)
         .unwrap();
+
+    assert_eq!(test.get_unspent_balance(), 0, "the outputs stay locked");
+    assert_eq!(
+        test.sdk()
+            .locks_api()
+            .get_locks_by_transaction_id(transaction_id)
+            .unwrap(),
+        lock_ids.to_vec()
+    );
+}
+
+#[tokio::test]
+async fn release_unlinked_lock_releases_a_lock_no_transaction_holds() {
+    let test = TestWithNetwork::with_network(CannedTransactionResultInterface::not_found());
+    test.add_unspent_output(25u64);
+    let lock_id = test.new_lock().keep_locked();
+    test.sdk()
+        .confidential_outputs_api()
+        .lock_outputs_by_amount(lock_id, &Test::test_vault_address(), 20u64)
+        .unwrap();
+    assert_eq!(test.get_unspent_balance(), 0);
+
+    assert!(test.sdk().locks_api().release_unlinked_lock(lock_id).unwrap());
+
+    assert_eq!(test.get_unspent_balance(), 25);
+    assert!(
+        !test.sdk().locks_api().release_unlinked_lock(lock_id).unwrap(),
+        "a released lock no longer exists"
+    );
+}
+
+#[tokio::test]
+async fn release_unlinked_lock_leaves_a_lock_linked_to_a_stored_transaction() {
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+    let (test, lock_ids) = wallet_with_two_locks_for(CannedTransactionResultInterface::not_found(), &transaction);
+
+    for lock_id in lock_ids {
+        assert!(!test.sdk().locks_api().release_unlinked_lock(lock_id).unwrap());
+    }
 
     assert_eq!(test.get_unspent_balance(), 0, "the outputs stay locked");
     assert_eq!(

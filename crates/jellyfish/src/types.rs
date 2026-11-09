@@ -1444,10 +1444,13 @@ impl<'de> Deserialize<'de> for Children {
             }
 
             fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-                // A repeated nibble replaces the earlier child
                 let mut children = Children::with_capacity(map.size_hint().unwrap_or(0));
                 while let Some((n, child)) = map.next_entry()? {
-                    children.insert(n, child);
+                    if children.insert(n, child).is_some() {
+                        return Err(serde::de::Error::custom(format!(
+                            "duplicate nibble key {n:x} in Children"
+                        )));
+                    }
                 }
                 Ok(children)
             }
@@ -2265,6 +2268,14 @@ mod tests {
                 "leaf_count": 3
             })
         );
+    }
+
+    #[test]
+    fn it_rejects_duplicate_nibble_keys_when_deserializing_children() {
+        let child_json = serde_json::to_string(&leaf_child()).unwrap();
+        let duplicate_json = format!(r#"{{"1":{child_json},"1":{child_json}}}"#);
+        let err = serde_json::from_str::<Children>(&duplicate_json).unwrap_err();
+        assert!(err.to_string().contains("duplicate nibble key 1"));
     }
 
     #[test]

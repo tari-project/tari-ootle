@@ -8,13 +8,13 @@ use crate::{
     version::WasmAbiVersion,
 };
 
-/// A template's definition, always in the current layout.
+/// A template's definition, as the `#[template]` macro embeds it in the template binary.
 ///
-/// Decoding accepts every layout a published template can carry and converts it to the current one, so code reading a
-/// definition sees a single shape. Encoding always writes the current layout.
+/// The enum index is the layout version and is part of the encoding, so a future layout is a new variant at the next
+/// index. Index 0 is the first layout, which the engine does not load: decoding it fails with an error telling the
+/// author to rebuild the template.
 #[derive(Debug, Clone, Encode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(from = "VersionedTemplateDef"))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum TemplateDef {
     #[n(1)]
@@ -68,30 +68,29 @@ impl TemplateDef {
     }
 }
 
+/// The enum index of the first template definition layout, which the engine refuses to load.
+const V1_LAYOUT_INDEX: u32 = 0;
+
 impl<'b, C> Decode<'b, C> for TemplateDef {
     fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        VersionedTemplateDef::decode(d, ctx).map(Self::from)
+        let mut probe = d.probe();
+        probe.array()?;
+        if probe.u32()? == V1_LAYOUT_INDEX {
+            return Err(minicbor::decode::Error::message(
+                "the template definition uses the V1 layout, which is not supported. Rebuild the template with \
+                 tari_template_lib 0.38 or later",
+            ));
+        }
+        DecodedTemplateDef::decode(d, ctx).map(|DecodedTemplateDef::V2(def)| TemplateDef::V2(def))
     }
 }
 
-/// Every template definition layout, as encoded. The variant indices match [`TemplateDef`]'s, so the current layout
-/// decodes and encodes identically through either type.
-#[derive(Debug, Clone, Encode, Decode, CborLen)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum VersionedTemplateDef {
-    #[n(0)]
-    V1(#[n(0)] TemplateDefV1),
+/// The derived decoder for [`TemplateDef`]'s layout. [`TemplateDef`] decodes by hand so that a V1 definition fails
+/// with an error naming the layout.
+#[derive(Decode)]
+enum DecodedTemplateDef {
     #[n(1)]
     V2(#[n(0)] TemplateDefV2),
-}
-
-impl From<VersionedTemplateDef> for TemplateDef {
-    fn from(def: VersionedTemplateDef) -> Self {
-        match def {
-            VersionedTemplateDef::V1(def) => TemplateDef::V2(def.into()),
-            VersionedTemplateDef::V2(def) => TemplateDef::V2(def),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, Encode, Decode, CborLen)]
@@ -201,83 +200,6 @@ pub enum Receiver {
     RefMut,
 }
 
-/// The first template definition layout. A method's receiver is its first argument, named `self` and typed
-/// `Other { name: "&self" }` or `Other { name: "&mut self" }`, and `is_mut` sets the component lock.
-#[derive(Debug, Clone, Default, Encode, Decode, CborLen)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct TemplateDefV1 {
-    #[n(0)]
-    pub template_name: String,
-    #[n(1)]
-    pub abi_version: WasmAbiVersion,
-    #[n(2)]
-    pub functions: Vec<FunctionDefV1>,
-}
-
-impl From<TemplateDefV1> for TemplateDefV2 {
-    fn from(def: TemplateDefV1) -> Self {
-        Self {
-            template_name: def.template_name,
-            abi_version: def.abi_version,
-            functions: def.functions.into_iter().map(Into::into).collect(),
-        }
-    }
-}
-
-/// A function in the [`TemplateDefV1`] layout.
-#[derive(Debug, Clone, Encode, Decode, CborLen)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct FunctionDefV1 {
-    #[n(0)]
-    pub name: String,
-    #[n(1)]
-    pub arguments: Vec<ArgDef>,
-    #[n(2)]
-    pub output: Type,
-    #[n(3)]
-    pub is_mut: bool,
-    #[n(4)]
-    pub is_migration: bool,
-}
-
-impl From<FunctionDefV1> for FunctionDef {
-    /// A leading `&self` or `&mut self` argument becomes the receiver, whose mutability comes from `is_mut` because
-    /// that is what sets the component lock for a V1 method. A migration's first argument, its previous state,
-    /// becomes [`FunctionKind::Migration::from`]. A V1 migration with no arguments, which only a hand-built definition
-    /// can have, migrates from [`Type::Unit`].
-    fn from(def: FunctionDefV1) -> Self {
-        let FunctionDefV1 {
-            name,
-            mut arguments,
-            output,
-            is_mut,
-            is_migration,
-        } = def;
-        let kind = if is_migration {
-            let from = if arguments.is_empty() {
-                Type::Unit
-            } else {
-                arguments.remove(0).arg_type
-            };
-            FunctionKind::Migration { from }
-        } else if arguments
-            .first()
-            .is_some_and(|arg| matches!(arg.arg_type.other(), Some("&self" | "&mut self")))
-        {
-            arguments.remove(0);
-            FunctionKind::Method(if is_mut { Receiver::RefMut } else { Receiver::Ref })
-        } else {
-            FunctionKind::Function
-        };
-        Self {
-            name,
-            kind,
-            arguments,
-            output,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -361,8 +283,14 @@ impl std::fmt::Display for Type {
             Type::Vec(t) => write!(f, "Vec<{}>", t),
             Type::Option(t) => write!(f, "Option<{}>", t),
             Type::Tuple(types) => {
-                let type_list = types.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(",");
-                write!(f, "Tuple<{}>", type_list)
+                f.write_str("Tuple<")?;
+                for (i, t) in types.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(",")?;
+                    }
+                    write!(f, "{t}")?;
+                }
+                f.write_str(">")
             },
             Type::Other { name } => write!(f, "{}", name),
         }
@@ -373,130 +301,97 @@ impl std::fmt::Display for Type {
 mod layout_tests {
     use super::*;
 
-    fn arg(name: &str, arg_type: Type) -> ArgDef {
-        ArgDef {
-            name: name.to_string(),
-            arg_type,
-        }
-    }
-
-    fn receiver_arg(ty: &str) -> ArgDef {
-        arg("self", Type::Other { name: ty.to_string() })
-    }
-
-    fn v1_function(name: &str, arguments: Vec<ArgDef>, is_mut: bool) -> FunctionDefV1 {
-        FunctionDefV1 {
-            name: name.to_string(),
-            arguments,
-            output: Type::Unit,
-            is_mut,
-            is_migration: false,
-        }
-    }
-
-    fn v1_migration(arguments: Vec<ArgDef>) -> FunctionDefV1 {
-        FunctionDefV1 {
-            name: "migrate".to_string(),
-            arguments,
-            output: Type::Other {
-                name: "Counter".to_string(),
-            },
-            is_mut: false,
-            is_migration: true,
-        }
-    }
-
-    fn previous_state() -> Type {
-        Type::Other {
-            name: "CounterV1".to_string(),
-        }
-    }
-
-    fn v1_def() -> VersionedTemplateDef {
-        VersionedTemplateDef::V1(TemplateDefV1 {
+    fn def() -> TemplateDef {
+        TemplateDef::V2(TemplateDefV2 {
             template_name: "Counter".to_string(),
             abi_version: 0,
             functions: vec![
-                v1_function("new", vec![arg("start", Type::U64)], false),
-                v1_function("get", vec![receiver_arg("&self")], false),
-                v1_function("add", vec![receiver_arg("&mut self"), arg("by", Type::U64)], true),
-                v1_migration(vec![arg("previous", previous_state()), arg("seed", Type::U32)]),
+                FunctionDef {
+                    name: "new".to_string(),
+                    kind: FunctionKind::Function,
+                    arguments: vec![ArgDef {
+                        name: "start".to_string(),
+                        arg_type: Type::U64,
+                    }],
+                    output: Type::Other {
+                        name: "Component".to_string(),
+                    },
+                },
+                FunctionDef {
+                    name: "add".to_string(),
+                    kind: FunctionKind::Method(Receiver::RefMut),
+                    arguments: vec![ArgDef {
+                        name: "by".to_string(),
+                        arg_type: Type::U64,
+                    }],
+                    output: Type::Unit,
+                },
+                FunctionDef {
+                    name: "migrate".to_string(),
+                    kind: FunctionKind::Migration {
+                        from: Type::Other {
+                            name: "CounterV1".to_string(),
+                        },
+                    },
+                    arguments: vec![],
+                    output: Type::Other {
+                        name: "Counter".to_string(),
+                    },
+                },
             ],
         })
     }
 
-    fn assert_converted(def: &TemplateDef) {
-        let new = def.get_function("new").unwrap();
-        assert_eq!(new.receiver(), None);
-        assert_eq!(new.arguments.len(), 1);
-        assert_eq!(new.arguments[0].name, "start");
-
-        let get = def.get_function("get").unwrap();
-        assert_eq!(get.receiver(), Some(Receiver::Ref));
-        assert!(get.arguments.is_empty());
-        assert_eq!(get.num_call_args(), 1);
-
-        let add = def.get_function("add").unwrap();
-        assert_eq!(add.receiver(), Some(Receiver::RefMut));
-        assert!(add.is_mut());
-        assert_eq!(add.arguments.len(), 1);
-        assert_eq!(add.arguments[0].name, "by");
-        assert_eq!(add.num_call_args(), 2);
-
-        let migrate = def.get_function("migrate").unwrap();
-        assert_eq!(migrate.kind, FunctionKind::Migration { from: previous_state() });
-        assert_eq!(migrate.receiver(), None);
-        assert_eq!(migrate.arguments.len(), 1);
-        assert_eq!(migrate.arguments[0].name, "seed");
-        assert_eq!(migrate.num_call_args(), 2);
+    fn assert_same(a: &TemplateDef, b: &TemplateDef) {
+        assert_eq!(a.template_name(), b.template_name());
+        assert_eq!(a.abi_version(), b.abi_version());
+        assert_eq!(a.functions().len(), b.functions().len());
+        for (a, b) in a.functions().iter().zip(b.functions()) {
+            assert_eq!(a.name, b.name);
+            assert_eq!(a.kind, b.kind);
+            assert_eq!(a.output, b.output);
+            assert_eq!(
+                a.arguments
+                    .iter()
+                    .map(|arg| (&arg.name, &arg.arg_type))
+                    .collect::<Vec<_>>(),
+                b.arguments
+                    .iter()
+                    .map(|arg| (&arg.name, &arg.arg_type))
+                    .collect::<Vec<_>>()
+            );
+        }
     }
 
     #[test]
-    fn a_v1_definition_decodes_with_its_receivers_lifted_out_of_the_arguments() {
-        let bytes = tari_bor::encode(&v1_def()).unwrap();
-        let def = tari_bor::decode::<TemplateDef>(&bytes).unwrap();
-        assert_converted(&def);
+    fn the_v2_layout_encodes_at_index_1_and_decodes_unchanged() {
+        let bytes = tari_bor::encode(&def()).unwrap();
+        // `[1, [..]]`: a two-element array holding the variant index, then the variant's fields.
+        assert_eq!(bytes[..2], [0x82, 0x01]);
+        assert_same(&tari_bor::decode::<TemplateDef>(&bytes).unwrap(), &def());
     }
 
     #[test]
-    fn a_v1_receiver_takes_its_mutability_from_is_mut() {
-        let converted = FunctionDef::from(v1_function("f", vec![receiver_arg("&self")], true));
-        assert_eq!(converted.receiver(), Some(Receiver::RefMut));
+    fn a_v1_definition_is_rejected_with_a_rebuild_message() {
+        // `[0, [["Buggy", 0, []]]]`: the V1 layout's index and a V1 definition with no functions.
+        let bytes = [0x82, 0x00, 0x81, 0x83, 0x65, b'B', b'u', b'g', b'g', b'y', 0x00, 0x80];
+        let err = tari_bor::decode::<TemplateDef>(&bytes).unwrap_err();
+        assert!(err.to_string().contains("V1 layout"), "{err}");
     }
 
     #[test]
-    fn a_v1_migration_stays_a_migration_whatever_its_first_argument() {
-        let converted = FunctionDef::from(v1_migration(vec![receiver_arg("&mut self")]));
-        assert_eq!(converted.kind, FunctionKind::Migration {
-            from: Type::Other {
-                name: "&mut self".to_string()
-            }
-        });
-        assert!(converted.arguments.is_empty());
-
-        let converted = FunctionDef::from(v1_migration(vec![]));
-        assert_eq!(converted.kind, FunctionKind::Migration { from: Type::Unit });
-    }
-
-    #[test]
-    fn the_current_layout_encodes_and_decodes_unchanged() {
-        let bytes = tari_bor::encode(&v1_def()).unwrap();
-        let def = tari_bor::decode::<TemplateDef>(&bytes).unwrap();
-
-        let reencoded = tari_bor::encode(&def).unwrap();
-        assert_converted(&tari_bor::decode::<TemplateDef>(&reencoded).unwrap());
-        assert!(matches!(
-            tari_bor::decode::<VersionedTemplateDef>(&reencoded).unwrap(),
-            VersionedTemplateDef::V2(_)
-        ));
+    fn an_unknown_layout_is_rejected() {
+        let mut bytes = tari_bor::encode(&def()).unwrap();
+        bytes[1] = 0x02;
+        assert!(tari_bor::decode::<TemplateDef>(&bytes).is_err());
     }
 
     #[cfg(feature = "serde")]
     #[test]
-    fn a_v1_definition_deserializes_through_serde_as_the_current_layout() {
-        let bytes = tari_bor::serde_codec::to_vec(v1_def()).unwrap();
-        let def: TemplateDef = tari_bor::serde_codec::from_slice(&bytes).unwrap();
-        assert_converted(&def);
+    fn the_v2_layout_round_trips_through_serde() {
+        let bytes = tari_bor::serde_codec::to_vec(def()).unwrap();
+        let decoded: TemplateDef = tari_bor::serde_codec::from_slice(&bytes).unwrap();
+        assert_same(&decoded, &def());
     }
 }
 

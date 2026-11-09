@@ -328,12 +328,15 @@ impl<TStore: StateReader> RuleEvaluator<'_, TStore> {
             },
             // `ScopedToComponent` / `ScopedToTemplate` mean "execution is within this component/template":
             // they always describe the current (top) frame, which is the actor on resource/ownership checks
-            // and the callee on method checks.
-            RuleRequirement::ScopedToComponent(address) => Ok(state.current_component()? == Some(*address)),
-            RuleRequirement::ScopedToTemplate(address) => {
-                let current = state.current_template()?;
-                Ok(current == address)
+            // and the callee on method checks. Outside any frame (a top-level instruction) no component or template
+            // is executing, so both are false.
+            RuleRequirement::ScopedToComponent(_) | RuleRequirement::ScopedToTemplate(_)
+                if state.call_frame_depth() == 0 =>
+            {
+                Ok(false)
             },
+            RuleRequirement::ScopedToComponent(address) => Ok(state.current_component()? == Some(*address)),
+            RuleRequirement::ScopedToTemplate(address) => Ok(state.current_template()? == address),
             // Sugar for the caller badges the engine stamps into a frame's scope at push. Both badge resources are
             // empty by invariant, so the scope's badges are the only thing that can satisfy these.
             RuleRequirement::CallerComponent(address) => {
@@ -343,5 +346,117 @@ impl<TStore: StateReader> RuleEvaluator<'_, TStore> {
                 Ok(scope.contains_badge(&NonFungibleAddress::direct_caller_template_badge(*address)))
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use ootle_network::Network;
+    use tari_engine_types::{
+        fees::{ExhaustBurnRate, FeeScale},
+        indexed_value::IndexedWellKnownTypes,
+        virtual_substate::VirtualSubstates,
+    };
+    use tari_template_lib::types::{
+        ComponentAddress,
+        EntityId,
+        Hash32,
+        ObjectKey,
+        ResourceAddress,
+        TemplateAddress,
+        access_rules::UpdateRule,
+    };
+
+    use super::*;
+    use crate::{
+        runtime::scope::{CallScope, PushCallFrame},
+        state_store::memory::MemoryStateStore,
+    };
+
+    fn test_working_state() -> WorkingState<MemoryStateStore> {
+        WorkingState::new(
+            MemoryStateStore::new(),
+            VirtualSubstates::empty(),
+            CallScope::new(),
+            HashSet::new(),
+            Hash32::zero(),
+            Hash32::zero(),
+            ExhaustBurnRate::new(0),
+            FeeScale::default(),
+            Network::LocalNet,
+            false,
+        )
+    }
+
+    #[test]
+    fn scoped_requirements_evaluate_to_false_outside_call_frame() {
+        let state = test_working_state();
+        let meter = AuthorizationMeter::default();
+        meter.open(u64::MAX);
+        let auth = Authorization::new(&state, &meter);
+
+        let component_address = ComponentAddress::from_array([1u8; ObjectKey::LENGTH]);
+        let template_address = TemplateAddress::from_array([2u8; 32]);
+        let badge_resource = ResourceAddress::new(ObjectKey::from_array([3u8; ObjectKey::LENGTH]));
+
+        let comp_rule = AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::Require(
+            RuleRequirement::ScopedToComponent(component_address),
+        )));
+        assert!(!auth.check_access_rule(&comp_rule).unwrap());
+
+        let tmpl_rule = AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::Require(
+            RuleRequirement::ScopedToTemplate(template_address),
+        )));
+        assert!(!auth.check_access_rule(&tmpl_rule).unwrap());
+
+        let any_of_rule = AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::AnyOf(Box::new([
+            RuleRequirement::ScopedToComponent(component_address),
+            RuleRequirement::ScopedToTemplate(template_address),
+            RuleRequirement::Resource(badge_resource),
+        ]))));
+        assert!(!auth.check_access_rule(&any_of_rule).unwrap());
+
+        let owner_rule = SubstateOwnerRule::ByAccessRule(comp_rule);
+        let access_rules = ResourceAccessRules::new().withdrawable(AccessRule::AllowAll, UpdateRule::Locked);
+        auth.check_resource_access_rules(
+            ResourceAuthAction::Withdraw,
+            Ownership {
+                owner_rule: std::borrow::Cow::Borrowed(&owner_rule),
+            },
+            &access_rules,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn scoped_to_template_matches_active_call_frame() {
+        let mut state = test_working_state();
+        let template_address = TemplateAddress::from_array([2u8; 32]);
+        let other_template = TemplateAddress::from_array([3u8; 32]);
+
+        let frame = PushCallFrame::Static {
+            template_address,
+            module_name: "Test".to_string(),
+            arg_scope: IndexedWellKnownTypes::new(),
+            entity_id: EntityId::default(),
+        }
+        .into_new_call_frame();
+        state.push_frame(frame, 10).unwrap();
+
+        let meter = AuthorizationMeter::default();
+        meter.open(u64::MAX);
+        let auth = Authorization::new(&state, &meter);
+
+        let matching = AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::Require(
+            RuleRequirement::ScopedToTemplate(template_address),
+        )));
+        let non_matching = AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::Require(
+            RuleRequirement::ScopedToTemplate(other_template),
+        )));
+
+        assert!(auth.check_access_rule(&matching).unwrap());
+        assert!(!auth.check_access_rule(&non_matching).unwrap());
     }
 }

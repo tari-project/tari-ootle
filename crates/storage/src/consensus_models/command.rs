@@ -296,7 +296,7 @@ impl Command {
     pub fn hash(&self, protocol_version: ProtocolVersion) -> FixedHash {
         let hasher = command_hasher().chain(self);
         match protocol_version {
-            ProtocolVersion::V0 => match self {
+            ProtocolVersion::V0 | ProtocolVersion::V1 => match self {
                 Command::LocalPrepare(atom) |
                 Command::LocalAccept(atom) |
                 Command::AllAccept(atom) |
@@ -317,7 +317,7 @@ impl Command {
     pub fn merkle_leaf(&self, protocol_version: ProtocolVersion) -> FixedHash {
         let hash = self.hash(protocol_version);
         match protocol_version {
-            ProtocolVersion::V0 => match self {
+            ProtocolVersion::V0 | ProtocolVersion::V1 => match self {
                 Command::EndEpoch(_) => hash,
                 Command::LocalOnly(_) |
                 Command::LocalPrepare(_) |

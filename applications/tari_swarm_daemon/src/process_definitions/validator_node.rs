@@ -8,7 +8,13 @@ use async_trait::async_trait;
 use log::debug;
 use tokio::process::Command;
 
-use crate::process_definitions::{ARGS_SETTINGS_KEY, ProcessContext, ProcessDefinition};
+use crate::process_definitions::{
+    ARGS_SETTINGS_KEY,
+    CLAIM_KEY_FILE_NAME,
+    CLAIM_PUBLIC_KEY_SETTINGS_KEY,
+    ProcessContext,
+    ProcessDefinition,
+};
 
 #[derive(Debug, Default)]
 pub struct ValidatorNode;
@@ -22,6 +28,21 @@ impl ValidatorNode {
 #[async_trait]
 impl ProcessDefinition for ValidatorNode {
     async fn get_command(&self, mut context: ProcessContext<'_>) -> anyhow::Result<Command> {
+        // The validator refuses to start without a fee claim key, so the swarm reports the missing key
+        // before allocating ports or forking a process that would exit immediately.
+        let claim_public_key = context
+            .get_setting(CLAIM_PUBLIC_KEY_SETTINGS_KEY)
+            .ok_or_else(|| {
+                anyhow!(
+                    "Validator node #{} has no fee claim public key: {} was not found in {}. Add a \
+                     TariWalletDaemonCreateKey instance before the validators, or set \
+                     `{CLAIM_PUBLIC_KEY_SETTINGS_KEY}` in the validator instance settings",
+                    context.instance_id(),
+                    CLAIM_KEY_FILE_NAME,
+                    context.processes_path().display()
+                )
+            })?
+            .to_string();
         let mut command = Command::new(context.bin());
         let jrpc_port = context.get_free_port("jrpc").await?;
         // The web UI is served from the JSON-RPC port. Some other components expect a "web" port.
@@ -50,14 +71,12 @@ impl ProcessDefinition for ValidatorNode {
             base_node_grpc_url
         );
 
-        if let Some(claim_public_key) = context.get_setting("claim_public_key") {
-            command.arg(format!("-pvalidator_node.fee_claim_public_key={claim_public_key}"));
-            // The one claim key is shared by every validator in the swarm, so seating it as a council
-            // of one gives every node the same genesis and the swarm's wallet the power to move the
-            // burn rate.
-            command.arg("-pvalidator_node.genesis_council.threshold=1");
-            command.arg(format!("-pvalidator_node.genesis_council.members={claim_public_key}"));
-        }
+        command.arg(format!("-pvalidator_node.fee_claim_public_key={claim_public_key}"));
+        // The one claim key is shared by every validator in the swarm, so seating it as a council
+        // of one gives every node the same genesis and the swarm's wallet the power to move the
+        // burn rate.
+        command.arg("-pvalidator_node.genesis_council.threshold=1");
+        command.arg(format!("-pvalidator_node.genesis_council.members={claim_public_key}"));
 
         command
             .envs(context.environment())

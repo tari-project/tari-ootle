@@ -12301,6 +12301,7 @@ dependencies = [
  "tari_ootle_storage",
  "tari_ootle_storage_sqlite",
  "tari_ootle_transaction",
+ "tari_ootle_wallet_crypto",
  "tari_script",
  "tari_sidechain 8.0.0",
  "tari_sidechain 9.0.0",

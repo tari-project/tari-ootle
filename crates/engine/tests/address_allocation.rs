@@ -352,7 +352,5 @@ fn it_rejects_allocation_if_component_already_exists() {
     );
 
     let expected_addr = derive_component_address_from_public_key(&template_addr, &pk);
-    assert_reject_reason(reason, RuntimeError::ComponentAlreadyExists {
-        address: expected_addr,
-    });
+    assert_reject_reason(reason, RuntimeError::ComponentAlreadyExists { address: expected_addr });
 }

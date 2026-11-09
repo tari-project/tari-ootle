@@ -236,7 +236,10 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
         );
         // Activate all validators queued at or before next_epoch (handles skipped epochs).
         // split_off returns everything > next_epoch, leaving everything <= next_epoch in place.
-        let remaining = self.queued_validators.split_off(&(next_epoch + Epoch(1)));
+        let remaining = next_epoch
+            .checked_add(Epoch(1))
+            .map(|after| self.queued_validators.split_off(&after))
+            .unwrap_or_default();
         let due = std::mem::replace(&mut self.queued_validators, remaining);
 
         for (epoch, vns) in due {
@@ -897,5 +900,32 @@ mod tests {
         ];
         expected.sort();
         assert_eq!(powers, expected);
+    }
+
+    #[test]
+    fn prepare_next_epoch_handles_u64_max_without_overflow() {
+        let validator = mk_validator(1, Epoch(u64::MAX - 1));
+        let config = mk_config(vec![validator.clone()]);
+        let ticker = ScriptedTicker::new(vec![EpochTickerData {
+            epoch: Epoch(u64::MAX),
+            epoch_hash: FixedHash::zero(),
+            done_for_now: true,
+        }]);
+        let mut oracle = ConfiguredEpochOracle::with_custom_ticker(config, TestStore::default(), ticker);
+
+        let events = drive_events(&mut oracle);
+
+        assert_eq!(
+            added_validators(&events)
+                .into_iter()
+                .map(|(epoch, claim_key, activation_epoch, _)| (epoch, claim_key, activation_epoch))
+                .collect::<Vec<_>>(),
+            vec![(Epoch(u64::MAX - 1), validator.claim_key, Epoch(u64::MAX))]
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, EpochEvent::DoneForNow { epoch, .. } if *epoch == Epoch(u64::MAX)))
+        );
     }
 }

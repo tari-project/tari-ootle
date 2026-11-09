@@ -21,7 +21,6 @@ use tari_ootle_common_types::{
     LockIntent,
     SubstateRequirement,
     SubstateVersion,
-    VersionedSubstateId,
     VersionedSubstateIdRef,
     committee::CommitteeInfo,
     optional::{IsNotFoundError, Optional},
@@ -33,6 +32,7 @@ use tari_ootle_storage::{
         BlockTransactionExecution,
         Evidence,
         LockedEpoch,
+        SubstateChange,
         SubstatePledge,
         SubstateRequirementLockIntent,
         TransactionExecution,
@@ -1091,7 +1091,7 @@ fn lock_all_or_none<TTx: StateStoreReadTransaction>(
     transaction_id: TransactionId,
     execution: &TransactionExecution,
 ) -> Result<LockStatus, BlockTransactionExecutorError> {
-    let fee_pool_outputs = validator_fee_withdrawal_outputs(execution);
+    let fee_pool_outputs = validator_fee_withdrawal_outputs(store, &transaction_id, execution)?;
     let requested_locks = execution
         .resolved_inputs()
         .iter()
@@ -1115,37 +1115,42 @@ where
     store.try_lock_all(transaction_id, locks, false)
 }
 
-/// The OUTPUT locks for the validator fee pools that `execution` withdraws from.
+/// The OUTPUT locks on the validator fee pool versions that applying the withdrawals of `execution`, the local-only
+/// execution of `transaction_id`, creates.
 ///
-/// A withdrawal updates the pool in place when the diff is applied rather than appearing in `resulting_outputs`, so a
-/// local-only execution locks the updated version as an OUTPUT to leave the pool open to subsequent local-only
-/// transactions on the same chain.
-fn validator_fee_withdrawal_outputs(execution: &TransactionExecution) -> Vec<VersionedSubstateIdLockIntent> {
+/// A withdrawal updates its pool in place when the diff is applied, so the pool is a resolved input of `execution` and
+/// the version the withdrawal creates is locked here. That OUTPUT lock leaves the pool open to later local-only
+/// transactions on the same chain. A pool the block being built has already put UP is rewritten at that version, which
+/// the OUTPUT lock of the transaction that put it UP already covers, so the withdrawal locks only its input.
+fn validator_fee_withdrawal_outputs<TTx: StateStoreReadTransaction>(
+    store: &PendingSubstateStore<TTx>,
+    transaction_id: &TransactionId,
+    execution: &TransactionExecution,
+) -> Result<Vec<VersionedSubstateIdLockIntent>, BlockTransactionExecutorError> {
     let Some(diff) = execution.result().finalize.any_accept() else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    diff.validator_fee_withdrawals()
-        .iter()
-        .filter_map(|withdrawal| {
-            let id = SubstateId::ValidatorFeePool(withdrawal.address);
-            if execution
-                .resulting_outputs()
-                .iter()
-                .any(|lock| *lock.versioned_substate_id().substate_id() == id)
-            {
-                return None;
-            }
-            let input_version = execution
-                .resolved_inputs()
-                .iter()
-                .find(|lock| *lock.versioned_substate_id().substate_id() == id)?
-                .version();
-            Some(VersionedSubstateIdLockIntent::output(VersionedSubstateId::new(
-                id,
-                input_version.next(),
-            )))
-        })
-        .collect()
+    let mut locks = Vec::with_capacity(diff.validator_fee_withdrawals().len());
+    for withdrawal in diff.validator_fee_withdrawals() {
+        let id = SubstateId::ValidatorFeePool(withdrawal.address);
+        if store.block_change(&id).is_some_and(SubstateChange::is_up) {
+            continue;
+        }
+        let input = execution
+            .resolved_inputs()
+            .iter()
+            .find(|lock| *lock.substate_id() == id)
+            .ok_or_else(|| {
+                BlockTransactionExecutorError::InvariantError(format!(
+                    "Transaction {transaction_id} withdraws from validator fee pool {id}, which is missing from its \
+                     resolved inputs"
+                ))
+            })?;
+        locks.push(VersionedSubstateIdLockIntent::output(
+            input.versioned_substate_id().to_next_version(),
+        ));
+    }
+    Ok(locks)
 }
 
 /// Whether `err` means an output version cannot be created in this or any later block on this chain: the version
@@ -1388,6 +1393,7 @@ mod tests {
     use tari_common_types::types::PrivateKey;
     use tari_consensus_types::BlockId;
     use tari_engine_types::{
+        ValidatorFeeWithdrawal,
         commit_result::{ExecuteResult, FeeIntentFallback, FinalizeResult, TransactionResult},
         fees::FeeReceipt,
         non_fungible::NonFungibleContainer,
@@ -1417,6 +1423,7 @@ mod tests {
     use tari_template_lib_types::{
         ComponentAddress,
         ObjectKey,
+        ValidatorFeePoolAddress,
         constants::{
             BURN_RATE_GOVERNANCE_COMPONENT_ADDRESS,
             PUBLIC_IDENTITY_RESOURCE_ADDRESS,
@@ -1426,7 +1433,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        hotstuff::transaction_manager::{EvidenceOrExecution, LocalPreparedTransaction},
+        hotstuff::{
+            common::tests::with_fee_pool_in_parent,
+            transaction_manager::{EvidenceOrExecution, LocalPreparedTransaction},
+        },
         traits::{UncommittedChainTemplates, WriteableSubstateStore},
     };
 
@@ -2896,110 +2906,109 @@ mod tests {
         assert_deferrable_pledging_nothing(prepare_local_inputs_with_foreign_outputs_behind_held_lock(false, false));
     }
 
-    #[test]
-    fn local_only_validator_fee_withdrawal_locks_output_for_subsequent_transactions() {
-        use tari_engine_types::{ValidatorFeePool, substate::ValidatorFeeWithdrawal};
-        use tari_ootle_common_types::derive_fee_pool_address;
-        use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
-
-        let claim_pk = RistrettoPublicKeyBytes::from([7u8; 32]);
-        let pool_addr = derive_fee_pool_address(&claim_pk, NumPreshards::P256, Shard::first()).unwrap();
-        let pool_id = SubstateId::ValidatorFeePool(pool_addr);
-
-        let dir = tempfile::tempdir().unwrap();
-        let db = RocksDbStateStore::<String>::open(dir.path().join("db"), Default::default()).unwrap();
-        let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
-        db.with_write_tx(|tx| zero.insert(tx)).unwrap();
-        db.with_read_tx(|tx| {
-            let mut store = PendingSubstateStore::init(tx, zero.as_leaf(), NumPreshards::P256)?;
-            store.put(SubstateChange::Up {
-                id: pool_id.clone(),
-                shard: shard_of(&pool_id),
-                substate: Box::new(Substate::new(0, ValidatorFeePool::new(claim_pk, 1_000))),
-            })?;
-
-            let tx1 = multishard_transaction(1);
-            let mut exec1 = executing_to(&tx1, &pool_id, &[], false);
-            if let TransactionResult::Accept(diff) = &mut exec1.result.finalize.result {
-                diff.set_once_fee_withdrawals(vec![ValidatorFeeWithdrawal {
-                    address: pool_addr,
-                    amount: 400,
-                }]);
-            }
-            let (exec1, status1) = lock_local_only_execution(&mut store, *tx1.id(), exec1)?;
-            assert!(!status1.is_any_failed(), "{status1:?}");
-            store.put_diff(exec1.result().finalize.any_accept().unwrap())?;
-
-            let check_status =
-                store.check_input_locks(&TransactionId::new([9; 32]), [VersionedSubstateIdLockIntent::write(
-                    versioned(&pool_id, 1),
-                    true,
-                )])?;
-            assert!(!check_status.is_any_failed(), "{check_status:?}");
-
-            crate::hotstuff::common::apply_leader_fee_to_substate_store(
-                &mut store,
-                &claim_pk,
-                NumPreshards::P256,
-                Shard::first(),
-                250,
-            )
-            .unwrap();
-            Ok::<_, BlockTransactionExecutorError>(())
-        })
-        .unwrap();
+    /// The local-only execution of `transaction` that withdraws `amount` from the fee pool at `pool_address`, resolved
+    /// at `pool_version` when that is given.
+    fn withdrawing_from(
+        transaction: &TransactionRecord,
+        pool_address: ValidatorFeePoolAddress,
+        pool_version: Option<u64>,
+        amount: u64,
+    ) -> TransactionExecution {
+        let pool_id = SubstateId::ValidatorFeePool(pool_address);
+        let receipt = SubstateId::TransactionReceipt(transaction.id().as_hash().into());
+        let mut diff = SubstateDiff::new();
+        diff.up(receipt.clone(), substate(0));
+        diff.set_once_fee_withdrawals(vec![ValidatorFeeWithdrawal {
+            address: pool_address,
+            amount,
+        }]);
+        TransactionExecution::new(
+            ExecuteResult {
+                finalize: FinalizeResult::new(
+                    transaction.id().as_hash(),
+                    vec![],
+                    vec![],
+                    TransactionResult::Accept(diff),
+                    FeeReceipt::default(),
+                ),
+                execution_time: Default::default(),
+                execute_epoch: Some(Epoch(1)),
+                wasm_execution_points: 0,
+                native_execution_points: 0,
+            },
+            pool_version
+                .map(|version| VersionedSubstateIdLockIntent::write(versioned(&pool_id, version), true))
+                .into_iter()
+                .collect(),
+            vec![VersionedSubstateIdLockIntent::output(versioned(&receipt, 0))],
+        )
     }
 
     #[test]
-    fn apply_leader_fee_refuses_active_unspent_write_lock_on_fee_pool() {
-        use tari_engine_types::ValidatorFeePool;
-        use tari_ootle_common_types::derive_fee_pool_address;
-        use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
-
-        let claim_pk = RistrettoPublicKeyBytes::from([8u8; 32]);
-        let pool_addr = derive_fee_pool_address(&claim_pk, NumPreshards::P256, Shard::first()).unwrap();
-        let pool_id = SubstateId::ValidatorFeePool(pool_addr);
-
-        let dir = tempfile::tempdir().unwrap();
-        let db = RocksDbStateStore::<String>::open(dir.path().join("db"), Default::default()).unwrap();
-        let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
-        db.with_write_tx(|tx| zero.insert(tx)).unwrap();
-        db.with_read_tx(|tx| {
-            let mut store = PendingSubstateStore::init(tx, zero.as_leaf(), NumPreshards::P256)?;
-            store.put(SubstateChange::Up {
-                id: pool_id.clone(),
-                shard: shard_of(&pool_id),
-                substate: Box::new(Substate::new(0, ValidatorFeePool::new(claim_pk, 1_000))),
-            })?;
-
-            let lock_status = store.try_lock_all(
-                TransactionId::new([3; 32]),
-                [VersionedSubstateIdLockIntent::write(versioned(&pool_id, 0), false)],
-                false,
-            )?;
+    fn a_local_only_withdrawal_locks_the_pool_version_it_creates_for_later_withdrawals() {
+        with_fee_pool_in_parent(|store, pool_address| {
+            let pool_id = SubstateId::ValidatorFeePool(pool_address);
+            let claim = multishard_transaction(1);
+            let (execution, lock_status) =
+                lock_local_only_execution(store, *claim.id(), withdrawing_from(&claim, pool_address, Some(0), 400))?;
             assert!(!lock_status.is_any_failed(), "{lock_status:?}");
+            let lock = store.get_latest_lock_by_id(&pool_id)?.unwrap().into_owned();
+            assert_eq!(lock.lock_type(), SubstateLockType::Output);
+            assert_eq!(lock.version(), SubstateVersion::new(1));
+            assert!(lock.is_local_only());
 
-            let err = crate::hotstuff::common::apply_leader_fee_to_substate_store(
-                &mut store,
-                &claim_pk,
-                NumPreshards::P256,
-                Shard::first(),
-                250,
-            )
-            .unwrap_err();
+            store.put_diff(execution.result().finalize.any_accept().unwrap())?;
+            let latest = store.get_latest_version(&pool_id)?;
+            assert!(latest.is_up());
+            assert_eq!(latest.version(), SubstateVersion::new(1));
+
+            let next_claim = multishard_transaction(2);
+            let lock_status = store.check_input_locks(next_claim.id(), [VersionedSubstateIdLockIntent::write(
+                versioned(&pool_id, 1),
+                true,
+            )])?;
+            assert!(!lock_status.is_any_failed(), "{lock_status:?}");
+            Ok::<_, BlockTransactionExecutorError>(())
+        });
+    }
+
+    #[test]
+    fn a_second_withdrawal_from_a_pool_in_one_block_locks_only_versions_the_block_creates() {
+        with_fee_pool_in_parent(|store, pool_address| {
+            let pool_id = SubstateId::ValidatorFeePool(pool_address);
+            for (signer, pool_version) in [(1, 0), (2, 1)] {
+                let claim = multishard_transaction(signer);
+                let (execution, lock_status) = lock_local_only_execution(
+                    store,
+                    *claim.id(),
+                    withdrawing_from(&claim, pool_address, Some(pool_version), 400),
+                )?;
+                assert!(!lock_status.is_any_failed(), "{lock_status:?}");
+                store.put_diff(execution.result().finalize.any_accept().unwrap())?;
+            }
+
+            let latest = store.get_latest_version(&pool_id)?;
+            assert!(latest.is_up());
+            assert_eq!(latest.version(), SubstateVersion::new(1));
+            let pool = store.get_latest_change(&pool_id)?.into_up().unwrap();
+            assert_eq!(pool.substate_value().as_validator_fee_pool().unwrap().amount(), 200);
+            let locks = store.new_locks().get(&pool_id).unwrap();
+            assert!(locks.iter().all(|lock| lock.version() <= latest.version()), "{locks:?}");
+            Ok::<_, BlockTransactionExecutorError>(())
+        });
+    }
+
+    #[test]
+    fn a_withdrawal_from_a_pool_missing_from_its_resolved_inputs_is_an_invariant_error() {
+        with_fee_pool_in_parent(|store, pool_address| {
+            let claim = multishard_transaction(1);
+            let err = lock_local_only_execution(store, *claim.id(), withdrawing_from(&claim, pool_address, None, 400))
+                .unwrap_err();
             assert!(
-                matches!(
-                    err,
-                    crate::hotstuff::HotStuffError::SubstateStoreError(
-                        crate::hotstuff::substate_store::SubstateStoreError::LockFailed(
-                            LockFailedError::LockConflict { .. }
-                        )
-                    )
-                ),
+                matches!(err, BlockTransactionExecutorError::InvariantError(_)),
                 "{err:?}"
             );
             Ok::<_, BlockTransactionExecutorError>(())
-        })
-        .unwrap();
+        });
     }
 }

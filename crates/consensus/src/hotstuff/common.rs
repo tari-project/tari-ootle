@@ -10,7 +10,7 @@ use tari_engine_types::{
     ValidatorFeePool,
     commit_result::{AbortReason, RejectReason},
     fees::ExhaustBurnRate,
-    substate::{SubstateDiff, SubstateId},
+    substate::SubstateDiff,
 };
 use tari_ootle_common_types::{
     Epoch,
@@ -19,8 +19,6 @@ use tari_ootle_common_types::{
     NumPreshards,
     ProtocolVersion,
     ShardGroup,
-    SubstateLockType,
-    VersionedSubstateId,
     VersionedSubstateIdRef,
     committee::{Committee, CommitteeInfo},
     derive_fee_pool_address,
@@ -37,7 +35,6 @@ use tari_ootle_storage::{
         BlockHeader,
         BookkeepingModel,
         EpochCheckpoint,
-        LockConflict,
         PendingShardStateTreeDiff,
         SubstateChange,
         TransactionExecution,
@@ -58,7 +55,7 @@ use crate::{
         ProposalValidationError,
         block_change_set::ProposedBlockChangeSet,
         commit_proofs::generate_end_of_epoch_commit_proof,
-        substate_store::{LockFailedError, PendingSubstateStore, ShardedStateTree},
+        substate_store::{PendingSubstateStore, ShardedStateTree},
     },
     tracing::TraceTimer,
     traits::LeaderStrategy,
@@ -494,29 +491,8 @@ pub fn apply_leader_fee_to_substate_store<TTx: StateStoreReadTransaction>(
 
     let fee_substate_id = derive_fee_pool_address(claim_public_key_bytes, num_preshards, shard)
         .map_err(|err| HotStuffError::InvariantError(err.to_string()))?;
-    let substate_id = SubstateId::from(fee_substate_id);
-    if let Some(lock) = store.get_latest_lock_by_id(&substate_id)? &&
-        lock.is_write() &&
-        store
-            .get_latest_version(&substate_id)
-            .optional()?
-            .is_some_and(|latest| latest.is_up() && latest.version() == lock.version())
-    {
-        return Err(HotStuffError::SubstateStoreError(
-            LockFailedError::LockConflict {
-                substate_id: VersionedSubstateId::new(substate_id, lock.version()),
-                conflict: LockConflict {
-                    existing_lock: lock.lock_type(),
-                    requested_lock: SubstateLockType::Write,
-                    transaction_id: *lock.transaction_id(),
-                    is_local_only: lock.is_local_only(),
-                },
-            }
-            .into(),
-        ));
-    }
     store.update_in_place(
-        &substate_id,
+        &fee_substate_id.into(),
         |value_mut| {
             debug!(target: LOG_TARGET, "🪙 Deposit leader fee {total_leader_fee} into fee pool {fee_substate_id}");
             let substate_type = SubstateType::from(&*value_mut);
@@ -764,4 +740,106 @@ pub fn process_newly_justified_block<TTx: StateStoreReadTransaction>(
     }
 
     Ok(blocks_to_process)
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use std::fmt::Debug;
+
+    use tari_consensus_types::ShardGroupAccumulatedData;
+    use tari_engine_types::substate::{Substate, SubstateId};
+    use tari_ootle_common_types::{ExtraData, SubstateVersion, VersionedSubstateId};
+    use tari_ootle_storage::{
+        StateStore,
+        StorageError,
+        consensus_models::{BlockDiff, VersionedSubstateIdLockIntent},
+    };
+    use tari_ootle_transaction::TransactionId;
+    use tari_state_store_rocksdb::RocksDbStateStore;
+    use tari_template_lib_types::{ValidatorFeePoolAddress, crypto::SchnorrSignatureBytes};
+
+    use super::*;
+
+    /// The claim key of the validator fee pool [`with_fee_pool_in_parent`] puts UP.
+    fn claim_public_key() -> RistrettoPublicKeyBytes {
+        RistrettoPublicKeyBytes::from([7u8; 32])
+    }
+
+    /// Runs `f` over a store building on a child of the zero block whose diff puts the validator fee pool of
+    /// [`claim_public_key`] UP at version 0, holding 1000. The block being built has made no change to the pool.
+    pub(crate) fn with_fee_pool_in_parent<F, E>(f: F)
+    where
+        F: FnOnce(
+            &mut PendingSubstateStore<'_, <RocksDbStateStore<String> as StateStore>::ReadTransaction<'_>>,
+            ValidatorFeePoolAddress,
+        ) -> Result<(), E>,
+        E: From<StorageError> + Debug,
+    {
+        let pool_address = derive_fee_pool_address(&claim_public_key(), NumPreshards::P256, Shard::first()).unwrap();
+        let pool_v0 = VersionedSubstateId::new(SubstateId::ValidatorFeePool(pool_address), SubstateVersion::ZERO);
+
+        let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
+        let parent = Block::create(
+            Network::LocalNet,
+            ProtocolVersion::V0,
+            *zero.id(),
+            zero.justify().clone(),
+            None,
+            NodeHeight(1),
+            zero.epoch(),
+            ShardGroup::all_shards(NumPreshards::P256),
+            Default::default(),
+            Default::default(),
+            FixedHash::zero(),
+            0,
+            SchnorrSignatureBytes::zero(),
+            0,
+            FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
+            ExtraData::new(),
+        )
+        .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = RocksDbStateStore::<String>::open(dir.path().join("db"), Default::default()).unwrap();
+        db.with_write_tx(|tx| {
+            zero.insert(tx)?;
+            parent.insert(tx)?;
+            BlockDiff::insert(tx, parent.id(), &[SubstateChange::Up {
+                shard: pool_v0.to_shard(NumPreshards::P256),
+                id: pool_v0.substate_id().clone(),
+                substate: Box::new(Substate::new(0, ValidatorFeePool::new(claim_public_key(), 1_000))),
+            }])
+        })
+        .unwrap();
+        db.with_read_tx(|tx| {
+            let mut store = PendingSubstateStore::init(tx, parent.as_leaf(), NumPreshards::P256)?;
+            f(&mut store, pool_address)
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn a_leader_fee_is_deposited_into_a_pool_a_multishard_claim_holds_write_locked() {
+        with_fee_pool_in_parent(|store, pool_address| {
+            let pool_id = SubstateId::ValidatorFeePool(pool_address);
+            let lock_status = store.try_lock_all(
+                TransactionId::new([3; 32]),
+                [VersionedSubstateIdLockIntent::write(
+                    VersionedSubstateId::new(pool_id.clone(), SubstateVersion::ZERO),
+                    true,
+                )],
+                false,
+            )?;
+            assert!(!lock_status.is_any_failed(), "{lock_status:?}");
+
+            apply_leader_fee_to_substate_store(store, &claim_public_key(), NumPreshards::P256, Shard::first(), 250)?;
+
+            let latest = store.get_latest_change(&pool_id)?;
+            assert_eq!(latest.versioned_substate_id().version(), SubstateVersion::new(1));
+            let pool = latest.into_up().unwrap();
+            assert_eq!(pool.substate_value().as_validator_fee_pool().unwrap().amount(), 1_250);
+            Ok::<_, HotStuffError>(())
+        });
+    }
 }

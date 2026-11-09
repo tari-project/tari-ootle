@@ -111,7 +111,7 @@ impl OotleWallet {
     }
 
     pub fn additional_signers(&self) -> impl Iterator<Item = &Address> {
-        self.key_providers.keys()
+        self.key_providers.keys().filter(move |addr| *addr != &self.default)
     }
 
     /// Build the complete stealth transfer statement for `spec` using the default key provider.
@@ -247,6 +247,10 @@ impl NetworkWallet for OotleWallet {
 
     async fn sign_transaction(&self, unsigned: UnsignedTransaction) -> WalletResult<Transaction> {
         let mut signatures = vec![];
+        if !unsigned.is_seal_signer_authorized() {
+            let sig = self.authorize_transaction(&self.default, &unsigned).await?;
+            signatures.push(sig.into_signature());
+        }
         for signer in self.additional_signers() {
             let sig = self.authorize_transaction(signer, &unsigned).await?;
             signatures.push(sig.into_signature());
@@ -290,5 +294,35 @@ impl TransactionAuthorization {
 impl From<TransactionSignature> for TransactionAuthorization {
     fn from(signature: TransactionSignature) -> Self {
         Self::new(signature)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_common_types::{Epoch, Network};
+    use tari_ootle_transaction::Transaction;
+
+    use super::*;
+    use crate::key_provider::local::PrivateKeyProvider;
+
+    #[tokio::test]
+    async fn default_signer_is_not_duplicated_in_additional_signers() {
+        let signer_a = PrivateKeyProvider::random(Network::LocalNet);
+        let addr_a = signer_a.address().clone();
+        let signer_b = PrivateKeyProvider::random(Network::LocalNet);
+        let addr_b = signer_b.address().clone();
+
+        let mut wallet = OotleWallet::new(signer_a);
+        assert_eq!(wallet.additional_signers().count(), 0);
+
+        let unsigned = Transaction::builder_localnet(Epoch(100)).build_unsigned();
+        let signed = wallet.sign_transaction(unsigned).await.unwrap();
+        assert!(signed.signatures().is_empty());
+
+        wallet.register_key_provider(signer_b);
+        assert_eq!(wallet.additional_signers().collect::<Vec<_>>(), vec![&addr_b]);
+
+        wallet.set_default_signer(&addr_b).unwrap();
+        assert_eq!(wallet.additional_signers().collect::<Vec<_>>(), vec![&addr_a]);
     }
 }

@@ -198,7 +198,10 @@ impl OotleAddress {
 
     pub fn decode_bech32(s: &str) -> Result<Self, OotleAddressError> {
         const KL: usize = RistrettoPublicKeyBytes::length();
-        let checked = bech32::primitives::decode::CheckedHrpstring::new::<Bech32m>(s)?;
+        let checked = bech32::primitives::decode::UncheckedHrpstring::new(s)
+            .map_err(bech32::DecodeError::Parse)?
+            .validate_and_remove_checksum::<Bech32m>()
+            .map_err(bech32::DecodeError::Checksum)?;
         let hrp = checked.hrp();
         let data: Vec<u8> = checked.byte_iter().collect();
         let network = network_from_hrp(&hrp).ok_or(OotleAddressError::UnrecognisedHrp { hrp })?;
@@ -273,7 +276,7 @@ impl FromStr for OotleAddress {
 #[derive(Debug, thiserror::Error)]
 pub enum OotleAddressError {
     #[error("Bech32 decode error: {0}")]
-    Bech32DecodeError(#[from] bech32::primitives::decode::CheckedHrpstringError),
+    Bech32DecodeError(#[from] bech32::DecodeError),
     #[error("Bech32 encode error: {0}")]
     Bech32EncodeError(#[from] bech32::EncodeError),
     #[error("Unrecognised HRP: {hrp}")]

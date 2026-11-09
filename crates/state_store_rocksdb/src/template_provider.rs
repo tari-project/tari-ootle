@@ -25,6 +25,9 @@ impl<TAddr: Send + Sync + 'static> TemplateProvider for RocksDbStateStore<TAddr>
         let Some(substate) = cf.get(&address, OPERATION).optional()? else {
             return Ok(None);
         };
+        if substate.is_destroyed() {
+            return Ok(None);
+        }
         let Some(value) = substate.into_substate_value() else {
             return Ok(None);
         };
@@ -41,8 +44,10 @@ impl<TAddr: Send + Sync + 'static> TemplateProvider for RocksDbStateStore<TAddr>
         let tx = self.read_view();
         let cf = tx.db().cf(SubstateCf)?;
         let address = template_address_to_substate_address(*id);
-        let exists = cf.exists(&address, OPERATION)?;
-        Ok(exists)
+        let Some(substate) = cf.get(&address, OPERATION).optional()? else {
+            return Ok(false);
+        };
+        Ok(!substate.is_destroyed() && substate.substate_value().is_some())
     }
 }
 

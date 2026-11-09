@@ -55,12 +55,23 @@ pub type BlockIdCodec = FixedBytesCodec<32>;
 pub struct FixedBytesCodec<const LEN: usize>;
 
 impl<T: AsRef<[u8]>, const LEN: usize> DbEncoder<T> for FixedBytesCodec<LEN> {
-    fn encode_len(&self, _value: &T) -> Result<usize, RocksDbStorageError> {
+    fn encode_len(&self, value: &T) -> Result<usize, RocksDbStorageError> {
+        let len = value.as_ref().len();
+        if len != LEN {
+            return Err(RocksDbStorageError::EncodeError {
+                source: anyhow!("FixedBytesCodec: Expected {} bytes, got {}", LEN, len),
+            });
+        }
         Ok(LEN)
     }
 
     fn encode_into<W: Write>(&self, value: &T, writer: &mut W) -> Result<(), RocksDbStorageError> {
         let bytes = value.as_ref();
+        if bytes.len() != LEN {
+            return Err(RocksDbStorageError::EncodeError {
+                source: anyhow!("FixedBytesCodec: Expected {} bytes, got {}", LEN, bytes.len()),
+            });
+        }
         writer.write_all(bytes).map_err(|e| RocksDbStorageError::EncodeError {
             source: anyhow!("FixedBytesCodec: Failed to write bytes: {}", e),
         })?;
@@ -68,7 +79,13 @@ impl<T: AsRef<[u8]>, const LEN: usize> DbEncoder<T> for FixedBytesCodec<LEN> {
     }
 
     fn encode(&self, value: &T) -> Result<EncodeVec, RocksDbStorageError> {
-        Ok(EncodeVec::from_slice(value.as_ref()))
+        let bytes = value.as_ref();
+        if bytes.len() != LEN {
+            return Err(RocksDbStorageError::EncodeError {
+                source: anyhow!("FixedBytesCodec: Expected {} bytes, got {}", LEN, bytes.len()),
+            });
+        }
+        Ok(EncodeVec::from_slice(bytes))
     }
 }
 

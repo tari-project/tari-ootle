@@ -616,9 +616,6 @@ mod tests {
 
         breakdown.add(FeeSource::Initial, 100);
         breakdown.add(FeeSource::Initial, 0);
-        assert_eq!(
-            breakdown.iter().collect::<Vec<_>>(),
-            vec![(&FeeSource::Initial, &100)]
-        );
+        assert_eq!(breakdown.iter().collect::<Vec<_>>(), vec![(&FeeSource::Initial, &100)]);
     }
 }

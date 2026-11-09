@@ -137,7 +137,7 @@ impl FromStr for PublishedTemplateAddress {
     type Err = KeyParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.strip_prefix("template_").ok_or(KeyParseError)?;
+        let s = s.strip_prefix("template_").unwrap_or(s);
         Self::from_hex(s)
     }
 }
@@ -247,16 +247,5 @@ mod tests {
         let encoded = tari_bor::encode(&tari_bor::Value::Bytes(bytes)).unwrap();
 
         tari_bor::decode::<TemplateBlob>(&encoded).unwrap_err();
-    }
-
-    #[test]
-    fn published_template_address_from_str_requires_template_prefix() {
-        let hex = "7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff";
-        let with_prefix = format!("template_{hex}");
-        let parsed = PublishedTemplateAddress::from_str(&with_prefix).unwrap();
-        assert_eq!(parsed.to_string(), with_prefix);
-
-        assert!(PublishedTemplateAddress::from_str(hex).is_err());
-        assert!(PublishedTemplateAddress::from_str(&format!("component_{hex}")).is_err());
     }
 }

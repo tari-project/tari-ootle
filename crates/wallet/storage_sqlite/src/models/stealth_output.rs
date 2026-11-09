@@ -96,11 +96,8 @@ impl StealthOutput {
                 item: "output commitment",
                 details: "Corrupt db: invalid hex representation".to_string(),
             })?,
-            value: u64::try_from(self.value).map_err(|e| WalletStorageError::DecodingError {
-                operation: "try_into_output",
-                item: "value",
-                details: format!("Corrupt db: invalid output value '{}': {e}", self.value),
-            })?,
+            // `value` is u64 stored in a signed BigInt column; values >= 2^63 wrap to negative.
+            value: self.value as u64,
             sender_public_nonce: RistrettoPublicKeyBytes::from_hex(&self.sender_public_nonce).map_err(|_| {
                 WalletStorageError::DecodingError {
                     operation: "try_into_output",
@@ -120,25 +117,17 @@ impl StealthOutput {
                     details: format!("Corrupt db: invalid encrypted data length {len}"),
                 }
             })?,
-            tag_byte: u32::try_from(self.tag_byte)
-                .map(UtxoTag::new)
-                .map_err(|e| WalletStorageError::DecodingError {
+            tag_byte: u32::try_from(self.tag_byte).map(UtxoTag::new).map_err(|e| {
+                WalletStorageError::DecodingError {
                     operation: "try_into_output",
                     item: "tag_byte",
                     details: format!("Corrupt db: invalid tag_byte '{}': {e}", self.tag_byte),
-                })?,
-            memo: self.memo_json.as_ref().map(deserialize_json).transpose()?,
-            auth: reconstruct_spend_authorization(self.spend_key.as_deref(), self.condition_root.as_deref())?,
-            minimum_value_promise: u64::try_from(self.minimum_value_promise).map_err(|e| {
-                WalletStorageError::DecodingError {
-                    operation: "try_into_output",
-                    item: "minimum_value_promise",
-                    details: format!(
-                        "Corrupt db: invalid minimum_value_promise '{}': {e}",
-                        self.minimum_value_promise
-                    ),
                 }
             })?,
+            memo: self.memo_json.as_ref().map(deserialize_json).transpose()?,
+            auth: reconstruct_spend_authorization(self.spend_key.as_deref(), self.condition_root.as_deref())?,
+            // `minimum_value_promise` is u64 stored in a signed BigInt column; values >= 2^63 wrap to negative.
+            minimum_value_promise: self.minimum_value_promise as u64,
             status: self.status.parse().map_err(|_| WalletStorageError::DecodingError {
                 operation: "try_into_output",
                 item: "output",
@@ -153,20 +142,20 @@ impl StealthOutput {
                 .proven_version
                 .zip(self.proven_up_epoch)
                 .map(|(version, epoch)| -> Result<ProvenUp, WalletStorageError> {
-                    let version = u64::try_from(version)
-                        .map(SubstateVersion::new)
-                        .map_err(|e| WalletStorageError::DecodingError {
+                    let version = u64::try_from(version).map(SubstateVersion::new).map_err(|e| {
+                        WalletStorageError::DecodingError {
                             operation: "try_into_output",
                             item: "proven_version",
                             details: format!("Corrupt db: invalid proven_version '{version}': {e}"),
-                        })?;
-                    let epoch = u64::try_from(epoch).map(Epoch).map_err(|e| {
-                        WalletStorageError::DecodingError {
+                        }
+                    })?;
+                    let epoch = u64::try_from(epoch)
+                        .map(Epoch)
+                        .map_err(|e| WalletStorageError::DecodingError {
                             operation: "try_into_output",
                             item: "proven_up_epoch",
                             details: format!("Corrupt db: invalid proven_up_epoch '{epoch}': {e}"),
-                        }
-                    })?;
+                        })?;
                     Ok(ProvenUp { version, epoch })
                 })
                 .transpose()?,
@@ -218,11 +207,8 @@ impl TryFrom<StealthOutput> for StealthOutputInfo {
                 item: "output info commitment",
                 details: "Corrupt db: invalid hex representation".to_string(),
             })?,
-            value: u64::try_from(value.value).map_err(|e| WalletStorageError::DecodingError {
-                operation: "try_into_output_info",
-                item: "output info value",
-                details: format!("Corrupt db: invalid output value '{}': {e}", value.value),
-            })?,
+            // `value` is u64 stored in a signed BigInt column; values >= 2^63 wrap to negative.
+            value: value.value as u64,
             memo: value.memo_json.as_ref().map(deserialize_json).transpose()?,
             is_on_chain: value.is_on_chain,
         })
@@ -283,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn stealth_output_conversions_reject_negative_unsigned_fields() {
+    fn stealth_output_conversions_round_trip_u64_max_amounts_and_reject_negative_non_amount_fields() {
         let (valid, owner) = sample_stealth_output();
         let converted = valid.clone().try_convert(owner).unwrap();
         assert_eq!(converted.value, 1000);
@@ -301,35 +287,20 @@ mod tests {
         let info = StealthOutputInfo::try_from(valid.clone()).unwrap();
         assert_eq!(info.value, 1000);
 
-        let mut bad_value = valid.clone();
-        bad_value.value = -1;
-        assert!(matches!(
-            bad_value.clone().try_convert(owner),
-            Err(WalletStorageError::DecodingError { item: "value", .. })
-        ));
-        assert!(matches!(
-            StealthOutputInfo::try_from(bad_value),
-            Err(WalletStorageError::DecodingError {
-                item: "output info value",
-                ..
-            })
-        ));
+        let mut max_amounts = valid.clone();
+        max_amounts.value = u64::MAX as i64;
+        max_amounts.minimum_value_promise = u64::MAX as i64;
+        let converted_max = max_amounts.clone().try_convert(owner).unwrap();
+        assert_eq!(converted_max.value, u64::MAX);
+        assert_eq!(converted_max.minimum_value_promise, u64::MAX);
+        let info_max = StealthOutputInfo::try_from(max_amounts).unwrap();
+        assert_eq!(info_max.value, u64::MAX);
 
         let mut bad_tag = valid.clone();
         bad_tag.tag_byte = -5;
         assert!(matches!(
             bad_tag.try_convert(owner),
             Err(WalletStorageError::DecodingError { item: "tag_byte", .. })
-        ));
-
-        let mut bad_promise = valid.clone();
-        bad_promise.minimum_value_promise = -10;
-        assert!(matches!(
-            bad_promise.try_convert(owner),
-            Err(WalletStorageError::DecodingError {
-                item: "minimum_value_promise",
-                ..
-            })
         ));
 
         let mut bad_proven_version = valid.clone();

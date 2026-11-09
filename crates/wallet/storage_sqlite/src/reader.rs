@@ -533,7 +533,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .first::<i64>(self.connection())
             .map_err(|e| WalletStorageError::general("account_count", e))?;
 
-        Ok(u64::try_from(count).unwrap_or(0))
+        Ok(count as u64)
     }
 
     fn accounts_get_by_name(&mut self, name: &str) -> Result<Account, WalletStorageError> {
@@ -937,7 +937,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
         Ok(BalanceChangePage {
             changes,
-            total: u64::try_from(total).unwrap_or(0),
+            total: total as u64,
         })
     }
 
@@ -1037,7 +1037,6 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
     // -------------------------------- Outputs -------------------------------- //
     fn confidential_outputs_get_unspent_balance(&mut self, vault_address: &VaultId) -> Result<u64, WalletStorageError> {
-        const OPERATION: &str = "outputs_get_unspent_balance";
         use crate::schema::{confidential_outputs, vaults};
 
         let vault_id = vaults::table
@@ -1045,32 +1044,31 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .select(vaults::id)
             .first::<i32>(self.connection())
             .optional()
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .map_err(|e| WalletStorageError::general("outputs_get_unspent_balance", e))?
             .ok_or_else(|| WalletStorageError::NotFound {
-                operation: OPERATION,
+                operation: "outputs_get_unspent_balance",
                 entity: "vault".to_string(),
                 key: vault_address.to_string(),
             })?;
 
-        let values = confidential_outputs::table
+        // `value` is u64 stored in a signed BigInt column; values >= 2^63 wrap to negative.
+        // Reinterpret each row's bits via `as u64` and aggregate in u128 to recover the true total.
+        let balance: u128 = confidential_outputs::table
             .select(confidential_outputs::value)
             .filter(confidential_outputs::vault_id.eq(vault_id))
             .filter(confidential_outputs::status.eq(OutputStatus::Unspent.as_key_str()))
             .load::<i64>(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+            .map_err(|e| WalletStorageError::general("outputs_get_unspent_balance", e))?
+            .into_iter()
+            .map(|v| u128::from(v as u64))
+            .sum();
 
-        let mut balance = 0u128;
-        for v in values {
-            let v = u64::try_from(v).map_err(|e| WalletStorageError::DecodingError {
-                operation: OPERATION,
-                item: "value",
-                details: format!("Corrupt db: invalid output value '{v}': {e}"),
-            })?;
-            balance += u128::from(v);
-        }
-
-        u64::try_from(balance)
-            .map_err(|_| WalletStorageError::general(OPERATION, format!("balance overflow u64: {balance}")))
+        u64::try_from(balance).map_err(|_| {
+            WalletStorageError::general(
+                "outputs_get_unspent_balance",
+                format!("balance overflow u64: {balance}"),
+            )
+        })
     }
 
     fn confidential_outputs_get_locked_by_lock_id(
@@ -1182,6 +1180,8 @@ impl WalletStoreReader for ReadTransaction<'_> {
         const OPERATION: &str = "stealth_outputs_get_unspent_balance";
         use crate::schema::stealth_outputs;
 
+        // `value` is u64 stored in a signed BigInt column; values >= 2^63 wrap to negative.
+        // Reinterpret each row's bits via `as u64` and aggregate in u128 to recover the true total.
         let values = stealth_outputs::table
             .select(stealth_outputs::value)
             .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
@@ -1192,15 +1192,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         let utxo_count = values.len();
-        let mut balance = 0u128;
-        for v in values {
-            let v = u64::try_from(v).map_err(|e| WalletStorageError::DecodingError {
-                operation: OPERATION,
-                item: "value",
-                details: format!("Corrupt db: invalid output value '{v}': {e}"),
-            })?;
-            balance += u128::from(v);
-        }
+        let balance: u128 = values.into_iter().map(|v| u128::from(v as u64)).sum();
 
         Ok(StealthBalance {
             balance: balance.into(),
@@ -1232,7 +1224,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .first::<i64>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
-        Ok(u64::try_from(count).unwrap_or(0))
+        Ok(count as u64)
     }
 
     fn stealth_outputs_get_unspent_by_account(
@@ -1924,7 +1916,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             })
             .collect::<Vec<AuthoredTemplateModel>>();
 
-        Ok((templates, u64::try_from(total_templates_for_key_index).unwrap_or(0)))
+        Ok((templates, total_templates_for_key_index as u64))
     }
 
     fn shard_state_version_get(
@@ -2659,7 +2651,7 @@ mod tests {
     }
 
     #[test]
-    fn reader_queries_reject_negative_unsigned_fields() {
+    fn reader_queries_round_trip_u64_max_amounts_and_reject_negative_non_amount_fields() {
         use std::collections::HashSet;
 
         use tari_ootle_common_types::{Epoch, SubstateVersion};
@@ -2704,21 +2696,18 @@ mod tests {
             .unwrap();
 
             let mut stealth = locked_stealth_output(acct, resource, 1, (view_key, owner_key), 1);
+            stealth.value = u64::MAX;
+            stealth.minimum_value_promise = u64::MAX;
             stealth.status = OutputStatus::Unspent;
             stealth.lock_id = None;
             tx.stealth_outputs_insert(&stealth).unwrap();
 
             let mut confidential = locked_confidential_output(acct, vault, 2, (view_key, owner_key), 1);
+            confidential.value = Amount::from(u64::MAX);
             confidential.status = OutputStatus::Unspent;
             confidential.lock_id = None;
             tx.confidential_outputs_insert(confidential).unwrap();
 
-            sql_query("UPDATE confidential_outputs SET value = -1")
-                .execute(tx.connection())
-                .unwrap();
-            sql_query("UPDATE stealth_outputs SET value = -1")
-                .execute(tx.connection())
-                .unwrap();
             sql_query(format!(
                 "INSERT INTO resources (address, resource_type, owner_rule, access_rules, divisibility, metadata) \
                  VALUES ('{resource}', 'Confidential', '{{}}', '{{}}', 0, '{{}}')"
@@ -2748,14 +2737,22 @@ mod tests {
         }
 
         let mut tx = store.create_read_tx().unwrap();
-        assert!(matches!(
-            tx.confidential_outputs_get_unspent_balance(&vault),
-            Err(WalletStorageError::DecodingError { item: "value", .. })
-        ));
-        assert!(matches!(
-            tx.stealth_outputs_get_unspent_balance(&resource),
-            Err(WalletStorageError::DecodingError { item: "value", .. })
-        ));
+        assert_eq!(tx.confidential_outputs_get_unspent_balance(&vault).unwrap(), u64::MAX);
+        assert_eq!(
+            tx.stealth_outputs_get_unspent_balance(&resource).unwrap().balance,
+            Amount::from(u64::MAX)
+        );
+        let confidential_outputs = tx
+            .confidential_outputs_get_by_account_and_status(&acct, OutputStatus::Unspent)
+            .unwrap();
+        assert_eq!(confidential_outputs.len(), 1);
+        assert_eq!(confidential_outputs[0].value, Amount::from(u64::MAX));
+        let stealth_outputs = tx
+            .stealth_outputs_get_unspent_by_account(&acct, Some(&resource), false)
+            .unwrap();
+        assert_eq!(stealth_outputs.len(), 1);
+        assert_eq!(stealth_outputs[0].value, u64::MAX);
+
         assert!(matches!(
             tx.shard_state_version_get(&acct, &resource),
             Err(WalletStorageError::DecodingError { item: "shard", .. })

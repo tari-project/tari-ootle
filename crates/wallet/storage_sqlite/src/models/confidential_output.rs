@@ -58,13 +58,8 @@ impl ConfidentialOutput {
                     details: "Corrupt db: invalid hex representation".to_string(),
                 }
             })?,
-            value: u64::try_from(self.value)
-                .map(Into::into)
-                .map_err(|e| WalletStorageError::DecodingError {
-                    operation: "try_into_output",
-                    item: "value",
-                    details: format!("Corrupt db: invalid output value '{}': {e}", self.value),
-                })?,
+            // `value` is u64 stored in a signed BigInt column; values >= 2^63 wrap to negative.
+            value: (self.value as u64).into(),
             sender_public_nonce: self
                 .sender_public_nonce
                 .map(|nonce| RistrettoPublicKeyBytes::from_hex(&nonce))
@@ -138,13 +133,13 @@ mod tests {
     }
 
     #[test]
-    fn try_into_output_rejects_negative_value() {
+    fn try_into_output_round_trips_u64_max_value() {
         let (valid, account, vault) = sample_confidential_output(500);
         let model = valid.try_into_output(&account, &vault).unwrap();
         assert_eq!(model.value, 500u64);
 
-        let (negative, account, vault) = sample_confidential_output(-1);
-        let err = negative.try_into_output(&account, &vault).unwrap_err();
-        assert!(matches!(err, WalletStorageError::DecodingError { item: "value", .. }));
+        let (max_val, account, vault) = sample_confidential_output(u64::MAX as i64);
+        let model = max_val.try_into_output(&account, &vault).unwrap();
+        assert_eq!(model.value, u64::MAX);
     }
 }

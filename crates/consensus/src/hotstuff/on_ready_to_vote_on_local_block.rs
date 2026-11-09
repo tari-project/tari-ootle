@@ -742,24 +742,22 @@ where
         }
 
         if fp.status().is_invalid() {
-            warn!(
-                target: LOG_TARGET,
-                "❌ NO VOTE: Foreign proposal {block_id} has status {status}.",
-                block_id = fp_atom.block_id,
-                status = fp.status(),
-            );
-            return Ok(Some(NoVoteReason::ForeignProposalProcessingFailed));
+            let reason = NoVoteReason::ForeignProposalInvalid {
+                block_id: fp_atom.block_id,
+            };
+            warn!(target: LOG_TARGET, "❌ NO VOTE: {reason} (local block {local_block})");
+            return Ok(Some(reason));
         }
 
-        if fp.shard_group_unchecked() != foreign_shard_group {
-            warn!(
-                target: LOG_TARGET,
-                "❌ NO VOTE: Foreign proposal {block_id} is from {actual_shard_group}, but atom in block {block} names {foreign_shard_group}.",
-                block = local_block,
-                block_id = fp_atom.block_id,
-                actual_shard_group = fp.shard_group_unchecked(),
-            );
-            return Ok(Some(NoVoteReason::ForeignProposalProcessingFailed));
+        let actual_shard_group = fp.shard_group_unchecked();
+        if actual_shard_group != foreign_shard_group {
+            let reason = NoVoteReason::ForeignProposalShardGroupMismatch {
+                block_id: fp_atom.block_id,
+                atom: foreign_shard_group,
+                actual: actual_shard_group,
+            };
+            warn!(target: LOG_TARGET, "❌ NO VOTE: {reason} (local block {local_block})");
+            return Ok(Some(reason));
         }
 
         if let Err(err) = process_foreign_block(
@@ -2015,7 +2013,7 @@ mod tests {
             assert!(
                 matches!(
                     decision.no_vote_reason,
-                    Some(NoVoteReason::ForeignProposalProcessingFailed { .. })
+                    Some(NoVoteReason::ForeignProposalInvalid { block_id }) if block_id == *foreign_proposal.block_id()
                 ),
                 "unexpected no_vote_reason: {:?}",
                 decision.no_vote_reason
@@ -2028,8 +2026,10 @@ mod tests {
             let foreign_proposal = foreign_proposal_record();
             fixture.store.with_write_tx(|tx| foreign_proposal.save(tx)).unwrap();
 
+            let forged_shard_group = ShardGroup::new(128, 255);
+            assert_ne!(forged_shard_group, foreign_proposal.shard_group_unchecked());
             let mut atom = foreign_proposal.to_atom();
-            atom.shard_group = ShardGroup::new(128, 255);
+            atom.shard_group = forged_shard_group;
             let commands = BlockCommands::init([Command::ForeignProposal(atom)]).unwrap();
             let block = fixture.make_block(
                 &fixture.genesis,
@@ -2044,7 +2044,10 @@ mod tests {
             assert!(
                 matches!(
                     decision.no_vote_reason,
-                    Some(NoVoteReason::ForeignProposalProcessingFailed { .. })
+                    Some(NoVoteReason::ForeignProposalShardGroupMismatch { block_id, atom, actual })
+                        if block_id == *foreign_proposal.block_id()
+                            && atom == forged_shard_group
+                            && actual == foreign_proposal.shard_group_unchecked()
                 ),
                 "unexpected no_vote_reason: {:?}",
                 decision.no_vote_reason

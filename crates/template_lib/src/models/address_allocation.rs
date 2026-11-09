@@ -82,4 +82,3 @@ impl ResourceAddressAllocation {
             .expect("Failed to decode ResourceAddressAllocation response")
     }
 }
-

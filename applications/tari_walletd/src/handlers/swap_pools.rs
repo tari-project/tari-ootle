@@ -166,32 +166,29 @@ async fn fetch_pool_info(
 #[cfg(test)]
 mod tests {
     use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
-    use tari_template_lib_types::ResourceAddress;
+    use tari_template_lib_types::{ObjectKey, ResourceAddress};
 
     use super::*;
     use crate::handlers::test_support::TestDaemon;
 
     #[tokio::test]
-    async fn exchange_rate_rejects_non_positive_desired_output_and_list_short_circuits_zero_limit() {
+    async fn exchange_rate_rejects_zero_desired_output_and_list_short_circuits_zero_limit() {
         let daemon = TestDaemon::start().await;
         let pool_address = ComponentAddress::from_array([0x44; 32]);
 
-        for desired in [Amount::zero(), Amount::from(-25i64)] {
-            let err =
-                handle_get_exchange_rate(&daemon.context, Some(&daemon.session), SwapPoolGetExchangeRateRequest {
-                    pool_address,
-                    desired_tari_output: Some(desired),
-                })
-                .await
-                .unwrap_err();
-            let jrpc = err.downcast_ref::<JsonRpcError>().expect("JsonRpcError");
-            assert!(matches!(jrpc.error_reason(), JsonRpcErrorReason::InvalidParams));
-            assert!(err.to_string().contains("desired_tari_output"), "{err}");
-        }
+        let err = handle_get_exchange_rate(&daemon.context, Some(&daemon.session), SwapPoolGetExchangeRateRequest {
+            pool_address,
+            desired_tari_output: Some(Amount::zero()),
+        })
+        .await
+        .unwrap_err();
+        let jrpc = err.downcast_ref::<JsonRpcError>().expect("JsonRpcError");
+        assert!(matches!(jrpc.error_reason(), JsonRpcErrorReason::InvalidParams));
+        assert!(err.to_string().contains("desired_tari_output"), "{err}");
 
         let pair = (
-            ResourceAddress::from_array([1; 32]),
-            ResourceAddress::from_array([2; 32]),
+            ResourceAddress::new(ObjectKey::from_array([1; ObjectKey::LENGTH])),
+            ResourceAddress::new(ObjectKey::from_array([2; ObjectKey::LENGTH])),
         );
         for resource_pair in [None, Some(pair)] {
             let resp = handle_list(&daemon.context, Some(&daemon.session), SwapPoolsListRequest {

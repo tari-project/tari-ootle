@@ -103,13 +103,7 @@ impl TemplateMetadataBuilder {
 
     /// Override the tags from Cargo.toml.
     pub fn tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.tags = Some(
-            tags.into_iter()
-                .map(Into::into)
-                .map(|t| t.trim().to_lowercase())
-                .filter(|t| !t.is_empty())
-                .collect(),
-        );
+        self.tags = Some(tags.into_iter().map(Into::into).collect());
         self
     }
 
@@ -599,13 +593,29 @@ overridden = "old"
         std::fs::create_dir_all(&out_dir).unwrap();
 
         let output = TemplateMetadataBuilder::new()
-            .tags(vec![" DeFi ", "", "  ", "NFT"])
+            .tags(vec![" DeFi ", "defi", "", "  ", "NFT"])
             .category("  Marketplace ")
             .build_inner(dir.path().to_str().unwrap(), out_dir.to_str().unwrap())
             .unwrap();
 
         assert_eq!(output.metadata.tags, vec!["defi", "nft"]);
         assert_eq!(output.metadata.category.as_deref(), Some("marketplace"));
+
+        let cargo_toml = r#"
+[package]
+name = "test-template"
+version = "1.0.0"
+
+[package.metadata.tari-template]
+tags = ["  Gaming ", "GAMING", "", "NFT "]
+category = "  Utility  "
+"#;
+        std::fs::write(dir.path().join("Cargo.toml"), cargo_toml).unwrap();
+        let from_cargo = TemplateMetadataBuilder::new()
+            .build_inner(dir.path().to_str().unwrap(), out_dir.to_str().unwrap())
+            .unwrap();
+        assert_eq!(from_cargo.metadata.tags, vec!["gaming", "nft"]);
+        assert_eq!(from_cargo.metadata.category.as_deref(), Some("utility"));
 
         let cleared = TemplateMetadataBuilder::new()
             .category("   ")

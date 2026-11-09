@@ -407,6 +407,10 @@ pub(super) fn general_error<T: Display>(details: T) -> anyhow::Error {
     application_error(ApplicationErrorCode::GeneralError, details)
 }
 
+/// Burn proofs are small fixed-size JSON. Cap reads at 1 MiB so a caller can't point us
+/// at `/dev/zero` (or a huge attacker-planted file) and exhaust memory.
+pub(crate) const MAX_BURN_PROOF_BYTES: u64 = 1 << 20;
+
 /// Accepts only a single `Component::Normal` path component containing no `/` or `\` separator, so
 /// caller-supplied names cannot escape the burn-proof directory via `Path::join`. `.` and `..` parse as
 /// `CurDir` and `ParentDir` and are rejected; names such as `a..b.json` are accepted.

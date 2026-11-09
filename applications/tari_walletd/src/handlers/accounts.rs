@@ -136,6 +136,7 @@ use crate::{
     handlers::{
         auth::jwt::enforce_scopes,
         helpers::{
+            MAX_BURN_PROOF_BYTES,
             complete_burn_proof_to_contents,
             ensure_seed_recovery_finished,
             faucet_already_claimed,
@@ -955,10 +956,6 @@ fn build_claim_burn_transaction(
     Ok(transaction)
 }
 
-/// Burn proofs are small fixed-size JSON. Cap reads at 1 MiB so a caller can't point us
-/// at `/dev/zero` (or a huge attacker-planted file) and exhaust memory.
-const MAX_BURN_PROOF_BYTES: u64 = 1 << 20;
-
 async fn resolve_claim_proof<P: AsRef<Path>>(
     base_path: P,
     proof: ClaimBurnProof,
@@ -971,6 +968,9 @@ async fn resolve_claim_proof<P: AsRef<Path>>(
             let metadata = tokio::fs::metadata(&path)
                 .await
                 .map_err(|_| anyhow!("Burn proof file not found: {file_name}"))?;
+            if !metadata.is_file() {
+                return Err(anyhow!("Burn proof file not found: {file_name}"));
+            }
             if metadata.len() > MAX_BURN_PROOF_BYTES {
                 return Err(anyhow!("Burn proof file too large: {file_name}"));
             }

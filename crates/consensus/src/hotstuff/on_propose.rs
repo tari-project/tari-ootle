@@ -1048,12 +1048,6 @@ where TConsensusSpec: ConsensusSpec
                         );
                         return Ok(None);
                     }
-                } else if derived
-                    .command
-                    .local_only()
-                    .is_some_and(|atom| atom.decision.is_abort())
-                {
-                    substate_store.release_new_locks(&pool_tx_id);
                 }
 
                 let DerivedCommand { command, execution, .. } = derived;

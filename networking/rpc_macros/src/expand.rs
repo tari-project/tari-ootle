@@ -356,56 +356,57 @@ fn extract_u32(ident: &syn::Ident, expr: &syn::Expr) -> syn::Result<u32> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use syn::parse_quote;
 
     use super::*;
 
-    fn collect_trait(item: syn::ItemTrait) -> Result<TraitInfo, syn::Error> {
-        let mut collector = TraitInfoCollector::new();
-        syn::visit_mut::visit_item_trait_mut(&mut collector, &mut item.clone());
-        collector.expect_TraitInfo()
+    fn parse_method(mut item: syn::TraitItemFn) -> syn::Result<RpcMethodInfo> {
+        TraitInfoCollector::new().parse_trait_item_method(&mut item)
     }
 
     #[test]
-    fn rejects_missing_method_duplicate_attr_duplicate_key_and_by_value_self() {
-        // Missing `method = N`
-        let missing_method: syn::ItemTrait = parse_quote! {
-            pub trait BadRpc {
-                #[rpc]
-                async fn foo(&self, req: Request<u32>) -> Result<Response<u32>, RpcStatus>;
-            }
+    fn rejects_missing_method_key() {
+        let item: syn::TraitItemFn = parse_quote! {
+            #[rpc]
+            async fn foo(&self, req: Request<u32>) -> Result<Response<u32>, RpcStatus>;
         };
-        assert!(collect_trait(missing_method).is_err());
+        let err = parse_method(item).unwrap_err();
+        assert!(err.to_string().contains("expected #[rpc(method = ...)]"), "{err}");
+    }
 
-        // Duplicate #[rpc(...)] attribute
-        let dup_attr: syn::ItemTrait = parse_quote! {
-            pub trait BadRpc {
-                #[rpc(method = 1)]
-                #[rpc(method = 2)]
-                async fn foo(&self, req: Request<u32>) -> Result<Response<u32>, RpcStatus>;
-            }
+    #[test]
+    fn rejects_duplicate_rpc_attribute() {
+        let item: syn::TraitItemFn = parse_quote! {
+            #[rpc(method = 1)]
+            #[rpc(method = 2)]
+            async fn foo(&self, req: Request<u32>) -> Result<Response<u32>, RpcStatus>;
         };
-        assert!(collect_trait(dup_attr).is_err());
+        let err = parse_method(item).unwrap_err();
+        assert!(
+            err.to_string().contains("only one #[rpc(...)] attribute is allowed per method"),
+            "{err}"
+        );
+    }
 
-        // Duplicate `method` key
-        let dup_key: syn::ItemTrait = parse_quote! {
-            pub trait BadRpc {
-                #[rpc(method = 1, method = 2)]
-                async fn foo(&self, req: Request<u32>) -> Result<Response<u32>, RpcStatus>;
-            }
+    #[test]
+    fn rejects_duplicate_method_key() {
+        let item: syn::TraitItemFn = parse_quote! {
+            #[rpc(method = 1, method = 2)]
+            async fn foo(&self, req: Request<u32>) -> Result<Response<u32>, RpcStatus>;
         };
-        assert!(collect_trait(dup_key).is_err());
+        let err = parse_method(item).unwrap_err();
+        assert!(err.to_string().contains("`method` is specified more than once"), "{err}");
+    }
 
-        // By-value `self` receiver
-        let by_val_self: syn::ItemTrait = parse_quote! {
-            pub trait BadRpc {
-                #[rpc(method = 1)]
-                async fn foo(self, req: Request<u32>) -> Result<Response<u32>, RpcStatus>;
-            }
+    #[test]
+    fn rejects_by_value_self_receiver() {
+        let item: syn::TraitItemFn = parse_quote! {
+            #[rpc(method = 1)]
+            async fn foo(self, req: Request<u32>) -> Result<Response<u32>, RpcStatus>;
         };
-        assert!(collect_trait(by_val_self).is_err());
+        let err = parse_method(item).unwrap_err();
+        assert!(err.to_string().contains("by-value `self` is not supported"), "{err}");
     }
 }

@@ -265,19 +265,29 @@ impl<Wallet> IndexerProvider<Wallet> {
                         cursor,
                     })
                     .await?;
-                let page_is_empty = resp.utxos.is_empty();
+                let mut last_id = None;
                 for (id, utxo) in resp.utxos {
+                    if let Some(prev) = last_id.or(cursor) &&
+                        id <= prev
+                    {
+                        return Err(IndexerRestClientError::InvalidResponse {
+                            message: format!("The indexer served UTXO {id} out of order after {prev}"),
+                        }
+                        .into());
+                    }
                     let utxo = utxo.decode().map_err(|e| IndexerRestClientError::InvalidResponse {
                         message: format!("The indexer served UTXO {id} that does not decode: {e}"),
                     })?;
+                    last_id = Some(id);
                     utxos.push((id, utxo));
                 }
                 if let Some(next_cursor) = resp.next_cursor &&
-                    (page_is_empty || cursor.is_some_and(|prev| next_cursor <= prev))
+                    last_id != Some(next_cursor)
                 {
                     return Err(IndexerRestClientError::InvalidResponse {
                         message: format!(
-                            "The indexer served a non-advancing UTXO page cursor {next_cursor:?} after {cursor:?}"
+                            "The indexer served UTXO page cursor {next_cursor:?} that does not match the last served \
+                             UTXO {last_id:?}"
                         ),
                     }
                     .into());
@@ -531,5 +541,55 @@ mod tests {
             err,
             ProviderError::IndexerClientError(IndexerRestClientError::InvalidResponse { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn fetching_unspent_utxos_rejects_cursor_mismatching_last_utxo_or_unordered_page() {
+        for response in [
+            {
+                let (id1, utxo1) = utxo(1);
+                GetUtxosResponse {
+                    utxos: vec![(id1, Encoded::encode(&utxo1).unwrap())],
+                    spent: Vec::new(),
+                    next_cursor: Some(UtxoId::from_array([3; 32])),
+                }
+            },
+            {
+                let (id1, utxo1) = utxo(1);
+                let (id2, utxo2) = utxo(2);
+                GetUtxosResponse {
+                    utxos: vec![
+                        (id2, Encoded::encode(&utxo2).unwrap()),
+                        (id1, Encoded::encode(&utxo1).unwrap()),
+                    ],
+                    spent: Vec::new(),
+                    next_cursor: None,
+                }
+            },
+        ] {
+            let router = Router::new().route(
+                "/utxos/fetch",
+                post(move || {
+                    let response = response.clone();
+                    async move { Json(response) }
+                }),
+            );
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/", listener.local_addr().unwrap());
+            tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+
+            let client = tari_indexer_client::connect_rest(&url).unwrap();
+            let provider = IndexerProvider::new(client, NoWallet, NETWORK);
+            let pair = (UtxoTag::new(0), RistrettoPublicKeyBytes::from_bytes(&[1; 32]).unwrap());
+
+            let err = provider
+                .fetch_unspent_utxos(STEALTH_TARI_RESOURCE_ADDRESS, &[pair])
+                .await
+                .unwrap_err();
+            assert!(matches!(
+                err,
+                ProviderError::IndexerClientError(IndexerRestClientError::InvalidResponse { .. })
+            ));
+        }
     }
 }

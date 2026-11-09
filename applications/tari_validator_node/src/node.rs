@@ -141,6 +141,12 @@ impl ValidatorNode {
             }
         }
 
+        self.join_services(service_error).await
+    }
+
+    /// Waits for every service to stop after shutdown is triggered. A service failure that caused the shutdown is
+    /// returned in preference to any error raised while the remaining services stop.
+    async fn join_services(self, service_error: Option<anyhow::Error>) -> Result<(), anyhow::Error> {
         // Just exit ASAP on panic
         info!(target: LOG_TARGET, "💤 Waiting for all services to shut down... ctrl+c to force shutdown");
         let join_res = tokio::select! {

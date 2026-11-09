@@ -1191,7 +1191,9 @@ impl SqliteStoreWriteTransaction<'_> {
         diesel::insert_into(substate_cache_invalidations::table)
             .values((
                 substate_cache_invalidations::substate_id.eq(&id),
-                substate_cache_invalidations::state_version.eq(state_version.as_u64() as i64),
+                substate_cache_invalidations::state_version.eq(diesel::dsl::sql::<diesel::sql_types::BigInt>(
+                    "max(state_version, excluded.state_version)",
+                )),
                 substate_cache_invalidations::substate_version.eq(invalidation.observed_version().as_u64() as i64),
                 substate_cache_invalidations::spent.eq(invalidation.is_observed_version_spent()),
                 substate_cache_invalidations::invalidated_at.eq(now),

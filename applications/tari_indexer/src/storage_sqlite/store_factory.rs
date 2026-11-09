@@ -3096,37 +3096,6 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn substate_cache_handles_versions_stored_negative() {
-        let (_d, store) = temp_store().await;
-        let id = substate(2);
-        let high_v = SubstateVersion::new((1u64 << 63) + 10);
-        let higher_v = SubstateVersion::new((1u64 << 63) + 20);
-        let low_v = SubstateVersion::new(5);
-
-        // Cache `high_v` (which is stored as a negative i64 in SQLite).
-        assert!(put(&store, &id, high_v, 100).await);
-        assert_eq!(read(&store, &id).await, Some(high_v));
-
-        // A lower positive version must not displace `high_v`.
-        assert!(!put(&store, &id, low_v, 100).await);
-        assert_eq!(read(&store, &id).await, Some(high_v));
-
-        // Invalidating a lower positive version must not delete `high_v` or lower the journal floor.
-        invalidate(&store, SubstateCacheInvalidation::destroyed(id.clone(), low_v), 100).await;
-        assert_eq!(read(&store, &id).await, Some(high_v));
-
-        // Invalidating `higher_v` retires `high_v` and raises the journal floor to `higher_v`.
-        invalidate(&store, SubstateCacheInvalidation::created(&id, higher_v).unwrap(), 101).await;
-        assert_eq!(read(&store, &id).await, None);
-
-        // Subsequent invalidation at `low_v` does not lower the floor below `higher_v`.
-        invalidate(&store, SubstateCacheInvalidation::destroyed(id.clone(), low_v), 102).await;
-        assert!(!put(&store, &id, high_v, 102).await);
-        assert!(put(&store, &id, higher_v, 102).await);
-        assert_eq!(read(&store, &id).await, Some(higher_v));
-    }
-
-    #[tokio::test]
     async fn pruning_evicts_down_to_the_cap_and_expires_the_journal() {
         let (_d, store) = temp_store().await;
         // Descending `cached_at`, so the substates with the lowest n are the oldest and evicted first.

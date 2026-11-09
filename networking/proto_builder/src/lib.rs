@@ -128,20 +128,31 @@ impl ProtobufCompiler {
         Ok(file_hash.finalize().to_vec())
     }
 
-    fn compare_and_move<P: AsRef<Path>>(&self, tmp_out_dir: P, out_dir: P) {
+    fn compare_and_move<P: AsRef<Path>>(&self, tmp_out_dir: P, out_dir: P) -> Result<(), String> {
+        fs::create_dir_all(out_dir.as_ref())
+            .map_err(|err| format!("Failed to create out dir '{}': {}", out_dir.as_ref().display(), err))?;
         let tmp_files = walk_files(tmp_out_dir, "rs");
         for tmp_file in tmp_files {
             let target_file = out_dir.as_ref().join(tmp_file.file_name().unwrap());
-            if target_file.exists() {
-                let tmp_hash = self.hash_file_contents(&tmp_file).unwrap();
-                let target_hash = self.hash_file_contents(&target_file).unwrap();
-                if tmp_hash != target_hash {
-                    fs::rename(tmp_file, target_file).unwrap();
-                }
+            let should_move = if target_file.exists() {
+                let tmp_hash = self.hash_file_contents(&tmp_file)?;
+                let target_hash = self.hash_file_contents(&target_file)?;
+                tmp_hash != target_hash
             } else {
-                fs::rename(tmp_file, target_file).unwrap();
+                true
+            };
+            if should_move && fs::rename(&tmp_file, &target_file).is_err() {
+                fs::copy(&tmp_file, &target_file).map_err(|err| {
+                    format!(
+                        "Failed to move '{}' to '{}': {}",
+                        tmp_file.display(),
+                        target_file.display(),
+                        err
+                    )
+                })?;
             }
         }
+        Ok(())
     }
 
     pub fn compile(&mut self) -> Result<(), String> {
@@ -165,7 +176,8 @@ impl ProtobufCompiler {
                 protos
             });
 
-        self.include_paths.extend(self.proto_paths.clone());
+        let mut include_paths = self.include_paths.clone();
+        include_paths.extend(self.proto_paths.iter().cloned());
 
         let mut config = prost_build::Config::new();
 
@@ -177,18 +189,24 @@ impl ProtobufCompiler {
             config.field_attribute(k, v);
         }
 
-        let out_dir = self
-            .out_dir
-            .take()
-            .unwrap_or_else(|| PathBuf::from(std::env::var("OUT_DIR").unwrap()));
+        let out_dir = match self.out_dir.clone() {
+            Some(dir) => dir,
+            None => PathBuf::from(
+                std::env::var("OUT_DIR")
+                    .map_err(|err| format!("OUT_DIR environment variable is not set and out_dir was not set: {err}"))?,
+            ),
+        };
 
-        let tmp_out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("tmp_protos");
+        let tmp_out_dir = std::env::var_os("OUT_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| out_dir.clone())
+            .join("tmp_protos");
         fs::create_dir_all(&tmp_out_dir)
             .map_err(|err| format!("Failed to create temporary out dir because '{}'", err))?;
 
         config.out_dir(tmp_out_dir.clone());
 
-        config.compile_protos(&protos, &self.include_paths).map_err(|err| {
+        config.compile_protos(&protos, &include_paths).map_err(|err| {
             // Side effect - print the error to stderr
             eprintln!("\n{}", err);
             format!("{}", err)
@@ -198,7 +216,7 @@ impl ProtobufCompiler {
             rustfmt(tmp_out_dir.to_str().expect("out_dir must be utf8"));
         }
 
-        self.compare_and_move(&tmp_out_dir, &out_dir);
+        self.compare_and_move(&tmp_out_dir, &out_dir)?;
 
         fs::remove_dir_all(&tmp_out_dir).map_err(|err| format!("Failed to remove temporary dir: {}", err))?;
 

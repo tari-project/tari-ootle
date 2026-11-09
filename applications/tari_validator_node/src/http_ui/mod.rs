@@ -81,8 +81,8 @@ mod enabled {
             .get_file(path)
             .or_else(|| PROJECT_DIR.get_file("index.html"))
         {
-            let mime_type = mime_guess::from_path(file.path())
-                .first_or_else(|| mime_guess::Mime::from_str("text/html").unwrap());
+            let mime_type =
+                mime_guess::from_path(file.path()).first_or_else(|| mime_guess::Mime::from_str("text/html").unwrap());
             let content_type =
                 HeaderValue::from_str(mime_type.as_ref()).unwrap_or_else(|_| HeaderValue::from_static("text/html"));
             return Response::builder()

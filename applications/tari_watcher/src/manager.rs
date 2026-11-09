@@ -14,7 +14,7 @@ use crate::{
     config::{ChannelConfig, Config},
     minotari::{MinotariNodes, TipStatus},
     monitoring::{ProcessStatus, TransactionRefInBlock, process_status_alert, process_status_log},
-    process::{ChildChannel, start_validator},
+    process::start_validator,
 };
 
 pub struct ProcessManager {
@@ -51,44 +51,34 @@ impl ProcessManager {
 
         // clean_stale_pid_file(self.base_dir.clone().join(DEFAULT_VALIDATOR_PID_PATH)).await?;
 
-        let cc = if self.config.auto_start.should_start_initially() {
-            Some(self.start_child_process().await)
-        } else {
-            None
-        };
+        let (tx_log, rx_log) = mpsc::channel(16);
+        let (tx_alert, rx_alert) = mpsc::channel(16);
+
+        if self.config.auto_start.should_start_initially() {
+            self.start_child_process(tx_log.clone(), tx_alert.clone()).await;
+        }
 
         info!("Setup completed: connected to base node and wallet, ready to receive requests");
-        let task_handle = tokio::spawn({
-            let tx_log = cc.as_ref().map(|cc| cc.tx_log.clone());
-            let tx_alert = cc.as_ref().map(|cc| cc.tx_alert.clone());
-            async move {
-                loop {
-                    tokio::select! {
-                        Some(req) = self.rx_request.recv() => {
-                            if let Err(err) = self.handle_request(req, tx_log.as_ref(), tx_alert.as_ref()).await {
-                                error!("Error handling request: {}", err);
-                            }
+        let task_handle = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    Some(req) = self.rx_request.recv() => {
+                        if let Err(err) = self.handle_request(req, Some(&tx_log), Some(&tx_alert)).await {
+                            error!("Error handling request: {}", err);
                         }
+                    }
 
-                        _ = self.shutdown_signal.wait() => {
-                            info!("Shutting down process manager");
-                            break;
-                        }
+                    _ = self.shutdown_signal.wait() => {
+                        info!("Shutting down process manager");
+                        break;
                     }
                 }
             }
         });
-        let Some(cc) = cc else {
-            return Ok(ChannelReceivers {
-                rx_log: None,
-                rx_alert: None,
-                task: task_handle,
-            });
-        };
 
         Ok(ChannelReceivers {
-            rx_log: Some(cc.rx_log),
-            rx_alert: Some(cc.rx_alert),
+            rx_log: Some(rx_log),
+            rx_alert: Some(rx_alert),
             task: task_handle,
         })
     }
@@ -148,24 +138,25 @@ impl ProcessManager {
         Ok(())
     }
 
-    async fn start_child_process(&self) -> ChildChannel {
+    async fn start_child_process(
+        &self,
+        tx_log: mpsc::Sender<ProcessStatus>,
+        tx_alert: mpsc::Sender<ProcessStatus>,
+    ) {
         let vn_binary_path = self.config.validator_node_executable_path.clone();
         let vn_base_dir = self.config.base_dir.join(self.config.vn_base_dir.clone());
 
-        // get child channel to communicate with the validator node process
-        let cc = start_validator(
+        start_validator(
             vn_binary_path,
             vn_base_dir,
             self.config.base_node_grpc_url.clone(),
             self.config.auto_start.should_restart(),
             self.config.network,
+            tx_log,
+            tx_alert,
+            self.shutdown_signal.clone(),
         )
         .await;
-        if cc.is_none() {
-            todo!("Create new validator node process event listener for fetched existing PID from OS");
-        }
-
-        cc.unwrap()
     }
 }
 
@@ -251,5 +242,34 @@ impl ManagerHandle {
         let (tx, rx) = oneshot::channel();
         self.tx_request.send(ManagerRequest::GetTipInfo { reply: tx }).await?;
         rx.await?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+    use tari_shutdown::Shutdown;
+
+    use super::*;
+    use crate::{
+        cli::Cli,
+        config::{AutoStart, get_base_config},
+    };
+
+    #[tokio::test]
+    async fn start_request_handler_provides_receivers_when_auto_start_is_never() {
+        let cli = Cli::parse_from(["tari_watcher", "init"]);
+        let mut cfg = get_base_config(&cli).unwrap();
+        cfg.auto_start = AutoStart::Never;
+
+        let shutdown = Shutdown::new();
+        let (manager, _handle) = ProcessManager::new(cfg, shutdown.to_signal());
+        let receivers = manager.start_request_handler().await.unwrap();
+
+        assert!(receivers.rx_log.is_some());
+        assert!(receivers.rx_alert.is_some());
+
+        shutdown.trigger();
+        receivers.task.await.unwrap();
     }
 }

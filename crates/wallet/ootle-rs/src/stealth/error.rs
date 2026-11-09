@@ -31,13 +31,6 @@ pub enum StealthProviderError {
         total_revealed_input: Amount,
         output_amount: Amount,
     },
-    #[error(
-        "Unbalanced burn claim: burned amount ({burned_amount}) does not equal total outputs amount ({output_amount})"
-    )]
-    UnbalancedBurnClaim {
-        burned_amount: Amount,
-        output_amount: Amount,
-    },
     #[error("Failed to decrypt input with commitment {commitment}: {details}")]
     DecryptionFailed {
         commitment: PedersenCommitmentBytes,

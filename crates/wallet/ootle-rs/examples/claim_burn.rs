@@ -37,7 +37,6 @@ use ootle_rs::{
     key_provider::PrivateKeyProvider,
     keys::OotleSecretKey,
     provider::{Provider, ProviderBuilder},
-    template_types::EncryptedData,
     wallet::{NetworkWallet, OotleWallet},
 };
 use tari_crypto::{
@@ -50,12 +49,11 @@ use tari_ootle_transaction::Epoch;
 /// MicroTARI revealed from the claimed funds to pay the transaction fee.
 const MAX_FEE: u64 = 2000;
 
-/// The L2 burn proof contents, as produced for the burned output. This matches the wallet daemon's
-/// `ClaimBurnProofContents` serde shape.
+/// The L2 burn proof contents, as produced for the burned output. This reads the claim proof out of the
+/// wallet daemon's `ClaimBurnProofContents` serde shape.
 #[derive(serde::Deserialize)]
 struct BurnProofFile {
     claim_proof: MinotariBurnClaimProof,
-    encrypted_data: EncryptedData,
 }
 
 #[tokio::main]
@@ -88,11 +86,9 @@ async fn main() {
         return;
     };
 
-    let BurnProofFile {
-        claim_proof,
-        encrypted_data,
-    } = serde_json::from_str(&fs::read_to_string(&proof_path).expect("failed to read burn proof file"))
-        .expect("failed to parse burn proof JSON");
+    let BurnProofFile { claim_proof } =
+        serde_json::from_str(&fs::read_to_string(&proof_path).expect("failed to read burn proof file"))
+            .expect("failed to parse burn proof JSON");
 
     let mut provider = ProviderBuilder::new()
         .wallet(wallet)
@@ -107,7 +103,7 @@ async fn main() {
     assert_eq!(provider.network(), network);
 
     // Build the claim transaction and the sealer that signs it with the derived stealth claim key.
-    let (unsigned_tx, sealer) = ClaimBurn::new(&provider, claim_proof, encrypted_data, max_epoch)
+    let (unsigned_tx, sealer) = ClaimBurn::new(&provider, claim_proof, max_epoch)
         .with_max_fee(MAX_FEE)
         .with_memo_message("claimed via ootle-rs")
         .prepare()

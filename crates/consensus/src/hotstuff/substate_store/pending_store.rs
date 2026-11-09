@@ -257,10 +257,29 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
                             let index = lock_status.add_failed(err);
                             lock_status.hard_conflict_idx = Some(index);
                         },
-                        err @ LockFailedError::LockConflict { .. } => {
-                            let index = lock_status.add_failed(err);
-                            // If the requested lock is for a specific version, the transaction must be ABORTED
-                            if lock.requested_version().is_some() {
+                        LockFailedError::LockConflict {
+                            ref substate_id,
+                            ref conflict,
+                        } => {
+                            let is_hard = if lock.lock_type().is_output() {
+                                true
+                            } else if let Some(req_v) = lock.requested_version() {
+                                let (existing_version, existing_is_local_only) =
+                                    self.get_latest_lock_by_id(substate_id.substate_id())?.map_or_else(
+                                        || (substate_id.version(), conflict.is_local_only),
+                                        |existing| (existing.version(), existing.is_local_only()),
+                                    );
+                                is_versioned_lock_conflict_hard(
+                                    conflict.existing_lock,
+                                    existing_is_local_only,
+                                    existing_version,
+                                    req_v,
+                                )
+                            } else {
+                                false
+                            };
+                            let index = lock_status.add_failed(error);
+                            if is_hard {
                                 lock_status.hard_conflict_idx = Some(index);
                             }
                         },
@@ -301,25 +320,34 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
             if existing.transaction_id() == transaction_id {
                 continue;
             }
-            let refuses_every_input = match existing.lock_type() {
+            let refuses_input = match existing.lock_type() {
                 SubstateLockType::Write => true,
                 SubstateLockType::Output => !existing.is_local_only(),
-                SubstateLockType::Read => false,
+                SubstateLockType::Read => lock.lock_type().is_write(),
             };
-            if !refuses_every_input {
+            if !refuses_input {
                 continue;
             }
 
+            let conflict = LockConflict {
+                existing_lock: existing.lock_type(),
+                requested_lock: lock.lock_type(),
+                transaction_id: *existing.transaction_id(),
+                is_local_only: existing.is_local_only(),
+            };
+            let is_hard = lock.requested_version().is_some_and(|req_v| {
+                is_versioned_lock_conflict_hard(
+                    existing.lock_type(),
+                    existing.is_local_only(),
+                    existing.version(),
+                    req_v,
+                )
+            });
             let index = lock_status.add_failed(LockFailedError::LockConflict {
                 substate_id: versioned_substate_id.to_owned(),
-                conflict: LockConflict {
-                    existing_lock: existing.lock_type(),
-                    requested_lock: lock.lock_type(),
-                    transaction_id: *existing.transaction_id(),
-                    is_local_only: existing.is_local_only(),
-                },
+                conflict,
             });
-            if lock.requested_version().is_some() {
+            if is_hard {
                 lock_status.hard_conflict_idx = Some(index);
             }
         }
@@ -596,8 +624,9 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
     /// Grants `lock_type` over `id` to `transaction_id`.
     ///
     /// An OUTPUT lock claims a version that the transaction will create, so it is only valid while that version does
-    /// not exist. A lock already held over the substate says nothing about the requested version, so the assertion
-    /// must run wherever an OUTPUT lock is granted.
+    /// not exist, unless the lock re-marks a validator fee pool version that this block already put UP and that this
+    /// local-only transaction updates in place. A lock already held over the substate says nothing about the requested
+    /// version, so the assertion must run wherever an OUTPUT lock is granted.
     fn grant_lock(
         &mut self,
         transaction_id: TransactionId,
@@ -606,7 +635,14 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         is_local_only: bool,
     ) -> Result<(), SubstateStoreError> {
         if lock_type.is_output() {
-            self.lock_assert_not_exist(id)?;
+            let is_in_place_fee_pool_update = is_local_only &&
+                id.substate_id().is_validator_fee_pool() &&
+                self.log
+                    .get_pending(&id.to_substate_address())
+                    .is_some_and(SubstateChange::is_up);
+            if !is_in_place_fee_pool_update {
+                self.lock_assert_not_exist(id)?;
+            }
         }
 
         self.add_new_lock(
@@ -975,4 +1011,30 @@ impl LatestSubstateVersion {
 
 fn up_encoded_len(id: &SubstateId, substate: &Substate) -> usize {
     tari_bor::encoded_len(id).saturating_add(tari_bor::encoded_len(substate))
+}
+
+/// Whether a `LockConflict` on a versioned input requesting `requested_version` against an existing lock at
+/// `existing_version` is a permanent hard conflict or a transient deferrable conflict.
+///
+/// Every versioned input conflict is hard (`requested_version != existing_version` included) except the two cases
+/// where the existing lock at `existing_version == requested_version` leaves that version UP once its holder commits:
+/// - `SubstateLockType::Read` at `existing_version == requested_version`: a read lock does not down the substate, so a
+///   write at that same version can proceed once the read lock is released;
+/// - a local-only `SubstateLockType::Output` at `existing_version == requested_version`: the local-only transaction is
+///   creating `requested_version` on this chain, so a multishard transaction requesting that version can proceed once
+///   the block creating it commits.
+fn is_versioned_lock_conflict_hard(
+    existing_lock: SubstateLockType,
+    existing_is_local_only: bool,
+    existing_version: SubstateVersion,
+    requested_version: SubstateVersion,
+) -> bool {
+    if requested_version != existing_version {
+        return true;
+    }
+    match existing_lock {
+        SubstateLockType::Write => true,
+        SubstateLockType::Output => !existing_is_local_only,
+        SubstateLockType::Read => false,
+    }
 }

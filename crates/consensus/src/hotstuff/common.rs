@@ -559,7 +559,8 @@ pub fn abort_if_local_prepared_expired(
 /// block must record.
 ///
 /// CONSENSUS RULE: a replica accepts this abort, when the leader proposes it, in a block it evaluates while its own
-/// oracle reports such a next epoch. The abort is safe for the reason given at
+/// oracle reports such a next epoch, and only for a transaction still waiting on foreign shard groups. A transaction
+/// that is ready for LocalAccept is executed instead, as the leader does. The abort is safe for the reason given at
 /// [`TransactionPoolRecord::is_local_prepared_expired_at`]: the local shard group has not sent its LocalAccept.
 pub fn abort_local_prepared_for_epoch_end(tx_rec: &mut TransactionPoolRecord) -> Option<TransactionExecution> {
     if !tx_rec.current_stage().is_local_prepared() || !tx_rec.current_decision().is_commit() {

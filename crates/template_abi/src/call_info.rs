@@ -36,24 +36,9 @@ pub struct CallInfo;
 impl CallInfo {
     #[cfg(feature = "std")]
     pub fn encode_v1_packed_size(args: &[tari_bor::Value]) -> Result<usize, tari_bor::BorError> {
-        let mut total_args_len = 0usize;
-        for a in args {
-            let len = tari_bor::encoded_len(a);
-            u32::try_from(len).map_err(|_| tari_bor::BorError::new("Argument length exceeds u32".to_string()))?;
-            total_args_len = total_args_len
-                .checked_add(len)
-                .ok_or_else(|| tari_bor::BorError::new("Total argument length overflow".to_string()))?;
-        }
-        let header_and_prefixes = CallHeader::SIZE
-            .checked_add(
-                args.len()
-                    .checked_mul(size_of::<u32>())
-                    .ok_or_else(|| tari_bor::BorError::new("Argument prefix length overflow".to_string()))?,
-            )
-            .ok_or_else(|| tari_bor::BorError::new("Call header length overflow".to_string()))?;
-        total_args_len
-            .checked_add(header_and_prefixes)
-            .ok_or_else(|| tari_bor::BorError::new("Total packed call info length overflow".to_string()))
+        let total_args_len = args.iter().map(|a| tari_bor::encoded_len(&a)).sum::<usize>();
+        let total_len = CallHeader::SIZE + total_args_len + args.len() * size_of::<u32>();
+        Ok(total_len)
     }
 
     #[cfg(feature = "std")]

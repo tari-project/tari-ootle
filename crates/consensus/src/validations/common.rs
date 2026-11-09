@@ -3,7 +3,6 @@
 
 use log::{debug, warn};
 use tari_consensus_types::{
-    ProposalCertificate,
     QcId,
     QuorumCertificateRef,
     TcSignatures,
@@ -454,15 +453,10 @@ pub fn check_quorum_certificate_signatures<TConsensusSpec: ConsensusSpec>(
     signing_service: &TConsensusSpec::SignerService,
 ) -> Result<(), ProposalValidationError> {
     // The "zero block" is the deterministic per-epoch genesis, known to every node without a vote, so a
-    // QC that justifies it is exempt from quorum/signature validation. Only a `ProposalCertificate` in
-    // canonical genesis shape (height zero, zero parent, zero header hash) qualifies for the exemption;
-    // everything else - including a `TimeoutCertificate` - falls through to the checks below.
-    if let Some(pc) = qc.as_proposal_certificate() &&
-        pc.height().is_zero() &&
-        *pc.signatures() == ProposalCertificate::genesis_signatures() &&
-        pc.justifies_zero_block() &&
-        pc.parent_id().is_zero()
-    {
+    // QC that justifies it is exempt from quorum/signature validation. Only a `ProposalCertificate` that
+    // satisfies `ProposalCertificate::justifies_zero_block` qualifies for the exemption; everything else -
+    // including a `TimeoutCertificate` - falls through to the checks below.
+    if qc.as_proposal_certificate().is_some_and(|pc| pc.justifies_zero_block()) {
         return Ok(());
     }
 

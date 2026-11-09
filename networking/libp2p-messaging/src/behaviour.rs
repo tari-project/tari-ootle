@@ -125,10 +125,17 @@ where TCodec: Codec + Send + Clone + 'static
 
                 sink
             },
-            None => match self.pending_outbound_dials.get(&peer_id) {
-                Some((sink, _)) => {
+            None => match self.pending_outbound_dials.get_mut(&peer_id) {
+                Some((sink, _)) if !sink.is_closed() => {
                     tracing::debug!("return a pending outbound dial {}", sink.stream_id());
                     sink.clone()
+                },
+                Some(pending_dial) => {
+                    let (sink, stream) = stream::channel(stream_id, peer_id);
+                    tracing::debug!("replace closed pending outbound dial stream with {stream_id}");
+                    *pending_dial = (sink.clone(), stream);
+                    self.next_outbound_stream_id();
+                    sink
                 },
                 None => {
                     let stream_id = self.next_outbound_stream_id();
@@ -252,7 +259,9 @@ where TCodec: Codec + Send + Clone + 'static
     ) {
         let mut connection = Connection::new(connection_id, remote_address);
 
-        if let Some((sink, stream)) = self.pending_outbound_dials.remove(&peer_id) {
+        if let Some((sink, stream)) = self.pending_outbound_dials.remove(&peer_id) &&
+            !sink.is_closed()
+        {
             connection.stream_id = Some(stream.stream_id());
             connection.pending_sink = Some(sink);
             handler.on_behaviour_event(stream);
@@ -572,5 +581,59 @@ mod tests {
             None
         );
         assert_eq!(visited, vec![2, 3, 0, 1]);
+    }
+
+    #[test]
+    fn closed_pending_dial_channel_is_replaced_without_a_second_dial() {
+        let mut behaviour = Behaviour::<TestCodec>::new(StreamProtocol::new("/test/1"), Config::default());
+        let peer_id = PeerId::random();
+        let mut cx = Context::from_waker(Waker::noop());
+
+        let first_sink = behaviour.obtain_message_channel(peer_id);
+        assert!(matches!(poll_event(&mut behaviour), ToSwarm::Dial { .. }));
+        assert!(behaviour.poll(&mut cx).is_pending());
+
+        // Close the pending dial's stream while the dial is still in flight.
+        behaviour.pending_outbound_dials.get_mut(&peer_id).unwrap().1.close();
+        assert!(first_sink.is_closed());
+
+        // Sending a new message while the dial is in flight must succeed on a fresh channel without re-dialing.
+        behaviour.send_message(peer_id, b"hello".to_vec()).unwrap();
+        assert!(
+            behaviour.poll(&mut cx).is_pending(),
+            "replacing a closed pending dial stream must not emit a duplicate Dial"
+        );
+
+        let connection_id = ConnectionId::new_unchecked(1);
+        let addr: Multiaddr = "/memory/1".parse().unwrap();
+        let mut handler = behaviour
+            .handle_established_outbound_connection(connection_id, peer_id, &addr, Endpoint::Dialer, PortUse::Reuse)
+            .unwrap();
+        assert!(matches!(
+            handler.poll(&mut cx),
+            Poll::Ready(libp2p::swarm::ConnectionHandlerEvent::OutboundSubstreamRequest { protocol })
+                if *protocol.info() != first_sink.stream_id()
+        ));
+    }
+
+    #[test]
+    fn closed_pending_dial_channel_is_not_opened_when_connection_establishes() {
+        let mut behaviour = Behaviour::<TestCodec>::new(StreamProtocol::new("/test/1"), Config::default());
+        let peer_id = PeerId::random();
+        let mut cx = Context::from_waker(Waker::noop());
+
+        let _sink = behaviour.obtain_message_channel(peer_id);
+        assert!(matches!(poll_event(&mut behaviour), ToSwarm::Dial { .. }));
+        behaviour.pending_outbound_dials.get_mut(&peer_id).unwrap().1.close();
+
+        let connection_id = ConnectionId::new_unchecked(1);
+        let addr: Multiaddr = "/memory/1".parse().unwrap();
+        let mut handler = behaviour
+            .handle_established_outbound_connection(connection_id, peer_id, &addr, Endpoint::Dialer, PortUse::Reuse)
+            .unwrap();
+        assert!(
+            handler.poll(&mut cx).is_pending(),
+            "a closed pending dial stream should not open an outbound substream when the connection establishes"
+        );
     }
 }

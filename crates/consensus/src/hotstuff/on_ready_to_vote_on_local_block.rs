@@ -176,28 +176,25 @@ where
         let processed_blocks =
             process_newly_justified_block(&**tx, &justified_block, block_qc_id, local_committee_info, change_set)?;
 
-        // Blocks first imported through catch-up have already been certified by the committee (and are never voted
-        // on by the caller), so evaluate and save their state transitions even when at or below `last_voted`. A live
-        // proposal at or below `last_voted`, and any block NoVoted for another reason, saves no change set.
-        if origin.is_catch_up() || self.should_vote(&**tx, valid_block.block())? {
-            let parent = valid_block.block().get_parent(&**tx)?;
+        // A block at a height this node has already voted at may still be the one the committee certifies, and
+        // committing it applies its change set. It is therefore decided on, and its change set saved, whether or not
+        // this node may vote for it. Blocks first imported through catch-up have already been certified by the
+        // committee and are never voted on by the caller, so their decision is reported even at or below
+        // `last_voted`.
+        let may_vote = origin.is_catch_up() || self.should_vote(&**tx, valid_block.block())?;
+        let parent = valid_block.block().get_parent(&**tx)?;
+        self.decide_what_to_vote(
+            &**tx,
+            &parent,
+            valid_block.block(),
+            local_committee_info,
+            proposer_claim_public_key_bytes,
+            can_propose_epoch_end,
+            local_next_epoch,
+            next_epoch_changes_layout,
+            change_set,
+        )?;
 
-            self.decide_what_to_vote(
-                &**tx,
-                &parent,
-                valid_block.block(),
-                local_committee_info,
-                proposer_claim_public_key_bytes,
-                can_propose_epoch_end,
-                local_next_epoch,
-                next_epoch_changes_layout,
-                change_set,
-            )?;
-        } else {
-            change_set.set_no_vote(NoVoteReason::AlreadyVotedAtHeight);
-        }
-
-        let quorum_decision = change_set.quorum_decision();
         if change_set.is_accept() {
             // A justified block and its walked ancestors are stamped only by an accepted proposal, whose change set
             // carries their evidence. A later justification walks back to the first stamped ancestor.
@@ -214,6 +211,11 @@ where
             self.transaction_manager
                 .uncommitted_templates()
                 .record(change_set.block(), change_set.local_substate_changes());
+            if let Some(reason) = change_set.abstention() &&
+                let Err(err) = tx.diagnostics_add_no_vote(*valid_block.id(), reason.clone())
+            {
+                error!(target: LOG_TARGET, "Failed to save no vote reason: {err}");
+            }
         } else {
             warn!(
                 target: LOG_TARGET,
@@ -223,13 +225,23 @@ where
             );
         }
 
+        let (local_decision, no_vote_reason) = if !may_vote {
+            (None, Some(NoVoteReason::AlreadyVotedAtHeight))
+        } else if let Some(reason) = change_set.no_vote_reason() {
+            (None, Some(reason.clone()))
+        } else if let Some(reason) = change_set.abstention() {
+            (None, Some(reason.clone()))
+        } else {
+            (change_set.quorum_decision(), None)
+        };
+
         Ok(BlockDecision {
-            local_decision: quorum_decision,
+            local_decision,
             commit_blocks,
             finalized_transactions,
             high_pc: high_qc,
             new_high_tc: maybe_high_tc,
-            no_vote_reason: change_set.no_vote_reason().cloned(),
+            no_vote_reason,
         })
     }
 
@@ -416,6 +428,10 @@ where
 
                     continue;
                 },
+                // The values an EndEpoch commits the next epoch to are ratified against this node's own view of the
+                // next epoch. Where that view does not confirm a value, the node abstains: it keeps the block's change
+                // set and withholds its vote. The committee may commit the block on the votes of members that do
+                // confirm it, and this node then commits it too, which requires its change set.
                 Command::EndEpoch(atom) => {
                     if !can_propose_epoch_end {
                         warn!(
@@ -423,8 +439,7 @@ where
                             "❌ EpochEvent::End command received for block {} but it is not the next epoch",
                             block.id(),
                         );
-                        proposed_block_change_set.set_no_vote(NoVoteReason::NotEndOfEpoch);
-                        return Ok(());
+                        proposed_block_change_set.abstain(NoVoteReason::NotEndOfEpoch);
                     }
                     if block.commands().len() > 1 {
                         warn!(
@@ -458,11 +473,10 @@ where
                                 atom.next_epoch_hash(),
                                 local,
                             );
-                            proposed_block_change_set.set_no_vote(NoVoteReason::EndOfEpochHashMismatch {
+                            proposed_block_change_set.abstain(NoVoteReason::EndOfEpochHashMismatch {
                                 local,
                                 proposed: *atom.next_epoch_hash(),
                             });
-                            return Ok(());
                         },
                         None => {
                             warn!(
@@ -470,8 +484,7 @@ where
                                 "❌ NO VOTE: EndEpoch in block {} but our oracle has not yet observed the next epoch boundary block",
                                 block.id(),
                             );
-                            proposed_block_change_set.set_no_vote(NoVoteReason::EndOfEpochHashNotObserved);
-                            return Ok(());
+                            proposed_block_change_set.abstain(NoVoteReason::EndOfEpochHashNotObserved);
                         },
                     }
 
@@ -491,11 +504,10 @@ where
                                 proposed.as_bps(),
                                 local_rate.as_bps(),
                             );
-                            proposed_block_change_set.set_no_vote(NoVoteReason::EndOfEpochBurnRateMismatch {
+                            proposed_block_change_set.abstain(NoVoteReason::EndOfEpochBurnRateMismatch {
                                 local_bps: local_rate.as_bps(),
                                 proposed_bps: proposed.as_bps(),
                             });
-                            return Ok(());
                         },
                         None => {
                             warn!(
@@ -516,8 +528,11 @@ where
                         block.next_epoch_validator_set_hash(),
                     ) {
                         warn!(target: LOG_TARGET, "❌ NO VOTE: {reason} (block {})", block.id());
-                        proposed_block_change_set.set_no_vote(reason);
-                        return Ok(());
+                        if matches!(reason, NoVoteReason::EndOfEpochValidatorSetMissing) {
+                            proposed_block_change_set.set_no_vote(reason);
+                            return Ok(());
+                        }
+                        proposed_block_change_set.abstain(reason);
                     }
 
                     continue;
@@ -850,6 +865,17 @@ where
             // Nothing to do here for empty dummy blocks. Just mark the block as committed.
             block.commit_block_without_state_changes(tx, commit_qc_id)?;
             return Ok(vec![]);
+        }
+
+        // Committing a block applies the change set this node saved when it accepted the block. A block it holds no
+        // change set for can only be committed by taking the committee's state through sync.
+        if !tx.blocks_is_executed(block.id())? {
+            return Err(HotStuffError::NeedsSync {
+                reason: format!(
+                    "the committee committed block {block}, which this node did not accept, so it holds none of the \
+                     block's state changes"
+                ),
+            });
         }
 
         info!(target: LOG_TARGET, "🌳 Finalizing block {}", block);
@@ -1933,6 +1959,8 @@ mod tests {
                         block.insert(tx)?;
                     }
                     foreign_proposal.save(tx)?;
+                    // The committed block was accepted, so its change set was saved.
+                    tx.blocks_set_executed(committed.id())?;
                     for block in [&committed, &fork] {
                         tx.foreign_proposals_set_status(
                             foreign_proposal.block_id(),

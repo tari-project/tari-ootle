@@ -204,7 +204,7 @@ impl<C> Encode<C> for NibblePath {
 // are a couple of comparisons.
 impl<'b, C> Decode<'b, C> for NibblePath {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, decode::Error> {
-        d.array()?;
+        expect_array(d, 2, "NibblePath")?;
         let pos = d.position();
         let num_nibbles = usize::decode(d, ctx)?;
         NibblePath::try_from_parts(num_nibbles, d.bytes()?).map_err(|e| decode::Error::message(e).at(pos))
@@ -344,10 +344,16 @@ impl<'b, C> Decode<'b, C> for InternalNode {
         let len = d
             .map()?
             .ok_or_else(|| decode::Error::message("InternalNode: expected a definite-length map").at(pos))?;
-        let mut children = Children::with_capacity(usize::try_from(len).unwrap_or(MAX_CHILDREN));
+        let Ok(len) = usize::try_from(len) else {
+            return Err(decode::Error::message("InternalNode: child count overflows usize").at(pos));
+        };
+        if !(1..=MAX_CHILDREN).contains(&len) {
+            return Err(decode::Error::message("InternalNode: child count must be in 1..=16").at(pos));
+        }
+        let mut children = Children::with_capacity(len);
         for _ in 0..len {
             let nibble_pos = d.position();
-            let nibble = Nibble::from_masked(d.u8()?);
+            let nibble = Nibble::decode(d, ctx)?;
             // The one structural check: `Children` relies on its nibbles ascending
             children.push(nibble, Child::decode(d, ctx)?).map_err(|_| {
                 decode::Error::message("InternalNode children must be in strictly ascending nibble order")
@@ -776,6 +782,43 @@ mod tests {
         e.u8(4).unwrap();
         child.encode(&mut e, &mut ()).unwrap();
         assert!(decode_err::<InternalNode>(&buf).contains("ascending"));
+    }
+
+    #[test]
+    fn rejects_out_of_range_nibble_in_internal_node() {
+        let child = Child::try_new(hash(1), 1, NodeType::Internal { leaf_count: 2 }).unwrap();
+        let mut buf = Vec::new();
+        let mut e = Encoder::new(&mut buf);
+        e.map(1).unwrap();
+        e.u8(16).unwrap();
+        child.encode(&mut e, &mut ()).unwrap();
+        assert!(decode_err::<InternalNode>(&buf).contains("out of range"));
+    }
+
+    #[test]
+    fn rejects_invalid_internal_node_child_count() {
+        let mut empty_buf = Vec::new();
+        Encoder::new(&mut empty_buf).map(0).unwrap();
+        assert!(decode_err::<InternalNode>(&empty_buf).contains("1..=16"));
+
+        let mut oversized_buf = Vec::new();
+        Encoder::new(&mut oversized_buf).map(MAX_CHILDREN as u64 + 1).unwrap();
+        assert!(decode_err::<InternalNode>(&oversized_buf).contains("1..=16"));
+    }
+
+    #[test]
+    fn rejects_wrong_nibble_path_array_length() {
+        let mut buf = Vec::new();
+        let mut e = Encoder::new(&mut buf);
+        e.array(3).unwrap();
+        e.u8(2).unwrap();
+        e.bytes(&[0x12]).unwrap();
+        e.u8(0).unwrap();
+        assert!(decode_err::<NibblePath>(&buf).contains("expected an array of 2"));
+
+        let mut indef_buf = Vec::new();
+        Encoder::new(&mut indef_buf).begin_array().unwrap();
+        assert!(decode_err::<NibblePath>(&indef_buf).contains("definite-length"));
     }
 
     #[test]

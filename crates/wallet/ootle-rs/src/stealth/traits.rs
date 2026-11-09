@@ -106,7 +106,8 @@ pub trait BurnClaimKeyProvider {
     ///
     /// The burn UTXO's mask is recovered from `spec.encrypted_data` internally, so — as with
     /// [`StealthStatementProvider::create_transfer_statement`] — only the finished statement is
-    /// returned.
+    /// returned. Implementors must return [`StealthProviderError::UnbalancedBurnClaim`] if the burned amount does
+    /// not equal the outputs.
     async fn create_burn_claim_statement(
         &self,
         spec: BurnClaimStatementSpec,

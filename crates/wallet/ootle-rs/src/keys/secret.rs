@@ -255,8 +255,8 @@ impl BurnClaimKeyProvider for LocalKeyProvider<OotleSecretKey> {
         );
 
         if !validate_balance_proof_signature(&balance_proof, &inputs_statement, &outputs_statement, &covenant_claims) {
-            return Err(StealthProviderError::UnbalancedTransfer {
-                total_revealed_input: Amount::zero(),
+            return Err(StealthProviderError::UnbalancedBurnClaim {
+                burned_amount: Amount::from(u128::from(decrypted.value())),
                 output_amount: total_output_amount,
             });
         }

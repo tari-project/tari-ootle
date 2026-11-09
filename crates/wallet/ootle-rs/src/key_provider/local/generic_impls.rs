@@ -191,17 +191,17 @@ where LocalKeyProvider<C>: StealthOutputStatementFactory + InputDecryptor + Send
             )
         });
 
-        if let Some(balance_proof) = &balance_proof {
+        let is_balanced = match &balance_proof {
             // Every proof above is generated from our own key material, so a balance proof that does not
             // verify means the caller's input and output values do not balance.
-            if !validate_balance_proof_signature(balance_proof, &inputs_statement, &outputs_statement, &covenant_claims)
-            {
-                return Err(StealthProviderError::UnbalancedTransfer {
-                    total_revealed_input,
-                    output_amount: total_output_amount,
-                });
-            }
-        } else if total_revealed_input.is_zero() || total_revealed_input != total_output_amount {
+            Some(balance_proof) => {
+                validate_balance_proof_signature(balance_proof, &inputs_statement, &outputs_statement, &covenant_claims)
+            },
+            // With no stealth inputs or outputs, `total_output_amount` is the revealed output alone, which must
+            // spend the revealed input exactly.
+            None => !total_revealed_input.is_zero() && total_revealed_input == total_output_amount,
+        };
+        if !is_balanced {
             return Err(StealthProviderError::UnbalancedTransfer {
                 total_revealed_input,
                 output_amount: total_output_amount,
@@ -612,7 +612,7 @@ mod tests {
             .create_burn_claim_statement(BurnClaimStatementSpec {
                 commitment,
                 encrypted_data,
-                sender_offset_public_key,
+                sender_offset_public_key: sender_offset_public_key.clone(),
                 output: output_to_self(&provider, VALUE - FEE),
                 revealed_output: Some(RevealedOutput::new(Amount::from(u128::from(FEE)), a_receiver())),
             })
@@ -636,10 +636,16 @@ mod tests {
             })
             .await
             .expect_err("an unbalanced burn claim must be rejected");
-        assert!(
-            matches!(err, StealthProviderError::UnbalancedTransfer { .. }),
-            "expected UnbalancedTransfer, got {err:?}"
-        );
+        match err {
+            StealthProviderError::UnbalancedBurnClaim {
+                burned_amount,
+                output_amount,
+            } => {
+                assert_eq!(burned_amount, Amount::from(u128::from(VALUE)));
+                assert_eq!(output_amount, Amount::from(u128::from(VALUE + FEE)));
+            },
+            err => panic!("expected UnbalancedBurnClaim, got {err:?}"),
+        }
     }
 
     /// `stealth_public_key` must agree with the key the signing methods actually use, since authorization signatures

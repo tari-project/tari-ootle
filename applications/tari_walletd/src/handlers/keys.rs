@@ -3,7 +3,11 @@
 
 use axum_extra::headers::authorization::Bearer;
 use ootle_byte_type::ToByteType;
-use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey, tari_utilities::hex::Hex};
+use tari_crypto::{
+    keys::PublicKey,
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    tari_utilities::hex::Hex,
+};
 use tari_ootle_wallet_sdk::{
     apis::key_manager::KeyManagerApiError,
     models::{KeyBranch, KeyId},
@@ -53,6 +57,9 @@ pub async fn handle_import(
 ) -> Result<KeysImportResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     context.authorize(token, &[Permission::Keys(Crud::Create)])?;
+    if req.secret_key == RistrettoSecretKey::default() {
+        return Err(invalid_params("secret_key", Some("Secret key cannot be zero")));
+    }
     let public_key = RistrettoPublicKey::from_secret_key(&req.secret_key);
     let key_id = sdk
         .key_manager_api()
@@ -147,5 +154,26 @@ mod tests {
         .await
         .unwrap();
         assert!(!listed.keys.is_empty());
+    }
+
+    #[tokio::test]
+    async fn import_rejects_zero_secret_key() {
+        use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
+        use tari_ootle_wallet_sdk::models::KeyType;
+
+        let daemon = TestDaemon::start().await;
+        let session = Some(&daemon.session);
+
+        let err = handle_import(&daemon.context, session, KeysImportRequest {
+            secret_key: RistrettoSecretKey::default(),
+            key_type: KeyType::Owner,
+        })
+        .await
+        .unwrap_err();
+        let jrpc_err = err
+            .downcast_ref::<JsonRpcError>()
+            .unwrap_or_else(|| panic!("expected JsonRpcError, got: {err}"));
+        assert!(matches!(jrpc_err.error_reason(), JsonRpcErrorReason::InvalidParams));
+        assert!(err.to_string().contains("secret_key"), "{err}");
     }
 }

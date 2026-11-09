@@ -196,7 +196,7 @@ web_ui_address = "127.0.0.1:15000"
 # events follow event_retention_epochs. Both default to 1000 epochs.
 transaction_retention_epochs = 500
 
-# Wallets configured with indexer_trust = "verify" require proof generation, so leave this enabled (default = true).
+# The indexer checks validator proofs and serves them to clients. Wallets with indexer_trust = "verify" need them, so leave this enabled (default = true).
 verify_substate_proofs = true
 
 [esmeralda.epoch_oracle.base_layer]

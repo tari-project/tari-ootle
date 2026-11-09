@@ -177,16 +177,13 @@ mod tests {
         let pool_address = ComponentAddress::from_array([0x44; 32]);
 
         for desired in [Amount::zero(), Amount::from(-25i64)] {
-            let err = handle_get_exchange_rate(
-                &daemon.context,
-                Some(&daemon.session),
-                SwapPoolGetExchangeRateRequest {
+            let err =
+                handle_get_exchange_rate(&daemon.context, Some(&daemon.session), SwapPoolGetExchangeRateRequest {
                     pool_address,
                     desired_tari_output: Some(desired),
-                },
-            )
-            .await
-            .unwrap_err();
+                })
+                .await
+                .unwrap_err();
             let jrpc = err.downcast_ref::<JsonRpcError>().expect("JsonRpcError");
             assert!(matches!(jrpc.error_reason(), JsonRpcErrorReason::InvalidParams));
             assert!(err.to_string().contains("desired_tari_output"), "{err}");
@@ -197,15 +194,11 @@ mod tests {
             ResourceAddress::from_array([2; 32]),
         );
         for resource_pair in [None, Some(pair)] {
-            let resp = handle_list(
-                &daemon.context,
-                Some(&daemon.session),
-                SwapPoolsListRequest {
-                    limit: Some(0),
-                    offset: Some(0),
-                    resource_pair,
-                },
-            )
+            let resp = handle_list(&daemon.context, Some(&daemon.session), SwapPoolsListRequest {
+                limit: Some(0),
+                offset: Some(0),
+                resource_pair,
+            })
             .await
             .unwrap();
             assert!(resp.pools.is_empty());

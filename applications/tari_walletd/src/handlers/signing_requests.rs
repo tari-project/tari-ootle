@@ -621,25 +621,19 @@ mod tests {
         let missing_id = 999_999;
 
         for err in [
-            handle_get(
-                &test.context,
-                Some(&test.session),
-                SigningRequestGetRequest { request_id: missing_id },
-            )
+            handle_get(&test.context, Some(&test.session), SigningRequestGetRequest {
+                request_id: missing_id,
+            })
             .await
             .unwrap_err(),
-            handle_approve(
-                &test.context,
-                Some(&test.session),
-                SigningRequestDecisionRequest { request_id: missing_id },
-            )
+            handle_approve(&test.context, Some(&test.session), SigningRequestDecisionRequest {
+                request_id: missing_id,
+            })
             .await
             .unwrap_err(),
-            handle_reject(
-                &test.context,
-                Some(&test.session),
-                SigningRequestDecisionRequest { request_id: missing_id },
-            )
+            handle_reject(&test.context, Some(&test.session), SigningRequestDecisionRequest {
+                request_id: missing_id,
+            })
             .await
             .unwrap_err(),
         ] {

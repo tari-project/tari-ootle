@@ -743,25 +743,6 @@ where
             return Ok(Some(reason));
         }
 
-        if fp.status().is_invalid() {
-            let reason = NoVoteReason::ForeignProposalInvalid {
-                block_id: fp_atom.block_id,
-            };
-            warn!(target: LOG_TARGET, "❌ NO VOTE: {reason} (local block {local_block})");
-            return Ok(Some(reason));
-        }
-
-        let actual_shard_group = fp.shard_group_unchecked();
-        if actual_shard_group != foreign_shard_group {
-            let reason = NoVoteReason::ForeignProposalShardGroupMismatch {
-                block_id: fp_atom.block_id,
-                atom: foreign_shard_group,
-                actual: actual_shard_group,
-            };
-            warn!(target: LOG_TARGET, "❌ NO VOTE: {reason} (local block {local_block})");
-            return Ok(Some(reason));
-        }
-
         if let Err(err) = process_foreign_block(
             tx,
             fp.proposal(),
@@ -1084,10 +1065,22 @@ pub(super) fn check_foreign_proposal_record(
     if matches!(fp.status(), ForeignProposalStatus::Confirmed) {
         return Some(NoVoteReason::ForeignProposalAlreadyConfirmed);
     }
-    if matches!(fp.status(), ForeignProposalStatus::Invalid) ||
-        fp.proposal().shard_group_checked() != Some(fp_atom.shard_group) ||
-        fp.proposal().commit_proof().commands().is_empty()
-    {
+    if matches!(fp.status(), ForeignProposalStatus::Invalid) {
+        return Some(NoVoteReason::ForeignProposalInvalid {
+            block_id: fp_atom.block_id,
+        });
+    }
+    let Some(actual_shard_group) = fp.proposal().shard_group_checked() else {
+        return Some(NoVoteReason::ForeignProposalProcessingFailed);
+    };
+    if actual_shard_group != fp_atom.shard_group {
+        return Some(NoVoteReason::ForeignProposalShardGroupMismatch {
+            block_id: fp_atom.block_id,
+            atom: fp_atom.shard_group,
+            actual: actual_shard_group,
+        });
+    }
+    if fp.proposal().commit_proof().commands().is_empty() {
         return Some(NoVoteReason::ForeignProposalProcessingFailed);
     }
     None
@@ -2155,7 +2148,7 @@ mod tests {
             let invalid_rec = make_record(sg_a, non_empty_cmds.clone(), ForeignProposalStatus::Invalid);
             assert!(matches!(
                 check_foreign_proposal_record(&atom, &invalid_rec),
-                Some(NoVoteReason::ForeignProposalProcessingFailed)
+                Some(NoVoteReason::ForeignProposalInvalid { .. })
             ));
 
             let confirmed_rec = make_record(sg_a, non_empty_cmds.clone(), ForeignProposalStatus::Confirmed);
@@ -2170,7 +2163,7 @@ mod tests {
             };
             assert!(matches!(
                 check_foreign_proposal_record(&wrong_sg_atom, &valid_rec),
-                Some(NoVoteReason::ForeignProposalProcessingFailed)
+                Some(NoVoteReason::ForeignProposalShardGroupMismatch { .. })
             ));
 
             let empty_cmds_rec = make_record(sg_a, vec![], ForeignProposalStatus::New);

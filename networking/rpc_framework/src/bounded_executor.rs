@@ -29,7 +29,7 @@ use tokio::{
 
 /// Error emitted from [`try_spawn`](self::BoundedExecutor::try_spawn) when there are no tasks available
 #[derive(Debug)]
-pub struct TrySpawnError<F>(pub F);
+pub struct TrySpawnError;
 
 /// A task executor bounded by a semaphore.
 ///
@@ -67,28 +67,13 @@ impl BoundedExecutor {
         self.semaphore.available_permits()
     }
 
-    pub fn try_spawn<F>(&self, future: F) -> Result<JoinHandle<F::Output>, TrySpawnError<F>>
+    pub fn try_spawn<F>(&self, future: F) -> Result<JoinHandle<F::Output>, TrySpawnError>
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        let Ok(permit) = self.semaphore.clone().try_acquire_owned() else {
-            return Err(TrySpawnError(future));
-        };
+        let permit = self.semaphore.clone().try_acquire_owned().map_err(|_| TrySpawnError)?;
         let handle = self.do_spawn(permit, future);
-        Ok(handle)
-    }
-
-    pub fn try_spawn_with<F, Fut>(&self, make_future: F) -> Result<JoinHandle<Fut::Output>, F>
-    where
-        F: FnOnce() -> Fut,
-        Fut: Future + Send + 'static,
-        Fut::Output: Send + 'static,
-    {
-        let Ok(permit) = self.semaphore.clone().try_acquire_owned() else {
-            return Err(make_future);
-        };
-        let handle = self.do_spawn(permit, make_future());
         Ok(handle)
     }
 

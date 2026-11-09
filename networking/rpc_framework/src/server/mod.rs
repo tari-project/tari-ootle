@@ -511,30 +511,16 @@ where
             },
         }
 
+        let session = run_session(self.config.clone(), protocol, peer_id, service, framed);
         // The session slot taken above is released when the spawned task completes, so a session
         // that never starts must release it here.
-        let config = self.config.clone();
-        let mut framed_opt = Some(framed);
-        let mut service_opt = Some(service);
-        let mut protocol_opt = Some(protocol);
-        match self.executor.try_spawn_with(|| {
-            run_session(
-                config,
-                protocol_opt.take().expect("called once"),
-                peer_id,
-                service_opt.take().expect("called once"),
-                framed_opt.take().expect("called once"),
-            )
-        }) {
+        match self.executor.try_spawn(session) {
             Ok(handle) => {
                 self.tasks.push(session_task(peer_id, handle));
                 Ok(())
             },
             Err(_) => {
                 self.on_session_complete(&peer_id);
-                if let Some(framed) = framed_opt.take() {
-                    reject_session(peer_id, framed, HandshakeRejectReason::NoSessionsAvailable);
-                }
                 Err(RpcServerError::MaximumSessionsReached)
             },
         }

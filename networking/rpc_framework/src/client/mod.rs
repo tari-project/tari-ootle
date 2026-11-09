@@ -1233,7 +1233,9 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin
         if resp_id != self.request_id {
             return Err(RpcError::ResponseIdDidNotMatchRequest {
                 expected: self.request_id,
-                actual: resp_id,
+                actual: u16::try_from(resp.request_id).map_err(|_| {
+                    RpcStatus::protocol_error(format!("invalid request_id: must be less than {}", u16::MAX))
+                })?,
             });
         }
 
@@ -1270,10 +1272,10 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin
 
         match next_msg_fut.await {
             Ok(Some(Ok(frame))) => {
+                let resp = proto::RpcResponse::decode(frame.as_ref())?;
                 // Request ids start at one, so a frame without one is not a response at all. On the
                 // first frame of a session that means the server refused it: the handshake is
                 // one-way, so a refusal arrives where the first response was expected.
-                let resp = proto::RpcResponse::decode(frame.as_ref())?;
                 if self.may_be_session_rejection &&
                     resp.request_id == 0 &&
                     let Some(reason) = crate::handshake::decode_session_rejection(&frame)

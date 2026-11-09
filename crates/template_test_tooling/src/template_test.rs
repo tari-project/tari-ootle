@@ -943,6 +943,7 @@ impl TemplateTest {
         let tx_id = wrapped_transaction.to_id();
         eprintln!("START Transaction id = \"{}\"", tx_id);
 
+        let timer = Instant::now();
         let execution = match creation_check {
             Some(creation_check) => processor.execute_with_fee_intent_fallback(wrapped_transaction, creation_check),
             None => processor.execute(wrapped_transaction).map(|result| (result, None)),
@@ -970,7 +971,6 @@ impl TemplateTest {
             }
         }
 
-        let timer = Instant::now();
         eprintln!("Finished Transaction \"{}\" in {:.2?}", tx_id, timer.elapsed());
         eprintln!();
 
@@ -1157,7 +1157,7 @@ impl TemplateTest {
             Default::default(),
             Default::default(),
         )?;
-        self.execute_and_commit(instructions.instructions, proofs)
+        self.execute_and_commit_with_fees(instructions.fee_instructions, instructions.instructions, proofs)
     }
 
     /// Asserts that every substate in the state store has a `CborLen` equal to the bytes it encodes to. The storage

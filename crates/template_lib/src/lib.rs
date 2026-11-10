@@ -187,6 +187,8 @@ pub mod template;
 
 pub use tari_template_lib_types as types;
 
+pub mod well_known;
+
 // ---------------------------------------- WASM exports ------------------------------------------------
 
 pub mod template_macro_deps;

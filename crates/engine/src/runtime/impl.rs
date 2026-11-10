@@ -54,7 +54,7 @@ use tari_ootle_transaction::{
     ResourceAddressRef,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
 };
-use tari_template_abi::{FunctionDef, FunctionKind, TemplateDef, Type};
+use tari_template_abi::{FunctionDef, FunctionKind, TemplateDef, Type, WellKnownType};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, is_builtin_template_address};
 use tari_template_lib::{
     SpendContext,
@@ -855,20 +855,26 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
 
-        if !matches!(
-            func.arguments.first().expect("length checked").arg_type.other(),
-            Some("ResourceAuthAction")
-        ) {
+        if !func
+            .arguments
+            .first()
+            .expect("length checked")
+            .arg_type
+            .is_well_known(WellKnownType::ResourceAuthAction)
+        {
             return Err(RuntimeError::InvalidArgument {
                 argument,
                 reason: format!("Authorize hook '{}' must take a ResourceAuthAction as argument 1", hook),
             });
         }
 
-        if !matches!(
-            func.arguments.get(1).expect("length checked").arg_type.other(),
-            Some("AuthHookCaller")
-        ) {
+        if !func
+            .arguments
+            .get(1)
+            .expect("length checked")
+            .arg_type
+            .is_well_known(WellKnownType::AuthHookCaller)
+        {
             return Err(RuntimeError::InvalidArgument {
                 argument,
                 reason: format!("Authorize hook '{}' must take an AuthHookCaller as argument 2", hook),
@@ -901,7 +907,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
         match func.arguments.last() {
-            Some(arg) if arg.arg_type.other() == Some("SpendContext") => Ok(()),
+            Some(arg) if arg.arg_type.is_well_known(WellKnownType::SpendContext) => Ok(()),
             _ => Err(RuntimeError::InvalidArgument {
                 argument: "TemplateFunction",
                 reason: format!(

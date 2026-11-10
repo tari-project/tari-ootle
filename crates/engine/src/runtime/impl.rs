@@ -26,13 +26,10 @@ use log::{warn, *};
 use tari_bor::{MaybeTagged, decode_exact};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_engine_types::{
-    Utxo,
-    UtxoOutput,
     bucket::Bucket,
     commit_result::{FeeIntentFallback, FinalizeResult, RejectReason},
-    confidential::{ClaimBurnOutputData, ClaimedOutputTombstone, MinotariBurnClaimProof},
+    confidential::{ClaimedOutputTombstone, MinotariBurnClaimProof},
     crypto,
-    crypto::OutputBody,
     entity_id_provider::EntityIdProvider,
     events::Event,
     fees::FeeReceipt,
@@ -57,7 +54,7 @@ use tari_ootle_transaction::{
     ResourceAddressRef,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
 };
-use tari_template_abi::{FunctionDef, FunctionKind, TemplateDef, Type};
+use tari_template_abi::{FunctionDef, FunctionKind, TemplateDef, Type, WellKnownType};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, is_builtin_template_address};
 use tari_template_lib::{
     SpendContext,
@@ -143,7 +140,7 @@ use tari_template_lib::{
         },
         bytes::Bytes,
         constants::{TARI_TOKEN, TOKEN_SYMBOL},
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag, ValueKnowledgeProof},
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, ValueKnowledgeProof},
         engine_args::IntrinsicId,
         stealth::{
             AtomicCondition,
@@ -151,7 +148,6 @@ use tari_template_lib::{
             Covenant,
             CurrentInputView,
             MerkleProof,
-            SpendAuthorization,
             SpendCondition,
             SpendWitness,
             StealthInput,
@@ -859,20 +855,26 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
 
-        if !matches!(
-            func.arguments.first().expect("length checked").arg_type.other(),
-            Some("ResourceAuthAction")
-        ) {
+        if !func
+            .arguments
+            .first()
+            .expect("length checked")
+            .arg_type
+            .is_well_known(WellKnownType::ResourceAuthAction)
+        {
             return Err(RuntimeError::InvalidArgument {
                 argument,
                 reason: format!("Authorize hook '{}' must take a ResourceAuthAction as argument 1", hook),
             });
         }
 
-        if !matches!(
-            func.arguments.get(1).expect("length checked").arg_type.other(),
-            Some("AuthHookCaller")
-        ) {
+        if !func
+            .arguments
+            .get(1)
+            .expect("length checked")
+            .arg_type
+            .is_well_known(WellKnownType::AuthHookCaller)
+        {
             return Err(RuntimeError::InvalidArgument {
                 argument,
                 reason: format!("Authorize hook '{}' must take an AuthHookCaller as argument 2", hook),
@@ -905,7 +907,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
         match func.arguments.last() {
-            Some(arg) if arg.arg_type.other() == Some("SpendContext") => Ok(()),
+            Some(arg) if arg.arg_type.is_well_known(WellKnownType::SpendContext) => Ok(()),
             _ => Err(RuntimeError::InvalidArgument {
                 argument: "TemplateFunction",
                 reason: format!(
@@ -3814,7 +3816,7 @@ where
         Ok(())
     }
 
-    fn claim_burn(&self, claim: MinotariBurnClaimProof, output_data: ClaimBurnOutputData) -> Result<(), RuntimeError> {
+    fn claim_burn(&self, claim: MinotariBurnClaimProof) -> Result<BucketId, RuntimeError> {
         let epoch = self.tracker.get_current_epoch()?;
         self.tracker
             .charge_native_execution(tari_engine_types::limits::NativeExecutionPoints::PER_CLAIM_BURN)?;
@@ -3845,33 +3847,26 @@ where
         })?;
 
         self.tracker.write_with(|state_mut| {
-            // 2. Create a tombstone
+            // The burner knows the burn commitment's opening, so a stealth transfer of theirs can create, and spend, a
+            // UTXO addressed by that commitment. The tombstone is therefore the only substate a claim addresses by the
+            // commitment: only a claim creates one, and a claim needs the claim key's signature.
             let address = ClaimedOutputTombstoneAddress::from_commitment(claim.commitment);
             state_mut.new_substate(address, ClaimedOutputTombstone { value: claim.value })?;
 
-            // 3. Create the stealth UTXO.
+            // The claimed value is revealed in a bucket that the claim transaction moves on. The ownership proof the
+            // verifier checked binds `claim.value` to the commitment.
+            //
             // This mints value with no `increase_total_supply` counterpart, which is sound only because the genesis
             // TARI resource both disables supply tracking and denies `Burn` (see `get_stealth_tari_resource`).
             // Enabling either would need an increase here to balance the decrease that
-            // `ResourceAction::StealthUtxoBurn` applies when the UTXO is burnt.
-            let address = UtxoAddress::new(TARI_TOKEN, claim.commitment.into());
-            let utxo = Utxo::new(UtxoOutput {
-                output: OutputBody {
-                    public_nonce: claim.output.sender_offset_public_key,
-                    encrypted_data: output_data.encrypted_data,
-                    minimum_value_promise: 0,
-                    viewable_balance: None,
-                },
-                auth: SpendAuthorization::Key(claim_public_key),
-                tag: UtxoTag::new(0),
-            });
-
-            state_mut.new_substate(address, utxo)?;
-
-            Ok::<_, RuntimeError>(())
-        })?;
-
-        Ok(())
+            // `ResourceAction::StealthUtxoBurn` applies when TARI is burnt.
+            let bucket_id = state_mut.new_bucket_id()?;
+            state_mut.new_bucket(
+                bucket_id,
+                ResourceContainer::stealth(TARI_TOKEN, Amount::from(claim.value)),
+            )?;
+            Ok(bucket_id)
+        })
     }
 
     fn claim_validator_fees(
@@ -4389,6 +4384,11 @@ where
                     let bucket = state_mut.take_bucket(input_bucket)?;
                     Self::check_bucket_is_unlocked("pay a fee from", input_bucket, &bucket)?;
 
+                    // An empty Tari bucket pays nothing: consume it and record no fee payment.
+                    if *bucket.resource_address() == TARI_TOKEN && bucket.unlocked_amount().is_zero() {
+                        return Ok(());
+                    }
+
                     // No refunds
                     state_mut.pay_fee(bucket.take_all(), None)?;
                     Ok(())
@@ -4880,6 +4880,54 @@ mod tests {
             runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args),
             Err(RuntimeError::WriteOutsideOwnComponent { .. })
         ));
+    }
+
+    fn pay_fee_from_new_bucket(
+        runtime: &RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        workspace_id: WorkspaceId,
+        container: ResourceContainer,
+    ) -> (BucketId, Result<(), RuntimeError>) {
+        let bucket_id = runtime.tracker.write_with(|state| {
+            let bucket_id = state.new_bucket_id().unwrap();
+            state.new_bucket(bucket_id, container).unwrap();
+            bucket_id
+        });
+        runtime
+            .put_on_workspace(workspace_id, IndexedValue::from_type(&bucket_id).unwrap())
+            .unwrap();
+        let result = runtime.pay_fee(PayFee::FromBucket {
+            bucket: WorkspaceOffsetId::new(workspace_id),
+        });
+        (bucket_id, result)
+    }
+
+    #[test]
+    fn pay_fee_from_an_empty_tari_bucket_consumes_it_and_records_no_payment() {
+        let runtime = runtime_with_blobs(Blobs::default());
+
+        let (bucket_id, result) =
+            pay_fee_from_new_bucket(&runtime, 0, ResourceContainer::stealth(TARI_TOKEN, Amount::zero()));
+        result.unwrap();
+        assert_eq!(runtime.tracker.total_fee_payments(), 0);
+        assert!(runtime.tracker.read_with(|state| state.get_bucket(bucket_id).is_err()));
+
+        let (_, result) = pay_fee_from_new_bucket(&runtime, 1, ResourceContainer::stealth(TARI_TOKEN, Amount::new(7)));
+        result.unwrap();
+        assert_eq!(runtime.tracker.total_fee_payments(), 7);
+    }
+
+    #[test]
+    fn pay_fee_from_an_empty_non_tari_bucket_is_rejected() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let other_resource = ResourceAddress::new([9u8; 32].into());
+
+        let (_, result) = pay_fee_from_new_bucket(
+            &runtime,
+            0,
+            ResourceContainer::public_fungible(other_resource, Amount::zero()),
+        );
+        assert!(matches!(result, Err(RuntimeError::InvalidArgument { .. })));
+        assert_eq!(runtime.tracker.total_fee_payments(), 0);
     }
 
     fn create_test_component(

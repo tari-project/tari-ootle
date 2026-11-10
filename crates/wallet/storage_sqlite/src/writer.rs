@@ -645,12 +645,12 @@ impl<'a> WriteTransaction<'a> {
 }
 
 impl CommittableStore for WriteTransaction<'_> {
-    fn commit(&mut self) -> Result<(), WalletStorageError> {
+    fn commit(mut self) -> Result<(), WalletStorageError> {
         self.transaction.commit_internal()?;
         Ok(())
     }
 
-    fn rollback(&mut self) -> Result<(), WalletStorageError> {
+    fn rollback(mut self) -> Result<(), WalletStorageError> {
         self.transaction.rollback_internal()?;
         Ok(())
     }

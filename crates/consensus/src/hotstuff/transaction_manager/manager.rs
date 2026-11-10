@@ -2252,10 +2252,10 @@ mod tests {
     fn a_cross_shard_transaction_with_a_hard_input_lock_conflict_aborts_without_locking_or_pledging() {
         let local_first = component_id(1);
         let local_shard = shard_of(&local_first);
-        let local_second = (2..=u8::MAX)
-            .map(component_id)
-            .find(|id| shard_of(id) == local_shard)
-            .unwrap();
+        let mut second_key = [2u8; 32];
+        second_key[0] = 1;
+        let local_second = SubstateId::Component(ComponentAddress::new(ObjectKey::from_array(second_key)));
+        assert_eq!(shard_of(&local_second), local_shard);
         let foreign = (2..=u8::MAX)
             .map(component_id)
             .find(|id| shard_of(id) != local_shard)

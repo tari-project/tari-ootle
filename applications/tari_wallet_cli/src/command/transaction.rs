@@ -320,8 +320,8 @@ fn cli_instruction_to_instruction(instruction: CliInstruction) -> Result<Instruc
     }
 }
 
-/// Builds an unsigned single-instruction transaction that locks fees via `pay_fee` in the fee phase
-/// rather than placing a bucket on the main workspace where the detached fee builder cannot resolve it.
+/// Builds an unsigned single-instruction transaction that pays fees from the fee account via `pay_fee` in the fee
+/// phase, and deposits the instruction's output into the dump account when one is set.
 fn build_submit_transaction(ctx: &TxBuildContext<'_>, instruction: Instruction) -> UnsignedTransaction {
     let mut builder = Transaction::builder(ctx.network_byte, ctx.max_epoch)
         .pay_fee_from_component(ctx.fee_account_address, ctx.common.max_fee)
@@ -776,8 +776,26 @@ impl FromStr for CliArg {
         if let Ok(v) = s.parse::<u64>() {
             return Ok(CliArg::U64(v));
         }
-        if let Some(arg) = Self::parse_narrow_or_signed_integer(s) {
-            return Ok(arg);
+        if let Ok(v) = s.parse::<u32>() {
+            return Ok(CliArg::U32(v));
+        }
+        if let Ok(v) = s.parse::<u16>() {
+            return Ok(CliArg::U16(v));
+        }
+        if let Ok(v) = s.parse::<u8>() {
+            return Ok(CliArg::U8(v));
+        }
+        if let Ok(v) = s.parse::<i64>() {
+            return Ok(CliArg::I64(v));
+        }
+        if let Ok(v) = s.parse::<i32>() {
+            return Ok(CliArg::I32(v));
+        }
+        if let Ok(v) = s.parse::<i16>() {
+            return Ok(CliArg::I16(v));
+        }
+        if let Ok(v) = s.parse::<i8>() {
+            return Ok(CliArg::I8(v));
         }
         if let Ok(v) = s.parse::<bool>() {
             return Ok(CliArg::Bool(v));
@@ -791,15 +809,11 @@ impl FromStr for CliArg {
             return Ok(CliArg::TemplateAddress(v));
         }
 
-        Ok(Self::parse_nft_or_string(s))
-    }
-}
-
-impl CliArg {
-    fn parse_nft_or_string(s: &str) -> Self {
         if let Some(("nft", nft_id)) = s.split_once('_') {
             match NonFungibleId::try_from_canonical_string(nft_id) {
-                Ok(v) => return CliArg::NonFungibleId(v),
+                Ok(v) => {
+                    return Ok(CliArg::NonFungibleId(v));
+                },
                 Err(e) => {
                     eprintln!(
                         "WARN: '{}' is not a valid NonFungibleId ({:?}) and will be interpreted as a string",
@@ -808,36 +822,11 @@ impl CliArg {
                 },
             }
         }
-        CliArg::String(s.to_string())
+        Ok(CliArg::String(s.to_string()))
     }
+}
 
-    fn parse_narrow_or_signed_integer(s: &str) -> Option<Self> {
-        Self::parse_narrow_unsigned_integer(s).or_else(|| Self::parse_signed_integer(s))
-    }
-
-    fn parse_narrow_unsigned_integer(s: &str) -> Option<Self> {
-        if let Ok(v) = s.parse::<u32>() {
-            return Some(CliArg::U32(v));
-        }
-        if let Ok(v) = s.parse::<u16>() {
-            return Some(CliArg::U16(v));
-        }
-        s.parse::<u8>().ok().map(CliArg::U8)
-    }
-
-    fn parse_signed_integer(s: &str) -> Option<Self> {
-        if let Ok(v) = s.parse::<i64>() {
-            return Some(CliArg::I64(v));
-        }
-        if let Ok(v) = s.parse::<i32>() {
-            return Some(CliArg::I32(v));
-        }
-        if let Ok(v) = s.parse::<i16>() {
-            return Some(CliArg::I16(v));
-        }
-        s.parse::<i8>().ok().map(CliArg::I8)
-    }
-
+impl CliArg {
     pub fn into_arg(self) -> InstructionArg {
         match self {
             CliArg::String(s) => call_arg!(s),

@@ -355,7 +355,7 @@ where TSpec: WalletSdkSpec
                 account_address,
                 latest_vault.get_non_fungible_ids().len()
             );
-            self.update_vault_nfts(vault_id, latest_vault, updated_nft_data).await?;
+            has_changed |= self.update_vault_nfts(vault_id, latest_vault, updated_nft_data).await?;
         }
 
         // If the vault has revealed stealth tokens, we should also to scan for UTXOs
@@ -762,7 +762,11 @@ where TSpec: WalletSdkSpec
                         .iter()
                         .filter_map(|nft_id| {
                             diff.up_iter()
-                                .find(|(id, _)| id.as_non_fungible_address().map(|a| a.id()) == Some(nft_id))
+                                .find(|(id, _)| {
+                                    id.as_non_fungible_address().is_some_and(|a| {
+                                        a.resource_address() == vault.resource_address() && a.id() == nft_id
+                                    })
+                                })
                                 .and_then(|(_, s)| s.substate_value().non_fungible())
                                 .map(|nft| (nft_id.clone(), nft.clone()))
                         })
@@ -840,7 +844,10 @@ where TSpec: WalletSdkSpec
                 .iter()
                 .filter_map(|nft_id| {
                     diff.up_iter()
-                        .find(|(id, _)| id.as_non_fungible_address().map(|a| a.id()) == Some(nft_id))
+                        .find(|(id, _)| {
+                            id.as_non_fungible_address()
+                                .is_some_and(|a| a.resource_address() == vault.resource_address() && a.id() == nft_id)
+                        })
                         .and_then(|(_, s)| s.substate_value().non_fungible())
                         .map(|nft| (nft_id.clone(), nft.clone()))
                 })

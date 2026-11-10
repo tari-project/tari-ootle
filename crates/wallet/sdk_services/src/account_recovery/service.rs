@@ -121,10 +121,10 @@ where
                     return;
                 },
             }
-            if not_found_accounts_count == self.abandon_after_not_found {
+            if not_found_accounts_count >= self.abandon_after_not_found {
                 info!(
                     target: LOG_TARGET,
-                    "No accounts found for {} consecutive keys. Assuming that we are done", self.abandon_after_not_found
+                    "No accounts found for {} consecutive keys. Assuming that we are done", not_found_accounts_count
                 );
                 break;
             }
@@ -186,6 +186,14 @@ where
                     }
                 },
             }
+        }
+        let public_key = RistrettoPublicKey::from_secret_key(&key.key).to_byte_type();
+        let account_addr = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &public_key);
+        if let Err(err) = self.wallet_sdk.accounts_api().delete_if_unused(&account_addr) {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️ Error removing unconfirmed account {account_addr} after failed recovery scan: {err}"
+            );
         }
         None
     }

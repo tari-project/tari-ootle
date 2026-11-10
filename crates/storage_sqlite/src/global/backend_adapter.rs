@@ -459,7 +459,12 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         epoch: Epoch,
     ) -> Result<(), Self::Error> {
         use crate::global::schema::{committees, validator_nodes};
-        let epoch_i64 = epoch.as_u64() as i64;
+        let epoch_i64 = i64::try_from(epoch.as_u64()).map_err(|_| SqliteStorageError::ConversionError {
+            reason: format!(
+                "validator_nodes_set_committee_bucket: epoch {} overflows i64::MAX",
+                epoch.as_u64()
+            ),
+        })?;
         // This is probably not the most robust way of doing this. Ideally you would pass the validator ID to the
         // function and use that to insert into the committees table.
         let candidates = validator_nodes::table
@@ -506,9 +511,8 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             operation: "validator_nodes_set_committee_bucket",
         })?;
 
-        // Remove any prior committee assignment for this epoch attached to an older registration row of the same
-        // validator (or shard key) so re-running committee assignment after a re-registration replaces rather than
-        // duplicates the validator's committee entry.
+        // Each validator (public key) and shard key holds at most one committee row per epoch; rows on its
+        // other registration rows for this epoch are deleted before the upsert.
         let stale_validator_ids = validator_nodes::table
             .select(validator_nodes::id)
             .filter(

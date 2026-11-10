@@ -27,7 +27,7 @@ use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_networking::{GossipMessage, NetworkingHandle};
-use tari_ootle_common_types::{Epoch, optional::Optional};
+use tari_ootle_common_types::Epoch;
 use tari_ootle_p2p::{GossipValidation, NewTransactionMessage, PeerAddress, TariMessage, TariMessagingSpec};
 use tari_ootle_storage::{StateStore, StateStoreReadTransaction, StorageError, consensus_models::TransactionRecord};
 use tari_ootle_transaction::{Transaction, TransactionId};
@@ -468,20 +468,27 @@ where
         }
 
         let transaction_exists = self.state_store.with_read_tx(|tx| {
-            if tx
-                .finalized_transaction_execution_get_finalized_time(id)
-                .optional()?
-                .is_some()
-            {
-                debug!(
-                    target: LOG_TARGET,
-                    "🎱 Transaction {} already finalized. Ignoring",
-                    id
-                );
-                return Ok(true);
-            }
-            if TransactionRecord::exists(tx, id)? {
-                return Ok(true);
+            match TransactionRecord::get_finalized_decision(tx, id)? {
+                Some(decision) if decision.is_commit() => {
+                    debug!(
+                        target: LOG_TARGET,
+                        "🎱 Transaction {} already finalized as committed. Ignoring",
+                        id
+                    );
+                    return Ok(true);
+                },
+                // An aborted transaction commits nothing and consensus allows it to be sequenced
+                // again while its previous TransactionRecord is still retained in the store.
+                Some(_) => {
+                    if tx.transaction_pool_exists(id)? {
+                        return Ok(true);
+                    }
+                },
+                None => {
+                    if TransactionRecord::exists(tx, id)? {
+                        return Ok(true);
+                    }
+                },
             }
             // A commit outlives the local records: the transaction's receipt substate proves the id
             // has committed even when the records were pruned. Best-effort — a node that does not
@@ -581,11 +588,24 @@ fn handle<T, E: Display>(reply: oneshot::Sender<Result<T, E>>, result: Result<T,
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Mutex, atomic::AtomicU64};
+    use std::{
+        sync::{Mutex, atomic::AtomicU64},
+        time::Duration,
+    };
 
+    use tari_consensus_types::{BlockId, Decision, LeafBlock};
     use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
+    use tari_engine_types::{
+        commit_result::{AbortReason, ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
+        fees::FeeReceipt,
+        substate::SubstateDiff,
+    };
     use tari_epoch_manager::service::CommitteeCache;
-    use tari_ootle_common_types::services::template_provider::TemplateProvider;
+    use tari_ootle_common_types::{NodeHeight, ShardGroup, services::template_provider::TemplateProvider};
+    use tari_ootle_storage::{
+        StateStoreWriteTransaction,
+        consensus_models::{Evidence, TransactionExecution},
+    };
     use tari_ootle_template_provider::ResidentTemplateProvider;
     use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
     use tari_template_lib::types::TemplateAddress;
@@ -594,6 +614,15 @@ mod tests {
 
     fn id(n: u8) -> TransactionId {
         TransactionId::new([n; 32])
+    }
+
+    fn test_leaf_block() -> LeafBlock {
+        LeafBlock {
+            block_id: BlockId::zero(),
+            height: NodeHeight::zero(),
+            epoch: Epoch(7),
+            shard_group: ShardGroup::new(0, 255),
+        }
     }
 
     #[derive(Default)]
@@ -651,10 +680,9 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn a_local_submission_while_consensus_is_not_running_is_propagated_without_admission() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = RocksDbStateStore::<PeerAddress>::open(dir.path(), DatabaseOptions::default()).unwrap();
+    fn test_service(
+        store: RocksDbStateStore<PeerAddress>,
+    ) -> MempoolService<RecordingValidator, RocksDbStateStore<PeerAddress>, RecordingGossip> {
         let (_tx_req, rx_req) = mpsc::channel(1);
         let (tx_epoch_request, rx_epoch_request) = mpsc::channel(1);
         // Drop the epoch-manager request receiver so any regression that calls `get_local_committee_info`
@@ -677,7 +705,7 @@ mod tests {
             #[cfg(feature = "metrics")]
             &mut prometheus_client::registry::Registry::default(),
         );
-        let mut service = MempoolService {
+        MempoolService {
             transactions: SeenTransactions::new(MEM_MAX_TRANSACTIONS_DEDUP),
             mempool_requests: rx_req,
             epoch_manager,
@@ -689,7 +717,14 @@ mod tests {
             prewarm_waits: Arc::new(Semaphore::new(MAX_CONCURRENT_PREWARM_WAITS)),
             #[cfg(feature = "metrics")]
             metrics: PrometheusMempoolMetrics::new(&mut prometheus_client::registry::Registry::default()),
-        };
+        }
+    }
+
+    #[tokio::test]
+    async fn a_local_submission_while_consensus_is_not_running_is_propagated_without_admission() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<PeerAddress>::open(dir.path(), DatabaseOptions::default()).unwrap();
+        let mut service = test_service(store);
 
         let secret = RistrettoSecretKey::random(&mut rand::rng());
         let transaction = Transaction::builder_localnet(Epoch(7)).build_and_seal(&secret);
@@ -707,6 +742,117 @@ mod tests {
             !service.transactions.contains(&tx_id),
             "a non-running validator must not admit the transaction into SeenTransactions",
         );
+    }
+
+    #[tokio::test]
+    async fn an_aborted_transaction_is_not_treated_as_existing_and_can_be_resubmitted() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<PeerAddress>::open(dir.path(), DatabaseOptions::default()).unwrap();
+        let secret = RistrettoSecretKey::random(&mut rand::rng());
+        let transaction = Transaction::builder_localnet(Epoch(7)).build_and_seal(&secret);
+        let rec = TransactionRecord::new(transaction.clone());
+        let tx_id = *rec.id();
+
+        store
+            .with_write_tx(|tx| {
+                rec.insert(tx)?;
+                tx.transaction_pool_insert_new(
+                    tx_id,
+                    Decision::Abort(AbortReason::ExecutionFailure),
+                    &Evidence::empty(),
+                    true,
+                    false,
+                    Epoch(7),
+                    0,
+                )?;
+                let pool_rec = tx.transaction_pool_get_all(10)?.pop().unwrap();
+                tx.transactions_finalize_all(Epoch(7), [&pool_rec])?;
+                tx.transaction_pool_remove_all([&tx_id])?;
+                let execution =
+                    TransactionExecution::abort(&tx_id, RejectReason::execution_failure_unclassified("aborted"))
+                        .for_block(test_leaf_block(), tx_id);
+                tx.block_transaction_executions_insert_or_ignore(&execution)?;
+                Ok::<_, StorageError>(())
+            })
+            .unwrap();
+
+        let mut service = test_service(store.clone());
+        assert!(!service.transaction_exists(&tx_id).unwrap());
+
+        service.handle_new_transaction_from_local(transaction).await.unwrap();
+        assert_eq!(service.gossip.forwarded, vec![tx_id]);
+
+        // Once re-sequenced into the transaction pool, it is treated as existing while in flight.
+        store
+            .with_write_tx(|tx| {
+                tx.transaction_pool_insert_new(tx_id, Decision::Commit, &Evidence::empty(), true, false, Epoch(7), 0)
+            })
+            .unwrap();
+        assert!(service.transaction_exists(&tx_id).unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_committed_or_in_flight_transaction_is_treated_as_existing() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<PeerAddress>::open(dir.path(), DatabaseOptions::default()).unwrap();
+        let mut rng = rand::rng();
+
+        let in_flight_tx =
+            Transaction::builder_localnet(Epoch(7)).build_and_seal(&RistrettoSecretKey::random(&mut rng));
+        let in_flight_rec = TransactionRecord::new(in_flight_tx);
+        let in_flight_id = *in_flight_rec.id();
+
+        let committed_tx =
+            Transaction::builder_localnet(Epoch(7)).build_and_seal(&RistrettoSecretKey::random(&mut rng));
+        let committed_rec = TransactionRecord::new(committed_tx.clone());
+        let committed_id = *committed_rec.id();
+
+        store
+            .with_write_tx(|tx| {
+                in_flight_rec.insert(tx)?;
+
+                committed_rec.insert(tx)?;
+                tx.transaction_pool_insert_new(
+                    committed_id,
+                    Decision::Commit,
+                    &Evidence::empty(),
+                    true,
+                    false,
+                    Epoch(7),
+                    0,
+                )?;
+                let pool_rec = tx.transaction_pool_get_all(10)?.pop().unwrap();
+                tx.transactions_finalize_all(Epoch(7), [&pool_rec])?;
+                tx.transaction_pool_remove_all([&committed_id])?;
+                let execution = TransactionExecution::new(
+                    ExecuteResult {
+                        finalize: FinalizeResult::new(
+                            committed_id.as_hash(),
+                            vec![],
+                            vec![],
+                            TransactionResult::Accept(SubstateDiff::new()),
+                            FeeReceipt::default(),
+                        ),
+                        execution_time: Duration::default(),
+                        execute_epoch: Some(Epoch(7)),
+                        wasm_execution_points: 0,
+                        native_execution_points: 0,
+                    },
+                    vec![],
+                    vec![],
+                )
+                .for_block(test_leaf_block(), committed_id);
+                tx.block_transaction_executions_insert_or_ignore(&execution)?;
+                Ok::<_, StorageError>(())
+            })
+            .unwrap();
+
+        let mut service = test_service(store);
+        assert!(service.transaction_exists(&in_flight_id).unwrap());
+        assert!(service.transaction_exists(&committed_id).unwrap());
+
+        service.handle_new_transaction_from_local(committed_tx).await.unwrap();
+        assert!(service.gossip.forwarded.is_empty());
     }
 
     #[test]

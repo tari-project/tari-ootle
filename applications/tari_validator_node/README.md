@@ -27,9 +27,8 @@ Shows all information about the VN:
 - all the committees (with the respective shard space) that VN is part of
 - list of all VNs
 
-There is also functionality to register the VNs.
-Auto-update of frontend.
-Source code for this is in the `tari_validator_node_web_ui`
+Epoch stats refresh every 2 minutes.
+Source code for this is in `web_ui`.
 
 ### JSON-RPC
 
@@ -39,31 +38,48 @@ with `--enable-permissive-cors`. Requests must address the node by `localhost`, 
 `validator_node.json_rpc_allowed_hosts` (`--json-rpc-allowed-host`); any other host name gets `421 Misdirected Request`.
 
 - submit_transaction
-- register_template
+- get_transaction
+- get_transaction_result
+- get_state
+- get_substate
+- list_blocks
+- get_tx_pool
+- get_block
+- get_blocks
+- get_filtered_blocks_count
+- get_template
 - get_identity
-- register_validator_node
 - get_mempool_stats
 - get_epoch_manager_stats
 - get_shard_key
 - get_committee
 - get_all_vns
+- get_consensus_status
+- get_diagnostic_events
+- clear_diagnostic_events
+- create_backup_snapshot
+- add_peer
 - get_comms_stats
 - get_connections
-- create_backup_snapshot
+- prepare_layer_one_transaction
 
 #### Linux
 
 ```
-sudo apt-get install git curl build-essential cmake clang pkg-config libssl-dev libsqlite3-dev sqlite3 npm
+sudo apt-get install git curl build-essential cmake clang pkg-config libssl-dev libsqlite3-dev sqlite3
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 ```
 
 ### From source
 
+The package sets `publish = false`, so `cargo install tari_validator_node` does not install it from crates.io. Build it from this workspace:
+
 ```
-cargo install tari_validator_node
+cargo build --release -p tari_validator_node
 ```
+
+A release build with the default `web_ui` feature runs `pnpm install` and `pnpm run build` in `web_ui/`.
 
 ### Identity recovery and fee claims
 

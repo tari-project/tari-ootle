@@ -97,9 +97,9 @@
 - Limited scalability
 - Performance bottlenecks under high load
 
-### High Availability Deployment
+### Two indexers
 
-**Best for**: Production applications requiring uptime guarantees
+Two processes can sit behind load balancers. The binary has no failover mode of its own.
 
 ```
 ┌──────────────────────┐    ┌──────────────────────┐
@@ -115,40 +115,17 @@
 │  │   APIs    │  │              │  │   APIs    │  │
 │  └───────────┘  │              │  └───────────┘  │
 │  ┌───────────┐  │              │  ┌───────────┐  │
-│  │ Database  │  │◄────────────►│  │ Database  │  │
-│  │(Primary)  │  │   Sync       │  │(Replica)  │  │
+│  │ Database  │  │              │  │ Database  │  │
+│  │ (SQLite)  │  │   separate   │  │ (SQLite)  │  │
 │  └───────────┘  │              │  └───────────┘  │
 └─────────────────┘              └─────────────────┘
 ```
 
-**Features:**
-- Active-passive failover configuration
-- Database replication for data consistency
-- Health monitoring and automatic failover
-- Geographic distribution capabilities
+Each indexer process keeps its own SQLite database. The binary does not replicate that database, elect a primary, or fail over. Two processes behind a load balancer are two independent copies of the chain data.
 
-### Microservices Deployment
+### One process
 
-**Best for**: Large-scale applications with diverse requirements
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          Kubernetes Cluster                        │
-│                                                                     │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐    │
-│  │   API Gateway   │  │   Data Ingress  │  │   Web UI        │    │
-│  │   (Multiple     │  │   (Scanner +    │  │   (Static       │    │
-│  │   Replicas)     │  │   Processor)    │  │   Serving)      │    │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘    │
-│           │                     │                     │            │
-│           ▼                     ▼                     ▼            │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐    │
-│  │   Database      │  │   Cache Layer   │  │   Storage       │    │
-│  │   (PostgreSQL)  │  │   (Redis)       │  │   (Persistent   │    │
-│  │                 │  │                 │  │   Volumes)      │    │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘    │
-└─────────────────────────────────────────────────────────────────────┘
-```
+`tari_indexer` is a single binary. The REST API, the web UI, and the SQLite database belong to that process.
 
 ## System Requirements
 
@@ -175,7 +152,7 @@
 **Database Growth Estimates:**
 - **Initial sync**: 1-5 GB (depending on network age)
 - **Daily growth**: 100MB - 1GB (depending on network activity)
-- **Substate cache**: 5-20 GB (configurable, LRU eviction)
+- **Substate cache**: rows in the same SQLite database, capped by `indexer.substate_cache_max_entries` (default 100000). Rows past that cap are deleted oldest `cached_at` first.
 - **Logs**: 100MB - 1GB per day (configurable retention)
 
 **Disk I/O Requirements:**
@@ -191,9 +168,10 @@
 - **API serving**: Variable (depends on client usage)
 
 **Port Requirements:**
-- **P2P listener**: Configurable (default: varies by config)
-- **REST API**: Configurable (default: 18300)
-- **Web UI**: Configurable (default: 15000)
+- **P2P listener**: `indexer.p2p.listener_port` (default: `0`, so the OS assigns the port). TCP and QUIC-v1 both use that port.
+- **REST API**: `indexer.api_listen_address` (default: `127.0.0.1:18300`)
+- **Web UI**: `indexer.web_ui_address` (default: `127.0.0.1:15000`)
+- **Prometheus**: `indexer.metrics_listen_address` (default: `127.0.0.1:18302`), only when the indexer is built with the `metrics` feature (on by default)
 
 ## Security Considerations
 

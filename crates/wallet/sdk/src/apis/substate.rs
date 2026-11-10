@@ -251,9 +251,8 @@ where
                         },
                         SubstateValue::ValidatorFeePool(_) => {
                             let resx_addr = SubstateId::Resource(TARI_TOKEN);
-                            if substate_ids.contains(&resx_addr) {
-                                continue;
-                            }
+                            self.insert_substate_if_absent(&resx_addr, unversioned, &mut substate_ids)
+                                .await?;
                         },
                         SubstateValue::ClaimedOutputTombstone(_) => {},
                         SubstateValue::Template(_) => {},

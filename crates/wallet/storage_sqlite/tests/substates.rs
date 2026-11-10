@@ -5,7 +5,13 @@ use std::{collections::HashSet, str::FromStr};
 
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{SubstateVersion, VersionedSubstateIdRef, optional::Optional};
-use tari_ootle_wallet_sdk::storage::{CommittableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore};
+use tari_ootle_wallet_sdk::storage::{
+    CommittableStore,
+    ReadableWalletStore,
+    WalletStoreReader,
+    WalletStoreWriter,
+    WriteableWalletStore,
+};
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 
 #[test]
@@ -39,6 +45,8 @@ fn get_and_insert_substates() {
     .unwrap();
 
     tx.commit().unwrap();
+
+    let mut tx = db.create_read_tx().unwrap();
 
     let returned = tx.substates_get(&address).unwrap();
     assert!(returned.parent_address.is_none());

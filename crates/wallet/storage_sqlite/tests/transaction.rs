@@ -12,7 +12,7 @@ use tari_ootle_common_types::{Epoch, optional::Optional};
 use tari_ootle_transaction::{Transaction, TransactionId, args};
 use tari_ootle_wallet_sdk::{
     models::{KeyBranch, KeyId, TransactionStatus},
-    storage::{CommittableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
+    storage::{CommittableStore, ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_lib_types::ComponentAddress;
@@ -70,6 +70,8 @@ fn get_and_insert_transaction() {
     tx.transactions_insert(&transaction, None, &[], false).unwrap();
     tx.commit().unwrap();
 
+    let mut tx = db.create_read_tx().unwrap();
+
     let returned = tx.transactions_get(tx_id).unwrap();
     // Transaction was not malleated in the database
     assert!(returned.transaction.verify_all_signatures());
@@ -111,6 +113,8 @@ fn fetch_all_filters_by_linked_account() {
     tx.transactions_insert(&tx3, None, &[account_b], false).unwrap();
 
     tx.commit().unwrap();
+
+    let mut tx = db.create_read_tx().unwrap();
 
     // No account filter -> all transactions.
     let all = tx.transactions_fetch_all(None, None).unwrap();
@@ -160,6 +164,8 @@ fn unknown_linked_accounts_are_ignored() {
     tx.transactions_insert(&transaction, None, &[known, unknown], false)
         .unwrap();
     tx.commit().unwrap();
+
+    let mut tx = db.create_read_tx().unwrap();
 
     let by_known: Vec<_> = tx.transactions_fetch_all(None, Some(known)).unwrap();
     assert_eq!(by_known.len(), 1);

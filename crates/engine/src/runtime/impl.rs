@@ -54,7 +54,7 @@ use tari_ootle_transaction::{
     ResourceAddressRef,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
 };
-use tari_template_abi::{FunctionDef, FunctionKind, TemplateDef, Type};
+use tari_template_abi::{FunctionDef, FunctionKind, TemplateDef, Type, WellKnownType};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, is_builtin_template_address};
 use tari_template_lib::{
     SpendContext,
@@ -855,20 +855,26 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
 
-        if !matches!(
-            func.arguments.first().expect("length checked").arg_type.other(),
-            Some("ResourceAuthAction")
-        ) {
+        if !func
+            .arguments
+            .first()
+            .expect("length checked")
+            .arg_type
+            .is_well_known(WellKnownType::ResourceAuthAction)
+        {
             return Err(RuntimeError::InvalidArgument {
                 argument,
                 reason: format!("Authorize hook '{}' must take a ResourceAuthAction as argument 1", hook),
             });
         }
 
-        if !matches!(
-            func.arguments.get(1).expect("length checked").arg_type.other(),
-            Some("AuthHookCaller")
-        ) {
+        if !func
+            .arguments
+            .get(1)
+            .expect("length checked")
+            .arg_type
+            .is_well_known(WellKnownType::AuthHookCaller)
+        {
             return Err(RuntimeError::InvalidArgument {
                 argument,
                 reason: format!("Authorize hook '{}' must take an AuthHookCaller as argument 2", hook),
@@ -901,7 +907,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
         match func.arguments.last() {
-            Some(arg) if arg.arg_type.other() == Some("SpendContext") => Ok(()),
+            Some(arg) if arg.arg_type.is_well_known(WellKnownType::SpendContext) => Ok(()),
             _ => Err(RuntimeError::InvalidArgument {
                 argument: "TemplateFunction",
                 reason: format!(
@@ -1581,13 +1587,25 @@ where
                             reason: "GetState component action requires a component address".to_string(),
                         })?;
                 args.assert_no_args("ComponentAction::GetState")?;
-                self.tracker.write_with(|state| {
-                    let is_already_locked = state
-                        .current_call_scope()?
+                let is_already_locked = self.tracker.read_with(|state| {
+                    let scope = state.current_call_scope()?;
+                    let is_already_locked = scope
                         .get_current_component_lock()
-                        .map(|l| *l.substate_id() == component_address)
-                        .unwrap_or(false);
+                        .is_some_and(|l| *l.substate_id() == component_address);
+                    if !is_already_locked {
+                        let substate_id = SubstateId::Component(component_address);
+                        if !scope.is_substate_in_scope(&substate_id) {
+                            return Err(RuntimeError::SubstateOutOfScope { id: substate_id });
+                        }
+                    }
+                    Ok::<_, RuntimeError>(is_already_locked)
+                })?;
 
+                if !is_already_locked {
+                    self.charge_component_load(component_address)?;
+                }
+
+                self.tracker.write_with(|state| {
                     let component_lock = if is_already_locked {
                         state
                             .current_call_scope()?
@@ -4122,6 +4140,24 @@ where
     }
 
     fn update_component_template(&self, new_template: TemplateAddress) -> Result<(), RuntimeError> {
+        let access_rules = self.tracker.read_with(|state| {
+            let locked = state
+                .current_call_scope()?
+                .get_current_component_lock()
+                .ok_or_else(|| RuntimeError::InvariantError {
+                    function: "update_component_template",
+                    details: "No current component lock in call scope".to_string(),
+                })?;
+            Ok::<_, RuntimeError>(state.get_component(locked)?.access_rules().clone())
+        })?;
+        // A method rule that the new template lacks would be lost silently, and a later template that re-adds the
+        // method would put it under the component's default rule. The developer keeps the rule by leaving a stub
+        // method in the new template, or by setting the access rules under the current template before upgrading.
+        if access_rules.num_access_rules() > 0 {
+            let template_def = self.get_template_def(&new_template)?;
+            validate_component_access_rule_methods(&access_rules, &template_def)?;
+        }
+
         self.tracker.write_with(|state_mut| {
             let locked = state_mut
                 .current_call_scope()?
@@ -4377,6 +4413,11 @@ where
                         })?;
                     let bucket = state_mut.take_bucket(input_bucket)?;
                     Self::check_bucket_is_unlocked("pay a fee from", input_bucket, &bucket)?;
+
+                    // An empty Tari bucket pays nothing: consume it and record no fee payment.
+                    if *bucket.resource_address() == TARI_TOKEN && bucket.unlocked_amount().is_zero() {
+                        return Ok(());
+                    }
 
                     // No refunds
                     state_mut.pay_fee(bucket.take_all(), None)?;
@@ -4645,8 +4686,9 @@ mod tests {
         type Error = std::convert::Infallible;
         type Template = LoadedTemplate;
 
-        fn get_template(&self, _id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
-            Ok(None)
+        fn get_template(&self, id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
+            Ok(tari_template_builtin::try_get_template_builtin(id)
+                .map(|code| crate::wasm::WasmModule::load_template_from_code(code).unwrap()))
         }
     }
 
@@ -5005,6 +5047,54 @@ mod tests {
         ));
     }
 
+    fn pay_fee_from_new_bucket(
+        runtime: &RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        workspace_id: WorkspaceId,
+        container: ResourceContainer,
+    ) -> (BucketId, Result<(), RuntimeError>) {
+        let bucket_id = runtime.tracker.write_with(|state| {
+            let bucket_id = state.new_bucket_id().unwrap();
+            state.new_bucket(bucket_id, container).unwrap();
+            bucket_id
+        });
+        runtime
+            .put_on_workspace(workspace_id, IndexedValue::from_type(&bucket_id).unwrap())
+            .unwrap();
+        let result = runtime.pay_fee(PayFee::FromBucket {
+            bucket: WorkspaceOffsetId::new(workspace_id),
+        });
+        (bucket_id, result)
+    }
+
+    #[test]
+    fn pay_fee_from_an_empty_tari_bucket_consumes_it_and_records_no_payment() {
+        let runtime = runtime_with_blobs(Blobs::default());
+
+        let (bucket_id, result) =
+            pay_fee_from_new_bucket(&runtime, 0, ResourceContainer::stealth(TARI_TOKEN, Amount::zero()));
+        result.unwrap();
+        assert_eq!(runtime.tracker.total_fee_payments(), 0);
+        assert!(runtime.tracker.read_with(|state| state.get_bucket(bucket_id).is_err()));
+
+        let (_, result) = pay_fee_from_new_bucket(&runtime, 1, ResourceContainer::stealth(TARI_TOKEN, Amount::new(7)));
+        result.unwrap();
+        assert_eq!(runtime.tracker.total_fee_payments(), 7);
+    }
+
+    #[test]
+    fn pay_fee_from_an_empty_non_tari_bucket_is_rejected() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let other_resource = ResourceAddress::new([9u8; 32].into());
+
+        let (_, result) = pay_fee_from_new_bucket(
+            &runtime,
+            0,
+            ResourceContainer::public_fungible(other_resource, Amount::zero()),
+        );
+        assert!(matches!(result, Err(RuntimeError::InvalidArgument { .. })));
+        assert_eq!(runtime.tracker.total_fee_payments(), 0);
+    }
+
     fn create_test_component(
         runtime: &RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
         template_address: TemplateAddress,
@@ -5131,6 +5221,227 @@ mod tests {
             .unwrap();
         let actual_migrated: TemplateAddress = migrated_res.decode().unwrap();
         assert_eq!(actual_migrated, migrated_template);
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn component_get_state_enforces_call_scope_and_charges_component_load() {
+        use tari_engine_types::limits::component_load_points;
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let template_address = TemplateAddress::from_array([11u8; 32]);
+        let entity_id = EntityId::default();
+
+        let caller_component = create_test_component(&runtime, template_address, "Caller", entity_id);
+
+        // Create a target component with a non-trivial state payload.
+        let payload: Vec<u64> = (0..64).collect();
+        let target_state = tari_bor::to_value(&payload).unwrap();
+        let counted = target_state
+            .count_items_bounded(u64::MAX, IndexedWellKnownTypes::indexes_tag)
+            .unwrap();
+        let expected_load_points = component_load_points(counted.items, counted.counted_tags);
+        assert!(expected_load_points > 0);
+
+        let target_entity = EntityId::new([2u8; EntityId::LENGTH]);
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address,
+                    module_name: "Target".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id: target_entity,
+                },
+                None,
+            )
+            .unwrap();
+        let target_component = runtime
+            .tracker
+            .new_component(
+                target_state.clone(),
+                SubstateOwnerRule::None,
+                ComponentAccessRules::new(),
+                None,
+                UpdateRule::Locked,
+            )
+            .unwrap();
+        runtime
+            .pop_call_frame(
+                &IndexedWellKnownTypes::from_value(&tari_bor::to_value(&target_component).unwrap()).unwrap(),
+            )
+            .unwrap();
+
+        // Push a frame for `caller_component` WITHOUT `target_component` in scope.
+        let caller_lock = runtime.lock_component(caller_component, LockFlag::Write).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address,
+                    module_name: "Caller".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: caller_lock,
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+
+        let points_before = runtime.native_points_consumed();
+        let err = runtime
+            .component_invoke(
+                ComponentRef::Ref(target_component),
+                ComponentAction::GetState,
+                EngineArgs::default(),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            RuntimeError::SubstateOutOfScope { id } if id == SubstateId::Component(target_component)
+        ));
+        assert_eq!(runtime.native_points_consumed(), points_before);
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+
+        // Push a frame for `caller_component` WITH `target_component` in `arg_scope`.
+        let caller_lock = runtime.lock_component(caller_component, LockFlag::Write).unwrap();
+        let arg_scope = IndexedWellKnownTypes::from_value(&tari_bor::to_value(&target_component).unwrap()).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address,
+                    module_name: "Caller".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: caller_lock,
+                    arg_scope: Box::new(arg_scope),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+
+        let points_before = runtime.native_points_consumed();
+        let res = runtime
+            .component_invoke(
+                ComponentRef::Ref(target_component),
+                ComponentAction::GetState,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let decoded_state: tari_bor::Value = res.decode().unwrap();
+        assert_eq!(decoded_state, target_state);
+        assert_eq!(runtime.native_points_consumed() - points_before, expected_load_points);
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    fn create_account_component_with_method_rules(
+        runtime: &RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        entity_id: EntityId,
+        access_rules: ComponentAccessRules,
+    ) -> ComponentAddress {
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address: ACCOUNT_TEMPLATE_ADDRESS,
+                    module_name: "Account".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+        let component_address = runtime
+            .tracker
+            .new_component(
+                tari_bor::Value::Null,
+                SubstateOwnerRule::None,
+                access_rules,
+                None,
+                UpdateRule::AccessRule(AccessRule::AllowAll),
+            )
+            .unwrap();
+        runtime
+            .pop_call_frame(
+                &IndexedWellKnownTypes::from_value(&tari_bor::to_value(&component_address).unwrap()).unwrap(),
+            )
+            .unwrap();
+        component_address
+    }
+
+    fn push_nft_faucet_migration_frame(
+        runtime: &RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        entity_id: EntityId,
+        component_address: ComponentAddress,
+    ) -> LockedSubstate {
+        let migration_lock = runtime.lock_component(component_address, LockFlag::Write).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::MigrationContext {
+                    template_address: NFT_FAUCET_TEMPLATE_ADDRESS,
+                    module_name: "NftFaucet".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: migration_lock.clone(),
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+        migration_lock
+    }
+
+    #[test]
+    fn update_component_template_rejects_method_rules_absent_from_new_template() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let entity_id = EntityId::default();
+
+        // `"balance"` exists on `Account` and is absent from `NftFaucet`; `"mint"` exists on `NftFaucet`.
+        let access_rules = ComponentAccessRules::new()
+            .add_method_rule("balance", AccessRule::DenyAll)
+            .add_method_rule("mint", AccessRule::AllowAll);
+        let component_address = create_account_component_with_method_rules(&runtime, entity_id, access_rules.clone());
+        let migration_lock = push_nft_faucet_migration_frame(&runtime, entity_id, component_address);
+
+        let err = runtime
+            .update_component_template(NFT_FAUCET_TEMPLATE_ADDRESS)
+            .unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                RuntimeError::InvalidMethodAccessRule { details, .. } if details.contains("'balance'")
+            ),
+            "unexpected error: {err:?}"
+        );
+        runtime
+            .tracker
+            .read_with(|state| {
+                let component = state.get_component(&migration_lock).unwrap();
+                assert_eq!(*component.template_address(), ACCOUNT_TEMPLATE_ADDRESS);
+                assert_eq!(*component.access_rules(), access_rules);
+                Ok::<_, RuntimeError>(())
+            })
+            .unwrap();
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn update_component_template_keeps_method_rules_present_on_new_template() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let entity_id = EntityId::default();
+
+        let access_rules = ComponentAccessRules::new().add_method_rule("mint", AccessRule::DenyAll);
+        let component_address = create_account_component_with_method_rules(&runtime, entity_id, access_rules.clone());
+        let migration_lock = push_nft_faucet_migration_frame(&runtime, entity_id, component_address);
+
+        runtime.update_component_template(NFT_FAUCET_TEMPLATE_ADDRESS).unwrap();
+        runtime
+            .tracker
+            .read_with(|state| {
+                let component = state.get_component(&migration_lock).unwrap();
+                assert_eq!(*component.template_address(), NFT_FAUCET_TEMPLATE_ADDRESS);
+                assert_eq!(*component.access_rules(), access_rules);
+                Ok::<_, RuntimeError>(())
+            })
+            .unwrap();
         runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
     }
 }

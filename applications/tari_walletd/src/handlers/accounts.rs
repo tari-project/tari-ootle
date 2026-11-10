@@ -50,6 +50,7 @@ use tari_ootle_wallet_sdk::{
         stealth_transfer::{StealthTransferApiError, StealthTransferParams, TransferOutput, TransferStatementSpec},
         substate::{SubstateApiError, ValidatorScanResult},
         transaction::TransactionApiError,
+        validator_set::ValidatorSetApiError,
     },
     models::{
         AccountWithAddress,
@@ -1910,7 +1911,7 @@ impl DeclaredInputPricing {
     const UNPROVEN_READ_RETRY_WINDOW: Duration = Duration::from_secs(30);
 
     /// Reads the substates `ids` names from the network, and the layout the latest end-of-epoch
-    /// checkpoints describe, one per shard group (see [`committees_of_checkpoint_layout`]).
+    /// checkpoints describe, one per shard group (see [`latest_checkpoint_layout`]).
     async fn fetch<I: IntoIterator<Item = SubstateId>>(sdk: &WalletSdk, ids: I) -> Result<Self, anyhow::Error> {
         let ids = ids.into_iter().collect::<HashSet<_>>().into_iter().collect::<Vec<_>>();
         let started = tokio::time::Instant::now();
@@ -1936,13 +1937,7 @@ impl DeclaredInputPricing {
             .collect();
 
         let num_preshards = NumPreshards::current();
-        let checkpoints = sdk.get_network_interface().get_latest_shard_group_checkpoints().await?;
-        let num_committees = committees_of_checkpoint_layout(
-            num_preshards,
-            checkpoints
-                .iter()
-                .map(|checkpoint| (checkpoint.epoch, checkpoint.shard_group)),
-        );
+        let num_committees = committees_of_checkpoint_layout(num_preshards, latest_checkpoint_layout(sdk).await?);
         Ok(Self {
             value_bytes,
             num_preshards,
@@ -1965,6 +1960,33 @@ impl DeclaredInputPricing {
             input_bytes,
             transaction.input_fanout(self.num_preshards, self.num_committees),
         )
+    }
+}
+
+/// The epoch and shard group of the latest end-of-epoch checkpoint of every shard group, in shard
+/// order. A verifying wallet takes only checkpoints it verified as the network's latest, and none
+/// while it cannot verify them, as in the epoch it anchors in: no layout prices the input fanout
+/// from above (see [`committees_of_checkpoint_layout`]).
+async fn latest_checkpoint_layout(sdk: &WalletSdk) -> Result<Vec<(Epoch, ShardGroup)>, anyhow::Error> {
+    if !sdk.sdk_config().indexer_trust.is_verify() {
+        return Ok(sdk
+            .get_network_interface()
+            .get_latest_shard_group_checkpoints()
+            .await?
+            .into_iter()
+            .map(|checkpoint| (checkpoint.epoch, checkpoint.shard_group))
+            .collect());
+    }
+    match sdk.validator_set_api().verified_checkpoint_layout().await {
+        Ok(layout) => Ok(layout),
+        Err(ValidatorSetApiError::StoreError(err)) => Err(err.into()),
+        Err(err) => {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️ No verified checkpoint layout to price the input fanout by: {err}. Pricing one committee per shard."
+            );
+            Ok(vec![])
+        },
     }
 }
 
@@ -3864,6 +3886,7 @@ mod claim_burn_fee_tests {
     };
     use tari_ootle_address::Network;
     use tari_ootle_common_types::base_layer_hashing::ownership_proof_hasher64;
+    use tari_ootle_light_client::test_fixtures::{ValidatorSetFixture, high, low};
     use tari_ootle_transaction::Instruction;
     use tari_ootle_wallet_sdk::{
         IndexerTrust,
@@ -3877,7 +3900,10 @@ mod claim_burn_fee_tests {
     use tari_utilities::SafePassword;
 
     use super::*;
-    use crate::WalletSdk;
+    use crate::{
+        WalletSdk,
+        handlers::test_support::{FakeIndexer, TestDaemon, checkpoint_signed_by, handover_checkpoint},
+    };
 
     /// What the burn being claimed is worth.
     const CLAIMED_VALUE: u64 = 5_000_000_000;
@@ -4034,6 +4060,75 @@ mod claim_burn_fee_tests {
                 "{layout:?}"
             );
         }
+    }
+
+    async fn priced_committees(daemon: &TestDaemon) -> u32 {
+        DeclaredInputPricing::fetch(daemon.context.wallet_sdk(), [])
+            .await
+            .unwrap()
+            .num_committees
+    }
+
+    async fn checkpoint_layout(daemon: &TestDaemon) -> Vec<(Epoch, ShardGroup)> {
+        latest_checkpoint_layout(daemon.context.wallet_sdk()).await.unwrap()
+    }
+
+    /// In the epoch a verifying wallet anchors in, it trusts no validator set that the latest checkpoints can be
+    /// verified against.
+    #[tokio::test]
+    async fn a_verifying_wallet_prices_one_committee_per_shard_in_the_epoch_it_anchors_in() {
+        let indexer = FakeIndexer::spawn().await;
+        indexer.end_epoch(&ValidatorSetFixture::new(1), &ValidatorSetFixture::new(2));
+        let daemon = TestDaemon::start_with_indexer(&indexer, IndexerTrust::Verify).await;
+        daemon.context.wallet_sdk().validator_set_api().sync().await.unwrap();
+
+        assert_eq!(checkpoint_layout(&daemon).await, vec![]);
+        assert_eq!(priced_committees(&daemon).await, NumPreshards::current().as_u32());
+    }
+
+    #[tokio::test]
+    async fn a_verifying_wallet_takes_only_the_checkpoint_layout_it_verifies() {
+        let sets = [1, 2, 3].map(ValidatorSetFixture::new);
+        let indexer = FakeIndexer::spawn().await;
+        indexer.end_epoch(&sets[0], &sets[1]);
+        let daemon = TestDaemon::start_with_indexer(&indexer, IndexerTrust::Verify).await;
+        daemon.context.wallet_sdk().validator_set_api().sync().await.unwrap();
+
+        indexer.end_epoch(&sets[1], &sets[2]);
+        let low_checkpoint = handover_checkpoint(low(), &sets[1], &sets[2]);
+        indexer.list_shard_group_checkpoints(vec![
+            low_checkpoint.clone(),
+            checkpoint_signed_by(high(), &sets[1], &sets[2], &sets[0].high),
+        ]);
+        assert_eq!(
+            checkpoint_layout(&daemon).await,
+            vec![],
+            "a checkpoint that another committee signed"
+        );
+
+        indexer.list_shard_group_checkpoints(vec![low_checkpoint, handover_checkpoint(high(), &sets[1], &sets[2])]);
+        assert_eq!(checkpoint_layout(&daemon).await, vec![
+            (Epoch(2), low()),
+            (Epoch(2), high())
+        ]);
+    }
+
+    /// A trusting wallet takes the layout the indexer lists as it is.
+    #[tokio::test]
+    async fn a_trusting_wallet_takes_the_listed_checkpoint_layout() {
+        let sets = [1, 2, 3].map(ValidatorSetFixture::new);
+        let indexer = FakeIndexer::spawn().await;
+        indexer.end_epoch(&sets[0], &sets[1]);
+        indexer.list_shard_group_checkpoints(vec![
+            handover_checkpoint(low(), &sets[0], &sets[1]),
+            checkpoint_signed_by(high(), &sets[0], &sets[1], &sets[2].high),
+        ]);
+        let daemon = TestDaemon::start_with_indexer(&indexer, IndexerTrust::Trust).await;
+
+        assert_eq!(checkpoint_layout(&daemon).await, vec![
+            (Epoch(1), low()),
+            (Epoch(1), high())
+        ]);
     }
 
     /// Prices the TARI resource every claim declares at a nominal size, on a network of two shard

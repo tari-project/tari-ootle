@@ -88,6 +88,7 @@ use crate::{
     hotstuff::{
         block_change_set::ProposedBlockChangeSet,
         command_derivation::pin_new_transaction,
+        command_sequencer::{BlockTotals, CommandSequencer},
         substate_store::PendingSubstateStore,
         transaction_manager::{
             ConsensusTransactionManager,
@@ -523,6 +524,7 @@ impl Replica {
                 let mut change_set = ProposedBlockChangeSet::new(block.as_leaf());
                 before(&mut change_set);
                 let mut evaluation = Evaluation::default();
+                let mut totals = BlockTotals::default();
                 for command in commands {
                     evaluation.no_vote = match command {
                         Command::LocalOnly(atom) => validator.evaluate_local_only_command(
@@ -532,8 +534,7 @@ impl Replica {
                             &self.committee,
                             &mut substate_store,
                             &mut change_set,
-                            &mut evaluation.total_leader_fee,
-                            &mut evaluation.total_exhaust_burn,
+                            &mut totals,
                         ),
                         Command::LocalPrepare(atom) => validator.evaluate_local_prepare_command(
                             tx,
@@ -542,6 +543,7 @@ impl Replica {
                             &self.committee,
                             &mut substate_store,
                             &mut change_set,
+                            &mut totals,
                         ),
                         Command::LocalAccept(atom) => validator.evaluate_local_accept_command(
                             tx,
@@ -551,6 +553,7 @@ impl Replica {
                             next_epoch_changes_layout,
                             &mut substate_store,
                             &mut change_set,
+                            &mut totals,
                         ),
                         Command::AllAccept(atom) => validator.evaluate_all_accept_command(
                             tx,
@@ -559,15 +562,22 @@ impl Replica {
                             &self.committee,
                             &mut substate_store,
                             &mut change_set,
-                            &mut evaluation.total_leader_fee,
-                            &mut evaluation.total_exhaust_burn,
+                            &mut totals,
                         ),
-                        Command::SomeAccept(atom) => {
-                            validator.evaluate_some_accept_command(tx, block, atom, &substate_store, &mut change_set)
-                        },
+                        Command::SomeAccept(atom) => validator.evaluate_some_accept_command(
+                            tx,
+                            block,
+                            atom,
+                            &self.committee,
+                            &mut substate_store,
+                            &mut change_set,
+                            &mut totals,
+                        ),
                         command => panic!("unsupported command {command}"),
                     }
                     .unwrap();
+                    evaluation.total_leader_fee = totals.leader_fee;
+                    evaluation.total_exhaust_burn = totals.exhaust_burn;
                     if evaluation.no_vote.is_some() {
                         break;
                     }
@@ -627,6 +637,7 @@ impl Replica {
                             &self.committee,
                             &mut substate_store,
                             &mut change_set,
+                            &mut BlockTotals::default(),
                         ),
                         atom,
                     ),
@@ -639,6 +650,7 @@ impl Replica {
                             false,
                             &mut substate_store,
                             &mut change_set,
+                            &mut BlockTotals::default(),
                         ),
                         atom,
                     ),
@@ -2130,7 +2142,62 @@ fn prepared_cross_shard_creating_an_existing_output() -> (Replica, TransactionPo
 
 mod local_accept_from_local_prepared {
     use super::*;
-    use crate::hotstuff::on_propose::propose_local_accept_transaction;
+
+    /// What the proposer leaves behind when it sequences a LocalPrepared transaction in the candidate block.
+    struct ProposedLocalAccept {
+        command: Option<Command>,
+        pledge_bytes: usize,
+        new_locks: Vec<String>,
+    }
+
+    /// The LocalAccept the proposer sequences for `rec` in the candidate block, with a block pledge budget of
+    /// `max_pledge_bytes`.
+    fn propose_local_accept(
+        replica: &Replica,
+        rec: TransactionPoolRecord,
+        max_pledge_bytes: usize,
+    ) -> ProposedLocalAccept {
+        replica
+            .store
+            .with_read_tx(|tx| {
+                let mut substate_store = PendingSubstateStore::init(tx, replica.candidate.as_leaf(), NUM_PRESHARDS)?
+                    .with_pledge_budget(max_pledge_bytes);
+                let mut change_set = ProposedBlockChangeSet::new(replica.candidate.as_leaf());
+                let sequencer = CommandSequencer::for_proposal(
+                    &replica.manager,
+                    &replica.committee,
+                    replica.candidate.as_leaf(),
+                    replica.candidate.epoch(),
+                    replica.candidate.to_locked_epoch(),
+                    usize::MAX,
+                );
+                let transaction_id = *rec.id();
+                let command = match sequencer
+                    .sequence(rec, false, &mut substate_store, &change_set)
+                    .unwrap()
+                {
+                    Ok(derived) => Some(
+                        sequencer
+                            .commit(derived, &mut change_set, &mut BlockTotals::default())
+                            .unwrap(),
+                    ),
+                    Err(_) => {
+                        substate_store.release_new_locks(&transaction_id);
+                        None
+                    },
+                };
+                Ok::<_, StorageError>(ProposedLocalAccept {
+                    command,
+                    pledge_bytes: substate_store.pledge_bytes(),
+                    new_locks: substate_store
+                        .new_locks()
+                        .iter()
+                        .map(|lock| format!("{lock:?}"))
+                        .collect(),
+                })
+            })
+            .unwrap()
+    }
 
     fn evaluate_accept(replica: &Replica, rec: TransactionPoolRecord, atom: MultiShardAtom) -> Evaluation {
         replica.evaluate_after(&[Command::LocalAccept(atom)], |change_set| {
@@ -2412,28 +2479,10 @@ mod local_accept_from_local_prepared {
             .set_prepare_qc(PcId::zero());
         ready_rec.set_ready(true);
 
-        let proposed = replica
-            .store
-            .with_read_tx(|tx| {
-                let mut substate_store = PendingSubstateStore::init(tx, replica.candidate.as_leaf(), NUM_PRESHARDS)?;
-                let change_set = ProposedBlockChangeSet::new(replica.candidate.as_leaf());
-                let mut executed = HashMap::new();
-                let command = propose_local_accept_transaction(
-                    &replica.manager,
-                    &replica.candidate.as_leaf(),
-                    &replica.committee,
-                    &change_set,
-                    ready_rec.clone(),
-                    &mut substate_store,
-                    &mut executed,
-                )
-                .unwrap()
-                .expect("proposes an aborting LocalAccept");
-                assert_eq!(substate_store.pledge_bytes(), 0);
-                assert!(substate_store.new_locks().is_empty());
-                Ok::<_, StorageError>(command)
-            })
-            .unwrap();
+        let proposal = propose_local_accept(&replica, ready_rec.clone(), usize::MAX);
+        assert_eq!(proposal.pledge_bytes, 0);
+        assert!(proposal.new_locks.is_empty(), "{:?}", proposal.new_locks);
+        let proposed = proposal.command.expect("proposes an aborting LocalAccept");
 
         let evaluation = replica.evaluate_after(&[proposed], |change_set| {
             change_set.set_next_transaction_update(ready_rec).unwrap();
@@ -2463,33 +2512,14 @@ mod local_accept_from_local_prepared {
             .set_prepare_qc(PcId::zero());
         ready_rec.set_ready(true);
 
-        replica
-            .store
-            .with_read_tx(|tx| {
-                let mut substate_store =
-                    PendingSubstateStore::init(tx, replica.candidate.as_leaf(), NUM_PRESHARDS)?.with_pledge_budget(0);
-                let change_set = ProposedBlockChangeSet::new(replica.candidate.as_leaf());
-                let mut executed = HashMap::new();
-                let command = propose_local_accept_transaction(
-                    &replica.manager,
-                    &replica.candidate.as_leaf(),
-                    &replica.committee,
-                    &change_set,
-                    ready_rec,
-                    &mut substate_store,
-                    &mut executed,
-                )
-                .unwrap();
-                assert!(command.is_none(), "expected deferral, got {command:?}");
-                assert_eq!(substate_store.pledge_bytes(), 0);
-                assert!(
-                    substate_store.new_locks().is_empty(),
-                    "{:?}",
-                    substate_store.new_locks()
-                );
-                Ok::<_, StorageError>(())
-            })
-            .unwrap();
+        let proposal = propose_local_accept(&replica, ready_rec, 0);
+        assert!(
+            proposal.command.is_none(),
+            "expected deferral, got {:?}",
+            proposal.command
+        );
+        assert_eq!(proposal.pledge_bytes, 0);
+        assert!(proposal.new_locks.is_empty(), "{:?}", proposal.new_locks);
     }
 }
 
@@ -2763,6 +2793,31 @@ mod some_accept {
         });
 
         assert_voted(&evaluation, TransactionPoolStage::SomeAccepted, false);
+    }
+
+    #[test]
+    fn an_all_accept_for_an_aborted_transaction_reports_the_local_abort_decision() {
+        let (replica, rec) = aborted_after_local_accept();
+        let atom = MultiShardAtom {
+            decision: Decision::Commit,
+            ..rec.get_current_multi_shard_atom().unwrap()
+        };
+
+        let evaluation = replica.evaluate_after(&[Command::AllAccept(atom)], |change_set| {
+            change_set.set_next_transaction_update(rec).unwrap();
+        });
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::DecisionDisagreement {
+                    local: Decision::Abort(AbortReason::ExecutionFailure),
+                    remote: Decision::Commit,
+                })
+            ),
+            "{:?}",
+            evaluation.no_vote
+        );
     }
 
     #[test]

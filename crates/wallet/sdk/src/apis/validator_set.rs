@@ -327,6 +327,49 @@ where
     pub async fn verified_shard_state_versions(
         &self,
     ) -> Result<HashMap<Shard, CheckpointStateVersion>, ValidatorSetApiError> {
+        let verified = self.verified_shard_groups().await?;
+        let versions = verified
+            .values()
+            .flat_map(|group| {
+                group.versions.iter().map(|&(shard, state_version)| {
+                    (shard, CheckpointStateVersion {
+                        epoch: group.epoch,
+                        state_version,
+                    })
+                })
+            })
+            .collect();
+        Ok(versions)
+    }
+
+    /// The epoch and shard group of the latest end-of-epoch checkpoint of every shard group, in shard order. Each
+    /// checkpoint is verified as [`Self::verified_shard_state_versions`] verifies it, and ends the epoch whose
+    /// checkpoint named the latest validator set the wallet trusts, or a later one.
+    ///
+    /// Empty before the network has ended an epoch.
+    pub async fn verified_checkpoint_layout(&self) -> Result<Vec<(Epoch, ShardGroup)>, ValidatorSetApiError> {
+        let verified = self.verified_shard_groups().await?;
+        let mut layout = verified
+            .into_iter()
+            .map(|(shard_group, group)| (group.epoch, shard_group))
+            .collect::<Vec<_>>();
+        layout.sort_by_key(|&(_, shard_group)| shard_group);
+        if let Some(trusted) = self.latest()? {
+            let latest_ended = trusted.epoch().saturating_sub(Epoch(1));
+            if let Some(&(epoch, shard_group)) = layout.iter().find(|&&(epoch, _)| epoch < latest_ended) {
+                return Err(ValidatorSetApiError::OutdatedLatestCheckpoint {
+                    shard_group,
+                    epoch,
+                    latest_ended,
+                });
+            }
+        }
+        Ok(layout)
+    }
+
+    async fn verified_shard_groups(
+        &self,
+    ) -> Result<HashMap<ShardGroup, VerifiedShardGroupVersions>, ValidatorSetApiError> {
         let trusted = match self.latest()? {
             Some(trusted) => trusted,
             None => self.sync().await?,
@@ -353,19 +396,8 @@ where
             };
             verified.insert(entry.shard_group, group_versions);
         }
-        let versions = verified
-            .values()
-            .flat_map(|group| {
-                group.versions.iter().map(|&(shard, state_version)| {
-                    (shard, CheckpointStateVersion {
-                        epoch: group.epoch,
-                        state_version,
-                    })
-                })
-            })
-            .collect();
-        self.shared.cache_shard_group_versions(verified);
-        Ok(versions)
+        self.shared.cache_shard_group_versions(verified.clone());
+        Ok(verified)
     }
 
     /// The state versions that `entry`, the latest checkpoint the indexer lists for its shard group, commits, once it
@@ -662,6 +694,15 @@ pub enum ValidatorSetApiError {
          have"
     )]
     CheckpointOfShardsOutsideNetwork { shard_group: ShardGroup },
+    #[error(
+        "The indexer listed the checkpoint ending {epoch} as the latest checkpoint of shard group {shard_group}, but \
+         the network has ended {latest_ended}"
+    )]
+    OutdatedLatestCheckpoint {
+        shard_group: ShardGroup,
+        epoch: Epoch,
+        latest_ended: Epoch,
+    },
 }
 
 impl ValidatorSetApiError {

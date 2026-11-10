@@ -1194,8 +1194,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         let values = (
             vaults::account_id.eq(account_id),
             vaults::address.eq(vault.id.to_string()),
-            vaults::vault_version.eq(i64::try_from(vault.vault_version.as_u64())
-                .map_err(|e| WalletStorageError::bad_query("vaults_insert", format!("invalid vault version: {e}")))?),
+            vaults::vault_version.eq(vault.vault_version.as_u64() as i64),
             vaults::revealed_balance.eq(vault.revealed_balance.to_string()),
             vaults::confidential_balance.eq(vault.confidential_balance.to_string()),
             vaults::resource_address.eq(vault.resource_address.to_string()),
@@ -1221,8 +1220,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         use crate::schema::vaults;
 
         let changeset = (
-            vaults::vault_version.eq(i64::try_from(vault_version.as_u64())
-                .map_err(|e| WalletStorageError::bad_query("vaults_update", format!("invalid vault version: {e}")))?),
+            vaults::vault_version.eq(vault_version.as_u64() as i64),
             vaults::revealed_balance.eq(revealed_balance.to_string()),
             vaults::confidential_balance.eq(confidential_balance.to_string()),
         );
@@ -1769,6 +1767,8 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     ) -> Result<ConfidentialOutputModel, WalletStorageError> {
         use crate::schema::{accounts, confidential_outputs, vaults};
 
+        self.ensure_lock_exists(lock_id)?;
+
         let vault_db_id = vaults::table
             .select(vaults::id)
             .filter(vaults::address.eq(vault_id.to_string()))
@@ -1937,20 +1937,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         let locked_output = stealth_outputs::table
             .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
             .filter(stealth_outputs::owner_account_id.eq(account_id))
-            .filter(
-                stealth_outputs::status
-                    .eq(OutputStatus::Unspent.as_key_str())
-                    // Allow locking a UTXO created within the transaction
-                    .or(stealth_outputs::status
-                        .eq(OutputStatus::LockedUnconfirmed.as_key_str())
-                        .and(stealth_outputs::lock_id.eq(lock_id))),
-            )
-            // We have the key to spend
-            .filter(stealth_outputs::owner_key_id.is_not_null())
-            // Rows stored before the Burnt status hold a burnt output as Unspent with is_burnt set.
-            .filter(stealth_outputs::is_burnt.eq(false))
-            .filter(stealth_outputs::is_frozen.eq(false))
-            .filter(stealth_outputs::is_condition_spendable.eq(true))
+            .filter(stealth_output_spendable_predicate(lock_id))
             // `value` is u64 stored in a signed BigInt column; values >= 2^63 wrap to negative.
             // Sort non-negatives first (small u64s ascending) then negatives (large u64s ascending) to recover u64 order.
             .order_by(dsl::sql::<diesel::sql_types::Integer>(
@@ -1983,43 +1970,6 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(output)
     }
 
-    fn stealth_outputs_lock_many(
-        &mut self,
-        resource_address: &ResourceAddress,
-        utxos: &[&PedersenCommitmentBytes],
-        lock_id: WalletLockId,
-    ) -> Result<(), WalletStorageError> {
-        const OPERATION: &str = "stealth_outputs_lock_many";
-        use crate::schema::stealth_outputs;
-
-        let num_rows = diesel::update(stealth_outputs::table)
-            .set((
-                stealth_outputs::status.eq(OutputStatus::LockedForSpend.as_key_str()),
-                stealth_outputs::lock_id.eq(lock_id),
-                stealth_outputs::locked_at.eq(dsl::now),
-            ))
-            .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
-            .filter(stealth_outputs::commitment.eq_any(utxos.iter().map(|id| serialize_hex(id.as_ref()))))
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-
-        if num_rows != utxos.len() {
-            return Err(WalletStorageError::NotFound {
-                operation: OPERATION,
-                entity: "stealth_output".to_string(),
-                key: format!(
-                    "{}/{} found: resource_address={}, utxos={}",
-                    num_rows,
-                    utxos.len(),
-                    resource_address,
-                    utxos.display()
-                ),
-            });
-        }
-
-        Ok(())
-    }
-
     fn stealth_outputs_lock_many_for_account(
         &mut self,
         account_address: &ComponentAddress,
@@ -2031,6 +1981,9 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         use crate::schema::{accounts, stealth_outputs};
 
         self.ensure_lock_exists(lock_id)?;
+        if utxos.is_empty() {
+            return Ok(());
+        }
 
         let account_id = accounts::table
             .select(accounts::id)
@@ -2038,8 +1991,35 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .first::<i32>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
+        let commitments: Vec<String> = utxos.iter().map(|id| serialize_hex(id.as_ref())).collect();
+        let resource_str = resource_address.to_string();
+
         // The `owner_account_id` filter is the account-scoping guard: caller-supplied commitments can only ever match
         // rows owned by this account, so a commitment belonging to another account is never locked here.
+        let matching_rows = stealth_outputs::table
+            .filter(stealth_outputs::owner_account_id.eq(account_id))
+            .filter(stealth_outputs::resource_address.eq(&resource_str))
+            .filter(stealth_outputs::commitment.eq_any(&commitments))
+            .filter(stealth_output_spendable_predicate(lock_id))
+            .count()
+            .get_result::<i64>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))? as usize;
+
+        if matching_rows != utxos.len() {
+            return Err(WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "stealth_output".to_string(),
+                key: format!(
+                    "{}/{} found: account={}, resource_address={}, utxos={}",
+                    matching_rows,
+                    utxos.len(),
+                    account_address,
+                    resource_address,
+                    utxos.display()
+                ),
+            });
+        }
+
         let num_rows = diesel::update(stealth_outputs::table)
             .set((
                 stealth_outputs::status.eq(OutputStatus::LockedForSpend.as_key_str()),
@@ -2047,8 +2027,9 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 stealth_outputs::locked_at.eq(dsl::now),
             ))
             .filter(stealth_outputs::owner_account_id.eq(account_id))
-            .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
-            .filter(stealth_outputs::commitment.eq_any(utxos.iter().map(|id| serialize_hex(id.as_ref()))))
+            .filter(stealth_outputs::resource_address.eq(&resource_str))
+            .filter(stealth_outputs::commitment.eq_any(&commitments))
+            .filter(stealth_output_spendable_predicate(lock_id))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
@@ -3658,4 +3639,34 @@ impl DerefMut for WriteTransaction<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.transaction
     }
+}
+
+pub(crate) fn stealth_output_spendable_predicate(
+    lock_id: WalletLockId,
+) -> Box<
+    dyn diesel::BoxableExpression<
+            crate::schema::stealth_outputs::table,
+            diesel::sqlite::Sqlite,
+            SqlType = diesel::sql_types::Nullable<diesel::sql_types::Bool>,
+        >,
+> {
+    use diesel::ExpressionMethods;
+
+    use crate::schema::stealth_outputs;
+
+    Box::new(
+        stealth_outputs::status
+            .eq(OutputStatus::Unspent.as_key_str())
+            .and(stealth_outputs::is_on_chain.eq(true))
+            // Allow spending/locking a UTXO created within the same transaction lock
+            .or(stealth_outputs::status
+                .eq(OutputStatus::LockedUnconfirmed.as_key_str())
+                .and(stealth_outputs::lock_id.eq(lock_id)))
+            // We have the key to spend
+            .and(stealth_outputs::owner_key_id.is_not_null())
+            // Rows stored before the Burnt status hold a burnt output as Unspent with is_burnt set.
+            .and(stealth_outputs::is_burnt.eq(false))
+            .and(stealth_outputs::is_frozen.eq(false))
+            .and(stealth_outputs::is_condition_spendable.eq(true)),
+    )
 }

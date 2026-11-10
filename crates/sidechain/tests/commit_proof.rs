@@ -561,3 +561,42 @@ fn every_current_protocol_version_uses_jmt_hash_scheme_v1() {
         assert_eq!(jmt_hash_scheme(protocol_version), JmtHashScheme::V1);
     }
 }
+
+#[test]
+fn it_rejects_a_qc_whose_epoch_differs_from_the_header_epoch() {
+    use tari_crypto::keys::SecretKey;
+    use tari_sidechain::{DecodedValidatorBlockSignature, PrivateKey, ValidatorBlockSignature};
+    use tari_utilities::ByteArray;
+
+    let mut proof = load_fixture::<SidechainBlockCommitProof>("commit_proof.json");
+    let Some(CommitProofElement::QuorumCertificate(qc)) = proof.proof_elements.first_mut() else {
+        panic!("commit_proof.json fixture must begin with a quorum certificate");
+    };
+    qc.epoch = proof.header.epoch + 1;
+    let block_id = qc.calculate_justified_block();
+    let message =
+        ProposalVoteMessage::new(qc.protocol_version, &block_id, qc.decision, qc.epoch, qc.height).calculate_hash();
+    let committee = fixture_committee();
+    let mut signers = (1..=4u8)
+        .map(|i| {
+            let index = committee.index_of(&validator_public_key(i)).unwrap();
+            (index, support::validator_secret(i))
+        })
+        .collect::<Vec<_>>();
+    signers.sort_by_key(|(index, _)| *index);
+    *schnorr_signatures(qc) = signers
+        .iter()
+        .map(|(_, secret)| {
+            let nonce_seed = [secret.as_bytes(), message.as_slice()].concat();
+            let nonce = PrivateKey::from_uniform_bytes(&nonce_seed).unwrap();
+            let sig = DecodedValidatorBlockSignature::sign_with_nonce_and_message(secret, nonce, message).unwrap();
+            ValidatorBlockSignature::new_from_schnorr(sig)
+        })
+        .collect();
+
+    let err = proof.validate_committed(FIXTURE_NETWORK, 4, &committee).unwrap_err();
+    assert!(
+        err.to_string().contains("Quorum certificate is for epoch"),
+        "Expected the QC epoch mismatch error, got: {err}"
+    );
+}

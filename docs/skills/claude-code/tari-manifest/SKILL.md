@@ -135,7 +135,7 @@ The wallet daemon exposes a JSON-RPC 2.0 API. All requests are POSTed to the `/j
 ### Step 1: Check Auth Method
 
 ```bash
-curl -s -X POST http://localhost:12008/json_rpc \
+curl -s -X POST http://127.0.0.1:5100/json_rpc \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"auth.method","params":{}}'
 ```
@@ -144,7 +144,7 @@ Response: `{"result":{"method":"none"}}` or `{"result":{"method":"webauthn"}}`.
 
 ### Step 2: Authenticate and Get JWT Token
 
-**Available permissions:** `Admin`, `AccountInfo`, `AccountList`, `AccountBalance`, `KeyList`, `TransactionGet`, `TransactionSend`, `SubstatesRead`, `TemplatesRead`, `GetNft`, `NftGetOwnershipProof`. Use `Admin` for full access.
+**Available permissions:** `auth.request` takes serde values such as `"Admin"` or `{"Transactions":"Create"}`. `"Admin"` grants every permission. Names such as `AccountInfo` and `TransactionSend` are not accepted. See `references/wallet-daemon-api.md`.
 
 JWT tokens expire after 5 minutes by default. Refresh with `auth.refresh` or request a new one.
 
@@ -153,7 +153,7 @@ JWT tokens expire after 5 minutes by default. Refresh with `auth.refresh` or req
 Authenticate directly with `AuthCredentials::None`:
 
 ```bash
-curl -s -X POST http://localhost:12008/json_rpc \
+curl -s -X POST http://127.0.0.1:5100/json_rpc \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc":"2.0","id":2,"method":"auth.request",
@@ -179,7 +179,7 @@ Once the user provides the token, use it in the `Authorization: Bearer <token>` 
 Include the JWT in the `Authorization` header:
 
 ```bash
-curl -s -X POST http://localhost:12008/json_rpc \
+curl -s -X POST http://127.0.0.1:5100/json_rpc \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJ..." \
   -d '{"jsonrpc":"2.0","id":3,"method":"accounts.list","params":{"offset":0,"limit":10}}'
@@ -203,7 +203,7 @@ Only after the user confirms, submit the manifest.
 ### Step 5: Submit the Manifest
 
 ```bash
-curl -s -X POST http://localhost:12008/json_rpc \
+curl -s -X POST http://127.0.0.1:5100/json_rpc \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJ..." \
   -d '{
@@ -214,6 +214,7 @@ curl -s -X POST http://localhost:12008/json_rpc \
         "account": "component_e61f...bf68",
         "dest": "component_1642...c0c1"
       },
+      "seal_signer_key_id": null,
       "max_fee": 1000,
       "dry_run": false
     }
@@ -223,7 +224,8 @@ curl -s -X POST http://localhost:12008/json_rpc \
 **Request fields:**
 - `manifest` (string): The manifest source code. Newlines as `\n`, inner quotes escaped.
 - `variables` (object): Map of variable names to address/value strings (e.g. `component_<hex>`, `resource_<hex>`, `"1000u64"`).
-- `signing_key_id` (optional): Override the signing key. Omit to use default account key.
+- `seal_signer_key_id` (object or null): Key that seals the transaction. `null` uses the default account's owner key. The field must be present.
+- `signing_key_ids` (array, optional): Additional signing keys. Defaults to `[]`.
 - `max_fee` (u64): Maximum fee in microtari.
 - `dry_run` (bool): If `true`, executes without submitting to network. Returns result in response.
 
@@ -231,7 +233,7 @@ curl -s -X POST http://localhost:12008/json_rpc \
 ```json
 {
   "result": {
-    "transaction_id": "tx_<hex>",
+    "transaction_id": "<64 hex chars>",
     "result": null
   }
 }
@@ -242,12 +244,12 @@ curl -s -X POST http://localhost:12008/json_rpc \
 ### Step 6: Wait for Result (optional)
 
 ```bash
-curl -s -X POST http://localhost:12008/json_rpc \
+curl -s -X POST http://127.0.0.1:5100/json_rpc \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJ..." \
   -d '{
     "jsonrpc":"2.0","id":5,"method":"transactions.wait_result",
-    "params":{"transaction_id":"tx_<hex>","timeout_secs":120}
+    "params":{"transaction_id":"<64 hex chars>","timeout_secs":120}
   }'
 ```
 
@@ -270,7 +272,7 @@ curl -s -X POST http://localhost:12008/json_rpc \
 ### Via Wallet CLI
 
 ```bash
-tari_wallet_cli transaction submit-manifest manifest.tm \
+tari_ootle_wallet_cli transaction submit-manifest manifest.tm \
   -g account=component_<hex> \
   -g resource=resource_<hex> \
   --max-fee 1000

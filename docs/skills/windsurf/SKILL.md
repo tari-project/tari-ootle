@@ -1023,10 +1023,10 @@ cargo build --release --bin tari_ootle_wallet_cli
 
 ```bash
 # Connect to a wallet daemon (default endpoint)
-tari_ootle_wallet_cli -d /ip4/127.0.0.1/tcp/12009 <command>
+tari_ootle_wallet_cli -d /ip4/127.0.0.1/tcp/5100 <command>
 
 # Or via environment variable
-export JRPC_ENDPOINT="/ip4/127.0.0.1/tcp/12009"
+export JRPC_ENDPOINT="/ip4/127.0.0.1/tcp/5100"
 tari_ootle_wallet_cli <command>
 ```
 
@@ -1045,8 +1045,9 @@ tari_ootle_wallet_cli accounts get my-account
 # Check balances
 tari_ootle_wallet_cli accounts get-balance my-account
 
-# Get free testnet tokens (faucet)
-tari_ootle_wallet_cli accounts faucet my-account --amount 1000000
+# Claim testnet faucet funds. The claim is always 1,000 TARI; there is no amount flag.
+# --fee overrides the max fee (default 50000 microtari).
+tari_ootle_wallet_cli accounts faucet my-account
 
 # Set default account
 tari_ootle_wallet_cli accounts default my-account
@@ -1055,21 +1056,25 @@ tari_ootle_wallet_cli accounts default my-account
 ### Transaction Commands
 
 ```bash
+# --max-fee is required on submit, submit-manifest, send, and confidential-transfer.
 # Call a template function (e.g., create a component)
 tari_ootle_wallet_cli transactions submit call-function \
     <template_address> new \
     --fee-account my-account \
+    --max-fee 1000 \
     --wait-timeout 30
 
 # Call a component method with arguments
 tari_ootle_wallet_cli transactions submit call-method \
     <component_address> guess \
     -a 5 -a <payout_component_address> \
-    --fee-account my-account
+    --fee-account my-account \
+    --max-fee 1000
 
 # Submit a transaction manifest (advanced)
 tari_ootle_wallet_cli transactions submit-manifest manifest.tari \
-    --fee-account my-account
+    --fee-account my-account \
+    --max-fee 1000
 
 # Get transaction result
 tari_ootle_wallet_cli transactions get <transaction_id>
@@ -1077,12 +1082,14 @@ tari_ootle_wallet_cli transactions get <transaction_id>
 # Send tokens to another account
 tari_ootle_wallet_cli transactions send \
     1000 <resource_address> <destination_pubkey> \
-    --fee-account my-account
+    --fee-account my-account \
+    --max-fee 1000
 
 # Confidential transfer
 tari_ootle_wallet_cli transactions confidential-transfer \
     1000 <destination_ootle_address> \
-    --account my-account
+    --account my-account \
+    --max-fee 1000
 ```
 
 ### Key Management

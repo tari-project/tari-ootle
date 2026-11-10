@@ -279,7 +279,9 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             for foreign_proposal in foreign_proposals {
                 let mut foreign_proposal = ForeignProposalRecord::new(foreign_proposal);
                 if foreign_proposal.exists(&**tx)? {
-                    // This is expected behaviour, we may receive the same foreign proposal multiple times
+                    // This is expected behaviour, we may receive the same foreign proposal multiple times. A proposal
+                    // already marked invalid is refused at voting (`check_foreign_proposal_record`), so the block is
+                    // still stored and this node can follow the chain if the block is certified anyway.
                     debug!(
                         target: LOG_TARGET,
                         "FOREIGN PROPOSAL: Already received proposal for block {}",
@@ -291,7 +293,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
                 if let Err(err) = self.on_receive_foreign_proposal.validate_and_save(
                     tx,
-                    &foreign_proposal,
+                    &mut foreign_proposal,
                     epoch_state.local_committee_info(),
                 ) {
                     if let Some(err) = err.validation_error().filter(|err| err.rejects_message_not_block()) {

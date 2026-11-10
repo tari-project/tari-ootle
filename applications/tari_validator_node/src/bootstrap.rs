@@ -23,7 +23,7 @@
 use std::{collections::HashMap, fs, io, str::FromStr, sync::Arc};
 
 use anyhow::{Context, anyhow};
-use futures::{FutureExt, future};
+use futures::future;
 use libp2p::identity;
 use log::*;
 use ootle_byte_type::ToByteType;
@@ -553,19 +553,16 @@ pub struct Services<TStore> {
 
 impl<TStore> Services<TStore> {
     pub async fn on_any_exit(&mut self) -> Result<(), anyhow::Error> {
-        // JoinHandler panics if polled again after reading the Result, we fuse the future to prevent this.
-        let fused = self.handles.iter_mut().map(|h| h.fuse());
-        let (res, _, _) = future::select_all(fused).await;
+        if self.handles.is_empty() {
+            return future::pending().await;
+        }
+        let (res, idx, _) = future::select_all(&mut self.handles).await;
+        self.handles.swap_remove(idx);
         res.unwrap_or_else(|e| Err(anyhow!("Task panicked: {}", e)))
     }
 
     pub async fn join_all(self) -> Result<(), anyhow::Error> {
-        // Handles that have already been polled to completion by `on_any_exit` would
-        // panic tokio's JoinHandle invariant ("polled after completion") if we awaited
-        // them again. Filter them out — their result is either already surfaced via
-        // `on_any_exit` or we're in the shutdown path and don't care about replay.
-        let handles: Vec<_> = self.handles.into_iter().filter(|h| !h.is_finished()).collect();
-        let results = future::try_join_all(handles).await?;
+        let results = future::try_join_all(self.handles).await?;
         for res in results {
             res?;
         }

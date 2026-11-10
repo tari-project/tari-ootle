@@ -6,16 +6,11 @@ use std::{collections::HashMap, sync::Arc};
 use async_trait::async_trait;
 use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
 use tari_ootle_transaction::{IntoSigned, Transaction, TransactionSignature, UnsealedTransaction, UnsignedTransaction};
-use tari_ootle_wallet_crypto::DecryptedData;
-use tari_template_lib_types::{
-    EncryptedData,
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    stealth::StealthTransferStatement,
-};
+use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, stealth::StealthTransferStatement};
 
 use crate::{
     signer,
-    stealth::{BurnClaimStatementSpec, ResolvedStealthTransferSpec, SignatureRequirements},
+    stealth::{ResolvedStealthTransferSpec, SignatureRequirements},
     transaction::TransactionSealSigner,
     types::Address,
     wallet::{NetworkWallet, WalletStealthAuthorizer, error::WalletError, traits::WalletKeyProvider},
@@ -146,44 +141,6 @@ impl OotleWallet {
             })?;
         let secret = signer.derive_burn_claim_secret(sender_offset_public_key).await?;
         Ok(secret)
-    }
-
-    /// Decrypt an L1 burn output's value and mask using the default key provider.
-    /// See [`crate::stealth::BurnClaimKeyProvider::decrypt_burn_claim_output`].
-    pub async fn decrypt_burn_claim_output(
-        &self,
-        encrypted_data: &EncryptedData,
-        commitment: &PedersenCommitmentBytes,
-        sender_offset_public_key: &RistrettoPublicKey,
-    ) -> WalletResult<DecryptedData> {
-        let address = self.default_address();
-        let signer = self
-            .key_providers
-            .get(address)
-            .ok_or_else(|| WalletError::KeyProviderNotFound {
-                address: address.clone(),
-            })?;
-        let decrypted = signer
-            .decrypt_burn_claim_output(encrypted_data, commitment, sender_offset_public_key)
-            .await?;
-        Ok(decrypted)
-    }
-
-    /// Build the statement that spends a minted burn UTXO using the default key provider.
-    /// See [`crate::stealth::BurnClaimKeyProvider::create_burn_claim_statement`].
-    pub async fn create_burn_claim_statement(
-        &self,
-        spec: BurnClaimStatementSpec,
-    ) -> WalletResult<StealthTransferStatement> {
-        let address = self.default_address();
-        let signer = self
-            .key_providers
-            .get(address)
-            .ok_or_else(|| WalletError::KeyProviderNotFound {
-                address: address.clone(),
-            })?;
-        let statement = signer.create_burn_claim_statement(spec).await?;
-        Ok(statement)
     }
 
     /// An authorizer for one transaction. Call this per transaction rather than reusing the result: an ephemeral seal

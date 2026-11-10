@@ -804,6 +804,17 @@ fn upsert_stealth_resource(tx: &mut impl WalletStoreWriter, resource_address: &R
     .unwrap();
 }
 
+fn stealth_output_by_commitment(
+    tx: &mut impl WalletStoreReader,
+    commitment: PedersenCommitmentBytes,
+) -> StealthOutputModel {
+    tx.stealth_outputs_get_by_commitments(&[commitment])
+        .unwrap()
+        .into_iter()
+        .find(|o| o.commitment == commitment)
+        .unwrap()
+}
+
 // A confidential spend from a vault-less account must be recorded at lock-finalize as a
 // transaction-sourced change so the spend is attributed to its transaction; the scanner's later
 // pass over the same balance then has nothing new to record.
@@ -1615,17 +1626,8 @@ fn stealth_outputs_lock_many_and_smallest_enforce_lock_existence_spendability_an
         ));
     }
 
-    let fetched = tx
-        .stealth_outputs_get_by_commitments(&[valid_on_chain.commitment, spent_output.commitment])
-        .unwrap();
-    let valid_after = fetched
-        .iter()
-        .find(|o| o.commitment == valid_on_chain.commitment)
-        .unwrap();
-    let spent_after = fetched
-        .iter()
-        .find(|o| o.commitment == spent_output.commitment)
-        .unwrap();
+    let valid_after = stealth_output_by_commitment(&mut *tx, valid_on_chain.commitment);
+    let spent_after = stealth_output_by_commitment(&mut *tx, spent_output.commitment);
     assert_eq!(valid_after.status, OutputStatus::Unspent);
     assert_eq!(valid_after.lock_id, None);
     assert_eq!(spent_after.status, OutputStatus::Spent);

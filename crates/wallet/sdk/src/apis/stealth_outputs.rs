@@ -484,7 +484,12 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                     .collect::<Vec<_>>();
 
                 // Lock the selected outputs
-                tx.stealth_outputs_lock_many(resource_address, result.selected_keys(), locked_by_id)?;
+                tx.stealth_outputs_lock_many_for_account(
+                    account_address,
+                    resource_address,
+                    result.selected_keys(),
+                    locked_by_id,
+                )?;
 
                 Ok(Selection {
                     outputs,

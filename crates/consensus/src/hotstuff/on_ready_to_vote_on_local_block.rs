@@ -26,7 +26,6 @@ use tari_ootle_storage::{
         ForeignProposalRecord,
         ForeignProposalStatus,
         NoVoteReason,
-        PendingShardStateTreeDiff,
         ProposalOrigin,
         SubstateRecord,
         TransactionPool,
@@ -46,9 +45,8 @@ use crate::{
     hotstuff::{
         HotstuffConfig,
         ProposalValidationError,
-        apply_leader_fee_to_substate_store,
         block_change_set::{BlockDecision, ProposedBlockChangeSet},
-        calculate_state_merkle_root,
+        command_sequencer::{BlockTotals, block_state_root},
         commit_proofs::{committed_block_commit_proof, generate_block_commit_proof},
         error::HotStuffError,
         event::HotstuffEvent,
@@ -332,8 +330,7 @@ where
         let mut substate_store =
             PendingSubstateStore::init(tx, block.as_leaf(), self.config.consensus_constants.num_preshards)?
                 .with_input_load_budget(self.config.consensus_constants.max_block_input_load_bytes);
-        let mut total_leader_fee = 0;
-        let mut total_exhaust_burn = parent.header().total_accumulated_exhaust_burn();
+        let mut totals = BlockTotals::extending(parent.header().total_accumulated_exhaust_burn());
         let max_validation_execution_points = self.config.consensus_constants.max_block_validation_execution_points;
         let mut block_execution_points = 0u64;
         let num_foreign_proposals = block.all_foreign_proposals().count();
@@ -350,8 +347,7 @@ where
                         local_committee_info,
                         &mut substate_store,
                         proposed_block_change_set,
-                        &mut total_leader_fee,
-                        &mut total_exhaust_burn,
+                        &mut totals,
                     )? {
                         proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
@@ -365,6 +361,7 @@ where
                         local_committee_info,
                         &mut substate_store,
                         proposed_block_change_set,
+                        &mut totals,
                     )? {
                         proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
@@ -379,6 +376,7 @@ where
                         next_epoch_changes_layout,
                         &mut substate_store,
                         proposed_block_change_set,
+                        &mut totals,
                     )? {
                         proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
@@ -392,8 +390,7 @@ where
                         local_committee_info,
                         &mut substate_store,
                         proposed_block_change_set,
-                        &mut total_leader_fee,
-                        &mut total_exhaust_burn,
+                        &mut totals,
                     )? {
                         proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
@@ -404,8 +401,10 @@ where
                         tx,
                         block,
                         atom,
-                        &substate_store,
+                        local_committee_info,
+                        &mut substate_store,
                         proposed_block_change_set,
+                        &mut totals,
                     )? {
                         proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
@@ -597,51 +596,37 @@ where
             return Ok(());
         }
 
-        if total_leader_fee != block.total_leader_fee() {
+        if totals.leader_fee != block.total_leader_fee() {
             warn!(
                 target: LOG_TARGET,
                 "❌ Leader fee disagreement for block {}. Leader proposed {}, we calculated {}",
                 block,
                 block.total_leader_fee(),
-                total_leader_fee
+                totals.leader_fee
             );
             proposed_block_change_set.set_no_vote(NoVoteReason::TotalLeaderFeeDisagreement);
             return Ok(());
         }
 
-        if total_exhaust_burn != block.header().total_accumulated_exhaust_burn() {
+        if totals.exhaust_burn != block.header().total_accumulated_exhaust_burn() {
             warn!(
                 target: LOG_TARGET,
                 "❌ Exhaust burn disagreement for block {}. Leader proposed {}, we calculated {}",
                 block,
                 block.header().total_accumulated_exhaust_burn(),
-                total_exhaust_burn
+                totals.exhaust_burn
             );
             proposed_block_change_set.set_no_vote(NoVoteReason::TotalExhaustBurnDisagreement);
             return Ok(());
         }
 
-        // Apply leader fee to substate store before we calculate the state root
-        if total_leader_fee > 0 {
-            apply_leader_fee_to_substate_store(
-                &mut substate_store,
-                proposer_claim_public_key_bytes,
-                local_committee_info.num_preshards(),
-                local_committee_info.shard_group().start(),
-                total_leader_fee,
-            )?;
-        }
-
-        let pending = PendingShardStateTreeDiff::get_all_up_to_commit_block(tx, block.parent())?;
-        let (expected_merkle_root, tree_diffs) = calculate_state_merkle_root(
+        let (expected_merkle_root, tree_diffs) = block_state_root(
             tx,
-            block.shard_group(),
-            pending,
-            substate_store
-                .changes()
-                .iter()
-                // Calculate for local shards only or the global shard
-                .filter(|ch| block.shard_group().contains_or_global(&ch.shard())),
+            local_committee_info,
+            block.parent(),
+            &mut substate_store,
+            proposer_claim_public_key_bytes,
+            totals.leader_fee,
             block.network(),
             block.epoch(),
         )?;
@@ -1086,34 +1071,6 @@ pub(super) fn check_foreign_proposal_record(
     None
 }
 
-/// Consensus rule: a leader may only move a transaction out of its current stage once the shard groups involved in it
-/// are ready for that, which is the same condition under which an honest leader proposes `command`. Evidence equality
-/// with the atom cannot stand in for this, because every replica derives the same incomplete evidence.
-pub(super) fn check_ready_to_leave_stage(
-    tx_rec: &TransactionPoolRecord,
-    block: &Block,
-    command: &'static str,
-) -> Option<NoVoteReason> {
-    if tx_rec.is_ready_for_pending_stage(block.shard_group()) {
-        return None;
-    }
-
-    warn!(
-        target: LOG_TARGET,
-        "❌ NO VOTE: Leader proposed {} for transaction {} in block {} before the shard groups involved in it were ready to leave stage {} ({})",
-        command,
-        tx_rec.id(),
-        block,
-        tx_rec.current_stage(),
-        tx_rec.evidence(),
-    );
-    Some(NoVoteReason::ProposedBeforeShardGroupsReady {
-        transaction_id: *tx_rec.id(),
-        stage: tx_rec.current_stage(),
-        command,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use tari_consensus_types::Decision;
@@ -1146,13 +1103,13 @@ mod tests {
     }
 
     mod check_ready_to_leave_stage {
-        use tari_engine_types::{SubstateVersion, fees::ExhaustBurnRate};
-        use tari_ootle_common_types::ProtocolVersion;
-        use tari_ootle_storage::consensus_models::Evidence;
-        use tari_ootle_transaction::{Network, TransactionId};
+        use tari_engine_types::SubstateVersion;
+        use tari_ootle_storage::consensus_models::{Evidence, TransactionPoolRecord};
+        use tari_ootle_transaction::TransactionId;
         use tari_template_lib_types::ComponentAddress;
 
         use super::*;
+        use crate::hotstuff::command_sequencer::check_ready_to_leave_stage;
 
         fn input_group() -> ShardGroup {
             ShardGroup::new(0, 127)
@@ -1160,19 +1117,6 @@ mod tests {
 
         fn local_group() -> ShardGroup {
             ShardGroup::new(128, 255)
-        }
-
-        fn local_block() -> Block {
-            Block::genesis(
-                Network::LocalNet,
-                ProtocolVersion::V0,
-                Epoch(1),
-                FixedHash::zero(),
-                local_group(),
-                FixedHash::zero(),
-                None,
-                ExhaustBurnRate::new(0),
-            )
         }
 
         /// A committed record at LocalAccepted for a transaction whose local output shard group has accepted. The input
@@ -1215,7 +1159,7 @@ mod tests {
 
         #[test]
         fn all_accept_before_the_input_shard_group_accepted_is_not_voted_for() {
-            let reason = check_ready_to_leave_stage(&local_accepted_record(false), &local_block(), "AllAccept");
+            let reason = check_ready_to_leave_stage(&local_accepted_record(false), local_group(), "AllAccept");
             assert!(
                 matches!(
                     reason,
@@ -1230,7 +1174,7 @@ mod tests {
 
         #[test]
         fn all_accept_after_every_shard_group_accepted_is_voted_for() {
-            let reason = check_ready_to_leave_stage(&local_accepted_record(true), &local_block(), "AllAccept");
+            let reason = check_ready_to_leave_stage(&local_accepted_record(true), local_group(), "AllAccept");
             assert!(reason.is_none(), "unexpected reason: {reason:?}");
         }
     }

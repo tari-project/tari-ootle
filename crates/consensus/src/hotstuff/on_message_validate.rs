@@ -511,6 +511,10 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             if !validations::are_block_foreign_proposals_matched(&**tx, &proposal.block, &proposal.foreign_proposals)? {
                 return Ok::<_, HotStuffError>(None);
             }
+            // `local_committee_info` comes from `epoch_state` (the node's current epoch), matching
+            // `get_missing_transactions` below; `check_local_proposal` has already verified that the block's shard
+            // group matches `epoch_state.local_committee_info().shard_group()`, while the transaction's validity
+            // window is checked against `proposal.block.epoch()`.
             self.resequence_unpooled_transactions(tx, epoch_state.local_committee_info(), &proposal, new_transactions)?;
             let missing = self.get_missing_transactions(&**tx, epoch_state.local_committee_info(), &proposal)?;
             Ok(Some(!missing.is_empty()))
@@ -1247,5 +1251,480 @@ mod tests {
             (Epoch(1), NodeHeight(5)),
             (Epoch(2), NodeHeight(1)),
         ]);
+    }
+
+    mod catch_up_resequence {
+        use std::{collections::HashMap, sync::Arc, time::Duration};
+
+        use tari_consensus_types::{
+            Decision,
+            ProposalCertificate,
+            ShardGroupAccumulatedData,
+            ToSignatureMessage,
+            ValidatorSchnorrSignature,
+        };
+        use tari_crypto::ristretto::RistrettoPublicKey;
+        use tari_engine_types::{
+            creation_check::CreationCheck,
+            fees::ExhaustBurnRate,
+            substate::{Substate, SubstateId},
+        };
+        use tari_epoch_manager::{EpochManagerError, EpochManagerEvent, PendingActivation};
+        use tari_ootle_common_types::{
+            ExtraData,
+            NumPreshards,
+            ProtocolVersion,
+            ShardGroup,
+            SubstateAddress,
+            SubstateRequirement,
+            ValidatorSetHash,
+            VotePower,
+        };
+        use tari_ootle_storage::{
+            consensus_models::{
+                BlockCommands,
+                BlockHeader,
+                Command,
+                LocalOnlyAtom,
+                LockedEpoch,
+                TransactionExecution,
+                TransactionPool,
+            },
+            global::models::ValidatorNode,
+        };
+        use tari_ootle_transaction::Network;
+        use tari_sidechain::{FixedHash, QuorumDecision};
+        use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+        use tari_state_tree::ValidatorSetCommitteeProof;
+        use tari_template_lib_types::{ComponentAddress, ObjectKey, crypto::RistrettoPublicKeyBytes};
+        use tokio::sync::mpsc;
+
+        use super::*;
+        use crate::{
+            consensus_constants::ConsensusConstants,
+            leader_selection::SmoothWeightedRoundRobin,
+            traits::{
+                BlockTransactionExecutor,
+                BlockTransactionExecutorError,
+                BlockTransactionValidator,
+                InboundMessaging,
+                InboundMessagingError,
+                OutboundMessagingError,
+                PresyncStatus,
+                SyncManager,
+                SyncStatus,
+                UncommittedChainTemplates,
+                ValidatorSignatureVerifierService,
+                ValidatorSignerService,
+                hooks::NoopHooks,
+            },
+        };
+
+        type TestAddr = RistrettoPublicKeyBytes;
+        type TestStore = RocksDbStateStore<TestAddr>;
+
+        #[derive(Clone)]
+        struct MaxEpochValidator;
+
+        impl BlockTransactionValidator for MaxEpochValidator {
+            type Error = ProposalValidationError;
+
+            fn validate_full(&self, current_epoch: Epoch, transaction: &Transaction) -> Result<(), Self::Error> {
+                self.validate_epoch(current_epoch, transaction)
+            }
+
+            fn validate_epoch(&self, current_epoch: Epoch, transaction: &Transaction) -> Result<(), Self::Error> {
+                if current_epoch > transaction.max_epoch() {
+                    return Err(ProposalValidationError::FutureEpoch {
+                        block_id: BlockId::zero(),
+                        current_epoch,
+                        block_epoch: transaction.max_epoch(),
+                    });
+                }
+                Ok(())
+            }
+        }
+
+        #[derive(Clone)]
+        struct NoopStub;
+
+        impl BlockTransactionExecutor<TestStore> for NoopStub {
+            fn execute(
+                &self,
+                _transaction: &Transaction,
+                _locked_epoch: LockedEpoch,
+                _input_fanout: u32,
+                _resolved_inputs: &HashMap<SubstateRequirement, Substate>,
+                _templates: &UncommittedChainTemplates,
+                _creation_check: &dyn CreationCheck,
+            ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
+                unimplemented!()
+            }
+        }
+
+        impl ValidatorSignatureVerifierService for NoopStub {}
+
+        impl ValidatorSignerService for NoopStub {
+            fn sign<M: ToSignatureMessage>(&self, _message: &M) -> ValidatorSchnorrSignature {
+                unimplemented!()
+            }
+
+            fn public_key(&self) -> &RistrettoPublicKey {
+                unimplemented!()
+            }
+        }
+
+        impl SyncManager for NoopStub {
+            type Error = HotStuffError;
+
+            async fn check_sync(&self) -> Result<SyncStatus, Self::Error> {
+                unimplemented!()
+            }
+
+            async fn sync(&mut self, _target_epoch: Option<Epoch>) -> Result<(), Self::Error> {
+                unimplemented!()
+            }
+
+            async fn presync(&mut self, _shard_group: ShardGroup, _epoch: Epoch) -> Result<PresyncStatus, Self::Error> {
+                unimplemented!()
+            }
+        }
+
+        impl InboundMessaging for NoopStub {
+            type Addr = TestAddr;
+
+            async fn next_message(&mut self) -> Option<Result<(Self::Addr, HotstuffMessage), InboundMessagingError>> {
+                unimplemented!()
+            }
+        }
+
+        impl OutboundMessaging for NoopStub {
+            type Addr = TestAddr;
+
+            async fn send_self<T: Into<HotstuffMessage> + Send>(
+                &mut self,
+                _message: T,
+            ) -> Result<(), OutboundMessagingError> {
+                unimplemented!()
+            }
+
+            async fn send<T: Into<HotstuffMessage> + Send>(
+                &mut self,
+                _to: Self::Addr,
+                _message: T,
+            ) -> Result<(), OutboundMessagingError> {
+                unimplemented!()
+            }
+
+            async fn multicast<T, I>(&mut self, _addresses: I, _message: T) -> Result<(), OutboundMessagingError>
+            where
+                I: IntoIterator<Item = Self::Addr> + Send,
+                T: Into<HotstuffMessage> + Send,
+            {
+                unimplemented!()
+            }
+
+            async fn broadcast<T>(&mut self, _message: T) -> Result<(), OutboundMessagingError>
+            where T: Into<HotstuffMessage> + Send {
+                unimplemented!()
+            }
+        }
+
+        impl EpochManagerReader for NoopStub {
+            type Addr = TestAddr;
+
+            fn subscribe(&self) -> broadcast::Receiver<EpochManagerEvent> {
+                unimplemented!()
+            }
+
+            async fn wait_for_initial_scanning_to_complete(&self) -> Result<(), EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_all_validator_nodes(
+                &self,
+                _epoch: Epoch,
+            ) -> Result<Vec<ValidatorNode<Self::Addr>>, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_committee_info_by_validator_address(
+                &self,
+                _epoch: Epoch,
+                _address: &Self::Addr,
+            ) -> Result<CommitteeInfo, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_committee_for_substate(
+                &self,
+                _epoch: Epoch,
+                _substate_address: SubstateAddress,
+            ) -> Result<Arc<Committee<Self::Addr>>, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_validator_node_by_public_key(
+                &self,
+                _epoch: Epoch,
+                _public_key: RistrettoPublicKeyBytes,
+            ) -> Result<ValidatorNode<Self::Addr>, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_our_validator_node(
+                &self,
+                _epoch: Epoch,
+            ) -> Result<ValidatorNode<Self::Addr>, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_local_committee_info(&self, _epoch: Epoch) -> Result<CommitteeInfo, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_committee_info(
+                &self,
+                _epoch: Epoch,
+                _shard_group: ShardGroup,
+            ) -> Result<CommitteeInfo, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_committee_info_for_substate(
+                &self,
+                _epoch: Epoch,
+                _shard: SubstateAddress,
+            ) -> Result<CommitteeInfo, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn current_epoch(&self) -> Result<Epoch, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_current_epoch_hash(&self) -> Result<FixedHash, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_epoch_hash(&self, _epoch: Epoch) -> Result<FixedHash, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_validator_set_hash(&self, _epoch: Epoch) -> Result<ValidatorSetHash, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_validator_set_committee_proof(
+                &self,
+                _epoch: Epoch,
+                _shard_group: ShardGroup,
+            ) -> Result<ValidatorSetCommitteeProof, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_num_committees(&self, _epoch: Epoch) -> Result<u32, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_committee_by_shard_group(
+                &self,
+                _epoch: Epoch,
+                _shards: ShardGroup,
+            ) -> Result<Arc<Committee<Self::Addr>>, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_committees_overlapping_shard_group(
+                &self,
+                _epoch: Epoch,
+                _shard_group: ShardGroup,
+            ) -> Result<HashMap<ShardGroup, Committee<Self::Addr>>, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_random_committee_member(
+                &self,
+                _epoch: Epoch,
+                _shard_group: Option<ShardGroup>,
+                _excluding: HashSet<Self::Addr>,
+            ) -> Result<ValidatorNode<Self::Addr>, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn lock_epoch(&self, _epoch: Epoch) -> Result<(), EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_observed_epoch_hash(&self, _epoch: Epoch) -> Result<Option<FixedHash>, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_birthday_epoch(&self) -> Result<Option<Epoch>, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_pending_activation(&self) -> Result<Option<PendingActivation>, EpochManagerError> {
+                unimplemented!()
+            }
+        }
+
+        #[derive(Clone)]
+        struct TestSpec;
+
+        impl ConsensusSpec for TestSpec {
+            type Addr = TestAddr;
+            type EpochManager = NoopStub;
+            type Hooks = NoopHooks;
+            type InboundMessaging = NoopStub;
+            type LeaderStrategy = SmoothWeightedRoundRobin;
+            type OutboundMessaging = NoopStub;
+            type SignerService = NoopStub;
+            type StateStore = TestStore;
+            type SyncManager = NoopStub;
+            type TransactionExecutor = NoopStub;
+            type TransactionValidator = MaxEpochValidator;
+        }
+
+        fn make_catch_up_proposal(
+            block_epoch: Epoch,
+            shard_group: ShardGroup,
+            tx_id: tari_ootle_transaction::TransactionId,
+        ) -> ProposalMessage {
+            let commands = BlockCommands::init(vec![Command::LocalOnly(LocalOnlyAtom {
+                id: tx_id,
+                decision: Decision::Commit,
+                transaction_fee: 0,
+                leader_fee: None,
+            })])
+            .unwrap();
+            let justify = ProposalCertificate::new(
+                FixedHash::zero(),
+                BlockId::zero(),
+                NodeHeight(0),
+                block_epoch,
+                shard_group,
+                ProposalCertificate::genesis_signatures(),
+                QuorumDecision::Accept,
+            );
+            let header = BlockHeader::create_unsigned(
+                Network::LocalNet,
+                ProtocolVersion::at(Network::LocalNet, block_epoch),
+                BlockId::zero(),
+                justify.calculate_id(),
+                None,
+                NodeHeight(1),
+                block_epoch,
+                shard_group,
+                RistrettoPublicKeyBytes::default(),
+                FixedHash::zero(),
+                &commands,
+                0,
+                0,
+                FixedHash::zero(),
+                ShardGroupAccumulatedData::default(),
+                ExtraData::new(),
+            )
+            .unwrap();
+            ProposalMessage {
+                block: Block::new(header, justify, commands, None),
+                foreign_proposals: vec![],
+            }
+        }
+
+        #[tokio::test]
+        async fn a_catch_up_block_from_an_earlier_epoch_resequences_unpooled_transactions_against_the_block_epoch() {
+            let block_epoch = Epoch(1);
+            let current_epoch = Epoch(2);
+            let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+
+            let dir = tempfile::tempdir().unwrap();
+            let store = TestStore::open(dir.path(), DatabaseOptions::default()).unwrap();
+            let pool = TransactionPool::new();
+            let (tx_missing, _rx_missing) = mpsc::unbounded_channel();
+            let new_transactions =
+                OnReceiveNewTransaction::<TestSpec>::new(store.clone(), pool.clone(), MaxEpochValidator, tx_missing);
+
+            let (tx_events, _rx_events) = broadcast::channel(1);
+            let mut on_message_validate = OnMessageValidate::<TestSpec>::new(
+                HotstuffConfig {
+                    network: Network::LocalNet,
+                    sidechain_id: None,
+                    consensus_constants: ConsensusConstants::devnet(1),
+                    state_history_length: 10,
+                    pinned_checkpoint_epochs: 1,
+                    state_tree_cleanup_interval: Duration::from_secs(60),
+                    epoch_gc_interval: Duration::from_secs(60),
+                    epoch_end_grace_period: Duration::from_secs(1),
+                    epoch_end_drain_period: Duration::from_secs(1),
+                    catch_up_request_timeout: Duration::from_secs(5),
+                },
+                store.clone(),
+                NoopStub,
+                CurrentView::new(),
+                NoopStub,
+                NoopStub,
+                tx_events.downgrade(),
+            );
+
+            let input = SubstateId::Component(ComponentAddress::from_array([1u8; ObjectKey::LENGTH]));
+            let tx_rec = TransactionRecord::new(
+                Transaction::builder_localnet(block_epoch)
+                    .add_input(SubstateRequirement::unversioned(input))
+                    .build_and_seal(&tari_common_types::types::PrivateKey::from(1u64)),
+            );
+            let tx_id = *tx_rec.id();
+
+            // Persist the transaction record without pooling it (as after a state sync or pool reset).
+            store.with_write_tx(|tx| tx_rec.save(tx)).unwrap();
+
+            let proposal = make_catch_up_proposal(block_epoch, shard_group, tx_id);
+
+            // The node's `epoch_state` has already advanced to `Epoch(2)` (`block_epoch + 1`).
+            let epoch_state = EpochState {
+                epoch: current_epoch,
+                epoch_hash: FixedHash::zero(),
+                exhaust_burn_rate: ExhaustBurnRate::new(0),
+                local_committee_info: CommitteeInfo::new(
+                    NumPreshards::P256,
+                    1,
+                    1,
+                    shard_group,
+                    current_epoch,
+                    VotePower::of(1),
+                ),
+                local_committee: Arc::new(Committee::empty()),
+            };
+
+            let result = on_message_validate
+                .handle_missing_transactions_local_block(
+                    RistrettoPublicKeyBytes::default(),
+                    &epoch_state,
+                    proposal,
+                    &new_transactions,
+                    ProposalOrigin::CatchUp,
+                )
+                .await
+                .unwrap();
+
+            assert!(
+                matches!(result, MessageValidationResult::Ready {
+                    message: HotstuffMessage::CatchUpSyncResponse(_),
+                    ..
+                }),
+                "expected catch-up block to be Ready, got {result:?}"
+            );
+
+            store
+                .with_read_tx(|tx| {
+                    assert!(
+                        pool.exists(tx, &tx_id)?,
+                        "unpooled transaction with max_epoch == block_epoch must be resequenced into the pool even \
+                         when epoch_state is at a later epoch"
+                    );
+                    Ok::<_, HotStuffError>(())
+                })
+                .unwrap();
+        }
     }
 }

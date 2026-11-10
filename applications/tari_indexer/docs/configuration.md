@@ -15,13 +15,14 @@ Basic settings that are shared across Tari applications.
 # Override configuration from a network-specific section (optional)
 #override_from = "esmeralda"
 
-# Base directory for all Tari data (default: ~/.tari)
-#base_path = "/path/to/tari/data"
+# Data directory. The process sets this from --base-path / TARI_BASE_DIR (default ~/.tari/ootle)
+# with the network name appended, for example ~/.tari/ootle/esmeralda.
+#base_path = "/path/to/tari/data/esmeralda"
 ```
 
 **Parameters:**
 - `override_from`: Network name to inherit configuration from (e.g., "esmeralda", "stagenet", "localnet")
-- `base_path`: Root directory for all Tari application data storage
+- `base_path`: Directory for this indexer's data. `--base-path` / `TARI_BASE_DIR` supplies the parent and the network name is appended
 
 ### Network Selection
 
@@ -47,6 +48,11 @@ Main indexer application settings.
 # API server listening address (default: "127.0.0.1:18300")
 #api_listen_address = "127.0.0.1:18300"
 
+# Prometheus /_metrics listener, separate from the API server, so metrics can be bound to a
+# private interface while the API is public. Only used when the indexer is compiled with the
+# metrics feature (enabled by default). (default: "127.0.0.1:18302")
+#metrics_listen_address = "127.0.0.1:18302"
+
 # Web UI server address (default: "127.0.0.1:15000")
 #web_ui_address = "127.0.0.1:15000"
 
@@ -69,13 +75,14 @@ Main indexer application settings.
 # no shorter than their own minimum (5s by default) (default: 10)
 #state_sync_keepalive_interval = 10
 
-# How many epochs past its terminal epoch a transaction submitted through this indexer is retained.
+# How many epochs past its terminal epoch a stored transaction is retained.
 # A transaction's terminal epoch is the epoch it committed in once its receipt has been indexed, and
 # its max_epoch (the last epoch it could still be sequenced in) until then, so a transaction that is
 # never sequenced ages out on the same schedule as one that commits. "forever" retains transactions
 # indefinitely; 0 keeps only those that can still commit or committed in the current epoch
 # (default: 50).
-# Only the submitted transaction body and its locally recorded mempool rejection reason are pruned;
+# Applies to every stored transaction, whether submitted here or observed on the gossip topic.
+# Only the transaction body and its locally recorded rejection reason are pruned;
 # transaction receipts synced from the network follow transaction_receipt_retention_epochs, which
 # is kept longer, so a pruned transaction still resolves to its receipt-backed outcome. Set this
 # well above the longest a client may take to poll for a result: once pruned, a transaction no
@@ -120,11 +127,29 @@ Main indexer application settings.
 #max_cache_size_bytes = 1073741824
 #max_disk_cache_size_bytes = 10737418240
 
-# Sidechain ID to listen on (optional, hex string)
-#sidechain_id = "a1b2c3d4e5f6..."
+# Cache TTL, in seconds, for substates fetched during dry-run transaction processing.
+# A shorter TTL reduces the chance of stale fee estimates. (default: 10)
+#dry_run_cache_ttl = 10
 
-# Burnt UTXO sidechain ID (optional, hex string)
-#burnt_utxo_sidechain_id = "a1b2c3d4e5f6..."
+# When true, a substate fetched from validators to serve a client read must come with a proof
+# that verifies against the shard group committee, or the read fails. Disabling it serves the
+# value unverified, as fetched from a single validator. (default: true)
+#verify_substate_proofs = true
+
+# How long, in seconds, after a shard was last confirmed level with its committee the substate
+# cache keeps serving entries for it. A shard with no transition is re-confirmed by each
+# keepalive on its state sync stream. (default: 300)
+#substate_cache_max_serve_lag = 300
+
+# Maximum substates held in the cache, one entry each (its head version). Beyond this the oldest
+# are evicted. (default: 100000)
+#substate_cache_max_entries = 100000
+
+# How long, in seconds, the cache serves a substate it has established does not exist. (default: 60)
+#substate_cache_negative_ttl = 60
+
+# Sidechain ID to listen on. Also identifies this chain for L1 burn-claim binding (optional, hex string)
+#sidechain_id = "a1b2c3d4e5f6..."
 ```
 
 ### P2P Networking Configuration `[indexer.p2p]`
@@ -133,31 +158,36 @@ Settings for peer-to-peer networking with validator nodes.
 
 ```toml
 [indexer.p2p]
-# P2P listening port (default: varies by network)
-#listener_port = 18189
+# P2P listening port (default: 0)
+#listener_port = 0
 
-# Reachability mode: "reachable" or "unreachable" (default: "reachable")
-#reachability_mode = "reachable"
+# Reachability mode: "Auto" or "Private" (default: "Auto")
+#reachability_mode = "Auto"
 
 # Enable mDNS peer discovery (default: true)
 #enable_mdns = true
 
-# Enable rendezvous server functionality (default: false)
+# Run a rendezvous server so other nodes can use this one for peer discovery.
+# The rendezvous client is always active. (default: false)
 #enable_rendezvous = false
+
+# Enable relay (default: false)
+#enable_relay = false
 ```
 
 **Parameters:**
 - `listener_port`: Port for incoming P2P connections
-- `reachability_mode`: Whether the node can accept incoming connections
+- `reachability_mode`: `Auto` (default) or `Private`
 - `enable_mdns`: Automatic peer discovery on local networks
 - `enable_rendezvous`: Act as a rendezvous server for other peers
+- `enable_relay`: Relay traffic for other peers
 
-### Peer Seeds Configuration `[peer_seeds]`
+### Peer Seeds Configuration `[p2p.seeds]`
 
-Configuration for discovering and connecting to network peers.
+Configuration for discovering and connecting to network peers. The indexer reads `[p2p.seeds]`, and the network override `[<network>.p2p.seeds]` when `p2p.seeds.override_from` is set (the CLI sets it to the selected network).
 
 ```toml
-[peer_seeds]
+[p2p.seeds]
 # DNS seed hosts for peer discovery (default: [])
 #dns_seeds = ["seeds.esmeralda.tari.com"]
 
@@ -166,12 +196,6 @@ Configuration for discovering and connecting to network peers.
 #    "public_key::/ip4/1.2.3.4/tcp/18189",
 #    "public_key::/dns/peer.example.com/tcp/18189"
 #]
-
-# DNS server for seed resolution (default: "1.1.1.1:853/cloudflare-dns.com")
-#dns_seeds_name_server = "1.1.1.1:853/cloudflare-dns.com"
-
-# Require DNSSEC validation for DNS seeds (default: false)
-#dns_seeds_use_dnssec = false
 ```
 
 ### Network-Specific Peer Seeds
@@ -196,8 +220,9 @@ Configures how the indexer determines network epochs and validator committees.
 
 ```toml
 [epoch_oracle]
-# Oracle type: "BaseLayer", "Configured", or "Hybrid" (default: "BaseLayer")
-#oracle_type = "BaseLayer"
+# "BaseLayer", "Configured", or "Hybrid" (default: "BaseLayer").
+# On MainNet this value is ignored: MainNet always runs the Hybrid oracle.
+#oracle = "BaseLayer"
 ```
 
 #### Base Layer Oracle `[epoch_oracle.base_layer]`
@@ -206,11 +231,12 @@ Monitors the Tari base layer for epoch information.
 
 ```toml
 [epoch_oracle.base_layer]
-# Minotari base node gRPC URL (default: network-specific)
-#base_node_grpc_url = "http://localhost:18142"
+# Minotari base node gRPC URL. When unset, the indexer uses http://127.0.0.1 and the
+# network's base-node gRPC port (18142 on esmeralda).
+#base_node_grpc_url = "http://127.0.0.1:18142"
 
-# Scanning interval in seconds (default: 5)
-#scanning_interval = 5
+# Scanning interval in seconds (default: 8)
+#scanning_interval = 8
 ```
 
 #### Configured Oracle `[epoch_oracle.configured]`
@@ -277,10 +303,11 @@ substate_id = "resource_0123456789abcdef..."
 ```
 
 **Filter Fields:**
-- `topic`: Event type (e.g., "ComponentCreated", "ResourceTransferred")
+- `topic`: Event type (e.g., "ComponentCreated", "ResourceTransferred"). `*` matches one dot-separated segment
 - `entity_id`: Specific entity identifier
-- `substate_id`: Specific substate identifier  
+- `substate_id`: Specific substate identifier
 - `template_address`: Smart contract template address
+- `resource_address`: Resource address (`resource_<hex>`). Matches `std.resource.*` events, which carry the resource as their substate id
 
 **Filter Logic:**
 - Multiple `[[indexer.event_filters]]` sections are combined with OR logic
@@ -288,59 +315,45 @@ substate_id = "resource_0123456789abcdef..."
 - An empty filter matches all events
 - If no filters are specified, all events are indexed
 
-### Template Configuration `[indexer.templates]`
+### Rate Limits `[indexer.rate_limits]`
 
-Settings for smart contract template management.
-
-```toml
-[indexer.templates]
-# Template storage directory (default: "templates")
-#template_dir = "templates"
-
-# Enable automatic template downloading (default: true)
-#auto_download = true
-
-# Maximum template size in bytes (default: 1048576 = 1MB)
-#max_template_size = 1048576
-```
-
-### Auto Update Configuration `[auto_update]`
-
-Automatic software update settings.
+Per-IP token-bucket limits for the REST API. On by default. Each `*_rate` is a `(capacity, window)` pair: `capacity` is the burst size, and the bucket refills at `capacity / window` tokens per second. A request consumes one token. The default window is 10 seconds.
 
 ```toml
-[auto_update]
-# Check interval in seconds (0 = disabled, default: 300)
-#check_interval = 300
+[indexer.rate_limits]
+#enabled = true
 
-# DNS server for update queries
-#name_server = "1.1.1.1:53/cloudflare.net"
+# POST /transactions – 50 requests / 10s burst (5/s sustained)
+#transactions_submit_rate = { capacity = 50.0, window = { secs = 10, nanos = 0 } }
 
-# Update information sources
-#update_uris = []
+# POST /transactions/dry-run – 30 requests / 10s burst (3/s sustained)
+#transactions_dry_run_submit_rate = { capacity = 30.0, window = { secs = 10, nanos = 0 } }
 
-# Enable DNSSEC validation
-#use_dnssec = false
+# /substates/* – 300 requests / 10s burst (30/s sustained)
+#substates_rate = { capacity = 300.0, window = { secs = 10, nanos = 0 } }
 
-# Base URL for downloading updates
-#download_base_url = ""
+# /utxos/* – 300 requests / 10s burst (30/s sustained)
+#utxos_fetch_rate = { capacity = 300.0, window = { secs = 10, nanos = 0 } }
 
-# Hash and signature URLs for verification
-#hashes_url = "https://releases.tari.com/hashes.txt"
-#hashes_sig_url = "https://releases.tari.com/hashes.txt.sig"
-```
+# GET /transactions/* read endpoints – 200 requests / 10s burst (20/s sustained)
+#transactions_rate = { capacity = 200.0, window = { secs = 10, nanos = 0 } }
 
-### Metrics Configuration `[metrics]`
+# GET /epoch-checkpoints/* – 20 requests / 10s burst (2/s sustained)
+#epoch_checkpoints_rate = { capacity = 20.0, window = { secs = 10, nanos = 0 } }
 
-Monitoring and metrics collection settings.
+# GET /resources/*, /templates/* and /validators – 200 requests / 10s burst (20/s sustained)
+#reads_rate = { capacity = 200.0, window = { secs = 10, nanos = 0 } }
 
-```toml
-[metrics]
-# Metrics server bind address (default: disabled)
-#server_bind_address = "127.0.0.1:5577"
+# Maximum concurrent SSE connections per IP (default: 10)
+#sse_max_connections_per_ip = 10
 
-# Prometheus push gateway endpoint (optional)
-#push_endpoint = "http://localhost:9091/metrics/job/tari-indexer"
+# Key limits on the last X-Forwarded-For entry, else X-Real-IP (default: false).
+# Only enable behind a reverse proxy that appends to X-Forwarded-For.
+#trust_proxy_headers = false
+
+# Key limits on CF-Connecting-IP, ahead of X-Forwarded-For (default: false).
+# Only enable when Cloudflare is in front of the indexer.
+#trust_cf_connecting_ip = false
 ```
 
 ## Environment Variables
@@ -351,11 +364,14 @@ Configuration values can be overridden using environment variables:
 # Network selection
 export TARI_NETWORK=esmeralda
 
-# Base data directory  
+# Parent of the per-network data directory ($TARI_BASE_DIR/<network>; default parent ~/.tari/ootle)
 export TARI_BASE_DIR=/opt/tari
 
-# Indexer-specific overrides
-export TARI_INDEXER_API_LISTEN_ADDRESS=0.0.0.0:18300
+# Config-file keys: TARI_ plus the dotted key, with __ for each dot.
+export TARI_INDEXER__API_LISTEN_ADDRESS=0.0.0.0:18300
+export TARI_INDEXER__METRICS_LISTEN_ADDRESS=127.0.0.1:18302
+
+# These two are command-line flags, so the environment name uses a single underscore.
 export TARI_INDEXER_WEB_UI_PUBLIC_API_URL=https://api.myindexer.com
 export TARI_INDEXER_MINOTARI_NODE_GRPC_URL=http://localhost:18142
 ```
@@ -391,7 +407,7 @@ enable_mdns = true
 listener_port = 18189
 
 [epoch_oracle]
-oracle_type = "Configured"
+oracle = "Configured"
 
 [epoch_oracle.configured]
 config_file = "dev_epoch_config.json"
@@ -407,17 +423,18 @@ network = "esmeralda"
 
 [indexer]
 api_listen_address = "0.0.0.0:18300"
+metrics_listen_address = "127.0.0.1:18302"
 web_ui_address = "0.0.0.0:15000"
 web_ui_public_api_url = "https://indexer.example.com:18300"
 state_scanning_interval = 60
 
 [indexer.p2p]
-reachability_mode = "reachable"
+reachability_mode = "Auto"
 enable_mdns = false
 listener_port = 18189
 
 [epoch_oracle]
-oracle_type = "BaseLayer"
+oracle = "BaseLayer"
 
 [epoch_oracle.base_layer]
 base_node_grpc_url = "http://basenode.internal:18142"
@@ -425,9 +442,6 @@ scanning_interval = 10
 
 [esmeralda.p2p.seeds]
 dns_seeds = ["seeds.esmeralda.tari.com"]
-
-[metrics]
-server_bind_address = "127.0.0.1:5577"
 
 # Filter for specific events to reduce storage
 [[indexer.event_filters]]
@@ -445,11 +459,9 @@ network = "esmeralda"
 [indexer]
 state_scanning_interval = 10
 
-# Large cache for better performance
 data_dir = "/fast-ssd/tari-indexer"
 
 [indexer.p2p]
-# Multiple connections for redundancy
 listener_port = 18189
 
 # High-performance base node connection
@@ -479,17 +491,11 @@ api_listen_address = "127.0.0.1:18300"
 web_ui_address = "127.0.0.1:15000"
 
 [indexer.p2p]
-# Unreachable mode for privacy
-reachability_mode = "unreachable"
+reachability_mode = "Private"
 enable_mdns = false
 
-# Use Tor for base node connection (if available)
 [epoch_oracle.base_layer]
-base_node_grpc_url = "socks5://127.0.0.1:9050/basenode.onion:18142"
-
-# Disable metrics collection
-[metrics]
-# server_bind_address = disabled
+base_node_grpc_url = "http://127.0.0.1:18142"
 ```
 
 ## Troubleshooting Configuration
@@ -531,7 +537,7 @@ export RUST_LOG=tari_indexer=debug
 Configuration values are applied in this order (highest precedence first):
 
 1. Command line arguments (`-p`, `--api-listen-address`, etc.)
-2. Environment variables (`TARI_INDEXER_*`)  
+2. Environment variables (`TARI_NETWORK`, `TARI_BASE_DIR`, `TARI_INDEXER__*` for config keys, and the flag-backed `TARI_INDEXER_WEB_UI_PUBLIC_API_URL` / `TARI_INDEXER_MINOTARI_NODE_GRPC_URL`)  
 3. Configuration file values
 4. Network-specific defaults (`[esmeralda.indexer]`)
 5. Global defaults (`[indexer]`)

@@ -4384,6 +4384,11 @@ where
                     let bucket = state_mut.take_bucket(input_bucket)?;
                     Self::check_bucket_is_unlocked("pay a fee from", input_bucket, &bucket)?;
 
+                    // An empty Tari bucket pays nothing: consume it and record no fee payment.
+                    if *bucket.resource_address() == TARI_TOKEN && bucket.unlocked_amount().is_zero() {
+                        return Ok(());
+                    }
+
                     // No refunds
                     state_mut.pay_fee(bucket.take_all(), None)?;
                     Ok(())
@@ -4875,6 +4880,54 @@ mod tests {
             runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args),
             Err(RuntimeError::WriteOutsideOwnComponent { .. })
         ));
+    }
+
+    fn pay_fee_from_new_bucket(
+        runtime: &RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        workspace_id: WorkspaceId,
+        container: ResourceContainer,
+    ) -> (BucketId, Result<(), RuntimeError>) {
+        let bucket_id = runtime.tracker.write_with(|state| {
+            let bucket_id = state.new_bucket_id().unwrap();
+            state.new_bucket(bucket_id, container).unwrap();
+            bucket_id
+        });
+        runtime
+            .put_on_workspace(workspace_id, IndexedValue::from_type(&bucket_id).unwrap())
+            .unwrap();
+        let result = runtime.pay_fee(PayFee::FromBucket {
+            bucket: WorkspaceOffsetId::new(workspace_id),
+        });
+        (bucket_id, result)
+    }
+
+    #[test]
+    fn pay_fee_from_an_empty_tari_bucket_consumes_it_and_records_no_payment() {
+        let runtime = runtime_with_blobs(Blobs::default());
+
+        let (bucket_id, result) =
+            pay_fee_from_new_bucket(&runtime, 0, ResourceContainer::stealth(TARI_TOKEN, Amount::zero()));
+        result.unwrap();
+        assert_eq!(runtime.tracker.total_fee_payments(), 0);
+        assert!(runtime.tracker.read_with(|state| state.get_bucket(bucket_id).is_err()));
+
+        let (_, result) = pay_fee_from_new_bucket(&runtime, 1, ResourceContainer::stealth(TARI_TOKEN, Amount::new(7)));
+        result.unwrap();
+        assert_eq!(runtime.tracker.total_fee_payments(), 7);
+    }
+
+    #[test]
+    fn pay_fee_from_an_empty_non_tari_bucket_is_rejected() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let other_resource = ResourceAddress::new([9u8; 32].into());
+
+        let (_, result) = pay_fee_from_new_bucket(
+            &runtime,
+            0,
+            ResourceContainer::public_fungible(other_resource, Amount::zero()),
+        );
+        assert!(matches!(result, Err(RuntimeError::InvalidArgument { .. })));
+        assert_eq!(runtime.tracker.total_fee_payments(), 0);
     }
 
     fn create_test_component(

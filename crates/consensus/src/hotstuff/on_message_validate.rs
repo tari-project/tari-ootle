@@ -511,7 +511,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             if !validations::are_block_foreign_proposals_matched(&**tx, &proposal.block, &proposal.foreign_proposals)? {
                 return Ok::<_, HotStuffError>(None);
             }
-            self.resequence_unpooled_transactions(tx, epoch_state, &proposal, new_transactions)?;
+            self.resequence_unpooled_transactions(tx, epoch_state.local_committee_info(), &proposal, new_transactions)?;
             let missing = self.get_missing_transactions(&**tx, epoch_state.local_committee_info(), &proposal)?;
             Ok(Some(!missing.is_empty()))
         })?
@@ -577,7 +577,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
     fn resequence_unpooled_transactions(
         &self,
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
-        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        local_committee_info: &CommitteeInfo,
         proposal: &ProposalMessage,
         new_transactions: &OnReceiveNewTransaction<TConsensusSpec>,
     ) -> Result<(), HotStuffError> {
@@ -596,12 +596,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             return Ok(());
         }
 
-        new_transactions.resequence_known_transactions(
-            tx,
-            epoch_state.epoch(),
-            ids,
-            epoch_state.local_committee_info(),
-        )?;
+        new_transactions.resequence_known_transactions(tx, proposal.block.epoch(), ids, local_committee_info)?;
         Ok(())
     }
 

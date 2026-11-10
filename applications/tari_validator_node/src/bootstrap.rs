@@ -657,10 +657,10 @@ pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
             create_node_transaction_validator(network, template_manager, constants)
                 .and_then(InputsAreDeclarableValidator::new()),
         )
-        .and_then(EpochRangeValidator::new())
         .and_then(TransactionValidityWindowValidator::new(
             constants.max_transaction_validity_epochs,
         ))
+        .and_then(EpochRangeValidator::new())
 }
 
 async fn create_base_layer_client(

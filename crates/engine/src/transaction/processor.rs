@@ -472,9 +472,9 @@ where
                 Self::drop_all_proofs_in_workspace(runtime)?;
                 Ok(None)
             },
-            Instruction::ClaimBurn { claim, output_data } => {
-                runtime.interface().claim_burn(*claim, output_data)?;
-                Ok(None)
+            Instruction::ClaimBurn { claim } => {
+                let bucket_id = runtime.interface().claim_burn(*claim)?;
+                Ok(Some(IndexedValue::from_type(&bucket_id)?))
             },
             Instruction::ClaimValidatorFees { address, max_amount } => {
                 let bucket_id = runtime.interface().claim_validator_fees(address, max_amount)?;

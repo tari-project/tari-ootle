@@ -26,13 +26,10 @@ use log::{warn, *};
 use tari_bor::{MaybeTagged, decode_exact};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_engine_types::{
-    Utxo,
-    UtxoOutput,
     bucket::Bucket,
     commit_result::{FeeIntentFallback, FinalizeResult, RejectReason},
-    confidential::{ClaimBurnOutputData, ClaimedOutputTombstone, MinotariBurnClaimProof},
+    confidential::{ClaimedOutputTombstone, MinotariBurnClaimProof},
     crypto,
-    crypto::OutputBody,
     entity_id_provider::EntityIdProvider,
     events::Event,
     fees::FeeReceipt,
@@ -143,7 +140,7 @@ use tari_template_lib::{
         },
         bytes::Bytes,
         constants::{TARI_TOKEN, TOKEN_SYMBOL},
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag, ValueKnowledgeProof},
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, ValueKnowledgeProof},
         engine_args::IntrinsicId,
         stealth::{
             AtomicCondition,
@@ -151,7 +148,6 @@ use tari_template_lib::{
             Covenant,
             CurrentInputView,
             MerkleProof,
-            SpendAuthorization,
             SpendCondition,
             SpendWitness,
             StealthInput,
@@ -3814,7 +3810,7 @@ where
         Ok(())
     }
 
-    fn claim_burn(&self, claim: MinotariBurnClaimProof, output_data: ClaimBurnOutputData) -> Result<(), RuntimeError> {
+    fn claim_burn(&self, claim: MinotariBurnClaimProof) -> Result<BucketId, RuntimeError> {
         let epoch = self.tracker.get_current_epoch()?;
         self.tracker
             .charge_native_execution(tari_engine_types::limits::NativeExecutionPoints::PER_CLAIM_BURN)?;
@@ -3845,33 +3841,26 @@ where
         })?;
 
         self.tracker.write_with(|state_mut| {
-            // 2. Create a tombstone
+            // The burner knows the burn commitment's opening, so a stealth transfer of theirs can create, and spend, a
+            // UTXO addressed by that commitment. The tombstone is therefore the only substate a claim addresses by the
+            // commitment: only a claim creates one, and a claim needs the claim key's signature.
             let address = ClaimedOutputTombstoneAddress::from_commitment(claim.commitment);
             state_mut.new_substate(address, ClaimedOutputTombstone { value: claim.value })?;
 
-            // 3. Create the stealth UTXO.
+            // The claimed value is revealed in a bucket that the claim transaction moves on. The ownership proof the
+            // verifier checked binds `claim.value` to the commitment.
+            //
             // This mints value with no `increase_total_supply` counterpart, which is sound only because the genesis
             // TARI resource both disables supply tracking and denies `Burn` (see `get_stealth_tari_resource`).
             // Enabling either would need an increase here to balance the decrease that
-            // `ResourceAction::StealthUtxoBurn` applies when the UTXO is burnt.
-            let address = UtxoAddress::new(TARI_TOKEN, claim.commitment.into());
-            let utxo = Utxo::new(UtxoOutput {
-                output: OutputBody {
-                    public_nonce: claim.output.sender_offset_public_key,
-                    encrypted_data: output_data.encrypted_data,
-                    minimum_value_promise: 0,
-                    viewable_balance: None,
-                },
-                auth: SpendAuthorization::Key(claim_public_key),
-                tag: UtxoTag::new(0),
-            });
-
-            state_mut.new_substate(address, utxo)?;
-
-            Ok::<_, RuntimeError>(())
-        })?;
-
-        Ok(())
+            // `ResourceAction::StealthUtxoBurn` applies when TARI is burnt.
+            let bucket_id = state_mut.new_bucket_id()?;
+            state_mut.new_bucket(
+                bucket_id,
+                ResourceContainer::stealth(TARI_TOKEN, Amount::from(claim.value)),
+            )?;
+            Ok(bucket_id)
+        })
     }
 
     fn claim_validator_fees(

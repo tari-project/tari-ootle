@@ -37,7 +37,6 @@ export * from "./types/BurnRateGovernanceState";
 export * from "./types/BurnSidechainId";
 export * from "./types/Bytes";
 export * from "./types/CheckOrd";
-export * from "./types/ClaimBurnOutputData";
 export * from "./types/ClaimedOutputTombstone";
 export * from "./types/ClaimedOutputTombstoneAddress";
 export * from "./types/Claims";

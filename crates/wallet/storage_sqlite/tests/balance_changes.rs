@@ -1687,7 +1687,6 @@ fn vaults_insert_update_and_get_round_trip_high_bit_substate_version_and_reject_
     assert_eq!(updated.vault_version, max_version);
     assert_eq!(updated.revealed_balance, Amount::from(250u64));
     tx.commit().unwrap();
-    drop(tx);
     drop(store);
 
     // Negative divisibility in the database must fail decoding rather than wrapping via `as u32`

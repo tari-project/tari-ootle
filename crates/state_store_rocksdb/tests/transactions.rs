@@ -834,7 +834,7 @@ mod finalized_transaction_gc {
         assert!(tx.transactions_exists(tx1.id()).unwrap());
         assert!(TransactionRecord::is_record_finalized(&*tx, tx1.id()).unwrap());
 
-        // epoch_history_length is 1 (default options): cleaning at epoch 1 prunes ..=0, which keeps
+        // epoch_history_length is 1: cleaning at epoch 1 prunes ..=0, which keeps
         // bookkeeping finalized in epoch 1.
         tx.epoch_cleanup(Epoch(1)).unwrap();
         assert!(tx.transactions_exists(tx1.id()).unwrap());

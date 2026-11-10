@@ -544,4 +544,22 @@ mod tests {
         assert_eq!(result.total_value, 170);
         assert_eq!(result.selected_keys, vec![&1, &2]);
     }
+
+    #[test]
+    fn first_descent_exact_match_exits_immediately() {
+        let mut inputs = vec![
+            KeyedInput {
+                key: 0usize,
+                value: 100,
+            },
+            KeyedInput { key: 1usize, value: 90 },
+        ];
+        for i in 2..52 {
+            inputs.push(KeyedInput { key: i, value: 10 });
+        }
+
+        let result = select_bounded(&inputs, 190u64, 10, 4).unwrap();
+        assert_eq!(result.total_value, 190);
+        assert_eq!(result.selected_keys, vec![&0, &1]);
+    }
 }

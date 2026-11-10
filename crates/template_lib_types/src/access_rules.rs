@@ -529,12 +529,6 @@ impl ComponentAccessRules {
         self.method_access.iter()
     }
 
-    /// Retains only the method access rules specified by the predicate.
-    pub fn retain_methods<F>(&mut self, f: F)
-    where F: FnMut(&String, &mut AccessRule) -> bool {
-        self.method_access.retain(f);
-    }
-
     /// Returns `true` if the default rule or any method rule contains `ScopedToComponent` or
     /// `ScopedToTemplate`, which are constant on component method rules (they always describe the current
     /// frame, i.e. the callee).

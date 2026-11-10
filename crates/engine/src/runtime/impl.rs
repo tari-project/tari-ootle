@@ -4150,12 +4150,13 @@ where
                 })?;
             Ok::<_, RuntimeError>(state.get_component(locked)?.access_rules().clone())
         })?;
-        let pruned_rules = if access_rules.num_access_rules() > 0 {
+        // A method rule that the new template lacks would be lost silently, and a later template that re-adds the
+        // method would put it under the component's default rule. The developer keeps the rule by leaving a stub
+        // method in the new template, or by setting the access rules under the current template before upgrading.
+        if access_rules.num_access_rules() > 0 {
             let template_def = self.get_template_def(&new_template)?;
-            prune_stale_component_access_rule_methods(&access_rules, &template_def)
-        } else {
-            None
-        };
+            validate_component_access_rule_methods(&access_rules, &template_def)?;
+        }
 
         self.tracker.write_with(|state_mut| {
             let locked = state_mut
@@ -4167,9 +4168,6 @@ where
                     details: "No current component lock in call scope".to_string(),
                 })?;
 
-            if let Some(access_rules) = pruned_rules {
-                state_mut.update_component_header(&locked, |header| header.access_rules = access_rules)?;
-            }
             let prev_template = state_mut.set_component_template_address(&locked, new_template)?;
 
             state_mut.push_event(Event::std(
@@ -4617,15 +4615,6 @@ fn validate_component_access_rule_methods(
         }
     }
     Ok(())
-}
-
-fn prune_stale_component_access_rule_methods(
-    access_rules: &ComponentAccessRules,
-    template_def: &TemplateDef,
-) -> Option<ComponentAccessRules> {
-    let mut pruned = access_rules.clone();
-    pruned.retain_methods(|name, _| template_def.functions().iter().any(|f| f.name == *name));
-    (pruned.num_access_rules() != access_rules.num_access_rules()).then_some(pruned)
 }
 
 #[cfg(test)]
@@ -5157,13 +5146,11 @@ mod tests {
         runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
     }
 
-    #[test]
-    fn update_component_template_drops_stale_component_access_rule_methods() {
-        let runtime = runtime_with_blobs(Blobs::default());
-        let entity_id = EntityId::default();
-
-        // Create a component with a method access rule for `"balance"` (exists on `Account`, absent on `NftFaucet`)
-        // and `"mint"` (exists on `NftFaucet`).
+    fn create_account_component_with_method_rules(
+        runtime: &RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        entity_id: EntityId,
+        access_rules: ComponentAccessRules,
+    ) -> ComponentAddress {
         runtime
             .push_call_frame(
                 PushCallFrame::Static {
@@ -5175,9 +5162,6 @@ mod tests {
                 None,
             )
             .unwrap();
-        let access_rules = ComponentAccessRules::new()
-            .add_method_rule("balance", AccessRule::AllowAll)
-            .add_method_rule("mint", AccessRule::AllowAll);
         let component_address = runtime
             .tracker
             .new_component(
@@ -5193,7 +5177,14 @@ mod tests {
                 &IndexedWellKnownTypes::from_value(&tari_bor::to_value(&component_address).unwrap()).unwrap(),
             )
             .unwrap();
+        component_address
+    }
 
+    fn push_nft_faucet_migration_frame(
+        runtime: &RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        entity_id: EntityId,
+        component_address: ComponentAddress,
+    ) -> LockedSubstate {
         let migration_lock = runtime.lock_component(component_address, LockFlag::Write).unwrap();
         runtime
             .push_call_frame(
@@ -5208,17 +5199,59 @@ mod tests {
                 None,
             )
             .unwrap();
+        migration_lock
+    }
 
-        // Updating to `NFT_FAUCET_TEMPLATE_ADDRESS` succeeds and drops the stale `"balance"` rule while retaining
-        // `"mint"`, which exists on `NftFaucet`.
+    #[test]
+    fn update_component_template_rejects_method_rules_absent_from_new_template() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let entity_id = EntityId::default();
+
+        // `"balance"` exists on `Account` and is absent from `NftFaucet`; `"mint"` exists on `NftFaucet`.
+        let access_rules = ComponentAccessRules::new()
+            .add_method_rule("balance", AccessRule::DenyAll)
+            .add_method_rule("mint", AccessRule::AllowAll);
+        let component_address = create_account_component_with_method_rules(&runtime, entity_id, access_rules.clone());
+        let migration_lock = push_nft_faucet_migration_frame(&runtime, entity_id, component_address);
+
+        let err = runtime
+            .update_component_template(NFT_FAUCET_TEMPLATE_ADDRESS)
+            .unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                RuntimeError::InvalidMethodAccessRule { details, .. } if details.contains("'balance'")
+            ),
+            "unexpected error: {err:?}"
+        );
+        runtime
+            .tracker
+            .read_with(|state| {
+                let component = state.get_component(&migration_lock).unwrap();
+                assert_eq!(*component.template_address(), ACCOUNT_TEMPLATE_ADDRESS);
+                assert_eq!(*component.access_rules(), access_rules);
+                Ok::<_, RuntimeError>(())
+            })
+            .unwrap();
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn update_component_template_keeps_method_rules_present_on_new_template() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let entity_id = EntityId::default();
+
+        let access_rules = ComponentAccessRules::new().add_method_rule("mint", AccessRule::DenyAll);
+        let component_address = create_account_component_with_method_rules(&runtime, entity_id, access_rules.clone());
+        let migration_lock = push_nft_faucet_migration_frame(&runtime, entity_id, component_address);
+
         runtime.update_component_template(NFT_FAUCET_TEMPLATE_ADDRESS).unwrap();
         runtime
             .tracker
             .read_with(|state| {
-                let rules = state.get_component(&migration_lock).unwrap().access_rules();
-                assert_eq!(rules.num_access_rules(), 1);
-                assert_eq!(rules.get_method_access_rule("mint"), &AccessRule::AllowAll);
-                assert_eq!(rules.get_method_access_rule("balance"), &AccessRule::DenyAll);
+                let component = state.get_component(&migration_lock).unwrap();
+                assert_eq!(*component.template_address(), NFT_FAUCET_TEMPLATE_ADDRESS);
+                assert_eq!(*component.access_rules(), access_rules);
                 Ok::<_, RuntimeError>(())
             })
             .unwrap();

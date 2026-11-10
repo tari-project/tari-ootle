@@ -1,0 +1,15 @@
+[workspace]
+[package]
+name = "well_known_types"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tari_template_lib = { path = "../../../../template_lib" }
+
+[features]
+# Takes a template-defined type named `Bucket` in place of the library's.
+lookalike = []
+
+[lib]
+crate-type = ["cdylib"]

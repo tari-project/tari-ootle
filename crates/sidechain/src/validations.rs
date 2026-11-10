@@ -22,8 +22,15 @@ use crate::{
 const LOG_TARGET: &str = "c::sidechain::validations";
 
 /// The maximum number of signatures a quorum certificate may contain. A valid quorum certificate contains at most one
-/// signature per committee member, so this is an upper bound for any committee size. Proof validation is the only place
-/// it is enforced, before any signature is verified.
+/// signature per committee member, so this bound holds only while no committee exceeds 1000 members.
+///
+/// It is enforced in two places, each before any signature is verified:
+/// - commit proof validation, in [`check_proof_elements`];
+/// - consensus message decoding in `tari_ootle_p2p`, which caps the signatures of a `QcSignatures` and the timeouts of
+///   a `TcSignatures`.
+///
+/// Raising committee sizes past this bound requires raising it, or valid quorum and timeout certificates fail to
+/// decode.
 pub const MAX_QC_SIGNATURES: usize = 1000;
 
 /// The maximum number of elements a commit proof may contain. A proof holds the three quorum certificates of the
@@ -63,6 +70,14 @@ pub fn check_proof_elements(
     let mut signed_qcs = Vec::with_capacity(proof_elements.len());
     for elem in proof_elements {
         if let CommitProofElement::QuorumCertificate(qc) = elem {
+            if qc.epoch != header.epoch {
+                return Err(SidechainProofValidationError::InvalidProof {
+                    details: format!(
+                        "Quorum certificate is for epoch {}, but header epoch is {}",
+                        qc.epoch, header.epoch
+                    ),
+                });
+            }
             signed_qcs.push((
                 qc,
                 check_qc_signers(qc, quorum_threshold, committee, &mut member_keys, expected_decision)?,
@@ -158,12 +173,12 @@ pub fn check_proof_structure(
         });
     };
 
-    let Some(last_parent) = last_parent else {
+    if last_parent.is_none() {
         // Not reachable because we check length of proof elements above
         return Err(SidechainProofValidationError::InvalidProof {
             details: "BUG: Proof must contain at least proof element (last_parent == None)".to_string(),
         });
-    };
+    }
 
     let justified = match last_elem {
         CommitProofElement::QuorumCertificate(qc) => qc.calculate_justified_block(),
@@ -183,7 +198,7 @@ pub fn check_proof_structure(
         return Err(SidechainProofValidationError::InvalidProof {
             details: format!(
                 "Last parent block ID does not match the block ID in the header. Expected {header_block_id}, but got \
-                 {last_parent}"
+                 {justified}"
             ),
         });
     }
@@ -212,8 +227,7 @@ pub fn check_proof_elements_num_qcs(
         return Err(SidechainProofValidationError::InvalidProof {
             details: format!(
                 "Expected at least {} QC proof elements, but got {}",
-                expected_len,
-                proof_elems.len()
+                expected_len, num_qcs
             ),
         });
     }

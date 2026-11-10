@@ -1163,7 +1163,7 @@ mod tests {
         let indef_str = [0x7f, 0x62, b'h', b'i', 0x61, b'!', 0xff];
         let got_str: String = from_slice(&indef_str).unwrap();
         assert_eq!(got_str, "hi!");
-        let got_cow: alloc::borrow::Cow<'_, str> = from_slice(&indef_str).unwrap();
+        let got_cow: std::borrow::Cow<'_, str> = from_slice(&indef_str).unwrap();
         assert_eq!(got_cow, "hi!");
         // Borrowed &str cannot borrow across indefinite-length chunks and must fail cleanly
         assert!(from_slice::<&str>(&indef_str).is_err());

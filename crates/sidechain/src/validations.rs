@@ -70,14 +70,6 @@ pub fn check_proof_elements(
     let mut signed_qcs = Vec::with_capacity(proof_elements.len());
     for elem in proof_elements {
         if let CommitProofElement::QuorumCertificate(qc) = elem {
-            if qc.epoch != header.epoch {
-                return Err(SidechainProofValidationError::InvalidProof {
-                    details: format!(
-                        "Quorum certificate is for epoch {}, but header epoch is {}",
-                        qc.epoch, header.epoch
-                    ),
-                });
-            }
             signed_qcs.push((
                 qc,
                 check_qc_signers(qc, quorum_threshold, committee, &mut member_keys, expected_decision)?,
@@ -93,9 +85,10 @@ pub fn check_proof_elements(
     Ok(())
 }
 
-/// Validates that `proof_elements` form a 3-chain of quorum certificates that, followed by any chain links, descends
-/// to `header`. A proof that passes proves `header` only once each of its quorum certificates is validated against a
-/// committee, as [`check_proof_elements`] does.
+/// Validates that `proof_elements` form a 3-chain of quorum certificates in `header.epoch` with consecutive descending
+/// heights that, followed by any chain links, descends to `header` at `header.height`. A proof that passes proves
+/// `header` only once each of its quorum certificates is validated against a committee, as [`check_proof_elements`]
+/// does.
 pub fn check_proof_structure(
     header: &SidechainBlockHeader,
     proof_elements: &[CommitProofElement],
@@ -103,10 +96,14 @@ pub fn check_proof_structure(
     check_proof_elements_num_qcs(proof_elements, 3)?;
 
     let mut last_parent = None::<&FixedHash>;
+    let mut last_qc_height = None::<u64>;
     let mut proven_3_chain = 0usize;
     for elem in proof_elements {
         match elem {
             CommitProofElement::QuorumCertificate(qc) => {
+                check_qc_epoch_and_height(header, qc, last_qc_height)?;
+                last_qc_height = Some(qc.height);
+
                 let justifies = qc.calculate_justified_block();
                 if let Some(last_parent) = last_parent &&
                     *last_parent != justifies
@@ -173,23 +170,17 @@ pub fn check_proof_structure(
         });
     };
 
-    if last_parent.is_none() {
-        // Not reachable because we check length of proof elements above
-        return Err(SidechainProofValidationError::InvalidProof {
-            details: "BUG: Proof must contain at least proof element (last_parent == None)".to_string(),
-        });
-    }
-
-    let justified = match last_elem {
-        CommitProofElement::QuorumCertificate(qc) => qc.calculate_justified_block(),
+    let (justified, num_links) = match last_elem {
+        CommitProofElement::QuorumCertificate(qc) => (qc.calculate_justified_block(), 0),
         CommitProofElement::ChainLinks(links) => {
-            links
+            let justified = links
                 .last()
                 .map(|link| link.parent_id)
                 // Already checked that links is not empty
                 .ok_or_else(|| SidechainProofValidationError::InvalidProof {
                     details: "BUG: chain must contain at least one element".to_string(),
-                })?
+                })?;
+            (justified, links.len())
         },
     };
 
@@ -203,6 +194,61 @@ pub fn check_proof_structure(
         });
     }
 
+    let Some(last_qc_height) = last_qc_height else {
+        // Not reachable because we check the number of quorum certificates above
+        return Err(SidechainProofValidationError::InvalidProof {
+            details: "BUG: Proof must contain at least one quorum certificate".to_string(),
+        });
+    };
+    check_final_qc_height(header, last_qc_height, num_links)
+}
+
+/// Checks that `qc` is in `header.epoch` and, when it follows another quorum certificate at `prev_qc_height`, sits one
+/// height below it.
+fn check_qc_epoch_and_height(
+    header: &SidechainBlockHeader,
+    qc: &QuorumCertificate,
+    prev_qc_height: Option<u64>,
+) -> Result<(), SidechainProofValidationError> {
+    if qc.epoch != header.epoch {
+        return Err(SidechainProofValidationError::InvalidProof {
+            details: format!(
+                "Quorum certificate is for epoch {}, but header epoch is {}",
+                qc.epoch, header.epoch
+            ),
+        });
+    }
+    if let Some(prev_height) = prev_qc_height &&
+        qc.height.checked_add(1) != Some(prev_height)
+    {
+        return Err(SidechainProofValidationError::InvalidProof {
+            details: format!(
+                "Quorum certificate height {} is not one less than the preceding quorum certificate height \
+                 {prev_height}",
+                qc.height
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// Checks that the final quorum certificate, at `last_qc_height`, reaches `header.height` through `num_links` chain
+/// links. The final quorum certificate justifies the header itself, or the child of the first chain link.
+fn check_final_qc_height(
+    header: &SidechainBlockHeader,
+    last_qc_height: u64,
+    num_links: usize,
+) -> Result<(), SidechainProofValidationError> {
+    let descent = if num_links == 0 { 0 } else { num_links as u64 + 1 };
+    if last_qc_height.checked_sub(descent) != Some(header.height) {
+        return Err(SidechainProofValidationError::InvalidProof {
+            details: format!(
+                "Final quorum certificate height {last_qc_height} cannot descend through {num_links} chain links to \
+                 header height {}",
+                header.height
+            ),
+        });
+    }
     Ok(())
 }
 
@@ -225,10 +271,7 @@ pub fn check_proof_elements_num_qcs(
         .count();
     if num_qcs < expected_len {
         return Err(SidechainProofValidationError::InvalidProof {
-            details: format!(
-                "Expected at least {} QC proof elements, but got {}",
-                expected_len, num_qcs
-            ),
+            details: format!("Expected at least {expected_len} QC proof elements, but got {num_qcs}"),
         });
     }
     Ok(())

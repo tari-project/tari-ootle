@@ -519,11 +519,6 @@ impl ComponentAccessRules {
         self
     }
 
-    /// Return the default access rule for methods that do not have a specific rule
-    pub const fn default_rule(&self) -> &AccessRule {
-        &self.default
-    }
-
     /// Return the access rule of a particular method in the component
     pub fn get_method_access_rule(&self, name: &str) -> &AccessRule {
         self.method_access.get(name).unwrap_or(&self.default)

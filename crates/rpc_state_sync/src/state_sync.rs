@@ -1168,7 +1168,8 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
         let held_no_state = self.holds_no_consensus_state()?;
         let within_window = self.oracle_within_birthday_join_window().await?;
         let result = self.sync_inner(target_epoch).await;
-        let holds_no_state = self.holds_no_consensus_state()?;
+        let holds_no_state = matches!(result, Err(RpcStateSyncError::CheckpointNotAvailable { .. })) &&
+            self.holds_no_consensus_state()?;
         match result {
             // Before any epoch of the network finalises, no peer holds a checkpoint, and every validator is a node with
             // no state. There is nothing to sync, so the node joins consensus at the birthday epoch. The node must

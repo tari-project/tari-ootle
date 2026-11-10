@@ -195,10 +195,10 @@ impl CommitteeReadTally {
     pub fn conclude(mut self, describe: impl std::fmt::Display) -> Result<SubstateLookupResult, IndexerError> {
         // A version reaches conclude above threshold when f = 0, or when f > 0 and an already-observed
         // newer Up or Down deferred early settlement in observe.
-        // A Down of a version strictly earlier than an Up or Down held unproven names a spent version,
-        // not the head, so it must not answer a head read (falling back to unproven_up or failing).
-        // For the same version (up_version == *version), Down(v) comes after Up(v) (v was up and has
-        // since been spent), so a threshold of agreeing Downs outranks an unproven Up(v).
+        // Among versions with > f agreeing Downs, the highest version wins unless an unproven Up of a
+        // strictly newer version is held (up_version > *version). A single sub-threshold Down of a
+        // higher version defers early settlement in observe so remaining members are polled, but does
+        // not veto a quorum Down in conclude once all responses are in.
         if let Some(version) = self
             .unproven_downs
             .iter()
@@ -209,8 +209,7 @@ impl CommitteeReadTally {
                 self.unproven_up
                     .as_ref()
                     .and_then(|up| up.version())
-                    .is_none_or(|up_version| up_version <= *version) &&
-                    !self.unproven_downs.keys().any(|&other_version| other_version > *version)
+                    .is_none_or(|up_version| up_version <= *version)
             })
         {
             return Ok(self.unproven_down(version));
@@ -858,16 +857,28 @@ mod tests {
         assert_eq!(result.result.version(), Some(SubstateVersion::new(5)));
         assert!(result.verified);
 
-        // When the newer Down never reaches a quorum and no Up is observed, conclude fails
-        // rather than returning the older Down(3).
+        // When the newer Down also reaches threshold (count > f), conclude returns the newer Down(5).
+        let result = race(4, 1, true, None, vec![
+            (0, Ok((down(5), None))),
+            (1, Ok((down(3), None))),
+            (2, Ok((down(3), None))),
+            (3, Ok((down(5), None))),
+        ])
+        .await
+        .unwrap();
+        assert!(matches!(result.result, SubstateResult::Down { version } if version == SubstateVersion::new(5)));
+
+        // When only a single member claims Down(5) (count <= f) and no Up is observed, conclude
+        // returns the quorum Down(3) so one Byzantine member cannot fail head reads of spent substates.
         let result = race(4, 1, true, None, vec![
             (0, Ok((down(5), None))),
             (1, Ok((down(3), None))),
             (2, Ok((down(3), None))),
             (3, Err(error())),
         ])
-        .await;
-        assert!(matches!(result, Err(IndexerError::InvalidSubstateState)), "{result:?}");
+        .await
+        .unwrap();
+        assert!(matches!(result.result, SubstateResult::Down { version } if version == SubstateVersion::new(3)));
 
         // When an unproven Up is also held, conclude falls back to it rather than returning Down(3).
         let result = race(4, 1, true, None, vec![

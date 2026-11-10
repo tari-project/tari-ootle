@@ -45,13 +45,12 @@ fn a_components_dependencies_leave_out_the_receipts_it_references() {
 async fn locating_validator_fee_pool_dependencies_includes_tari_resource() {
     use tari_engine_types::{ValidatorFeePool, resource::Resource, substate::SubstateValue};
     use tari_ootle_light_client::test_fixtures::ValidatorSetFixture;
-    use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId};
     use tari_template_lib::types::{
         Metadata,
         ResourceType,
         SubstateOwnerRule,
         ValidatorFeePoolAddress,
-        access_rules::{ComponentAccessRules, ResourceAccessRules},
+        access_rules::ResourceAccessRules,
         constants::TARI_TOKEN,
         crypto::RistrettoPublicKeyBytes,
     };
@@ -100,10 +99,4 @@ async fn locating_validator_fee_pool_dependencies_includes_tari_resource() {
         "locating dependencies of a ValidatorFeePool must include the TARI resource: {deps:?}"
     );
     assert!(deps.contains(&pool_id));
-
-    let _ = (
-        KeyBranch::Account,
-        KeyId::derived(KeyBranch::Account, 0),
-        ComponentAccessRules::new(),
-    );
 }

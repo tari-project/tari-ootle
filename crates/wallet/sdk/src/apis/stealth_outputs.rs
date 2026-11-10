@@ -892,6 +892,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         let network = self.config_api.get_network()?;
 
         let mut found_utxos_count = 0usize;
+        let mut held_utxos_count = 0usize;
         let mut num_outputs = 0usize;
         let mut touched_balances = HashSet::new();
         let mut burnt = Vec::new();
@@ -915,10 +916,11 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 if held.is_some() || utxo.output().is_none() || all_used_view_only_keys.is_some() {
                     break (tx, held);
                 }
-                drop(tx);
+                tx.rollback()?;
                 all_used_view_only_keys = Some(self.all_used_view_only_keys()?);
             };
             if let Some(held) = held {
+                held_utxos_count += 1;
                 info!(
                     target: LOG_TARGET,
                     "Output already exists in the wallet. Updating. (commitment: {})",
@@ -994,9 +996,11 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         if num_outputs > 0 {
             info!(
                 target: LOG_TARGET,
-                "✅️ Found {}/{} stealth outputs owned by this wallet.",
-                found_utxos_count,
+                "✅️ Found {}/{} stealth outputs owned by this wallet ({} new, {} already held).",
+                found_utxos_count + held_utxos_count,
                 num_outputs,
+                found_utxos_count,
+                held_utxos_count,
             );
         }
 

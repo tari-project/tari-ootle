@@ -9,4 +9,6 @@ ignore = [
     "RUSTSEC-2023-0071",
     # crypto-bigint 0.5.5 via `webrtc -> dtls -> p256/p384` (ephemeral ECDH only; blocked on `dtls` moving to `p256` 0.14).
     "RUSTSEC-2026-0387",
+    # bundled SQLite WAL page-size bug; blocked on `diesel` releasing with `libsqlite3-sys` 0.39 allowed.
+    "RUSTSEC-2026-0459",
 ]

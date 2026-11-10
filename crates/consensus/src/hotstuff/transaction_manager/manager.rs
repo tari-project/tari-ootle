@@ -689,6 +689,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                         local_committee_info,
                         transaction_id,
                         locked.execution,
+                        locked.fee_intent_only,
                     );
                 }
                 self.finish_multishard_prepare(store, local_committee_info, transaction_id, locked)
@@ -837,12 +838,13 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         local_committee_info: &CommitteeInfo,
         transaction_id: TransactionId,
         execution: TransactionExecution,
+        fee_intent_only: bool,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         let lock_status = store.try_lock_all(transaction_id, execution.resolved_inputs(), false)?;
         self.finish_multishard_prepare(store, local_committee_info, transaction_id, LockedMultishardExecution {
             execution,
             lock_status,
-            fee_intent_only: false,
+            fee_intent_only,
         })
     }
 
@@ -3095,6 +3097,36 @@ mod tests {
                 matches!(err, BlockTransactionExecutorError::InvariantError(_)),
                 "{err:?}"
             );
+            Ok::<_, BlockTransactionExecutorError>(())
+        });
+    }
+
+    #[test]
+    fn prepare_local_inputs_only_preserves_fee_intent_only() {
+        with_fee_pool_in_parent(|store, pool_address| {
+            let claim = multishard_transaction(1);
+            let committee = CommitteeInfo::new(
+                NumPreshards::P256,
+                4,
+                1,
+                ShardGroup::all_shards(NumPreshards::P256),
+                Epoch(1),
+                VotePower::of(1),
+            );
+            let prepared = manager().prepare_local_inputs_only(
+                store,
+                &committee,
+                *claim.id(),
+                withdrawing_from(&claim, pool_address, Some(0), 400),
+                true,
+            )?;
+            let PreparedTransaction::MultiShard(prepared) = prepared else {
+                panic!("expected multishard preparation: {prepared:?}");
+            };
+            let EvidenceOrExecution::Execution { fee_intent_only, .. } = prepared.into_evidence_or_execution() else {
+                panic!("expected execution");
+            };
+            assert!(fee_intent_only);
             Ok::<_, BlockTransactionExecutorError>(())
         });
     }

@@ -19,7 +19,7 @@ use tari_template_lib::types::{
     UtxoAddress,
     UtxoId,
     VaultId,
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
 };
 use webauthn_rs::prelude::Passkey;
 
@@ -57,7 +57,7 @@ use crate::{
         WalletLockId,
         WalletTransactionUpdate,
     },
-    storage::{CommittableStore, QueuedUtxo, WalletStorageError},
+    storage::{CommittableStore, QueuedEntry, QueuedUtxo, WalletStorageError},
 };
 
 pub trait WalletStoreWriter: CommittableStore {
@@ -204,6 +204,8 @@ pub trait WalletStoreWriter: CommittableStore {
         lock_id: WalletLockId,
     ) -> Result<(), WalletStorageError>;
     fn stealth_outputs_insert(&mut self, output: &StealthOutputModel) -> Result<(), WalletStorageError>;
+    /// Deletes the output at `address` if it is held as invalid. Returns whether it was deleted.
+    fn stealth_outputs_delete_invalid(&mut self, address: &UtxoAddress) -> Result<bool, WalletStorageError>;
     /// Marks the output spent, as a spend of `version` takes it down, and records `version` as
     /// [`stealth_outputs_record_spent_version`](Self::stealth_outputs_record_spent_version) does.
     fn stealth_outputs_mark_as_spent(
@@ -406,12 +408,15 @@ pub trait WalletStoreWriter: CommittableStore {
         resource_address: &ResourceAddress,
         items: I,
     ) -> Result<(), WalletStorageError>;
-    fn utxo_process_queue_remove_item(
+    /// Removes each of `entries` that is still queued at its generation. An entry queued again since it was read
+    /// stays queued. Returns the number removed.
+    fn utxo_process_queue_ack(&mut self, entries: &[QueuedEntry]) -> Result<usize, WalletStorageError>;
+    /// Advances the generation of every entry queued for the resource, so that no lookup made before is
+    /// acknowledged. Returns the number of entries advanced.
+    fn utxo_process_queue_invalidate(
         &mut self,
-        resource_address: ResourceAddress,
-        tag: UtxoTag,
-        public_nonce: RistrettoPublicKeyBytes,
-    ) -> Result<(), WalletStorageError>;
+        resource_address: &ResourceAddress,
+    ) -> Result<usize, WalletStorageError>;
 
     // Address book
     fn address_book_insert(

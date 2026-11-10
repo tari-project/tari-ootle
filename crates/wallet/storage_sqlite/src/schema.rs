@@ -317,6 +317,7 @@ diesel::table! {
         shard -> Nullable<Integer>,
         state_version -> Nullable<BigInt>,
         created_at -> Timestamp,
+        generation -> BigInt,
     }
 }
 

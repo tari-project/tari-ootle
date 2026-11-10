@@ -286,6 +286,15 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         local_state_matches_checkpoint_at(&self.epoch_manager, &self.state_store, checkpoint_epoch, local_epoch).await
     }
 
+    /// True if the oracle's epoch is within `BIRTHDAY_JOIN_WINDOW_EPOCHS` of the birthday epoch.
+    async fn oracle_within_birthday_join_window(&self) -> Result<bool, RpcStateSyncError> {
+        let Some(birthday_epoch) = self.epoch_manager.get_birthday_epoch().await? else {
+            return Ok(false);
+        };
+        let oracle_epoch = self.epoch_manager.current_epoch().await?;
+        Ok(is_within_birthday_join_window(birthday_epoch, oracle_epoch))
+    }
+
     /// True if this node holds neither a leaf block nor an epoch checkpoint.
     fn holds_no_consensus_state(&self) -> Result<bool, RpcStateSyncError> {
         let holds_state = self.state_store.with_read_tx(|tx| {
@@ -1156,15 +1165,19 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
     }
 
     async fn sync(&mut self, target_epoch: Option<Epoch>) -> Result<(), Self::Error> {
-        let holds_no_state = self.holds_no_consensus_state()?;
+        let may_join_at_birthday =
+            self.holds_no_consensus_state()? && self.oracle_within_birthday_join_window().await?;
         match self.sync_inner(target_epoch).await {
             // Before any epoch of the network finalises, no peer holds a checkpoint, and every validator is a node with
             // no state. There is nothing to sync, so the node joins consensus at the birthday epoch. The node must
-            // still hold no state afterwards: a sync that stored some shard groups' checkpoint before
-            // failing on another retries instead. A node that joins this way while its committee has moved
-            // on sees proposals from a later epoch, and syncs from the stalled leaf path then.
+            // still hold no state afterwards: a sync that stored some shard groups' checkpoint before failing on
+            // another retries instead. A peer also reports no checkpoint while its committee finalises the previous
+            // epoch, or while it syncs itself, so the join is taken only while the oracle is within
+            // `BIRTHDAY_JOIN_WINDOW_EPOCHS` of the birthday epoch. There the birthday committee still serves the
+            // network, and a node that joined behind it sees proposals from a later epoch and syncs from the stalled
+            // leaf path. Past the window the node retries.
             Err(RpcStateSyncError::CheckpointNotAvailable { epoch })
-                if holds_no_state && self.holds_no_consensus_state()? =>
+                if may_join_at_birthday && self.holds_no_consensus_state()? =>
             {
                 info!(
                     target: LOG_TARGET,
@@ -1238,6 +1251,15 @@ impl LaterGenesisReports {
 /// activation and never admits the join: the node syncs the remaining epochs first.
 fn checkpoint_admits_leafless_join(checkpoint_epoch: Epoch, oracle_epoch: Epoch) -> bool {
     checkpoint_epoch + Epoch(1) >= oracle_epoch
+}
+
+/// The number of epochs after the birthday epoch in which a node with no state, finding no checkpoint on any peer,
+/// joins consensus at the birthday epoch. It spans a day of 20-minute epochs: long enough for every validator of a new
+/// network to come up, and short enough that the birthday committee still serves the network.
+const BIRTHDAY_JOIN_WINDOW_EPOCHS: Epoch = Epoch(72);
+
+fn is_within_birthday_join_window(birthday_epoch: Epoch, oracle_epoch: Epoch) -> bool {
+    oracle_epoch <= birthday_epoch.saturating_add(BIRTHDAY_JOIN_WINDOW_EPOCHS)
 }
 
 /// True if the peer could not supply the `prev_epoch` checkpoint yet, which another peer or a later attempt
@@ -1357,6 +1379,27 @@ fn local_state_matches_checkpoints<TTx: StateStoreReadTransaction>(
 
 #[cfg(test)]
 mod tests {
+    mod birthday_join_window {
+        use super::super::*;
+
+        #[test]
+        fn admits_the_birthday_epoch_and_the_window_after_it() {
+            assert!(is_within_birthday_join_window(Epoch(100), Epoch(100)));
+            assert!(is_within_birthday_join_window(
+                Epoch(100),
+                Epoch(100) + BIRTHDAY_JOIN_WINDOW_EPOCHS
+            ));
+        }
+
+        #[test]
+        fn refuses_an_oracle_past_the_window() {
+            assert!(!is_within_birthday_join_window(
+                Epoch(100),
+                Epoch(101) + BIRTHDAY_JOIN_WINDOW_EPOCHS
+            ));
+        }
+    }
+
     use tari_ootle_common_types::ExtraData;
     use tari_ootle_storage::{
         ShardScopedTreeStoreWriter,

@@ -30,3 +30,7 @@ pub fn get_definition(instance_type: InstanceType) -> Box<dyn ProcessDefinition 
 }
 
 pub const ARGS_SETTINGS_KEY: &str = "args";
+/// Validator setting holding the wallet account public key that receives validator fees.
+pub const CLAIM_PUBLIC_KEY_SETTINGS_KEY: &str = "claim_public_key";
+/// File in the processes directory where the create-key wallet writes the fee claim account.
+pub const CLAIM_KEY_FILE_NAME: &str = "claim_key.json";

@@ -101,6 +101,9 @@ pub struct ProposedBlockChangeSet {
     proposed_foreign_proposals: Vec<BlockId>,
     proposed_utxo_mints: Vec<ClaimedOutputTombstoneAddress>,
     no_vote_reason: Option<NoVoteReason>,
+    /// Why this node withholds its vote from a block it accepts. Such a block carries a value this node ratifies
+    /// against its own view, and that view does not confirm it; the committee may still commit the block.
+    abstention: Option<NoVoteReason>,
 }
 
 impl ProposedBlockChangeSet {
@@ -116,6 +119,7 @@ impl ProposedBlockChangeSet {
             proposed_foreign_proposals: Vec::new(),
             proposed_utxo_mints: Vec::new(),
             no_vote_reason: None,
+            abstention: None,
         }
     }
 
@@ -132,6 +136,17 @@ impl ProposedBlockChangeSet {
 
     pub fn no_vote_reason(&self) -> Option<&NoVoteReason> {
         self.no_vote_reason.as_ref()
+    }
+
+    /// Withholds this node's vote from the block without rejecting it: the change set is still saved if the block is
+    /// otherwise accepted. The first abstention recorded is kept.
+    pub fn abstain(&mut self, reason: NoVoteReason) -> &mut Self {
+        self.abstention.get_or_insert(reason);
+        self
+    }
+
+    pub fn abstention(&self) -> Option<&NoVoteReason> {
+        self.abstention.as_ref()
     }
 
     pub fn clear(&mut self) {
@@ -210,6 +225,7 @@ impl ProposedBlockChangeSet {
             self.proposed_utxo_mints.shrink_to(MEM_MAX_PROPOSED_UTXO_MINTS_SIZE);
         }
         self.no_vote_reason = None;
+        self.abstention = None;
     }
 
     pub fn set_state_tree_diffs(&mut self, diffs: IndexMap<Shard, PendingShardStateTreeDiff>) -> &mut Self {
@@ -460,6 +476,8 @@ impl ProposedBlockChangeSet {
         }
 
         let _timer = TraceTimer::debug(LOG_TARGET, "ProposedBlockChangeSet::save");
+        tx.blocks_set_executed(self.block.block_id())?;
+
         // Store the block diff
         BlockDiff::insert(tx, &self.block.block_id, &self.local_substate_changes)?;
 
@@ -491,6 +509,7 @@ impl ProposedBlockChangeSet {
             )?;
         }
 
+        let mut aborting_tx_ids = Vec::new();
         for (transaction_id, change) in &self.transaction_changes {
             // Save any transaction executions for the block
             if let Some(ref execution) = change.execution {
@@ -515,8 +534,7 @@ impl ProposedBlockChangeSet {
             // Save any transaction pool updates
             if let Some(ref update) = change.next_update {
                 if update.decision().is_abort() {
-                    // Remove lock conflicts for this transaction. This allows other transactions to be proposed.
-                    TransactionLockConflicts::remove_for_transactions(tx, Some(update.transaction_id()))?;
+                    aborting_tx_ids.push(update.transaction_id());
                 }
                 update.insert_for_block(tx, &self.block)?;
             }
@@ -524,6 +542,11 @@ impl ProposedBlockChangeSet {
             for (shard_group, pledges) in &change.foreign_pledges {
                 tx.foreign_substate_pledges_save(transaction_id, *shard_group, pledges)?;
             }
+        }
+
+        if !aborting_tx_ids.is_empty() {
+            // Remove lock conflicts for aborting transactions. This allows other transactions to be proposed.
+            TransactionLockConflicts::remove_for_transactions(tx, aborting_tx_ids)?;
         }
 
         // TODO(perf): batch this update

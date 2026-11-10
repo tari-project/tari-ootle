@@ -58,7 +58,7 @@ use std::{cell::RefCell, fmt::Debug, rc::Rc};
 pub use pay_fee::PayFee;
 use tari_engine_types::{
     commit_result::{FeeIntentFallback, FinalizeResult, RejectReason},
-    confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
+    confidential::MinotariBurnClaimProof,
     fees::FeeReceipt,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     limits::{CompileCounts, ModuleShape},
@@ -200,7 +200,8 @@ pub trait RuntimeInterface {
     /// `PutLastInstructionOutputOnWorkspace` names; `None` leaves the output of an earlier instruction in place.
     fn complete_instruction(&self, output: Option<IndexedValue>) -> Result<(), RuntimeError>;
 
-    fn claim_burn(&self, claim: MinotariBurnClaimProof, output_data: ClaimBurnOutputData) -> Result<(), RuntimeError>;
+    /// Claims an L1 burn into a bucket of its revealed value.
+    fn claim_burn(&self, claim: MinotariBurnClaimProof) -> Result<BucketId, RuntimeError>;
 
     fn claim_validator_fees(
         &self,

@@ -4,7 +4,11 @@
 use axum_extra::headers::authorization::Bearer;
 use log::warn;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_wallet_sdk::{apis::swap_pool, network::WalletNetworkInterface};
+use tari_ootle_common_types::optional::IsNotFoundError;
+use tari_ootle_wallet_sdk::{
+    apis::swap_pool::{self, SwapPoolApiError},
+    network::WalletNetworkInterface,
+};
 use tari_ootle_walletd_client::{
     permissions::{Permission, ReadOnly},
     types::{
@@ -16,9 +20,12 @@ use tari_ootle_walletd_client::{
     },
 };
 use tari_template_builtin::LIQUIDITY_POOL_TEMPLATE_ADDRESS;
-use tari_template_lib_types::ComponentAddress;
+use tari_template_lib_types::{Amount, ComponentAddress};
 
-use crate::handlers::HandlerContext;
+use crate::handlers::{
+    HandlerContext,
+    helpers::{invalid_params, not_found},
+};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::swap_pools";
 
@@ -30,8 +37,23 @@ pub async fn handle_get_exchange_rate(
     let sdk = context.wallet_sdk().clone();
     context.authorize(token, &[Permission::SwapPools(ReadOnly::Read)])?;
 
+    if let Some(desired) = req.desired_tari_output &&
+        !desired.is_positive()
+    {
+        return Err(invalid_params(
+            "desired_tari_output",
+            Some("Desired TARI output must be positive"),
+        ));
+    }
+
     let substate_api = sdk.substate_api();
-    let reserves = swap_pool::get_pool_reserves(&substate_api, req.pool_address).await?;
+    let reserves = swap_pool::get_pool_reserves(&substate_api, req.pool_address)
+        .await
+        .map_err(|e| match &e {
+            SwapPoolApiError::SubstateApi(err) if err.is_not_found_error() => not_found(e),
+            SwapPoolApiError::VaultNotFound { .. } => not_found(e),
+            _ => e.into(),
+        })?;
 
     let swap_input_amount = match req.desired_tari_output {
         Some(desired) => {
@@ -39,9 +61,11 @@ pub async fn handle_get_exchange_rate(
                 .tari_swap_reserves()
                 .ok_or_else(|| anyhow::anyhow!("Neither pool resource is TARI"))?;
             Some(
-                swap_pool::calculate_swap_input(desired, reserve_in, reserve_out).ok_or_else(|| {
-                    anyhow::anyhow!("Pool does not have enough TARI liquidity for the desired output")
-                })?,
+                swap_pool::calculate_swap_input(desired, reserve_in, reserve_out)
+                    .filter(Amount::is_positive)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("Pool does not have enough TARI liquidity for the desired output")
+                    })?,
             )
         },
         None => None,
@@ -68,6 +92,9 @@ pub async fn handle_list(
     context.authorize(token, &[Permission::SwapPools(ReadOnly::Read)])?;
 
     let limit = req.limit.unwrap_or(10).min(50) as usize;
+    if limit == 0 {
+        return Ok(SwapPoolsListResponse { pools: Vec::new() });
+    }
     let offset = req.offset.unwrap_or(0);
 
     // When filtering by resource pair, we need to over-fetch because not all pools will match.
@@ -134,4 +161,44 @@ async fn fetch_pool_info(
         resource_b: reserves.resource_b,
         balance_b: reserves.balance_b,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
+    use tari_template_lib_types::{ObjectKey, ResourceAddress};
+
+    use super::*;
+    use crate::handlers::test_support::TestDaemon;
+
+    #[tokio::test]
+    async fn exchange_rate_rejects_zero_desired_output_and_list_short_circuits_zero_limit() {
+        let daemon = TestDaemon::start().await;
+        let pool_address = ComponentAddress::from_array([0x44; 32]);
+
+        let err = handle_get_exchange_rate(&daemon.context, Some(&daemon.session), SwapPoolGetExchangeRateRequest {
+            pool_address,
+            desired_tari_output: Some(Amount::zero()),
+        })
+        .await
+        .unwrap_err();
+        let jrpc = err.downcast_ref::<JsonRpcError>().expect("JsonRpcError");
+        assert!(matches!(jrpc.error_reason(), JsonRpcErrorReason::InvalidParams));
+        assert!(err.to_string().contains("desired_tari_output"), "{err}");
+
+        let pair = (
+            ResourceAddress::new(ObjectKey::from_array([1; ObjectKey::LENGTH])),
+            ResourceAddress::new(ObjectKey::from_array([2; ObjectKey::LENGTH])),
+        );
+        for resource_pair in [None, Some(pair)] {
+            let resp = handle_list(&daemon.context, Some(&daemon.session), SwapPoolsListRequest {
+                limit: Some(0),
+                offset: Some(0),
+                resource_pair,
+            })
+            .await
+            .unwrap();
+            assert!(resp.pools.is_empty());
+        }
+    }
 }

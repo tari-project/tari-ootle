@@ -48,7 +48,13 @@ const CONSENSUS_CONSTANTS_TEMPLATE: &str = r#"# Consensus constants for this swa
 use crate::{
     config::{InstanceConfig, InstanceType},
     logger::FORWARDED_TARGET,
-    process_definitions::{CONSENSUS_CONSTANTS_FILE_NAME, ProcessContext, get_definition},
+    process_definitions::{
+        CLAIM_KEY_FILE_NAME,
+        CLAIM_PUBLIC_KEY_SETTINGS_KEY,
+        CONSENSUS_CONSTANTS_FILE_NAME,
+        ProcessContext,
+        get_definition,
+    },
     process_manager::{
         AllocatedPorts,
         IndexerProcess,
@@ -112,7 +118,7 @@ impl InstanceManager {
 
             // The key outlives a restart, and creating it again fails because the account name is taken
             if instance.instance_type.is_wallet_daemon_create_key() &&
-                fs::try_exists(self.base_path.join("processes").join("claim_key.json"))
+                fs::try_exists(self.base_path.join("processes").join(CLAIM_KEY_FILE_NAME))
                     .await
                     .unwrap_or(false)
             {
@@ -263,7 +269,7 @@ impl InstanceManager {
 
         // Special handling to set the claim public key if we find a file containing one
         if instance_type.is_validator() {
-            let claim_public_key_file = processes_path.join("claim_key.json");
+            let claim_public_key_file = processes_path.join(CLAIM_KEY_FILE_NAME);
             if claim_public_key_file.exists() {
                 let file = File::open(&claim_public_key_file)
                     .await
@@ -277,7 +283,7 @@ impl InstanceManager {
                     .and_then(|pk| pk.as_str())
                     .ok_or_else(|| anyhow!("Failed to extract public key from claim public key file: {claim_data}"))?;
                 info!("Setting claim public key to {}", claim_public_key);
-                instance_settings.insert("claim_public_key".to_string(), claim_public_key.to_string());
+                instance_settings.insert(CLAIM_PUBLIC_KEY_SETTINGS_KEY.to_string(), claim_public_key.to_string());
             }
         }
 
@@ -734,5 +740,30 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("already exists"), "{err}");
         assert_eq!(manager.instances().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_validator_without_a_claim_key_is_not_forked() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_path = temp_dir.path().to_path_buf();
+        let executable = Executable {
+            instance_type: InstanceType::TariValidatorNode,
+            ..stub_executable(&base_path).await
+        };
+        let mut manager = InstanceManager::new(base_path, Network::LocalNet, HashMap::new(), vec![], 47100);
+
+        let err = manager
+            .create_instance(
+                &executable,
+                InstanceType::TariValidatorNode,
+                "vn".to_string(),
+                HashMap::new(),
+            )
+            .await
+            .unwrap_err();
+        let err = format!("{err:#}");
+        assert!(err.contains("no fee claim public key"), "{err}");
+        assert!(err.contains(CLAIM_KEY_FILE_NAME), "{err}");
+        assert_eq!(manager.instances().count(), 0);
     }
 }

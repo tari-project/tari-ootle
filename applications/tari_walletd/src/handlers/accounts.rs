@@ -17,7 +17,6 @@ use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
     commit_result::{ExecutionFailureCode, RejectReason},
     component::derive_component_address_from_public_key,
-    confidential::ClaimBurnOutputData,
     fees::FEE_ESTIMATE_ALLOWANCE,
     stealth::{ClaimBurnShape, declared_input_bytes, persisted_utxo_bytes},
     substate::SubstateId,
@@ -753,7 +752,7 @@ pub(crate) async fn execute_claim_burn(
     })
 }
 
-/// Decrypts the burn proof and builds the claim transaction, signed by the claim key.
+/// Builds the claim transaction, signed by the claim key.
 #[allow(clippy::too_many_lines)]
 fn build_claim_burn_transaction(
     sdk: &crate::WalletSdk,
@@ -764,10 +763,7 @@ fn build_claim_burn_transaction(
     is_dry_run: bool,
     input_pricing: &DeclaredInputPricing,
 ) -> Result<Transaction, anyhow::Error> {
-    let ClaimBurnProofContents {
-        encrypted_data: claimed_encrypted_data,
-        claim_proof,
-    } = proof_contents;
+    let ClaimBurnProofContents { claim_proof } = proof_contents;
 
     let account_owner_key_id = account
         .owner_key_id()
@@ -821,16 +817,8 @@ fn build_claim_burn_transaction(
         stealth_claim_pk,
     );
 
-    let decrypted = sdk.stealth_crypto_api().decrypt_utxo_data(
-        &claimed_encrypted_data,
-        &claim_proof.commitment,
-        account_owner_key.secret(),
-        &sender_offset_pub_key,
-        true,
-    )?;
-
-    // The secrets required to spend the claimed output
-    let claimed = decrypted.into_mask_and_value();
+    // The ownership proof checked above binds the claimed value to the burn commitment
+    let claimed_value = claim_proof.value;
 
     let mask = sdk.key_manager_api().next_key(KeyBranch::StealthMask)?;
     let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
@@ -853,17 +841,10 @@ fn build_claim_burn_transaction(
         &nonce,
     );
 
-    // We'll create an output with the same encrypted data that was used on L1 burn. Note that this is not strictly
-    // necessary. The engine will create the output with whatever you give it, so we could reencrypt.
-    let output_data = ClaimBurnOutputData {
-        encrypted_data: claimed_encrypted_data,
-    };
-
     // Builds the claim revealing `fee` out of the claimed value, returning the signed transaction and the
     // statement that reveals the fee.
     let build = |fee: u64| -> Result<(Transaction, StealthTransferStatement), anyhow::Error> {
-        let final_amount = claimed
-            .value
+        let final_amount = claimed_value
             .checked_sub(fee)
             .ok_or_else(|| invalid_params("max_fee", Some("more fees paid than claimed amount")))?;
 
@@ -893,8 +874,8 @@ fn build_claim_burn_transaction(
         };
 
         let pay_fee_and_mint_output = sdk.stealth_crypto_api().generate_transfer_statement(
-            iter::once(StealthInputWitness::new(claimed.clone())),
-            Amount::zero(),
+            iter::empty::<StealthInputWitness>(),
+            Amount::from(claimed_value),
             iter::once(&output_witness),
             // The claim key signs this transaction, so it is the only badge in scope to take the revealed fee.
             Some(RevealedOutput::new(Amount::from(fee), stealth_claim_pk)),
@@ -903,10 +884,11 @@ fn build_claim_burn_transaction(
         let transaction = Transaction::builder(network.as_byte(), max_epoch)
             .with_fee_instructions_builder(|fee_builder| {
                 fee_builder
-                    // Mint the UTXO
-                    .claim_burn(claim_proof.clone(), output_data.clone())
-                    // Transfer the UTXO to another UTXO with some revealed output for fees
-                    .stealth_transfer(TARI_TOKEN, pay_fee_and_mint_output.clone())
+                    // Reveal the claimed value in a bucket
+                    .claim_burn(claim_proof.clone())
+                    .put_last_instruction_output_on_workspace("claimed")
+                    // Pay the bucket into a stealth output, revealing the fee
+                    .stealth_transfer_with_input_bucket(TARI_TOKEN, pay_fee_and_mint_output.clone(), "claimed")
                     // Pay fee
                     .put_last_instruction_output_on_workspace("fee")
                     .pay_fee_from_bucket("fee")
@@ -1422,9 +1404,6 @@ pub async fn handle_confidential_transfer(
     let sdk = context.wallet_sdk().clone();
     let notifier = context.notifier().clone();
 
-    if req.amount.is_negative() {
-        return Err(invalid_params("amount", Some("must be positive")));
-    }
     let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
     enforce_scopes(&granted, &[Permission::Transfer(
         Crud::Create,
@@ -3950,8 +3929,7 @@ mod claim_burn_fee_tests {
     }
 
     /// An L1 burn of `value` made out to the test account, as the L1 wallet would produce it: a stealth
-    /// claim key derived from the account key, an ownership proof by the commitment's mask, and the
-    /// value and mask encrypted to the account.
+    /// claim key derived from the account key and an ownership proof by the commitment's mask.
     fn burn_to_account(test: &ClaimTest, value: u64) -> ClaimBurnProofContents {
         let crypto = test.sdk.stealth_crypto_api();
         let account_key = test
@@ -3965,9 +3943,6 @@ mod claim_burn_fee_tests {
 
         let mask = RistrettoSecretKey::random(&mut rand::rng());
         let commitment = commit_u64_amount(&mask, value).to_byte_type();
-        let encrypted_data = crypto
-            .encrypt_value_and_mask(value, &mask, &sender_offset_public_key, account_key.secret(), None)
-            .unwrap();
         let sidechain_id: Option<&[u8]> = None;
         let message = ownership_proof_hasher64(Network::LocalNet)
             .chain(&commitment.as_bytes())
@@ -4013,7 +3988,6 @@ mod claim_burn_fee_tests {
                     block_output_proof: mmr_proof(),
                 },
             },
-            encrypted_data,
         }
     }
 
@@ -4025,7 +3999,7 @@ mod claim_burn_fee_tests {
                 Instruction::StealthTransfer { statement, .. } => Some(statement),
                 _ => None,
             })
-            .expect("a claim spends the claimed UTXO in a stealth transfer")
+            .expect("a claim pays the claimed bucket into a stealth transfer")
     }
 
     fn revealed_fee(transaction: &Transaction) -> Amount {

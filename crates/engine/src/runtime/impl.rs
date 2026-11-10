@@ -26,13 +26,10 @@ use log::{warn, *};
 use tari_bor::{MaybeTagged, decode_exact};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_engine_types::{
-    Utxo,
-    UtxoOutput,
     bucket::Bucket,
     commit_result::{FeeIntentFallback, FinalizeResult, RejectReason},
-    confidential::{ClaimBurnOutputData, ClaimedOutputTombstone, MinotariBurnClaimProof},
+    confidential::{ClaimedOutputTombstone, MinotariBurnClaimProof},
     crypto,
-    crypto::OutputBody,
     entity_id_provider::EntityIdProvider,
     events::Event,
     fees::FeeReceipt,
@@ -57,7 +54,7 @@ use tari_ootle_transaction::{
     ResourceAddressRef,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
 };
-use tari_template_abi::{FunctionDef, FunctionKind, TemplateDef, Type};
+use tari_template_abi::{FunctionDef, FunctionKind, TemplateDef, Type, WellKnownType};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, is_builtin_template_address};
 use tari_template_lib::{
     SpendContext,
@@ -143,7 +140,7 @@ use tari_template_lib::{
         },
         bytes::Bytes,
         constants::{TARI_TOKEN, TOKEN_SYMBOL},
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, ValueKnowledgeProof},
         engine_args::IntrinsicId,
         stealth::{
             AtomicCondition,
@@ -151,7 +148,6 @@ use tari_template_lib::{
             Covenant,
             CurrentInputView,
             MerkleProof,
-            SpendAuthorization,
             SpendCondition,
             SpendWitness,
             StealthInput,
@@ -560,6 +556,17 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             return Ok(());
         }
 
+        // The hook frame's scope comes from the arguments as they stand before the acting component's state is
+        // attached, so the hook receives that state as data only. The acting component's frame validated the state
+        // when it wrote it, and the substates it names belong to the acting component: a root substate among them
+        // may be absent from this transaction, and none of them enter the hook frame's scope.
+        let hook_arg_scope = [
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&action)?)?,
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&auth_caller)?)?,
+        ]
+        .into_iter()
+        .collect();
+
         if let Some(component) = auth_caller.component().copied() {
             self.invoke_modules_on_runtime_call("load_component")?;
             self.charge_component_load(component)?;
@@ -592,6 +599,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             &auth_hook.method,
             args,
             Some(FrameWriteMode::OwnComponent),
+            Some(hook_arg_scope),
         );
         if !resource_was_in_scope {
             self.tracker.write_with(|state_mut| {
@@ -688,12 +696,15 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         Runtime::new(Rc::new(self.clone()))
     }
 
+    /// Calls `method` on `component_address`. `arg_scope`, when given, is the callee frame's argument scope in
+    /// place of the one derived from `args`.
     fn invoke_component_method(
         &self,
         component_address: ComponentAddress,
         method: &str,
         args: Vec<Bytes>,
         restrict_frame_to: Option<FrameWriteMode>,
+        arg_scope: Option<IndexedWellKnownTypes>,
     ) -> Result<IndexedValue, RuntimeError> {
         let call_runtime = self.for_nested_call();
 
@@ -704,6 +715,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             method,
             args.into_iter().map(InstructionArg::Literal).collect(),
             restrict_frame_to,
+            arg_scope,
         )
         .map_err(|e| RuntimeError::CrossTemplateCallMethodError {
             component_address,
@@ -843,20 +855,26 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
 
-        if !matches!(
-            func.arguments.first().expect("length checked").arg_type.other(),
-            Some("ResourceAuthAction")
-        ) {
+        if !func
+            .arguments
+            .first()
+            .expect("length checked")
+            .arg_type
+            .is_well_known(WellKnownType::ResourceAuthAction)
+        {
             return Err(RuntimeError::InvalidArgument {
                 argument,
                 reason: format!("Authorize hook '{}' must take a ResourceAuthAction as argument 1", hook),
             });
         }
 
-        if !matches!(
-            func.arguments.get(1).expect("length checked").arg_type.other(),
-            Some("AuthHookCaller")
-        ) {
+        if !func
+            .arguments
+            .get(1)
+            .expect("length checked")
+            .arg_type
+            .is_well_known(WellKnownType::AuthHookCaller)
+        {
             return Err(RuntimeError::InvalidArgument {
                 argument,
                 reason: format!("Authorize hook '{}' must take an AuthHookCaller as argument 2", hook),
@@ -889,7 +907,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
         match func.arguments.last() {
-            Some(arg) if arg.arg_type.other() == Some("SpendContext") => Ok(()),
+            Some(arg) if arg.arg_type.is_well_known(WellKnownType::SpendContext) => Ok(()),
             _ => Err(RuntimeError::InvalidArgument {
                 argument: "TemplateFunction",
                 reason: format!(
@@ -1768,10 +1786,21 @@ where
                 args.assert_no_args("Component::GetTemplateAddress")?;
 
                 self.tracker.write_with(|state| {
-                    let locked = state.read_lock_substate(SubstateId::Component(component_address))?;
+                    let current_component_lock = state
+                        .current_call_scope()?
+                        .get_current_component_lock()
+                        .filter(|l| *l.substate_id() == component_address)
+                        .cloned();
+                    let is_already_locked = current_component_lock.is_some();
+                    let locked = match current_component_lock {
+                        Some(lock) => lock,
+                        None => state.read_lock_substate(SubstateId::Component(component_address))?,
+                    };
                     let component = state.get_component(&locked)?;
                     let template_address = *component.template_address();
-                    state.unlock_substate(locked)?;
+                    if !is_already_locked {
+                        state.unlock_substate(locked)?;
+                    }
                     Ok(InvokeResult::encode(&template_address)?)
                 })
             },
@@ -2586,9 +2615,33 @@ where
                         }));
                     }
 
-                    // The value proof is the burner's proof that they hold the UTXO's opening (or the resource's
-                    // secret view key), so it is required whether or not the resource tracks its total supply.
                     let commitment = arg.utxo_id.into_commitment_bytes();
+
+                    // The output's creator chose its mask, so a mask-knowledge proof shows knowledge of the opening
+                    // but not ownership. It authorises a burn only together with the UTXO's key-path spend authority.
+                    // A view-key proof needs the resource's secret view key and stands on its own.
+                    if matches!(arg.value_proof.knowledge_proof, ValueKnowledgeProof::Commitment { .. }) {
+                        let Some(spend_key) = utxo_mut.output().and_then(|o| o.auth.spend_key()).copied() else {
+                            return Err(RuntimeError::ResourceError(ResourceError::UtxoBurnFailed {
+                                id: arg.utxo_id,
+                                details: "a mask-knowledge value proof can only burn a UTXO that has a spend key"
+                                    .to_string(),
+                            }));
+                        };
+                        let badge = NonFungibleAddress::from_public_key(spend_key);
+                        if !state_mut.base_call_scope().auth_scope().contains_badge(&badge) {
+                            return Err(RuntimeError::ResourceError(
+                                ResourceError::RequiredSignatureMissingForStealthUtxo {
+                                    commitment,
+                                    public_key: spend_key,
+                                },
+                            ));
+                        }
+                    }
+
+                    let utxo_mut = state_mut.get_utxo_mut(&utxo_lock)?;
+                    // The value proof is required whether or not the resource tracks its total supply, since it is
+                    // what limits burns to the UTXO owner or the view-key holder.
                     // Burning discards the output, so the proof is validated against the viewable balance first
                     let elgamal_proof = utxo_mut
                         .output
@@ -2769,7 +2822,7 @@ where
 
                     // Enforce confidential limits before the withdraw's proof crypto runs.
                     if let VaultWithdrawArg::Confidential { proof } = &arg {
-                        state.account_confidential_withdraw(proof)?;
+                        state.admit_confidential_withdraw(proof)?;
                     }
 
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
@@ -2907,10 +2960,10 @@ where
                 // inputs unspent. Fees are always paid in TARI.
                 let admitted_transfer = match arg.statement {
                     Some(statement) => {
-                        self.tracker.account_fee_intent_stealth_transfer()?;
+                        self.tracker.admit_fee_intent_stealth_transfer()?;
                         let admitted = self
                             .tracker
-                            .write_with(|state| state.account_stealth_transfer(statement))?;
+                            .write_with(|state| state.admit_stealth_transfer(statement))?;
                         // TARI has no view key, so the viewable-balance surcharge never applies to a fee payment.
                         self.tracker
                             .charge_native_execution(stealth::transfer_native_points(admitted.statement(), false))?;
@@ -3217,7 +3270,7 @@ where
                                 e
                             ),
                         })?;
-                    state.account_confidential_withdraw(&proof)?;
+                    state.admit_confidential_withdraw(&proof)?;
                     let bucket_mut = state.get_bucket_mut(bucket_id)?;
                     let (resource, effects) = bucket_mut.take_confidential(proof, view_key.as_ref())?;
                     let resource_address = *resource.resource_address();
@@ -3763,7 +3816,7 @@ where
         Ok(())
     }
 
-    fn claim_burn(&self, claim: MinotariBurnClaimProof, output_data: ClaimBurnOutputData) -> Result<(), RuntimeError> {
+    fn claim_burn(&self, claim: MinotariBurnClaimProof) -> Result<BucketId, RuntimeError> {
         let epoch = self.tracker.get_current_epoch()?;
         self.tracker
             .charge_native_execution(tari_engine_types::limits::NativeExecutionPoints::PER_CLAIM_BURN)?;
@@ -3794,33 +3847,26 @@ where
         })?;
 
         self.tracker.write_with(|state_mut| {
-            // 2. Create a tombstone
+            // The burner knows the burn commitment's opening, so a stealth transfer of theirs can create, and spend, a
+            // UTXO addressed by that commitment. The tombstone is therefore the only substate a claim addresses by the
+            // commitment: only a claim creates one, and a claim needs the claim key's signature.
             let address = ClaimedOutputTombstoneAddress::from_commitment(claim.commitment);
             state_mut.new_substate(address, ClaimedOutputTombstone { value: claim.value })?;
 
-            // 3. Create the stealth UTXO.
+            // The claimed value is revealed in a bucket that the claim transaction moves on. The ownership proof the
+            // verifier checked binds `claim.value` to the commitment.
+            //
             // This mints value with no `increase_total_supply` counterpart, which is sound only because the genesis
             // TARI resource both disables supply tracking and denies `Burn` (see `get_stealth_tari_resource`).
             // Enabling either would need an increase here to balance the decrease that
-            // `ResourceAction::StealthUtxoBurn` applies when the UTXO is burnt.
-            let address = UtxoAddress::new(TARI_TOKEN, claim.commitment.into());
-            let utxo = Utxo::new(UtxoOutput {
-                output: OutputBody {
-                    public_nonce: claim.output.sender_offset_public_key,
-                    encrypted_data: output_data.encrypted_data,
-                    minimum_value_promise: 0,
-                    viewable_balance: None,
-                },
-                auth: SpendAuthorization::Key(claim_public_key),
-                tag: UtxoTag::new(0),
-            });
-
-            state_mut.new_substate(address, utxo)?;
-
-            Ok::<_, RuntimeError>(())
-        })?;
-
-        Ok(())
+            // `ResourceAction::StealthUtxoBurn` applies when TARI is burnt.
+            let bucket_id = state_mut.new_bucket_id()?;
+            state_mut.new_bucket(
+                bucket_id,
+                ResourceContainer::stealth(TARI_TOKEN, Amount::from(claim.value)),
+            )?;
+            Ok(bucket_id)
+        })
     }
 
     fn claim_validator_fees(
@@ -3962,6 +4008,10 @@ where
                         .map(|public_key| id_provider.derive_new_component_address(&template, public_key))
                         .unwrap_or_else(|| id_provider.new_component_address())?;
 
+                    if state.substate_exists(&SubstateId::Component(address))? {
+                        return Err(RuntimeError::ComponentAlreadyExists { address });
+                    }
+
                     let id = state.new_address_allocation(address)?;
                     Ok(InvokeResult::encode(&ComponentAddressAllocation::new(id))?)
                 },
@@ -4013,7 +4063,7 @@ where
                     args,
                 } = args.assert_one_arg()?;
 
-                self.invoke_component_method(component_address, &method, args, None)?
+                self.invoke_component_method(component_address, &method, args, None, None)?
             },
         };
 
@@ -4268,14 +4318,14 @@ where
         // The fee intent runs on free-compute credit, so the transfers it may perform are capped. Checked before any
         // resource read, charge or crypto so an over-cap fee intent is rejected up front. Both the `StealthTransfer`
         // instruction and a template's `ResourceManager::stealth_transfer` reach here, so neither route escapes it.
-        self.tracker.account_fee_intent_stealth_transfer()?;
+        self.tracker.admit_fee_intent_stealth_transfer()?;
 
         // The whole statement's native verification cost is charged against the payment-funded
         // allowance before any of it runs (the authorisation pass below included), so a transaction
         // that will not pay traps here without extracting the crypto work. The resource peek is a
         // cheap substate read that determines whether the viewable-balance surcharge applies.
         let (admitted, has_view_key) = self.tracker.write_with(|state| {
-            let admitted = state.account_stealth_transfer(statement)?;
+            let admitted = state.admit_stealth_transfer(statement)?;
             let resource_lock = state.read_lock_substate(SubstateId::Resource(address))?;
             let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
             state.unlock_substate(resource_lock)?;
@@ -4333,6 +4383,11 @@ where
                         })?;
                     let bucket = state_mut.take_bucket(input_bucket)?;
                     Self::check_bucket_is_unlocked("pay a fee from", input_bucket, &bucket)?;
+
+                    // An empty Tari bucket pays nothing: consume it and record no fee payment.
+                    if *bucket.resource_address() == TARI_TOKEN && bucket.unlocked_amount().is_zero() {
+                        return Ok(());
+                    }
 
                     // No refunds
                     state_mut.pay_fee(bucket.take_all(), None)?;
@@ -4825,5 +4880,182 @@ mod tests {
             runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args),
             Err(RuntimeError::WriteOutsideOwnComponent { .. })
         ));
+    }
+
+    fn pay_fee_from_new_bucket(
+        runtime: &RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        workspace_id: WorkspaceId,
+        container: ResourceContainer,
+    ) -> (BucketId, Result<(), RuntimeError>) {
+        let bucket_id = runtime.tracker.write_with(|state| {
+            let bucket_id = state.new_bucket_id().unwrap();
+            state.new_bucket(bucket_id, container).unwrap();
+            bucket_id
+        });
+        runtime
+            .put_on_workspace(workspace_id, IndexedValue::from_type(&bucket_id).unwrap())
+            .unwrap();
+        let result = runtime.pay_fee(PayFee::FromBucket {
+            bucket: WorkspaceOffsetId::new(workspace_id),
+        });
+        (bucket_id, result)
+    }
+
+    #[test]
+    fn pay_fee_from_an_empty_tari_bucket_consumes_it_and_records_no_payment() {
+        let runtime = runtime_with_blobs(Blobs::default());
+
+        let (bucket_id, result) =
+            pay_fee_from_new_bucket(&runtime, 0, ResourceContainer::stealth(TARI_TOKEN, Amount::zero()));
+        result.unwrap();
+        assert_eq!(runtime.tracker.total_fee_payments(), 0);
+        assert!(runtime.tracker.read_with(|state| state.get_bucket(bucket_id).is_err()));
+
+        let (_, result) = pay_fee_from_new_bucket(&runtime, 1, ResourceContainer::stealth(TARI_TOKEN, Amount::new(7)));
+        result.unwrap();
+        assert_eq!(runtime.tracker.total_fee_payments(), 7);
+    }
+
+    #[test]
+    fn pay_fee_from_an_empty_non_tari_bucket_is_rejected() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let other_resource = ResourceAddress::new([9u8; 32].into());
+
+        let (_, result) = pay_fee_from_new_bucket(
+            &runtime,
+            0,
+            ResourceContainer::public_fungible(other_resource, Amount::zero()),
+        );
+        assert!(matches!(result, Err(RuntimeError::InvalidArgument { .. })));
+        assert_eq!(runtime.tracker.total_fee_payments(), 0);
+    }
+
+    fn create_test_component(
+        runtime: &RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        template_address: TemplateAddress,
+        module_name: &str,
+        entity_id: EntityId,
+    ) -> ComponentAddress {
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address,
+                    module_name: module_name.to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+        let component_address = runtime
+            .tracker
+            .new_component(
+                tari_bor::Value::Null,
+                SubstateOwnerRule::None,
+                ComponentAccessRules::new(),
+                None,
+                UpdateRule::Locked,
+            )
+            .unwrap();
+        runtime
+            .pop_call_frame(
+                &IndexedWellKnownTypes::from_value(&tari_bor::to_value(&component_address).unwrap()).unwrap(),
+            )
+            .unwrap();
+        component_address
+    }
+
+    #[test]
+    fn get_template_address_succeeds_on_write_locked_current_component_and_migration() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let expected_template = TemplateAddress::from_array([7u8; 32]);
+        let other_template = TemplateAddress::from_array([8u8; 32]);
+        let migrated_template = TemplateAddress::from_array([9u8; 32]);
+        let entity_id = EntityId::default();
+
+        let component_address = create_test_component(&runtime, expected_template, "Test", entity_id);
+        let other_component_address = create_test_component(
+            &runtime,
+            other_template,
+            "Other",
+            EntityId::new([1u8; EntityId::LENGTH]),
+        );
+
+        // Simulate a `&mut self` component method holding a Write lock on `component_address`.
+        let component_lock = runtime.lock_component(component_address, LockFlag::Write).unwrap();
+        let arg_scope =
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&other_component_address).unwrap()).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address: expected_template,
+                    module_name: "Test".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock,
+                    arg_scope: Box::new(arg_scope),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+
+        let invoke_res = runtime
+            .component_invoke(
+                ComponentRef::Ref(component_address),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let actual_template: TemplateAddress = invoke_res.decode().unwrap();
+        assert_eq!(actual_template, expected_template);
+
+        // Querying a different component's template address still acquires and releases a temporary read lock.
+        let other_res = runtime
+            .component_invoke(
+                ComponentRef::Ref(other_component_address),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let actual_other_template: TemplateAddress = other_res.decode().unwrap();
+        assert_eq!(actual_other_template, other_template);
+
+        // Ensure the frame's write lock is still held so subsequent `SetState` and `pop_call_frame` succeed.
+        runtime
+            .component_invoke(
+                ComponentRef::Ref(component_address),
+                ComponentAction::SetState,
+                EngineArgs::from(vec![tari_bor::encode(&tari_bor::Value::Null).unwrap().into()]),
+            )
+            .unwrap();
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+
+        // Simulate a component migration holding a Write lock on `component_address`.
+        let migration_lock = runtime.lock_component(component_address, LockFlag::Write).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::MigrationContext {
+                    template_address: migrated_template,
+                    module_name: "TestV2".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: migration_lock,
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+        runtime.update_component_template(migrated_template).unwrap();
+
+        let migrated_res = runtime
+            .component_invoke(
+                ComponentRef::Ref(component_address),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let actual_migrated: TemplateAddress = migrated_res.decode().unwrap();
+        assert_eq!(actual_migrated, migrated_template);
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
     }
 }

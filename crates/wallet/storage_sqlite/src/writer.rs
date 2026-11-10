@@ -645,12 +645,12 @@ impl<'a> WriteTransaction<'a> {
 }
 
 impl CommittableStore for WriteTransaction<'_> {
-    fn commit(&mut self) -> Result<(), WalletStorageError> {
+    fn commit(mut self) -> Result<(), WalletStorageError> {
         self.transaction.commit_internal()?;
         Ok(())
     }
 
-    fn rollback(&mut self) -> Result<(), WalletStorageError> {
+    fn rollback(mut self) -> Result<(), WalletStorageError> {
         self.transaction.rollback_internal()?;
         Ok(())
     }
@@ -1566,12 +1566,6 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         if amount_to_lock.is_zero() {
             // No-op
             return Ok(());
-        }
-        if amount_to_lock.is_negative() {
-            return Err(WalletStorageError::bad_query(
-                OPERATION,
-                "amount to lock cannot be negative",
-            ));
         }
 
         self.ensure_lock_exists(lock_id)?;

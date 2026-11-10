@@ -44,7 +44,6 @@ fn it_keeps_each_trusted_set_and_the_anchor_they_descend_from() {
         .unwrap();
     tx.trusted_validator_sets_insert(&walked, None).unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = db.create_read_tx().unwrap();
     assert_eq!(tx.trusted_validator_sets_get(Epoch(2)).unwrap(), anchored);
@@ -64,7 +63,6 @@ fn a_set_recorded_for_an_epoch_stays_as_it_is() {
     tx.trusted_validator_sets_insert(&walked, Some(ValidatorSetAnchor::Reanchor))
         .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = db.create_read_tx().unwrap();
     assert_eq!(tx.trusted_validator_sets_get(Epoch(3)).unwrap(), walked);
@@ -83,7 +81,6 @@ fn clearing_forgets_every_trusted_set() {
     tx.trusted_validator_sets_insert(&walked, Some(ValidatorSetAnchor::Reanchor))
         .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = db.create_read_tx().unwrap();
     assert!(tx.trusted_validator_sets_get(Epoch(2)).optional().unwrap().is_none());

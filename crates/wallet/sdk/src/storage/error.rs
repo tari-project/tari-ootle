@@ -77,6 +77,10 @@ impl WalletStorageError {
 pub type TagAndPublicNoncePair = (UtxoTag, RistrettoPublicKeyBytes);
 
 pub trait CommittableStore {
-    fn commit(&mut self) -> Result<(), WalletStorageError>;
-    fn rollback(&mut self) -> Result<(), WalletStorageError>;
+    /// Commits and ends the transaction, releasing its connection.
+    fn commit(self) -> Result<(), WalletStorageError>
+    where Self: Sized;
+    /// Rolls back and ends the transaction, releasing its connection.
+    fn rollback(self) -> Result<(), WalletStorageError>
+    where Self: Sized;
 }

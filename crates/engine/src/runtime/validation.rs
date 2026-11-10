@@ -47,10 +47,10 @@ pub(crate) struct StealthTransactionTotals {
 }
 
 impl StealthTransactionTotals {
-    /// Accounts one more stealth transfer against the per-transaction caps. Returns an error — which aborts the
+    /// Admits one more stealth transfer against the per-transaction caps. Returns an error — which aborts the
     /// transaction before the transfer's (expensive) crypto runs — if any cap would be exceeded. Totals only advance
     /// when the transfer is admitted, so the work actually performed never exceeds the caps.
-    pub fn account_transfer(
+    pub fn admit(
         &mut self,
         limits: &StealthLimits,
         statement: &StealthTransferStatement,
@@ -106,10 +106,10 @@ pub(crate) struct ConfidentialTransactionTotals {
 }
 
 impl ConfidentialTransactionTotals {
-    /// Accounts one more confidential withdraw against the per-transaction caps. Returns an error — which aborts the
+    /// Admits one more confidential withdraw against the per-transaction caps. Returns an error — which aborts the
     /// transaction before the withdraw's (expensive) crypto runs — if any cap would be exceeded. Totals only advance
     /// when the withdraw is admitted, so the work actually performed never exceeds the caps.
-    pub fn account_withdraw(
+    pub fn admit(
         &mut self,
         limits: &ConfidentialLimits,
         proof: &ConfidentialWithdrawProof,
@@ -189,15 +189,15 @@ mod tests {
     #[test]
     fn admits_a_transfer_sitting_on_every_cap() {
         let mut totals = StealthTransactionTotals::default();
-        totals.account_transfer(&LIMITS, &statement(3, 2)).unwrap();
+        totals.admit(&LIMITS, &statement(3, 2)).unwrap();
     }
 
     #[test]
     fn rejects_the_transfer_that_exceeds_the_transfer_cap() {
         let mut totals = StealthTransactionTotals::default();
-        totals.account_transfer(&LIMITS, &statement(0, 0)).unwrap();
-        totals.account_transfer(&LIMITS, &statement(0, 0)).unwrap();
-        let err = totals.account_transfer(&LIMITS, &statement(0, 0)).unwrap_err();
+        totals.admit(&LIMITS, &statement(0, 0)).unwrap();
+        totals.admit(&LIMITS, &statement(0, 0)).unwrap();
+        let err = totals.admit(&LIMITS, &statement(0, 0)).unwrap_err();
         assert!(matches!(
             err,
             ArgumentValidationError::MaxStealthTransfersPerTransactionExceeded { max_transfers: 2 }
@@ -207,8 +207,8 @@ mod tests {
     #[test]
     fn sums_inputs_and_outputs_across_transfers() {
         let mut totals = StealthTransactionTotals::default();
-        totals.account_transfer(&LIMITS, &statement(2, 1)).unwrap();
-        let err = totals.account_transfer(&LIMITS, &statement(2, 0)).unwrap_err();
+        totals.admit(&LIMITS, &statement(2, 1)).unwrap();
+        let err = totals.admit(&LIMITS, &statement(2, 0)).unwrap_err();
         assert!(matches!(
             err,
             ArgumentValidationError::MaxStealthInputsPerTransactionExceeded { max_inputs: 3, .. }
@@ -218,11 +218,11 @@ mod tests {
     #[test]
     fn a_rejected_transfer_does_not_consume_budget() {
         let mut totals = StealthTransactionTotals::default();
-        totals.account_transfer(&LIMITS, &statement(2, 0)).unwrap();
+        totals.admit(&LIMITS, &statement(2, 0)).unwrap();
         // Rejected: 2 + 2 = 4 > 3 inputs. Must not advance the running totals.
-        totals.account_transfer(&LIMITS, &statement(2, 0)).unwrap_err();
+        totals.admit(&LIMITS, &statement(2, 0)).unwrap_err();
         // A 1-input transfer still fits (2 + 1 = 3).
-        totals.account_transfer(&LIMITS, &statement(1, 0)).unwrap();
+        totals.admit(&LIMITS, &statement(1, 0)).unwrap();
     }
 
     const CONF_LIMITS: ConfidentialLimits = ConfidentialLimits {
@@ -251,9 +251,9 @@ mod tests {
     #[test]
     fn rejects_the_withdraw_that_exceeds_the_withdraw_cap() {
         let mut totals = ConfidentialTransactionTotals::default();
-        totals.account_withdraw(&CONF_LIMITS, &withdraw_proof(0)).unwrap();
-        totals.account_withdraw(&CONF_LIMITS, &withdraw_proof(0)).unwrap();
-        let err = totals.account_withdraw(&CONF_LIMITS, &withdraw_proof(0)).unwrap_err();
+        totals.admit(&CONF_LIMITS, &withdraw_proof(0)).unwrap();
+        totals.admit(&CONF_LIMITS, &withdraw_proof(0)).unwrap();
+        let err = totals.admit(&CONF_LIMITS, &withdraw_proof(0)).unwrap_err();
         assert!(matches!(
             err,
             ArgumentValidationError::MaxConfidentialWithdrawsPerTransactionExceeded { max_withdraws: 2 }
@@ -263,14 +263,14 @@ mod tests {
     #[test]
     fn sums_inputs_across_withdraws_and_a_rejected_withdraw_keeps_its_budget() {
         let mut totals = ConfidentialTransactionTotals::default();
-        totals.account_withdraw(&CONF_LIMITS, &withdraw_proof(2)).unwrap();
+        totals.admit(&CONF_LIMITS, &withdraw_proof(2)).unwrap();
         // Rejected: 2 + 2 = 4 > 3 inputs. Must not advance the running totals.
-        let err = totals.account_withdraw(&CONF_LIMITS, &withdraw_proof(2)).unwrap_err();
+        let err = totals.admit(&CONF_LIMITS, &withdraw_proof(2)).unwrap_err();
         assert!(matches!(
             err,
             ArgumentValidationError::MaxConfidentialInputsPerTransactionExceeded { max_inputs: 3, .. }
         ));
         // A 1-input withdraw still fits (2 + 1 = 3).
-        totals.account_withdraw(&CONF_LIMITS, &withdraw_proof(1)).unwrap();
+        totals.admit(&CONF_LIMITS, &withdraw_proof(1)).unwrap();
     }
 }

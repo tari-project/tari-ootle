@@ -216,7 +216,8 @@ pub struct ArgDef {
     pub arg_type: Type,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Encode, Decode, CborLen)]
+/// A type in a function's signature.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Encode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Type {
@@ -258,6 +259,9 @@ pub enum Type {
     },
     #[n(16)]
     Option(#[n(0)] Box<Type>),
+    /// A type that `tari_template_lib` defines, which the macro has checked the template's type resolves to.
+    #[n(17)]
+    WellKnown(#[n(0)] WellKnownType),
 }
 
 impl Type {
@@ -267,6 +271,163 @@ impl Type {
             _ => None,
         }
     }
+
+    /// True when this is `kind`. A template built by `tari_template_lib` before 0.40 names every well-known type
+    /// as `Other` with the type's name, and deployed templates keep that definition.
+    pub fn is_well_known(&self, kind: WellKnownType) -> bool {
+        match self {
+            Type::WellKnown(k) => *k == kind,
+            Type::Other { name } => name == kind.name(),
+            _ => false,
+        }
+    }
+}
+
+/// Written by hand, in the layout the derived `Encode` writes, because `Type` nests and the engine decodes it to its
+/// CBOR nesting bound on a worker thread's stack. A derived decoder's frame holds the locals of every variant, which in
+/// a debug build overflows the stack before the bound; this one keeps each variant's fields in a function of its own.
+impl<'b, C> Decode<'b, C> for Type {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let start = d.position();
+        if d.array()? != Some(2) {
+            return Err(minicbor::decode::Error::message("expected enum (2-element array)").at(start));
+        }
+        let index_at = d.position();
+        let index = d.i64()?;
+        if let Some(ty) = Type::without_fields(index) {
+            d.skip()?;
+            return Ok(ty);
+        }
+        match index {
+            13 => decode_only_field(d, ctx, "Type::Vec::_0", start).map(Type::Vec),
+            14 => decode_only_field(d, ctx, "Type::Tuple::_0", start).map(Type::Tuple),
+            15 => decode_only_field(d, ctx, "Type::Other::name", start).map(|name| Type::Other { name }),
+            16 => decode_only_field(d, ctx, "Type::Option::_0", start).map(Type::Option),
+            17 => decode_only_field(d, ctx, "Type::WellKnown::_0", start).map(Type::WellKnown),
+            n => Err(minicbor::decode::Error::unknown_variant(n).at(index_at)),
+        }
+    }
+}
+
+impl Type {
+    /// The variant at `index` when it has no fields.
+    fn without_fields(index: i64) -> Option<Self> {
+        Some(match index {
+            0 => Type::Unit,
+            1 => Type::Bool,
+            2 => Type::I8,
+            3 => Type::I16,
+            4 => Type::I32,
+            5 => Type::I64,
+            6 => Type::I128,
+            7 => Type::U8,
+            8 => Type::U16,
+            9 => Type::U32,
+            10 => Type::U64,
+            11 => Type::U128,
+            12 => Type::String,
+            _ => return None,
+        })
+    }
+}
+
+/// The field at index 0 of a variant's fields, which the encoding holds in an array that may be indefinite and may
+/// carry fields at higher indices, which are skipped.
+fn decode_only_field<'b, C, T: Decode<'b, C>>(
+    d: &mut minicbor::Decoder<'b>,
+    ctx: &mut C,
+    field: &'static str,
+    variant_at: usize,
+) -> Result<T, minicbor::decode::Error> {
+    let mut value = None;
+    match d.array()? {
+        Some(len) => {
+            for i in 0..len {
+                if i == 0 {
+                    value = Some(T::decode(d, ctx)?);
+                } else {
+                    d.skip()?;
+                }
+            }
+        },
+        None => {
+            let mut i = 0;
+            while d.datatype()? != minicbor::data::Type::Break {
+                if i == 0 {
+                    value = Some(T::decode(d, ctx)?);
+                } else {
+                    d.skip()?;
+                }
+                i += 1;
+            }
+            d.skip()?;
+        },
+    }
+    value.ok_or_else(|| {
+        minicbor::decode::Error::missing_value(0)
+            .with_message(field)
+            .at(variant_at)
+    })
+}
+
+macro_rules! well_known_types {
+    ($($(#[$doc:meta])* $index:literal => $variant:ident,)+) => {
+        /// A `tari_template_lib` type that a [`TemplateDef`] names by what it is. The `#[template]` macro checks, when
+        /// the template builds, that the template's type is this one.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Encode, Decode, CborLen)]
+        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+        #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+        #[cbor(index_only)]
+        #[repr(u8)]
+        pub enum WellKnownType {
+            $($(#[$doc])* #[n($index)] $variant = $index,)+
+        }
+
+        impl WellKnownType {
+            pub const ALL: &[WellKnownType] = &[$(WellKnownType::$variant),+];
+
+            /// The type's name in `tari_template_lib`.
+            pub const fn name(self) -> &'static str {
+                match self {
+                    $(WellKnownType::$variant => stringify!($variant),)+
+                }
+            }
+
+            /// The well-known type named `name`, as a template spells it without its path.
+            pub fn from_name(name: &str) -> Option<Self> {
+                match name {
+                    $(stringify!($variant) => Some(WellKnownType::$variant),)+
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+well_known_types! {
+    0 => Amount,
+    1 => Bucket,
+    2 => Proof,
+    3 => ComponentAddress,
+    4 => ResourceAddress,
+    5 => VaultId,
+    6 => NonFungibleId,
+    7 => NonFungibleAddress,
+    8 => UtxoAddress,
+    /// The address of a template. It is the same Rust type as [`WellKnownType::Hash32`], so the macro tags it by
+    /// the name the template used.
+    9 => TemplateAddress,
+    10 => Hash32,
+    11 => Metadata,
+    12 => Bytes,
+    13 => RistrettoPublicKeyBytes,
+    14 => ResourceType,
+    15 => OwnerRule,
+    16 => AccessRule,
+    17 => ConfidentialWithdrawProof,
+    18 => ResourceAuthAction,
+    19 => AuthHookCaller,
+    20 => SpendContext,
 }
 
 #[cfg(feature = "std")]
@@ -299,6 +460,7 @@ impl std::fmt::Display for Type {
                 f.write_str(">")
             },
             Type::Other { name } => write!(f, "{}", name),
+            Type::WellKnown(kind) => f.write_str(kind.name()),
         }
     }
 }
@@ -398,6 +560,101 @@ mod layout_tests {
         let bytes = tari_bor::serde_codec::to_vec(def()).unwrap();
         let decoded: TemplateDef = tari_bor::serde_codec::from_slice(&bytes).unwrap();
         assert_same(&decoded, &def());
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod decode_tests {
+    use super::*;
+
+    fn every_variant() -> Vec<Type> {
+        let mut types = (0..=12).map(|i| Type::without_fields(i).unwrap()).collect::<Vec<_>>();
+        types.extend([
+            Type::Vec(Box::new(Type::Option(Box::new(Type::U8)))),
+            Type::Tuple(vec![Type::String, Type::Tuple(vec![]), Type::Bool]),
+            Type::Other {
+                name: "Component<Counter>".to_string(),
+            },
+            Type::Option(Box::new(Type::WellKnown(WellKnownType::Bucket))),
+        ]);
+        types.extend(WellKnownType::ALL.iter().map(|k| Type::WellKnown(*k)));
+        types
+    }
+
+    #[test]
+    fn every_variant_round_trips() {
+        for ty in every_variant() {
+            let bytes = tari_bor::encode(&ty).unwrap();
+            assert_eq!(tari_bor::decode::<Type>(&bytes).unwrap(), ty, "{ty:?}");
+        }
+    }
+
+    #[test]
+    fn a_well_known_type_encodes_as_its_index() {
+        let bytes = tari_bor::encode(&Type::WellKnown(WellKnownType::SpendContext)).unwrap();
+        // `[17, [20]]`
+        assert_eq!(bytes, [0x82, 0x11, 0x81, 0x14]);
+    }
+
+    #[test]
+    fn fields_in_an_indefinite_array_decode() {
+        // `[13, [_ [0, []]]]`: `Vec<Unit>`, its fields in an indefinite array.
+        let bytes = [0x82, 0x0d, 0x9f, 0x82, 0x00, 0x80, 0xff];
+        assert_eq!(
+            tari_bor::decode::<Type>(&bytes).unwrap(),
+            Type::Vec(Box::new(Type::Unit))
+        );
+    }
+
+    #[test]
+    fn fields_past_the_first_are_skipped() {
+        // `[15, ["A", 7]]` and `[15, [_ "A", 7]]`: `Other` with a field at index 1.
+        for bytes in [vec![0x82, 0x0f, 0x82, 0x61, b'A', 0x07], vec![
+            0x82, 0x0f, 0x9f, 0x61, b'A', 0x07, 0xff,
+        ]] {
+            assert_eq!(tari_bor::decode::<Type>(&bytes).unwrap(), Type::Other {
+                name: "A".to_string()
+            });
+        }
+    }
+
+    #[test]
+    fn a_missing_field_is_rejected() {
+        // `[16, []]`: `Option` without its type.
+        let err = tari_bor::decode::<Type>(&[0x82, 0x10, 0x80]).unwrap_err();
+        assert!(err.to_string().contains("Type::Option::_0"), "{err}");
+    }
+
+    #[test]
+    fn an_unknown_variant_or_well_known_type_is_rejected() {
+        // `[18, []]` and `[17, [200]]`
+        assert!(tari_bor::decode::<Type>(&[0x82, 0x12, 0x80]).is_err());
+        assert!(tari_bor::decode::<Type>(&[0x82, 0x11, 0x81, 0x18, 0xc8]).is_err());
+    }
+
+    #[test]
+    fn a_well_known_type_is_its_tag_or_its_name() {
+        let kind = WellKnownType::SpendContext;
+        assert!(Type::WellKnown(kind).is_well_known(kind));
+        assert!(
+            Type::Other {
+                name: "SpendContext".to_string()
+            }
+            .is_well_known(kind)
+        );
+        assert!(!Type::WellKnown(WellKnownType::Bucket).is_well_known(kind));
+        assert!(
+            !Type::Other {
+                name: "Bucket".to_string()
+            }
+            .is_well_known(kind)
+        );
+    }
+
+    #[test]
+    fn a_variant_without_fields_skips_its_payload() {
+        // `[9, [1]]`: `U32` with an unexpected field.
+        assert_eq!(tari_bor::decode::<Type>(&[0x82, 0x09, 0x81, 0x01]).unwrap(), Type::U32);
     }
 }
 

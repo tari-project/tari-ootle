@@ -55,7 +55,7 @@ macro_rules! partial_ord_impl {
                 match <$other>::try_from(self.into_inner_value()) {
                     Ok(value) => value.partial_cmp(other),
                     Err(_) => {
-                        if self.is_negative() {
+                        if *self < <$ty>::zero() {
                             Some(cmp::Ordering::Less)
                         } else {
                             Some(cmp::Ordering::Greater)

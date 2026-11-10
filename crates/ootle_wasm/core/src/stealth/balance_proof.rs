@@ -12,7 +12,11 @@ use tari_template_lib_types::{
     stealth::{CovenantBalanceClaim, StealthInputsStatement, StealthOutputsStatement},
 };
 
-use crate::{error::OotleWasmError, keys::secret_key_from_bytes, sign::SchnorrSignatureResult};
+use crate::{
+    error::OotleWasmError,
+    keys::{public_key_from_bytes, secret_key_from_bytes},
+    sign::SchnorrSignatureResult,
+};
 
 /// Generate the Schnorr signature that proves
 /// `∑ input_commitments + revealed_input ≡ ∑ output_commitments + revealed_output`.
@@ -62,11 +66,13 @@ pub fn validate_balance_proof_signature(
             expected: RistrettoPublicKeyBytes::length(),
             got: e.actual_size(),
         })?;
+    let _ = public_key_from_bytes(public_nonce.as_bytes())?;
     let signature_scalar = Scalar32Bytes::from_bytes(signature).map_err(|e| OotleWasmError::InvalidByteLength {
         field: "signature",
         expected: Scalar32Bytes::length(),
         got: e.actual_size(),
     })?;
+    let _ = secret_key_from_bytes(signature_scalar.as_bytes())?;
     let sig_bytes: BalanceProofSignature = SchnorrSignatureBytes::new(public_nonce, signature_scalar);
     let inputs_statement: StealthInputsStatement = serde_json::from_str(inputs_statement_json)?;
     let outputs_statement: StealthOutputsStatement = serde_json::from_str(outputs_statement_json)?;

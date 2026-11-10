@@ -1,7 +1,9 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use ootle_byte_type::ToByteType;
 use serde::Deserialize;
+use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_ootle_common_types::signature::Sr25519SignatureBytes;
 use tari_ootle_transaction::{
     TransactionSealSignature,
@@ -56,6 +58,10 @@ fn signature_from_bytes(bytes: &[u8]) -> Result<Sr25519SignatureBytes, OotleWasm
 pub fn seal_transaction_json(tx_json: &str, seal_signer_secret_key: &[u8]) -> Result<String, OotleWasmError> {
     let unsealed = parse_transaction_json(tx_json)?.into_unsealed();
     let secret = secret_key_from_bytes(seal_signer_secret_key)?;
+    let seal_signer = RistrettoPublicKey::from_secret_key(&secret).to_byte_type();
+    if !unsealed.verify_all_signatures(&seal_signer) {
+        return Err(OotleWasmError::AuthorizationSignatureInvalid);
+    }
     let sealed = unsealed.seal(&secret);
     Ok(serde_json::to_string(&sealed)?)
 }
@@ -348,6 +354,9 @@ mod tests {
         let hash = hash_unsealed_transaction_json(&unsealed_json).unwrap();
         let signature = external_sign(&seal_secret, &hash);
         let err = attach_seal_signature_json(&unsealed_json, seal_pk.as_bytes(), &signature).unwrap_err();
+        assert!(matches!(err, OotleWasmError::AuthorizationSignatureInvalid));
+
+        let err = seal_transaction_json(&unsealed_json, seal_secret.as_bytes()).unwrap_err();
         assert!(matches!(err, OotleWasmError::AuthorizationSignatureInvalid));
     }
 

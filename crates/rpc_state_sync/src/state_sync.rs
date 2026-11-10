@@ -286,6 +286,17 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         local_state_matches_checkpoint_at(&self.epoch_manager, &self.state_store, checkpoint_epoch, local_epoch).await
     }
 
+    /// True if this node holds neither a leaf block nor an epoch checkpoint.
+    fn holds_no_consensus_state(&self) -> Result<bool, RpcStateSyncError> {
+        let holds_state = self.state_store.with_read_tx(|tx| {
+            Ok::<_, StorageError>(
+                LeafBlock::get_any(tx).optional()?.is_some() ||
+                    EpochCheckpoint::get_last_checkpoint(tx).optional()?.is_some(),
+            )
+        })?;
+        Ok(!holds_state)
+    }
+
     /// The sync status of a node that holds no leaf block, given the oracle's current epoch.
     async fn leafless_sync_status(&self, oracle_epoch: Epoch) -> Result<SyncStatus, RpcStateSyncError> {
         // A leaf-less node that still holds an `EpochCheckpoint` covering the epoch immediately before the
@@ -1145,8 +1156,26 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
     }
 
     async fn sync(&mut self, target_epoch: Option<Epoch>) -> Result<(), Self::Error> {
-        let result = self.sync_inner(target_epoch).await;
-        self.report_sync("State sync", result)
+        let holds_no_state = self.holds_no_consensus_state()?;
+        match self.sync_inner(target_epoch).await {
+            // Before any epoch of the network finalises, no peer holds a checkpoint, and every validator is a node with
+            // no state. There is nothing to sync, so the node joins consensus at the birthday epoch. The node must
+            // still hold no state afterwards: a sync that stored some shard groups' checkpoint before
+            // failing on another retries instead. A node that joins this way while its committee has moved
+            // on sees proposals from a later epoch, and syncs from the stalled leaf path then.
+            Err(RpcStateSyncError::CheckpointNotAvailable { epoch })
+                if holds_no_state && self.holds_no_consensus_state()? =>
+            {
+                info!(
+                    target: LOG_TARGET,
+                    "🛜 No peer holds the checkpoint for epoch {epoch}, and this node holds no consensus state. Joining \
+                     consensus at the birthday epoch."
+                );
+                self.stats = StateSyncStats::default();
+                Ok(())
+            },
+            result => self.report_sync("State sync", result),
+        }
     }
 
     async fn presync(&mut self, shard_group: ShardGroup, epoch: Epoch) -> Result<PresyncStatus, Self::Error> {

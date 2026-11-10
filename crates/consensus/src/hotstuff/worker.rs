@@ -324,7 +324,14 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
         let current_epoch = match select_starting_epoch(last_finalised_epoch, leaf_epoch) {
             Some(epoch) => epoch,
-            None => self.epoch_manager.current_epoch().await?,
+            // No peer holds a checkpoint to sync from, so no epoch of this network has finalised. Every node in that
+            // position opens the birthday epoch, whatever epoch its oracle has reached, so they all build the same
+            // genesis block and then step forward to the oracle's epoch together.
+            None => self.epoch_manager.get_birthday_epoch().await?.ok_or_else(|| {
+                HotStuffError::InvariantError(
+                    "Consensus started with no committed state before the birthday epoch was determined".to_string(),
+                )
+            })?,
         };
 
         let epoch_hash = self.epoch_manager.get_epoch_hash(current_epoch).await?;
@@ -338,9 +345,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     /// resuming a stalled epoch would propose `EndEpoch` until the next base-layer epoch boundary publishes a fresh
     /// event, leaving the committee stuck one epoch behind for an entire base-layer epoch.
     ///
-    /// Seeds the epoch immediately following `starting_epoch` and lets consensus progress naturally from there. If
-    /// the oracle is more than one epoch ahead, the committee transitions one epoch and the next `EpochChanged` event
-    /// (or peer QCs at a higher epoch) drives the rest.
+    /// Seeds the oracle's epoch as the target, so the committee proposes `EndEpoch` in each epoch from `starting_epoch`
+    /// until it reaches the oracle's, without waiting for further `EpochChanged` events.
     async fn seed_next_epoch_from_oracle(&mut self, starting_epoch: Epoch) -> Result<(), HotStuffError> {
         let oracle_epoch = self.epoch_manager.current_epoch().await?;
         if oracle_epoch <= starting_epoch {
@@ -363,10 +369,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
         info!(
             target: LOG_TARGET,
-            "🌟 Oracle is at epoch {oracle_epoch} but consensus is resuming at {starting_epoch}. Seeding next epoch \
-             {next_epoch} so that EndEpoch can be proposed.",
+            "🌟 Oracle is at epoch {oracle_epoch} but consensus is resuming at {starting_epoch}. Seeding epoch \
+             {oracle_epoch} so that EndEpoch can be proposed.",
         );
-        self.next_epoch = Some((next_epoch, Instant::now()));
+        self.next_epoch = Some((oracle_epoch, Instant::now()));
         Ok(())
     }
 
@@ -2036,7 +2042,7 @@ impl<TAddr> CatchUp<TAddr> {
     }
 }
 
-/// The epoch consensus resumes in, or `None` for a node with no consensus state, which joins at the oracle's epoch.
+/// The epoch consensus resumes in, or `None` for a node with no consensus state, which opens the birthday epoch.
 ///
 /// A finalised checkpoint means its epoch ended, so consensus resumes in the next one. Without one, the persisted
 /// leaf's epoch has not ended: its committee either stalled there or moved on, and state sync has already decided

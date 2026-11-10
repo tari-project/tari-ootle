@@ -152,7 +152,6 @@ fn setup_store_at(path: impl AsRef<Path>) -> (SqliteWalletStore, VaultId, VaultI
         .unwrap();
     }
     tx.commit().unwrap();
-    drop(tx);
 
     (store, first_vault, second_vault, first_resource, second_resource)
 }
@@ -216,7 +215,6 @@ fn records_signed_deltas_metadata_and_filters() {
     tx.transactions_insert(&transaction, None, &[account_address()], false)
         .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     record_change(
         &store,
@@ -293,7 +291,6 @@ fn rejects_zero_changes_deduplicates_transactions_and_paginates_deterministicall
     tx.transactions_insert(&transaction, None, &[account_address()], false)
         .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_write_tx().unwrap();
     let current = tx.vaults_get(&first_vault).unwrap();
@@ -310,7 +307,6 @@ fn rejects_zero_changes_deduplicates_transactions_and_paginates_deterministicall
         .unwrap()
     );
     tx.rollback().unwrap();
-    drop(tx);
 
     record_change(
         &store,
@@ -330,7 +326,6 @@ fn rejects_zero_changes_deduplicates_transactions_and_paginates_deterministicall
         .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     record_change(
         &store,
@@ -414,7 +409,6 @@ fn records_account_resource_change_without_vault() {
         .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -449,7 +443,6 @@ fn latest_account_resource_history_ignores_vault_backed_rows() {
         .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     record_change(
         &store,
@@ -507,7 +500,6 @@ fn attributes_only_the_exact_vault_version_across_round_trips_and_recovery() {
     tx.transactions_insert(&second_transaction, None, &[account_address()], false)
         .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     for (version, amount) in [(1, 10u64), (2, 20), (3, 10)] {
         record_change(
@@ -530,7 +522,6 @@ fn attributes_only_the_exact_vault_version_across_round_trips_and_recovery() {
             .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let first_transaction_page = tx
@@ -557,7 +548,6 @@ fn attributes_only_the_exact_vault_version_across_round_trips_and_recovery() {
             .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let transaction_page = tx
@@ -599,7 +589,6 @@ fn same_version_scan_updates_after_balance_and_deletes_net_zero_row() {
     )
     .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -626,7 +615,6 @@ fn same_version_scan_updates_after_balance_and_deletes_net_zero_row() {
     tx.vaults_update(first_vault, SubstateVersion::new(1), Amount::zero(), Amount::zero())
         .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -646,7 +634,6 @@ fn same_version_scan_does_not_clobber_transaction_row() {
     tx.transactions_insert(&transaction, None, &[account_address()], false)
         .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     record_change(
         &store,
@@ -674,7 +661,6 @@ fn same_version_scan_does_not_clobber_transaction_row() {
     )
     .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -705,7 +691,6 @@ fn same_transaction_merges_revealed_finalize_and_confidential_refresh() {
     tx.transactions_insert(&other, None, &[account_address()], false)
         .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let snapshot = |revealed_before: u64, revealed_after: u64, confidential_before: u64, confidential_after: u64| {
         BalanceChangeSnapshot {
@@ -745,7 +730,6 @@ fn same_transaction_merges_revealed_finalize_and_confidential_refresh() {
         .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -875,7 +859,6 @@ fn lock_finalize_records_confidential_spend_for_vaultless_account() {
     );
     tx.locks_unlock_finalized(lock_id, &diff).unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -970,7 +953,6 @@ fn lock_finalize_records_confidential_spend_for_vault_backed_resource() {
     );
     tx.locks_unlock_finalized(lock_id, &diff).unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -1095,7 +1077,6 @@ fn lock_finalize_records_on_vault_created_by_transaction() {
         .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -1159,7 +1140,6 @@ fn lock_finalize_records_revealed_movement_from_diff_not_lock_amount() {
     );
     tx.locks_unlock_finalized(lock_id, &diff).unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -1252,7 +1232,6 @@ fn same_transaction_vault_record_fills_dimension_on_no_vault_row() {
         .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -1316,7 +1295,6 @@ fn same_transaction_no_vault_records_merge_into_net_effect() {
         .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -1339,7 +1317,6 @@ fn same_transaction_no_vault_records_merge_into_net_effect() {
         .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -1494,7 +1471,6 @@ fn lock_finalize_records_revealed_spends_across_multiple_vaults() {
     );
     tx.locks_unlock_finalized(lock_id, &diff).unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let first_vault_after = tx.vaults_get(&first_vault).unwrap();
@@ -1535,7 +1511,6 @@ fn lock_finalize_records_revealed_spends_across_multiple_vaults() {
         .unwrap();
     tx.locks_unlock_finalized(unlinked_lock, &SubstateDiff::new()).unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let first_vault_unlinked = tx.vaults_get(&first_vault).unwrap();

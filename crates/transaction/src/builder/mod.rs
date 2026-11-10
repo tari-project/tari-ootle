@@ -905,20 +905,18 @@ impl<D> TransactionBuilder<D> {
     }
 
     pub fn claim_validator_fees(self, address: ValidatorFeePoolAddress) -> Self {
-        self.then(|b| if b.fill_inputs { b.add_input(address) } else { b })
-            .add_instruction(Instruction::ClaimValidatorFees {
-                address,
-                max_amount: None,
-            })
+        self.add_instruction(Instruction::ClaimValidatorFees {
+            address,
+            max_amount: None,
+        })
     }
 
     pub fn claim_validator_fees_up_to<A: Into<Amount>>(self, address: ValidatorFeePoolAddress, max_amount: A) -> Self {
         let max_amount = max_amount.into();
-        self.then(|b| if b.fill_inputs { b.add_input(address) } else { b })
-            .add_instruction(Instruction::ClaimValidatorFees {
-                address,
-                max_amount: Some(max_amount),
-            })
+        self.add_instruction(Instruction::ClaimValidatorFees {
+            address,
+            max_amount: Some(max_amount),
+        })
     }
 
     pub fn create_proof<A: Into<ComponentReference>>(self, account: A, resource_addr: ResourceAddress) -> Self {
@@ -1039,10 +1037,18 @@ impl<D> TransactionBuilder<D> {
                 statement,
                 ..
             } => {
-                // NOTE: UTXO inputs may have come from previous instructions, and therefore are not an existing
-                // on-chain substate input. This means the user will have to manually add them as inputs as required.
-
                 self.add_input_for_resource_ref(resource_address_ref);
+                if let ResourceAddressRef::Address(addr) = resource_address_ref {
+                    declare_inputs(
+                        self.unsigned_transaction.inputs_mut(),
+                        statement.inputs_statement.inputs.iter().map(|i| {
+                            InputDeclaration::write(tari_template_lib_types::UtxoAddress::new(
+                                *addr,
+                                i.commitment.into(),
+                            ))
+                        }),
+                    );
+                }
                 for arg in statement.script_path_template_functions().flat_map(|tf| &tf.args) {
                     self.add_inputs_for_raw_arg(arg, InputDeclaration::read);
                 }

@@ -277,7 +277,9 @@ impl UnsignedTransactionV1 {
                     ..
                 } => {
                     if let ResourceAddressRef::Address(addr) = resource_address_ref {
-                        substates.insert(SubstateId::Resource(*addr));
+                        if *addr != TARI_TOKEN {
+                            substates.insert(SubstateId::Resource(*addr));
+                        }
                         substates.extend(
                             statement
                                 .inputs_statement

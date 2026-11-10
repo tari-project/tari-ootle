@@ -312,7 +312,7 @@ impl TryFrom<proto::consensus::ForeignProposalNotification> for ForeignProposalN
     type Error = anyhow::Error;
 
     fn try_from(value: proto::consensus::ForeignProposalNotification) -> Result<Self, Self::Error> {
-        // Check the cap before mapping over value.shard_groups so an oversized notification does not allocate first.
+        // A notification names at most one shard group per shard.
         let max_shard_groups = Shard::max().as_u32() as usize;
         if value.shard_groups.len() > max_shard_groups {
             return Err(anyhow!(
@@ -1486,7 +1486,8 @@ mod tests {
                 },
             )),
         };
-        assert!(QcSignatures::try_from(qc).is_err());
+        let err = QcSignatures::try_from(qc).unwrap_err();
+        assert!(err.to_string().contains("exceeding maximum"), "unexpected error: {err}");
 
         let tc = proto::consensus::TcSignatures {
             scheme: Some(proto::consensus::tc_signatures::Scheme::Schnorr(
@@ -1496,7 +1497,8 @@ mod tests {
                 },
             )),
         };
-        assert!(TcSignatures::try_from(tc).is_err());
+        let err = TcSignatures::try_from(tc).unwrap_err();
+        assert!(err.to_string().contains("exceeding maximum"), "unexpected error: {err}");
     }
 
     #[test]
@@ -1508,7 +1510,8 @@ mod tests {
             shard_group: sg,
             shard_groups: vec![sg; Shard::max().as_u32() as usize + 1],
         };
-        assert!(ForeignProposalNotificationMessage::try_from(notification).is_err());
+        let err = ForeignProposalNotificationMessage::try_from(notification).unwrap_err();
+        assert!(err.to_string().contains("exceeding maximum"), "unexpected error: {err}");
     }
 
     mod block_commands {

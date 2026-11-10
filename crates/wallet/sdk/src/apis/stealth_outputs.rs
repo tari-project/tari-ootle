@@ -917,6 +917,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                     break (tx, held);
                 }
                 tx.rollback()?;
+                drop(tx);
                 all_used_view_only_keys = Some(self.all_used_view_only_keys()?);
             };
             if let Some(held) = held {

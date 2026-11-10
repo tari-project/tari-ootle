@@ -41,6 +41,56 @@ impl CallInfo {
         Ok(total_len)
     }
 
+    /// Encodes `func` and `args` in the v1 packed format in a single pass, returning `Ok(None)` as
+    /// soon as the encoded output would exceed `max_size` bytes.
+    #[cfg(feature = "std")]
+    pub fn encode_v1_packed_bounded(
+        func: FunctionIdent,
+        args: &[tari_bor::Value],
+        max_size: usize,
+    ) -> Result<Option<Vec<u8>>, tari_bor::BorError> {
+        let min_len = args
+            .len()
+            .checked_mul(size_of::<u32>())
+            .and_then(|n| n.checked_add(CallHeader::SIZE));
+        let Some(min_len) = min_len.filter(|&n| n <= max_size) else {
+            return Ok(None);
+        };
+
+        let initial_cap = min_len
+            .saturating_add(args.len().saturating_mul(8))
+            .min(max_size)
+            .min(4096);
+        let mut buf = Vec::with_capacity(initial_cap);
+        buf.extend_from_slice(&func.to_le_bytes());
+
+        for arg in args {
+            let Some(after_prefix) = buf.len().checked_add(size_of::<u32>()).filter(|&n| n <= max_size) else {
+                return Ok(None);
+            };
+            let len_offset = buf.len();
+            buf.extend_from_slice(&[0u8; size_of::<u32>()]);
+
+            let mut writer = BoundedVecWriter {
+                buf: &mut buf,
+                max_size,
+            };
+            if let Err(err) = tari_bor::minicbor::encode(arg, &mut writer) {
+                if err.is_write() {
+                    return Ok(None);
+                }
+                return Err(tari_bor::BorError::from(err));
+            }
+
+            let arg_len = buf.len() - after_prefix;
+            let arg_len = u32::try_from(arg_len)
+                .map_err(|_| tari_bor::BorError::new("Argument length exceeds u32".to_string()))?;
+            buf[len_offset..after_prefix].copy_from_slice(&arg_len.to_le_bytes());
+        }
+
+        Ok(Some(buf))
+    }
+
     #[cfg(feature = "std")]
     pub fn encode_v1_packed<W>(
         writer: &mut W,
@@ -50,26 +100,46 @@ impl CallInfo {
     where
         W: std::io::Write,
     {
-        // Header ([func])
+        let encoded = Self::encode_v1_packed_bounded(func, args, usize::MAX)?
+            .ok_or_else(|| tari_bor::BorError::new("CallInfo size overflow".to_string()))?;
         writer
-            .write_all(&func.to_le_bytes())
-            .map_err(|e| tari_bor::BorError::new(e.to_string()))?;
-
-        let args_lens = args.iter().map(|a| tari_bor::encoded_len(&a));
-        // Args
-        for (arg, len) in args.iter().zip(args_lens) {
-            let arg_len =
-                u32::try_from(len).map_err(|_| tari_bor::BorError::new("Argument length exceeds u32".to_string()))?;
-            writer
-                .write_all(&arg_len.to_le_bytes())
-                .map_err(|e| tari_bor::BorError::new(e.to_string()))?;
-            tari_bor::encode_into_writer(arg, writer)?;
-        }
-        Ok(())
+            .write_all(&encoded)
+            .map_err(|e| tari_bor::BorError::new(e.to_string()))
     }
 
     pub fn v1_packed_reader(data: &[u8]) -> PackedCallInfoReader<'_> {
         PackedCallInfoReader::new(data)
+    }
+}
+
+#[cfg(feature = "std")]
+struct BoundedVecWriter<'a> {
+    buf: &'a mut Vec<u8>,
+    max_size: usize,
+}
+
+#[cfg(feature = "std")]
+#[derive(Debug)]
+struct SizeLimitExceeded;
+
+#[cfg(feature = "std")]
+impl core::fmt::Display for SizeLimitExceeded {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("call info size limit exceeded")
+    }
+}
+
+#[cfg(feature = "std")]
+impl tari_bor::minicbor::encode::Write for BoundedVecWriter<'_> {
+    type Error = SizeLimitExceeded;
+
+    fn write_all(&mut self, data: &[u8]) -> Result<(), Self::Error> {
+        let new_len = self.buf.len().checked_add(data.len()).ok_or(SizeLimitExceeded)?;
+        if new_len > self.max_size {
+            return Err(SizeLimitExceeded);
+        }
+        self.buf.extend_from_slice(data);
+        Ok(())
     }
 }
 
@@ -226,5 +296,55 @@ mod tests {
 
         // PANIC
         corrupted_reader.next_arg();
+    }
+
+    #[test]
+    fn encode_v1_packed_bounded_matches_unbounded_and_enforces_max_size() {
+        let func_id: FunctionIdent = 99;
+        let args = vec![
+            tari_bor::Value::Bytes(vec![0xAB; 64]),
+            tari_bor::Value::Array(vec![
+                tari_bor::Value::Text("alpha".to_string()),
+                tari_bor::Value::Integer(12345.into()),
+            ]),
+        ];
+
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&func_id.to_le_bytes());
+        for arg in &args {
+            let arg_len = u32::try_from(tari_bor::encoded_len(arg)).unwrap();
+            expected.extend_from_slice(&arg_len.to_le_bytes());
+            tari_bor::encode_into_writer(arg, &mut expected).unwrap();
+        }
+        let exact_size = expected.len();
+        assert_eq!(exact_size, CallInfo::encode_v1_packed_size(&args).unwrap());
+
+        let mut unbounded = Vec::new();
+        CallInfo::encode_v1_packed(&mut unbounded, func_id, &args).unwrap();
+        assert_eq!(unbounded, expected);
+
+        let bounded_exact = CallInfo::encode_v1_packed_bounded(func_id, &args, exact_size)
+            .unwrap()
+            .expect("must fit at exact_size");
+        assert_eq!(bounded_exact, expected);
+
+        assert!(
+            CallInfo::encode_v1_packed_bounded(func_id, &args, exact_size - 1)
+                .unwrap()
+                .is_none(),
+            "must reject when max_size is 1 byte below the encoded size"
+        );
+        assert!(
+            CallInfo::encode_v1_packed_bounded(func_id, &args, CallHeader::SIZE - 1)
+                .unwrap()
+                .is_none(),
+            "must reject when max_size cannot even hold the header"
+        );
+        assert!(
+            CallInfo::encode_v1_packed_bounded(func_id, &args, CallHeader::SIZE + args.len() * size_of::<u32>() - 1)
+                .unwrap()
+                .is_none(),
+            "must reject when max_size cannot hold header plus argument length prefixes"
+        );
     }
 }

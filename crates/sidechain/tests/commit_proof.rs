@@ -594,9 +594,7 @@ fn it_rejects_a_qc_whose_epoch_differs_from_the_header_epoch() {
         })
         .collect();
 
-    let err = proof
-        .validate_committed(FIXTURE_NETWORK, 4, &committee)
-        .unwrap_err();
+    let err = proof.validate_committed(FIXTURE_NETWORK, 4, &committee).unwrap_err();
     assert!(
         err.to_string().contains("Quorum certificate is for epoch"),
         "Expected the QC epoch mismatch error, got: {err}"

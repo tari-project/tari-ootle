@@ -12,11 +12,7 @@ mod workspace_ids;
 
 pub use named_component_call::*;
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_engine_types::{
-    confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
-    indexed_value::IndexedValue,
-    substate::SubstateId,
-};
+use tari_engine_types::{confidential::MinotariBurnClaimProof, indexed_value::IndexedValue, substate::SubstateId};
 use tari_ootle_common_types::{Epoch, InputDeclaration, declare_input, declare_inputs};
 use tari_template_lib_types::{
     Amount,
@@ -902,11 +898,10 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
-    pub fn claim_burn(self, claim: MinotariBurnClaimProof, output_data: ClaimBurnOutputData) -> Self {
-        self.add_instruction(Instruction::ClaimBurn {
-            claim: Box::new(claim),
-            output_data,
-        })
+    /// Claims an L1 burn. The instruction's output is a bucket of the burn's value, which the transaction must
+    /// move on, e.g. with [`Self::put_last_instruction_output_on_workspace`].
+    pub fn claim_burn(self, claim: MinotariBurnClaimProof) -> Self {
+        self.add_instruction(Instruction::ClaimBurn { claim: Box::new(claim) })
     }
 
     pub fn claim_validator_fees(self, address: ValidatorFeePoolAddress) -> Self {

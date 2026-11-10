@@ -1032,7 +1032,7 @@ fn main() {{
             rpc = JsonRpc(url, timeout=10)
             cs = rpc.call("get_consensus_status")
             em = rpc.call("get_epoch_manager_stats")
-            group = em.get("committee_info", {}).get("shard_group") or {}
+            group = (em.get("committee_info") or {}).get("shard_group") or {}
             status[name] = {
                 "state": cs["state"],
                 "epoch": cs["epoch"],

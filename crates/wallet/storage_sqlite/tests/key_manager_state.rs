@@ -4,7 +4,7 @@
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::{
     models::KeyType,
-    storage::{CommittableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
+    storage::{CommittableStore, ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 
@@ -24,6 +24,8 @@ fn get_and_set_branch_index() {
     assert_eq!(index, 1);
     tx.key_manager_set_active_index("another", 2).unwrap();
     tx.commit().unwrap();
+
+    let mut tx = db.create_read_tx().unwrap();
 
     let index = tx.key_manager_get_active_index("").unwrap();
     assert_eq!(index, 123);

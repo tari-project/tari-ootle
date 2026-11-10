@@ -804,7 +804,7 @@ where
                 block,
             );
             return Ok(Some(NoVoteReason::DecisionDisagreement {
-                local: atom.decision,
+                local: tx_rec.current_decision(),
                 remote: Decision::Commit,
             }));
         }

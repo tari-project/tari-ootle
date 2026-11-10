@@ -998,7 +998,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         let call_frame_mut = self.current_call_scope_mut()?;
         call_frame_mut.require_held_proof(&proof_id)?;
         call_frame_mut.remove_proof_from_scope(&proof_id);
-        self.workspace.remove_proof(&proof_id);
+        self.workspace.remove_proof(proof_id);
 
         // Fetch the proof
         let proof = self

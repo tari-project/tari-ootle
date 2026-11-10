@@ -614,7 +614,7 @@ fn it_rejects_a_qc_for_another_epoch_before_checking_any_signature() {
         .unwrap_err();
     assert!(
         err.to_string()
-            .contains("Quorum certificate is for epoch 2, but header is at epoch 1"),
+            .contains("Quorum certificate is for epoch 2, but header epoch is 1"),
         "Expected epoch mismatch error, got: {err}"
     );
 }
@@ -649,7 +649,7 @@ fn it_rejects_final_qc_whose_height_differs_from_header_height() {
         .unwrap_err();
     assert!(
         err.to_string()
-            .contains("Final quorum certificate height 21 does not match header height 20"),
+            .contains("Final quorum certificate height 21 cannot descend through 0 chain links to header height 20"),
         "Expected final QC height mismatch error, got: {err}"
     );
 }
@@ -676,7 +676,7 @@ fn it_rejects_chain_links_whose_length_does_not_reach_header_height() {
         .unwrap_err();
     assert!(
         err.to_string()
-            .contains("Quorum certificate height 20 cannot descend through 1 chain links to header height 20"),
+            .contains("Final quorum certificate height 20 cannot descend through 1 chain links to header height 20"),
         "Expected chain links height mismatch error, got: {err}"
     );
 }

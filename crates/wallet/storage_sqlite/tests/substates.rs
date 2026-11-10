@@ -4,7 +4,12 @@
 use std::{collections::HashSet, str::FromStr};
 
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{SubstateVersion, VersionedSubstateIdRef, optional::Optional, substate_type::SubstateType};
+use tari_ootle_common_types::{
+    SubstateVersion,
+    VersionedSubstateIdRef,
+    optional::Optional,
+    substate_type::SubstateType,
+};
 use tari_ootle_wallet_sdk::storage::{
     CommittableStore,
     ReadableWalletStore,

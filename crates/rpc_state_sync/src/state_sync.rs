@@ -1165,9 +1165,11 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
     }
 
     async fn sync(&mut self, target_epoch: Option<Epoch>) -> Result<(), Self::Error> {
-        let may_join_at_birthday =
-            self.holds_no_consensus_state()? && self.oracle_within_birthday_join_window().await?;
-        match self.sync_inner(target_epoch).await {
+        let held_no_state = self.holds_no_consensus_state()?;
+        let within_window = self.oracle_within_birthday_join_window().await?;
+        let result = self.sync_inner(target_epoch).await;
+        let holds_no_state = self.holds_no_consensus_state()?;
+        match result {
             // Before any epoch of the network finalises, no peer holds a checkpoint, and every validator is a node with
             // no state. There is nothing to sync, so the node joins consensus at the birthday epoch. The node must
             // still hold no state afterwards: a sync that stored some shard groups' checkpoint before failing on
@@ -1177,7 +1179,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
             // network, and a node that joined behind it sees proposals from a later epoch and syncs from the stalled
             // leaf path. Past the window the node retries.
             Err(RpcStateSyncError::CheckpointNotAvailable { epoch })
-                if may_join_at_birthday && self.holds_no_consensus_state()? =>
+                if joins_at_birthday(held_no_state, holds_no_state, within_window) =>
             {
                 info!(
                     target: LOG_TARGET,
@@ -1257,6 +1259,12 @@ fn checkpoint_admits_leafless_join(checkpoint_epoch: Epoch, oracle_epoch: Epoch)
 /// joins consensus at the birthday epoch. It spans a day of 20-minute epochs: long enough for every validator of a new
 /// network to come up, and short enough that the birthday committee still serves the network.
 const BIRTHDAY_JOIN_WINDOW_EPOCHS: Epoch = Epoch(72);
+
+/// True if a node whose sync found no checkpoint on any peer joins consensus at the birthday epoch. See
+/// `RpcStateSyncClientProtocol::sync`.
+fn joins_at_birthday(held_no_state_before: bool, holds_no_state_after: bool, within_window: bool) -> bool {
+    held_no_state_before && holds_no_state_after && within_window
+}
 
 fn is_within_birthday_join_window(birthday_epoch: Epoch, oracle_epoch: Epoch) -> bool {
     oracle_epoch <= birthday_epoch.saturating_add(BIRTHDAY_JOIN_WINDOW_EPOCHS)
@@ -1389,6 +1397,26 @@ mod tests {
                 Epoch(100),
                 Epoch(100) + BIRTHDAY_JOIN_WINDOW_EPOCHS
             ));
+        }
+
+        #[test]
+        fn a_stateless_node_inside_the_window_joins() {
+            assert!(joins_at_birthday(true, true, true));
+        }
+
+        #[test]
+        fn a_node_that_stored_a_partial_checkpoint_retries() {
+            assert!(!joins_at_birthday(true, false, true));
+        }
+
+        #[test]
+        fn a_node_holding_state_before_the_sync_retries() {
+            assert!(!joins_at_birthday(false, false, true));
+        }
+
+        #[test]
+        fn a_stateless_node_past_the_window_retries() {
+            assert!(!joins_at_birthday(true, true, false));
         }
 
         #[test]

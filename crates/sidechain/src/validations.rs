@@ -22,8 +22,15 @@ use crate::{
 const LOG_TARGET: &str = "c::sidechain::validations";
 
 /// The maximum number of signatures a quorum certificate may contain. A valid quorum certificate contains at most one
-/// signature per committee member, so this is an upper bound for any committee size. Proof validation is the only place
-/// it is enforced, before any signature is verified.
+/// signature per committee member, so this bound holds only while no committee exceeds 1000 members.
+///
+/// It is enforced in two places, each before any signature is verified:
+/// - commit proof validation, in [`check_proof_elements`];
+/// - consensus message decoding in `tari_ootle_p2p`, which caps the signatures of a `QcSignatures` and the timeouts of
+///   a `TcSignatures`.
+///
+/// Raising committee sizes past this bound requires raising it, or valid quorum and timeout certificates fail to
+/// decode.
 pub const MAX_QC_SIGNATURES: usize = 1000;
 
 /// The maximum number of elements a commit proof may contain. A proof holds the three quorum certificates of the

@@ -172,6 +172,14 @@ where
     /// key may hold the only UTXOs that keep the scan going, and its account row must not be left in place of an
     /// account the user creates later.
     async fn try_recover_account_with_retries(&self, key: &DerivedWalletKey) -> Option<RecoveredAccount> {
+        let public_key = RistrettoPublicKey::from_secret_key(&key.key).to_byte_type();
+        let account_addr = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &public_key);
+        let existed_before = self
+            .wallet_sdk
+            .accounts_api()
+            .exists_by_address(&account_addr)
+            .unwrap_or(true);
+
         for attempt in 1..=MAX_ATTEMPTS_PER_KEY {
             match self.try_recover_account(key).await {
                 Ok(recovered) => return Some(recovered),
@@ -187,9 +195,13 @@ where
                 },
             }
         }
-        let public_key = RistrettoPublicKey::from_secret_key(&key.key).to_byte_type();
-        let account_addr = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &public_key);
-        if let Err(err) = self.wallet_sdk.accounts_api().delete_if_unused(&account_addr) {
+        if !existed_before &&
+            self.wallet_sdk
+                .accounts_api()
+                .exists_by_address(&account_addr)
+                .unwrap_or(false) &&
+            let Err(err) = self.wallet_sdk.accounts_api().delete_if_unused(&account_addr)
+        {
             warn!(
                 target: LOG_TARGET,
                 "⚠️ Error removing unconfirmed account {account_addr} after failed recovery scan: {err}"

@@ -65,9 +65,7 @@ use crate::types::{
 ///
 /// The variant names + field names match the indexer enum exactly so this deserializes the same JSON
 /// (`serde`'s default externally-tagged enum representation). Timestamp / duration fields are accepted
-/// as opaque `Value` because the boundary records never expose them. The `final_decision` and the
-/// timestamp/duration fields are part of the wire shape but unread by the parser (the outcome is
-/// derived from `finalize.result`); they are kept so deserialization matches the indexer JSON exactly.
+/// as opaque `Value` because the boundary records never expose them.
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 enum WireFinalizedResult {
@@ -95,8 +93,8 @@ enum WireFinalizedResult {
 ///
 /// - `Pending` ⇒ a clean pending result: `submit.outcome == None`, nested fields empty.
 /// - `Finalized` ⇒ maps `finalize.result` via the `tx_watcher` arms and fills fee/diff/events/logs/epoch. If
-///   `execution_result` is absent (an abort with no execution detail) the outcome is a `Reject` built from
-///   `abort_details`.
+///   `execution_result` is absent on an abort, the outcome is a `Reject` built from `final_decision` and
+///   `abort_details`; a `Commit` without `execution_result` is a parse error.
 /// - `Rejected` ⇒ a `Reject` outcome built from `details`.
 ///
 /// A deserialize failure is an [`OotleSdkError::Parse`].
@@ -160,23 +158,36 @@ pub fn parse_finalized_result(raw: &str) -> Result<FinalizedResult, OotleSdkErro
                 }
                 Ok(finalized_from_execute_result(&result))
             },
-            // A commit always carries an execution result, so a missing one is a rejection: fall
-            // back to `abort_details` for the message.
-            None => Ok(FinalizedResult {
-                submit: SubmitResult {
-                    transaction_id: TransactionIdBytes::from_bytes(&[]),
-                    outcome: Some(TransactionOutcome::Reject(RejectReason::from_abort_details(
-                        abort_details.unwrap_or_else(|| "Unknown".to_string()),
-                    ))),
-                },
-                fee_receipt: None,
-                diff_summary: None,
-                events: Vec::new(),
-                logs: Vec::new(),
-                epoch: None,
-                estimated_fee: None,
-            }),
+            None => finalized_without_execution_result(final_decision, abort_details),
         },
+    }
+}
+
+/// Resolves a `Finalized` envelope that carries no `execution_result`: a `Commit` decision is a
+/// parse error, and an `Abort` decision preserves the canonical [`AbortReason`] sub-code.
+fn finalized_without_execution_result(
+    final_decision: Decision,
+    abort_details: Option<String>,
+) -> Result<FinalizedResult, OotleSdkError> {
+    match final_decision {
+        Decision::Commit => Err(OotleSdkError::Parse(
+            "indexer final_decision (Commit) is missing execution_result".to_string(),
+        )),
+        Decision::Abort(reason) => Ok(FinalizedResult {
+            submit: SubmitResult {
+                transaction_id: TransactionIdBytes::from_bytes(&[]),
+                outcome: Some(TransactionOutcome::Reject(RejectReason::from_abort(
+                    reason,
+                    abort_details,
+                ))),
+            },
+            fee_receipt: None,
+            diff_summary: None,
+            events: Vec::new(),
+            logs: Vec::new(),
+            epoch: None,
+            estimated_fee: None,
+        }),
     }
 }
 
@@ -619,5 +630,46 @@ mod tests {
         let err = parse_finalized_result(&json).unwrap_err();
         assert_eq!(err.code(), "PARSE");
         assert!(err.to_string().contains("disagrees"), "{err}");
+    }
+
+    #[test]
+    fn commit_decision_without_execution_result_is_a_parse_error() {
+        let json = serde_json::json!({
+            "Finalized": {
+                "final_decision": "Commit",
+                "execution_result": null,
+                "execution_time": { "secs": 1, "nanos": 0 },
+                "finalized_time": "2026-06-12 00:00:00.0",
+                "abort_details": null,
+            }
+        })
+        .to_string();
+        let err = parse_finalized_result(&json).unwrap_err();
+        assert_eq!(err.code(), "PARSE");
+        assert!(err.to_string().contains("missing execution_result"), "{err}");
+    }
+
+    #[test]
+    fn abort_decision_without_execution_result_preserves_abort_sub_code() {
+        let json = serde_json::json!({
+            "Finalized": {
+                "final_decision": { "Abort": "OneOrMoreInputsNotFound" },
+                "execution_result": null,
+                "execution_time": null,
+                "finalized_time": "2026-06-12 00:00:00.0",
+                "abort_details": "substate component_01 was not found",
+            }
+        })
+        .to_string();
+        let parsed = parse_finalized_result(&json).unwrap();
+        assert_eq!(
+            parsed.submit.outcome,
+            Some(TransactionOutcome::Reject(RejectReason {
+                code: "ABORT".to_string(),
+                abort_code: Some("ONE_OR_MORE_INPUTS_NOT_FOUND".to_string()),
+                failure_code: None,
+                message: "substate component_01 was not found".to_string(),
+            }))
+        );
     }
 }

@@ -300,11 +300,11 @@ pub trait RuntimeInterface {
     /// the work.
     fn charge_template_instantiation(&self, shape: &ModuleShape) -> Result<(), RuntimeError>;
 
-    /// Charges the host-side handling of a value a template call returned, `bytes` long and holding
-    /// `items` CBOR data items, before it is decoded. Priced by
-    /// [`tari_engine_types::limits::return_value_points`] and charged against the same compute
-    /// allowance as native verification.
-    fn charge_return_value(&self, bytes: u64, items: u64) -> Result<(), RuntimeError>;
+    /// Charges the host-side handling of a value a template call returned, `raw`, before it is
+    /// decoded. Priced by [`tari_engine_types::limits::return_value_points`] and charged against
+    /// the same compute allowance as native verification; its items are counted as
+    /// [`Self::charge_engine_arg`] counts an argument's.
+    fn charge_return_value_read(&self, raw: &[u8]) -> Result<(), EngineArgChargeError>;
 
     /// Charges the host-side decode of CBOR a template wrote, `input`, before it is decoded: an
     /// engine call's argument, or a value nested in one. Priced by

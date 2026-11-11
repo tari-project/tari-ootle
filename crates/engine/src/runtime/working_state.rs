@@ -11,7 +11,7 @@ use indexmap::{IndexMap, IndexSet};
 use log::*;
 use ootle_byte_type::{ConvertFromByteType, ToByteType};
 use ootle_network::Network;
-use tari_bor::encoded_len;
+use tari_bor::{MaybeTagged, encoded_len};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{
     SubstateVersion,
@@ -1995,27 +1995,49 @@ impl<TStore: StateReader> WorkingState<TStore> {
                         id,
                         existing_ids: self.workspace().all_ids_iter().collect(),
                     })?;
-                let allocation_id: ResourceAddressAllocation =
-                    tari_bor::from_value(value).map_err(|e| RuntimeError::InvalidArgument {
-                        argument: "ResourceAddressRef::Workspace",
-                        reason: format!("Item on workspace at key '{id}' is not a valid ResourceAddressRef: {e}",),
-                    })?;
-                let substate_id = self.get_substate_id_from_used_address_allocation(allocation_id.id())?;
-                let resource_address = match substate_id {
-                    SubstateId::Resource(addr) => addr,
-                    substate_id => {
-                        let substate_type = tari_ootle_common_types::substate_type::SubstateType::from(&substate_id);
-                        return Err(RuntimeError::InvalidArgument {
+
+                // A workspace resource ref holds either a `ResourceAddress` or a used `ResourceAddressAllocation`.
+                if value.is_tag_of::<ResourceAddress>() {
+                    let resource_address: ResourceAddress =
+                        tari_bor::from_value(value).map_err(|e| RuntimeError::InvalidArgument {
+                            argument: "ResourceAddressRef::Workspace",
+                            reason: format!("Item on workspace at key '{id}' is not a valid ResourceAddress: {e}"),
+                        })?;
+                    Ok(resource_address)
+                } else if value.is_tag_of::<ResourceAddressAllocation>() {
+                    let allocation_id: ResourceAddressAllocation =
+                        tari_bor::from_value(value).map_err(|e| RuntimeError::InvalidArgument {
                             argument: "ResourceAddressRef::Workspace",
                             reason: format!(
-                                "Invalid attempt to load resource address with an address allocation ID ({}) with \
-                                 substate type {substate_type}",
-                                allocation_id.id()
+                                "Item on workspace at key '{id}' is not a valid ResourceAddressAllocation: {e}"
                             ),
-                        });
-                    },
-                };
-                Ok(resource_address)
+                        })?;
+                    let substate_id = self.get_substate_id_from_used_address_allocation(allocation_id.id())?;
+                    let resource_address = match substate_id {
+                        SubstateId::Resource(addr) => addr,
+                        substate_id => {
+                            let substate_type =
+                                tari_ootle_common_types::substate_type::SubstateType::from(&substate_id);
+                            return Err(RuntimeError::InvalidArgument {
+                                argument: "ResourceAddressRef::Workspace",
+                                reason: format!(
+                                    "Invalid attempt to load resource address with an address allocation ID ({}) with \
+                                     substate type {substate_type}",
+                                    allocation_id.id()
+                                ),
+                            });
+                        },
+                    };
+                    Ok(resource_address)
+                } else {
+                    Err(RuntimeError::InvalidArgument {
+                        argument: "ResourceAddressRef::Workspace",
+                        reason: format!(
+                            "Item on workspace at key '{id}' is not a valid ResourceAddress or \
+                             ResourceAddressAllocation"
+                        ),
+                    })
+                }
             },
         }
     }
@@ -2783,5 +2805,68 @@ mod tests {
                 .and_then(|alloc| alloc.template_address()),
             Some(&template_a)
         );
+    }
+
+    #[test]
+    fn resolve_resource_address_ref_accepts_direct_resource_address_and_allocation_on_workspace() {
+        let mut state = test_working_state();
+        let resx_direct = ResourceAddress::new(ObjectKey::from_array([10u8; ObjectKey::LENGTH]));
+        let resx_tuple = ResourceAddress::new(ObjectKey::from_array([11u8; ObjectKey::LENGTH]));
+        let resx_allocated = ResourceAddress::new(ObjectKey::from_array([12u8; ObjectKey::LENGTH]));
+        let comp_addr = ComponentAddress::from_array([13u8; ObjectKey::LENGTH]);
+
+        // 1. Direct ResourceAddress placed on workspace
+        state
+            .workspace_mut()
+            .insert(0, IndexedValue::from_type(&resx_direct).unwrap())
+            .unwrap();
+        assert_eq!(
+            state
+                .resolve_resource_address_ref(ResourceAddressRef::Workspace(WorkspaceOffsetId::new(0)))
+                .unwrap(),
+            resx_direct
+        );
+
+        // 2. ResourceAddress inside a tuple on workspace referenced via WorkspaceOffsetId offset
+        state
+            .workspace_mut()
+            .insert(1, IndexedValue::from_type(&(comp_addr, resx_tuple)).unwrap())
+            .unwrap();
+        assert_eq!(
+            state
+                .resolve_resource_address_ref(ResourceAddressRef::Workspace(WorkspaceOffsetId::new(1).with_offset(1)))
+                .unwrap(),
+            resx_tuple
+        );
+
+        // 3. ResourceAddressAllocation placed on workspace, rejected before redemption and accepted once redeemed
+        let alloc_id = state.new_address_allocation(resx_allocated).unwrap();
+        state
+            .workspace_mut()
+            .insert(
+                2,
+                IndexedValue::from_type(&ResourceAddressAllocation::new(alloc_id)).unwrap(),
+            )
+            .unwrap();
+        assert!(matches!(
+            state.resolve_resource_address_ref(ResourceAddressRef::Workspace(WorkspaceOffsetId::new(2))),
+            Err(RuntimeError::AddressAllocationNotUsed { id }) if id == alloc_id
+        ));
+        state.use_allocated_address(alloc_id).unwrap();
+        assert_eq!(
+            state
+                .resolve_resource_address_ref(ResourceAddressRef::Workspace(WorkspaceOffsetId::new(2)))
+                .unwrap(),
+            resx_allocated
+        );
+
+        // 4. Non-resource item on workspace is rejected with InvalidArgument
+        assert!(matches!(
+            state.resolve_resource_address_ref(ResourceAddressRef::Workspace(WorkspaceOffsetId::new(1).with_offset(0))),
+            Err(RuntimeError::InvalidArgument {
+                argument: "ResourceAddressRef::Workspace",
+                ..
+            })
+        ));
     }
 }

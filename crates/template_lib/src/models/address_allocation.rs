@@ -82,3 +82,31 @@ impl ResourceAddressAllocation {
             .expect("Failed to decode ResourceAddressAllocation response")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tari_bor::MaybeTagged;
+
+    use super::*;
+
+    #[test]
+    fn address_allocations_carry_their_expected_cbor_tags() {
+        let comp_alloc = ComponentAddressAllocation::new(7);
+        let comp_val = tari_bor::to_value(&comp_alloc).unwrap();
+        assert!(comp_val.is_tag_of::<ComponentAddressAllocation>());
+        assert!(!comp_val.is_tag_of::<ResourceAddressAllocation>());
+        assert_eq!(
+            tari_bor::from_value::<ComponentAddressAllocation>(&comp_val).unwrap(),
+            comp_alloc
+        );
+
+        let resx_alloc = ResourceAddressAllocation::new(11);
+        let resx_val = tari_bor::to_value(&resx_alloc).unwrap();
+        assert!(resx_val.is_tag_of::<ResourceAddressAllocation>());
+        assert!(!resx_val.is_tag_of::<ComponentAddressAllocation>());
+        assert_eq!(
+            tari_bor::from_value::<ResourceAddressAllocation>(&resx_val).unwrap(),
+            resx_alloc
+        );
+    }
+}

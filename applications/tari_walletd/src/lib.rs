@@ -197,13 +197,7 @@ pub async fn run_tari_ootle_walletd(
         shutdown_signal.clone(),
     )
     .with_cookie_token(cookie);
-    let (jrpc_address, listen_fut) = server::spawn_listener(jrpc_address, signaling_server_address, handlers).await?;
-
-    #[cfg(not(feature = "web_ui"))]
-    info!(
-        target: LOG_TARGET,
-        "Web UI is not enabled. To enable it, add the `web_ui` feature to your Cargo.toml. JSON-RPC address is {jrpc_address}"
-    );
+    let (_, listen_fut) = server::spawn_listener(jrpc_address, signaling_server_address, handlers).await?;
 
     if let Err(e) = fs::write(config.common.base_path.join("pid"), process::id().to_string()) {
         error!(
@@ -218,16 +212,7 @@ pub async fn run_tari_ootle_walletd(
         if !webauthn_service.is_enrolled()? {
             let (setup_token, setup_token_path) =
                 webauthn_service.issue_setup_token_to_file(config.common.base_path())?;
-            let ui_origin = config
-                .ootle_wallet_daemon
-                .webauthn
-                .rp_origin
-                .as_ref()
-                .cloned()
-                .unwrap_or_else(|| {
-                    Url::parse(format!("http://localhost:{}", jrpc_address.port()).as_str())
-                        .expect("url cannot be invalid")
-                });
+            let ui_origin = config.ootle_wallet_daemon.web_ui_origin();
             let register_url = format!("{}/register", ui_origin.as_str().trim_end_matches('/'));
             info!(
                 target: LOG_TARGET,

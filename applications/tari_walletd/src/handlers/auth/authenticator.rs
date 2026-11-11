@@ -4,7 +4,6 @@
 use log::info;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_ootle_walletd_client::types::AuthCredentials;
-use url::Url;
 use webauthn_rs::{Webauthn, WebauthnBuilder};
 
 use super::{anonym::AnonymousAuth, webauthn::WebAuthnAuth};
@@ -26,10 +25,7 @@ pub fn create_authenticator(
     match config.authentication {
         WalletDaemonAuth::None => Ok(WalletAuthenticator::None(AnonymousAuth::new())),
         WalletDaemonAuth::WebAuthn => {
-            let rp_origin = config.webauthn.rp_origin.as_ref().cloned().unwrap_or_else(|| {
-                Url::parse(format!("http://localhost:{}", config.json_rpc_address.port()).as_str())
-                    .expect("url cannot be invalid")
-            });
+            let rp_origin = config.web_ui_origin();
             info!(target: LOG_TARGET, "Using WebAuthn authentication with RP origin: {} TTL: {:?}", rp_origin, config.webauthn.session_ttl);
             let webauthn = WebauthnBuilder::new(&config.webauthn.rp_id, &rp_origin)
                 .map_err(|e| {

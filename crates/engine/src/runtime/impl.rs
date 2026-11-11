@@ -1296,7 +1296,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     ///
     /// Counting the items is itself host work, so the walk reads only as many items as the
     /// transaction can still pay `per_item` for, and checks their nesting against `max_depth` on the
-    /// way. Input holding more is charged what was read and fails out of compute.
+    /// way. Input holding more is charged what was read and fails out of compute. Input the walk
+    /// rejects, malformed or nested too deep, is charged the items read before the walk stopped.
     fn charge_cbor_read(
         &self,
         input: &[u8],
@@ -1306,8 +1307,13 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     ) -> Result<(), EngineArgChargeError> {
         self.tracker.charge_native_execution(points(input.len() as u64, 0))?;
         let affordable = self.tracker.native_execution_headroom() / per_item;
-        let counted = tari_bor::count_data_items_bounded(input, max_depth, affordable)
-            .map_err(|e| EngineArgChargeError::Unreadable(e.into()))?;
+        let counted = match tari_bor::count_data_items_bounded(input, max_depth, affordable) {
+            Ok(counted) => counted,
+            Err(tari_bor::ItemCountError { items_read, error }) => {
+                self.tracker.charge_native_execution(points(0, items_read))?;
+                return Err(EngineArgChargeError::Unreadable(error.into()));
+            },
+        };
         match counted {
             Some(items) => self.tracker.charge_native_execution(points(0, items))?,
             None => {
@@ -4473,9 +4479,15 @@ where
             .charge_native_execution(tari_engine_types::limits::instantiation_points(shape))
     }
 
-    fn charge_return_value(&self, bytes: u64, items: u64) -> Result<(), RuntimeError> {
-        self.tracker
-            .charge_native_execution(tari_engine_types::limits::return_value_points(bytes, items))
+    fn charge_return_value_read(&self, raw: &[u8]) -> Result<(), EngineArgChargeError> {
+        use tari_engine_types::limits::{self, NativeExecutionPoints, return_value_points};
+
+        self.charge_cbor_read(
+            raw,
+            limits::MAX_CBOR_NESTING_DEPTH,
+            NativeExecutionPoints::PER_RETURN_VALUE_ITEM,
+            return_value_points,
+        )
     }
 
     fn charge_engine_arg(&self, input: &[u8]) -> Result<(), EngineArgChargeError> {
@@ -4575,15 +4587,44 @@ where
     }
 
     fn resolve_workspace_id(&self, workspace_id: &WorkspaceOffsetId) -> Result<tari_bor::Value, RuntimeError> {
+        use tari_engine_types::limits::{NativeExecutionPoints, engine_arg_points};
+
+        let id = *workspace_id;
+        let affordable = self.tracker.native_execution_headroom() / NativeExecutionPoints::PER_ENGINE_ARG_ITEM;
+        let counted = self.tracker.with_workspace(|workspace| {
+            let value = workspace.get(id)?.ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
+                id,
+                existing_ids: workspace.all_ids_iter().collect(),
+            })?;
+            Ok::<_, RuntimeError>(
+                value
+                    .count_items_bounded(affordable, |_| false)
+                    .map(|count| (tari_bor::encoded_len(value) as u64, count.items)),
+            )
+        })?;
+        match counted {
+            Some((bytes, items)) => {
+                self.tracker.charge_native_execution(engine_arg_points(0, items))?;
+                self.tracker.charge_native_execution(engine_arg_points(bytes, 0))?;
+            },
+            None => {
+                self.tracker.charge_native_execution(engine_arg_points(0, affordable))?;
+                self.tracker.charge_native_execution(engine_arg_points(0, 1))?;
+                return Err(RuntimeError::InvariantError {
+                    function: "resolve_workspace_id",
+                    details: "an item beyond the native execution headroom was affordable".to_string(),
+                });
+            },
+        }
         self.tracker.with_workspace(|workspace| {
-            let id = *workspace_id;
-            workspace.get(id).map(|opt| opt.cloned()).map(|opt| {
-                opt.ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
+            workspace
+                .get(id)?
+                .cloned()
+                .ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
                     id,
                     existing_ids: workspace.all_ids_iter().collect(),
                 })
-            })
-        })?
+        })
     }
 }
 
@@ -4784,6 +4825,150 @@ mod tests {
         assert!(
             exhausted,
             "repeatedly referencing a large blob must exhaust the compute allowance"
+        );
+    }
+
+    #[test]
+    fn resolving_a_workspace_arg_charges_native_points_per_reference() {
+        let payload: Vec<u64> = (0..128).collect();
+        let encoded = tari_bor::encode(&payload).unwrap();
+        let items = tari_bor::count_data_items_bounded(&encoded, limits::MAX_CBOR_NESTING_DEPTH, u64::MAX)
+            .unwrap()
+            .unwrap();
+        let expected_per_ref = engine_arg_points(encoded.len() as u64, items);
+        assert!(expected_per_ref > 0);
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        runtime
+            .put_on_workspace(0, IndexedValue::from_type(&payload).unwrap())
+            .unwrap();
+        assert_eq!(runtime.native_points_consumed(), 0);
+
+        let ws_arg = InstructionArg::Workspace(WorkspaceOffsetId::new(0));
+        let resolved = runtime.resolve_args(None, std::slice::from_ref(&ws_arg)).unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(runtime.native_points_consumed(), expected_per_ref);
+
+        let resolved_multi = runtime
+            .resolve_args(None, &[ws_arg.clone(), ws_arg.clone(), ws_arg])
+            .unwrap();
+        assert_eq!(resolved_multi.len(), 3);
+        assert_eq!(runtime.native_points_consumed(), expected_per_ref * 4);
+    }
+
+    #[test]
+    fn repeating_a_large_workspace_arg_across_instructions_exhausts_compute_allowance() {
+        let payload: Vec<u64> = (0..2_000).collect();
+        let runtime = runtime_with_blobs(Blobs::default());
+        runtime
+            .put_on_workspace(0, IndexedValue::from_type(&payload).unwrap())
+            .unwrap();
+
+        let ws_arg = InstructionArg::Workspace(WorkspaceOffsetId::new(0));
+        let mut exhausted = false;
+        for _ in 0..500 {
+            match runtime.resolve_args(None, std::slice::from_ref(&ws_arg)) {
+                Ok(_) => {},
+                Err(RuntimeError::FeeIntentComputeExceeded { .. }) => {
+                    exhausted = true;
+                    break;
+                },
+                Err(other) => panic!("expected FeeIntentComputeExceeded, got {other:?}"),
+            }
+        }
+        assert!(
+            exhausted,
+            "repeatedly referencing a large workspace item must exhaust the compute allowance"
+        );
+        assert!(
+            runtime.native_points_consumed() >
+                limits::FREE_COMPUTE_GRACE_POINTS - limits::NativeExecutionPoints::PER_ENGINE_ARG_ITEM,
+            "items counted before failing must be paid for"
+        );
+    }
+
+    #[test]
+    fn decode_return_value_bounds_item_scan_and_depth() {
+        use crate::wasm::{WasmExecutionError, WasmProcess};
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let over_item_limit: Vec<u8> = vec![
+            0u8;
+            usize::try_from(
+                limits::FREE_COMPUTE_GRACE_POINTS / limits::NativeExecutionPoints::PER_RETURN_VALUE_ITEM + 100
+            )
+            .unwrap()
+        ];
+        let mut raw = Vec::new();
+        {
+            let mut enc = tari_bor::minicbor::Encoder::new(&mut raw);
+            enc.array(over_item_limit.len() as u64).unwrap();
+            for &v in &over_item_limit {
+                enc.u8(v).unwrap();
+            }
+        }
+
+        let err = WasmProcess::decode_return_value_for(&runtime, &raw).unwrap_err();
+        assert!(matches!(
+            err,
+            WasmExecutionError::RuntimeError(RuntimeError::FeeIntentComputeExceeded { .. })
+        ));
+        assert!(
+            runtime.native_points_consumed() >
+                limits::FREE_COMPUTE_GRACE_POINTS - limits::NativeExecutionPoints::PER_RETURN_VALUE_ITEM,
+            "the bounded item scan must charge for the affordable items it read before failing"
+        );
+
+        let runtime_depth = runtime_with_blobs(Blobs::default());
+        let depth = limits::MAX_CBOR_NESTING_DEPTH + 1;
+        let mut deep_raw = vec![0x81; depth];
+        deep_raw.push(0xf6);
+        let depth_err = WasmProcess::decode_return_value_for(&runtime_depth, &deep_raw).unwrap_err();
+        assert!(matches!(depth_err, WasmExecutionError::EncodingError(_)));
+    }
+
+    #[test]
+    fn unreadable_cbor_is_charged_for_the_items_read_before_it() {
+        use crate::wasm::{WasmExecutionError, WasmProcess};
+
+        const READABLE: u64 = 200;
+        // An array claiming one more element than it holds, then a reserved head the scan cannot read.
+        let mut malformed = Vec::new();
+        {
+            let mut enc = tari_bor::minicbor::Encoder::new(&mut malformed);
+            enc.array(READABLE + 1).unwrap();
+            for _ in 0..READABLE {
+                enc.u8(0).unwrap();
+            }
+        }
+        malformed.push(0x1c);
+        // The array, its readable elements and the unreadable one.
+        let items_read = READABLE + 2;
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let err = WasmProcess::decode_return_value_for(&runtime, &malformed).unwrap_err();
+        assert!(matches!(err, WasmExecutionError::EncodingError(_)), "{err:?}");
+        assert_eq!(
+            runtime.native_points_consumed(),
+            limits::return_value_points(malformed.len() as u64, items_read)
+        );
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let err = runtime.charge_engine_arg(&malformed).unwrap_err();
+        assert!(matches!(err, EngineArgChargeError::Unreadable(_)), "{err:?}");
+        assert_eq!(
+            runtime.native_points_consumed(),
+            engine_arg_points(malformed.len() as u64, items_read)
+        );
+
+        // Nesting past the depth bound is charged for every container read up to it.
+        let mut too_deep = vec![0x81u8; limits::MAX_CBOR_NESTING_DEPTH + 1];
+        too_deep.push(0xf6);
+        let runtime = runtime_with_blobs(Blobs::default());
+        runtime.charge_engine_arg(&too_deep).unwrap_err();
+        assert_eq!(
+            runtime.native_points_consumed(),
+            engine_arg_points(too_deep.len() as u64, limits::MAX_CBOR_NESTING_DEPTH as u64 + 1)
         );
     }
 

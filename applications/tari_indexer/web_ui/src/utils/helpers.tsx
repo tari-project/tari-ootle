@@ -67,31 +67,8 @@ const renderJson = (json: JSONRenderItem) => {
   return <span className="other">{json as ReactNode}</span>;
 };
 
-export interface Duration {
-  secs: number;
-  nanos: number;
-}
-
-export function displayDuration(duration: Duration) {
-  if (duration.secs === 0) {
-    if (duration.nanos > 1000000) {
-      return `${(duration.nanos / 1000000).toFixed(2)}ms`;
-    }
-    if (duration.nanos > 1000) {
-      return `${(duration.nanos / 1000).toFixed(2)}µs`;
-    }
-    return `${duration.nanos}ns`;
-  }
-  if (duration.secs >= 60 * 60) {
-    const minutes_secs = duration.secs - Math.floor(duration.secs / 60 / 60) * 60 * 60;
-    return `${(duration.secs / 60 / 60).toFixed(0)}h${Math.floor(minutes_secs / 60)}m`;
-  }
-  if (duration.secs >= 60) {
-    const secs = duration.secs - Math.floor(duration.secs / 60) * 60;
-    return `${(duration.secs / 60).toFixed(0)}m${secs.toFixed(0)}s`;
-  }
-  return `${duration.secs}s`;
-}
+export { displayDuration } from "./duration";
+export type { Duration } from "./duration";
 
 export function truncateText(text: string | null, length: number) {
   if (!length || !text || text.length <= length) {

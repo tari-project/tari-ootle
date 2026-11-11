@@ -14,9 +14,9 @@ Rust clients read fee receipts from JSON again.
 
 ### Bug fixes
 
-- **engine_types:** `FeeBreakdown` decoded from JSON accepts keys in any order, so wallet daemon
-  responses no longer fail with "FeeBreakdown sources are repeated or out of ascending order".
-  CBOR decoding keeps its strict order check. (#3712)
+- **engine_types:** `FeeBreakdown` decoding keeps rows in wire order and rejects only repeated
+  sources, so wallet daemon responses no longer fail with "FeeBreakdown sources are repeated or out
+  of ascending order". (#3712)
 
 ## [0.53.2](https://github.com/tari-project/tari-ootle/compare/v0.53.1...v0.53.2) (2026-11-11)
 

@@ -466,47 +466,13 @@ impl FeeSource {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FeeBreakdown {
     #[n(0)]
-    #[cbor(
-        encode_with = "tari_bor::adapters::indexmap_codec::encode",
-        decode_with = "decode_breakdown",
-        cbor_len = "tari_bor::adapters::indexmap_codec::cbor_len"
-    )]
+    #[cbor(with = "tari_bor::adapters::indexmap_codec")]
     #[serde(deserialize_with = "deserialize_breakdown")]
     breakdown: IndexMap<FeeSource, u64>,
 }
 
-/// Appends a decoded row, requiring its source to sort strictly after the previous row's.
-///
-/// `add` and `set` keep the breakdown sorted by `FeeSource`, and the receipt hash re-encodes the decoded map in its
-/// stored order, so decoding accepts that order alone. One comparison against the last row rejects both an
-/// out-of-order source and a repeated one. A zero-charge row is kept as stored: receipts written before
-/// `FeeBreakdown::add` began omitting zero charges carry them.
-fn push_ascending(
-    breakdown: &mut IndexMap<FeeSource, u64>,
-    source: FeeSource,
-    amount: u64,
-) -> Result<(), &'static str> {
-    if breakdown.last().is_some_and(|(last, _)| *last >= source) {
-        return Err("FeeBreakdown sources are repeated or out of ascending order");
-    }
-    breakdown.insert(source, amount);
-    Ok(())
-}
-
-fn decode_breakdown<'b, C>(
-    d: &mut minicbor::Decoder<'b>,
-    ctx: &mut C,
-) -> Result<IndexMap<FeeSource, u64>, minicbor::decode::Error> {
-    let mut breakdown = IndexMap::with_capacity(FeeSource::ALL.len());
-    for entry in d.map_iter_with::<C, FeeSource, u64>(ctx)? {
-        let (source, amount) = entry?;
-        push_ascending(&mut breakdown, source, amount).map_err(minicbor::decode::Error::message)?;
-    }
-    Ok(breakdown)
-}
-
-/// Serde formats such as JSON carry no hash commitment, and intermediaries like `serde_json::Value` reorder map
-/// keys, so this path sorts the rows into `FeeSource` order and rejects only a repeated source.
+/// Keeps rows in wire order, so re-encoding a decoded breakdown reproduces the bytes it came from, and rejects a
+/// repeated source, matching `indexmap_codec` on the CBOR path.
 fn deserialize_breakdown<'de, D>(deserializer: D) -> Result<IndexMap<FeeSource, u64>, D::Error>
 where D: serde::Deserializer<'de> {
     struct BreakdownVisitor;
@@ -525,7 +491,6 @@ where D: serde::Deserializer<'de> {
                     return Err(serde::de::Error::custom("FeeBreakdown source is repeated"));
                 }
             }
-            breakdown.sort_keys();
             Ok(breakdown)
         }
     }
@@ -696,8 +661,6 @@ mod tests {
         assert_eq!(breakdown.iter().collect::<Vec<_>>(), vec![(&FeeSource::Initial, &100)]);
     }
 
-    const ORDER_ERROR: &str = "FeeBreakdown sources are repeated or out of ascending order";
-
     fn encode_breakdown_rows(rows: &[(FeeSource, u64)]) -> Vec<u8> {
         let mut e = minicbor::Encoder::new(Vec::new());
         e.array(1).unwrap().map(rows.len() as u64).unwrap();
@@ -731,29 +694,34 @@ mod tests {
     }
 
     #[test]
-    fn decode_rejects_out_of_order_and_repeated_sources() {
-        let out_of_order = encode_breakdown_rows(&[(FeeSource::Storage, 30), (FeeSource::Initial, 10)]);
-        let repeated = encode_breakdown_rows(&[(FeeSource::Storage, 1), (FeeSource::Storage, 2)]);
-        for bytes in [out_of_order, repeated] {
-            let err = tari_bor::decode::<FeeBreakdown>(&bytes).unwrap_err();
-            assert!(err.to_string().contains(ORDER_ERROR), "{err}");
-        }
+    fn decode_keeps_wire_order() {
+        let rows = vec![
+            (FeeSource::WasmExecution, 20),
+            (FeeSource::Initial, 10),
+            (FeeSource::Storage, 30),
+        ];
+        let bytes = encode_breakdown_rows(&rows);
+        let decoded: FeeBreakdown = tari_bor::decode(&bytes).unwrap();
+        assert_eq!(rows_of(&decoded), rows);
+        assert_eq!(tari_bor::encode(&decoded).unwrap(), bytes);
 
-        let err = serde_json::from_str::<FeeBreakdown>(r#"{"breakdown":{"Storage":1,"Storage":2}}"#).unwrap_err();
-        assert!(err.to_string().contains("FeeBreakdown source is repeated"), "{err}");
+        let json = r#"{"breakdown":{"WasmExecution":20,"Initial":10,"Storage":30}}"#;
+        let deserialized: FeeBreakdown = serde_json::from_str(json).unwrap();
+        assert_eq!(rows_of(&deserialized), rows);
+        assert_eq!(serde_json::to_string(&deserialized).unwrap(), json);
     }
 
     #[test]
-    fn json_decode_sorts_rows_into_source_order() {
-        let json = r#"{"breakdown":{"WasmExecution":20,"Initial":10,"Storage":30}}"#;
-        let deserialized: FeeBreakdown = serde_json::from_str(json).unwrap();
-        assert_eq!(rows_of(&deserialized), vec![
-            (FeeSource::Initial, 10),
-            (FeeSource::Storage, 30),
-            (FeeSource::WasmExecution, 20),
-        ]);
+    fn decode_rejects_repeated_sources() {
+        let bytes = encode_breakdown_rows(&[(FeeSource::Storage, 1), (FeeSource::Storage, 2)]);
+        let err = tari_bor::decode::<FeeBreakdown>(&bytes).unwrap_err();
+        assert!(err.to_string().contains("duplicate key"), "{err}");
 
-        let via_value: serde_json::Value = serde_json::from_str(json).unwrap();
-        assert_eq!(serde_json::from_value::<FeeBreakdown>(via_value).unwrap(), deserialized);
+        let err = serde_json::from_str::<FeeBreakdown>(r#"{"breakdown":{"Storage":1,"Storage":2}}"#).unwrap_err();
+        assert!(err.to_string().contains("FeeBreakdown source is repeated"), "{err}");
+
+        let via_value: serde_json::Value =
+            serde_json::from_str(r#"{"breakdown":{"WasmExecution":20,"Initial":10}}"#).unwrap();
+        serde_json::from_value::<FeeBreakdown>(via_value).unwrap();
     }
 }

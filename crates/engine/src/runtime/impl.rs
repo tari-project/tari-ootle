@@ -1296,7 +1296,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     ///
     /// Counting the items is itself host work, so the walk reads only as many items as the
     /// transaction can still pay `per_item` for, and checks their nesting against `max_depth` on the
-    /// way. Input holding more is charged what was read and fails out of compute.
+    /// way. Input holding more is charged what was read and fails out of compute. Input the walk
+    /// rejects, malformed or nested too deep, is charged the items read before the walk stopped.
     fn charge_cbor_read(
         &self,
         input: &[u8],
@@ -1306,8 +1307,13 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     ) -> Result<(), EngineArgChargeError> {
         self.tracker.charge_native_execution(points(input.len() as u64, 0))?;
         let affordable = self.tracker.native_execution_headroom() / per_item;
-        let counted = tari_bor::count_data_items_bounded(input, max_depth, affordable)
-            .map_err(|e| EngineArgChargeError::Unreadable(e.into()))?;
+        let counted = match tari_bor::count_data_items_bounded(input, max_depth, affordable) {
+            Ok(counted) => counted,
+            Err(tari_bor::ItemCountError { items_read, error }) => {
+                self.tracker.charge_native_execution(points(0, items_read))?;
+                return Err(EngineArgChargeError::Unreadable(error.into()));
+            },
+        };
         match counted {
             Some(items) => self.tracker.charge_native_execution(points(0, items))?,
             None => {
@@ -4906,6 +4912,51 @@ mod tests {
         deep_raw.push(0xf6);
         let depth_err = WasmProcess::decode_return_value_for(&runtime_depth, &deep_raw).unwrap_err();
         assert!(matches!(depth_err, WasmExecutionError::EncodingError(_)));
+    }
+
+    #[test]
+    fn unreadable_cbor_is_charged_for_the_items_read_before_it() {
+        use crate::wasm::{WasmExecutionError, WasmProcess};
+
+        const READABLE: u64 = 200;
+        // An array claiming one more element than it holds, then a reserved head the scan cannot read.
+        let mut malformed = Vec::new();
+        {
+            let mut enc = tari_bor::minicbor::Encoder::new(&mut malformed);
+            enc.array(READABLE + 1).unwrap();
+            for _ in 0..READABLE {
+                enc.u8(0).unwrap();
+            }
+        }
+        malformed.push(0x1c);
+        // The array, its readable elements and the unreadable one.
+        let items_read = READABLE + 2;
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let err = WasmProcess::decode_return_value_for(&runtime, &malformed).unwrap_err();
+        assert!(matches!(err, WasmExecutionError::EncodingError(_)), "{err:?}");
+        assert_eq!(
+            runtime.native_points_consumed(),
+            limits::return_value_points(malformed.len() as u64, items_read)
+        );
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let err = runtime.charge_engine_arg(&malformed).unwrap_err();
+        assert!(matches!(err, EngineArgChargeError::Unreadable(_)), "{err:?}");
+        assert_eq!(
+            runtime.native_points_consumed(),
+            engine_arg_points(malformed.len() as u64, items_read)
+        );
+
+        // Nesting past the depth bound is charged for every container read up to it.
+        let mut too_deep = vec![0x81u8; limits::MAX_CBOR_NESTING_DEPTH + 1];
+        too_deep.push(0xf6);
+        let runtime = runtime_with_blobs(Blobs::default());
+        runtime.charge_engine_arg(&too_deep).unwrap_err();
+        assert_eq!(
+            runtime.native_points_consumed(),
+            engine_arg_points(too_deep.len() as u64, limits::MAX_CBOR_NESTING_DEPTH as u64 + 1)
+        );
     }
 
     #[test]

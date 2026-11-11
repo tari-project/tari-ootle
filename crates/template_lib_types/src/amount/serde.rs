@@ -195,5 +195,11 @@ mod tests {
         let cbor = encode(&amount).unwrap();
         let decoded: Amount = decode_exact(&cbor).unwrap();
         assert_eq!(decoded, amount);
+
+        // Indefinite-length CBOR string exceeding 128 bytes is rejected before parsing
+        let mut overlong_indef = vec![0x7f, 0x78, 0x81];
+        overlong_indef.extend_from_slice(&[b'1'; 129]);
+        overlong_indef.push(0xff);
+        assert!(decode_exact::<Amount>(&overlong_indef).is_err());
     }
 }

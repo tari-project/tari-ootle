@@ -505,6 +505,8 @@ fn decode_breakdown<'b, C>(
     Ok(breakdown)
 }
 
+/// Serde formats such as JSON carry no hash commitment, and intermediaries like `serde_json::Value` reorder map
+/// keys, so this path sorts the rows into `FeeSource` order and rejects only a repeated source.
 fn deserialize_breakdown<'de, D>(deserializer: D) -> Result<IndexMap<FeeSource, u64>, D::Error>
 where D: serde::Deserializer<'de> {
     struct BreakdownVisitor;
@@ -519,8 +521,11 @@ where D: serde::Deserializer<'de> {
         fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
             let mut breakdown = IndexMap::with_capacity(map.size_hint().unwrap_or(0).min(FeeSource::ALL.len()));
             while let Some((source, amount)) = map.next_entry()? {
-                push_ascending(&mut breakdown, source, amount).map_err(serde::de::Error::custom)?;
+                if breakdown.insert(source, amount).is_some() {
+                    return Err(serde::de::Error::custom("FeeBreakdown source is repeated"));
+                }
             }
+            breakdown.sort_keys();
             Ok(breakdown)
         }
     }
@@ -734,12 +739,21 @@ mod tests {
             assert!(err.to_string().contains(ORDER_ERROR), "{err}");
         }
 
-        for json in [
-            r#"{"breakdown":{"Storage":30,"Initial":10}}"#,
-            r#"{"breakdown":{"Storage":1,"Storage":2}}"#,
-        ] {
-            let err = serde_json::from_str::<FeeBreakdown>(json).unwrap_err();
-            assert!(err.to_string().contains(ORDER_ERROR), "{err}");
-        }
+        let err = serde_json::from_str::<FeeBreakdown>(r#"{"breakdown":{"Storage":1,"Storage":2}}"#).unwrap_err();
+        assert!(err.to_string().contains("FeeBreakdown source is repeated"), "{err}");
+    }
+
+    #[test]
+    fn json_decode_sorts_rows_into_source_order() {
+        let json = r#"{"breakdown":{"WasmExecution":20,"Initial":10,"Storage":30}}"#;
+        let deserialized: FeeBreakdown = serde_json::from_str(json).unwrap();
+        assert_eq!(rows_of(&deserialized), vec![
+            (FeeSource::Initial, 10),
+            (FeeSource::Storage, 30),
+            (FeeSource::WasmExecution, 20),
+        ]);
+
+        let via_value: serde_json::Value = serde_json::from_str(json).unwrap();
+        assert_eq!(serde_json::from_value::<FeeBreakdown>(via_value).unwrap(), deserialized);
     }
 }

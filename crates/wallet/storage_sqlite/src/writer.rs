@@ -3171,15 +3171,30 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(num_removed)
     }
 
-    fn utxo_unheld_spends_insert(
+    fn utxo_unheld_spends_record(
         &mut self,
         resource_address: &ResourceAddress,
         commitments: &[PedersenCommitmentBytes],
     ) -> Result<(), WalletStorageError> {
-        const OPERATION: &str = "utxo_unheld_spends_insert";
-        use crate::schema::utxo_unheld_spends;
+        const OPERATION: &str = "utxo_unheld_spends_record";
+        use crate::schema::{utxo_process_queue, utxo_unheld_spends};
 
         let resource_address = resource_address.to_string();
+        let has_queued = diesel::select(diesel::dsl::exists(
+            utxo_process_queue::table.filter(utxo_process_queue::resource_address.eq(&resource_address)),
+        ))
+        .get_result::<bool>(self.connection())
+        .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        if !has_queued {
+            diesel::delete(utxo_unheld_spends::table)
+                .filter(utxo_unheld_spends::resource_address.eq(&resource_address))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+            return Ok(());
+        }
+        if commitments.is_empty() {
+            return Ok(());
+        }
         let rows = commitments
             .iter()
             .map(|commitment| {

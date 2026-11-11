@@ -411,8 +411,10 @@ pub trait WalletStoreWriter: CommittableStore {
     /// Removes each of `entries` that is still queued at its generation. An entry queued again since it was read
     /// stays queued. Returns the number removed.
     fn utxo_process_queue_ack(&mut self, entries: &[QueuedEntry]) -> Result<usize, WalletStorageError>;
-    /// Records spends of outputs of the resource that the wallet does not hold, after every one recorded before.
-    fn utxo_unheld_spends_insert(
+    /// Records spends of outputs of the resource that the wallet does not hold, after every one recorded before, while
+    /// any UTXO of the resource is queued for recovery. With none queued, no lookup can need them, so they and every
+    /// spend recorded for the resource before are removed instead.
+    fn utxo_unheld_spends_record(
         &mut self,
         resource_address: &ResourceAddress,
         commitments: &[PedersenCommitmentBytes],

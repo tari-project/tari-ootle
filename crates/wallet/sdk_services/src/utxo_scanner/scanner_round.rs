@@ -475,9 +475,7 @@ where TSpec: WalletSdkSpec
             // A spend of an output the wallet does not hold may be of one that recovery has looked up unspent and not
             // stored yet. Recovery does not store an output with a spend recorded after its lookup, and looks it up
             // again.
-            if !spends_unheld.is_empty() {
-                tx.utxo_unheld_spends_insert(self.resource_address, &spends_unheld)?;
-            }
+            tx.utxo_unheld_spends_record(self.resource_address, &spends_unheld)?;
 
             let bound = &self.stored_cursor_bound;
             let mut cursors = Vec::new();

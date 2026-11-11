@@ -790,3 +790,34 @@ async fn an_output_looked_up_while_another_unheld_output_is_spent_is_recovered()
     assert!(is_stored(&test, id));
     assert_eq!(balance(&test, &account), Amount::from_u64(100));
 }
+
+fn unheld_spends(test: &Test) -> u64 {
+    test.store()
+        .with_read_tx(|tx| tx.utxo_unheld_spends_watermark())
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scan_records_no_unheld_spends_while_nothing_is_queued() {
+    let network = UtxoNetwork::default();
+    let (test, account) = new_test(network.clone());
+    let (held_id, held) = test.owned_utxo(&account, 100);
+    network.index((held_id, held.clone()));
+    queue_at(&test, &account, &held, None);
+    recover(&test).await;
+    assert!(is_stored(&test, held_id));
+    assert_eq!(queued_entries(&test), 0);
+
+    let other = second_account(&test);
+    let (unheld_id, _) = test.owned_utxo(&other, 50);
+    network.stream_later(WalletUtxoUpdate::Spent(UtxoSpent {
+        id: unheld_id,
+        version: SubstateVersion::ZERO,
+    }));
+    scan(&test, &account).await;
+    assert_eq!(
+        unheld_spends(&test),
+        0,
+        "no lookup can need a spend while nothing is queued"
+    );
+}

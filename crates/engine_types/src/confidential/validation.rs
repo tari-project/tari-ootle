@@ -64,6 +64,14 @@ pub fn validate_confidential_statement(
         });
     }
 
+    if let (Some(output), Some(change)) = (&proof.output, &proof.change_statement) &&
+        output.commitment == change.commitment
+    {
+        return Err(ResourceError::InvalidConfidentialProof {
+            details: "Confidential output and change commitments cannot be identical".to_string(),
+        });
+    }
+
     let maybe_output = proof
         .output
         .as_ref()
@@ -148,4 +156,49 @@ pub fn validate_confidential_statement(
         output_revealed_amount: proof.output_revealed_amount,
         change_revealed_amount: proof.change_revealed_amount,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use ootle_byte_type::ToByteType;
+    use tari_crypto::{keys::PublicKey, ristretto::RistrettoSecretKey};
+    use tari_template_lib::types::{EncryptedData, crypto::RangeProofBytes, stealth::UnspentOutput};
+
+    use super::*;
+    use crate::crypto::commit_u64_amount;
+
+    fn sample_unspent_output(mask_seed: u64, value: u64) -> UnspentOutput {
+        let mask = RistrettoSecretKey::from(mask_seed);
+        let commitment = commit_u64_amount(&mask, value).to_byte_type();
+        let sender_public_nonce = RistrettoPublicKey::from_secret_key(&mask).to_byte_type();
+        UnspentOutput {
+            commitment,
+            sender_public_nonce,
+            encrypted_data: EncryptedData::try_from(vec![0u8; EncryptedData::min_size()]).unwrap(),
+            minimum_value_promise: 1,
+            viewable_balance_proof: None,
+        }
+    }
+
+    #[test]
+    fn rejects_identical_output_and_change_commitments() {
+        let dup_output = sample_unspent_output(7, 100);
+        let stmt = ConfidentialOutputStatement {
+            output: Some(dup_output.clone()),
+            change_statement: Some(dup_output),
+            range_proof: RangeProofBytes::empty(),
+            output_revealed_amount: Amount::ZERO,
+            change_revealed_amount: Amount::ZERO,
+        };
+
+        let err = validate_confidential_statement(&stmt, None).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                ResourceError::InvalidConfidentialProof { details }
+                    if details.contains("output and change commitments cannot be identical")
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
 }

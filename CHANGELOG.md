@@ -3,6 +3,54 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.53.2](https://github.com/tari-project/tari-ootle/compare/v0.53.1...v0.53.2) (2026-11-11)
+
+Engine metering and confidential validation tighten, the wallet daemon defaults to MainNet, and
+wallet UTXO recovery no longer misattributes or stalls on outputs.
+
+### ⚠️ Upgrade notes
+
+- **Validators upgrade together.** Workspace argument metering, confidential withdraw admission,
+  commitment uniqueness and freeze event metadata change execution results with no activation epoch.
+  (#3661, #3683, #3646, #3533)
+- **Wallet daemon operators:** `--network` now defaults to `mainnet`. Pass `--network esmeralda` or
+  set `TARI_NETWORK=esmeralda` to stay on testnet. (#3694)
+- **Template authors:** `ProofAccess` is no longer `Clone`, since dropping a clone deauthorized the
+  proof while the original guard was still in scope. (#3533)
+- **App and SDK developers:** a transaction that passes workspace values as arguments costs more
+  native execution points, so re-estimate its fee. (#3661)
+
+### Features
+
+- **walletd-ui:** transfers default to spending confidential funds first. (#3699)
+
+### Bug fixes
+
+- **engine:** resolving a workspace argument is charged per item, a return value's item scan is
+  bounded by the remaining compute, and call info is encoded once and stops at the size limit.
+  (#3661)
+- **engine:** a confidential withdraw's input count is capped at 1000 when decoded, and the withdraw
+  is admitted before vault reads, auth hooks or view-key decompression. (#3683)
+- **engine:** a confidential or stealth statement or withdraw whose output or change commitment
+  repeats an input, sibling output or held commitment is rejected. (#3646)
+- **engine:** a resource address placed directly on the workspace resolves, including tuple
+  elements. (#3674)
+- **template_abi:** a truncated argument length prefix panics instead of silently ending the argument
+  list, and the packed-size calculation checks for overflow. (#3689)
+- **template_lib:** `VaultFreezeFlags` iterates and displays every set flag, setting a component's
+  address twice is caught, and `ResourceAddressAllocation` is `Tagged`. (#3533)
+- **engine_types:** a decoded `FeeBreakdown` must list its fee sources in canonical order, so a
+  receipt hashes the same whatever order the wire gave, and component access rules naming a method
+  twice fail to decode. (#3684)
+- **engine_types:** a template binary with two `tari_tdef` sections is rejected by the indexer and
+  walletd as it is by the engine. (#3659)
+- **wallet:** UTXO recovery checks an output against every candidate account and acknowledges only
+  the work it looked up, and only a spend of an output it returned discards a lookup, so recovery no
+  longer stalls during a busy sync. (#3672, #3693)
+- **walletd:** the startup log links the web UI at its WebAuthn origin, and `authentication=none`
+  prints a warning banner. (#3692)
+- **indexer:** the web UI shows fees in TARI. (#3695)
+
 ## [0.53.1](https://github.com/tari-project/tari-ootle/compare/v0.53.0...v0.53.1) (2026-11-10)
 
 Validators keep six epochs of history instead of one, so peers further behind can still sync from

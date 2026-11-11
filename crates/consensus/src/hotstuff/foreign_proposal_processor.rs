@@ -263,7 +263,7 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                                 })
                             })
                         });
-                    if has_conflicts {
+                    if conflicting_tx.current_decision().is_commit() && has_conflicts {
                         warn!(
                             target: LOG_TARGET,
                             "⚠️ Foreign proposal {} received for transaction {} but a conflicting transaction ({}) has already been prepared by this node. Abort.",
@@ -343,10 +343,6 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                             tx_rec.current_decision(),
                             tx_rec.current_stage()
                         );
-                        // If foreign abort, we are ready to propose ABORT
-                        if tx_rec.current_decision().is_abort() {
-                            tx_rec.set_ready(true);
-                        }
                     }
                 } else if tx_rec.current_stage().is_local_prepared() &&
                     tx_rec.is_ready_for_pending_stage(local_shard_group)
@@ -502,7 +498,8 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                     // have them.
                     // CASE: Foreign SGs have pledged all inputs and executed the transaction, local SG is involved
                     // in the outputs
-                    let is_ready = //local_committee_info.includes_substate_id(&tx_rec.to_receipt_id().into()) ||
+                    let is_ready = tx_rec.current_decision().is_abort() ||
+                        //local_committee_info.includes_substate_id(&tx_rec.to_receipt_id().into()) ||
                         tx_rec.committee_involves_inputs(local_committee_info) ||
                         has_all_foreign_input_pledges(tx, &tx_rec, local_committee_info, proposed_block_change_set)?;
                     if is_ready {
@@ -524,11 +521,6 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                             tx_rec.current_decision(),
                             tx_rec.current_stage()
                         );
-
-                        // If foreign abort, we are ready to propose ABORT
-                        if tx_rec.current_decision().is_abort() {
-                            tx_rec.set_ready(true);
-                        }
                     }
                 } else if tx_rec.current_stage().is_local_prepared() &&
                     tx_rec.is_ready_for_pending_stage(local_shard_group)
@@ -668,6 +660,16 @@ fn add_pledges(
                 "FOREIGN PLEDGE {block_pledge}",
             );
         }
+    }
+
+    if transaction.current_decision().is_abort() {
+        debug!(
+            target: LOG_TARGET,
+            "Transaction {} is ABORTED ({}). Skipping foreign pledges.",
+            atom.id,
+            transaction.current_decision()
+        );
+        return Ok(());
     }
 
     match atom.decision {
@@ -892,17 +894,45 @@ fn foreign_locked_epoch(
 #[cfg(test)]
 mod tests {
     use tari_common_types::types::PrivateKey;
+    use tari_consensus_types::{PcId, ShardGroupAccumulatedData};
     use tari_crypto::{keys::SecretKey, tari_utilities::ByteArray};
-    use tari_engine_types::fees::ExhaustBurnRate;
+    use tari_engine_types::{
+        SubstateVersion,
+        commit_result::AbortReason,
+        component::{Component, ComponentBody, ComponentHeader},
+        fees::ExhaustBurnRate,
+        substate::{SubstateId, SubstateValue},
+    };
     use tari_ootle_common_types::{
         Epoch,
         ExtraData,
         ExtraFieldKey,
+        NodeHeight,
         NumPreshards,
+        SubstateLockType,
+        SubstateRequirement,
+        VersionedSubstateId,
         VotePower,
         committee::{Committee, CommitteeMember},
     };
-    use tari_ootle_storage::consensus_models::{BlockHeaderMetadata, BlockPledge, CommandsCommitProof};
+    use tari_ootle_storage::{
+        StateStore,
+        StateStoreWriteTransaction,
+        consensus_models::{
+            Block,
+            BlockCommands,
+            BlockHeader,
+            BlockHeaderMetadata,
+            BlockPledge,
+            CommandOrHash,
+            CommandsCommitProof,
+            SubstateLock,
+            SubstateRecord,
+            SubstateTransition,
+            SubstateUpdateBatch,
+            VersionedSubstateIdLockIntent,
+        },
+    };
     use tari_ootle_transaction::{Network, Transaction};
     use tari_sidechain::{
         ChainLink,
@@ -919,9 +949,17 @@ mod tests {
         SignerBitmap,
         ValidatorBlockSignature,
     };
-    use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+    use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+    use tari_template_lib_types::{
+        ComponentAddress,
+        ObjectKey,
+        SubstateOwnerRule,
+        access_rules::ComponentAccessRules,
+        crypto::RistrettoPublicKeyBytes,
+    };
 
     use super::*;
+    use crate::{hotstuff::substate_store::PendingSubstateStore, traits::CertificateStore};
 
     /// A proposal from `shard_group`'s block in `epoch` whose proven metadata names `rate_bps`.
     fn proposal_naming(shard_group: ShardGroup, epoch: u64, rate_bps: u16) -> ForeignProposal {
@@ -1423,5 +1461,234 @@ mod tests {
 
         assert_eq!(pinned.epoch(), Epoch(5));
         assert_eq!(pinned.exhaust_burn_rate().as_bps(), 500);
+    }
+
+    type TestInputs = (
+        [ShardGroup; 2],
+        [SubstateId; 3],
+        SubstateValue,
+        BlockPledge,
+        Evidence,
+        [Transaction; 3],
+    );
+
+    fn make_test_fp(
+        group: ShardGroup,
+        cmd: fn(MultiShardAtom) -> Command,
+        tx: &Transaction,
+        decision: Decision,
+        evidence: Evidence,
+        block_pledge: BlockPledge,
+    ) -> ForeignProposal {
+        let locked_epoch = LockedEpoch::new(Epoch(5), Default::default(), ExhaustBurnRate::try_new(500).unwrap());
+        let atom = MultiShardAtom {
+            id: tx.calculate_id(),
+            decision,
+            evidence,
+            transaction_fee: 0,
+            leader_fee: None,
+            fee_intent_only: false,
+            locked_epoch,
+        };
+        let secrets = committee_secrets();
+        let base = proposal_proven_by(group, 6, 500, |h| committing_qcs(h, &secrets, &[0, 1, 2, 3]));
+        let proof = base.commit_proof().sidechain_block_commit_proof().clone();
+        let commit_proof = CommandsCommitProof::new_latest(vec![CommandOrHash::Command(cmd(atom))], proof);
+        ForeignProposal::new(commit_proof, block_pledge, base.block_metadata().clone())
+    }
+
+    fn build_input_block_pledge(
+        ga: ShardGroup,
+        gc: ShardGroup,
+        a: &SubstateId,
+        c: &SubstateId,
+        val: &SubstateValue,
+    ) -> BlockPledge {
+        let z = SubstateVersion::ZERO;
+        let tmp = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(tmp.path(), DatabaseOptions::default()).unwrap();
+        let zero = Block::zero_block(Network::MainNet, NumPreshards::P256);
+        let shard = VersionedSubstateId::new(a.clone(), z).to_shard(NumPreshards::P256);
+        let mut batch = SubstateUpdateBatch::new(Network::MainNet, Epoch::zero());
+        batch.with_transition(shard, 0).push(SubstateTransition::Up {
+            id: a.clone(),
+            version: z,
+            substate_or_hash: val.clone().into(),
+        });
+        let mut ev = Evidence::empty();
+        let lock_a = VersionedSubstateIdLockIntent::write(VersionedSubstateId::new(a.clone(), z), true)
+            .with_pledged_value(val);
+        ev.add_shard_group(ga).insert_from_lock_intent(lock_a);
+        ev.add_shard_group(gc).insert_unpledged_input(c.clone());
+        let locked_epoch = LockedEpoch::new(Epoch(5), Default::default(), ExhaustBurnRate::try_new(500).unwrap());
+        let atom = MultiShardAtom {
+            id: TransactionId::new([9; 32]),
+            decision: Decision::Commit,
+            evidence: ev,
+            transaction_fee: 0,
+            leader_fee: None,
+            fee_intent_only: false,
+            locked_epoch,
+        };
+        let cmds = BlockCommands::init([Command::LocalPrepare(atom)]).unwrap();
+        let bh = BlockHeader::create_unsigned(
+            Network::MainNet,
+            ProtocolVersion::V0,
+            *zero.id(),
+            zero.justify().calculate_id(),
+            None,
+            NodeHeight(1),
+            Epoch(6),
+            ga,
+            RistrettoPublicKeyBytes::default(),
+            FixedHash::zero(),
+            &cmds,
+            0,
+            0,
+            FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
+            ExtraData::new(),
+        )
+        .unwrap();
+        let block = Block::new(bh, zero.justify().clone(), cmds, None);
+        store
+            .with_write_tx(|tx| {
+                SubstateRecord::commit_batch(tx, batch)?;
+                block.get_block_pledge(&**tx, gc)
+            })
+            .unwrap()
+    }
+
+    fn test_inputs() -> TestInputs {
+        let mut groups = NumPreshards::P256.all_shard_groups_iter(2);
+        let (ga, gc) = (groups.next().unwrap(), groups.next().unwrap());
+        let z = SubstateVersion::ZERO;
+        let find_in = |g: ShardGroup, skip: usize| {
+            (0x20..=u8::MAX)
+                .map(|s| SubstateId::Component(ComponentAddress::from_array([s; ObjectKey::LENGTH])))
+                .filter(|id| g.contains(&VersionedSubstateId::new(id.clone(), z).to_shard(NumPreshards::P256)))
+                .nth(skip)
+                .unwrap()
+        };
+        let (a, a2, c) = (find_in(ga, 0), find_in(ga, 1), find_in(gc, 0));
+        let mut ev = Evidence::empty();
+        ev.add_shard_group(ga).insert_unpledged_input(a.clone());
+        ev.add_shard_group(gc).insert_unpledged_input(c.clone());
+        let make_tx = |k: u64, ids: &[&SubstateId]| {
+            let mut tx_b = Transaction::builder(Network::MainNet, Epoch(100));
+            for id in ids {
+                tx_b = tx_b.add_input(SubstateRequirement::unversioned((*id).clone()));
+            }
+            tx_b.build_and_seal(&PrivateKey::from(k))
+        };
+        let txs = [make_tx(1, &[&a, &c]), make_tx(2, &[&a, &c]), make_tx(3, &[&a, &a2, &c])];
+        let header = ComponentHeader {
+            template_address: Default::default(),
+            owner_rule: SubstateOwnerRule::None,
+            access_rules: ComponentAccessRules::allow_all(),
+            entity_id: Default::default(),
+            upgrade_rule: Default::default(),
+        };
+        let val = SubstateValue::Component(Component {
+            header,
+            body: ComponentBody::empty(),
+        });
+        let pledge = build_input_block_pledge(ga, gc, &a, &c, &val);
+        ([ga, gc], [a, a2, c], val, pledge, ev, txs)
+    }
+
+    fn run_foreign_proposals(
+        gc: ShardGroup,
+        txs: &[Transaction],
+        locks: &[(&SubstateId, &Vec<SubstateLock>)],
+        initial_records: Vec<TransactionPoolRecord>,
+        proposals: &[ForeignProposal],
+    ) -> Result<(ProposedBlockChangeSet, Vec<TransactionPoolRecord>), HotStuffError> {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(tmp.path(), DatabaseOptions::default()).unwrap();
+        let zero = Block::zero_block(Network::MainNet, NumPreshards::P256);
+        store.with_write_tx(|tx| {
+            zero.justify().save(tx)?;
+            zero.insert(tx)?;
+            tx.blocks_set_qcs(zero.id(), Some(&PcId::zero()), Some(&PcId::zero()))?;
+            tx.substate_locks_insert_all(&zero.as_leaf(), locks.iter().copied())?;
+            for t in txs {
+                TransactionRecord::new(t.clone()).insert(tx)?;
+            }
+            let committee = CommitteeInfo::new(NumPreshards::P256, 4, 2, gc, Epoch(6), VotePower::of(1));
+            let mut substate_store = PendingSubstateStore::init(&**tx, zero.as_leaf(), NumPreshards::P256)?;
+            let mut cs = ProposedBlockChangeSet::new(zero.as_leaf());
+            for rec in initial_records {
+                cs.set_next_transaction_update(rec)?;
+            }
+            for fp in proposals {
+                process_foreign_block(&**tx, fp, &committee, &mut substate_store, &mut cs)?;
+            }
+            let chain = substate_store.parent_chain();
+            let updated = txs
+                .iter()
+                .map(|t| cs.get_transaction_pool_record(&**tx, chain, &t.calculate_id()).unwrap())
+                .collect();
+            Ok((cs, updated))
+        })
+    }
+
+    #[test]
+    fn foreign_abort_accept_and_unpledged_foreign_input_checks() {
+        use HotStuffError::ForeignNodeOmittedTransactionPledges;
+        let ([ga, gc], [in_a, in_a2, in_c], val_a, pledge, ev_init, [tx_1, _, tx_3]) = test_inputs();
+        let z = SubstateVersion::ZERO;
+        let mut ev_out_only = Evidence::empty();
+        ev_out_only.add_shard_group(ga).insert_unpledged_input(in_a.clone());
+        ev_out_only.add_shard_group(gc).insert_output(in_c.clone(), z);
+        let mut ev_abt = ev_out_only.clone();
+        ev_abt.abort();
+
+        let abort_dec = Decision::Abort(AbortReason::ExecutionFailure);
+        let fp = make_test_fp(ga, Command::LocalAccept, &tx_1, abort_dec, ev_abt, Default::default());
+        let rec = TransactionPoolRecord::new_from_transaction(&tx_1, ev_out_only);
+        let (_, updated) = run_foreign_proposals(gc, &[tx_1], &[], vec![rec], &[fp]).unwrap();
+        assert!(updated[0].current_decision().is_abort() && updated[0].is_ready());
+        assert_eq!(updated[0].pending_stage(), Some(TransactionPoolStage::New));
+
+        let mut ev_two_in = ev_init;
+        ev_two_in.add_shard_group(ga).insert_unpledged_input(in_a2);
+        let mut ev_partial = Evidence::empty();
+        let v_id = VersionedSubstateId::new(in_a, z);
+        ev_partial
+            .add_shard_group(ga)
+            .insert_from_lock_intent(VersionedSubstateIdLockIntent::write(v_id, true).with_pledged_value(&val_a));
+        ev_partial.add_shard_group(gc).insert_unpledged_input(in_c);
+        let fp_bad = make_test_fp(ga, Command::LocalPrepare, &tx_3, Decision::Commit, ev_partial, pledge);
+        let rec_3 = TransactionPoolRecord::new_from_transaction(&tx_3, ev_two_in);
+        let err = run_foreign_proposals(gc, &[tx_3], &[], vec![rec_3], &[fp_bad]).unwrap_err();
+        assert!(matches!(err, ForeignNodeOmittedTransactionPledges { .. }));
+    }
+
+    #[test]
+    fn aborted_local_tx_skips_conflict_and_foreign_pledges() {
+        let ([ga, gc], [in_a, _, in_c], val_a, pledge, _, [tx_abt, tx_inc, _]) = test_inputs();
+        let (z, cm) = (SubstateVersion::ZERO, Decision::Commit);
+        let (lp, la) = (Command::LocalPrepare, Command::LocalAccept);
+        let mut ev_cm = Evidence::empty();
+        let v_id = VersionedSubstateId::new(in_a, z);
+        let lock_a = VersionedSubstateIdLockIntent::write(v_id, true).with_pledged_value(&val_a);
+        ev_cm.add_shard_group(ga).insert_from_lock_intent(lock_a);
+        ev_cm.add_shard_group(gc).insert_unpledged_input(in_c.clone());
+
+        let fp_inc = make_test_fp(ga, lp, &tx_inc, cm, ev_cm.clone(), pledge.clone());
+        let fp_ac = make_test_fp(ga, la, &tx_inc, cm, ev_cm.clone(), Default::default());
+        let fp_abt = make_test_fp(ga, lp, &tx_abt, cm, ev_cm.clone(), pledge);
+        let lock = SubstateLock::new(tx_abt.calculate_id(), z, SubstateLockType::Write, false);
+        let mut rec_aborted = TransactionPoolRecord::new_from_transaction(&tx_abt, ev_cm.clone());
+        rec_aborted.set_local_decision(Decision::Abort(AbortReason::ExecutionFailure));
+        let rec_inc = TransactionPoolRecord::new_from_transaction(&tx_inc, ev_cm);
+        let (recs, fps) = (vec![rec_aborted, rec_inc], [fp_inc, fp_ac, fp_abt]);
+
+        let (cs, updated) =
+            run_foreign_proposals(gc, &[tx_abt.clone(), tx_inc.clone()], &[(&in_c, &vec![lock])], recs, &fps).unwrap();
+        assert!(updated[0].current_decision().is_abort() && updated[1].current_decision().is_commit());
+        assert_eq!(cs.get_foreign_pledges(&tx_abt.calculate_id()).count(), 0);
+        assert_eq!(cs.get_foreign_pledges(&tx_inc.calculate_id()).count(), 1);
     }
 }

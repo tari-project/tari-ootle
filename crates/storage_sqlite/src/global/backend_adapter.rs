@@ -328,7 +328,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .inner_join(committees::table.on(validator_nodes::id.eq(committees::validator_node_id)))
             .filter(committees::epoch.eq(epoch.as_u64() as i64))
             .filter(validator_nodes::address.eq(serialize_json(address)?))
-            .order_by(validator_nodes::id.desc())
+            .order_by((validator_nodes::start_epoch.desc(), validator_nodes::id.desc()))
             .first::<DbValidatorNode>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
@@ -352,7 +352,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .inner_join(committees::table.on(validator_nodes::id.eq(committees::validator_node_id)))
             .filter(committees::epoch.eq(epoch.as_u64() as i64))
             .filter(validator_nodes::public_key.eq(public_key.as_bytes()))
-            .order_by(validator_nodes::shard_key.desc())
+            .order_by((validator_nodes::start_epoch.desc(), validator_nodes::id.desc()))
             .first::<DbValidatorNode>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,

@@ -10,7 +10,10 @@ use crate::{Hash32, address_prefixes};
 pub type TemplateAddress = Hash32;
 
 pub fn parse_template_address(s: &str) -> Option<TemplateAddress> {
-    let hash_str = s.strip_prefix(address_prefixes::TEMPLATE)?.strip_prefix('_')?;
+    let (prefix, hash_str) = s.split_once('_')?;
+    if prefix != address_prefixes::TEMPLATE {
+        return None;
+    }
     TemplateAddress::from_str(hash_str).ok()
 }
 
@@ -19,13 +22,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_canonical_template_address() {
-        let hex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
-        let canonical = "template_0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
-        let parsed = parse_template_address(canonical).unwrap();
-        assert_eq!(parsed, TemplateAddress::from_str(hex).unwrap());
-        assert!(parse_template_address(hex).is_none());
-        assert!(parse_template_address("template").is_none());
+    fn parses_valid_and_rejects_malformed_template_addresses() {
+        let hex = "7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff";
+        let addr = parse_template_address(&format!("template_{hex}")).expect("valid template_ address should parse");
+        assert_eq!(addr.to_string(), hex);
+
+        assert!(parse_template_address(&format!("template{hex}")).is_none());
+        assert!(parse_template_address(&format!("component_{hex}")).is_none());
         assert!(parse_template_address("template_").is_none());
     }
 }

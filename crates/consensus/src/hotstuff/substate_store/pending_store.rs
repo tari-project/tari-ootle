@@ -343,10 +343,6 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         let versioned_substate_id = requested_lock.to_versioned_substate_id_ref();
 
         let Some(existing) = self.get_latest_lock_by_id(versioned_substate_id.substate_id())? else {
-            if requested_lock_type.is_input() {
-                self.lock_assert_is_up(versioned_substate_id)?;
-            }
-
             self.grant_lock(
                 transaction_id,
                 versioned_substate_id,
@@ -359,7 +355,9 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         // Local-Only-Rules apply if: current lock is local-only AND requested lock is local only
         let has_local_only_rules = existing.is_local_only() && is_local_only;
         let same_transaction = *existing.transaction_id() == transaction_id;
-        let same_transaction_lock = same_transaction && existing.lock_type() == requested_lock_type;
+        let same_transaction_lock = same_transaction &&
+            existing.lock_type() == requested_lock_type &&
+            existing.version() == versioned_substate_id.version();
 
         debug!(
             target: LOG_TARGET,
@@ -595,9 +593,9 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
 
     /// Grants `lock_type` over `id` to `transaction_id`.
     ///
-    /// An OUTPUT lock claims a version that the transaction will create, so it is only valid while that version does
-    /// not exist. A lock already held over the substate says nothing about the requested version, so the assertion
-    /// must run wherever an OUTPUT lock is granted.
+    /// An input lock requires `id` to be UP, and an OUTPUT lock claims a version that the transaction will create, so
+    /// it is only valid while that version does not exist. A lock already held over the substate says nothing about
+    /// the requested version, so the assertion must run wherever a lock is granted.
     fn grant_lock(
         &mut self,
         transaction_id: TransactionId,
@@ -605,6 +603,9 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         lock_type: SubstateLockType,
         is_local_only: bool,
     ) -> Result<(), SubstateStoreError> {
+        if lock_type.is_input() {
+            self.lock_assert_is_up(id)?;
+        }
         if lock_type.is_output() {
             self.lock_assert_not_exist(id)?;
         }

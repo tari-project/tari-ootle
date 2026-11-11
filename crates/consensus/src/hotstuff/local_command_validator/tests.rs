@@ -1342,6 +1342,165 @@ mod local_only {
             evaluation.no_vote
         );
     }
+
+    #[test]
+    fn put_diff_with_duplicate_up_version_rolls_back_and_refuses_conflicting_transaction() {
+        use crate::{hotstuff::substate_store::LockFailedError, traits::WriteableSubstateStore};
+
+        let replica = Replica::new();
+        let substate_id = component_id(0x20);
+        let v0 = VersionedSubstateId::new(substate_id.clone(), SubstateVersion::ZERO);
+
+        replica
+            .store
+            .with_read_tx(|tx| {
+                let mut store = PendingSubstateStore::init(tx, replica.candidate.as_leaf(), NUM_PRESHARDS)?;
+                let mut diff = SubstateDiff::new();
+                diff.up(substate_id.clone(), component(SubstateVersion::ZERO));
+                diff.up(substate_id, component(SubstateVersion::ZERO));
+
+                let err = store.put_diff(&diff).unwrap_err();
+                assert!(
+                    matches!(err.ok_lock_failed(), Ok(LockFailedError::SubstateExists { id }) if id == v0),
+                );
+                assert!(store.changes().is_empty(), "{:?}", store.changes());
+                assert_eq!(store.max_shard_output_bytes(), 0);
+                Ok::<_, StorageError>(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn try_lock_rejects_same_transaction_locking_different_version_with_same_lock_type() {
+        use crate::hotstuff::substate_store::LockFailedError;
+
+        let replica = Replica::new();
+        let substate_id = component_id(0x20);
+        replica.add_substate(&substate_id);
+        let v0 = VersionedSubstateId::new(substate_id.clone(), SubstateVersion::ZERO);
+        let v1 = VersionedSubstateId::new(substate_id, SubstateVersion::new(1));
+
+        replica
+            .store
+            .with_read_tx(|tx| {
+                let mut store = PendingSubstateStore::init(tx, replica.candidate.as_leaf(), NUM_PRESHARDS)?;
+                let tx1 = TransactionId::new([1; 32]);
+                let status = store
+                    .try_lock_all(
+                        tx1,
+                        [
+                            VersionedSubstateIdLockIntent::read(v0.clone(), true),
+                            VersionedSubstateIdLockIntent::read(v0.clone(), true),
+                        ],
+                        false,
+                    )
+                    .unwrap();
+                assert!(!status.is_any_failed(), "{status:?}");
+
+                let status = store
+                    .try_lock_all(tx1, [VersionedSubstateIdLockIntent::read(v1.clone(), true)], false)
+                    .unwrap();
+                assert!(
+                    matches!(
+                        status.hard_conflict(),
+                        Some(LockFailedError::LockConflict { substate_id, .. }) if substate_id == &v1
+                    ),
+                    "{status:?}"
+                );
+
+                let tx2 = TransactionId::new([2; 32]);
+                let status = store
+                    .try_lock_all(
+                        tx2,
+                        [
+                            VersionedSubstateIdLockIntent::output(v1.clone()),
+                            VersionedSubstateIdLockIntent::output(v0.clone()),
+                        ],
+                        false,
+                    )
+                    .unwrap();
+                assert!(
+                    matches!(
+                        status.hard_conflict(),
+                        Some(LockFailedError::LockConflict { substate_id, .. }) if substate_id == &v0
+                    ),
+                    "{status:?}"
+                );
+                assert!(store.new_locks().is_empty(), "{:?}", store.new_locks());
+                Ok::<_, StorageError>(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn try_lock_rejects_non_up_input_version_when_another_version_holds_read_or_local_only_output_lock() {
+        use crate::{hotstuff::substate_store::LockFailedError, traits::WriteableSubstateStore};
+
+        let replica = Replica::new();
+        let substate_id = component_id(0x20);
+        replica.add_substate(&substate_id);
+        let v0 = VersionedSubstateId::new(substate_id.clone(), SubstateVersion::ZERO);
+        let v1 = VersionedSubstateId::new(substate_id.clone(), SubstateVersion::new(1));
+        let v2 = VersionedSubstateId::new(substate_id.clone(), SubstateVersion::new(2));
+
+        replica
+            .store
+            .with_read_tx(|tx| {
+                let mut store = PendingSubstateStore::init(tx, replica.candidate.as_leaf(), NUM_PRESHARDS)?;
+                let tx1 = TransactionId::new([1; 32]);
+                let status = store
+                    .try_lock_all(
+                        tx1,
+                        [
+                            VersionedSubstateIdLockIntent::write(v0.clone(), true),
+                            VersionedSubstateIdLockIntent::output(v1.clone()),
+                        ],
+                        true,
+                    )
+                    .unwrap();
+                assert!(!status.is_any_failed(), "{status:?}");
+                let mut diff = SubstateDiff::new();
+                diff.down(substate_id.clone(), v0.version());
+                diff.up(substate_id, component(v1.version()));
+                store.put_diff(&diff).unwrap();
+
+                let tx2 = TransactionId::new([2; 32]);
+                for bad_vid in [&v0, &v2] {
+                    let status = store
+                        .try_lock_all(tx2, [VersionedSubstateIdLockIntent::write(bad_vid.clone(), true)], true)
+                        .unwrap();
+                    assert!(
+                        matches!(
+                            status.hard_conflict(),
+                            Some(LockFailedError::SubstateNotFound { id }) if id == bad_vid
+                        ),
+                        "{status:?}"
+                    );
+                }
+
+                let tx3 = TransactionId::new([3; 32]);
+                let status = store
+                    .try_lock_all(tx3, [VersionedSubstateIdLockIntent::read(v1, true)], true)
+                    .unwrap();
+                assert!(!status.is_any_failed(), "{status:?}");
+
+                let tx4 = TransactionId::new([4; 32]);
+                for bad_vid in [&v0, &v2] {
+                    let status = store
+                        .try_lock_all(tx4, [VersionedSubstateIdLockIntent::read(bad_vid.clone(), true)], false)
+                        .unwrap();
+                    assert!(
+                        matches!(
+                            status.hard_conflict(),
+                            Some(LockFailedError::SubstateNotFound { id }) if id == bad_vid
+                        ),
+                        "{status:?}"
+                    );
+                }
+                Ok::<_, StorageError>(())
+            })
+            .unwrap();
+    }
 }
 
 /// The atom of a LocalPrepare or LocalAccept command.

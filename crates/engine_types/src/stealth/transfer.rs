@@ -354,7 +354,7 @@ mod tests {
                 agg_range_proof: RangeProofBytes::empty(),
             },
             balance_proof: Some(dummy_sig),
-            covenant_claims: vec![].try_into().unwrap(),
+            covenant_claims: vec![],
         };
         let err = validate_transfer(&input_output_collision, None).unwrap_err();
         assert!(
@@ -378,7 +378,7 @@ mod tests {
                 agg_range_proof: RangeProofBytes::empty(),
             },
             balance_proof: Some(dummy_sig),
-            covenant_claims: vec![].try_into().unwrap(),
+            covenant_claims: vec![],
         };
         let err = validate_transfer(&dup_outputs, None).unwrap_err();
         assert!(

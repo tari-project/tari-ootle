@@ -22,6 +22,7 @@ mod on_receive_vote;
 // mod on_sync_response;
 mod block_change_set;
 mod command_derivation;
+mod command_sequencer;
 pub mod commit_proofs;
 mod epoch_end_drain;
 mod epoch_gc;

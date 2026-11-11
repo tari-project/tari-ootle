@@ -39,7 +39,10 @@ pub struct VoteCollector<V: Vote> {
     store: Arc<RwLock<VoteStoreInner<V>>>,
 }
 
-impl<V: Vote + Display + Clone> VoteCollector<V> {
+impl<V: Vote + Display + Clone> VoteCollector<V>
+where
+    V::AggregationKey: Clone,
+{
     pub fn new() -> Self {
         Self {
             store: Arc::new(RwLock::new(VoteStoreInner::new())),
@@ -205,12 +208,10 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
     /// All votes at `(epoch, height)` remain stored until [`Self::clear_votes_before`] prunes the view so that a
     /// signer equivocating after the quorum is still detected and votes for sibling forks or `Reject` decisions are
     /// preserved.
-    pub fn take_accept_votes(
-        &mut self,
-        epoch: Epoch,
-        height: NodeHeight,
-        agg_key: &V::AggregationKey,
-    ) -> Option<Vec<V>> {
+    pub fn take_accept_votes(&mut self, epoch: Epoch, height: NodeHeight, agg_key: &V::AggregationKey) -> Option<Vec<V>>
+    where
+        V::AggregationKey: Clone,
+    {
         let epoch_height = (epoch, height);
         let view_votes = self.store.get_mut(&epoch_height)?;
         if view_votes.quorums_reached.contains(agg_key) {
@@ -222,9 +223,7 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
             .filter(|vote| vote.decision().is_accept() && vote.aggregation_key() == *agg_key)
             .cloned()
             .collect();
-        if let Some(first) = accept_votes.first() {
-            view_votes.quorums_reached.push(first.aggregation_key());
-        }
+        view_votes.quorums_reached.push(agg_key.clone());
         Some(accept_votes)
     }
 

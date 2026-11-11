@@ -469,20 +469,34 @@ pub struct FeeBreakdown {
     breakdown: IndexMap<FeeSource, u64>,
 }
 
-// Keep decoded breakdowns in the same canonical form that `add` and `set` maintain: only non-zero charges, sorted by
-// `FeeSource`. Re-encoding a decoded receipt for `SubstateHashMessage` or iterating with `FeeBreakdown::iter` is then
-// independent of the key order or zero-charge rows a peer sent.
-fn normalize_breakdown(mut breakdown: IndexMap<FeeSource, u64>) -> IndexMap<FeeSource, u64> {
-    breakdown.retain(|_, &mut amount| amount != 0);
-    breakdown.sort_keys();
-    breakdown
+/// Appends a decoded row, requiring its source to sort strictly after the previous row's.
+///
+/// `add` and `set` keep the breakdown sorted by `FeeSource`, and the receipt hash re-encodes the decoded map in its
+/// stored order, so decoding accepts that order alone. One comparison against the last row rejects both an
+/// out-of-order source and a repeated one. A zero-charge row is kept as stored: receipts written before
+/// `FeeBreakdown::add` began omitting zero charges carry them.
+fn push_ascending(
+    breakdown: &mut IndexMap<FeeSource, u64>,
+    source: FeeSource,
+    amount: u64,
+) -> Result<(), &'static str> {
+    if breakdown.last().is_some_and(|(last, _)| *last >= source) {
+        return Err("FeeBreakdown sources are repeated or out of ascending order");
+    }
+    breakdown.insert(source, amount);
+    Ok(())
 }
 
 fn decode_breakdown<'b, C>(
     d: &mut minicbor::Decoder<'b>,
     ctx: &mut C,
 ) -> Result<IndexMap<FeeSource, u64>, minicbor::decode::Error> {
-    tari_bor::adapters::indexmap_codec::decode(d, ctx).map(normalize_breakdown)
+    let mut breakdown = IndexMap::with_capacity(FeeSource::ALL.len());
+    for entry in d.map_iter_with::<C, FeeSource, u64>(ctx)? {
+        let (source, amount) = entry?;
+        push_ascending(&mut breakdown, source, amount).map_err(minicbor::decode::Error::message)?;
+    }
+    Ok(breakdown)
 }
 
 fn deserialize_breakdown<'de, D>(deserializer: D) -> Result<IndexMap<FeeSource, u64>, D::Error>
@@ -499,11 +513,9 @@ where D: serde::Deserializer<'de> {
         fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
             let mut breakdown = IndexMap::with_capacity(map.size_hint().unwrap_or(0).min(FeeSource::ALL.len()));
             while let Some((source, amount)) = map.next_entry()? {
-                if breakdown.insert(source, amount).is_some() {
-                    return Err(serde::de::Error::custom("duplicate fee source in FeeBreakdown"));
-                }
+                push_ascending(&mut breakdown, source, amount).map_err(serde::de::Error::custom)?;
             }
-            Ok(normalize_breakdown(breakdown))
+            Ok(breakdown)
         }
     }
 
@@ -665,57 +677,55 @@ mod tests {
         assert_eq!(breakdown.iter().collect::<Vec<_>>(), vec![(&FeeSource::Initial, &100)]);
     }
 
-    #[test]
-    fn decode_and_deserialize_normalize_key_order_and_zero_charges() {
-        let mut canonical = FeeBreakdown::default();
-        canonical.add(FeeSource::Initial, 10);
-        canonical.add(FeeSource::Storage, 30);
-        canonical.add(FeeSource::WasmExecution, 20);
+    const ORDER_ERROR: &str = "FeeBreakdown sources are repeated or out of ascending order";
 
+    fn encode_breakdown_rows(rows: &[(FeeSource, u64)]) -> Vec<u8> {
         let mut e = minicbor::Encoder::new(Vec::new());
-        e.array(1)
-            .unwrap()
-            .map(4)
-            .unwrap()
-            .encode(FeeSource::WasmExecution)
-            .unwrap()
-            .u64(20)
-            .unwrap()
-            .encode(FeeSource::InputFanout)
-            .unwrap()
-            .u64(0)
-            .unwrap()
-            .encode(FeeSource::Storage)
-            .unwrap()
-            .u64(30)
-            .unwrap()
-            .encode(FeeSource::Initial)
-            .unwrap()
-            .u64(10)
-            .unwrap();
-        let decoded: FeeBreakdown = tari_bor::decode(e.writer()).unwrap();
-        assert_eq!(decoded, canonical);
-        assert_eq!(decoded.iter().collect::<Vec<_>>(), canonical.iter().collect::<Vec<_>>());
-        assert_eq!(
-            tari_bor::encode(&decoded).unwrap(),
-            tari_bor::encode(&canonical).unwrap()
-        );
-        assert_eq!(borsh::to_vec(&decoded).unwrap(), borsh::to_vec(&canonical).unwrap());
+        e.array(1).unwrap().map(rows.len() as u64).unwrap();
+        for (source, amount) in rows {
+            e.encode(source).unwrap().u64(*amount).unwrap();
+        }
+        e.into_writer()
+    }
 
-        let json = r#"{"breakdown":{"WasmExecution":20,"InputFanout":0,"Storage":30,"Initial":10}}"#;
+    fn rows_of(breakdown: &FeeBreakdown) -> Vec<(FeeSource, u64)> {
+        breakdown.iter().map(|(source, amount)| (*source, *amount)).collect()
+    }
+
+    #[test]
+    fn decode_keeps_ascending_rows_as_stored_including_zero_charges() {
+        let rows = vec![
+            (FeeSource::Initial, 10),
+            (FeeSource::Storage, 30),
+            (FeeSource::WasmExecution, 20),
+            (FeeSource::InputFanout, 0),
+        ];
+        let bytes = encode_breakdown_rows(&rows);
+        let decoded: FeeBreakdown = tari_bor::decode(&bytes).unwrap();
+        assert_eq!(rows_of(&decoded), rows);
+        assert_eq!(tari_bor::encode(&decoded).unwrap(), bytes);
+
+        let json = r#"{"breakdown":{"Initial":10,"Storage":30,"WasmExecution":20,"InputFanout":0}}"#;
         let deserialized: FeeBreakdown = serde_json::from_str(json).unwrap();
-        assert_eq!(deserialized, canonical);
-        assert_eq!(
-            deserialized.iter().collect::<Vec<_>>(),
-            canonical.iter().collect::<Vec<_>>()
-        );
-        assert_eq!(
-            tari_bor::encode(&deserialized).unwrap(),
-            tari_bor::encode(&canonical).unwrap()
-        );
+        assert_eq!(rows_of(&deserialized), rows);
+        assert_eq!(serde_json::to_string(&deserialized).unwrap(), json);
+    }
 
-        let duplicate_json = r#"{"breakdown":{"Storage":1,"Storage":2}}"#;
-        let err = serde_json::from_str::<FeeBreakdown>(duplicate_json).unwrap_err();
-        assert!(err.to_string().contains("duplicate fee source in FeeBreakdown"));
+    #[test]
+    fn decode_rejects_out_of_order_and_repeated_sources() {
+        let out_of_order = encode_breakdown_rows(&[(FeeSource::Storage, 30), (FeeSource::Initial, 10)]);
+        let repeated = encode_breakdown_rows(&[(FeeSource::Storage, 1), (FeeSource::Storage, 2)]);
+        for bytes in [out_of_order, repeated] {
+            let err = tari_bor::decode::<FeeBreakdown>(&bytes).unwrap_err();
+            assert!(err.to_string().contains(ORDER_ERROR), "{err}");
+        }
+
+        for json in [
+            r#"{"breakdown":{"Storage":30,"Initial":10}}"#,
+            r#"{"breakdown":{"Storage":1,"Storage":2}}"#,
+        ] {
+            let err = serde_json::from_str::<FeeBreakdown>(json).unwrap_err();
+            assert!(err.to_string().contains(ORDER_ERROR), "{err}");
+        }
     }
 }

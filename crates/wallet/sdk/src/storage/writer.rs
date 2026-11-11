@@ -19,7 +19,7 @@ use tari_template_lib::types::{
     UtxoAddress,
     UtxoId,
     VaultId,
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
 };
 use webauthn_rs::prelude::Passkey;
 
@@ -57,7 +57,7 @@ use crate::{
         WalletLockId,
         WalletTransactionUpdate,
     },
-    storage::{CommittableStore, QueuedUtxo, WalletStorageError},
+    storage::{CommittableStore, QueuedEntry, QueuedUtxo, WalletStorageError},
 };
 
 pub trait WalletStoreWriter: CommittableStore {
@@ -204,6 +204,8 @@ pub trait WalletStoreWriter: CommittableStore {
         lock_id: WalletLockId,
     ) -> Result<(), WalletStorageError>;
     fn stealth_outputs_insert(&mut self, output: &StealthOutputModel) -> Result<(), WalletStorageError>;
+    /// Deletes the output at `address` if it is held as invalid. Returns whether it was deleted.
+    fn stealth_outputs_delete_invalid(&mut self, address: &UtxoAddress) -> Result<bool, WalletStorageError>;
     /// Marks the output spent, as a spend of `version` takes it down, and records `version` as
     /// [`stealth_outputs_record_spent_version`](Self::stealth_outputs_record_spent_version) does.
     fn stealth_outputs_mark_as_spent(
@@ -406,12 +408,19 @@ pub trait WalletStoreWriter: CommittableStore {
         resource_address: &ResourceAddress,
         items: I,
     ) -> Result<(), WalletStorageError>;
-    fn utxo_process_queue_remove_item(
+    /// Removes each of `entries` that is still queued at its generation. An entry queued again since it was read
+    /// stays queued. Returns the number removed.
+    fn utxo_process_queue_ack(&mut self, entries: &[QueuedEntry]) -> Result<usize, WalletStorageError>;
+    /// Records spends of outputs of the resource that the wallet does not hold, after every one recorded before, while
+    /// any UTXO of the resource is queued for recovery. With none queued, no lookup can need them, so they and every
+    /// spend recorded for the resource before are removed instead.
+    fn utxo_unheld_spends_record(
         &mut self,
-        resource_address: ResourceAddress,
-        tag: UtxoTag,
-        public_nonce: RistrettoPublicKeyBytes,
+        resource_address: &ResourceAddress,
+        commitments: &[PedersenCommitmentBytes],
     ) -> Result<(), WalletStorageError>;
+    /// Removes the recorded unheld spends at or below `watermark`. Returns the number removed.
+    fn utxo_unheld_spends_prune(&mut self, watermark: u64) -> Result<usize, WalletStorageError>;
 
     // Address book
     fn address_book_insert(

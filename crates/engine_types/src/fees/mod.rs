@@ -364,6 +364,12 @@ impl Default for FeeReceipt {
     }
 }
 
+/// The kind of work a fee charge pays for, one row of a [`FeeBreakdown`].
+///
+/// Append new variants at the end, with the next discriminant and `#[n]` index. Decoding a
+/// [`FeeBreakdown`] requires its rows in strictly ascending order of the derived `Ord`, which
+/// compares discriminants. Inserting, reordering or renumbering a variant changes that order,
+/// and committed receipts written under the old order then fail to decode.
 #[repr(u8)]
 #[derive(
     Debug,
@@ -460,8 +466,66 @@ impl FeeSource {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FeeBreakdown {
     #[n(0)]
-    #[cbor(with = "tari_bor::adapters::indexmap_codec")]
+    #[cbor(
+        encode_with = "tari_bor::adapters::indexmap_codec::encode",
+        decode_with = "decode_breakdown",
+        cbor_len = "tari_bor::adapters::indexmap_codec::cbor_len"
+    )]
+    #[serde(deserialize_with = "deserialize_breakdown")]
     breakdown: IndexMap<FeeSource, u64>,
+}
+
+/// Appends a decoded row, requiring its source to sort strictly after the previous row's.
+///
+/// `add` and `set` keep the breakdown sorted by `FeeSource`, and the receipt hash re-encodes the decoded map in its
+/// stored order, so decoding accepts that order alone. One comparison against the last row rejects both an
+/// out-of-order source and a repeated one. A zero-charge row is kept as stored: receipts written before
+/// `FeeBreakdown::add` began omitting zero charges carry them.
+fn push_ascending(
+    breakdown: &mut IndexMap<FeeSource, u64>,
+    source: FeeSource,
+    amount: u64,
+) -> Result<(), &'static str> {
+    if breakdown.last().is_some_and(|(last, _)| *last >= source) {
+        return Err("FeeBreakdown sources are repeated or out of ascending order");
+    }
+    breakdown.insert(source, amount);
+    Ok(())
+}
+
+fn decode_breakdown<'b, C>(
+    d: &mut minicbor::Decoder<'b>,
+    ctx: &mut C,
+) -> Result<IndexMap<FeeSource, u64>, minicbor::decode::Error> {
+    let mut breakdown = IndexMap::with_capacity(FeeSource::ALL.len());
+    for entry in d.map_iter_with::<C, FeeSource, u64>(ctx)? {
+        let (source, amount) = entry?;
+        push_ascending(&mut breakdown, source, amount).map_err(minicbor::decode::Error::message)?;
+    }
+    Ok(breakdown)
+}
+
+fn deserialize_breakdown<'de, D>(deserializer: D) -> Result<IndexMap<FeeSource, u64>, D::Error>
+where D: serde::Deserializer<'de> {
+    struct BreakdownVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for BreakdownVisitor {
+        type Value = IndexMap<FeeSource, u64>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "a map from FeeSource to u64")
+        }
+
+        fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut breakdown = IndexMap::with_capacity(map.size_hint().unwrap_or(0).min(FeeSource::ALL.len()));
+            while let Some((source, amount)) = map.next_entry()? {
+                push_ascending(&mut breakdown, source, amount).map_err(serde::de::Error::custom)?;
+            }
+            Ok(breakdown)
+        }
+    }
+
+    deserializer.deserialize_map(BreakdownVisitor)
 }
 
 impl FeeBreakdown {
@@ -589,6 +653,14 @@ mod tests {
     }
 
     #[test]
+    fn fee_source_order_follows_consecutive_discriminants() {
+        for (index, source) in FeeSource::ALL.into_iter().enumerate() {
+            assert_eq!(source as usize, index, "{source:?} is out of declaration order");
+        }
+        assert!(FeeSource::ALL.is_sorted_by(|a, b| a < b));
+    }
+
+    #[test]
     fn widest_bounds_every_other_receipt() {
         let widest = minicbor::len(FeeReceipt::widest());
 
@@ -617,5 +689,57 @@ mod tests {
         breakdown.add(FeeSource::Initial, 100);
         breakdown.add(FeeSource::Initial, 0);
         assert_eq!(breakdown.iter().collect::<Vec<_>>(), vec![(&FeeSource::Initial, &100)]);
+    }
+
+    const ORDER_ERROR: &str = "FeeBreakdown sources are repeated or out of ascending order";
+
+    fn encode_breakdown_rows(rows: &[(FeeSource, u64)]) -> Vec<u8> {
+        let mut e = minicbor::Encoder::new(Vec::new());
+        e.array(1).unwrap().map(rows.len() as u64).unwrap();
+        for (source, amount) in rows {
+            e.encode(source).unwrap().u64(*amount).unwrap();
+        }
+        e.into_writer()
+    }
+
+    fn rows_of(breakdown: &FeeBreakdown) -> Vec<(FeeSource, u64)> {
+        breakdown.iter().map(|(source, amount)| (*source, *amount)).collect()
+    }
+
+    #[test]
+    fn decode_keeps_ascending_rows_as_stored_including_zero_charges() {
+        let rows = vec![
+            (FeeSource::Initial, 10),
+            (FeeSource::Storage, 30),
+            (FeeSource::WasmExecution, 20),
+            (FeeSource::InputFanout, 0),
+        ];
+        let bytes = encode_breakdown_rows(&rows);
+        let decoded: FeeBreakdown = tari_bor::decode(&bytes).unwrap();
+        assert_eq!(rows_of(&decoded), rows);
+        assert_eq!(tari_bor::encode(&decoded).unwrap(), bytes);
+
+        let json = r#"{"breakdown":{"Initial":10,"Storage":30,"WasmExecution":20,"InputFanout":0}}"#;
+        let deserialized: FeeBreakdown = serde_json::from_str(json).unwrap();
+        assert_eq!(rows_of(&deserialized), rows);
+        assert_eq!(serde_json::to_string(&deserialized).unwrap(), json);
+    }
+
+    #[test]
+    fn decode_rejects_out_of_order_and_repeated_sources() {
+        let out_of_order = encode_breakdown_rows(&[(FeeSource::Storage, 30), (FeeSource::Initial, 10)]);
+        let repeated = encode_breakdown_rows(&[(FeeSource::Storage, 1), (FeeSource::Storage, 2)]);
+        for bytes in [out_of_order, repeated] {
+            let err = tari_bor::decode::<FeeBreakdown>(&bytes).unwrap_err();
+            assert!(err.to_string().contains(ORDER_ERROR), "{err}");
+        }
+
+        for json in [
+            r#"{"breakdown":{"Storage":30,"Initial":10}}"#,
+            r#"{"breakdown":{"Storage":1,"Storage":2}}"#,
+        ] {
+            let err = serde_json::from_str::<FeeBreakdown>(json).unwrap_err();
+            assert!(err.to_string().contains(ORDER_ERROR), "{err}");
+        }
     }
 }

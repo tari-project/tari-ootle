@@ -1,7 +1,10 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::DerefMut,
+};
 
 use log::*;
 use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
@@ -484,7 +487,12 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                     .collect::<Vec<_>>();
 
                 // Lock the selected outputs
-                tx.stealth_outputs_lock_many(resource_address, result.selected_keys(), locked_by_id)?;
+                tx.stealth_outputs_lock_many_for_account(
+                    account_address,
+                    resource_address,
+                    result.selected_keys(),
+                    locked_by_id,
+                )?;
 
                 Ok(Selection {
                     outputs,
@@ -694,34 +702,10 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(count)
     }
 
-    /// Inserts `utxo`, or updates the stored output's burnt and frozen flags and, while it is unspent, its status.
-    /// Returns whether the stored output was inserted or changed.
+    /// Inserts `utxo`, or updates the stored output as [`upsert_utxo_in`] does. Returns whether the stored output was
+    /// inserted or changed.
     pub fn upsert_utxo(&self, utxo: &StealthOutputModel) -> Result<bool, StealthOutputsApiError> {
-        let changed = self.store.with_write_tx(|tx| {
-            // TODO(perf): consider a dedicated exists query
-            let maybe_utxo = tx
-                .stealth_outputs_get_by_commitment(&utxo.resource_address, &utxo.commitment)
-                .optional()?;
-            if let Some(prev_utxo) = maybe_utxo {
-                let new_status = match prev_utxo.status {
-                    OutputStatus::Unspent => Some(utxo.status),
-                    // If not unspent, don't allow status to be changed.
-                    // EDGE-CASE: scanning picks up a local UTXO that we know was spent
-                    _ => None,
-                };
-                // A burn is final, so a burnt output stays burnt.
-                let is_burnt = prev_utxo.is_burnt || utxo.is_burnt;
-                let changed = new_status.is_some_and(|status| status != prev_utxo.status) ||
-                    prev_utxo.is_burnt != is_burnt ||
-                    prev_utxo.is_frozen != utxo.is_frozen;
-                let address = utxo.to_utxo_address();
-                tx.stealth_outputs_update(&address, Some(is_burnt), new_status, Some(utxo.is_frozen))?;
-                Ok::<_, WalletStorageError>(changed)
-            } else {
-                tx.stealth_outputs_insert(utxo)?;
-                Ok(true)
-            }
-        })?;
+        let changed = self.store.with_write_tx(|tx| upsert_utxo_in(tx, utxo))?;
         Ok(changed)
     }
 
@@ -1312,6 +1296,47 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
 
 /// Each lock's `LockedForSpend` outputs. A lock also holds the change its statement creates (`LockedUnconfirmed`),
 /// which its transaction does not spend.
+/// Inserts `utxo`, or updates the stored output's burnt and frozen flags and, while it is unspent, its status. An
+/// output stored as invalid is replaced when `utxo` is not invalid: `utxo` was validated with a key that owns it, where
+/// the stored one was validated with another account's key that only decrypts it. Returns whether the stored output was
+/// inserted or changed.
+pub fn upsert_utxo_in<TTx, TReader>(tx: &mut TTx, utxo: &StealthOutputModel) -> Result<bool, WalletStorageError>
+where
+    TTx: WalletStoreWriter + DerefMut<Target = TReader>,
+    TReader: WalletStoreReader,
+{
+    // TODO(perf): consider a dedicated exists query
+    let maybe_utxo = tx
+        .stealth_outputs_get_by_commitment(&utxo.resource_address, &utxo.commitment)
+        .optional()?;
+    let Some(prev_utxo) = maybe_utxo else {
+        tx.stealth_outputs_insert(utxo)?;
+        return Ok(true);
+    };
+    let address = utxo.to_utxo_address();
+    // A burn is final, so a burnt output stays burnt.
+    let is_burnt = prev_utxo.is_burnt || utxo.is_burnt;
+    if prev_utxo.status == OutputStatus::Invalid && utxo.status != OutputStatus::Invalid {
+        tx.stealth_outputs_delete_invalid(&address)?;
+        tx.stealth_outputs_insert(&StealthOutputModel {
+            is_burnt,
+            ..utxo.clone()
+        })?;
+        return Ok(true);
+    }
+    let new_status = match prev_utxo.status {
+        OutputStatus::Unspent => Some(utxo.status),
+        // If not unspent, don't allow status to be changed.
+        // EDGE-CASE: scanning picks up a local UTXO that we know was spent
+        _ => None,
+    };
+    let changed = new_status.is_some_and(|status| status != prev_utxo.status) ||
+        prev_utxo.is_burnt != is_burnt ||
+        prev_utxo.is_frozen != utxo.is_frozen;
+    tx.stealth_outputs_update(&address, Some(is_burnt), new_status, Some(utxo.is_frozen))?;
+    Ok(changed)
+}
+
 fn locked_for_spend<R: WalletStoreReader>(
     reader: &mut R,
     lock_ids: &[WalletLockId],

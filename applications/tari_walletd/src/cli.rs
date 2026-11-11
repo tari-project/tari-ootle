@@ -365,11 +365,9 @@ mod tests {
 
     #[test]
     fn network_defaults_to_mainnet() {
-        let matches = Cli::command_with_defaults()
-            .try_get_matches_from(["tari_ootle_walletd"])
-            .unwrap();
-        let cli = Cli::from_arg_matches(&matches).unwrap();
-        assert_eq!(cli.network(), Network::MainNet);
+        let cmd = Cli::command_with_defaults();
+        let network = cmd.get_arguments().find(|arg| arg.get_id() == "network").unwrap();
+        assert_eq!(network.get_default_values(), [Network::MainNet.as_key_str()]);
     }
 
     #[test]

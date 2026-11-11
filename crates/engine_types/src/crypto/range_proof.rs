@@ -5,7 +5,11 @@ use std::iter;
 
 use tari_crypto::{
     extended_range_proof::{ExtendedRangeProofService, Statement},
-    ristretto::{bulletproofs_plus::RistrettoAggregatedPublicStatement, pedersen::PedersenCommitment},
+    ristretto::{
+        RistrettoPublicKey,
+        bulletproofs_plus::RistrettoAggregatedPublicStatement,
+        pedersen::PedersenCommitment,
+    },
     tari_utilities::ByteArray,
 };
 use tari_template_lib::types::{crypto::RangeProofBytes, stealth::UnspentOutput};
@@ -19,7 +23,7 @@ pub fn validate_bullet_proof<'a, I: IntoIterator<Item = &'a UnspentOutput>>(
     range_proof: &RangeProofBytes,
     outputs: I,
 ) -> Result<(), ResourceError> {
-    let mut statements = outputs
+    let statements = outputs
         .into_iter()
         .map(|stmt| {
             let commitment = PedersenCommitment::from_canonical_bytes(&*stmt.commitment).map_err(|_| {
@@ -34,6 +38,13 @@ pub fn validate_bullet_proof<'a, I: IntoIterator<Item = &'a UnspentOutput>>(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    validate_bullet_proof_statements(range_proof, statements)
+}
+
+pub(crate) fn validate_bullet_proof_statements(
+    range_proof: &RangeProofBytes,
+    mut statements: Vec<Statement<RistrettoPublicKey>>,
+) -> Result<(), ResourceError> {
     let agg_factor = statements.len();
     if agg_factor == 0 {
         // No outputs, so no rangeproof needed (revealed mint)

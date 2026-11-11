@@ -144,7 +144,7 @@ pub async fn run_tari_ootle_walletd(
 
     info!(
         target: LOG_TARGET,
-        "🔐 Authentication method set to {:?}",
+        "🔐 Authentication method set to {}",
         config.ootle_wallet_daemon.authentication
     );
     if config.ootle_wallet_daemon.authentication.is_none() {
@@ -235,20 +235,13 @@ pub async fn run_tari_ootle_walletd(
                 setup_token_path.display()
             );
             // The tokenised link goes to stdout only: log appenders persist it in files that outlive the token.
-            let heading = if cfg!(not(windows)) &&
-                std::io::stdout().is_terminal() &&
-                std::env::var_os("NO_COLOR").is_none() &&
-                std::env::var("TERM").as_deref() != Ok("dumb")
-            {
-                "\x1b[1;33mACTION REQUIRED — Set up your wallet passkey\x1b[0m"
-            } else {
-                "ACTION REQUIRED — Set up your wallet passkey"
-            };
-            let separator = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
-            println!(
-                "\n{separator}\n{heading}\n{separator}\n\nOpen this link in your \
-                 browser:\n\n{register_url}?token={}\n\n{separator}\n",
-                setup_token.as_str()
+            print_banner(
+                BANNER_YELLOW,
+                "ACTION REQUIRED — Set up your wallet passkey",
+                &format!(
+                    "Open this link in your browser:\n\n{register_url}?token={}",
+                    setup_token.as_str()
+                ),
             );
         } else if let Err(err) = services::remove_setup_token_file(config.common.base_path()) {
             warn!(
@@ -260,6 +253,16 @@ pub async fn run_tari_ootle_walletd(
         } else {
             // Already enrolled and no stale setup token removal error
         }
+    }
+
+    if config.ootle_wallet_daemon.authentication.is_none() {
+        print_banner(
+            BANNER_RED,
+            "WARNING — Authentication is disabled (authentication=none)",
+            "Any program on this computer, or anyone who can reach this port, can spend\nthis wallet's funds without \
+             asking. Use this only for a local test wallet.\nSet ootle_wallet_daemon.authentication=webauthn before \
+             holding real value.",
+        );
     }
 
     // Wait for shutdown, or for any service to error
@@ -405,6 +408,24 @@ fn create_secret_password() -> SafePassword {
     let secret = RistrettoSecretKey::random(&mut rand::rng());
     // It is safe to use to_hex() since the String's underlying Vec is moved directly into SafePassword
     SafePassword::from(secret.to_hex())
+}
+
+const BANNER_YELLOW: &str = "1;33";
+const BANNER_RED: &str = "1;31";
+
+/// Prints a boxed notice to stdout, colouring the heading with the given SGR code when stdout is a colour terminal.
+fn print_banner(sgr: &str, heading: &str, body: &str) {
+    let use_colour = cfg!(not(windows)) &&
+        std::io::stdout().is_terminal() &&
+        std::env::var_os("NO_COLOR").is_none() &&
+        std::env::var("TERM").as_deref() != Ok("dumb");
+    let heading = if use_colour {
+        format!("\x1b[{sgr}m{heading}\x1b[0m")
+    } else {
+        heading.to_string()
+    };
+    let separator = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+    println!("\n{separator}\n{heading}\n{separator}\n\n{body}\n\n{separator}\n");
 }
 
 #[cfg(test)]

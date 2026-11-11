@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::anyhow;
-use log::{error, info};
+use log::{debug, error, info};
 use minotari_node_grpc_client::grpc::{self, RevalidateRequest};
 use minotari_wallet_grpc_client::WalletGrpcClient;
 use serde::Serialize;
@@ -198,7 +198,13 @@ async fn write_claim_burn_proof_file(path: &Path, proof: &CompleteClaimBurnProof
     let tmp_path = path.with_extension("json.tmp");
     tokio::fs::write(&tmp_path, &bytes).await?;
     if let Err(err) = tokio::fs::rename(&tmp_path, path).await {
-        let _ = tokio::fs::remove_file(&tmp_path).await;
+        if let Err(remove_err) = tokio::fs::remove_file(&tmp_path).await {
+            debug!(
+                "Failed to remove temporary burn claim proof file {}: {}",
+                tmp_path.display(),
+                remove_err
+            );
+        }
         return Err(err.into());
     }
     Ok(())

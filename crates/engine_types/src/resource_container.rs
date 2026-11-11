@@ -1400,8 +1400,11 @@ mod tests {
             if !agg_factor.is_power_of_two() {
                 let pad = agg_factor.next_power_of_two() - agg_factor;
                 let default_mask =
-                    RistrettoExtendedMask::assign(ExtensionDegree::DefaultPedersen, vec![RistrettoSecretKey::default()])
-                        .unwrap();
+                    RistrettoExtendedMask::assign(
+                        ExtensionDegree::DefaultPedersen,
+                        vec![RistrettoSecretKey::default()],
+                    )
+                    .unwrap();
                 extended.extend(iter::repeat_n(
                     RistrettoExtendedWitness {
                         mask: default_mask,

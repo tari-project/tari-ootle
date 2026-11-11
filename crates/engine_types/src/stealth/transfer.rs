@@ -212,9 +212,7 @@ fn basic_validations(transfer: &StealthTransferStatement) -> Result<(), Resource
         let commitment = output.output.commitment;
         if seen.contains(&commitment) {
             return Err(ResourceError::InvalidSpend {
-                details: format!(
-                    "Output commitment {commitment} duplicates an input commitment in transfer statement"
-                ),
+                details: format!("Output commitment {commitment} duplicates an input commitment in transfer statement"),
             });
         }
     }
@@ -341,14 +339,15 @@ mod tests {
 
         let out1 = make_output(1, 100);
         let out2 = make_output(2, 100);
-        let dummy_sig = BalanceProofSignature::new(
-            RistrettoPublicKeyBytes::from([1u8; 32]),
-            Scalar32Bytes::from([1u8; 32]),
-        );
+        let dummy_sig =
+            BalanceProofSignature::new(RistrettoPublicKeyBytes::from([1u8; 32]), Scalar32Bytes::from([1u8; 32]));
 
         // 1. Output commitment duplicating an input commitment is rejected with InvalidSpend.
         let input_output_collision = StealthTransferStatement {
-            inputs_statement: StealthInputsStatement::new(vec![StealthInput::new(out1.output.commitment)], Amount::ZERO),
+            inputs_statement: StealthInputsStatement::new(
+                vec![StealthInput::new(out1.output.commitment)],
+                Amount::ZERO,
+            ),
             outputs_statement: StealthOutputsStatement {
                 outputs: vec![out1.clone()],
                 revealed_output: None,
@@ -369,7 +368,10 @@ mod tests {
 
         // 2. Duplicate output commitments in the same transfer statement are rejected.
         let dup_outputs = StealthTransferStatement {
-            inputs_statement: StealthInputsStatement::new(vec![StealthInput::new(out1.output.commitment)], Amount::ZERO),
+            inputs_statement: StealthInputsStatement::new(
+                vec![StealthInput::new(out1.output.commitment)],
+                Amount::ZERO,
+            ),
             outputs_statement: StealthOutputsStatement {
                 outputs: vec![out2.clone(), out2],
                 revealed_output: None,

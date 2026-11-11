@@ -36,7 +36,12 @@ pub struct CallInfo;
 impl CallInfo {
     #[cfg(feature = "std")]
     pub fn encode_v1_packed_size(args: &[tari_bor::Value]) -> Result<usize, tari_bor::BorError> {
-        let total_args_len = args.iter().map(|a| tari_bor::encoded_len(&a)).sum::<usize>();
+        let mut total_args_len = 0usize;
+        for arg in args {
+            let len = tari_bor::encoded_len(&arg);
+            u32::try_from(len).map_err(|_| tari_bor::BorError::new("Argument length exceeds u32".to_string()))?;
+            total_args_len += len;
+        }
         let total_len = CallHeader::SIZE + total_args_len + args.len() * size_of::<u32>();
         Ok(total_len)
     }
@@ -177,13 +182,16 @@ impl<'a> PackedCallInfoReader<'a> {
     /// Returns None if there are no more arguments to read
     ///
     /// # Panics
-    /// Panics if the argument length exceeds the data bounds (malformed data).
+    /// Panics if the argument length prefix is truncated or if the argument length exceeds the data bounds (malformed data).
     pub fn next_arg(&mut self) -> Option<&'a [u8]> {
+        if self.payload_offset == self.data.len() {
+            return None;
+        }
         // Read the length of the next argument
-        let start = self.payload_offset.checked_add(4)?;
-        let len_slice = self.data.get(self.payload_offset..start)?;
+        let start = self.payload_offset.checked_add(4).expect("ARGOVR");
+        let len_slice = self.data.get(self.payload_offset..start).expect("ARGOVR");
         let arg_len = decode_u32_le(len_slice) as usize;
-        let end = start.checked_add(arg_len)?;
+        let end = start.checked_add(arg_len).expect("ARGOVR");
         self.payload_offset = end;
         Some(self.data.get(start..end).expect("ARGOVR"))
     }
@@ -346,5 +354,21 @@ mod tests {
                 .is_none(),
             "must reject when max_size cannot hold header plus argument length prefixes"
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "ARGOVR")]
+    fn it_panics_if_arg_length_prefix_is_truncated() {
+        let func_id: FunctionIdent = 1;
+        let args = vec![tari_bor::Value::Integer(7.into())];
+        let mut encoded_data = Vec::new();
+        CallInfo::encode_v1_packed(&mut encoded_data, func_id, &args).unwrap();
+        // Append 2 trailing bytes after the valid argument to form a truncated length prefix.
+        encoded_data.extend_from_slice(&[0x01, 0x00]);
+
+        let mut reader = CallInfo::v1_packed_reader(&encoded_data);
+        reader.decode_header();
+        assert!(reader.next_arg().is_some());
+        reader.next_arg();
     }
 }

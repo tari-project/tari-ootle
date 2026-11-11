@@ -60,7 +60,8 @@ impl ValueRangeRequest {
     /// 0 when it named none.
     fn coverage(&self, searched: &RangeInclusive<u64>) -> ValueScanCoverage {
         let below = *searched.start() > *self.scan_range.start();
-        let above = self.requested_max.is_some_and(|max| max > *searched.end());
+        let above = *self.scan_range.start() > *searched.end() ||
+            self.requested_max.is_some_and(|max| max > *searched.end());
         ValueScanCoverage {
             min: *searched.start(),
             max: *searched.end(),
@@ -310,5 +311,14 @@ mod tests {
     fn a_minimum_above_the_maximum_scans_one_candidate() {
         let resolved = ValueRangeRequest::resolve(Some(500), Some(100));
         assert_eq!(resolved.scan_range, 500..=500);
+    }
+
+    #[test]
+    fn coverage_ending_below_the_requested_minimum_is_reported_as_clamped() {
+        let request = ValueRangeRequest::resolve(Some(2_000), None);
+        let searched = request.coverage(&(0..=1_000));
+
+        assert!(searched.clamped);
+        assert_eq!((searched.min, searched.max), (0, 1_000));
     }
 }

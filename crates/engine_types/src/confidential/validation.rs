@@ -29,7 +29,7 @@ pub struct ValidatedConfidentialProof {
 /// outputs (revealed-only) verifies no range proof, so it prices at zero.
 pub fn statement_native_points(proof: &ConfidentialOutputStatement, has_view_key: bool) -> u64 {
     use crate::limits::NativeExecutionPoints as P;
-    let num_outputs = u64::from(proof.output.is_some()) + u64::from(proof.change_statement.is_some());
+    let num_outputs = proof.num_confidential_outputs() as u64;
     if num_outputs == 0 {
         return 0;
     }

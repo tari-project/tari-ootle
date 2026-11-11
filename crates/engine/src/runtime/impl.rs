@@ -2812,9 +2812,7 @@ where
                     self.authorize_vault_action(vault_id, ResourceAuthAction::Withdraw, VaultFreezeFlag::Withdrawals)?;
 
                 // Charge the withdraw's native verification cost against the payment-funded
-                // allowance before any of its proof crypto (including view-key decompression) runs. The
-                // key is decompressed only for a proof whose outputs are checked against it, which is
-                // when the viewable surcharge pays for it.
+                // allowance before any of its proof crypto (including view-key decompression) runs.
                 let maybe_view_key =
                     if let VaultWithdrawArg::Confidential { proof } = &arg {
                         let view_key_bytes = self.tracker.write_with(|state_mut| {
@@ -2826,8 +2824,10 @@ where
                         self.tracker.charge_native_execution(
                             tari_engine_types::confidential::withdraw_native_points(proof, view_key_bytes.is_some()),
                         )?;
+                        // The key is read only to verify the confidential outputs' viewable-balance proofs, which
+                        // `PER_OUTPUT_VIEWABLE_SURCHARGE` in the charge above pays for.
                         view_key_bytes
-                            .filter(|_| tari_engine_types::confidential::withdraw_uses_view_key(proof))
+                            .filter(|_| proof.output_proof.num_confidential_outputs() > 0)
                             .map(|bytes| {
                                 RistrettoPublicKey::from_canonical_bytes(bytes.as_bytes()).map_err(|e| {
                                     RuntimeError::InvariantError {
@@ -3284,9 +3284,9 @@ where
                 self.tracker.write_with(|state| {
                     let bucket = state.get_bucket(bucket_id)?;
                     let resource_lock = state.read_lock_substate((*bucket.resource_address()).into())?;
-                    // Decompress the view key only for a proof whose outputs are checked against it,
-                    // which is when the viewable surcharge charged above pays for it.
-                    let view_key = if tari_engine_types::confidential::withdraw_uses_view_key(&proof) {
+                    // The key is read only to verify the confidential outputs' viewable-balance proofs,
+                    // which `PER_OUTPUT_VIEWABLE_SURCHARGE` in the charge above pays for.
+                    let view_key = if proof.output_proof.num_confidential_outputs() > 0 {
                         state
                             .get_resource(&resource_lock)?
                             .to_view_key_public_key()
@@ -5149,10 +5149,7 @@ mod tests {
 
     #[test]
     fn confidential_vault_withdraw_charges_native_points_before_view_key_decompression() {
-        use tari_engine_types::{
-            confidential::{withdraw_native_points, withdraw_uses_view_key},
-            limits::FREE_COMPUTE_GRACE_POINTS,
-        };
+        use tari_engine_types::{confidential::withdraw_native_points, limits::FREE_COMPUTE_GRACE_POINTS};
         use tari_template_lib::types::{EncryptedData, stealth::UnspentOutput};
 
         let (runtime, vault_id, _) = runtime_with_malformed_view_key_resource();
@@ -5166,7 +5163,7 @@ mod tests {
             minimum_value_promise: 0,
             viewable_balance_proof: None,
         });
-        assert!(withdraw_uses_view_key(&proof));
+        assert_eq!(proof.output_proof.num_confidential_outputs(), 1);
         let withdraw_cost = withdraw_native_points(&proof, true);
         assert!(withdraw_cost > 0);
 
@@ -5190,7 +5187,7 @@ mod tests {
 
     #[test]
     fn revealed_only_confidential_withdraw_and_take_skip_view_key_decompression() {
-        use tari_engine_types::confidential::{withdraw_native_points, withdraw_uses_view_key};
+        use tari_engine_types::confidential::withdraw_native_points;
 
         let (runtime, vault_id, bucket_id) = runtime_with_malformed_view_key_resource();
 
@@ -5198,7 +5195,7 @@ mod tests {
         // both paths complete without decompressing the malformed key.
         let proof = ConfidentialWithdrawProof::revealed_withdraw(Amount::new(1));
         assert_eq!(withdraw_native_points(&proof, true), 0);
-        assert!(!withdraw_uses_view_key(&proof));
+        assert_eq!(proof.output_proof.num_confidential_outputs(), 0);
 
         let withdraw_args = EngineArgs::from(vec![
             tari_bor::encode(&VaultWithdrawArg::Confidential {

@@ -53,6 +53,11 @@ impl ConfidentialOutputStatement {
             change_revealed_amount: Amount::zero(),
         }
     }
+
+    /// The number of confidential outputs (the output and the change output) this statement creates.
+    pub fn num_confidential_outputs(&self) -> usize {
+        usize::from(self.output.is_some()) + usize::from(self.change_statement.is_some())
+    }
 }
 
 /// A confidential proof that defines a confidential and/or revealed withdrawal, e.g. from a vault containing
@@ -157,6 +162,23 @@ mod tests {
         let mut proof = ConfidentialWithdrawProof::revealed_withdraw(Amount::new(1));
         proof.inputs = (0..n).map(|_| PedersenCommitmentBytes::zero()).collect();
         proof
+    }
+
+    #[test]
+    fn num_confidential_outputs_counts_output_and_change() {
+        let output = || UnspentOutput {
+            commitment: PedersenCommitmentBytes::zero(),
+            sender_public_nonce: crate::crypto::RistrettoPublicKeyBytes::zero(),
+            encrypted_data: crate::EncryptedData::empty(),
+            minimum_value_promise: 0,
+            viewable_balance_proof: None,
+        };
+        let mut statement = ConfidentialOutputStatement::mint_revealed(Amount::new(1));
+        assert_eq!(statement.num_confidential_outputs(), 0);
+        statement.change_statement = Some(output());
+        assert_eq!(statement.num_confidential_outputs(), 1);
+        statement.output = Some(output());
+        assert_eq!(statement.num_confidential_outputs(), 2);
     }
 
     #[test]

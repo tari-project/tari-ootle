@@ -33,7 +33,7 @@ impl OnForceBeat {
 
     pub fn beat(&self, new_height: Option<NodeHeight>) {
         self.sender.send_modify(|current| {
-            *current = (*current).max(new_height);
+            *current = new_height.or(*current);
         });
     }
 }
@@ -60,9 +60,9 @@ mod tests {
     #[tokio::test]
     async fn a_consumed_forced_height_is_cleared_for_the_next_timer_beat() {
         let mut force_beat = OnForceBeat::new();
-        force_beat.beat(Some(NodeHeight(4)));
         force_beat.beat(Some(NodeHeight(9)));
-        assert_eq!(force_beat.wait().await, Some(NodeHeight(9)));
+        force_beat.beat(Some(NodeHeight(4)));
+        assert_eq!(force_beat.wait().await, Some(NodeHeight(4)));
 
         force_beat.beat(None);
         assert_eq!(force_beat.wait().await, None);

@@ -211,7 +211,7 @@ impl PaceMaker {
         let delta = self.delta_time();
         // TODO: get real avg latency
         let avg_latency = Duration::from_secs(2);
-        let offset = self.block_time.saturating_add(delta).saturating_add(avg_latency);
+        let offset = self.block_time + delta + avg_latency;
         tokio::time::Instant::now() + offset
     }
 
@@ -221,7 +221,7 @@ impl PaceMaker {
         let current_height = self.current_view.get_height();
         if current_height.is_zero() || self.current_high_pc_height.is_zero() {
             // Allow extra time for the first block
-            return self.block_time.saturating_mul(2);
+            return self.block_time * 2;
         }
         let exp = u32::try_from(cmp::min(
             u64::from(u32::MAX),

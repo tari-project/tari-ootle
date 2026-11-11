@@ -333,6 +333,15 @@ pub trait WalletStoreReader {
     ) -> Result<UtxoProcessQueueBatch, WalletStorageError>;
     /// Whether every one of `entries` is still queued at its generation.
     fn utxo_process_queue_is_current(&mut self, entries: &[QueuedEntry]) -> Result<bool, WalletStorageError>;
+    /// The position of the last recorded unheld spend, or 0 when none is recorded.
+    fn utxo_unheld_spends_watermark(&mut self) -> Result<u64, WalletStorageError>;
+    /// Whether a spend of any of `commitments` of the resource was recorded after `watermark`.
+    fn utxo_unheld_spends_any_after(
+        &mut self,
+        resource_address: &ResourceAddress,
+        watermark: u64,
+        commitments: &[PedersenCommitmentBytes],
+    ) -> Result<bool, WalletStorageError>;
     /// Whether the account has any UTXO of the resource queued for recovery.
     fn utxo_process_queue_has_entries(
         &mut self,

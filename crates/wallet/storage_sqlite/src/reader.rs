@@ -2074,6 +2074,40 @@ impl WalletStoreReader for ReadTransaction<'_> {
         Ok(true)
     }
 
+    fn utxo_unheld_spends_watermark(&mut self) -> Result<u64, WalletStorageError> {
+        const OPERATION: &str = "utxo_unheld_spends_watermark";
+        use crate::schema::utxo_unheld_spends;
+
+        let max = utxo_unheld_spends::table
+            .select(diesel::dsl::max(utxo_unheld_spends::id))
+            .get_result::<Option<i32>>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        Ok(max.map_or(0, |id| u64::try_from(id).unwrap_or(0)))
+    }
+
+    fn utxo_unheld_spends_any_after(
+        &mut self,
+        resource_address: &ResourceAddress,
+        watermark: u64,
+        commitments: &[PedersenCommitmentBytes],
+    ) -> Result<bool, WalletStorageError> {
+        const OPERATION: &str = "utxo_unheld_spends_any_after";
+        use crate::schema::utxo_unheld_spends;
+
+        if commitments.is_empty() {
+            return Ok(false);
+        }
+        let watermark = i32::try_from(watermark).unwrap_or(i32::MAX);
+        diesel::select(diesel::dsl::exists(
+            utxo_unheld_spends::table
+                .filter(utxo_unheld_spends::resource_address.eq(resource_address.to_string()))
+                .filter(utxo_unheld_spends::id.gt(watermark))
+                .filter(utxo_unheld_spends::commitment.eq_any(commitments.iter().map(serialize_hex))),
+        ))
+        .get_result(self.connection())
+        .map_err(|e| WalletStorageError::general(OPERATION, e))
+    }
+
     fn utxo_process_queue_has_entries(
         &mut self,
         account: &ComponentAddress,

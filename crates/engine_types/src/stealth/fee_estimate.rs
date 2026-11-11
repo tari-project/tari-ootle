@@ -39,7 +39,7 @@ use crate::{
     confidential::ClaimedOutputTombstone,
     crypto::{ElgamalVerifiableBalanceBytes, OutputBody},
     fees::FeeRates,
-    limits::NativeExecutionPoints,
+    limits::{NativeExecutionPoints, engine_arg_points},
     stealth::transfer_native_points_for_shape,
     substate::{SubstateId, SubstateValue},
     transaction_receipt::TransactionReceipt,
@@ -188,6 +188,10 @@ pub struct ClaimBurnShape {
 }
 
 impl ClaimBurnShape {
+    /// Native points the transfer spends resolving the claimed bucket from the workspace, priced as an engine
+    /// argument. The claim's bucket is the first the transaction creates, so its id is a tag around a one-byte
+    /// integer: two CBOR items in three bytes.
+    pub const CLAIMED_BUCKET_ARG_POINTS: u64 = engine_arg_points(3, 2);
     /// Engine host calls this shape's instruction sequence makes: the claim's bucket output and the
     /// workspace put that names it, then the merged transfer's three.
     /// `the_runtime_call_count_matches_the_claim_sequence` in `tari_engine`'s claim-burn tests holds it
@@ -195,12 +199,13 @@ impl ClaimBurnShape {
     pub const RUNTIME_CALLS: u64 = 2 + MergedStealthTransferShape::RUNTIME_CALLS;
 
     /// The native execution points the engine charges a transaction of this shape: the claim's proof verification,
-    /// then a transfer paying the claimed bucket into one output, with its withdraw authorization. TARI carries no
-    /// view key.
+    /// then a transfer paying the claimed bucket into one output, with its withdraw authorization and the
+    /// resolution of the bucket it takes. TARI carries no view key.
     pub fn native_points() -> u64 {
         NativeExecutionPoints::PER_CLAIM_BURN
             .saturating_add(transfer_native_points_for_shape(0, 1, false))
             .saturating_add(MergedStealthTransferShape::AUTHORIZATION_POINTS)
+            .saturating_add(Self::CLAIMED_BUCKET_ARG_POINTS)
     }
 
     /// An upper bound, in microtari, on what the engine charges a transaction of this shape.

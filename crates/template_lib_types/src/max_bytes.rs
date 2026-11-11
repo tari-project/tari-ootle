@@ -2,20 +2,50 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_template_abi::rust::{
+    fmt,
     format,
     ops::{Deref, DerefMut},
     prelude::*,
 };
 
 #[cfg(feature = "serde")]
-use crate::{
-    hex::{bytes_from_hex, bytes_to_hex},
-    serde_helpers::BytesVisitor,
-};
+use crate::hex::{bytes_from_hex, bytes_to_hex};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct MaxBytes<const N: usize>(Box<[u8]>);
+
+#[cfg(feature = "borsh")]
+pub(crate) fn read_bounded_bytes<const N: usize, R: borsh::io::Read>(
+    reader: &mut R,
+    label: &str,
+) -> Result<Vec<u8>, borsh::io::Error> {
+    let len = u32::deserialize_reader(reader)? as usize;
+    if len > N {
+        return Err(borsh::io::Error::new(
+            borsh::io::ErrorKind::InvalidData,
+            format!("{} length exceeds maximum of {}: got {}", label, N, len),
+        ));
+    }
+    let mut buf = Vec::with_capacity(len.min(1024));
+    let mut remaining = len;
+    let mut chunk = [0u8; 1024];
+    while remaining > 0 {
+        let to_read = remaining.min(chunk.len());
+        reader.read_exact(&mut chunk[..to_read])?;
+        buf.extend_from_slice(&chunk[..to_read]);
+        remaining -= to_read;
+    }
+    Ok(buf)
+}
+
+#[cfg(feature = "borsh")]
+impl<const N: usize> borsh::BorshDeserialize for MaxBytes<N> {
+    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
+        let buf = read_bounded_bytes::<N, _>(reader, "byte array")?;
+        Ok(Self(buf.into_boxed_slice()))
+    }
+}
 
 impl<const N: usize> Deref for MaxBytes<N> {
     type Target = [u8];
@@ -48,7 +78,14 @@ impl<const N: usize> MaxBytes<N> {
     /// # Safety
     /// The caller must ensure that the length of `bytes` is less than or equal to `N`.
     pub unsafe fn new_unchecked(bytes: impl Into<Box<[u8]>>) -> Self {
-        Self(bytes.into())
+        let bytes = bytes.into();
+        debug_assert!(
+            bytes.len() <= N,
+            "byte array length exceeds maximum of {}: got {}",
+            N,
+            bytes.len()
+        );
+        Self(bytes)
     }
 
     pub fn into_bytes(self) -> Box<[u8]> {
@@ -119,29 +156,84 @@ impl<const N: usize> serde::Serialize for MaxBytes<N> {
 }
 
 #[cfg(feature = "serde")]
+struct MaxBytesHexVisitor<const N: usize>;
+
+#[cfg(feature = "serde")]
+impl<const N: usize> serde::de::Visitor<'_> for MaxBytesHexVisitor<N> {
+    type Value = MaxBytes<N>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "a hex string representing at most {} bytes", N)
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where E: serde::de::Error {
+        if v.len() > N.saturating_mul(2) {
+            return Err(E::custom(format!("byte array length exceeds maximum of {}", N)));
+        }
+        let bytes = bytes_from_hex(v).map_err(E::custom)?;
+        MaxBytes::new_checked(bytes.into_boxed_slice())
+            .ok_or_else(|| E::custom(format!("byte array length exceeds maximum of {}", N)))
+    }
+}
+
+#[cfg(feature = "serde")]
+struct MaxBytesBinaryVisitor<const N: usize>;
+
+#[cfg(feature = "serde")]
+impl<'de, const N: usize> serde::de::Visitor<'de> for MaxBytesBinaryVisitor<N> {
+    type Value = MaxBytes<N>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "at most {} bytes", N)
+    }
+
+    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+    where E: serde::de::Error {
+        if v.len() > N {
+            return Err(E::custom(format!("byte array length exceeds maximum of {}", N)));
+        }
+        Ok(MaxBytes(v.to_vec().into_boxed_slice()))
+    }
+
+    fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+    where E: serde::de::Error {
+        MaxBytes::new_checked(v.into_boxed_slice())
+            .ok_or_else(|| E::custom(format!("byte array length exceeds maximum of {}", N)))
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where A: serde::de::SeqAccess<'de> {
+        if let Some(hint) = seq.size_hint() &&
+            hint > N
+        {
+            return Err(serde::de::Error::custom(format!(
+                "byte array length exceeds maximum of {}",
+                N
+            )));
+        }
+        let mut bytes = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(N).min(64));
+        while let Some(byte) = seq.next_element::<u8>()? {
+            if bytes.len() == N {
+                return Err(serde::de::Error::custom(format!(
+                    "byte array length exceeds maximum of {}",
+                    N
+                )));
+            }
+            bytes.push(byte);
+        }
+        Ok(MaxBytes(bytes.into_boxed_slice()))
+    }
+}
+
+#[cfg(feature = "serde")]
 impl<'de, const N: usize> serde::Deserialize<'de> for MaxBytes<N> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where D: serde::Deserializer<'de> {
         if deserializer.is_human_readable() {
-            let s = String::deserialize(deserializer)?;
-            if s.len() > N * 2 {
-                return Err(serde::de::Error::custom(format!(
-                    "byte array length exceeds maximum of {}",
-                    N
-                )));
-            }
-            let bytes = bytes_from_hex(&s).map_err(serde::de::Error::custom)?;
-            MaxBytes::new_checked(bytes.into_boxed_slice())
-                .ok_or_else(|| serde::de::Error::custom(format!("byte array length exceeds maximum of {}", N)))
+            deserializer.deserialize_str(MaxBytesHexVisitor::<N>)
         } else {
-            let bytes = deserializer.deserialize_byte_buf(BytesVisitor::new())?;
-            if bytes.len() > N {
-                return Err(serde::de::Error::custom(format!(
-                    "byte array length exceeds maximum of {}",
-                    N
-                )));
-            }
-            Ok(MaxBytes::new_checked(bytes.into_owned()).expect("length checked above"))
+            deserializer.deserialize_byte_buf(MaxBytesBinaryVisitor::<N>)
         }
     }
 }
@@ -235,6 +327,33 @@ mod tests {
             let bytes = MaxBytes::<5>(vec![1; 6].into_boxed_slice());
             let serialized = tari_bor::encode(&bytes).unwrap();
             let err = tari_bor::decode::<MaxBytes<5>>(&serialized).unwrap_err();
+            assert!(err.to_string().contains("byte array length exceeds maximum"));
+        }
+    }
+
+    #[cfg(feature = "borsh")]
+    mod borsh_impl {
+        use borsh::{BorshDeserialize, BorshSerialize};
+
+        use super::*;
+
+        #[test]
+        fn it_enforces_max_length_on_borsh_deserialize() {
+            let valid = MaxBytes::<5>::new_checked(vec![1, 2, 3, 4, 5]).unwrap();
+            let mut encoded = Vec::new();
+            valid.serialize(&mut encoded).unwrap();
+            let decoded = MaxBytes::<5>::try_from_slice(&encoded).unwrap();
+            assert_eq!(decoded, valid);
+
+            let mut oversized = Vec::new();
+            vec![1u8; 6].serialize(&mut oversized).unwrap();
+            let err = MaxBytes::<5>::try_from_slice(&oversized).unwrap_err();
+            assert!(err.to_string().contains("byte array length exceeds maximum"));
+
+            // Header claiming u32::MAX bytes on a 4-byte buffer fails on the bound check before reading payload bytes.
+            let oversized_header = u32::MAX.to_le_bytes();
+            let err = MaxBytes::<5>::try_from_slice(&oversized_header).unwrap_err();
+            assert_eq!(err.kind(), borsh::io::ErrorKind::InvalidData);
             assert!(err.to_string().contains("byte array length exceeds maximum"));
         }
     }

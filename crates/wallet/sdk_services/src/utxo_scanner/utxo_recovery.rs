@@ -2,7 +2,6 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    array,
     collections::{HashMap, HashSet, hash_map::Entry},
     time::Duration,
 };
@@ -13,15 +12,18 @@ use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     response_status::TransactionStatusResponseError,
 };
-use tari_ootle_transaction::Network;
 use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkSpec,
-    apis::substate::{ReadSubstate, SubstateApiError},
+    apis::{
+        stealth_outputs::upsert_utxo_in,
+        substate::{ReadSubstate, SubstateApiError},
+    },
     models::{
         AccountAndViewKeys,
         OutputStatus,
         ProvenUp,
+        StealthOutputModel,
         UtxoBurntEvent,
         UtxoRecoveredEvent,
         UtxoRecoveryCompletedEvent,
@@ -30,6 +32,7 @@ use tari_ootle_wallet_sdk::{
     },
     network::{FetchedUtxos, WalletNetworkInterface},
     storage::{
+        QueuedPair,
         ReadableWalletStore,
         TagAndPublicNoncePair,
         WalletStorageError,
@@ -137,6 +140,8 @@ where
         let mut num_recovered = 0;
         let mut num_unresolved = 0;
         let mut cursor = None;
+        // A pair queued for several accounts has entries in several batches, and is looked up once a round
+        let mut looked_up = HashSet::new();
         loop {
             let batch = self
                 .sdk
@@ -161,22 +166,27 @@ where
                     error!(target: LOG_TARGET, "❓️ NEVER HAPPEN: Asked indexer for zero UTXOs for resource {}.", resource_addr);
                 }
                 let now = Instant::now();
-                let tag_and_nonce_to_view_key_map = queued
-                    .iter()
-                    .filter(|(pair, _)| {
-                        self.unsettled
-                            .get(&(*resource_addr, **pair))
-                            .is_none_or(|backoff| backoff.retry_at <= now)
-                    })
-                    .map(|(pair, queued)| (*pair, queued.account))
-                    .collect::<HashMap<_, _>>();
-                num_unresolved += queued.len() - tag_and_nonce_to_view_key_map.len();
-                if tag_and_nonce_to_view_key_map.is_empty() {
+                let mut to_look_up = HashMap::with_capacity(queued.len());
+                for (pair, queued_pair) in queued {
+                    if !looked_up.insert((*resource_addr, *pair)) {
+                        continue;
+                    }
+                    if self
+                        .unsettled
+                        .get(&(*resource_addr, *pair))
+                        .is_some_and(|backoff| backoff.retry_at > now)
+                    {
+                        num_unresolved += 1;
+                        continue;
+                    }
+                    to_look_up.insert(*pair, queued_pair);
+                }
+                if to_look_up.is_empty() {
                     continue;
                 }
-                let tag_and_nonce_pairs = tag_and_nonce_to_view_key_map
-                    .keys()
-                    .map(|pair| (*pair, queued.get(pair).and_then(|queued| queued.unspent_at)))
+                let tag_and_nonce_pairs = to_look_up
+                    .iter()
+                    .map(|(pair, queued_pair)| (*pair, queued_pair.unspent_at))
                     .collect();
 
                 // TODO(perf): we should check if any UTXOs are already known (by tag and nonce?) because we
@@ -201,7 +211,7 @@ where
                 // resolves it first.
                 let spent = spent
                     .into_iter()
-                    .filter(|pair| tag_and_nonce_to_view_key_map.contains_key(pair) && !returned.contains(pair))
+                    .filter(|pair| to_look_up.contains_key(pair) && !returned.contains(pair))
                     .collect::<HashSet<_>>();
 
                 // A round that only retries unresolved entries publishes no round events
@@ -213,9 +223,10 @@ where
                     start_event_published = true;
                 }
 
+                // An entry queued again since the lookup may stand for an output the lookup did not see, so it stays
                 self.sdk.store().with_write_tx(|tx| {
-                    for (tag, nonce) in &spent {
-                        tx.utxo_process_queue_remove_item(*resource_addr, *tag, *nonce)?;
+                    for pair in &spent {
+                        tx.utxo_process_queue_ack(&to_look_up[pair].entries)?;
                     }
                     Ok::<_, WalletStorageError>(())
                 })?;
@@ -228,7 +239,7 @@ where
 
                 // A pair the indexer neither returned nor reported spent may be one it has not indexed yet, so it
                 // stays queued for a later round.
-                let unresolved = tag_and_nonce_to_view_key_map
+                let unresolved = to_look_up
                     .keys()
                     .filter(|pair| !returned.contains(*pair) && !spent.contains(*pair))
                     .count();
@@ -253,14 +264,12 @@ where
                         Some((id, output, is_frozen))
                     })
                     .filter_map(|(id, output, is_frozen)| {
-                        let tag_and_nonce_pair = (output.tag, output.output.public_nonce);
-                        let Some(account_addr) = tag_and_nonce_to_view_key_map.get(&tag_and_nonce_pair).copied() else {
+                        if !to_look_up.contains_key(&(output.tag, output.output.public_nonce)) {
                             warn!(target: LOG_TARGET, "❓️ NEVER HAPPEN: Indexer returned UTXO with tag {}, nonce {} that we didn't request. Ignoring", output.tag, output.output.public_nonce);
                             return None;
-                        };
+                        }
 
                         Some(FoundUtxo {
-                            account_addr,
                             id,
                             output,
                             is_frozen,
@@ -294,7 +303,9 @@ where
                 } else {
                     (utxos, HashSet::new())
                 };
-                num_recovered += self.process_recovered_utxos(*resource_addr, utxos, &deferred)?;
+                let stored = self.process_recovered_utxos(*resource_addr, &to_look_up, utxos, &deferred)?;
+                num_recovered += stored.num_recovered;
+                num_unresolved += stored.num_stale;
             }
         }
     }
@@ -340,7 +351,9 @@ where
                     tx.stealth_outputs_get_by_commitment(&resource_address, &found.id.into_commitment_bytes())
                 })
                 .optional()?;
-            if let Some(held) = held {
+            // An output held invalid is validated again, as the keys of every account it is queued for may now show
+            // that one of them owns it
+            if let Some(held) = held.filter(|held| held.status != OutputStatus::Invalid) {
                 found.is_held = true;
                 if held.status == OutputStatus::Burnt {
                     found.is_frozen = held.is_frozen;
@@ -637,37 +650,104 @@ where
         }
     }
 
-    /// Stores each of `utxos_to_recover` the wallet may hold and dequeues its tag and nonce pair, unless the pair is in
-    /// `keep_queued`: another output with the pair is left for a later round.
+    /// Stores each of `utxos_to_recover` the wallet may hold and acknowledges the queued entries of its tag and nonce
+    /// pair, unless the pair is in `keep_queued`: another output with the pair is left for a later round.
+    ///
+    /// The outputs of a pair are stored and its entries acknowledged in one write, and only while every entry is as
+    /// it was when looked up. An entry queued again since may stand for another output with the pair, and the scanner
+    /// advances every entry when it sees the spend of an output the wallet does not hold, which may be one the lookup
+    /// returned unspent. A pair whose lookup is no longer current is left queued, to be looked up again.
     fn process_recovered_utxos(
         &self,
         resource_address: ResourceAddress,
+        queued: &HashMap<TagAndPublicNoncePair, &QueuedPair>,
         utxos_to_recover: Vec<FoundUtxo>,
         keep_queued: &HashSet<TagAndPublicNoncePair>,
-    ) -> Result<usize, StealthScannerApiError> {
+    ) -> Result<StoredUtxos, StealthScannerApiError> {
         let num_attempted = utxos_to_recover.len();
-        let mut num_recovered = 0;
+        let mut stored = StoredUtxos::default();
+        let mut by_pair = HashMap::<_, Vec<_>>::new();
+        for utxo in utxos_to_recover {
+            by_pair.entry(utxo.tag_and_nonce()).or_default().push(utxo);
+        }
         // Loading an account's keys decrypts imported keys, so it is done once per account in the batch
         let mut keys_by_account = HashMap::new();
-        for utxo in utxos_to_recover {
-            let keys = match keys_by_account.entry(utxo.account_addr) {
-                Entry::Occupied(entry) => entry.into_mut(),
-                Entry::Vacant(entry) => entry.insert(self.load_account_keys(&utxo.account_addr)?),
+        for (pair, utxos) in by_pair {
+            let Some(queued_pair) = queued.get(&pair) else {
+                continue;
             };
-            if self.check_unspent_utxo_and_store(self.sdk.network(), resource_address, keys, utxo, keep_queued)? {
-                num_recovered += 1;
+            // Tags of different accounts can collide, and an output whose nonce is the identity decrypts under every
+            // view key, so the output is validated with the keys of every account the pair is queued for. Validation
+            // prefers a key that owns the output.
+            let mut keys = Vec::with_capacity(queued_pair.entries.len());
+            for account in queued_pair.accounts() {
+                let account_keys = match keys_by_account.entry(*account) {
+                    Entry::Occupied(entry) => entry.into_mut(),
+                    Entry::Vacant(entry) => entry.insert(self.load_account_keys(account)?),
+                };
+                keys.push(account_keys.clone());
+            }
+            let mut validated = Vec::with_capacity(utxos.len());
+            for found in utxos {
+                let output = if found.is_held || found.burnt_at.is_some() {
+                    None
+                } else {
+                    self.sdk.stealth_outputs_api().validate_utxo(
+                        &keys,
+                        self.sdk.network(),
+                        resource_address,
+                        found.id.into_commitment_bytes(),
+                        &found.output,
+                        found.is_frozen,
+                    )?
+                };
+                validated.push((found, output));
+            }
+
+            let mut events = Vec::new();
+            let num_recovered = self.sdk.store().with_write_tx(|tx| {
+                if !tx.utxo_process_queue_is_current(&queued_pair.entries)? {
+                    return Ok::<_, StealthScannerApiError>(None);
+                }
+                let mut num_recovered = 0;
+                for (found, output) in validated {
+                    if Self::store_found_utxo(tx, resource_address, found, output, &mut events)? {
+                        num_recovered += 1;
+                    }
+                }
+                if !keep_queued.contains(&pair) {
+                    tx.utxo_process_queue_ack(&queued_pair.entries)?;
+                }
+                Ok(Some(num_recovered))
+            })?;
+            match num_recovered {
+                Some(num_recovered) => {
+                    stored.num_recovered += num_recovered;
+                    for event in events {
+                        self.notify(event);
+                    }
+                },
+                None => {
+                    debug!(
+                        target: LOG_TARGET,
+                        "Queued UTXO with tag {}, nonce {} changed while it was looked up. Looking it up again later.",
+                        pair.0,
+                        pair.1
+                    );
+                    stored.num_stale += 1;
+                },
             }
         }
         if num_attempted > 0 {
             info!(
                 target: LOG_TARGET,
                 "✅ Recovered {} out of {} applicable UTXOs",
-                num_recovered,
+                stored.num_recovered,
                 num_attempted,
             );
         }
 
-        Ok(num_recovered)
+        Ok(stored)
     }
 
     fn load_account_keys(
@@ -687,104 +767,98 @@ where
         })
     }
 
-    fn check_unspent_utxo_and_store(
-        &self,
-        network: Network,
+    /// Stores `found` in `tx`, as `output` when validation produced one, and adds the events to publish once `tx`
+    /// commits to `events`. Returns whether the output was recovered.
+    fn store_found_utxo(
+        tx: &mut <TSpec::Store as WriteableWalletStore>::WriteTransaction<'_>,
         resource_address: ResourceAddress,
-        keys: &AccountAndViewKeys,
         found: FoundUtxo,
-        keep_queued: &HashSet<TagAndPublicNoncePair>,
+        output: Option<StealthOutputModel>,
+        events: &mut Vec<WalletEvent>,
     ) -> Result<bool, StealthScannerApiError> {
-        let outputs_api = self.sdk.stealth_outputs_api();
-
         let address = UtxoAddress::new(resource_address, found.id);
-        if let Some(burnt_at) = found.burnt_at {
-            debug!(target: LOG_TARGET, "The indexer reported stealth output {} unspent, but proved it burnt at v{}", address, burnt_at);
-            if let Some(account_address) = outputs_api.mark_burnt(&address)? {
-                self.notify(UtxoBurntEvent {
-                    account_address,
-                    address,
-                });
-            }
-            self.sdk
-                .store()
-                .with_write_tx(|tx| found.dequeue(tx, resource_address, keep_queued))?;
-            return Ok(false);
-        }
         let commitment = found.id.into_commitment_bytes();
-        let validated = if found.is_held {
-            None
-        } else {
-            outputs_api.validate_utxo(
-                array::from_ref(keys),
-                network,
-                resource_address,
-                commitment,
-                &found.output,
-                found.is_frozen,
-            )?
-        };
-        let Some(mut output) = validated else {
+        let Some(mut output) = output else {
+            let Some(held) = tx
+                .stealth_outputs_get_by_commitment(&resource_address, &commitment)
+                .optional()?
+            else {
+                return Ok(false);
+            };
+            if let Some(burnt_at) = found.burnt_at {
+                debug!(target: LOG_TARGET, "The indexer reported stealth output {} unspent, but proved it burnt at v{}", address, burnt_at);
+                if tx.stealth_outputs_mark_as_burnt(&address)? {
+                    info!(target: LOG_TARGET, "🔥 Stealth output {} is burnt", address);
+                    events.push(
+                        UtxoBurntEvent {
+                            account_address: held.owner_account,
+                            address,
+                        }
+                        .into(),
+                    );
+                }
+                return Ok(false);
+            }
             if found.is_readopted() {
                 // One write: a re-adoption that recorded the later version but left the output spent could never be
                 // retried, as the version would no longer be later than the one held.
-                self.sdk.store().with_write_tx(|tx| {
-                    if let Some(proven_up) = found.proven_up {
-                        tx.stealth_outputs_record_proven_up(&address, proven_up)?;
+                if let Some(proven_up) = found.proven_up {
+                    tx.stealth_outputs_record_proven_up(&address, proven_up)?;
+                }
+                tx.stealth_outputs_update(&address, None, Some(OutputStatus::Unspent), Some(found.is_frozen))?;
+                events.push(
+                    UtxoRecoveredEvent {
+                        address,
+                        account_address: held.owner_account,
                     }
-                    tx.stealth_outputs_update(&address, None, Some(OutputStatus::Unspent), Some(found.is_frozen))?;
-                    found.dequeue(tx, resource_address, keep_queued)
-                })?;
-                self.notify(UtxoRecoveredEvent {
-                    address,
-                    account_address: found.account_addr,
-                });
+                    .into(),
+                );
                 return Ok(true);
             }
             if found.is_held &&
                 let Some(proven_up) = found.proven_up
             {
-                outputs_api.record_proven_up(&address, proven_up)?;
+                tx.stealth_outputs_record_proven_up(&address, proven_up)?;
             }
-            // The output could be held already, burnt, frozen, or otherwise invalid. If we already have it in the db,
-            // update its frozen flag, if not, do nothing.
-            let frozen_changed = outputs_api.set_utxo_frozen(&address, found.is_frozen)?.unwrap_or(false);
-
-            if frozen_changed {
-                self.notify(UtxoRecoveredEvent {
-                    address: UtxoAddress::new(resource_address, found.id),
-                    account_address: found.account_addr,
-                });
+            // The output could be held already, burnt, frozen, or otherwise invalid. Only its frozen flag is updated.
+            tx.stealth_outputs_update(&address, None, None, Some(found.is_frozen))?;
+            if held.is_frozen != found.is_frozen {
+                events.push(
+                    UtxoRecoveredEvent {
+                        address,
+                        account_address: held.owner_account,
+                    }
+                    .into(),
+                );
             }
-            self.sdk
-                .store()
-                .with_write_tx(|tx| found.dequeue(tx, resource_address, keep_queued))?;
-
             return Ok(false);
         };
 
         output.proven_up = found.proven_up;
-        let changed = outputs_api.upsert_utxo(&output)?;
-
-        self.sdk
-            .store()
-            .with_write_tx(|tx| found.dequeue(tx, resource_address, keep_queued))?;
-
-        if !changed {
+        if !upsert_utxo_in(tx, &output)? {
             debug!(target: LOG_TARGET, "Stealth output {} is already recorded", address);
             return Ok(false);
         }
-        self.notify(UtxoRecoveredEvent {
-            address: UtxoAddress::new(resource_address, found.id),
-            account_address: found.account_addr,
-        });
-        info!(target: LOG_TARGET, "💰️ Recovered stealth output {} for account {}", address, keys.account_public_key);
+        info!(target: LOG_TARGET, "💰️ Recovered stealth output {} for account {}", address, output.owner_account);
+        events.push(
+            UtxoRecoveredEvent {
+                address,
+                account_address: output.owner_account,
+            }
+            .into(),
+        );
         Ok(true)
     }
 }
 
+#[derive(Default)]
+struct StoredUtxos {
+    num_recovered: usize,
+    /// Pairs left queued because their entries changed while they were looked up.
+    num_stale: usize,
+}
+
 struct FoundUtxo {
-    account_addr: ComponentAddress,
     output: UtxoOutput,
     id: UtxoId,
     is_frozen: bool,
@@ -817,22 +891,6 @@ impl FoundUtxo {
 
     fn tag_and_nonce(&self) -> TagAndPublicNoncePair {
         (self.output.tag, self.output.output.public_nonce)
-    }
-
-    /// Removes the output's tag and nonce pair from the recovery queue, unless it is in `keep_queued`. Outputs of one
-    /// lookup may share a pair, so the pair may be gone already.
-    fn dequeue<TTx: WalletStoreWriter>(
-        &self,
-        tx: &mut TTx,
-        resource_address: ResourceAddress,
-        keep_queued: &HashSet<TagAndPublicNoncePair>,
-    ) -> Result<(), WalletStorageError> {
-        if keep_queued.contains(&self.tag_and_nonce()) {
-            return Ok(());
-        }
-        tx.utxo_process_queue_remove_item(resource_address, self.output.tag, self.output.output.public_nonce)
-            .optional()?;
-        Ok(())
     }
 }
 

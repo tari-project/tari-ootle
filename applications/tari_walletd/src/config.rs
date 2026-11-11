@@ -162,6 +162,14 @@ pub struct WalletDaemonConfig {
 }
 
 impl WalletDaemonConfig {
+    /// The WebAuthn relying-party origin, which is also where the web UI must be opened: `webauthn.rp_origin`, or
+    /// `http://localhost:{json_rpc_address port}` when unset.
+    pub fn web_ui_origin(&self) -> Url {
+        self.webauthn.rp_origin.clone().unwrap_or_else(|| {
+            Url::parse(&format!("http://localhost:{}", self.json_rpc_address.port())).expect("url cannot be invalid")
+        })
+    }
+
     /// Parses `cookie_scopes` into a [`Permissions`] set.
     pub fn parsed_cookie_scopes(&self) -> Result<Permissions, anyhow::Error> {
         if self.cookie_scopes.is_empty() {

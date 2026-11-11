@@ -1,7 +1,10 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    sync::Arc,
+};
 
 use axum_jrpc::{JsonRpcAnswer, JsonRpcRequest, JsonRpcResponse};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
@@ -36,13 +39,25 @@ struct Response {
     payload: json::Value,
 }
 
+fn signaling_server_url(address: SocketAddr) -> String {
+    format!("http://{address}")
+}
+
+fn wallet_jrpc_url(address: SocketAddr) -> String {
+    let ip = match address.ip() {
+        IpAddr::V4(ip) if ip.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(ip) if ip.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+        ip => ip,
+    };
+    format!("http://{}/json_rpc", SocketAddr::new(ip, address.port()))
+}
+
 async fn make_request<T: Serialize>(
-    address: SocketAddr,
+    url: &str,
     token: Option<String>,
     method: String,
     params: T,
 ) -> anyhow::Result<serde_json::Value> {
-    let url = format!("http://{}", address);
     let client = reqwest::Client::new();
     let body = JsonRpcRequest {
         id: axum_jrpc::Id::Num(0),
@@ -80,7 +95,7 @@ pub async fn on_ice_candidate(
             match ice_candidate.to_json() {
                 Ok(ice_candidate) => {
                     if let Err(err) = make_request(
-                        signaling_server_address,
+                        &signaling_server_url(signaling_server_address),
                         Some(signaling_server_token_clone),
                         "add.answer_ice_candidate".to_string(),
                         ice_candidate,
@@ -114,7 +129,7 @@ pub async fn on_message(
             id: request.id,
         }
     } else {
-        let result = make_request(address, request.token, request.method, request.params)
+        let result = make_request(&wallet_jrpc_url(address), request.token, request.method, request.params)
             .await
             .unwrap_or_else(|e| json!({"error": e.to_string()}));
         response = Response {
@@ -122,7 +137,7 @@ pub async fn on_message(
             id: request.id,
         };
     }
-    let text = serde_json::to_string(&response).unwrap_or_else(|e| e.to_string());
+    let text = serde_json::to_string(&response)?;
     d_on_message.send_text(text).await?;
     Ok(())
 }
@@ -163,8 +178,9 @@ pub async fn webrtc_start_session(
         ))
     }));
 
+    let signaling_url = signaling_server_url(signaling_server_address);
     let offer = make_request(
-        signaling_server_address,
+        &signaling_url,
         Some(signaling_server_token.clone()),
         "get.offer".to_string(),
         json!({}),
@@ -180,7 +196,7 @@ pub async fn webrtc_start_session(
     pc.set_remote_description(desc).await?;
 
     let ices = make_request(
-        signaling_server_address,
+        &signaling_url,
         Some(signaling_server_token.clone()),
         "get.offer_ice_candidates".to_string(),
         json!({}),
@@ -189,21 +205,37 @@ pub async fn webrtc_start_session(
 
     let ices: Vec<RTCIceCandidateInit> = serde_json::from_value(ices)?;
     for ice_candidate in ices {
-        println!("ice_candidate {:?}", ice_candidate);
-        // let ice_candidate: RTCIceCandidateInit = serde_json::from_str(ice_candidate.as_str())?;
+        log::debug!(target: LOG_TARGET, "ice_candidate {:?}", ice_candidate);
         pc.add_ice_candidate(ice_candidate).await?;
     }
     let answer = pc.create_answer(None).await?;
     pc.set_local_description(answer.clone()).await?;
 
     make_request(
-        signaling_server_address,
+        &signaling_url,
         Some(signaling_server_token),
         "add.answer".to_string(),
         &answer.sdp,
     )
     .await?;
     shutdown_signal.await;
-    // pc.close().await?;
+    pc.close().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wallet_jrpc_url_targets_json_rpc_path_and_resolves_unspecified_ips() {
+        let loopback: SocketAddr = "127.0.0.1:5100".parse().unwrap();
+        assert_eq!(wallet_jrpc_url(loopback), "http://127.0.0.1:5100/json_rpc");
+
+        let unspecified_v4: SocketAddr = "0.0.0.0:5100".parse().unwrap();
+        assert_eq!(wallet_jrpc_url(unspecified_v4), "http://127.0.0.1:5100/json_rpc");
+
+        let unspecified_v6: SocketAddr = "[::]:5100".parse().unwrap();
+        assert_eq!(wallet_jrpc_url(unspecified_v6), "http://[::1]:5100/json_rpc");
+    }
 }

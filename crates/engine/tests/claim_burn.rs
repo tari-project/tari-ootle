@@ -13,14 +13,13 @@ use tari_engine_types::{
         BurnOutput,
         BurnOutputFeatures,
         BurnOutputInclusionProof,
-        ClaimBurnOutputData,
         MinotariBurnClaimProof,
         MmrInclusionProof,
     },
 };
-use tari_ootle_transaction::{Epoch, Transaction};
+use tari_ootle_transaction::{Epoch, Transaction, TransactionBuilder};
 use tari_template_lib::types::{
-    EncryptedData,
+    Amount,
     Hash32,
     constants::TARI_TOKEN,
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes},
@@ -62,24 +61,24 @@ fn keypair() -> (RistrettoSecretKey, RistrettoPublicKeyBytes) {
 }
 
 /// A claim of a burn output made out to `claim_public_key`
-fn claim_to(claim_public_key: RistrettoPublicKeyBytes) -> (MinotariBurnClaimProof, ClaimBurnOutputData) {
-    let (mut proof, output_data) = claim();
+fn claim_to(claim_public_key: RistrettoPublicKeyBytes) -> MinotariBurnClaimProof {
+    let mut proof = claim();
     proof.output.features.claim_public_key = claim_public_key;
-    (proof, output_data)
+    proof
 }
 
 fn one_byte<const N: usize>() -> bounded_vec::BoundedVec<u8, 1, N> {
     bounded_vec::BoundedVec::<u8, 1, N>::from_vec(vec![0]).unwrap()
 }
 
-fn claim() -> (MinotariBurnClaimProof, ClaimBurnOutputData) {
+fn claim() -> MinotariBurnClaimProof {
     let mmr_proof = || MmrInclusionProof {
         leaf_index: 0,
         mmr_size: 1,
         path: vec![],
         peaks: vec![],
     };
-    let proof = MinotariBurnClaimProof {
+    MinotariBurnClaimProof {
         commitment: PedersenCommitmentBytes::zero(),
         ownership_proof: SchnorrSignatureBytes::zero(),
         value: 1_000,
@@ -106,11 +105,21 @@ fn claim() -> (MinotariBurnClaimProof, ClaimBurnOutputData) {
             normal_output_mr: Hash32::zero(),
             block_output_proof: mmr_proof(),
         },
-    };
-    let output_data = ClaimBurnOutputData {
-        encrypted_data: EncryptedData::empty(),
-    };
-    (proof, output_data)
+    }
+}
+
+/// Claims `proof` and pays the claimed bucket into a single stealth output
+fn claim_into_output<D>(builder: TransactionBuilder<D>, proof: MinotariBurnClaimProof) -> TransactionBuilder<D> {
+    let transfer = stealth::generate_transfer_data(
+        stealth::NO_INPUTS,
+        Amount::from(proof.value),
+        [proof.value],
+        Amount::zero(),
+    );
+    builder
+        .claim_burn(proof)
+        .put_last_instruction_output_on_workspace("claimed")
+        .stealth_transfer_with_input_bucket(TARI_TOKEN, transfer.statement, "claimed")
 }
 
 fn verifier_fault() -> FixedOutcomeVerifier {
@@ -121,12 +130,11 @@ fn verifier_fault() -> FixedOutcomeVerifier {
 fn a_verifier_fault_in_the_fee_intent_aborts_execution() {
     let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
     test.set_claim_proof_verifier(verifier_fault());
-    let (proof, output_data) = claim();
 
     let err = test
         .try_execute(
             Transaction::builder_localnet(Epoch(1))
-                .with_fee_instructions_builder(|builder| builder.claim_burn(proof, output_data))
+                .with_fee_instructions_builder(|builder| claim_into_output(builder, claim()))
                 .build_and_seal(test.secret_key()),
             vec![],
         )
@@ -138,13 +146,10 @@ fn a_verifier_fault_in_the_fee_intent_aborts_execution() {
 fn a_verifier_fault_in_the_main_intent_aborts_execution() {
     let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
     test.set_claim_proof_verifier(verifier_fault());
-    let (proof, output_data) = claim();
 
     let err = test
         .try_execute(
-            Transaction::builder_localnet(Epoch(1))
-                .claim_burn(proof, output_data)
-                .build_and_seal(test.secret_key()),
+            claim_into_output(Transaction::builder_localnet(Epoch(1)), claim()).build_and_seal(test.secret_key()),
             vec![],
         )
         .expect_err("a verifier fault must not produce a receipt");
@@ -157,13 +162,10 @@ fn an_invalid_claim_is_rejected_with_a_receipt() {
     test.set_claim_proof_verifier(FixedOutcomeVerifier(
         ClaimProofRejection::Invalid("bad proof".to_string()).into(),
     ));
-    let (proof, output_data) = claim();
 
     let result = test
         .try_execute(
-            Transaction::builder_localnet(Epoch(1))
-                .claim_burn(proof, output_data)
-                .build_and_seal(test.secret_key()),
+            claim_into_output(Transaction::builder_localnet(Epoch(1)), claim()).build_and_seal(test.secret_key()),
             vec![],
         )
         .expect("an invalid claim is a verdict on the transaction");
@@ -180,12 +182,10 @@ fn a_claim_sealed_by_the_claim_key_is_accepted() {
     let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
     test.set_claim_proof_verifier(AcceptingVerifier);
     let (claim_secret, claim_public_key) = keypair();
-    let (proof, output_data) = claim_to(claim_public_key);
 
     let result = test
         .try_execute(
-            Transaction::builder_localnet(Epoch(1))
-                .claim_burn(proof, output_data)
+            claim_into_output(Transaction::builder_localnet(Epoch(1)), claim_to(claim_public_key))
                 .build_and_seal(&claim_secret),
             vec![],
         )
@@ -200,13 +200,11 @@ fn a_claim_co_signed_by_the_claim_key_is_accepted() {
     let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
     test.set_claim_proof_verifier(AcceptingVerifier);
     let (claim_secret, claim_public_key) = keypair();
-    let (proof, output_data) = claim_to(claim_public_key);
 
     // Another key, e.g. a relayer paying the fee, seals
     let result = test
         .try_execute(
-            Transaction::builder_localnet(Epoch(1))
-                .claim_burn(proof, output_data)
+            claim_into_output(Transaction::builder_localnet(Epoch(1)), claim_to(claim_public_key))
                 .add_signer(&test.to_public_key_bytes(), &claim_secret)
                 .seal(test.secret_key()),
             vec![],
@@ -217,42 +215,52 @@ fn a_claim_co_signed_by_the_claim_key_is_accepted() {
     }
 }
 
+/// The claim's value arrives as a revealed bucket for the claim transaction to move on, so the only UTXO is the one
+/// the transaction pays it into.
 #[test]
-fn a_claim_sealed_by_another_key_is_spendable_by_the_claim_key_alone() {
+fn a_claim_reveals_the_burnt_value_in_a_bucket() {
     let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
     test.set_claim_proof_verifier(AcceptingVerifier);
     let (claim_secret, claim_public_key) = keypair();
-    let (relayer_secret, relayer_public_key) = keypair();
-    let opening = MaskAndValue {
-        mask: keypair().0,
-        value: 1_000,
-    };
-    let (mut proof, output_data) = claim_to(claim_public_key);
-    proof.commitment = opening.to_commitment().to_byte_type();
-    proof.value = opening.value;
+    let proof = claim_to(claim_public_key);
+    let value = proof.value;
+    let transfer = stealth::generate_transfer_data(stealth::NO_INPUTS, Amount::from(value), [value], Amount::zero());
 
     let result = test.execute_expect_success(
         Transaction::builder_localnet(Epoch(1))
-            .claim_burn(proof, output_data)
-            .add_signer(&relayer_public_key, &claim_secret)
-            .seal(&relayer_secret),
+            .claim_burn(proof)
+            .put_last_instruction_output_on_workspace("claimed")
+            .assert_bucket_contains_exactly("claimed", TARI_TOKEN, value)
+            .stealth_transfer_with_input_bucket(TARI_TOKEN, transfer.statement, "claimed")
+            .build_and_seal(&claim_secret),
         vec![],
     );
     let diff = result.finalize.any_accept().unwrap();
-    let spend_key = diff
-        .up_iter()
-        .find_map(|(_, substate)| substate.substate_value().as_utxo())
-        .expect("claim_burn mints a UTXO")
-        .spender_public_key()
-        .copied();
-    assert_eq!(spend_key, Some(claim_public_key));
+    assert_eq!(
+        diff.up_iter()
+            .filter(|(_, substate)| substate.substate_value().as_utxo().is_some())
+            .count(),
+        1
+    );
+}
 
-    let transfer = stealth::generate_transfer_data([opening.clone()], 0u64, [opening.value], 0u64);
-    test.execute_expect_success(
-        Transaction::builder_localnet(Epoch(1))
-            .stealth_transfer(TARI_TOKEN, transfer.statement)
-            .build_and_seal(&claim_secret),
-        vec![],
+#[test]
+fn a_claim_that_leaves_its_bucket_behind_is_rejected() {
+    let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
+    test.set_claim_proof_verifier(AcceptingVerifier);
+    let (claim_secret, claim_public_key) = keypair();
+
+    let result = test
+        .try_execute(
+            Transaction::builder_localnet(Epoch(1))
+                .claim_burn(claim_to(claim_public_key))
+                .build_and_seal(&claim_secret),
+            vec![],
+        )
+        .unwrap();
+    assert!(
+        result.finalize.any_reject().is_some(),
+        "a dangling claimed bucket must reject the claim"
     );
 }
 
@@ -263,14 +271,11 @@ fn the_burner_cannot_claim_a_burn_made_out_to_someone_else() {
     test.set_claim_proof_verifier(AcceptingVerifier);
     let (_recipient_secret, recipient_public_key) = keypair();
     let (burner_secret, burner_public_key) = keypair();
-    let (proof, output_data) = claim_to(recipient_public_key);
+    let proof = claim_to(recipient_public_key);
 
     for transaction in [
-        Transaction::builder_localnet(Epoch(1))
-            .claim_burn(proof.clone(), output_data.clone())
-            .build_and_seal(&burner_secret),
-        Transaction::builder_localnet(Epoch(1))
-            .claim_burn(proof, output_data)
+        claim_into_output(Transaction::builder_localnet(Epoch(1)), proof.clone()).build_and_seal(&burner_secret),
+        claim_into_output(Transaction::builder_localnet(Epoch(1)), proof)
             .add_signer(&burner_public_key, test.secret_key())
             .seal(&burner_secret),
     ] {
@@ -289,6 +294,176 @@ fn the_burner_cannot_claim_a_burn_made_out_to_someone_else() {
     }
 }
 
+/// The burner knows the burn commitment's opening, so they can put a stealth output of their own at the burn
+/// commitment, and spend it again, before the recipient claims. Neither may stand in the way of the claim.
+mod occupied_commitment {
+    use std::collections::HashSet;
+
+    use tari_engine_types::substate::SubstateId;
+    use tari_ootle_transaction::args;
+    use tari_template_lib::types::{
+        ComponentAddress,
+        EncryptedData,
+        NonFungibleAddress,
+        UtxoAddress,
+        crypto::UtxoTag,
+        stealth::{RevealedOutput, SpendAuthorization},
+    };
+    use tari_template_test_tooling::wallet_crypto::{
+        OutputWitness,
+        StealthInputWitness,
+        StealthOutputWitness,
+        stealth::create_transfer_statement,
+    };
+
+    use super::*;
+
+    const BURNT_VALUE: u64 = 500_000;
+
+    struct Burner {
+        account: ComponentAddress,
+        proof: NonFungibleAddress,
+        secret: RistrettoSecretKey,
+        public_key: RistrettoPublicKeyBytes,
+    }
+
+    /// The burner funds a stealth output with their own L2 TARI whose commitment is the burn commitment, returning
+    /// the substates that transaction created.
+    fn occupy(test: &mut TemplateTest, burner: &Burner, opening: &MaskAndValue) -> HashSet<SubstateId> {
+        let output = StealthOutputWitness {
+            witness: OutputWitness {
+                amount: opening.value,
+                mask: opening.mask.clone(),
+                sender_public_nonce: stealth::test_sender_public_nonce(),
+                minimum_value_promise: 0,
+                encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
+                resource_view_key: None,
+            },
+            auth: SpendAuthorization::Key(burner.public_key),
+            tag: UtxoTag::new(0),
+        };
+        let statement = create_transfer_statement(
+            std::iter::empty::<StealthInputWitness>(),
+            Amount::from(opening.value),
+            [&output],
+            None,
+        )
+        .unwrap();
+        let result = test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(burner.account, "withdraw", args![TARI_TOKEN, opening.value])
+                .put_last_instruction_output_on_workspace("bucket")
+                .stealth_transfer_with_input_bucket(TARI_TOKEN, statement, "bucket")
+                .build_and_seal(&burner.secret),
+            vec![burner.proof.clone()],
+        );
+        let created = result
+            .finalize
+            .any_accept()
+            .unwrap()
+            .up_iter()
+            .map(|(id, _)| id.clone())
+            .collect::<HashSet<_>>();
+        let occupied = SubstateId::Utxo(UtxoAddress::new(
+            TARI_TOKEN,
+            opening.to_commitment().to_byte_type().into(),
+        ));
+        assert!(
+            created.contains(&occupied),
+            "the burner's output must sit at the burn commitment"
+        );
+        created
+    }
+
+    /// The burner spends the output at the burn commitment back into their account.
+    fn release(test: &mut TemplateTest, burner: &Burner, opening: &MaskAndValue) {
+        let statement = create_transfer_statement(
+            [StealthInputWitness::new(opening.clone())],
+            Amount::zero(),
+            std::iter::empty::<&StealthOutputWitness>(),
+            Some(RevealedOutput::new(Amount::from(opening.value), burner.public_key)),
+        )
+        .unwrap();
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .stealth_transfer(TARI_TOKEN, statement)
+                .put_last_instruction_output_on_workspace("released")
+                .call_method(burner.account, "deposit", args![Workspace("released")])
+                .build_and_seal(&burner.secret),
+            vec![burner.proof.clone()],
+        );
+    }
+
+    fn setup() -> (TemplateTest, Burner, MaskAndValue) {
+        let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
+        test.set_claim_proof_verifier(AcceptingVerifier);
+        let (account, proof, secret, public_key) = test.create_funded_account_with_keypair();
+        let burner = Burner {
+            account,
+            proof,
+            secret,
+            public_key: public_key.to_byte_type(),
+        };
+        let opening = MaskAndValue {
+            mask: keypair().0,
+            value: BURNT_VALUE,
+        };
+        (test, burner, opening)
+    }
+
+    fn claim_of(opening: &MaskAndValue, claim_public_key: RistrettoPublicKeyBytes) -> MinotariBurnClaimProof {
+        let mut proof = claim_to(claim_public_key);
+        proof.commitment = opening.to_commitment().to_byte_type();
+        proof.value = opening.value;
+        proof
+    }
+
+    #[test]
+    fn a_live_output_at_the_burn_commitment_does_not_block_the_claim() {
+        let (mut test, burner, opening) = setup();
+        let (recipient_secret, recipient_public_key) = keypair();
+        occupy(&mut test, &burner, &opening);
+
+        let result = test
+            .try_execute(
+                claim_into_output(
+                    Transaction::builder_localnet(Epoch(1)),
+                    claim_of(&opening, recipient_public_key),
+                )
+                .build_and_seal(&recipient_secret),
+                vec![],
+            )
+            .unwrap();
+        if let Some(reason) = result.finalize.any_reject() {
+            panic!("the recipient's claim must be accepted: {reason}");
+        }
+    }
+
+    #[test]
+    fn a_spent_output_at_the_burn_commitment_does_not_block_the_claim() {
+        let (mut test, burner, opening) = setup();
+        let (recipient_secret, recipient_public_key) = keypair();
+        let ever_created = occupy(&mut test, &burner, &opening);
+        release(&mut test, &burner, &opening);
+
+        // Consensus reports every substate that was ever created as taken, spent or not
+        let (result, _) = test
+            .try_execute_with_fee_intent_fallback(
+                Transaction::builder_localnet(Epoch(1))
+                    .with_fee_instructions_builder(|builder| {
+                        claim_into_output(builder, claim_of(&opening, recipient_public_key))
+                    })
+                    .build_and_seal(&recipient_secret),
+                vec![],
+                &|id: &SubstateId| ever_created.contains(id),
+            )
+            .unwrap();
+        if let Some(reason) = result.finalize.any_reject() {
+            panic!("the recipient's claim must be accepted: {reason}");
+        }
+    }
+}
+
 /// Holds `ClaimBurnShape::estimate_fee` to what the engine charges the claim a wallet builds.
 mod fee_estimate {
     use tari_crypto::keys::SecretKey as _;
@@ -297,8 +472,7 @@ mod fee_estimate {
         fees::{FeeRates, FeeScale, FeeSource},
         stealth::{ClaimBurnShape, persisted_utxo_bytes},
     };
-    use tari_template_lib::types::{Amount, constants::TARI_TOKEN, stealth::StealthTransferStatement};
-    use tari_template_test_tooling::{support::stealth, wallet_crypto::MaskAndValue};
+    use tari_template_lib::types::stealth::StealthTransferStatement;
 
     use super::*;
 
@@ -345,25 +519,26 @@ mod fee_estimate {
         statement: StealthTransferStatement,
     }
 
-    /// Builds the transaction a wallet builds to claim a burn: claim it, spend the claimed UTXO into
-    /// one stealth output revealing `revealed_fee`, and pay the revealed bucket as the fee. The claim
-    /// key seals, so the claim, the claimed UTXO and the revealed output all answer to one signer.
+    /// Builds the transaction a wallet builds to claim a burn: claim it, pay the claimed bucket into one
+    /// stealth output revealing `revealed_fee`, and pay the revealed bucket as the fee. The claim key seals, so
+    /// the claim and the revealed output answer to one signer.
     fn build(test: &TemplateTest, claimed: &MaskAndValue, revealed_fee: u64) -> Build {
-        let (mut proof, output_data) = claim_to(test.to_public_key_bytes());
+        let mut proof = claim_to(test.to_public_key_bytes());
         proof.commitment = claimed.to_commitment().to_byte_type();
         proof.value = claimed.value;
 
         let transfer = stealth::generate_transfer_data(
-            [claimed.clone()],
-            Amount::zero(),
+            stealth::NO_INPUTS,
+            Amount::from(claimed.value),
             [claimed.value - revealed_fee],
             Amount::from(revealed_fee),
         );
         let transaction = Transaction::builder_localnet(Epoch(1))
             .with_fee_instructions_builder(|builder| {
                 builder
-                    .claim_burn(proof, output_data)
-                    .stealth_transfer(TARI_TOKEN, transfer.statement.clone())
+                    .claim_burn(proof)
+                    .put_last_instruction_output_on_workspace("claimed")
+                    .stealth_transfer_with_input_bucket(TARI_TOKEN, transfer.statement.clone(), "claimed")
                     .put_last_instruction_output_on_workspace("fee")
                     .pay_fee_from_bucket("fee")
             })

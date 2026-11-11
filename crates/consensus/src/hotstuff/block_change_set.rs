@@ -509,6 +509,7 @@ impl ProposedBlockChangeSet {
             )?;
         }
 
+        let mut aborting_tx_ids = Vec::new();
         for (transaction_id, change) in &self.transaction_changes {
             // Save any transaction executions for the block
             if let Some(ref execution) = change.execution {
@@ -533,8 +534,7 @@ impl ProposedBlockChangeSet {
             // Save any transaction pool updates
             if let Some(ref update) = change.next_update {
                 if update.decision().is_abort() {
-                    // Remove lock conflicts for this transaction. This allows other transactions to be proposed.
-                    TransactionLockConflicts::remove_for_transactions(tx, Some(update.transaction_id()))?;
+                    aborting_tx_ids.push(update.transaction_id());
                 }
                 update.insert_for_block(tx, &self.block)?;
             }
@@ -542,6 +542,11 @@ impl ProposedBlockChangeSet {
             for (shard_group, pledges) in &change.foreign_pledges {
                 tx.foreign_substate_pledges_save(transaction_id, *shard_group, pledges)?;
             }
+        }
+
+        if !aborting_tx_ids.is_empty() {
+            // Remove lock conflicts for aborting transactions. This allows other transactions to be proposed.
+            TransactionLockConflicts::remove_for_transactions(tx, aborting_tx_ids)?;
         }
 
         // TODO(perf): batch this update

@@ -2806,7 +2806,9 @@ where
                     self.authorize_vault_action(vault_id, ResourceAuthAction::Withdraw, VaultFreezeFlag::Withdrawals)?;
 
                 // Charge the withdraw's native verification cost against the payment-funded
-                // allowance before any of its proof crypto (including view-key decompression) runs.
+                // allowance before any of its proof crypto (including view-key decompression) runs. The
+                // key is decompressed only for a proof whose outputs are checked against it, which is
+                // when the viewable surcharge pays for it.
                 let maybe_view_key =
                     if let VaultWithdrawArg::Confidential { proof } = &arg {
                         let view_key_bytes = self.tracker.write_with(|state_mut| {
@@ -2819,6 +2821,7 @@ where
                             tari_engine_types::confidential::withdraw_native_points(proof, view_key_bytes.is_some()),
                         )?;
                         view_key_bytes
+                            .filter(|_| tari_engine_types::confidential::withdraw_uses_view_key(proof))
                             .map(|bytes| {
                                 RistrettoPublicKey::from_canonical_bytes(bytes.as_bytes()).map_err(|e| {
                                     RuntimeError::InvariantError {
@@ -3275,17 +3278,23 @@ where
                 self.tracker.write_with(|state| {
                     let bucket = state.get_bucket(bucket_id)?;
                     let resource_lock = state.read_lock_substate((*bucket.resource_address()).into())?;
-                    let resource = state.get_resource(&resource_lock)?;
-                    let view_key = resource
-                        .to_view_key_public_key()
-                        .map_err(|e| RuntimeError::InvariantError {
-                            function: "BucketAction::TakeConfidential",
-                            details: format!(
-                                "Resource {} has a malformed view key: {}",
-                                resource_lock.substate_id(),
-                                e
-                            ),
-                        })?;
+                    // Decompress the view key only for a proof whose outputs are checked against it,
+                    // which is when the viewable surcharge charged above pays for it.
+                    let view_key = if tari_engine_types::confidential::withdraw_uses_view_key(&proof) {
+                        state
+                            .get_resource(&resource_lock)?
+                            .to_view_key_public_key()
+                            .map_err(|e| RuntimeError::InvariantError {
+                                function: "BucketAction::TakeConfidential",
+                                details: format!(
+                                    "Resource {} has a malformed view key: {}",
+                                    resource_lock.substate_id(),
+                                    e
+                                ),
+                            })?
+                    } else {
+                        None
+                    };
                     let bucket_mut = state.get_bucket_mut(bucket_id)?;
                     let (resource, effects) = bucket_mut.take_confidential(proof, view_key.as_ref())?;
                     let resource_address = *resource.resource_address();
@@ -4831,6 +4840,13 @@ mod tests {
         let runtime = runtime_with_blobs(Blobs::default());
         let vault_id = tari_template_lib::types::VaultId::new([1u8; 32].into());
         let bucket_id = BucketId::from(1u32);
+        runtime.tracker.write_with(|state| {
+            state
+                .current_call_scope_mut()
+                .unwrap()
+                .add_substate_to_scope(vault_id.into())
+                .unwrap();
+        });
 
         // The proof decoder bounds inputs at `MAX_CONFIDENTIAL_INPUTS`, which is `CONFIDENTIAL_LIMITS.max_inputs`, so
         // an over-limit proof is refused while decoding, before the vault or bucket is read.
@@ -4859,11 +4875,6 @@ mod tests {
         // Exhaust the per-transaction confidential withdraw count and verify both `VaultAction::Withdraw` and
         // `BucketAction::TakeConfidential` reject before reading the non-existent vault or bucket.
         runtime.tracker.write_with(|state| {
-            state
-                .current_call_scope_mut()
-                .unwrap()
-                .add_substate_to_scope(vault_id.into())
-                .unwrap();
             for _ in 0..limits::CONFIDENTIAL_LIMITS.max_withdraws_per_transaction {
                 state.admit_confidential_withdraw(&valid_proof).unwrap();
             }
@@ -4896,21 +4907,20 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn confidential_vault_withdraw_charges_native_points_before_view_key_decompression() {
-        use tari_engine_types::{
-            confidential::withdraw_native_points,
-            limits::FREE_COMPUTE_GRACE_POINTS,
-            resource::Resource,
-            vault::Vault,
-        };
+    /// A runtime holding a confidential resource whose view key is a non-canonical Ristretto point (`[0xff; 32]`),
+    /// plus a vault and a bucket of that resource with 10 revealed units each. Decompressing the view key returns
+    /// `InvariantError`, so a call that gets past it never decompressed the key.
+    fn runtime_with_malformed_view_key_resource() -> (
+        RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        tari_template_lib::types::VaultId,
+        BucketId,
+    ) {
+        use tari_engine_types::{resource::Resource, vault::Vault};
 
         let runtime = runtime_with_blobs(Blobs::default());
         let resource_address = ResourceAddress::new([2u8; 32].into());
         let vault_id = tari_template_lib::types::VaultId::new([3u8; 32].into());
 
-        // Store a confidential resource with a non-canonical Ristretto point as its view key (`[0xff; 32]`),
-        // so decompressing it via `to_view_key_public_key()` would return `InvariantError`.
         let malformed_view_key = RistrettoPublicKeyBytes::from_bytes(&[0xff; 32]).unwrap();
         let resource = Resource::new(
             ResourceType::Confidential,
@@ -4922,20 +4932,56 @@ mod tests {
             0,
             false,
         );
-        let vault = Vault::new(ResourceContainer::Confidential {
+        let container = || ResourceContainer::Confidential {
             address: resource_address,
             commitments: Default::default(),
             revealed_amount: Amount::new(10),
             locked_commitments: Default::default(),
             locked_revealed_amount: Amount::zero(),
-        });
+        };
 
-        runtime.tracker.write_with(|state| {
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address: TemplateAddress::default(),
+                    module_name: "Test".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id: EntityId::default(),
+                },
+                None,
+            )
+            .unwrap();
+        let bucket_id = runtime.tracker.write_with(|state| {
             state.new_substate(resource_address, resource).unwrap();
-            state.new_substate(vault_id, vault).unwrap();
+            state.new_substate(vault_id, Vault::new(container())).unwrap();
+            let bucket_id = state.id_provider().unwrap().new_bucket_id().unwrap();
+            state.new_bucket(bucket_id, container()).unwrap();
+            bucket_id
         });
 
-        let proof = ConfidentialWithdrawProof::revealed_withdraw(Amount::new(1));
+        (runtime, vault_id, bucket_id)
+    }
+
+    #[test]
+    fn confidential_vault_withdraw_charges_native_points_before_view_key_decompression() {
+        use tari_engine_types::{
+            confidential::{withdraw_native_points, withdraw_uses_view_key},
+            limits::FREE_COMPUTE_GRACE_POINTS,
+        };
+        use tari_template_lib::types::{EncryptedData, stealth::UnspentOutput};
+
+        let (runtime, vault_id, _) = runtime_with_malformed_view_key_resource();
+
+        // A change output is checked against the view key, so this proof needs the key decompressed.
+        let mut proof = ConfidentialWithdrawProof::revealed_withdraw(Amount::new(1));
+        proof.output_proof.change_statement = Some(UnspentOutput {
+            commitment: PedersenCommitmentBytes::zero(),
+            sender_public_nonce: RistrettoPublicKeyBytes::zero(),
+            encrypted_data: EncryptedData::empty(),
+            minimum_value_promise: 0,
+            viewable_balance_proof: None,
+        });
+        assert!(withdraw_uses_view_key(&proof));
         let withdraw_cost = withdraw_native_points(&proof, true);
         assert!(withdraw_cost > 0);
 
@@ -4955,6 +5001,35 @@ mod tests {
             matches!(err, RuntimeError::FeeIntentComputeExceeded { .. }),
             "expected FeeIntentComputeExceeded before view-key decompression, got {err:?}"
         );
+    }
+
+    #[test]
+    fn revealed_only_confidential_withdraw_and_take_skip_view_key_decompression() {
+        use tari_engine_types::confidential::{withdraw_native_points, withdraw_uses_view_key};
+
+        let (runtime, vault_id, bucket_id) = runtime_with_malformed_view_key_resource();
+
+        // A revealed-only proof prices at zero native points and has no outputs to check against the view key, so
+        // both paths complete without decompressing the malformed key.
+        let proof = ConfidentialWithdrawProof::revealed_withdraw(Amount::new(1));
+        assert_eq!(withdraw_native_points(&proof, true), 0);
+        assert!(!withdraw_uses_view_key(&proof));
+
+        let withdraw_args = EngineArgs::from(vec![
+            tari_bor::encode(&VaultWithdrawArg::Confidential {
+                proof: Box::new(proof.clone()),
+            })
+            .unwrap()
+            .into(),
+        ]);
+        runtime
+            .vault_invoke(VaultRef::Ref(vault_id), VaultAction::Withdraw, withdraw_args)
+            .unwrap();
+
+        let take_args = EngineArgs::from(vec![tari_bor::encode(&proof).unwrap().into()]);
+        runtime
+            .bucket_invoke(BucketRef::Ref(bucket_id), BucketAction::TakeConfidential, take_args)
+            .unwrap();
     }
 
     #[test]

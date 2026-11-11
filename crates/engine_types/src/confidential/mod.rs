@@ -10,4 +10,4 @@ pub use claim::*;
 pub use unclaimed::*;
 pub use validation::*;
 pub(crate) use withdraw::validate_confidential_withdraw;
-pub use withdraw::{ValidatedConfidentialWithdrawProof, withdraw_native_points};
+pub use withdraw::{ValidatedConfidentialWithdrawProof, withdraw_native_points, withdraw_uses_view_key};

@@ -49,6 +49,14 @@ pub fn withdraw_native_points(proof: &ConfidentialWithdrawProof, has_view_key: b
         .saturating_add(P::PER_INPUT.saturating_mul(proof.inputs.len() as u64))
 }
 
+/// Whether [`validate_confidential_withdraw`] reads the resource's view key for this proof. Only confidential outputs
+/// are checked against the key, and [`withdraw_native_points`] prices each of them with
+/// [`NativeExecutionPoints::PER_OUTPUT_VIEWABLE_SURCHARGE`](crate::limits::NativeExecutionPoints::PER_OUTPUT_VIEWABLE_SURCHARGE),
+/// so callers decompress the key only when this returns true and the decompression is always paid for.
+pub fn withdraw_uses_view_key(proof: &ConfidentialWithdrawProof) -> bool {
+    proof.output_proof.output.is_some() || proof.output_proof.change_statement.is_some()
+}
+
 pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a PedersenCommitment>>(
     inputs: I,
     view_key: Option<&RistrettoPublicKey>,

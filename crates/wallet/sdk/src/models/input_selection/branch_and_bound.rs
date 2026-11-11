@@ -88,6 +88,15 @@ fn select_bounded<A: Into<Amount>, K: Clone>(
     max_inputs: usize,
     max_states: usize,
 ) -> Option<SelectionResult<'_, K>> {
+    select_bounded_with_stats(inputs, target, max_inputs, max_states).0
+}
+
+fn select_bounded_with_stats<A: Into<Amount>, K: Clone>(
+    inputs: &[KeyedInput<K>],
+    target: A,
+    max_inputs: usize,
+    max_states: usize,
+) -> (Option<SelectionResult<'_, K>>, usize) {
     // Sort descending to improve pruning efficiency
     // Collect references to avoid cloning keys/values unnecessarily
     let mut items = inputs.iter().collect::<Vec<_>>();
@@ -105,7 +114,7 @@ fn select_bounded<A: Into<Amount>, K: Clone>(
         .map(|i| Amount::from(i.value))
         .sum::<Amount>();
     if max_achievable < target {
-        return None;
+        return (None, 0);
     }
 
     // `remaining_sums[i]` totals `items[i..]`, so that a state's upper bound costs one lookup and the search's cost
@@ -180,7 +189,7 @@ fn select_bounded<A: Into<Amount>, K: Clone>(
         }
     }
 
-    match best_sum {
+    let selection = match best_sum {
         Some(total_value) => Some(SelectionResult {
             total_value,
             selected_keys: best_keys,
@@ -188,7 +197,8 @@ fn select_bounded<A: Into<Amount>, K: Clone>(
         // The search ran out of states before it reached any solution. The largest-first selection is one whenever
         // the target is reachable at all, which the check above has established it is.
         None => take_largest_first(&items, target, max_inputs),
-    }
+    };
+    (selection, states_explored)
 }
 
 /// The target reached with the fewest of the largest inputs, or `None` if `max_inputs` of them do not reach it.
@@ -558,7 +568,9 @@ mod tests {
             inputs.push(KeyedInput { key: i, value: 10 });
         }
 
-        let result = select_bounded(&inputs, 190u64, 10, 4).unwrap();
+        let (result, states_explored) = select_bounded_with_stats(&inputs, 190u64, 10, MAX_SEARCH_STATES);
+        let result = result.unwrap();
+        assert_eq!(states_explored, 3);
         assert_eq!(result.total_value, 190);
         assert_eq!(result.selected_keys, vec![&0, &1]);
     }

@@ -737,7 +737,7 @@ impl Replica {
                 let mut rec = change_set
                     .get_transaction_pool_record(tx, substate_store.parent_chain(), id)
                     .unwrap();
-                pin_new_transaction(&mut rec, &block.to_locked_epoch(), self.committee.shard_group()).unwrap();
+                pin_new_transaction(&mut rec, None, &block.to_locked_epoch(), self.committee.shard_group()).unwrap();
                 let prepared = self
                     .manager
                     .prepare_for_proposal(&mut substate_store, &self.committee, &rec, block.as_leaf(), &change_set)
@@ -901,7 +901,7 @@ mod local_only {
                 let mut rec = changes
                     .get_transaction_pool_record(tx, store.parent_chain(), &id)
                     .unwrap();
-                pin_new_transaction(&mut rec, &replica.candidate.to_locked_epoch(), local).unwrap();
+                pin_new_transaction(&mut rec, None, &replica.candidate.to_locked_epoch(), local).unwrap();
                 let prepared = replica
                     .manager
                     .prepare_for_proposal(&mut store, &replica.committee, &rec, block, &changes)
@@ -2764,6 +2764,93 @@ mod locked_epoch {
                     if locked_epoch == later.epoch() && b == block_epoch
             ),
             "{:?}",
+            evaluation.no_vote
+        );
+    }
+
+    #[test]
+    fn sequencing_a_new_transaction_before_its_min_epoch_is_refused() {
+        let replica = Replica::new();
+        let input = component_id(0x20);
+        replica.add_substate(&input);
+        let block_epoch = replica.candidate.epoch();
+        let min_epoch = block_epoch + Epoch(1);
+
+        let transaction = (0u64..)
+            .map(|attempt| {
+                Transaction::builder_localnet(Epoch(100))
+                    .with_min_epoch(Some(min_epoch))
+                    .add_input(SubstateRequirement::unversioned(input.clone()))
+                    .build_and_seal(&PrivateKey::from(9_000 + attempt))
+            })
+            .find(|tx| {
+                let receipt = SubstateId::TransactionReceipt(TransactionReceiptAddress::from(tx.calculate_id()));
+                replica.committee.includes_substate_id(&receipt)
+            })
+            .unwrap();
+        let id = transaction.calculate_id();
+        replica.executor.script(id, commits());
+        replica
+            .store
+            .with_write_tx(|tx| {
+                TransactionRecord::new(transaction).insert(tx)?;
+                tx.transaction_pool_insert_new(id, Decision::Commit, &Evidence::empty(), true, false, Epoch(100), 0)
+            })
+            .unwrap();
+
+        let rec = replica
+            .store
+            .with_read_tx(|tx| tx.transaction_pool_get_all(usize::MAX))
+            .unwrap()
+            .into_iter()
+            .find(|r| r.id() == &id)
+            .unwrap();
+        replica
+            .store
+            .with_read_tx(|tx| {
+                let mut substate_store = PendingSubstateStore::init(tx, replica.candidate.as_leaf(), NUM_PRESHARDS)?;
+                let change_set = ProposedBlockChangeSet::new(replica.candidate.as_leaf());
+                let sequencer = CommandSequencer::for_proposal(
+                    &replica.manager,
+                    &replica.committee,
+                    replica.candidate.as_leaf(),
+                    replica.candidate.epoch(),
+                    replica.candidate.to_locked_epoch(),
+                    usize::MAX,
+                );
+                let res = sequencer
+                    .sequence(rec, false, &mut substate_store, &change_set)
+                    .unwrap();
+                assert!(
+                    matches!(
+                        &res,
+                        Err(refusal) if matches!(
+                            refusal.reason,
+                            NoVoteReason::MinEpochAfterBlock {
+                                transaction_id,
+                                min_epoch: m,
+                                block_epoch: b,
+                            } if transaction_id == id && m == min_epoch && b == block_epoch
+                        )
+                    ),
+                    "expected proposer CommandSequencer to refuse with MinEpochAfterBlock, got {res:?}",
+                );
+                Ok::<_, StorageError>(())
+            })
+            .unwrap();
+
+        let evaluation = replica.evaluate_local_only(&[committing(id)]);
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::MinEpochAfterBlock {
+                    transaction_id,
+                    min_epoch: m,
+                    block_epoch: b,
+                }) if transaction_id == id && m == min_epoch && b == block_epoch
+            ),
+            "expected MinEpochAfterBlock, got {:?}",
             evaluation.no_vote
         );
     }

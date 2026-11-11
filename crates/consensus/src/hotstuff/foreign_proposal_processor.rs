@@ -7,6 +7,7 @@ use log::*;
 use tari_consensus_types::{BlockId, Decision, LeafBlock, PcId};
 use tari_engine_types::commit_result::RejectReason;
 use tari_ootle_common_types::{
+    Epoch,
     NumPreshards,
     ProtocolVersion,
     ShardGroup,
@@ -137,7 +138,8 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                     continue;
                 }
 
-                if tx_rec.update_locked_epoch(foreign_locked_epoch(proposal, atom)?) {
+                let min_epoch = tx_rec.get_transaction(tx)?.transaction().min_epoch();
+                if tx_rec.update_locked_epoch(foreign_locked_epoch(proposal, atom, min_epoch)?) {
                     debug!(
                         target: LOG_TARGET,
                         "🔒 Foreign proposal {} updated locked epoch for transaction {} to {}",
@@ -427,7 +429,8 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                 // An output-only shard group never receives a LocalPrepare, so this is where it first pins the
                 // transaction. Every input shard group settled on one pin before sending its LocalAccept, and executed
                 // the transaction under it.
-                tx_rec.update_locked_epoch(foreign_locked_epoch(proposal, atom)?);
+                let min_epoch = tx_rec.get_transaction(tx)?.transaction().min_epoch();
+                tx_rec.update_locked_epoch(foreign_locked_epoch(proposal, atom, min_epoch)?);
 
                 let remote_decision = atom.decision;
                 let local_decision = tx_rec.current_decision();
@@ -876,6 +879,7 @@ fn foreign_justify_qc_id(proposal: &ForeignProposal) -> Option<PcId> {
 fn foreign_locked_epoch(
     proposal: &ForeignProposal,
     atom: &MultiShardAtom,
+    min_epoch: Option<Epoch>,
 ) -> Result<LockedEpoch, ProposalValidationError> {
     if atom.locked_epoch.epoch() > proposal.epoch() {
         return Err(ProposalValidationError::ForeignTransactionPinnedAfterBlock {
@@ -884,6 +888,17 @@ fn foreign_locked_epoch(
             transaction_id: atom.id,
             locked_epoch: atom.locked_epoch.epoch(),
             block_epoch: proposal.epoch(),
+        });
+    }
+    if let Some(min_epoch) = min_epoch &&
+        atom.locked_epoch.epoch() < min_epoch
+    {
+        return Err(ProposalValidationError::ForeignTransactionPinnedBeforeMinEpoch {
+            block_id: proposal.calculate_block_id(),
+            shard_group: proposal.shard_group_unchecked(),
+            transaction_id: atom.id,
+            locked_epoch: atom.locked_epoch.epoch(),
+            min_epoch,
         });
     }
     Ok(atom.locked_epoch.clone())
@@ -1139,8 +1154,8 @@ mod tests {
         let num_preshards = NumPreshards::P256;
         let group_a = ShardGroup::new(0u32, num_preshards.as_u32() / 2 - 1);
         let group_b = ShardGroup::new(num_preshards.as_u32() / 2, num_preshards.as_u32() - 1);
-        let from_a = foreign_locked_epoch(&proposal_naming(group_a, 5, 500), &atom_pinned_to(5, 500)).unwrap();
-        let from_b = foreign_locked_epoch(&proposal_naming(group_b, 5, 700), &atom_pinned_to(5, 700)).unwrap();
+        let from_a = foreign_locked_epoch(&proposal_naming(group_a, 5, 500), &atom_pinned_to(5, 500), None).unwrap();
+        let from_b = foreign_locked_epoch(&proposal_naming(group_b, 5, 700), &atom_pinned_to(5, 700), None).unwrap();
         assert_eq!(from_a.exhaust_burn_rate().as_bps(), 500);
         assert_eq!(from_b.exhaust_burn_rate().as_bps(), 700);
 
@@ -1163,16 +1178,36 @@ mod tests {
         let group_a = ShardGroup::new(0u32, num_preshards.as_u32() / 2 - 1);
         let proposal = proposal_naming(group_a, 6, 700);
 
-        let earlier = foreign_locked_epoch(&proposal, &atom_pinned_to(5, 500)).unwrap();
+        let earlier = foreign_locked_epoch(&proposal, &atom_pinned_to(5, 500), None).unwrap();
         assert_eq!(earlier.epoch(), Epoch(5));
         assert_eq!(earlier.exhaust_burn_rate().as_bps(), 500);
-        assert!(foreign_locked_epoch(&proposal, &atom_pinned_to(6, 900)).is_ok());
+        assert!(foreign_locked_epoch(&proposal, &atom_pinned_to(6, 900), None).is_ok());
 
-        let err = foreign_locked_epoch(&proposal, &atom_pinned_to(7, 500)).unwrap_err();
+        let err = foreign_locked_epoch(&proposal, &atom_pinned_to(7, 500), None).unwrap_err();
         assert!(
             matches!(err, ProposalValidationError::ForeignTransactionPinnedAfterBlock {
                 locked_epoch: Epoch(7),
                 block_epoch: Epoch(6),
+                ..
+            }),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_foreign_atom_pinned_before_its_transaction_min_epoch_is_rejected() {
+        let num_preshards = NumPreshards::P256;
+        let group_a = ShardGroup::new(0u32, num_preshards.as_u32() / 2 - 1);
+        let proposal = proposal_naming(group_a, 6, 700);
+        let atom = atom_pinned_to(5, 500);
+
+        assert!(foreign_locked_epoch(&proposal, &atom, Some(Epoch(5))).is_ok());
+
+        let err = foreign_locked_epoch(&proposal, &atom, Some(Epoch(6))).unwrap_err();
+        assert!(
+            matches!(err, ProposalValidationError::ForeignTransactionPinnedBeforeMinEpoch {
+                locked_epoch: Epoch(5),
+                min_epoch: Epoch(6),
                 ..
             }),
             "{err}"

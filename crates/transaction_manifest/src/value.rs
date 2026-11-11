@@ -159,16 +159,20 @@ impl FromStr for ManifestValue {
 /// decodes nothing deeper, and the bound keeps parsing an untrusted variable off a deep native stack.
 pub(crate) const MAX_LIST_DEPTH: usize = tari_bor::MAX_DECODE_DEPTH;
 
-/// Parses `s` as a value nested `depth` lists deep.
-fn parse_value(s: &str, depth: usize) -> Result<ManifestValue, ManifestParseError> {
-    if let Some(inner) = s.trim().strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+/// Parses `raw` as a value nested `depth` lists deep.
+fn parse_value(raw: &str, depth: usize) -> Result<ManifestValue, ManifestParseError> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return Err(ManifestParseError(raw.to_string()));
+    }
+    if let Some(inner) = s.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
         if depth >= MAX_LIST_DEPTH {
             return Err(ManifestParseError(format!(
                 "list nested deeper than {MAX_LIST_DEPTH} levels"
             )));
         }
         return split_list(inner)
-            .ok_or_else(|| ManifestParseError(s.to_string()))?
+            .ok_or_else(|| ManifestParseError(raw.to_string()))?
             .into_iter()
             .map(|elem| {
                 parse_value(elem, depth + 1)?
@@ -185,7 +189,12 @@ fn parse_value(s: &str, depth: usize) -> Result<ManifestValue, ManifestParseErro
     if let Ok(id) = NonFungibleId::try_from_canonical_string(s) {
         return Ok(ManifestValue::NonFungibleId(id));
     }
-    if let Ok(tokens) = s.parse::<TokenStream>() &&
+
+    // A 64-character hex string is always a 32-byte key or hash, even when every hex digit happens
+    // to be `0..=9` and its decimal value fits in `i64` (such as `0000...0000` or `0000...0001`).
+    let is_64_hex_digits = s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit());
+    if !is_64_hex_digits &&
+        let Ok(tokens) = s.parse::<TokenStream>() &&
         // A literal holds no group. Rejecting groups first keeps `syn` from recursing into them.
         !tokens.clone().into_iter().any(|tt| matches!(tt, TokenTree::Group(_))) &&
         let Ok(lit) = parse2::<Lit>(tokens)
@@ -193,23 +202,22 @@ fn parse_value(s: &str, depth: usize) -> Result<ManifestValue, ManifestParseErro
         if lit_to_arg(&lit).is_ok() {
             return Ok(ManifestValue::Literal(lit));
         }
-        // An integer literal that overflows its target range is an error unless it is an unsuffixed
-        // 64-character string (a 32-byte key or hash whose hex digits happen to be 0..=9). Tokens
-        // that start with digits followed by hex letters (`044bcc...`) have a non-integer suffix in
-        // `syn` and fall through to `bytes_from_hex`.
+        // An integer literal that overflows its target range is an error. Tokens that start with
+        // digits followed by hex letters (`044bcc...`) have a non-integer suffix in `syn` and fall
+        // through to `bytes_from_hex`.
         if let Lit::Int(ref int_lit) = lit {
             let is_int_suffix = matches!(
                 int_lit.suffix(),
                 "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize"
             );
-            if is_int_suffix || (int_lit.suffix().is_empty() && s.len() != 64) {
-                return Err(ManifestParseError(s.to_string()));
+            if is_int_suffix || int_lit.suffix().is_empty() {
+                return Err(ManifestParseError(raw.to_string()));
             }
         }
     }
 
     // Try parsing as hex bytes (e.g. public keys)
-    let bytes = bytes_from_hex(s).map_err(|_| ManifestParseError(s.to_string()))?;
+    let bytes = bytes_from_hex(s).map_err(|_| ManifestParseError(raw.to_string()))?;
     Ok(ManifestValue::Value(tari_bor::Value::Bytes(bytes)))
 }
 
@@ -416,6 +424,56 @@ mod tests {
             assert!(
                 overflowing.parse::<ManifestValue>().is_err(),
                 "expected {overflowing} to be rejected by FromStr"
+            );
+        }
+    }
+
+    #[test]
+    fn leading_zero_64_digit_hex_parses_as_bytes_and_empty_input_is_rejected() {
+        let zero_pk = "0".repeat(64);
+        let one_pk = format!("{}1", "0".repeat(63));
+        let max_i64_padded = format!("{}{}", "0".repeat(45), i64::MAX);
+
+        for hex_str in [&zero_pk, &one_pk, &max_i64_padded] {
+            let expected = tari_bor::Value::Bytes(bytes_from_hex(hex_str).unwrap());
+
+            let parsed = hex_str.parse::<ManifestValue>().unwrap();
+            assert_eq!(parsed.to_value().unwrap(), expected, "misparsed {hex_str}");
+
+            let padded = format!("  {hex_str}  ").parse::<ManifestValue>().unwrap();
+            assert_eq!(padded.to_value().unwrap(), expected, "misparsed padded {hex_str}");
+
+            let in_list = format!("[{hex_str}]").parse::<ManifestValue>().unwrap();
+            assert_eq!(
+                in_list.to_value().unwrap(),
+                tari_bor::Value::Array(vec![expected.clone()])
+            );
+
+            let globals = std::collections::HashMap::from([("pk".to_string(), parsed)]);
+            crate::parse_manifest(
+                "fn main() { create_account!(pk); }",
+                globals,
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap();
+        }
+
+        // Surrounding whitespace on standalone hex and substate IDs matches list element trimming.
+        let spaced_hex = "  044bccd4d01ceb41816bc9106a836806e6f9412646ecda4c2d726d8372b2c843  "
+            .parse::<ManifestValue>()
+            .unwrap();
+        assert!(matches!(spaced_hex, ManifestValue::Value(tari_bor::Value::Bytes(_))));
+
+        let spaced_addr = "  component_0000000000000000000000000000000000000000000000000000000000000000  "
+            .parse::<ManifestValue>()
+            .unwrap();
+        assert!(spaced_addr.as_address().is_some());
+
+        for empty in ["", "   ", "\t\n"] {
+            assert!(
+                empty.parse::<ManifestValue>().is_err(),
+                "expected empty/whitespace string {empty:?} to be rejected"
             );
         }
     }

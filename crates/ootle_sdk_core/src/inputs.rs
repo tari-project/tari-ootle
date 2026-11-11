@@ -738,22 +738,27 @@ fn resolve_vault(
     let vault_ids = component_vault_ids(component)?;
 
     let mut have_all_vaults = true;
-    let mut matched = false;
+    let mut matching_vaults = Vec::new();
     for vault_id in vault_ids {
         match cache.get(&vault_id) {
             Some(Some(value)) => {
-                if let SubstateValue::Vault(vault) = value &&
-                    *vault.resource_address() == resource
-                {
-                    push_unique(resolved, InputDeclaration::write(vault_id.clone()));
-                    if resource != TARI_TOKEN {
-                        push_unique(resolved, InputDeclaration::read(resource));
-                    }
-                    matched = true;
+                let vault = value.as_vault().ok_or_else(|| {
+                    OotleSdkError::Resolution(format!(
+                        "expected a vault at '{vault_id}' referenced by component '{component_address}' but the \
+                         indexer returned a different substate kind"
+                    ))
+                })?;
+                if *vault.resource_address() == resource {
+                    matching_vaults.push(vault_id);
                 }
             },
-            // Fetched-but-absent vault: keep looking at the others.
-            Some(None) => {},
+            Some(None) => {
+                // The component referenced this vault but the indexer reports it missing — an
+                // inconsistent view, a hard error.
+                return Err(OotleSdkError::Resolution(format!(
+                    "vault '{vault_id}' referenced by component '{component_address}' was not found"
+                )));
+            },
             None => {
                 have_all_vaults = false;
                 to_fetch.push(vault_id);
@@ -761,17 +766,23 @@ fn resolve_vault(
         }
     }
 
-    if matched {
-        return Ok(true);
-    }
     if !have_all_vaults {
         // Still need to fetch some vaults before we can decide.
         return Ok(false);
     }
-    if required {
-        return Err(OotleSdkError::Resolution(format!(
-            "required vault for resource '{resource_address}' in component '{component_address}' does not exist"
-        )));
+    if matching_vaults.is_empty() {
+        if required {
+            return Err(OotleSdkError::Resolution(format!(
+                "required vault for resource '{resource_address}' in component '{component_address}' does not exist"
+            )));
+        }
+    } else {
+        for vault_id in matching_vaults {
+            push_unique(resolved, InputDeclaration::write(vault_id));
+        }
+        if resource != TARI_TOKEN {
+            push_unique(resolved, InputDeclaration::read(resource));
+        }
     }
     // Optional and not found after checking every vault → satisfied (the create instruction handles it).
     Ok(true)
@@ -817,12 +828,16 @@ fn resolve_all_vaults(
     for vault_id in vault_ids {
         match cache.get(&vault_id) {
             Some(Some(value)) => {
-                if let SubstateValue::Vault(vault) = value {
-                    push_unique(resolved, InputDeclaration::write(vault_id.clone()));
-                    let resource = *vault.resource_address();
-                    if resource != TARI_TOKEN {
-                        push_unique(resolved, InputDeclaration::write(resource));
-                    }
+                let vault = value.as_vault().ok_or_else(|| {
+                    OotleSdkError::Resolution(format!(
+                        "expected a vault at '{vault_id}' referenced by component '{component_address}' but the \
+                         indexer returned a different substate kind"
+                    ))
+                })?;
+                push_unique(resolved, InputDeclaration::write(vault_id.clone()));
+                let resource = *vault.resource_address();
+                if resource != TARI_TOKEN {
+                    push_unique(resolved, InputDeclaration::write(resource));
                 }
             },
             Some(None) => {
@@ -1324,5 +1339,41 @@ mod tests {
             assert!(decl.is_write(), "resolved write must upgrade existing read");
             assert_eq!(decl.version(), Some(SubstateVersion::from(5)));
         }
+    }
+
+    #[test]
+    fn resolve_vault_rejects_missing_referenced_vault_and_non_vault_substate() {
+        let missing_vault = VaultId::new(ObjectKey::from_array([0xdd; ObjectKey::LENGTH]));
+        let (partial, _w) = build_public_transfer_unsigned_with_wants(Network::Esmeralda, &intent_resolved()).unwrap();
+        let r1 = vec![fetched(
+            SubstateId::Component(from_component()),
+            component_substate_json(&[from_vault_id(), missing_vault]),
+        )];
+        let (partial, _w) = unwrap_need_more(apply_fetched_substates(partial, &r1).unwrap());
+
+        // Omit `missing_vault` even though `from_vault_id()` holds the target resource.
+        let r2 = vec![fetched(
+            SubstateId::Vault(from_vault_id()),
+            vault_substate_json(resource()),
+        )];
+        let err = apply_fetched_substates(partial, &r2).unwrap_err();
+        assert_eq!(err.code(), "RESOLUTION");
+        assert!(err.to_string().contains("was not found"));
+
+        // Non-vault substate at a vault ID must also fail resolution.
+        let (partial, _w) = build_public_transfer_unsigned_with_wants(Network::Esmeralda, &intent_resolved()).unwrap();
+        let (partial, _w) = unwrap_need_more(
+            apply_fetched_substates(partial, &[fetched(
+                SubstateId::Component(from_component()),
+                component_substate_json(&[from_vault_id()]),
+            )])
+            .unwrap(),
+        );
+        let err = apply_fetched_substates(partial, &[fetched(
+            SubstateId::Vault(from_vault_id()),
+            component_substate_json(&[]),
+        )])
+        .unwrap_err();
+        assert_eq!(err.code(), "RESOLUTION");
     }
 }

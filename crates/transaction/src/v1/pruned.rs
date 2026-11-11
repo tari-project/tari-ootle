@@ -79,6 +79,10 @@ pub struct PrunedUnsignedTransactionV1 {
     /// blob sizes without downloading payloads.
     #[n(9)]
     #[cbor(decode_with = "decode_blob_sizes")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "crate::blobs::deserialize_bounded_blobs")
+    )]
     #[borsh(skip)]
     pub blob_sizes: Vec<u32>,
     /// Mirrors `UnsignedTransactionV1::nonce` of the full form.
@@ -498,6 +502,15 @@ mod tests {
         let bad = Blobs::from_vec(vec![Blob::from(vec![9, 9, 9])]);
         let err = pruned.rehydrate(bad).unwrap_err();
         assert_eq!(err, BlobRehydrationError::HashMismatch { index: 0 });
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn pruned_serde_rejects_oversized_blob_sizes() {
+        let mut pruned = PrunedUnsignedTransactionV1::from(sample_unsigned_with_blobs(Blobs::empty()));
+        pruned.blob_sizes = vec![0u32; Blobs::MAX_BLOBS + 1];
+        let json = serde_json::to_string(&pruned).unwrap();
+        assert!(serde_json::from_str::<PrunedUnsignedTransactionV1>(&json).is_err());
     }
 
     #[test]

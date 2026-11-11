@@ -52,5 +52,30 @@ mod template {
             .with_access_rules(AccessRules::allow_all())
             .create()
         }
+
+        pub fn new_with_access_rules(
+            owner_rule: OwnerRule,
+            upgrade_rule: UpdateRule,
+            access_rules: ComponentAccessRules,
+            signers: MaxVec<10, RistrettoPublicKeyBytes>,
+        ) -> Component<Self> {
+            let resource_address = ResourceBuilder::non_fungible()
+                .mintable(rule!(allow_all), OWNER)
+                .build();
+
+            Component::new(Self {
+                signers,
+                manager: resource_address.into(),
+                supply_vault: Vault::new_empty(resource_address),
+            })
+            .with_owner_rule(owner_rule)
+            .with_upgrade_rule(upgrade_rule)
+            .with_access_rules(access_rules)
+            .create()
+        }
+
+        pub fn faulty_not_migrate_function(&self) {}
+
+        pub fn migrate_v1_to_v2(&self) {}
     }
 }

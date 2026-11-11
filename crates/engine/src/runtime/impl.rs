@@ -4665,11 +4665,23 @@ fn validate_component_access_rule_methods(
     template_def: &TemplateDef,
 ) -> Result<(), RuntimeError> {
     for (name, _) in access_rules.method_access_rules_iter() {
-        if template_def.functions().iter().all(|f| f.name != *name) {
-            return Err(RuntimeError::InvalidMethodAccessRule {
-                template_name: template_def.template_name().to_string(),
-                details: format!("No method '{}' found in template", name),
-            });
+        match template_def.get_function(name) {
+            Some(func) if func.has_receiver() => {},
+            Some(func) => {
+                let kind = if func.is_migration() { "migration" } else { "function" };
+                return Err(RuntimeError::InvalidMethodAccessRule {
+                    template_name: template_def.template_name().to_string(),
+                    details: format!(
+                        "'{name}' in template is a {kind}, not a component method taking &self or &mut self"
+                    ),
+                });
+            },
+            None => {
+                return Err(RuntimeError::InvalidMethodAccessRule {
+                    template_name: template_def.template_name().to_string(),
+                    details: format!("No method '{name}' found in template"),
+                });
+            },
         }
     }
     Ok(())
@@ -5706,6 +5718,188 @@ mod tests {
                 Ok::<_, RuntimeError>(())
             })
             .unwrap();
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn validate_component_access_rule_methods_rejects_static_functions_and_migrations() {
+        use tari_template_abi::{Receiver, TemplateDefV2, version};
+
+        let template_def = TemplateDef::V2(TemplateDefV2 {
+            template_name: "Sample".to_string(),
+            abi_version: version::LATEST_TEMPLATE_VERSION,
+            functions: vec![
+                FunctionDef {
+                    name: "read_method".to_string(),
+                    kind: FunctionKind::Method(Receiver::Ref),
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+                FunctionDef {
+                    name: "write_method".to_string(),
+                    kind: FunctionKind::Method(Receiver::RefMut),
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+                FunctionDef {
+                    name: "constructor".to_string(),
+                    kind: FunctionKind::Function,
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+                FunctionDef {
+                    name: "migrate_v1".to_string(),
+                    kind: FunctionKind::Migration { from: Type::Unit },
+                    arguments: vec![],
+                    output: Type::Other {
+                        name: "Sample".to_string(),
+                    },
+                },
+            ],
+        });
+
+        let valid_rules = ComponentAccessRules::new()
+            .add_method_rule("read_method", AccessRule::AllowAll)
+            .add_method_rule("write_method", AccessRule::DenyAll);
+        validate_component_access_rule_methods(&valid_rules, &template_def).unwrap();
+
+        let static_fn_rules = ComponentAccessRules::new().add_method_rule("constructor", AccessRule::DenyAll);
+        let err = validate_component_access_rule_methods(&static_fn_rules, &template_def).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                RuntimeError::InvalidMethodAccessRule { template_name, details }
+                    if template_name == "Sample" &&
+                        details == "'constructor' in template is a function, not a component method taking &self or &mut self"
+            ),
+            "unexpected error: {err:?}"
+        );
+
+        let migration_rules = ComponentAccessRules::new().add_method_rule("migrate_v1", AccessRule::DenyAll);
+        let err = validate_component_access_rule_methods(&migration_rules, &template_def).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                RuntimeError::InvalidMethodAccessRule { template_name, details }
+                    if template_name == "Sample" &&
+                        details == "'migrate_v1' in template is a migration, not a component method taking &self or &mut self"
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn component_create_and_set_access_rules_reject_static_function_method_rule() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let entity_id = EntityId::default();
+
+        // `Account::create` is a static `FunctionKind::Function`, not a component method.
+        let invalid_rules = ComponentAccessRules::new().add_method_rule("create", AccessRule::DenyAll);
+
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address: ACCOUNT_TEMPLATE_ADDRESS,
+                    module_name: "Account".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+        let create_arg = CreateComponentArg {
+            encoded_state: tari_bor::Value::Null,
+            owner_rule: OwnerRule::None,
+            access_rules: invalid_rules.clone(),
+            address_allocation: None,
+            upgrade_rule: UpdateRule::Locked,
+        };
+        let err = runtime
+            .component_invoke(
+                ComponentRef::Component,
+                ComponentAction::Create,
+                EngineArgs::from(vec![tari_bor::encode(&create_arg).unwrap().into()]),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                RuntimeError::InvalidMethodAccessRule { template_name, details }
+                    if template_name == "Account" &&
+                        details == "'create' in template is a function, not a component method taking &self or &mut self"
+            ),
+            "unexpected error: {err:?}"
+        );
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+
+        let component_address =
+            create_account_component_with_method_rules(&runtime, entity_id, ComponentAccessRules::new());
+        let component_lock = runtime.lock_component(component_address, LockFlag::Write).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address: ACCOUNT_TEMPLATE_ADDRESS,
+                    module_name: "Account".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock,
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+        let err = runtime
+            .component_invoke(
+                ComponentRef::Ref(component_address),
+                ComponentAction::SetAccessRules,
+                EngineArgs::from(vec![tari_bor::encode(&invalid_rules).unwrap().into()]),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                RuntimeError::InvalidMethodAccessRule { template_name, details }
+                    if template_name == "Account" &&
+                        details == "'create' in template is a function, not a component method taking &self or &mut self"
+            ),
+            "unexpected error: {err:?}"
+        );
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn update_component_template_rejects_method_rule_naming_static_function_on_target() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let entity_id = EntityId::default();
+
+        // `"create"` exists on `Account`, but only as a static `FunctionKind::Function`.
+        let access_rules = ComponentAccessRules::new().add_method_rule("create", AccessRule::DenyAll);
+        let component_address = create_account_component_with_method_rules(&runtime, entity_id, access_rules);
+        let migration_lock = runtime.lock_component(component_address, LockFlag::Write).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::MigrationContext {
+                    template_address: ACCOUNT_TEMPLATE_ADDRESS,
+                    module_name: "Account".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: migration_lock,
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+
+        let err = runtime.update_component_template(ACCOUNT_TEMPLATE_ADDRESS).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                RuntimeError::InvalidMethodAccessRule { template_name, details }
+                    if template_name == "Account" &&
+                        details == "'create' in template is a function, not a component method taking &self or &mut self"
+            ),
+            "unexpected error: {err:?}"
+        );
         runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
     }
 }

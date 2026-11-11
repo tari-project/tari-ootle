@@ -7,7 +7,14 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_template_builtin::LIQUIDITY_POOL_TEMPLATE_ADDRESS;
-use tari_template_lib::types::{Amount, ComponentAddress, ResourceAddress, TemplateAddress, constants::TARI_TOKEN};
+use tari_template_lib::types::{
+    Amount,
+    ComponentAddress,
+    ResourceAddress,
+    TemplateAddress,
+    constants::TARI_TOKEN,
+    precision::PrecisionAmount,
+};
 
 use crate::{
     apis::substate::{SubstateApiError, SubstatesApi},
@@ -87,18 +94,28 @@ impl PoolReserves {
 ///
 /// Includes a [`SLIPPAGE_MARGIN_PERCENT`] slippage margin and uses ceiling division to avoid integer truncation.
 pub fn calculate_swap_input(desired_output: Amount, reserve_in: Amount, reserve_out: Amount) -> Option<Amount> {
-    if reserve_out <= desired_output {
+    if !desired_output.is_positive() || !reserve_in.is_positive() || reserve_out <= desired_output {
         return None;
     }
+    // Match the on-chain liquidity pool's 192-bit `PrecisionAmount` arithmetic so valid 18-decimal reserves do not
+    // overflow `u128` in `desired_output * reserve_in * (100 + margin)`.
     // ceil(desired_output * reserve_in * (100 + margin) / ((reserve_out - desired_output) * 100))
-    let numerator = desired_output
-        .to_u128()
-        .checked_mul(reserve_in.to_u128())?
-        .checked_mul(100 + SLIPPAGE_MARGIN_PERCENT)?;
-    let denominator = reserve_out.checked_sub(desired_output)?.to_u128().checked_mul(100)?;
-    // Ceiling division: (a + b - 1) / b
-    let result = numerator.checked_add(denominator - 1)? / denominator;
-    Some(Amount::new(result))
+    let desired = desired_output.into_precision_amount();
+    let reserve_in_prec = reserve_in.into_precision_amount();
+    let reserve_out_prec = reserve_out.into_precision_amount();
+    let remaining_out = reserve_out.checked_sub(desired_output)?.into_precision_amount();
+
+    let numerator = desired
+        .checked_mul(reserve_in_prec)?
+        .checked_mul(PrecisionAmount::from(100 + SLIPPAGE_MARGIN_PERCENT))?;
+    let denominator = remaining_out.checked_mul(PrecisionAmount::from(100u128))?;
+    let dx = numerator.checked_div_ceil(denominator)?;
+
+    // Ensure the derived input also stays within the on-chain swap's 192-bit `dx * reserve_out` and `reserve_in + dx`
+    // bounds.
+    let _ = dx.checked_mul(reserve_out_prec)?;
+    let _ = reserve_in_prec.checked_add(dx)?;
+    Amount::try_from(dx).ok().filter(Amount::is_positive)
 }
 
 /// Fetches and resolves the vault reserves of a liquidity pool component from the network.
@@ -287,5 +304,36 @@ mod tests {
             balance_b: amt(500),
         };
         assert_eq!(reserves.tari_swap_reserves(), None);
+    }
+
+    #[test]
+    fn returns_none_when_desired_output_or_input_reserve_is_zero() {
+        assert_eq!(calculate_swap_input(Amount::zero(), amt(1_000), amt(1_000)), None);
+        assert_eq!(calculate_swap_input(amt(100), Amount::zero(), amt(1_000)), None);
+    }
+
+    #[test]
+    fn handles_18_decimal_reserves_without_intermediate_u128_overflow() {
+        let reserve_in = amt(4_000_000_000_000_000_000); // 4 * 10^18
+        let reserve_out = amt(20_000_000_000_000_000_000); // 2 * 10^19
+        let desired = amt(10_000_000_000_000_000_000); // 10^19
+
+        let input = calculate_swap_input(desired, reserve_in, reserve_out)
+            .expect("192-bit intermediate math should not overflow on 18-decimal reserves");
+        assert_eq!(input, amt(4_200_000_000_000_000_000));
+
+        let dx = input.into_precision_amount();
+        let on_chain_out = Amount::try_from(
+            dx.checked_mul(reserve_out.into_precision_amount())
+                .and_then(|num| {
+                    reserve_in
+                        .into_precision_amount()
+                        .checked_add(dx)
+                        .and_then(|denom| num.checked_div(denom))
+                })
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(on_chain_out >= desired);
     }
 }

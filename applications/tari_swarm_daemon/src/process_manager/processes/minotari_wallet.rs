@@ -1,7 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{fs::File, path::PathBuf};
+use std::path::{Path, PathBuf};
 
 use anyhow::anyhow;
 use log::{error, info};
@@ -146,8 +146,7 @@ impl MinoTariWalletProcess {
                 mined_in_epoch,
             };
 
-            let mut file = File::create(&path)?;
-            serde_json::to_writer_pretty(&mut file, &proof)?;
+            write_claim_burn_proof_file(&path, &proof).await?;
             break;
         }
 
@@ -189,4 +188,76 @@ pub struct BurnClaimProofResponse {
     pub tx_id: u64,
     pub claim_public_key: RistrettoPublicKeyBytes,
     pub commitment: PedersenCommitmentBytes,
+}
+
+async fn write_claim_burn_proof_file(path: &Path, proof: &CompleteClaimBurnProof) -> anyhow::Result<()> {
+    let bytes = serde_json::to_vec_pretty(proof)?;
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let tmp_path = path.with_extension("json.tmp");
+    tokio::fs::write(&tmp_path, &bytes).await?;
+    if let Err(err) = tokio::fs::rename(&tmp_path, path).await {
+        let _ = tokio::fs::remove_file(&tmp_path).await;
+        return Err(err.into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_sidechain::{BurnOutputProof, MmrInclusionProof, OutputHashPreimage};
+
+    use super::*;
+
+    fn empty_mmr_proof() -> MmrInclusionProof {
+        MmrInclusionProof {
+            leaf_index: 0,
+            mmr_size: 1,
+            path: vec![],
+            peaks: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn write_claim_burn_proof_file_writes_atomically_and_removes_tmp_sibling() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("misc").join("burn_proof-42.json");
+        let proof = CompleteClaimBurnProof {
+            claim_proof: BurnClaimProof {
+                burn_public_key: CompressedPublicKey::default(),
+                ownership_proof: CompressedRistrettoSchnorr::default(),
+                output_proof: BurnOutputProof {
+                    block_hash: Default::default(),
+                    block_height: 100,
+                    output: OutputHashPreimage {
+                        version: 1,
+                        features: vec![1, 2],
+                        commitment: Default::default(),
+                        rangeproof_hash: Default::default(),
+                        script: vec![3],
+                        sender_offset_public_key: Default::default(),
+                        metadata_signature: Default::default(),
+                        covenant: vec![0],
+                        encrypted_data: vec![9; 10],
+                        minimum_value_promise: 0,
+                    },
+                    normal_output_proof: empty_mmr_proof(),
+                    normal_output_mr: Default::default(),
+                    block_output_proof: empty_mmr_proof(),
+                },
+                value: 1000,
+            },
+            encrypted_data: vec![1, 2, 3],
+            mined_in_epoch: 7,
+        };
+
+        write_claim_burn_proof_file(&nested, &proof).await.unwrap();
+        assert!(nested.exists());
+        assert!(!nested.with_extension("json.tmp").exists());
+        let decoded: CompleteClaimBurnProof =
+            serde_json::from_slice(&tokio::fs::read(&nested).await.unwrap()).unwrap();
+        assert_eq!(decoded.claim_proof.value, 1000);
+        assert_eq!(decoded.mined_in_epoch, 7);
+    }
 }

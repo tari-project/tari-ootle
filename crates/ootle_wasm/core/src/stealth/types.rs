@@ -47,6 +47,12 @@ pub struct OutputWitnessJson {
 
 impl OutputWitnessJson {
     pub(crate) fn try_into_witness(self) -> Result<OutputWitness, OotleWasmError> {
+        if self.minimum_value_promise > self.amount {
+            return Err(OotleWasmError::Stealth(format!(
+                "minimum_value_promise ({}) must be <= amount ({})",
+                self.minimum_value_promise, self.amount
+            )));
+        }
         let mask = decode_secret_key(&self.mask, "mask")?;
         let sender_public_nonce = decode_public_key(&self.sender_public_nonce, "sender_public_nonce")?;
         let resource_view_key = self
@@ -174,14 +180,72 @@ pub(crate) fn decode_public_key(hex_str: &str, field: &'static str) -> Result<Ri
 }
 
 fn decode_fixed_hex<const N: usize>(hex_str: &str, field: &'static str) -> Result<[u8; N], OotleWasmError> {
-    if hex_str.len() != N * 2 {
-        return Err(OotleWasmError::InvalidByteLength {
-            field,
-            expected: N,
-            got: hex_str.len() / 2,
-        });
+    let bytes = hex::decode(hex_str)?;
+    bytes.try_into().map_err(|v: Vec<u8>| OotleWasmError::InvalidByteLength {
+        field,
+        expected: N,
+        got: v.len(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_crypto::keys::{PublicKey, SecretKey};
+
+    use super::*;
+
+    fn sample_output_witness_json(amount: u64, minimum_value_promise: u64) -> OutputWitnessJson {
+        let mask = RistrettoSecretKey::random(&mut rand::rng());
+        let nonce = RistrettoPublicKey::from_secret_key(&mask);
+        OutputWitnessJson {
+            amount,
+            mask: hex::encode(mask.as_bytes()),
+            sender_public_nonce: hex::encode(nonce.as_bytes()),
+            minimum_value_promise,
+            encrypted_data: EncryptedData::try_from(vec![0u8; EncryptedData::min_size()]).unwrap(),
+            resource_view_key: None,
+        }
     }
-    let mut out = [0u8; N];
-    hex::decode_to_slice(hex_str, &mut out)?;
-    Ok(out)
+
+    #[test]
+    fn try_into_witness_rejects_minimum_value_promise_above_amount() {
+        let json = sample_output_witness_json(100, 101);
+        let err = json.try_into_witness().unwrap_err();
+        assert!(matches!(err, OotleWasmError::Stealth(ref msg) if msg.contains("minimum_value_promise")));
+    }
+
+    #[test]
+    fn try_into_witness_accepts_minimum_value_promise_at_amount() {
+        let json = sample_output_witness_json(100, 100);
+        let witness = json.try_into_witness().unwrap();
+        assert_eq!(witness.amount, 100);
+        assert_eq!(witness.minimum_value_promise, 100);
+    }
+
+    #[test]
+    fn decode_fixed_hex_reports_invalid_hex_on_odd_length_or_non_hex() {
+        let odd_65 = format!("{}a", "00".repeat(32));
+        let err = decode_secret_key(&odd_65, "mask").unwrap_err();
+        assert!(matches!(err, OotleWasmError::InvalidHex(hex::FromHexError::OddLength)));
+
+        let err = decode_secret_key("zz", "mask").unwrap_err();
+        assert!(matches!(
+            err,
+            OotleWasmError::InvalidHex(hex::FromHexError::InvalidHexCharacter { .. })
+        ));
+    }
+
+    #[test]
+    fn decode_fixed_hex_reports_decoded_byte_length_on_mismatch() {
+        let short_hex = "00".repeat(31);
+        let err = decode_secret_key(&short_hex, "mask").unwrap_err();
+        assert!(matches!(
+            err,
+            OotleWasmError::InvalidByteLength {
+                field: "mask",
+                expected: 32,
+                got: 31,
+            }
+        ));
+    }
 }

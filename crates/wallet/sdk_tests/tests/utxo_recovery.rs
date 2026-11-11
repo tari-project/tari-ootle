@@ -761,3 +761,32 @@ async fn an_output_spent_while_it_is_looked_up_is_not_recovered_unspent() {
     assert!(!is_stored(&test, id));
     assert_eq!(balance(&test, &account), Amount::zero());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_output_looked_up_while_another_unheld_output_is_spent_is_recovered() {
+    let network = UtxoNetwork::default();
+    let (test, account) = new_test(network.clone());
+    let (id, utxo) = test.owned_utxo(&account, 100);
+    let other = second_account(&test);
+    let (unheld_id, _) = test.owned_utxo(&other, 50);
+    network.index((id, utxo.clone()));
+    queue_at(&test, &account, &utxo, None);
+    assert_eq!(queued_entries(&test), 1);
+
+    // While the lookup is made, a scan streams the spend of an output the wallet does not hold. The spend is not of
+    // the output the lookup returned, so the lookup stays good.
+    let sdk = test.sdk().clone();
+    let account_address = *account.account.component_address();
+    let network_in_lookup = network.clone();
+    network.on_next_lookup(move || async move {
+        network_in_lookup.stream_later(WalletUtxoUpdate::Spent(UtxoSpent {
+            id: unheld_id,
+            version: SubstateVersion::ZERO,
+        }));
+        scan_with(sdk, account_address).await;
+    });
+    assert_eq!(recover(&test).await, 0);
+    assert_eq!(queued_entries(&test), 0);
+    assert!(is_stored(&test, id));
+    assert_eq!(balance(&test, &account), Amount::from_u64(100));
+}

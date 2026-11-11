@@ -3171,16 +3171,38 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(num_removed)
     }
 
-    fn utxo_process_queue_invalidate(
+    fn utxo_unheld_spends_insert(
         &mut self,
         resource_address: &ResourceAddress,
-    ) -> Result<usize, WalletStorageError> {
-        const OPERATION: &str = "utxo_process_queue_invalidate";
-        use crate::schema::utxo_process_queue;
+        commitments: &[PedersenCommitmentBytes],
+    ) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "utxo_unheld_spends_insert";
+        use crate::schema::utxo_unheld_spends;
 
-        diesel::update(utxo_process_queue::table)
-            .filter(utxo_process_queue::resource_address.eq(resource_address.to_string()))
-            .set(utxo_process_queue::generation.eq(utxo_process_queue::generation + 1))
+        let resource_address = resource_address.to_string();
+        let rows = commitments
+            .iter()
+            .map(|commitment| {
+                (
+                    utxo_unheld_spends::resource_address.eq(&resource_address),
+                    utxo_unheld_spends::commitment.eq(crate::serialization::serialize_hex(commitment)),
+                )
+            })
+            .collect::<Vec<_>>();
+        diesel::insert_into(utxo_unheld_spends::table)
+            .values(rows)
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        Ok(())
+    }
+
+    fn utxo_unheld_spends_prune(&mut self, watermark: u64) -> Result<usize, WalletStorageError> {
+        const OPERATION: &str = "utxo_unheld_spends_prune";
+        use crate::schema::utxo_unheld_spends;
+
+        let watermark = i32::try_from(watermark).unwrap_or(i32::MAX);
+        diesel::delete(utxo_unheld_spends::table)
+            .filter(utxo_unheld_spends::id.le(watermark))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))
     }

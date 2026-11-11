@@ -411,12 +411,14 @@ pub trait WalletStoreWriter: CommittableStore {
     /// Removes each of `entries` that is still queued at its generation. An entry queued again since it was read
     /// stays queued. Returns the number removed.
     fn utxo_process_queue_ack(&mut self, entries: &[QueuedEntry]) -> Result<usize, WalletStorageError>;
-    /// Advances the generation of every entry queued for the resource, so that no lookup made before is
-    /// acknowledged. Returns the number of entries advanced.
-    fn utxo_process_queue_invalidate(
+    /// Records spends of outputs of the resource that the wallet does not hold, after every one recorded before.
+    fn utxo_unheld_spends_insert(
         &mut self,
         resource_address: &ResourceAddress,
-    ) -> Result<usize, WalletStorageError>;
+        commitments: &[PedersenCommitmentBytes],
+    ) -> Result<(), WalletStorageError>;
+    /// Removes the recorded unheld spends at or below `watermark`. Returns the number removed.
+    fn utxo_unheld_spends_prune(&mut self, watermark: u64) -> Result<usize, WalletStorageError>;
 
     // Address book
     fn address_book_insert(

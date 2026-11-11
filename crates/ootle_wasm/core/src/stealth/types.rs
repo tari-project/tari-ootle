@@ -180,12 +180,19 @@ pub(crate) fn decode_public_key(hex_str: &str, field: &'static str) -> Result<Ri
 }
 
 fn decode_fixed_hex<const N: usize>(hex_str: &str, field: &'static str) -> Result<[u8; N], OotleWasmError> {
-    let bytes = hex::decode(hex_str)?;
-    bytes.try_into().map_err(|v: Vec<u8>| OotleWasmError::InvalidByteLength {
-        field,
-        expected: N,
-        got: v.len(),
-    })
+    if !hex_str.len().is_multiple_of(2) {
+        return Err(hex::FromHexError::OddLength.into());
+    }
+    if hex_str.len() != N * 2 {
+        return Err(OotleWasmError::InvalidByteLength {
+            field,
+            expected: N,
+            got: hex_str.len() / 2,
+        });
+    }
+    let mut out = [0u8; N];
+    hex::decode_to_slice(hex_str, &mut out)?;
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -228,7 +235,8 @@ mod tests {
         let err = decode_secret_key(&odd_65, "mask").unwrap_err();
         assert!(matches!(err, OotleWasmError::InvalidHex(hex::FromHexError::OddLength)));
 
-        let err = decode_secret_key("zz", "mask").unwrap_err();
+        let non_hex_64 = "zz".repeat(32);
+        let err = decode_secret_key(&non_hex_64, "mask").unwrap_err();
         assert!(matches!(
             err,
             OotleWasmError::InvalidHex(hex::FromHexError::InvalidHexCharacter { .. })

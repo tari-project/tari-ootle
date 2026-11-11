@@ -182,7 +182,8 @@ impl<'a> PackedCallInfoReader<'a> {
     /// Returns None if there are no more arguments to read
     ///
     /// # Panics
-    /// Panics if the argument length prefix is truncated or if the argument length exceeds the data bounds (malformed data).
+    /// Panics if the argument length prefix is truncated or if the argument length exceeds the data bounds (malformed
+    /// data).
     pub fn next_arg(&mut self) -> Option<&'a [u8]> {
         if self.payload_offset == self.data.len() {
             return None;

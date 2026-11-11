@@ -78,4 +78,21 @@ describe("feeReceiptFigures", () => {
     expect(figures.totalFeesPaid).toBe(100n);
     expect(figures.totalRefunded).toBe(900n);
   });
+
+  it("handles receipt fields that arrive as plain JSON numbers", () => {
+    // The wallet JSON-RPC client decodes u64 fields with response.json(), so they are numbers at runtime.
+    const wire = JSON.parse(
+      '{"total_fee_payment":1000,"total_fees_paid":100,"total_fee_overcharge":0,"exhaust_burn":0,"cost_breakdown":{"breakdown":{"Initial":100}}}',
+    ) as FeeReceipt;
+
+    const withFinalFee = feeReceiptFigures(wire, 100);
+    expect(withFinalFee.totalFeesPaid).toBe(100n);
+    expect(withFinalFee.totalFeesCharged).toBe(100n);
+    expect(withFinalFee.totalRefunded).toBe(900n);
+    expect(withFinalFee.overcharge).toBe(0n);
+
+    const withoutFinalFee = feeReceiptFigures(wire, null);
+    expect(withoutFinalFee.totalFeesPaid).toBe(100n);
+    expect(withoutFinalFee.totalRefunded).toBe(900n);
+  });
 });

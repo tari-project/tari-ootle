@@ -364,6 +364,12 @@ impl Default for FeeReceipt {
     }
 }
 
+/// The kind of work a fee charge pays for, one row of a [`FeeBreakdown`].
+///
+/// Append new variants at the end, with the next discriminant and `#[n]` index. Decoding a
+/// [`FeeBreakdown`] requires its rows in strictly ascending order of the derived `Ord`, which
+/// compares discriminants. Inserting, reordering or renumbering a variant changes that order,
+/// and committed receipts written under the old order then fail to decode.
 #[repr(u8)]
 #[derive(
     Debug,
@@ -644,6 +650,14 @@ mod tests {
                 FeeSource::InputFanout => {},
             }
         }
+    }
+
+    #[test]
+    fn fee_source_order_follows_consecutive_discriminants() {
+        for (index, source) in FeeSource::ALL.into_iter().enumerate() {
+            assert_eq!(source as usize, index, "{source:?} is out of declaration order");
+        }
+        assert!(FeeSource::ALL.is_sorted_by(|a, b| a < b));
     }
 
     #[test]

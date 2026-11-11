@@ -460,8 +460,54 @@ impl FeeSource {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FeeBreakdown {
     #[n(0)]
-    #[cbor(with = "tari_bor::adapters::indexmap_codec")]
+    #[cbor(
+        encode_with = "tari_bor::adapters::indexmap_codec::encode",
+        decode_with = "decode_breakdown",
+        cbor_len = "tari_bor::adapters::indexmap_codec::cbor_len"
+    )]
+    #[serde(deserialize_with = "deserialize_breakdown")]
     breakdown: IndexMap<FeeSource, u64>,
+}
+
+// Keep decoded breakdowns in the same canonical form that `add` and `set` maintain: only non-zero charges, sorted by
+// `FeeSource`. Re-encoding a decoded receipt for `SubstateHashMessage` or iterating with `FeeBreakdown::iter` is then
+// independent of the key order or zero-charge rows a peer sent.
+fn normalize_breakdown(mut breakdown: IndexMap<FeeSource, u64>) -> IndexMap<FeeSource, u64> {
+    breakdown.retain(|_, &mut amount| amount != 0);
+    breakdown.sort_keys();
+    breakdown
+}
+
+fn decode_breakdown<'b, C>(
+    d: &mut minicbor::Decoder<'b>,
+    ctx: &mut C,
+) -> Result<IndexMap<FeeSource, u64>, minicbor::decode::Error> {
+    tari_bor::adapters::indexmap_codec::decode(d, ctx).map(normalize_breakdown)
+}
+
+fn deserialize_breakdown<'de, D>(deserializer: D) -> Result<IndexMap<FeeSource, u64>, D::Error>
+where D: serde::Deserializer<'de> {
+    struct BreakdownVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for BreakdownVisitor {
+        type Value = IndexMap<FeeSource, u64>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "a map from FeeSource to u64")
+        }
+
+        fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut breakdown = IndexMap::with_capacity(map.size_hint().unwrap_or(0).min(FeeSource::ALL.len()));
+            while let Some((source, amount)) = map.next_entry()? {
+                if breakdown.insert(source, amount).is_some() {
+                    return Err(serde::de::Error::custom("duplicate fee source in FeeBreakdown"));
+                }
+            }
+            Ok(normalize_breakdown(breakdown))
+        }
+    }
+
+    deserializer.deserialize_map(BreakdownVisitor)
 }
 
 impl FeeBreakdown {
@@ -617,5 +663,59 @@ mod tests {
         breakdown.add(FeeSource::Initial, 100);
         breakdown.add(FeeSource::Initial, 0);
         assert_eq!(breakdown.iter().collect::<Vec<_>>(), vec![(&FeeSource::Initial, &100)]);
+    }
+
+    #[test]
+    fn decode_and_deserialize_normalize_key_order_and_zero_charges() {
+        let mut canonical = FeeBreakdown::default();
+        canonical.add(FeeSource::Initial, 10);
+        canonical.add(FeeSource::Storage, 30);
+        canonical.add(FeeSource::WasmExecution, 20);
+
+        let mut e = minicbor::Encoder::new(Vec::new());
+        e.array(1)
+            .unwrap()
+            .map(4)
+            .unwrap()
+            .encode(FeeSource::WasmExecution)
+            .unwrap()
+            .u64(20)
+            .unwrap()
+            .encode(FeeSource::InputFanout)
+            .unwrap()
+            .u64(0)
+            .unwrap()
+            .encode(FeeSource::Storage)
+            .unwrap()
+            .u64(30)
+            .unwrap()
+            .encode(FeeSource::Initial)
+            .unwrap()
+            .u64(10)
+            .unwrap();
+        let decoded: FeeBreakdown = tari_bor::decode(e.writer()).unwrap();
+        assert_eq!(decoded, canonical);
+        assert_eq!(decoded.iter().collect::<Vec<_>>(), canonical.iter().collect::<Vec<_>>());
+        assert_eq!(
+            tari_bor::encode(&decoded).unwrap(),
+            tari_bor::encode(&canonical).unwrap()
+        );
+        assert_eq!(borsh::to_vec(&decoded).unwrap(), borsh::to_vec(&canonical).unwrap());
+
+        let json = r#"{"breakdown":{"WasmExecution":20,"InputFanout":0,"Storage":30,"Initial":10}}"#;
+        let deserialized: FeeBreakdown = serde_json::from_str(json).unwrap();
+        assert_eq!(deserialized, canonical);
+        assert_eq!(
+            deserialized.iter().collect::<Vec<_>>(),
+            canonical.iter().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            tari_bor::encode(&deserialized).unwrap(),
+            tari_bor::encode(&canonical).unwrap()
+        );
+
+        let duplicate_json = r#"{"breakdown":{"Storage":1,"Storage":2}}"#;
+        let err = serde_json::from_str::<FeeBreakdown>(duplicate_json).unwrap_err();
+        assert!(err.to_string().contains("duplicate fee source in FeeBreakdown"));
     }
 }

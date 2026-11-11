@@ -36,14 +36,8 @@ pub struct CallInfo;
 impl CallInfo {
     #[cfg(feature = "std")]
     pub fn encode_v1_packed_size(args: &[tari_bor::Value]) -> Result<usize, tari_bor::BorError> {
-        let mut total_args_len = 0usize;
-        for arg in args {
-            let len = tari_bor::encoded_len(&arg);
-            u32::try_from(len).map_err(|_| tari_bor::BorError::new("Argument length exceeds u32".to_string()))?;
-            total_args_len += len;
-        }
-        let total_len = CallHeader::SIZE + total_args_len + args.len() * size_of::<u32>();
-        Ok(total_len)
+        packed_size(args.iter().map(|a| tari_bor::encoded_len(&a)))
+            .ok_or_else(|| tari_bor::BorError::new("encoded call size overflows usize".to_string()))
     }
 
     /// Encodes `func` and `args` in the v1 packed format in a single pass, returning `Ok(None)` as
@@ -146,6 +140,19 @@ impl tari_bor::minicbor::encode::Write for BoundedVecWriter<'_> {
         self.buf.extend_from_slice(data);
         Ok(())
     }
+}
+
+/// Size of a packed call whose encoded arguments have the given lengths, or `None` if it overflows `usize`.
+#[cfg(feature = "std")]
+fn packed_size<I: IntoIterator<Item = usize>>(arg_lens: I) -> Option<usize> {
+    let mut total_args_len = 0usize;
+    let mut num_args = 0usize;
+    for len in arg_lens {
+        total_args_len = total_args_len.checked_add(len)?;
+        num_args = num_args.checked_add(1)?;
+    }
+    let prefixes_len = num_args.checked_mul(size_of::<u32>())?;
+    CallHeader::SIZE.checked_add(total_args_len)?.checked_add(prefixes_len)
 }
 
 pub struct CallHeader {
@@ -371,5 +378,24 @@ mod tests {
         reader.decode_header();
         assert!(reader.next_arg().is_some());
         reader.next_arg();
+    }
+
+    #[test]
+    fn packed_size_counts_header_prefixes_and_args() {
+        assert_eq!(packed_size([]), Some(CallHeader::SIZE));
+        assert_eq!(
+            packed_size([3, 5]),
+            Some(CallHeader::SIZE + 3 + 5 + 2 * size_of::<u32>())
+        );
+    }
+
+    #[test]
+    fn packed_size_returns_none_on_overflow() {
+        assert_eq!(packed_size([usize::MAX, 1]), None);
+        assert_eq!(packed_size([usize::MAX - CallHeader::SIZE]), None);
+        assert_eq!(
+            packed_size([usize::MAX - CallHeader::SIZE - size_of::<u32>()]),
+            Some(usize::MAX)
+        );
     }
 }

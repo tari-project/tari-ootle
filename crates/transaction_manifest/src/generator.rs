@@ -125,7 +125,14 @@ impl ManifestInstructionGenerator {
 
         let mut fee_instructions = Vec::with_capacity(ast.parsed.fee_instruction_intents.len());
         for intent in ast.parsed.fee_instruction_intents {
-            fee_instructions.extend(self.translate_intent(intent)?);
+            for instruction in self.translate_intent(intent)? {
+                if !instruction.is_allowed_in_fee_intent() {
+                    return Err(ManifestError::InvalidInstruction {
+                        reason: format!("Instruction {instruction} is not permitted in fee_main()"),
+                    });
+                }
+                fee_instructions.push(instruction);
+            }
         }
 
         Ok(ManifestInstructions {

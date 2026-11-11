@@ -1852,3 +1852,19 @@ fn non_fungible_id_macro_enforces_u8_and_u16_bounds() {
         );
     }
 }
+
+#[test]
+fn publish_template_in_fee_main_is_rejected() {
+    use tari_ootle_transaction::Blob;
+
+    let blobs = HashMap::from([("wasm".to_string(), Blob::from(vec![0u8, 0x61, 0x73, 0x6d]))]);
+    let err = parse_manifest(
+        "fn fee_main() { publish_template!(wasm); } fn main() {}",
+        HashMap::new(),
+        Default::default(),
+        blobs,
+    )
+    .err()
+    .expect("publish_template! in fee_main() must be rejected");
+    assert!(err.to_string().contains("not permitted in fee_main()"), "{err}");
+}

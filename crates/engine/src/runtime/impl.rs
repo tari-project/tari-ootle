@@ -2794,48 +2794,50 @@ where
                 })?;
                 let arg: VaultWithdrawArg = args.assert_one_arg()?;
 
+                // Enforce confidential limits before substate reads, authorization hooks, or proof crypto run.
+                if let VaultWithdrawArg::Confidential { proof } = &arg {
+                    self.tracker.write_with(|state| {
+                        state.check_write_allowed(&SubstateId::Vault(vault_id))?;
+                        state.admit_confidential_withdraw(proof)
+                    })?;
+                }
+
                 let resource_address =
                     self.authorize_vault_action(vault_id, ResourceAuthAction::Withdraw, VaultFreezeFlag::Withdrawals)?;
 
-                let maybe_view_key = if matches!(&arg, VaultWithdrawArg::Confidential { .. }) {
-                    self.tracker.write_with(|state_mut| {
-                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
-                        let resource = state_mut.get_resource(&resource_lock)?;
-                        let maybe_view_key =
-                            resource
-                                .to_view_key_public_key()
-                                .map_err(|e| RuntimeError::InvariantError {
-                                    function: "VaultAction::Withdraw",
-                                    details: format!(
-                                        "Resource {} has a malformed view key: {}",
-                                        resource_lock.substate_id(),
-                                        e
-                                    ),
-                                })?;
-                        state_mut.unlock_substate(resource_lock)?;
-                        Ok::<_, RuntimeError>(maybe_view_key)
-                    })?
-                } else {
-                    None
-                };
-
                 // Charge the withdraw's native verification cost against the payment-funded
-                // allowance before any of its proof crypto runs.
-                if let VaultWithdrawArg::Confidential { proof } = &arg {
-                    self.tracker
-                        .charge_native_execution(tari_engine_types::confidential::withdraw_native_points(
-                            proof,
-                            maybe_view_key.is_some(),
-                        ))?;
-                }
+                // allowance before any of its proof crypto (including view-key decompression) runs.
+                let maybe_view_key =
+                    if let VaultWithdrawArg::Confidential { proof } = &arg {
+                        let view_key_bytes = self.tracker.write_with(|state_mut| {
+                            let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
+                            let view_key_bytes = state_mut.get_resource(&resource_lock)?.view_key().copied();
+                            state_mut.unlock_substate(resource_lock)?;
+                            Ok::<_, RuntimeError>(view_key_bytes)
+                        })?;
+                        self.tracker.charge_native_execution(
+                            tari_engine_types::confidential::withdraw_native_points(proof, view_key_bytes.is_some()),
+                        )?;
+                        view_key_bytes
+                            .map(|bytes| {
+                                RistrettoPublicKey::from_canonical_bytes(bytes.as_bytes()).map_err(|e| {
+                                    RuntimeError::InvariantError {
+                                        function: "VaultAction::Withdraw",
+                                        details: format!(
+                                            "Resource {} has a malformed view key: {}",
+                                            SubstateId::Resource(resource_address),
+                                            e
+                                        ),
+                                    }
+                                })
+                            })
+                            .transpose()?
+                    } else {
+                        None
+                    };
 
                 let (result, moved) = self.tracker.write_with(|state| {
                     let vault_lock = state.write_lock_substate(SubstateId::Vault(vault_id))?;
-
-                    // Enforce confidential limits before the withdraw's proof crypto runs.
-                    if let VaultWithdrawArg::Confidential { proof } = &arg {
-                        state.admit_confidential_withdraw(proof)?;
-                    }
 
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
                     let (resource_container, public_amount, confidential_effects) = match arg {
@@ -3252,10 +3254,12 @@ where
                 })?;
                 let proof = args.assert_one_arg()?;
 
-                // Charge the withdraw's native verification cost against the payment-funded
-                // allowance before any of its proof crypto runs. The resource peek is a cheap
-                // substate read that determines whether the viewable-balance surcharge applies.
+                // Enforce confidential limits and charge the withdraw's native verification cost
+                // against the payment-funded allowance before any of its proof crypto runs. The
+                // resource peek is a cheap substate read that determines whether the
+                // viewable-balance surcharge applies.
                 let has_view_key = self.tracker.write_with(|state| {
+                    state.admit_confidential_withdraw(&proof)?;
                     let bucket = state.get_bucket(bucket_id)?;
                     let resource_lock = state.read_lock_substate((*bucket.resource_address()).into())?;
                     let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
@@ -3282,7 +3286,6 @@ where
                                 e
                             ),
                         })?;
-                    state.admit_confidential_withdraw(&proof)?;
                     let bucket_mut = state.get_bucket_mut(bucket_id)?;
                     let (resource, effects) = bucket_mut.take_confidential(proof, view_key.as_ref())?;
                     let resource_address = *resource.resource_address();
@@ -4635,6 +4638,7 @@ mod tests {
     };
     use tari_ootle_common_types::Epoch;
     use tari_ootle_transaction::{Blob, Blobs, TransactionWeight};
+    use tari_template_lib::types::{access_rules::ResourceAccessRules, confidential::ConfidentialWithdrawProof};
 
     use super::*;
     use crate::{
@@ -4814,6 +4818,143 @@ mod tests {
             runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args),
             Err(RuntimeError::InvalidArgument { argument, .. }) if argument.ends_with("PayFeeArg")
         ));
+    }
+
+    #[test]
+    fn confidential_withdraw_and_take_confidential_enforce_limits_before_substate_reads_and_auth() {
+        let valid_proof = ConfidentialWithdrawProof::revealed_withdraw(Amount::new(1));
+        let mut too_many_inputs = valid_proof.clone();
+        too_many_inputs.inputs = (0..=limits::CONFIDENTIAL_LIMITS.max_inputs)
+            .map(|_| PedersenCommitmentBytes::zero())
+            .collect();
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let vault_id = tari_template_lib::types::VaultId::new([1u8; 32].into());
+        let bucket_id = BucketId::from(1u32);
+
+        // The proof decoder bounds inputs at `MAX_CONFIDENTIAL_INPUTS`, which is `CONFIDENTIAL_LIMITS.max_inputs`, so
+        // an over-limit proof is refused while decoding, before the vault or bucket is read.
+        let over_limit_withdraw_args = EngineArgs::from(vec![
+            tari_bor::encode(&VaultWithdrawArg::Confidential {
+                proof: Box::new(too_many_inputs.clone()),
+            })
+            .unwrap()
+            .into(),
+        ]);
+        assert!(matches!(
+            runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::Withdraw, over_limit_withdraw_args),
+            Err(RuntimeError::InvalidArgument { argument, .. }) if argument.ends_with("VaultWithdrawArg")
+        ));
+
+        let over_limit_take_args = EngineArgs::from(vec![tari_bor::encode(&too_many_inputs).unwrap().into()]);
+        assert!(matches!(
+            runtime.bucket_invoke(
+                BucketRef::Ref(bucket_id),
+                BucketAction::TakeConfidential,
+                over_limit_take_args
+            ),
+            Err(RuntimeError::InvalidArgument { argument, .. }) if argument.ends_with("ConfidentialWithdrawProof")
+        ));
+
+        // Exhaust the per-transaction confidential withdraw count and verify both `VaultAction::Withdraw` and
+        // `BucketAction::TakeConfidential` reject before reading the non-existent vault or bucket.
+        runtime.tracker.write_with(|state| {
+            state
+                .current_call_scope_mut()
+                .unwrap()
+                .add_substate_to_scope(vault_id.into())
+                .unwrap();
+            for _ in 0..limits::CONFIDENTIAL_LIMITS.max_withdraws_per_transaction {
+                state.admit_confidential_withdraw(&valid_proof).unwrap();
+            }
+        });
+
+        let valid_withdraw_args = EngineArgs::from(vec![
+            tari_bor::encode(&VaultWithdrawArg::Confidential {
+                proof: Box::new(valid_proof.clone()),
+            })
+            .unwrap()
+            .into(),
+        ]);
+        assert!(matches!(
+            runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::Withdraw, valid_withdraw_args),
+            Err(RuntimeError::ArgumentValidationError(
+                ArgumentValidationError::MaxConfidentialWithdrawsPerTransactionExceeded { .. }
+            ))
+        ));
+
+        let valid_take_args = EngineArgs::from(vec![tari_bor::encode(&valid_proof).unwrap().into()]);
+        assert!(matches!(
+            runtime.bucket_invoke(
+                BucketRef::Ref(bucket_id),
+                BucketAction::TakeConfidential,
+                valid_take_args
+            ),
+            Err(RuntimeError::ArgumentValidationError(
+                ArgumentValidationError::MaxConfidentialWithdrawsPerTransactionExceeded { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn confidential_vault_withdraw_charges_native_points_before_view_key_decompression() {
+        use tari_engine_types::{
+            confidential::withdraw_native_points,
+            limits::FREE_COMPUTE_GRACE_POINTS,
+            resource::Resource,
+            vault::Vault,
+        };
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let resource_address = ResourceAddress::new([2u8; 32].into());
+        let vault_id = tari_template_lib::types::VaultId::new([3u8; 32].into());
+
+        // Store a confidential resource with a non-canonical Ristretto point as its view key (`[0xff; 32]`),
+        // so decompressing it via `to_view_key_public_key()` would return `InvariantError`.
+        let malformed_view_key = RistrettoPublicKeyBytes::from_bytes(&[0xff; 32]).unwrap();
+        let resource = Resource::new(
+            ResourceType::Confidential,
+            SubstateOwnerRule::None,
+            ResourceAccessRules::new(),
+            Metadata::new(),
+            Some(malformed_view_key),
+            None,
+            0,
+            false,
+        );
+        let vault = Vault::new(ResourceContainer::Confidential {
+            address: resource_address,
+            commitments: Default::default(),
+            revealed_amount: Amount::new(10),
+            locked_commitments: Default::default(),
+            locked_revealed_amount: Amount::zero(),
+        });
+
+        runtime.tracker.write_with(|state| {
+            state.new_substate(resource_address, resource).unwrap();
+            state.new_substate(vault_id, vault).unwrap();
+        });
+
+        let proof = ConfidentialWithdrawProof::revealed_withdraw(Amount::new(1));
+        let withdraw_cost = withdraw_native_points(&proof, true);
+        assert!(withdraw_cost > 0);
+
+        // Leave the tracker just 1 point short of `withdraw_cost`.
+        let pre_charge = FREE_COMPUTE_GRACE_POINTS - withdraw_cost + 1;
+        runtime.tracker.charge_native_execution(pre_charge).unwrap();
+
+        let withdraw_args = EngineArgs::from(vec![
+            tari_bor::encode(&VaultWithdrawArg::Confidential { proof: Box::new(proof) })
+                .unwrap()
+                .into(),
+        ]);
+        let err = runtime
+            .vault_invoke(VaultRef::Ref(vault_id), VaultAction::Withdraw, withdraw_args)
+            .unwrap_err();
+        assert!(
+            matches!(err, RuntimeError::FeeIntentComputeExceeded { .. }),
+            "expected FeeIntentComputeExceeded before view-key decompression, got {err:?}"
+        );
     }
 
     #[test]

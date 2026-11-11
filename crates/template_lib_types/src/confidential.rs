@@ -1,7 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use minicbor::{CborLen, Decode, Encode};
+use minicbor::{CborLen, Decode, Decoder, Encode, decode};
+use tari_bor::adapters::bounded_vec;
 use tari_template_abi::rust::{prelude::*, vec};
 
 use crate::{
@@ -9,6 +10,13 @@ use crate::{
     crypto::{BalanceProofSignature, PedersenCommitmentBytes, RangeProofBytes},
     stealth::UnspentOutput,
 };
+
+/// The most confidential inputs one [`ConfidentialWithdrawProof`] may spend. Decoding refuses more.
+pub const MAX_CONFIDENTIAL_INPUTS: usize = 1000;
+
+fn decode_inputs<'b, C>(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Vec<PedersenCommitmentBytes>, decode::Error> {
+    bounded_vec::decode(d, ctx, MAX_CONFIDENTIAL_INPUTS)
+}
 
 /// A statement for confidential and revealed outputs. A statement must contain either confidential outputs or non-zero
 /// revealed funds or both.
@@ -62,6 +70,7 @@ impl ConfidentialOutputStatement {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ConfidentialWithdrawProof {
     #[n(0)]
+    #[cbor(decode_with = "decode_inputs")]
     pub inputs: Vec<PedersenCommitmentBytes>,
     /// The amount to withdraw from revealed funds i.e. the revealed funds as inputs
     #[n(1)]
@@ -137,5 +146,27 @@ impl ConfidentialWithdrawProof {
 
     pub fn revealed_change_amount(&self) -> Amount {
         self.output_proof.change_revealed_amount
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn proof_with_inputs(n: usize) -> ConfidentialWithdrawProof {
+        let mut proof = ConfidentialWithdrawProof::revealed_withdraw(Amount::new(1));
+        proof.inputs = (0..n).map(|_| PedersenCommitmentBytes::zero()).collect();
+        proof
+    }
+
+    #[test]
+    fn withdraw_proof_decodes_up_to_max_inputs() {
+        let at_limit = proof_with_inputs(MAX_CONFIDENTIAL_INPUTS);
+        let bytes = tari_bor::encode(&at_limit).unwrap();
+        assert!(tari_bor::decode::<ConfidentialWithdrawProof>(&bytes).is_ok());
+
+        let over_limit = proof_with_inputs(MAX_CONFIDENTIAL_INPUTS + 1);
+        let bytes = tari_bor::encode(&over_limit).unwrap();
+        assert!(tari_bor::decode::<ConfidentialWithdrawProof>(&bytes).is_err());
     }
 }

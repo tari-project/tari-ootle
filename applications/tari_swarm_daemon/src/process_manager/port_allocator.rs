@@ -15,7 +15,7 @@ use crate::{
 };
 
 pub struct PortAllocator {
-    instances: Arc<Mutex<HashMap<InstanceId, AllocatedPorts>>>,
+    instances: Arc<Mutex<HashMap<InstanceId, HashMap<&'static str, u16>>>>,
     start_port_overrides: HashMap<InstanceType, Arc<AtomicU16>>,
     current_port: Arc<AtomicU16>,
 }
@@ -51,7 +51,7 @@ impl PortAllocator {
         self.instances
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(instance_id, ports);
+            .insert(instance_id, ports.ports);
     }
 
     pub fn unregister(&mut self, instance_id: InstanceId) {
@@ -66,7 +66,7 @@ impl PortAllocator {
 pub struct AllocatedPorts {
     current_port: Arc<AtomicU16>,
     ports: HashMap<&'static str, u16>,
-    registered_instances: Arc<Mutex<HashMap<InstanceId, AllocatedPorts>>>,
+    registered_instances: Arc<Mutex<HashMap<InstanceId, HashMap<&'static str, u16>>>>,
 }
 
 impl AllocatedPorts {
@@ -94,7 +94,7 @@ impl AllocatedPorts {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .values()
-            .any(|instance_ports| instance_ports.ports.values().any(|&allocated| allocated == port))
+            .any(|instance_ports| instance_ports.values().any(|&allocated| allocated == port))
     }
 
     /// Prefer get_or_next_port for most use cases, but this can be used to set a specific port for a name.
@@ -151,8 +151,8 @@ mod tests {
         );
 
         allocator.unregister(1);
-        let mut replacement = PortAllocator::new(first_port, &[]);
-        let mut reused = replacement.create(InstanceType::MinoTariNode);
+        allocator.current_port.store(first_port, atomic::Ordering::SeqCst);
+        let mut reused = allocator.create(InstanceType::MinoTariNode);
         assert_eq!(reused.get_or_next_port("grpc").await, first_port);
     }
 

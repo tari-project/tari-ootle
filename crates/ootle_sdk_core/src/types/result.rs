@@ -144,9 +144,9 @@ impl RejectReason {
         }
     }
 
-    /// Builds a boundary reject from a free-form **abort** message (e.g. an indexer `Finalized` result
-    /// whose `abort_details` is set but which carries no `execution_result`). The stable `code` is
-    /// `ABORT` (matching the engine `Abort` variant) and there is no structured abort sub-code.
+    /// Builds a boundary reject from a free-form **abort** message when no structured [`AbortReason`]
+    /// is available. Sets `code` to `"ABORT"` and leaves `abort_code` as `None`; prefer
+    /// [`Self::from_abort`] whenever the consensus [`AbortReason`] is known.
     pub fn from_abort_details(message: impl Into<String>) -> Self {
         Self {
             code: "ABORT".to_string(),

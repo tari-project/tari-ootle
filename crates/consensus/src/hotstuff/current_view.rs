@@ -3,7 +3,7 @@
 
 use std::{
     fmt::Display,
-    sync::{Arc, atomic, atomic::AtomicU64},
+    sync::{Arc, RwLock},
 };
 
 use log::info;
@@ -13,8 +13,7 @@ const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::current_view";
 
 #[derive(Debug, Clone, Default)]
 pub struct CurrentView {
-    height: Arc<AtomicU64>,
-    epoch: Arc<AtomicU64>,
+    inner: Arc<RwLock<(Epoch, NodeHeight)>>,
 }
 
 impl CurrentView {
@@ -23,34 +22,37 @@ impl CurrentView {
     }
 
     pub fn get_epoch(&self) -> Epoch {
-        self.epoch.load(atomic::Ordering::SeqCst).into()
+        self.read().0
     }
 
     pub fn get_height(&self) -> NodeHeight {
-        self.height.load(atomic::Ordering::SeqCst).into()
+        self.read().1
     }
 
     /// Updates the view if (epoch, height) is lexicographically greater than the current view. Heights restart from
     /// zero each epoch, so entering a later epoch must always take the new height, even when it is lower than the
     /// current one.
     pub(crate) fn enter(&self, epoch: Epoch, height: NodeHeight) -> bool {
-        let current_epoch = self.get_epoch();
-        let current_height = self.get_height();
-        let is_updated = if epoch > current_epoch {
-            self.epoch.store(epoch.as_u64(), atomic::Ordering::SeqCst);
-            self.height.store(height.as_u64(), atomic::Ordering::SeqCst);
-            true
-        } else if epoch == current_epoch && height > current_height {
-            self.height.store(height.as_u64(), atomic::Ordering::SeqCst);
+        let prev = {
+            let mut guard = self.inner.write().unwrap_or_else(|e| e.into_inner());
+            let (current_epoch, current_height) = *guard;
+            if (epoch, height) > (current_epoch, current_height) {
+                *guard = (epoch, height);
+                Some((current_epoch, current_height))
+            } else {
+                None
+            }
+        };
+
+        if let Some((current_epoch, current_height)) = prev {
+            info!(
+                target: LOG_TARGET,
+                "🧿 PACEMAKER: View updated from {current_epoch}/{current_height} to {epoch}/{height}"
+            );
             true
         } else {
             false
-        };
-
-        if is_updated {
-            info!(target: LOG_TARGET, "🧿 PACEMAKER: View updated from {current_epoch}/{current_height} to {self}");
         }
-        is_updated
     }
 
     // /// Sets the epoch to epoch + 1
@@ -61,15 +63,22 @@ impl CurrentView {
 
     /// Resets the height and epoch. Prefer update.
     pub(crate) fn reset(&self, epoch: Epoch, height: NodeHeight) {
-        self.epoch.store(epoch.as_u64(), atomic::Ordering::SeqCst);
-        self.height.store(height.as_u64(), atomic::Ordering::SeqCst);
+        {
+            let mut guard = self.inner.write().unwrap_or_else(|e| e.into_inner());
+            *guard = (epoch, height);
+        }
         info!(target: LOG_TARGET, "🧿 PACEMAKER: reset View updated to {epoch}/{height}");
+    }
+
+    fn read(&self) -> (Epoch, NodeHeight) {
+        *self.inner.read().unwrap_or_else(|e| e.into_inner())
     }
 }
 
 impl Display for CurrentView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}/{}", self.get_epoch(), self.get_height())
+        let (epoch, height) = self.read();
+        write!(f, "{epoch}/{height}")
     }
 }
 

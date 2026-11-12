@@ -120,6 +120,7 @@ use crate::metrics::{
 };
 use crate::{
     ApplicationConfig,
+    MIN_EPOCH_HISTORY_LENGTH,
     MIN_PINNED_CHECKPOINT_EPOCHS,
     ValidatorNodeEpochManagerSpec,
     ValidatorNodeStateStore,
@@ -272,6 +273,15 @@ pub async fn spawn_services(
             "⚠️ validator_node.pinned_checkpoint_epochs = {} is below the minimum of {MIN_PINNED_CHECKPOINT_EPOCHS}, which \
              indexers rely on to snapshot new shards. Keeping the trees of {MIN_PINNED_CHECKPOINT_EPOCHS} checkpoints",
             config.validator_node.pinned_checkpoint_epochs
+        );
+    }
+
+    if config.validator_node.epoch_history_length < MIN_EPOCH_HISTORY_LENGTH {
+        warn!(
+            target: LOG_TARGET,
+            "⚠️ validator_node.epoch_history_length = {} is below the minimum of {MIN_EPOCH_HISTORY_LENGTH}. Keeping \
+             {MIN_EPOCH_HISTORY_LENGTH} epoch of history",
+            config.validator_node.epoch_history_length
         );
     }
 
@@ -657,10 +667,10 @@ pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
             create_node_transaction_validator(network, template_manager, constants)
                 .and_then(InputsAreDeclarableValidator::new()),
         )
-        .and_then(EpochRangeValidator::new())
         .and_then(TransactionValidityWindowValidator::new(
             constants.max_transaction_validity_epochs,
         ))
+        .and_then(EpochRangeValidator::new())
 }
 
 async fn create_base_layer_client(

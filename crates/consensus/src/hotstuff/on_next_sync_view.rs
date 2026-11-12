@@ -138,11 +138,13 @@ fn next_timeout_height<TTx: StateStoreReadTransaction>(
     epoch: Epoch,
     current_height: NodeHeight,
 ) -> Result<NodeHeight, StorageError> {
-    let timeout_height = current_height + NodeHeight(2);
+    let timeout_height = current_height.saturating_add(NodeHeight(2));
     let last_sent = LastSentNewView::get(tx, epoch).optional()?;
     Ok(last_sent
         .filter(|last_sent| last_sent.height >= timeout_height)
-        .map_or(timeout_height, |last_sent| last_sent.height + NodeHeight(1)))
+        .map_or(timeout_height, |last_sent| {
+            last_sent.height.saturating_add(NodeHeight(1))
+        }))
 }
 
 #[cfg(test)]
@@ -187,5 +189,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         persist_last_sent(dir.path(), Epoch(0), NodeHeight(13));
         assert_eq!(timeout_height_after_reopen(dir.path(), NodeHeight(10)), NodeHeight(12));
+    }
+
+    #[test]
+    fn timeout_height_saturates_at_node_height_max() {
+        let dir = tempfile::tempdir().unwrap();
+        persist_last_sent(dir.path(), EPOCH, NodeHeight::max());
+        assert_eq!(
+            timeout_height_after_reopen(dir.path(), NodeHeight::max()),
+            NodeHeight::max()
+        );
     }
 }

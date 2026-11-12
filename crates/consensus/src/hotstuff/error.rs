@@ -360,6 +360,18 @@ pub enum ProposalValidationError {
         block_epoch: Epoch,
     },
 
+    #[error(
+        "Foreign proposal for block {block_id} from {shard_group} pins transaction {transaction_id} to \
+         {locked_epoch}, earlier than its minimum epoch {min_epoch}"
+    )]
+    ForeignTransactionPinnedBeforeMinEpoch {
+        block_id: BlockId,
+        shard_group: ShardGroup,
+        transaction_id: TransactionId,
+        locked_epoch: Epoch,
+        min_epoch: Epoch,
+    },
+
     #[error("Foreign proposal commit proof error: {0}")]
     ForeignProposalCommitProofError(#[from] ForeignProposalCommitProofError),
 

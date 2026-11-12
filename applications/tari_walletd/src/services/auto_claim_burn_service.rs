@@ -563,6 +563,9 @@ impl AutoClaimBurnService {
     }
 
     async fn query_current_epoch(&self) -> anyhow::Result<Epoch> {
+        if self.sdk.sdk_config().indexer_trust.is_verify() {
+            return Ok(self.sdk.validator_set_api().sync().await?.epoch());
+        }
         self.sdk
             .get_network_interface()
             .get_current_epoch()
@@ -810,9 +813,35 @@ impl From<ClaimBurnError> for ClaimError {
 
 #[cfg(test)]
 mod tests {
-    use tari_ootle_wallet_sdk::apis::substate::SubstateApiError;
+    use tari_ootle_light_client::test_fixtures::ValidatorSetFixture;
+    use tari_ootle_wallet_sdk::{IndexerTrust, apis::substate::SubstateApiError};
 
     use super::*;
+    use crate::handlers::test_support::{FakeIndexer, TestDaemon};
+
+    async fn current_epoch_read_by(indexer: &FakeIndexer, indexer_trust: IndexerTrust) -> Epoch {
+        let daemon = TestDaemon::start_with_indexer(indexer, indexer_trust).await;
+        let context = &daemon.context;
+        let service = AutoClaimBurnService::new(
+            context.wallet_sdk().clone(),
+            context.transaction_service().clone(),
+            PathBuf::new(),
+            u64::MAX,
+            context.notifier(),
+            context.shutdown_signal().clone(),
+        );
+        service.query_current_epoch().await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_verifying_wallet_claims_in_the_epoch_of_its_trusted_validator_set() {
+        let indexer = FakeIndexer::spawn().await;
+        indexer.end_epoch(&ValidatorSetFixture::new(1), &ValidatorSetFixture::new(2));
+        indexer.claim_current_epoch(Epoch(50));
+
+        assert_eq!(current_epoch_read_by(&indexer, IndexerTrust::Verify).await, Epoch(2));
+        assert_eq!(current_epoch_read_by(&indexer, IndexerTrust::Trust).await, Epoch(50));
+    }
 
     #[test]
     fn claim_burn_errors_map_to_network_transient_and_permanent() {

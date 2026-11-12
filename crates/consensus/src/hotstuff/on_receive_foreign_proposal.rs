@@ -33,7 +33,7 @@ use crate::{
         ProposalValidationError,
         commit_proofs::generate_block_commit_proof,
         error::HotStuffError,
-        pacemaker_handle::PaceMakerHandle,
+        pacemaker::PaceMaker,
     },
     messages::{
         ForeignProposalMessage,
@@ -64,7 +64,6 @@ const PROPOSAL_RESPONSE_TIMEOUT: Duration = REQUEST_TIMEOUT;
 pub struct OnReceiveForeignProposalHandler<TConsensusSpec: ConsensusSpec> {
     store: TConsensusSpec::StateStore,
     epoch_manager: TConsensusSpec::EpochManager,
-    pacemaker: PaceMakerHandle,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     pending_requests: PendingRequests<TConsensusSpec::Addr>,
     bounded_spawner: PerKeyBoundedSpawn<TConsensusSpec::Addr>,
@@ -76,13 +75,11 @@ where TConsensusSpec: ConsensusSpec
     pub fn new(
         store: TConsensusSpec::StateStore,
         epoch_manager: TConsensusSpec::EpochManager,
-        pacemaker: PaceMakerHandle,
         outbound_messaging: TConsensusSpec::OutboundMessaging,
     ) -> Self {
         Self {
             store,
             epoch_manager,
-            pacemaker,
             outbound_messaging,
             pending_requests: PendingRequests::new(),
             bounded_spawner: PerKeyBoundedSpawn::new(
@@ -101,6 +98,7 @@ where TConsensusSpec: ConsensusSpec
 
     pub async fn handle_received(
         &mut self,
+        pacemaker: &mut PaceMaker,
         message: ForeignProposalMessage,
         local_committee_info: &CommitteeInfo,
     ) -> Result<(), HotStuffError> {
@@ -129,7 +127,7 @@ where TConsensusSpec: ConsensusSpec
         self.pending_requests.remove(&block_id);
 
         // Foreign proposals to propose
-        self.pacemaker.beat();
+        pacemaker.beat();
         Ok(())
     }
 

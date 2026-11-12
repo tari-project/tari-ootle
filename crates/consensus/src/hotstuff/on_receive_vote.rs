@@ -8,13 +8,7 @@ use tari_ootle_storage::{StateStore, consensus_models::BookkeepingModel};
 
 use super::vote_collector::ProposalVoteCollector;
 use crate::{
-    hotstuff::{
-        HotstuffConfig,
-        LeaderSkipSet,
-        epoch_state::EpochState,
-        error::HotStuffError,
-        pacemaker_handle::PaceMakerHandle,
-    },
+    hotstuff::{HotstuffConfig, LeaderSkipSet, epoch_state::EpochState, error::HotStuffError, pacemaker::PaceMaker},
     messages::VoteMessage,
     tracing::TraceTimer,
     traits::ConsensusSpec,
@@ -25,7 +19,6 @@ const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_receive_vote";
 pub struct OnReceiveVoteHandler<TConsensusSpec: ConsensusSpec> {
     config: HotstuffConfig,
     store: TConsensusSpec::StateStore,
-    pacemaker: PaceMakerHandle,
     vote_collector: ProposalVoteCollector<TConsensusSpec>,
     leader_strategy: TConsensusSpec::LeaderStrategy,
     local_addr: TConsensusSpec::Addr,
@@ -47,7 +40,6 @@ where TConsensusSpec: ConsensusSpec
     pub fn new(
         config: HotstuffConfig,
         store: TConsensusSpec::StateStore,
-        pacemaker: PaceMakerHandle,
         vote_collector: ProposalVoteCollector<TConsensusSpec>,
         local_addr: TConsensusSpec::Addr,
         leader_strategy: TConsensusSpec::LeaderStrategy,
@@ -56,7 +48,6 @@ where TConsensusSpec: ConsensusSpec
             config,
             store,
             vote_collector,
-            pacemaker,
             local_addr,
             leader_strategy,
             cached_skip_set: None,
@@ -65,6 +56,7 @@ where TConsensusSpec: ConsensusSpec
 
     pub async fn handle(
         &mut self,
+        pacemaker: &mut PaceMaker,
         from: TConsensusSpec::Addr,
         current_height: NodeHeight,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
@@ -82,9 +74,9 @@ where TConsensusSpec: ConsensusSpec
             Ok(Some((_, high_pc))) => {
                 // Reset the leader timeout (not the block timer) - this mitigates the chance of our node sending a
                 // NEWVIEW just before we are ready to propose
-                self.pacemaker.reset_leader_timeout(&high_pc).await?;
+                pacemaker.reset_leader_timeout(&high_pc);
                 // We've reached quorum, trigger a check to see if we should propose immediately
-                self.pacemaker.beat();
+                pacemaker.beat();
             },
             Ok(None) => {
                 // No quorum yet, do nothing

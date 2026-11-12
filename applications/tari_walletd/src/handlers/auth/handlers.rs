@@ -211,7 +211,7 @@ mod tests {
             .generate_auth_claims(Permissions::from(vec![Permission::Admin]))
             .unwrap();
 
-        handle_login_request(
+        let (_cookies, _response) = handle_login_request(
             &daemon.context,
             None,
             (Id::Num(1), AuthLoginRequest {

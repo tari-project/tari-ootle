@@ -35,6 +35,9 @@ pub const MAGIC: u32 = 0x5441_5252;
 /// non-backward-compatible way.
 pub const FORMAT_VERSION: u8 = 2;
 
+/// Upper bound on a single serialized `AuditRecord` frame (16 MiB).
+pub const MAX_AUDIT_RECORD_LEN: usize = 16 * 1024 * 1024;
+
 #[derive(Debug, thiserror::Error)]
 pub enum AuditError {
     #[error("I/O error: {0}")]
@@ -166,6 +169,12 @@ impl<W: Write> AuditWriter<W> {
     pub fn write_record(&mut self, record: &AuditRecord) -> Result<(), AuditError> {
         let mut buf = Vec::new();
         BorshSerialize::serialize(record, &mut buf).map_err(|e| AuditError::Decode(e.to_string()))?;
+        if buf.len() > MAX_AUDIT_RECORD_LEN {
+            return Err(AuditError::Malformed(format!(
+                "record length {} exceeds maximum {MAX_AUDIT_RECORD_LEN}",
+                buf.len()
+            )));
+        }
         let len: u32 = buf
             .len()
             .try_into()
@@ -208,6 +217,9 @@ impl<R: Read> AuditReader<R> {
         if version != FORMAT_VERSION {
             return Err(AuditError::UnsupportedVersion(version));
         }
+        if header[1..4] != [0u8; 3] {
+            return Err(AuditError::Malformed("non-zero reserved header bytes".into()));
+        }
         Ok(Self { inner })
     }
 
@@ -227,31 +239,47 @@ impl<R: Read> AuditReader<R> {
             total += n;
         }
         let len = u32::from_le_bytes(len_buf) as usize;
+        if len > MAX_AUDIT_RECORD_LEN {
+            return Err(AuditError::Malformed(format!(
+                "record length {len} exceeds maximum {MAX_AUDIT_RECORD_LEN}"
+            )));
+        }
         let mut buf = vec![0u8; len];
         self.inner.read_exact(&mut buf)?;
-        let mut cursor = &buf[..];
-        let record =
-            BorshDeserialize::deserialize_reader(&mut cursor).map_err(|e| AuditError::Decode(e.to_string()))?;
+        let record = BorshDeserialize::try_from_slice(&buf).map_err(|e| AuditError::Decode(e.to_string()))?;
         Ok(Some(record))
     }
 
     pub fn records(self) -> AuditRecordIter<R> {
-        AuditRecordIter { reader: self }
+        AuditRecordIter {
+            reader: self,
+            done: false,
+        }
     }
 }
 
 pub struct AuditRecordIter<R: Read> {
     reader: AuditReader<R>,
+    done: bool,
 }
 
 impl<R: Read> Iterator for AuditRecordIter<R> {
     type Item = Result<AuditRecord, AuditError>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
         match self.reader.read_record() {
             Ok(Some(r)) => Some(Ok(r)),
-            Ok(None) => None,
-            Err(e) => Some(Err(e)),
+            Ok(None) => {
+                self.done = true;
+                None
+            },
+            Err(e) => {
+                self.done = true;
+                Some(Err(e))
+            },
         }
     }
 }
@@ -300,6 +328,43 @@ mod tests {
         bytes.extend_from_slice(&[99, 0, 0, 0]);
         let err = AuditReader::new(bytes.as_slice()).unwrap_err();
         assert!(matches!(err, AuditError::UnsupportedVersion(99)));
+    }
+
+    #[test]
+    fn rejects_nonzero_reserved_header_bytes() {
+        let mut bytes = MAGIC.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&[FORMAT_VERSION, 1, 0, 0]);
+        let err = AuditReader::new(bytes.as_slice()).unwrap_err();
+        assert!(matches!(err, AuditError::Malformed(_)));
+    }
+
+    #[test]
+    fn rejects_oversized_record_length() {
+        let mut bytes = MAGIC.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&[FORMAT_VERSION, 0, 0, 0]);
+        let oversized = (MAX_AUDIT_RECORD_LEN as u32) + 1;
+        bytes.extend_from_slice(&oversized.to_le_bytes());
+        let mut reader = AuditReader::new(bytes.as_slice()).unwrap();
+        let err = reader.read_record().unwrap_err();
+        assert!(matches!(err, AuditError::Malformed(_)));
+    }
+
+    #[test]
+    fn rejects_trailing_bytes_inside_record_frame() {
+        let mut buf = Vec::new();
+        let mut writer = AuditWriter::new(&mut buf).unwrap();
+        writer
+            .write_record(&AuditRecord::Footer(AuditFooter::default()))
+            .unwrap();
+        writer.finish().unwrap();
+
+        let orig_len = u32::from_le_bytes(buf[8..12].try_into().unwrap());
+        buf[8..12].copy_from_slice(&(orig_len + 1).to_le_bytes());
+        buf.push(0xAA);
+
+        let mut reader = AuditReader::new(buf.as_slice()).unwrap();
+        let err = reader.read_record().unwrap_err();
+        assert!(matches!(err, AuditError::Decode(_)));
     }
 
     #[test]

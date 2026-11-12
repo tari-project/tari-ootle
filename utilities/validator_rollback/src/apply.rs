@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    collections::BTreeMap,
     iter,
     ops::Deref,
     path::PathBuf,
@@ -10,19 +11,27 @@ use std::{
 
 use anyhow::{Context, anyhow, bail};
 use clap::Args as ClapArgs;
-use tari_ootle_common_types::{Epoch, ShardGroup, optional::Optional, shard::Shard};
+use tari_ootle_common_types::{Epoch, ShardGroup, SubstateAddress, optional::Optional, shard::Shard};
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::{
+    Ordering,
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
+    StorageError,
     consensus_models::{EpochCheckpoint, RollbackHistoryEntry},
 };
 use tari_state_store_rocksdb::{
     DatabaseOptions,
+    ReadView,
     RocksDbStateStore,
     codecs::ByteColumn,
-    column_families::bookkeeping::{CURRENT_SCHEMA_VERSION, DatabaseMigrationVersion},
+    column_families::{
+        bookkeeping::{CURRENT_SCHEMA_VERSION, DatabaseMigrationVersion},
+        state_sync_rewind_point::StateSyncMissingValueByShardQuery,
+        state_transition::{ByShardAndStateVersionQuery, StateTransitionCf, StateTransitionType},
+        substate::SubstateCf,
+    },
 };
 use tari_state_tree::Version;
 
@@ -176,6 +185,7 @@ pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
     let substate_rows = store.with_read_tx(|tx| -> anyhow::Result<_> {
         let mut rows = Vec::new();
         for (shard, version) in &state_versions {
+            check_shard_rewind_has_no_pruned_values(tx, *shard, *version)?;
             let mut per_shard = rollback_plan_collect_substates(tx, *shard, *version)?;
             rows.append(&mut per_shard);
         }
@@ -239,7 +249,7 @@ pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
         .and_then(|f| f.to_str())
         .unwrap_or("")
         .to_string();
-    store.with_write_tx(|tx| -> anyhow::Result<()> {
+    if let Err(err) = store.with_write_tx(|tx| -> anyhow::Result<()> {
         for (shard, version) in &state_versions {
             rewind_shard(tx, *shard, *version)?;
         }
@@ -253,10 +263,80 @@ pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
         })
         .context("rollback_history_insert")?;
         Ok(())
-    })?;
+    }) {
+        let _ = std::fs::remove_file(&audit_path);
+        return Err(err);
+    }
 
     println!("Rollback applied successfully.");
     Ok(outcome)
+}
+
+fn check_shard_rewind_has_no_pruned_values<TAddr>(
+    tx: &ReadView<'_, TAddr>,
+    shard: Shard,
+    version: Version,
+) -> anyhow::Result<()>
+where
+    TAddr: tari_ootle_common_types::NodeAddressable + serde::Serialize + serde::de::DeserializeOwned,
+{
+    const OPERATION: &str = "check_shard_rewind_has_no_pruned_values";
+
+    let db = tx.db();
+    let transitions_cf = db.cf(StateTransitionCf)?;
+    let transitions_query = db.cf(ByShardAndStateVersionQuery)?;
+    let substates_cf = db.cf(SubstateCf)?;
+    let missing_query = db.cf(StateSyncMissingValueByShardQuery)?;
+
+    let mut missing_values: BTreeMap<SubstateAddress, Version> = missing_query
+        .query_prefix_range_iterator(Ordering::Ascending, &shard)
+        .map(|entry| {
+            let ((_, address), created_at) = entry?;
+            Ok::<_, StorageError>((address, created_at))
+        })
+        .collect::<Result<_, _>>()?;
+
+    let start_version = version.saturating_add(1);
+    let versions: Vec<Version> = transitions_query
+        .query_range_key_iterator(Ordering::Descending, (shard, start_version)..(shard, Version::MAX))
+        .map(|res| {
+            let (_key_shard, state_version) = res?;
+            Ok::<_, StorageError>(state_version)
+        })
+        .collect::<Result<_, _>>()?;
+
+    for state_version in versions {
+        let record = transitions_cf.get(&(shard, state_version), OPERATION)?;
+        for transition in record.transitions.iter().rev() {
+            match transition.transition {
+                StateTransitionType::Up => {
+                    missing_values.remove(&transition.substate_address);
+                },
+                StateTransitionType::Down => {
+                    let substate = substates_cf.get(&transition.substate_address, OPERATION)?;
+                    if substate.substate_value.is_none() {
+                        missing_values.insert(transition.substate_address, substate.created.at_state_version);
+                    }
+                },
+            }
+        }
+    }
+
+    let mut earliest = None::<(SubstateAddress, Version)>;
+    for (address, created_at) in missing_values {
+        if earliest.is_none_or(|(_, earliest_version)| created_at < earliest_version) {
+            earliest = Some((address, created_at));
+        }
+    }
+
+    if let Some((address, created_at)) = earliest {
+        bail!(
+            "rolling {shard} back to v{version} leaves the substate at {address} (created at v{created_at}) up \
+             without its value, which epoch GC has pruned; roll back to a later epoch"
+        );
+    }
+
+    Ok(())
 }
 
 /// Rewinds `shard`'s state tree and substates to `version`.
@@ -291,6 +371,15 @@ fn locate_checkpoint(
 ) -> anyhow::Result<(EpochCheckpoint, ShardGroup)> {
     if let Some(sg) = requested_shard_group {
         let ck = store.with_read_tx(|tx| tx.epoch_checkpoint_get_by_shard_group(target_epoch, sg))?;
+        let ck_sg = ck
+            .checked_shard_group()
+            .map_err(|e| anyhow!("checkpoint at epoch {} has an invalid shard group: {e}", target_epoch.0))?;
+        if ck_sg != sg {
+            bail!(
+                "checkpoint at epoch {} has shard group {ck_sg}, expected requested shard group {sg}",
+                target_epoch.0
+            );
+        }
         return Ok((ck, sg));
     }
     // Caller didn't specify. Enumerate up to a small cap and filter to the target epoch.
@@ -346,5 +435,128 @@ fn clone_counters(c: &AuditCounters) -> AuditCounters {
         substate_transitions: c.substate_transitions,
         transactions_unfinalised: c.transactions_unfinalised,
         blocks_deleted: c.blocks_deleted,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+
+    use tari_engine_types::{SubstateVersion, substate::SubstateId};
+    use tari_ootle_storage::consensus_models::{SubstateCreated, SubstateDestroyed, SubstateRecord};
+    use tari_state_store_rocksdb::column_families::state_transition::{
+        StateTransitionModelDataV1,
+        StateTransitionRecordData,
+    };
+    use tari_state_tree::TransitionAccumulator;
+    use tari_template_lib_types::{ComponentAddress, Hash32, ObjectKey};
+
+    use super::*;
+
+    struct TempTestDir(PathBuf);
+
+    impl TempTestDir {
+        fn new(label: &str) -> Self {
+            static COUNTER: AtomicU64 = AtomicU64::new(0);
+            let id = COUNTER.fetch_add(1, AtomicOrdering::Relaxed);
+            let dir = std::env::temp_dir().join(format!(
+                "tari_validator_rollback_apply_{label}_{}_{id}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+
+    impl Drop for TempTestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn pruned_substate_record(seed: u8, shard: Shard, created_at: Version, destroyed_at: Version) -> SubstateRecord {
+        let substate_id =
+            SubstateId::Component(ComponentAddress::new(ObjectKey::from_array([seed; ObjectKey::LENGTH])));
+        SubstateRecord {
+            substate_id,
+            version: SubstateVersion::ZERO,
+            substate_value: None,
+            state_hash: Hash32::from_array([seed; Hash32::LENGTH]),
+            created: SubstateCreated {
+                at_epoch: Epoch(1),
+                in_shard: shard,
+                at_state_version: created_at,
+            },
+            destroyed: Some(SubstateDestroyed {
+                at_epoch: Epoch(2),
+                at_state_version: destroyed_at,
+            }),
+        }
+    }
+
+    #[test]
+    fn parse_shard_group_validates_bounds() {
+        let sg = parse_shard_group("1:64").unwrap();
+        assert_eq!(sg.start(), Shard::from_u32(1));
+        assert_eq!(sg.end(), Shard::from_u32(64));
+        assert!(parse_shard_group("1-64").is_err());
+        assert!(parse_shard_group("64:1").is_err());
+    }
+
+    #[test]
+    fn preflight_detects_pruned_substate_restored_by_rewind_unless_also_uncreated() {
+        let tmp = TempTestDir::new("pruned_substate");
+        let store: RocksDbStateStore<PeerAddress> =
+            RocksDbStateStore::open(tmp.0.join("db"), DatabaseOptions::default()).unwrap();
+        let shard = Shard::from_u32(1);
+        let record = pruned_substate_record(7, shard, 2, 3);
+        let address = record.to_substate_address();
+
+        store
+            .with_write_tx(|tx| -> anyhow::Result<()> {
+                let db = tx.db();
+                db.cf(SubstateCf)?.put(&address, &record, "test")?;
+                db.cf(StateTransitionCf)?.put(
+                    &(shard, 2),
+                    &StateTransitionModelDataV1 {
+                        epoch: Epoch(1),
+                        transitions: vec![StateTransitionRecordData {
+                            substate_address: address,
+                            transition: StateTransitionType::Up,
+                        }],
+                        state_version: 2,
+                        transition_acc: TransitionAccumulator::zero(),
+                    },
+                    "test",
+                )?;
+                db.cf(StateTransitionCf)?.put(
+                    &(shard, 3),
+                    &StateTransitionModelDataV1 {
+                        epoch: Epoch(2),
+                        transitions: vec![StateTransitionRecordData {
+                            substate_address: address,
+                            transition: StateTransitionType::Down,
+                        }],
+                        state_version: 3,
+                        transition_acc: TransitionAccumulator::zero(),
+                    },
+                    "test",
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        let err = store
+            .with_read_tx(|tx| check_shard_rewind_has_no_pruned_values(tx, shard, 2))
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("without its value, which epoch GC has pruned"),
+            "unexpected error: {err}"
+        );
+
+        store
+            .with_read_tx(|tx| check_shard_rewind_has_no_pruned_values(tx, shard, 1))
+            .unwrap();
     }
 }

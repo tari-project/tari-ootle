@@ -4,10 +4,12 @@ description: What a machine needs to keep up with Ootle consensus — measured f
 ---
 
 import { Aside } from "@astrojs/starlight/components";
+import { basePath } from '../../../helpers/path';
 
 A validator node has to finish its work inside a consensus view. Falling behind is not a
 performance problem that shows up as slowness — a node that misses enough proposals is suspended,
-so the machine either keeps up or eventually stops participating.
+so the machine either keeps up or eventually stops participating. To install and configure a node, see
+<a href={basePath("/validators/run-a-validator-node/")}>Run a Validator Node</a>.
 
 These figures come from `tari-vn-bench` (in `utilities/tari_vn_bench`), which measures a machine on
 each axis and grades it against the consensus budgets the network actually enforces. Run it on a

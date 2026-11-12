@@ -54,8 +54,7 @@ pub async fn handle_get_validator_fees(
     req: GetValidatorFeesRequest,
 ) -> Result<GetValidatorFeesResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    let granted = context.check_auth(token)?;
-    enforce_scopes(&granted, &[Permission::Validators(Crud::Read)])?;
+    let granted = context.authorize(token, &[Permission::Validators(Crud::Read)])?;
 
     let claim_key = match req.account_or_key {
         AccountOrKeyId::Account(acc) => {
@@ -129,8 +128,7 @@ pub async fn handle_claim_validator_fees(
     mut req: ClaimValidatorFeesRequest,
 ) -> Result<ClaimValidatorFeesResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    let granted = context.check_auth(token)?;
-    enforce_scopes(&granted, &[Permission::Validators(Crud::Update)])?;
+    let granted = context.authorize(token, &[Permission::Validators(Crud::Update)])?;
     if !req.dry_run {
         context.enforce_max_fee_limit(req.max_fee)?;
     }
@@ -415,7 +413,7 @@ mod tests {
     use tari_template_lib_types::ComponentAddress;
 
     use super::*;
-    use crate::handlers::{auth::AuthError, test_support::TestDaemon};
+    use crate::handlers::{auth::jwt::AuthError, test_support::TestDaemon};
 
     #[tokio::test]
     async fn fees_are_looked_up_only_for_a_signing_key() {

@@ -4252,12 +4252,9 @@ mod tests {
         let up_id = vault_id(1);
         let down_id = vault_id(2);
         let mut member_responses = HashMap::new();
-        member_responses.insert(
-            ("vn".to_string(), down_id.clone()),
-            SubstateResult::Down {
-                version: SubstateVersion::new(2),
-            },
-        );
+        member_responses.insert(("vn".to_string(), down_id.clone()), SubstateResult::Down {
+            version: SubstateVersion::new(2),
+        });
         let (manager, network) = manager(FakeNetwork {
             live: live(std::slice::from_ref(&up_id)),
             member_responses,

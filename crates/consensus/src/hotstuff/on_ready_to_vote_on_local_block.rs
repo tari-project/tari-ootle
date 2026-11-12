@@ -2187,10 +2187,9 @@ mod tests {
                 fee_intent_only: true,
                 locked_epoch: fixture.genesis.to_locked_epoch(),
             };
-            let foreign_proposal = foreign_proposal_record_with_commands(
-                foreign_sg,
-                vec![CommandOrHash::Command(Command::LocalAccept(foreign_accept_atom))],
-            );
+            let foreign_proposal = foreign_proposal_record_with_commands(foreign_sg, vec![CommandOrHash::Command(
+                Command::LocalAccept(foreign_accept_atom),
+            )]);
             let foreign_qc_id: PcId = foreign_quorum_certificate_id_hasher()
                 .chain(foreign_proposal.block_id())
                 .chain(&QuorumDecision::Accept)
@@ -2313,10 +2312,9 @@ mod tests {
                 fee_intent_only: false,
                 locked_epoch: fixture.genesis.to_locked_epoch(),
             };
-            let foreign_proposal = foreign_proposal_record_with_commands(
-                foreign_sg,
-                vec![CommandOrHash::Command(Command::LocalAccept(foreign_abort_atom))],
-            );
+            let foreign_proposal = foreign_proposal_record_with_commands(foreign_sg, vec![CommandOrHash::Command(
+                Command::LocalAccept(foreign_abort_atom),
+            )]);
             let foreign_qc_id: PcId = foreign_quorum_certificate_id_hasher()
                 .chain(foreign_proposal.block_id())
                 .chain(&QuorumDecision::Accept)

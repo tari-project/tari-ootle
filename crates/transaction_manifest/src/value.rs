@@ -179,38 +179,38 @@ fn parse_value(s: &str, depth: usize) -> Result<ManifestValue, ManifestParseErro
             .map(|items| ManifestValue::Value(tari_bor::Value::Array(items)));
     }
 
-    SubstateId::from_str(s)
-        .ok()
-        .map(ManifestValue::SubstateId)
-        .or_else(|| {
-            let id = NonFungibleId::try_from_canonical_string(s).ok()?;
-            Some(ManifestValue::NonFungibleId(id))
-        })
-        .or_else(|| {
-            let tokens: TokenStream = s.parse().ok()?;
-            // A literal holds no group. Rejecting groups first keeps `syn` from recursing into them.
-            if tokens.clone().into_iter().any(|tt| matches!(tt, TokenTree::Group(_))) {
-                return None;
+    if let Ok(id) = SubstateId::from_str(s) {
+        return Ok(ManifestValue::SubstateId(id));
+    }
+    if let Ok(id) = NonFungibleId::try_from_canonical_string(s) {
+        return Ok(ManifestValue::NonFungibleId(id));
+    }
+    if let Ok(tokens) = s.parse::<TokenStream>() &&
+        // A literal holds no group. Rejecting groups first keeps `syn` from recursing into them.
+        !tokens.clone().into_iter().any(|tt| matches!(tt, TokenTree::Group(_))) &&
+        let Ok(lit) = parse2::<Lit>(tokens)
+    {
+        if lit_to_arg(&lit).is_ok() {
+            return Ok(ManifestValue::Literal(lit));
+        }
+        // An integer literal that overflows its target range is an error unless it is an unsuffixed
+        // 64-character string (a 32-byte key or hash whose hex digits happen to be 0..=9). Tokens
+        // that start with digits followed by hex letters (`044bcc...`) have a non-integer suffix in
+        // `syn` and fall through to `bytes_from_hex`.
+        if let Lit::Int(ref int_lit) = lit {
+            let is_int_suffix = matches!(
+                int_lit.suffix(),
+                "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize"
+            );
+            if is_int_suffix || (int_lit.suffix().is_empty() && s.len() != 64) {
+                return Err(ManifestParseError(s.to_string()));
             }
-            let lit: Lit = parse2(tokens).ok()?;
-            // Reject literals that are not supported or have unrecognized suffixes (e.g. hex strings
-            // like "044bccd4..." that syn misinterprets as integer + suffix, or "1e23" as float).
-            match &lit {
-                Lit::Str(_) | Lit::Bool(_) | Lit::ByteStr(_) | Lit::Byte(_) | Lit::Char(_) => {},
-                Lit::Int(i) => match i.suffix() {
-                    "" | "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" => {},
-                    _ => return None,
-                },
-                _ => return None,
-            }
-            Some(ManifestValue::Literal(lit))
-        })
-        .or_else(|| {
-            // Try parsing as hex bytes (e.g. public keys)
-            let bytes = bytes_from_hex(s).ok()?;
-            Some(ManifestValue::Value(tari_bor::Value::Bytes(bytes)))
-        })
-        .ok_or_else(|| ManifestParseError(s.to_string()))
+        }
+    }
+
+    // Try parsing as hex bytes (e.g. public keys)
+    let bytes = bytes_from_hex(s).map_err(|_| ManifestParseError(s.to_string()))?;
+    Ok(ManifestValue::Value(tari_bor::Value::Bytes(bytes)))
 }
 
 /// The comma-separated elements of a list's contents, split at the commas outside any nested list
@@ -388,6 +388,35 @@ mod tests {
                 assert!(bor_err.to_string().contains("remaining on input"));
             },
             other => panic!("expected CborSerializationError, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn it_parses_digit_only_hex_bytes_and_rejects_overflowing_int_literals() {
+        let digit_only_pk = "1234567890123456789012345678901234567890123456789012345678901234";
+        let expected_bytes = tari_bor::Value::Bytes(bytes_from_hex(digit_only_pk).unwrap());
+
+        let parsed = digit_only_pk.parse::<ManifestValue>().unwrap();
+        assert_eq!(parsed.to_value().unwrap(), expected_bytes);
+
+        let parsed_list = format!("[{digit_only_pk}]").parse::<ManifestValue>().unwrap();
+        assert_eq!(
+            parsed_list.to_value().unwrap(),
+            tari_bor::Value::Array(vec![expected_bytes])
+        );
+
+        for overflowing in [
+            "12345678901234567890",
+            "9223372036854775808",
+            "256u8",
+            "65536u16",
+            "18446744073709551616u64",
+            "18446744073709551616u128",
+        ] {
+            assert!(
+                overflowing.parse::<ManifestValue>().is_err(),
+                "expected {overflowing} to be rejected by FromStr"
+            );
         }
     }
 }

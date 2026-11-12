@@ -22,7 +22,7 @@ use tari_ootle_wallet_sdk::{
 use tari_ootle_walletd_client::{ComponentAddressOrName, types::ClaimBurnProofContents};
 use tari_sidechain::CompleteClaimBurnProof;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib_types::{ComponentAddress, EncryptedData, ResourceAddress, stealth::StealthTransferStatement};
+use tari_template_lib_types::{ComponentAddress, ResourceAddress, stealth::StealthTransferStatement};
 use tokio::{sync::broadcast, time};
 
 use crate::server::ApplicationErrorCode;
@@ -423,18 +423,8 @@ pub(crate) fn validate_burn_proof_file_name(file_name: &str) -> anyhow::Result<(
 /// Converts a `CompleteClaimBurnProof` (the L1 burn proof file format) into the
 /// `ClaimBurnProofContents` used by the wallet daemon for claim transactions.
 pub(crate) fn complete_burn_proof_to_contents(proof: CompleteClaimBurnProof) -> anyhow::Result<ClaimBurnProofContents> {
-    let encrypted_data = EncryptedData::try_from(proof.encrypted_data).map_err(|len| {
-        anyhow!(
-            "Invalid encrypted data length: {}. Expected max length: {}",
-            len,
-            EncryptedData::MAX_MEMO_SIZE
-        )
-    })?;
     let claim_proof = claim_proof_from_l1(&proof.claim_proof).map_err(|e| anyhow!("Invalid burn proof: {e}"))?;
-    Ok(ClaimBurnProofContents {
-        claim_proof,
-        encrypted_data,
-    })
+    Ok(ClaimBurnProofContents { claim_proof })
 }
 
 #[cfg(test)]

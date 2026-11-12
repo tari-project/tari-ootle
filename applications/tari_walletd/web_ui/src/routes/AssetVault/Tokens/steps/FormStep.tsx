@@ -317,8 +317,8 @@ export default function FormStep({
               value={transferFormState.inputSelection}
               onChange={onSelectFormValueChange}
             >
-              <MenuItem value="PreferRevealed">Spend revealed funds first, then confidential</MenuItem>
               <MenuItem value="PreferConfidential">Spend confidential funds first, then revealed</MenuItem>
+              <MenuItem value="PreferRevealed">Spend revealed funds first, then confidential</MenuItem>
               <MenuItem value="ConfidentialOnly">Only spend confidential funds</MenuItem>
               <MenuItem value="RevealedOnly">Only spend revealed funds</MenuItem>
             </Select>

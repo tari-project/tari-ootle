@@ -156,9 +156,12 @@ where TConsensusSpec: ConsensusSpec
     /// carrying a later command gains nothing here - the stage check rejects it either way - and the
     /// ready record would be proposed, putting a stale-stage command in every block this node leads.
     ///
-    /// Safety comes from [`Self::validate_new_transaction`], which refuses to sequence an id that has
-    /// already committed - by its finalized decision or by its receipt existing in state - so this can
-    /// never resurrect a transaction the synced state has finalised.
+    /// An id this node holds as finalized with an abort is offered too. A proposal that sequences a
+    /// previously aborted id must be votable on every node whatever its local records remember, and
+    /// a node whose records of the abort are gone sequences it like any new transaction. Safety comes
+    /// from [`Self::validate_new_transaction`], which refuses to sequence an id that has already
+    /// committed - by its finalized decision or by its receipt existing in state - and gives an
+    /// aborted id a fresh lifecycle, so this can never resurrect a committed transaction.
     ///
     /// Returns the number of transactions put back in the pool.
     pub fn resequence_known_transactions<I: IntoIterator<Item = TransactionId>>(
@@ -173,12 +176,6 @@ where TConsensusSpec: ConsensusSpec
             // Cheap membership check first: on the hot path almost every id is already pooled, and
             // this avoids loading its record to find that out.
             if self.transaction_pool.exists(&**tx, &id)? {
-                continue;
-            }
-            // A finalized marker means the id has already run its course on this node. Whether an
-            // aborted attempt may be sequenced again is the mempool's call; repairing the pool during
-            // block validation must not resurrect one as a side effect.
-            if TransactionRecord::is_record_finalized(&**tx, &id)? {
                 continue;
             }
             unpooled.push(id);

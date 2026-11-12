@@ -5,10 +5,12 @@ mod support;
 
 use std::{
     collections::HashMap,
+    future::Future,
     sync::{Arc, Mutex},
 };
 
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt, future::BoxFuture};
+use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{Epoch, Utxo, substate::SubstateId};
 use tari_indexer_client::types::{EpochCheckpointEntry, ValidatorSetCommittee, WatchedSubstateItem};
 use tari_ootle_common_types::{
@@ -20,7 +22,17 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_transaction::{Transaction, TransactionEnvelope, TransactionId};
 use tari_ootle_wallet_sdk::{
-    models::{AccountWithAddress, StartOfShard, UtxoUnspent, UtxoUpdatePayload, WalletEvent, WalletUtxoUpdate},
+    WalletSdk,
+    models::{
+        AccountWithAddress,
+        EndOfShard,
+        StartOfShard,
+        UtxoSpent,
+        UtxoUnspent,
+        UtxoUpdatePayload,
+        WalletEvent,
+        WalletUtxoUpdate,
+    },
     network::{
         FetchedSubstates,
         FetchedUtxos,
@@ -47,6 +59,7 @@ use tari_ootle_wallet_sdk_services::{
 use tari_template_abi::TemplateDef;
 use tari_template_lib::types::{
     Amount,
+    ComponentAddress,
     ResourceAddress,
     TemplateAddress,
     UtxoAddress,
@@ -54,7 +67,7 @@ use tari_template_lib::types::{
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
 };
 
-use crate::support::TestWithNetwork;
+use crate::support::{TestSdkSpec, TestWithNetwork, random_key};
 
 #[derive(Debug, thiserror::Error)]
 #[error("not found")]
@@ -78,10 +91,16 @@ impl TransactionStatusResponseError for FakeError {
     }
 }
 
-#[derive(Debug, Default)]
+type Interleaving = Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>;
+
+#[derive(Default)]
 struct UtxoNetworkState {
     /// The UTXOs streamed as unspent in shard 0 at state version 1.
     streamed: Vec<(UtxoId, Utxo)>,
+    /// The updates streamed in shard 0 at state version 2. A stream of unspent updates only leaves out the spends.
+    streamed_later: Vec<WalletUtxoUpdate>,
+    /// Runs once, after the next full-UTXO lookup has read its answer and before the answer is returned.
+    on_next_lookup: Option<Interleaving>,
     /// The UTXOs the full-UTXO lookup returns.
     indexed: Vec<(UtxoId, Utxo)>,
     /// The pairs the full-UTXO lookup reports spent.
@@ -92,7 +111,7 @@ struct UtxoNetworkState {
 }
 
 /// An indexer whose UTXO stream and full-UTXO lookup can disagree, as two indexers at different heights do.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 struct UtxoNetwork {
     state: Arc<Mutex<UtxoNetworkState>>,
 }
@@ -110,6 +129,24 @@ impl UtxoNetwork {
         self.state.lock().unwrap().spent.push(tag_and_nonce(utxo));
     }
 
+    fn stream_later(&self, update: WalletUtxoUpdate) {
+        self.state.lock().unwrap().streamed_later.push(update);
+    }
+
+    /// Runs `interleaving` between the next full-UTXO lookup and the return of its answer, as a slow answer lets
+    /// other tasks run.
+    fn on_next_lookup<F, Fut>(&self, interleaving: F)
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.state.lock().unwrap().on_next_lookup = Some(Box::new(move || interleaving().boxed()));
+    }
+
+    fn unindex(&self, id: UtxoId) {
+        self.state.lock().unwrap().indexed.retain(|(indexed, _)| *indexed != id);
+    }
+
     fn index_through(&self, shard: u32, state_version: u64) {
         self.state
             .lock()
@@ -122,6 +159,37 @@ impl UtxoNetwork {
 fn tag_and_nonce(utxo: &Utxo) -> TagAndPublicNoncePair {
     let output = utxo.output().expect("an unspent UTXO has an output");
     (output.tag, output.output.public_nonce)
+}
+
+impl UtxoNetwork {
+    /// The answer of the full-UTXO lookup of `tag_and_nonce_pairs`.
+    fn lookup(&self, tag_and_nonce_pairs: Vec<PlacedTagAndNoncePair>) -> FetchedUtxos {
+        let state = self.state.lock().unwrap();
+        let requested =
+            |pair: &TagAndPublicNoncePair| tag_and_nonce_pairs.iter().any(|(requested, _)| requested == pair);
+        let unspent = state
+            .indexed
+            .iter()
+            .filter(|(_, utxo)| requested(&tag_and_nonce(utxo)))
+            .cloned()
+            .collect::<Vec<_>>();
+        let held = unspent.iter().map(|(_, utxo)| tag_and_nonce(utxo)).collect::<Vec<_>>();
+        let gone = tag_and_nonce_pairs
+            .iter()
+            .filter(|(pair, unspent_at)| {
+                !held.contains(pair) &&
+                    !state.spent.contains(pair) &&
+                    unspent_at.is_some_and(|(shard, state_version)| {
+                        state
+                            .indexed_through
+                            .get(&shard)
+                            .is_some_and(|indexed_through| *indexed_through >= state_version)
+                    })
+            })
+            .map(|(pair, _)| *pair);
+        let spent = state.spent.iter().copied().filter(requested).chain(gone).collect();
+        FetchedUtxos { unspent, spent }
+    }
 }
 
 impl WalletNetworkInterface for UtxoNetwork {
@@ -170,37 +238,57 @@ impl WalletNetworkInterface for UtxoNetwork {
         _from_epoch: Epoch,
         _resource_address: ResourceAddress,
         shard_state_versions: Vec<(Shard, StateVersion)>,
-        _unspent_only: bool,
+        unspent_only: bool,
     ) -> Result<UtxoUpdateStream<Self::Error>, Self::Error> {
         let shard = Shard::from(0u32);
-        let synced = shard_state_versions
+        let cursor = shard_state_versions
             .iter()
-            .any(|(s, v)| *s == shard && *v >= StateVersion::from(1));
-        if synced {
+            .find(|(s, _)| *s == shard)
+            .map(|(_, v)| *v)
+            .unwrap_or(StateVersion::from(0));
+        let state = self.state.lock().unwrap();
+        let max_state_version = if state.streamed_later.is_empty() { 1 } else { 2 };
+        if cursor >= StateVersion::from(max_state_version) {
             return Ok(futures::stream::empty().boxed());
         }
+        let first = (cursor < StateVersion::from(1))
+            .then_some(state.streamed.iter())
+            .into_iter()
+            .flatten()
+            .map(|(_, utxo)| {
+                let (tag, public_nonce) = tag_and_nonce(utxo);
+                WalletUtxoUpdate::Unspent(UtxoUnspent { tag, public_nonce })
+            });
+        let later = state
+            .streamed_later
+            .iter()
+            .filter(|update| !unspent_only || matches!(update, WalletUtxoUpdate::Unspent(_)))
+            .cloned();
         let sos = StartOfShard {
             shard,
-            max_state_version: StateVersion::from(1),
+            max_state_version: StateVersion::from(max_state_version),
             has_more: false,
             spends_incomplete: false,
         };
-        let payloads = self
-            .state
-            .lock()
-            .unwrap()
-            .streamed
-            .iter()
-            .enumerate()
-            .map(|(i, (_, utxo))| {
-                let (tag, public_nonce) = tag_and_nonce(utxo);
-                Ok(UtxoUpdatePayload {
-                    sos: (i == 0).then_some(sos.clone()),
-                    update: Some(WalletUtxoUpdate::Unspent(UtxoUnspent { tag, public_nonce })),
-                    eos: None,
-                })
+        let mut payloads = vec![Ok(UtxoUpdatePayload {
+            sos: Some(sos),
+            update: None,
+            eos: None,
+        })];
+        payloads.extend(first.chain(later).map(|update| {
+            Ok(UtxoUpdatePayload {
+                sos: None,
+                update: Some(update),
+                eos: None,
             })
-            .collect::<Vec<_>>();
+        }));
+        payloads.push(Ok(UtxoUpdatePayload {
+            sos: None,
+            update: None,
+            eos: Some(EndOfShard {
+                max_state_version: StateVersion::from(max_state_version),
+            }),
+        }));
         Ok(futures::stream::iter(payloads).boxed())
     }
 
@@ -218,31 +306,12 @@ impl WalletNetworkInterface for UtxoNetwork {
         _resource_address: ResourceAddress,
         tag_and_nonce_pairs: Vec<PlacedTagAndNoncePair>,
     ) -> Result<FetchedUtxos, Self::Error> {
-        let state = self.state.lock().unwrap();
-        let requested =
-            |pair: &TagAndPublicNoncePair| tag_and_nonce_pairs.iter().any(|(requested, _)| requested == pair);
-        let unspent = state
-            .indexed
-            .iter()
-            .filter(|(_, utxo)| requested(&tag_and_nonce(utxo)))
-            .cloned()
-            .collect::<Vec<_>>();
-        let held = unspent.iter().map(|(_, utxo)| tag_and_nonce(utxo)).collect::<Vec<_>>();
-        let gone = tag_and_nonce_pairs
-            .iter()
-            .filter(|(pair, unspent_at)| {
-                !held.contains(pair) &&
-                    !state.spent.contains(pair) &&
-                    unspent_at.is_some_and(|(shard, state_version)| {
-                        state
-                            .indexed_through
-                            .get(&shard)
-                            .is_some_and(|indexed_through| *indexed_through >= state_version)
-                    })
-            })
-            .map(|(pair, _)| *pair);
-        let spent = state.spent.iter().copied().filter(requested).chain(gone).collect();
-        Ok(FetchedUtxos { unspent, spent })
+        let fetched = self.lookup(tag_and_nonce_pairs);
+        let interleaving = self.state.lock().unwrap().on_next_lookup.take();
+        if let Some(interleaving) = interleaving {
+            interleaving().await;
+        }
+        Ok(fetched)
     }
 
     async fn get_latest_epoch_checkpoint(&self, _shard: Shard) -> Result<EpochCheckpointEntry, Self::Error> {
@@ -315,11 +384,12 @@ fn balance(test: &Test, account: &AccountWithAddress) -> Amount {
 
 /// Scans the account once, queueing every streamed UTXO for recovery.
 async fn scan(test: &Test, account: &AccountWithAddress) {
-    let (_join, scanner) = StealthUtxoScannerWorker::new(test.sdk().clone(), Notify::new(10)).spawn();
-    scanner
-        .scan(*account.account.component_address(), STEALTH_TARI_RESOURCE_ADDRESS)
-        .await
-        .unwrap();
+    scan_with(test.sdk().clone(), *account.account.component_address()).await;
+}
+
+async fn scan_with(sdk: WalletSdk<TestSdkSpec<UtxoNetwork>>, account: ComponentAddress) {
+    let (_join, scanner) = StealthUtxoScannerWorker::new(sdk, Notify::new(10)).spawn();
+    scanner.scan(account, STEALTH_TARI_RESOURCE_ADDRESS).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -547,6 +617,207 @@ fn a_batch_places_a_pair_by_every_queued_entry_of_it_beyond_the_batch() {
         .store()
         .with_read_tx(|tx| tx.utxo_process_queue_fetch_batch(None, 1))
         .unwrap();
-    let queued = batch.entries[&STEALTH_TARI_RESOURCE_ADDRESS][&tag_and_nonce(&utxo)];
+    let queued = &batch.entries[&STEALTH_TARI_RESOURCE_ADDRESS][&tag_and_nonce(&utxo)];
     assert_eq!(queued.unspent_at, None);
+}
+
+/// The number of queued entries, counting each account's entry of a pair.
+fn queued_entries(test: &Test) -> usize {
+    test.store()
+        .with_read_tx(|tx| tx.utxo_process_queue_fetch_batch(None, 1000))
+        .unwrap()
+        .entries
+        .values()
+        .flat_map(|pairs| pairs.values())
+        .map(|pair| pair.entries.len())
+        .sum()
+}
+
+/// An output whose public nonce is the identity: `v·R` is the identity for every view key `v`, so every account derives
+/// its tag and decrypts it, and only the spend key tells the owner apart.
+async fn assert_identity_nonce_output_is_recovered_for_its_owner(owner_queued_first: bool) {
+    let network = UtxoNetwork::default();
+    let (test, owner) = new_test(network.clone());
+    let other = second_account(&test);
+    let (id, utxo) = test.owned_utxo_with_nonce(&owner, 100, &RistrettoSecretKey::default());
+    network.index((id, utxo.clone()));
+    let (first, second) = if owner_queued_first {
+        (&owner, &other)
+    } else {
+        (&other, &owner)
+    };
+    queue_at(&test, first, &utxo, None);
+    queue_at(&test, second, &utxo, None);
+    assert_eq!(queued_entries(&test), 2);
+
+    assert_eq!(recover(&test).await, 0);
+    assert_eq!(queued_entries(&test), 0);
+    assert!(is_stored(&test, id));
+    assert_eq!(balance(&test, &owner), Amount::from_u64(100));
+    assert_eq!(balance(&test, &other), Amount::zero());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_output_queued_for_its_owner_first_and_another_account_is_recovered_for_its_owner() {
+    assert_identity_nonce_output_is_recovered_for_its_owner(true).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_output_queued_for_another_account_first_and_its_owner_is_recovered_for_its_owner() {
+    assert_identity_nonce_output_is_recovered_for_its_owner(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_output_held_invalid_for_another_account_is_recovered_for_its_owner() {
+    let network = UtxoNetwork::default();
+    let (test, owner) = new_test(network.clone());
+    let other = second_account(&test);
+    let (id, utxo) = test.owned_utxo_with_nonce(&owner, 100, &RistrettoSecretKey::default());
+    network.index((id, utxo.clone()));
+
+    // Only the other account scans the output's pair at first, so its keys alone validate the output
+    queue_at(&test, &other, &utxo, None);
+    assert_eq!(recover(&test).await, 0);
+    assert!(is_stored(&test, id), "the other account's view key decrypts the output");
+    assert_eq!(balance(&test, &owner), Amount::zero());
+
+    queue_at(&test, &owner, &utxo, None);
+    assert_eq!(recover(&test).await, 0);
+    assert_eq!(queued_entries(&test), 0);
+    assert_eq!(balance(&test, &owner), Amount::from_u64(100));
+    assert_eq!(balance(&test, &other), Amount::zero());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_output_queued_while_its_pair_is_looked_up_is_recovered() {
+    let network = UtxoNetwork::default();
+    let (test, account) = new_test(network.clone());
+    let nonce = random_key();
+    let (first_id, first) = test.owned_utxo_with_nonce(&account, 100, &nonce);
+    let (later_id, later) = test.owned_utxo_with_nonce(&account, 200, &nonce);
+    let (tag, public_nonce) = tag_and_nonce(&first);
+    assert_eq!(tag_and_nonce(&later), (tag, public_nonce));
+    network.stream((first_id, first.clone()));
+    network.index((first_id, first));
+    scan(&test, &account).await;
+    assert_eq!(queued_entries(&test), 1);
+
+    // The lookup sees only the first output. Before recovery stores it, a scan finds the later one with the same pair.
+    let sdk = test.sdk().clone();
+    let account_address = *account.account.component_address();
+    let network_in_lookup = network.clone();
+    network.on_next_lookup(move || async move {
+        network_in_lookup.stream_later(WalletUtxoUpdate::Unspent(UtxoUnspent { tag, public_nonce }));
+        network_in_lookup.index((later_id, later));
+        scan_with(sdk, account_address).await;
+    });
+    assert_eq!(recover(&test).await, 1);
+    assert_eq!(
+        queued_entries(&test),
+        1,
+        "the entry queued again during the lookup stands for an output the lookup did not see"
+    );
+
+    assert_eq!(recover(&test).await, 0);
+    assert_eq!(queued_entries(&test), 0);
+    assert!(is_stored(&test, first_id));
+    assert!(is_stored(&test, later_id));
+    assert_eq!(balance(&test, &account), Amount::from_u64(300));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_output_spent_while_it_is_looked_up_is_not_recovered_unspent() {
+    let network = UtxoNetwork::default();
+    let (test, account) = new_test(network.clone());
+    let (id, utxo) = test.owned_utxo(&account, 100);
+    network.stream((id, utxo.clone()));
+    network.index((id, utxo.clone()));
+    scan(&test, &account).await;
+    assert_eq!(queued_entries(&test), 1);
+
+    // The lookup sees the output unspent. Before recovery stores it, the output is spent and a scan streams the spend.
+    // The account holds no output yet, so only the queued output makes the scan ask for spends.
+    let sdk = test.sdk().clone();
+    let account_address = *account.account.component_address();
+    let network_in_lookup = network.clone();
+    network.on_next_lookup(move || async move {
+        network_in_lookup.unindex(id);
+        network_in_lookup.spend(&utxo);
+        network_in_lookup.stream_later(WalletUtxoUpdate::Spent(UtxoSpent {
+            id,
+            version: SubstateVersion::ZERO,
+        }));
+        scan_with(sdk, account_address).await;
+    });
+    assert_eq!(recover(&test).await, 1);
+    assert!(
+        !is_stored(&test, id),
+        "the lookup that saw the output unspent was made before its spend"
+    );
+    assert_eq!(queued_entries(&test), 1);
+
+    assert_eq!(recover(&test).await, 0);
+    assert_eq!(queued_entries(&test), 0);
+    assert!(!is_stored(&test, id));
+    assert_eq!(balance(&test, &account), Amount::zero());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_output_looked_up_while_another_unheld_output_is_spent_is_recovered() {
+    let network = UtxoNetwork::default();
+    let (test, account) = new_test(network.clone());
+    let (id, utxo) = test.owned_utxo(&account, 100);
+    let other = second_account(&test);
+    let (unheld_id, _) = test.owned_utxo(&other, 50);
+    network.index((id, utxo.clone()));
+    queue_at(&test, &account, &utxo, None);
+    assert_eq!(queued_entries(&test), 1);
+
+    // While the lookup is made, a scan streams the spend of an output the wallet does not hold. The spend is not of
+    // the output the lookup returned, so the lookup stays good.
+    let sdk = test.sdk().clone();
+    let account_address = *account.account.component_address();
+    let network_in_lookup = network.clone();
+    network.on_next_lookup(move || async move {
+        network_in_lookup.stream_later(WalletUtxoUpdate::Spent(UtxoSpent {
+            id: unheld_id,
+            version: SubstateVersion::ZERO,
+        }));
+        scan_with(sdk, account_address).await;
+    });
+    assert_eq!(recover(&test).await, 0);
+    assert_eq!(queued_entries(&test), 0);
+    assert!(is_stored(&test, id));
+    assert_eq!(balance(&test, &account), Amount::from_u64(100));
+}
+
+fn unheld_spends(test: &Test) -> u64 {
+    test.store()
+        .with_read_tx(|tx| tx.utxo_unheld_spends_watermark())
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scan_records_no_unheld_spends_while_nothing_is_queued() {
+    let network = UtxoNetwork::default();
+    let (test, account) = new_test(network.clone());
+    let (held_id, held) = test.owned_utxo(&account, 100);
+    network.index((held_id, held.clone()));
+    queue_at(&test, &account, &held, None);
+    recover(&test).await;
+    assert!(is_stored(&test, held_id));
+    assert_eq!(queued_entries(&test), 0);
+
+    let other = second_account(&test);
+    let (unheld_id, _) = test.owned_utxo(&other, 50);
+    network.stream_later(WalletUtxoUpdate::Spent(UtxoSpent {
+        id: unheld_id,
+        version: SubstateVersion::ZERO,
+    }));
+    scan(&test, &account).await;
+    assert_eq!(
+        unheld_spends(&test),
+        0,
+        "no lookup can need a spend while nothing is queued"
+    );
 }

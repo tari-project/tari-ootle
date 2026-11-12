@@ -140,7 +140,6 @@ fn setup_locked_transfer() -> (SqliteWalletStore, WalletLockId) {
     ))
     .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     (store, lock_id)
 }

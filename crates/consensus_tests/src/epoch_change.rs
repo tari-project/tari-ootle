@@ -1285,3 +1285,48 @@ async fn epoch_change_hash_divergence_self_heals() {
     test.stop();
     test.assert_clean_shutdown().await;
 }
+
+/// Every validator of a new network comes up with no state while its oracle is already past the birthday epoch. All
+/// of them open genesis at the birthday epoch, then end each epoch in turn until they reach the oracle's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_fresh_network_past_its_birthday_walks_from_the_birthday_epoch() {
+    setup_logger();
+    let birthday = Epoch(1);
+    let oracle_epoch = Epoch(3);
+    let mut test = Test::builder().add_committee(0, vec!["1", "2", "3", "4"]).start().await;
+    for vn in test.validators_iter() {
+        vn.epoch_manager.set_birthday_epoch(birthday).await;
+    }
+
+    test.start_epoch(oracle_epoch).await;
+    // Each commit is answered with another transaction, so every epoch of the walk has work to commit.
+    test.send_transaction_to_all(Decision::Commit, 1, 5, 1).await;
+    for commits in 0.. {
+        let (_, _, epoch, _) = test.on_block_committed().await;
+        if epoch == oracle_epoch && test.is_all_submitted_transactions_finalized() {
+            break;
+        }
+        assert!(
+            commits < 300,
+            "Consensus did not commit in {oracle_epoch} after {commits} commits"
+        );
+        if epoch < oracle_epoch {
+            test.send_transaction_to_all(Decision::Commit, 1, 5, 1).await;
+        }
+    }
+
+    for vn in test.validators_iter() {
+        vn.state_store
+            .with_read_tx(|tx| {
+                for epoch in [birthday, Epoch(2), oracle_epoch] {
+                    Block::get_genesis_for_epoch(tx, epoch)?;
+                }
+                assert_eq!(tx.leaf_block_get(oracle_epoch)?.epoch(), oracle_epoch);
+                Ok::<_, HotStuffError>(())
+            })
+            .unwrap();
+    }
+
+    test.stop();
+    test.assert_clean_shutdown().await;
+}

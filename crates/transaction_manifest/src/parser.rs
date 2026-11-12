@@ -1020,7 +1020,9 @@ fn lit_to_nonfungible_id(lit: &Lit) -> Result<NonFungibleId, ManifestError> {
             Ok(NonFungibleId::from_u256(id))
         },
         Lit::Int(v) => match v.suffix() {
-            "u8" | "u16" | "u32" => Ok(NonFungibleId::from_u32(v.base10_parse()?)),
+            "u8" => Ok(NonFungibleId::from_u32(u32::from(v.base10_parse::<u8>()?))),
+            "u16" => Ok(NonFungibleId::from_u32(u32::from(v.base10_parse::<u16>()?))),
+            "u32" => Ok(NonFungibleId::from_u32(v.base10_parse()?)),
             "u64" => Ok(NonFungibleId::from_u64(v.base10_parse()?)),
             "" => Err(ManifestError::UnsupportedExpr(
                 "Non-fungible ID integer literal must have a type suffix specified (1u32, 2u64 etc)".to_string(),

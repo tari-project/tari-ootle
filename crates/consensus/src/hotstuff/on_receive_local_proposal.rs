@@ -293,7 +293,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
                 if let Err(err) = self.on_receive_foreign_proposal.validate_and_save(
                     tx,
-                    &foreign_proposal,
+                    &mut foreign_proposal,
                     epoch_state.local_committee_info(),
                 ) {
                     if let Some(err) = err.validation_error().filter(|err| err.rejects_message_not_block()) {

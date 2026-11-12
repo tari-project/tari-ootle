@@ -1594,15 +1594,13 @@ where
                         })?;
                 args.assert_no_args("ComponentAction::GetState")?;
                 let is_already_locked = self.tracker.read_with(|state| {
-                    let scope = state.current_call_scope()?;
-                    let is_already_locked = scope
+                    let is_already_locked = state
+                        .current_call_scope()?
                         .get_current_component_lock()
                         .is_some_and(|l| *l.substate_id() == component_address);
+                    // Checked before charging the load so an out-of-scope read costs nothing
                     if !is_already_locked {
-                        let substate_id = SubstateId::Component(component_address);
-                        if !scope.is_substate_in_scope(&substate_id) {
-                            return Err(RuntimeError::SubstateOutOfScope { id: substate_id });
-                        }
+                        state.check_substate_in_scope(&SubstateId::Component(component_address))?;
                     }
                     Ok::<_, RuntimeError>(is_already_locked)
                 })?;
@@ -1621,7 +1619,7 @@ where
                                 action: ComponentAction::GetState.into(),
                             })?
                     } else {
-                        state.read_lock_substate(SubstateId::Component(component_address))?
+                        state.read_lock_substate_in_scope(SubstateId::Component(component_address))?
                     };
 
                     // We only allow mutating of the current component.
@@ -1804,21 +1802,15 @@ where
                 args.assert_no_args("Component::GetTemplateAddress")?;
 
                 self.tracker.write_with(|state| {
-                    let scope = state.current_call_scope()?;
-                    let current_component_lock = scope
+                    let current_component_lock = state
+                        .current_call_scope()?
                         .get_current_component_lock()
                         .filter(|l| *l.substate_id() == component_address)
                         .cloned();
                     let is_already_locked = current_component_lock.is_some();
                     let locked = match current_component_lock {
                         Some(lock) => lock,
-                        None => {
-                            let substate_id = SubstateId::Component(component_address);
-                            if !scope.is_substate_in_scope(&substate_id) {
-                                return Err(RuntimeError::SubstateOutOfScope { id: substate_id });
-                            }
-                            state.read_lock_substate(substate_id)?
-                        },
+                        None => state.read_lock_substate_in_scope(SubstateId::Component(component_address))?,
                     };
                     let component = state.get_component(&locked)?;
                     let template_address = *component.template_address();

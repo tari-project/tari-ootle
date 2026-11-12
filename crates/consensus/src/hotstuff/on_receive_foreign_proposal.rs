@@ -33,7 +33,7 @@ use crate::{
         ProposalValidationError,
         commit_proofs::generate_block_commit_proof,
         error::HotStuffError,
-        pacemaker_handle::PaceMakerHandle,
+        pacemaker_action::PacemakerActions,
     },
     messages::{
         ForeignProposalMessage,
@@ -64,7 +64,6 @@ const PROPOSAL_RESPONSE_TIMEOUT: Duration = REQUEST_TIMEOUT;
 pub struct OnReceiveForeignProposalHandler<TConsensusSpec: ConsensusSpec> {
     store: TConsensusSpec::StateStore,
     epoch_manager: TConsensusSpec::EpochManager,
-    pacemaker: PaceMakerHandle,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     pending_requests: PendingRequests<TConsensusSpec::Addr>,
     bounded_spawner: PerKeyBoundedSpawn<TConsensusSpec::Addr>,
@@ -76,13 +75,11 @@ where TConsensusSpec: ConsensusSpec
     pub fn new(
         store: TConsensusSpec::StateStore,
         epoch_manager: TConsensusSpec::EpochManager,
-        pacemaker: PaceMakerHandle,
         outbound_messaging: TConsensusSpec::OutboundMessaging,
     ) -> Self {
         Self {
             store,
             epoch_manager,
-            pacemaker,
             outbound_messaging,
             pending_requests: PendingRequests::new(),
             bounded_spawner: PerKeyBoundedSpawn::new(
@@ -101,6 +98,7 @@ where TConsensusSpec: ConsensusSpec
 
     pub async fn handle_received(
         &mut self,
+        pacemaker_actions: &mut PacemakerActions,
         message: ForeignProposalMessage,
         local_committee_info: &CommitteeInfo,
     ) -> Result<(), HotStuffError> {
@@ -129,7 +127,7 @@ where TConsensusSpec: ConsensusSpec
         self.pending_requests.remove(&block_id);
 
         // Foreign proposals to propose
-        self.pacemaker.beat();
+        pacemaker_actions.beat();
         Ok(())
     }
 
@@ -482,7 +480,7 @@ where TConsensusSpec: ConsensusSpec
     pub fn validate_and_save<TTx>(
         &self,
         tx: &mut TTx,
-        proposal: &ForeignProposalRecord,
+        proposal: &mut ForeignProposalRecord,
         local_committee_info: &CommitteeInfo,
     ) -> Result<(), HotStuffError>
     where
@@ -527,15 +525,24 @@ where
     Ok(true)
 }
 
+/// Validates `proposal` and saves it with its commands in the form a proof generated for the local shard group carries
+/// them, so the stored copy is the same whichever peer relayed it.
 fn validate_and_save<TTx>(
     tx: &mut TTx,
-    proposal: &ForeignProposalRecord,
+    proposal: &mut ForeignProposalRecord,
     local_committee_info: &CommitteeInfo,
 ) -> Result<(), HotStuffError>
 where
     TTx: StateStoreWriteTransaction + Deref,
     TTx::Target: StateStoreReadTransaction,
 {
+    proposal
+        .prune_for_shard_group(local_committee_info.shard_group())
+        .map_err(|e| ProposalValidationError::ForeignProposalInvalid {
+            block_id: *proposal.block_id(),
+            shard_group: proposal.proposal().shard_group_unchecked(),
+            details: e.into(),
+        })?;
     if let Err(err) = validate_foreign_proposal(proposal.proposal(), local_committee_info) {
         // TODO: handle this case. Perhaps, by aborting all transactions that are affected by this block (we known
         // the justify QC is valid)

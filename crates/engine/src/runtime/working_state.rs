@@ -11,7 +11,7 @@ use indexmap::{IndexMap, IndexSet};
 use log::*;
 use ootle_byte_type::{ConvertFromByteType, ToByteType};
 use ootle_network::Network;
-use tari_bor::encoded_len;
+use tari_bor::{MaybeTagged, encoded_len};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{
     SubstateVersion,
@@ -343,6 +343,22 @@ impl<TStore: StateReader> WorkingState<TStore> {
 
     pub fn read_lock_substate(&mut self, addr: SubstateId) -> Result<LockedSubstate, RuntimeError> {
         self.lock_substate(addr, LockFlag::Read)
+    }
+
+    /// Read-locks `addr` only when the current call frame has it in scope, so a frame cannot read a substate it was
+    /// never given by naming its address.
+    pub fn read_lock_substate_in_scope(&mut self, addr: SubstateId) -> Result<LockedSubstate, RuntimeError> {
+        self.check_substate_in_scope(&addr)?;
+        self.read_lock_substate(addr)
+    }
+
+    /// Fails with [`RuntimeError::SubstateOutOfScope`] when `addr` is outside the current call frame's scope.
+    pub fn check_substate_in_scope(&self, addr: &SubstateId) -> Result<(), RuntimeError> {
+        if self.current_call_scope()?.is_substate_in_scope(addr) {
+            Ok(())
+        } else {
+            Err(RuntimeError::SubstateOutOfScope { id: addr.clone() })
+        }
     }
 
     pub fn write_lock_substate(&mut self, addr: SubstateId) -> Result<LockedSubstate, RuntimeError> {
@@ -998,6 +1014,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         let call_frame_mut = self.current_call_scope_mut()?;
         call_frame_mut.require_held_proof(&proof_id)?;
         call_frame_mut.remove_proof_from_scope(&proof_id);
+        self.workspace.remove_proof(proof_id);
 
         // Fetch the proof
         let proof = self
@@ -1400,7 +1417,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
         }
         let alloc_addr = self
             .address_allocations
-            .swap_remove(&id)
+            .shift_remove(&id)
             .ok_or(RuntimeError::AddressAllocationNotFound { id })?;
         self.current_call_scope_mut()?.remove_address_allocation_from_scope(id);
         self.used_address_allocations
@@ -1994,27 +2011,49 @@ impl<TStore: StateReader> WorkingState<TStore> {
                         id,
                         existing_ids: self.workspace().all_ids_iter().collect(),
                     })?;
-                let allocation_id: ResourceAddressAllocation =
-                    tari_bor::from_value(value).map_err(|e| RuntimeError::InvalidArgument {
-                        argument: "ResourceAddressRef::Workspace",
-                        reason: format!("Item on workspace at key '{id}' is not a valid ResourceAddressRef: {e}",),
-                    })?;
-                let substate_id = self.get_substate_id_from_used_address_allocation(allocation_id.id())?;
-                let resource_address = match substate_id {
-                    SubstateId::Resource(addr) => addr,
-                    substate_id => {
-                        let substate_type = tari_ootle_common_types::substate_type::SubstateType::from(&substate_id);
-                        return Err(RuntimeError::InvalidArgument {
+
+                // A workspace resource ref holds either a `ResourceAddress` or a used `ResourceAddressAllocation`.
+                if value.is_tag_of::<ResourceAddress>() {
+                    let resource_address: ResourceAddress =
+                        tari_bor::from_value(value).map_err(|e| RuntimeError::InvalidArgument {
+                            argument: "ResourceAddressRef::Workspace",
+                            reason: format!("Item on workspace at key '{id}' is not a valid ResourceAddress: {e}"),
+                        })?;
+                    Ok(resource_address)
+                } else if value.is_tag_of::<ResourceAddressAllocation>() {
+                    let allocation_id: ResourceAddressAllocation =
+                        tari_bor::from_value(value).map_err(|e| RuntimeError::InvalidArgument {
                             argument: "ResourceAddressRef::Workspace",
                             reason: format!(
-                                "Invalid attempt to load resource address with an address allocation ID ({}) with \
-                                 substate type {substate_type}",
-                                allocation_id.id()
+                                "Item on workspace at key '{id}' is not a valid ResourceAddressAllocation: {e}"
                             ),
-                        });
-                    },
-                };
-                Ok(resource_address)
+                        })?;
+                    let substate_id = self.get_substate_id_from_used_address_allocation(allocation_id.id())?;
+                    let resource_address = match substate_id {
+                        SubstateId::Resource(addr) => addr,
+                        substate_id => {
+                            let substate_type =
+                                tari_ootle_common_types::substate_type::SubstateType::from(&substate_id);
+                            return Err(RuntimeError::InvalidArgument {
+                                argument: "ResourceAddressRef::Workspace",
+                                reason: format!(
+                                    "Invalid attempt to load resource address with an address allocation ID ({}) with \
+                                     substate type {substate_type}",
+                                    allocation_id.id()
+                                ),
+                            });
+                        },
+                    };
+                    Ok(resource_address)
+                } else {
+                    Err(RuntimeError::InvalidArgument {
+                        argument: "ResourceAddressRef::Workspace",
+                        reason: format!(
+                            "Item on workspace at key '{id}' is not a valid ResourceAddress or \
+                             ResourceAddressAllocation"
+                        ),
+                    })
+                }
             },
         }
     }
@@ -2709,6 +2748,141 @@ mod tests {
             Err(RuntimeError::ArgumentValidationError(
                 ArgumentValidationError::MaxStealthTransfersPerTransactionExceeded { .. }
             ))
+        ));
+    }
+
+    #[test]
+    fn drop_proof_removes_proof_from_workspace_and_preserves_remaining_order() {
+        let mut state = test_working_state();
+        for raw_id in 0..3u32 {
+            let proof_id = ProofId::from(raw_id);
+            state
+                .new_proof(
+                    proof_id,
+                    LockedResource::new(
+                        ContainerRef::Runtime,
+                        ResourceContainer::public_fungible(STEALTH_TARI_RESOURCE_ADDRESS, Amount::from(10u64)),
+                    ),
+                )
+                .unwrap();
+            let encoded = IndexedValue::from_type(&Proof::from_id(proof_id)).unwrap();
+            state.workspace_mut().insert(raw_id as u16, encoded).unwrap();
+        }
+
+        state.drop_proof(ProofId::from(0u32)).unwrap();
+
+        let remaining: Vec<ProofId> = state.workspace_mut().take_all_proofs().into_iter().collect();
+        assert_eq!(remaining, vec![ProofId::from(1u32), ProofId::from(2u32)]);
+    }
+
+    #[test]
+    fn use_allocated_address_preserves_insertion_order_of_remaining_allocations() {
+        let mut state = test_working_state();
+        let first_addr = ComponentAddress::from_array([1u8; ObjectKey::LENGTH]);
+        let shared_addr = ComponentAddress::from_array([2u8; ObjectKey::LENGTH]);
+        let template_a = TemplateAddress::from_array([0xAA; 32]);
+        let template_b = TemplateAddress::from_array([0xBB; 32]);
+
+        let alloc0 = state.new_address_allocation(first_addr).unwrap();
+
+        let frame_a = PushCallFrame::Static {
+            template_address: template_a,
+            module_name: "A".to_string(),
+            arg_scope: IndexedWellKnownTypes::new(),
+            entity_id: EntityId::default(),
+        }
+        .into_new_call_frame();
+        state.push_frame(frame_a, 10).unwrap();
+        let alloc1 = state.new_address_allocation(shared_addr).unwrap();
+        let ret_a =
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&ComponentAddressAllocation::new(alloc1)).unwrap())
+                .unwrap();
+        state.pop_frame(&ret_a).unwrap();
+
+        let frame_b = PushCallFrame::Static {
+            template_address: template_b,
+            module_name: "B".to_string(),
+            arg_scope: IndexedWellKnownTypes::new(),
+            entity_id: EntityId::default(),
+        }
+        .into_new_call_frame();
+        state.push_frame(frame_b, 10).unwrap();
+        let alloc2 = state.new_address_allocation(shared_addr).unwrap();
+        let ret_b =
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&ComponentAddressAllocation::new(alloc2)).unwrap())
+                .unwrap();
+        state.pop_frame(&ret_b).unwrap();
+
+        state.use_allocated_address(alloc0).unwrap();
+
+        assert_eq!(
+            state
+                .get_allocated_address_by_address(shared_addr)
+                .and_then(|alloc| alloc.template_address()),
+            Some(&template_a)
+        );
+    }
+
+    #[test]
+    fn resolve_resource_address_ref_accepts_direct_resource_address_and_allocation_on_workspace() {
+        let mut state = test_working_state();
+        let resx_direct = ResourceAddress::new(ObjectKey::from_array([10u8; ObjectKey::LENGTH]));
+        let resx_tuple = ResourceAddress::new(ObjectKey::from_array([11u8; ObjectKey::LENGTH]));
+        let resx_allocated = ResourceAddress::new(ObjectKey::from_array([12u8; ObjectKey::LENGTH]));
+        let comp_addr = ComponentAddress::from_array([13u8; ObjectKey::LENGTH]);
+
+        // 1. Direct ResourceAddress placed on workspace
+        state
+            .workspace_mut()
+            .insert(0, IndexedValue::from_type(&resx_direct).unwrap())
+            .unwrap();
+        assert_eq!(
+            state
+                .resolve_resource_address_ref(ResourceAddressRef::Workspace(WorkspaceOffsetId::new(0)))
+                .unwrap(),
+            resx_direct
+        );
+
+        // 2. ResourceAddress inside a tuple on workspace referenced via WorkspaceOffsetId offset
+        state
+            .workspace_mut()
+            .insert(1, IndexedValue::from_type(&(comp_addr, resx_tuple)).unwrap())
+            .unwrap();
+        assert_eq!(
+            state
+                .resolve_resource_address_ref(ResourceAddressRef::Workspace(WorkspaceOffsetId::new(1).with_offset(1)))
+                .unwrap(),
+            resx_tuple
+        );
+
+        // 3. ResourceAddressAllocation placed on workspace, rejected before redemption and accepted once redeemed
+        let alloc_id = state.new_address_allocation(resx_allocated).unwrap();
+        state
+            .workspace_mut()
+            .insert(
+                2,
+                IndexedValue::from_type(&ResourceAddressAllocation::new(alloc_id)).unwrap(),
+            )
+            .unwrap();
+        assert!(matches!(
+            state.resolve_resource_address_ref(ResourceAddressRef::Workspace(WorkspaceOffsetId::new(2))),
+            Err(RuntimeError::AddressAllocationNotUsed { id }) if id == alloc_id
+        ));
+        state.use_allocated_address(alloc_id).unwrap();
+        assert_eq!(
+            state
+                .resolve_resource_address_ref(ResourceAddressRef::Workspace(WorkspaceOffsetId::new(2)))
+                .unwrap(),
+            resx_allocated
+        );
+
+        // 4. Non-resource item on workspace is rejected with InvalidArgument
+        assert!(matches!(
+            state.resolve_resource_address_ref(ResourceAddressRef::Workspace(WorkspaceOffsetId::new(1).with_offset(0))),
+            Err(RuntimeError::InvalidArgument {
+                argument: "ResourceAddressRef::Workspace",
+                ..
+            })
         ));
     }
 }

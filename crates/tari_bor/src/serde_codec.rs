@@ -16,7 +16,7 @@
 #![cfg(feature = "serde")]
 
 #[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
+use alloc::{format, string::String, vec::Vec};
 use core::fmt;
 
 use minicbor::{
@@ -115,7 +115,18 @@ pub fn to_vec<T: Serialize>(val: T) -> Result<Vec<u8>, EncodeError<core::convert
 /// The target type's recursion is bounded by the stack, so deserializing untrusted input on a
 /// native stack wants [`from_slice_with_max_depth`] and a bound of the caller's choosing.
 pub fn from_slice<'de, T: Deserialize<'de>>(b: &'de [u8]) -> Result<T, DecodeError> {
-    T::deserialize(&mut Deserializer::new(b))
+    let mut de = Deserializer::new(b);
+    let val = T::deserialize(&mut de)?;
+    let consumed = de.decoder.position();
+    if consumed != b.len() {
+        return Err(decode::Error::message(format!(
+            "serde_codec::from_slice: {} trailing bytes remaining on input",
+            b.len() - consumed
+        ))
+        .at(consumed)
+        .into());
+    }
+    Ok(val)
 }
 
 /// Deserialize, rejecting input nested deeper than `max_depth`.
@@ -138,6 +149,16 @@ fn collect_indef_bytes(d: &mut Decoder<'_>) -> Result<Vec<u8>, decode::Error> {
     let mut buf = Vec::with_capacity(total);
     for chunk in chunks {
         buf.extend_from_slice(chunk);
+    }
+    Ok(buf)
+}
+
+fn collect_indef_str(d: &mut Decoder<'_>) -> Result<String, decode::Error> {
+    let chunks: Vec<&str> = d.str_iter()?.collect::<Result<_, _>>()?;
+    let total: usize = chunks.iter().map(|c| c.len()).sum();
+    let mut buf = String::with_capacity(total);
+    for chunk in chunks {
+        buf.push_str(chunk);
     }
     Ok(buf)
 }
@@ -591,16 +612,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
                 }
             },
             Type::BytesIndef => visitor.visit_byte_buf(collect_indef_bytes(&mut self.decoder)?),
-            Type::StringIndef => {
-                #[cfg(feature = "std")]
-                let mut buf = std::string::String::new();
-                #[cfg(not(feature = "std"))]
-                let mut buf = alloc::string::String::new();
-                for b in self.decoder.str_iter()? {
-                    buf += b?;
-                }
-                visitor.visit_string(buf)
-            },
+            Type::StringIndef => visitor.visit_string(collect_indef_str(&mut self.decoder)?),
             t @ (Type::F16 | Type::Undefined | Type::Simple | Type::Break | Type::Unknown(_)) => {
                 Err(decode::Error::type_mismatch(t)
                     .with_message("unexpected type")
@@ -667,19 +679,35 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     }
 
     fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        visitor.visit_borrowed_str(self.decoder.str()?)
+        if Type::StringIndef == self.decoder.datatype()? {
+            visitor.visit_string(collect_indef_str(&mut self.decoder)?)
+        } else {
+            visitor.visit_borrowed_str(self.decoder.str()?)
+        }
     }
 
     fn deserialize_string<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        visitor.visit_str(self.decoder.str()?)
+        if Type::StringIndef == self.decoder.datatype()? {
+            visitor.visit_string(collect_indef_str(&mut self.decoder)?)
+        } else {
+            visitor.visit_str(self.decoder.str()?)
+        }
     }
 
     fn deserialize_bytes<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        visitor.visit_borrowed_bytes(self.decoder.bytes()?)
+        if Type::BytesIndef == self.decoder.datatype()? {
+            visitor.visit_byte_buf(collect_indef_bytes(&mut self.decoder)?)
+        } else {
+            visitor.visit_borrowed_bytes(self.decoder.bytes()?)
+        }
     }
 
     fn deserialize_byte_buf<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        visitor.visit_bytes(self.decoder.bytes()?)
+        if Type::BytesIndef == self.decoder.datatype()? {
+            visitor.visit_byte_buf(collect_indef_bytes(&mut self.decoder)?)
+        } else {
+            visitor.visit_bytes(self.decoder.bytes()?)
+        }
     }
 
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
@@ -1063,5 +1091,81 @@ mod tests {
             };
             super::roundtrip(&v);
         }
+    }
+
+    #[test]
+    fn from_slice_rejects_trailing_bytes() {
+        let mut bytes = to_vec(42u32).unwrap();
+        bytes.push(0x00);
+        assert!(from_slice::<u32>(&bytes).is_err());
+        assert!(from_slice_with_max_depth::<u32>(&bytes, 16).is_err());
+    }
+
+    #[test]
+    fn indef_bytes_and_strings_deserialize_into_typed_targets() {
+        // Indefinite-length byte string: 0x5f (start indef bstr), 0x42 "hi", 0x41 "!", 0xff (break)
+        let indef_bytes = [0x5f, 0x42, b'h', b'i', 0x41, b'!', 0xff];
+        mod raw_bytes {
+            use serde::{Deserializer, de::Visitor};
+            pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+                struct V;
+                impl<'de> Visitor<'de> for V {
+                    type Value = Vec<u8>;
+
+                    fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                        f.write_str("bytes")
+                    }
+
+                    fn visit_bytes<E: serde::de::Error>(self, v: &[u8]) -> Result<Self::Value, E> {
+                        Ok(v.to_vec())
+                    }
+
+                    fn visit_byte_buf<E: serde::de::Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
+                        Ok(v)
+                    }
+                }
+                d.deserialize_byte_buf(V)
+            }
+        }
+        #[derive(Debug, PartialEq, Eq, Deserialize)]
+        struct ByteBufWrapper(#[serde(with = "raw_bytes")] Vec<u8>);
+        let got: ByteBufWrapper = from_slice(&indef_bytes).unwrap();
+        assert_eq!(got.0, b"hi!");
+
+        mod via_deserialize_bytes {
+            use serde::{Deserializer, de::Visitor};
+            pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+                struct V;
+                impl<'de> Visitor<'de> for V {
+                    type Value = Vec<u8>;
+
+                    fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                        f.write_str("bytes")
+                    }
+
+                    fn visit_bytes<E: serde::de::Error>(self, v: &[u8]) -> Result<Self::Value, E> {
+                        Ok(v.to_vec())
+                    }
+
+                    fn visit_byte_buf<E: serde::de::Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
+                        Ok(v)
+                    }
+                }
+                d.deserialize_bytes(V)
+            }
+        }
+        #[derive(Debug, PartialEq, Eq, Deserialize)]
+        struct BytesWrapper(#[serde(with = "via_deserialize_bytes")] Vec<u8>);
+        let got_bytes: BytesWrapper = from_slice(&indef_bytes).unwrap();
+        assert_eq!(got_bytes.0, b"hi!");
+
+        // Indefinite-length text string: 0x7f (start indef tstr), 0x62 "hi", 0x61 "!", 0xff (break)
+        let indef_str = [0x7f, 0x62, b'h', b'i', 0x61, b'!', 0xff];
+        let got_str: String = from_slice(&indef_str).unwrap();
+        assert_eq!(got_str, "hi!");
+        let got_cow: std::borrow::Cow<'_, str> = from_slice(&indef_str).unwrap();
+        assert_eq!(got_cow, "hi!");
+        // Borrowed &str cannot borrow across indefinite-length chunks and must fail cleanly
+        assert!(from_slice::<&str>(&indef_str).is_err());
     }
 }

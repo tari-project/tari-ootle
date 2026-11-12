@@ -44,14 +44,16 @@ impl BlockLocks {
     }
 
     pub fn from_record(record: BlockLockSet) -> Self {
+        let mut substates = IndexMap::<SubstateId, Vec<SubstateLock>>::new();
+        for grants in record.substates {
+            if !grants.locks.is_empty() {
+                substates.entry(grants.substate_id).or_default().extend(grants.locks);
+            }
+        }
         Self {
             epoch: record.block_epoch,
             height: record.block_height,
-            substates: record
-                .substates
-                .into_iter()
-                .map(|grants| (grants.substate_id, grants.locks))
-                .collect(),
+            substates,
         }
     }
 }
@@ -115,8 +117,12 @@ impl LockTable {
     }
 
     /// Sets the locks `block_id` holds, replacing any it held before.
-    pub fn insert_block(&mut self, block_id: BlockId, locks: BlockLocks) {
+    pub fn insert_block(&mut self, block_id: BlockId, mut locks: BlockLocks) {
         self.remove_block(&block_id);
+        locks.substates.retain(|_, substate_locks| !substate_locks.is_empty());
+        if locks.substates.is_empty() {
+            return;
+        }
         for (substate_id, substate_locks) in &locks.substates {
             push_unique(self.by_substate.entry(substate_id.clone()).or_default(), block_id);
             for lock in substate_locks {
@@ -191,5 +197,83 @@ where
         if entries.is_empty() {
             index.remove(key);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_common_types::{SubstateLockType, SubstateVersion};
+    use tari_template_lib_types::ComponentAddress;
+
+    use super::*;
+
+    fn substate_id(seed: u8) -> SubstateId {
+        SubstateId::Component(ComponentAddress::from_array([seed; 32]))
+    }
+
+    fn write_lock(tx_seed: u8, version: u32) -> SubstateLock {
+        SubstateLock::new(
+            TransactionId::new([tx_seed; 32]),
+            SubstateVersion::new(version),
+            SubstateLockType::Write,
+            false,
+        )
+    }
+
+    #[test]
+    fn insert_block_drops_empty_substate_lock_entries_and_empty_blocks() {
+        let mut table = LockTable::default();
+        let block_id = BlockId::from([1u8; 32]);
+        let s1 = substate_id(1);
+        let s2 = substate_id(2);
+
+        table.insert_block(block_id, BlockLocks {
+            epoch: Epoch(1),
+            height: NodeHeight(1),
+            substates: IndexMap::from([(s1.clone(), Vec::new()), (s2.clone(), vec![write_lock(10, 0)])]),
+        });
+
+        assert_eq!(table.blocks_locking_substate(&s1).count(), 0);
+        assert_eq!(table.blocks_locking_substate(&s2).count(), 1);
+
+        let released = table.release([&TransactionId::new([10u8; 32])]);
+        assert_eq!(released, vec![block_id]);
+        assert!(table.block(&block_id).is_none());
+
+        table.insert_block(block_id, BlockLocks {
+            epoch: Epoch(1),
+            height: NodeHeight(2),
+            substates: IndexMap::from([(s1.clone(), Vec::new())]),
+        });
+        assert!(table.block(&block_id).is_none());
+        assert_eq!(table.blocks_locking_substate(&s1).count(), 0);
+    }
+
+    #[test]
+    fn from_record_merges_duplicate_substates_and_skips_empty_grants() {
+        let s1 = substate_id(1);
+        let s2 = substate_id(2);
+        let record = BlockLockSet {
+            block_epoch: Epoch(2),
+            block_height: NodeHeight(5),
+            substates: vec![
+                SubstateLockGrants {
+                    substate_id: s1.clone(),
+                    locks: vec![write_lock(1, 0)],
+                },
+                SubstateLockGrants {
+                    substate_id: s2.clone(),
+                    locks: Vec::new(),
+                },
+                SubstateLockGrants {
+                    substate_id: s1.clone(),
+                    locks: vec![write_lock(2, 1)],
+                },
+            ],
+        };
+
+        let block_locks = BlockLocks::from_record(record);
+        assert!(!block_locks.substates.contains_key(&s2));
+        assert_eq!(block_locks.substates.get(&s1).map(Vec::len), Some(2));
     }
 }

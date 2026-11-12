@@ -345,6 +345,22 @@ impl<TStore: StateReader> WorkingState<TStore> {
         self.lock_substate(addr, LockFlag::Read)
     }
 
+    /// Read-locks `addr` only when the current call frame has it in scope, so a frame cannot read a substate it was
+    /// never given by naming its address.
+    pub fn read_lock_substate_in_scope(&mut self, addr: SubstateId) -> Result<LockedSubstate, RuntimeError> {
+        self.check_substate_in_scope(&addr)?;
+        self.read_lock_substate(addr)
+    }
+
+    /// Fails with [`RuntimeError::SubstateOutOfScope`] when `addr` is outside the current call frame's scope.
+    pub fn check_substate_in_scope(&self, addr: &SubstateId) -> Result<(), RuntimeError> {
+        if self.current_call_scope()?.is_substate_in_scope(addr) {
+            Ok(())
+        } else {
+            Err(RuntimeError::SubstateOutOfScope { id: addr.clone() })
+        }
+    }
+
     pub fn write_lock_substate(&mut self, addr: SubstateId) -> Result<LockedSubstate, RuntimeError> {
         self.lock_substate(addr, LockFlag::Write)
     }

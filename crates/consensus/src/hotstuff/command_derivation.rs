@@ -335,19 +335,30 @@ pub(super) fn locked_epoch_disagreement(
     })
 }
 
-/// A transaction at the New stage that cannot be sequenced yet: it is pinned to a later epoch than the block.
+/// A transaction at the New stage that cannot be sequenced yet: either its signed minimum epoch has not been reached
+/// or it is already pinned to a later epoch than the block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct PinnedAfterBlock {
-    pub locked_epoch: Epoch,
-    pub block_epoch: Epoch,
+pub(super) enum EpochBeforeTransactionWindow {
+    PinnedAfterBlock { locked_epoch: Epoch, block_epoch: Epoch },
+    BeforeMinEpoch { min_epoch: Epoch, block_epoch: Epoch },
 }
 
-impl PinnedAfterBlock {
+impl EpochBeforeTransactionWindow {
     pub fn into_no_vote(self, transaction_id: TransactionId) -> NoVoteReason {
-        NoVoteReason::LockedEpochAfterBlock {
-            transaction_id,
-            locked_epoch: self.locked_epoch,
-            block_epoch: self.block_epoch,
+        match self {
+            Self::PinnedAfterBlock {
+                locked_epoch,
+                block_epoch,
+            } => NoVoteReason::LockedEpochAfterBlock {
+                transaction_id,
+                locked_epoch,
+                block_epoch,
+            },
+            Self::BeforeMinEpoch { min_epoch, block_epoch } => NoVoteReason::MinEpochAfterBlock {
+                transaction_id,
+                min_epoch,
+                block_epoch,
+            },
         }
     }
 }
@@ -361,13 +372,22 @@ impl PinnedAfterBlock {
 /// own epoch reaches the pin, so no block carries a transaction pinned to a later epoch than the block.
 pub(super) fn pin_new_transaction(
     pool_record: &mut TransactionPoolRecord,
+    min_epoch: Option<Epoch>,
     block_locked_epoch: &LockedEpoch,
     local_shard_group: ShardGroup,
-) -> Result<(), PinnedAfterBlock> {
+) -> Result<(), EpochBeforeTransactionWindow> {
+    if let Some(min_epoch) = min_epoch &&
+        min_epoch > block_locked_epoch.epoch()
+    {
+        return Err(EpochBeforeTransactionWindow::BeforeMinEpoch {
+            min_epoch,
+            block_epoch: block_locked_epoch.epoch(),
+        });
+    }
     match pool_record.locked_epoch() {
         Some(pin) if !pool_record.evidence().has_inputs(local_shard_group) => {
             if pin.epoch() > block_locked_epoch.epoch() {
-                return Err(PinnedAfterBlock {
+                return Err(EpochBeforeTransactionWindow::PinnedAfterBlock {
                     locked_epoch: pin.epoch(),
                     block_epoch: block_locked_epoch.epoch(),
                 });

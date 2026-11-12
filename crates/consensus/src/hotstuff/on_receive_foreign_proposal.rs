@@ -33,7 +33,7 @@ use crate::{
         ProposalValidationError,
         commit_proofs::generate_block_commit_proof,
         error::HotStuffError,
-        pacemaker::PaceMaker,
+        pacemaker_action::PacemakerActions,
     },
     messages::{
         ForeignProposalMessage,
@@ -98,7 +98,7 @@ where TConsensusSpec: ConsensusSpec
 
     pub async fn handle_received(
         &mut self,
-        pacemaker: &mut PaceMaker,
+        pacemaker_actions: &mut PacemakerActions,
         message: ForeignProposalMessage,
         local_committee_info: &CommitteeInfo,
     ) -> Result<(), HotStuffError> {
@@ -127,7 +127,7 @@ where TConsensusSpec: ConsensusSpec
         self.pending_requests.remove(&block_id);
 
         // Foreign proposals to propose
-        pacemaker.beat();
+        pacemaker_actions.beat();
         Ok(())
     }
 

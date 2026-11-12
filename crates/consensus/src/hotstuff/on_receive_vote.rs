@@ -8,7 +8,13 @@ use tari_ootle_storage::{StateStore, consensus_models::BookkeepingModel};
 
 use super::vote_collector::ProposalVoteCollector;
 use crate::{
-    hotstuff::{HotstuffConfig, LeaderSkipSet, epoch_state::EpochState, error::HotStuffError, pacemaker::PaceMaker},
+    hotstuff::{
+        HotstuffConfig,
+        LeaderSkipSet,
+        epoch_state::EpochState,
+        error::HotStuffError,
+        pacemaker_action::PacemakerActions,
+    },
     messages::VoteMessage,
     tracing::TraceTimer,
     traits::ConsensusSpec,
@@ -56,7 +62,7 @@ where TConsensusSpec: ConsensusSpec
 
     pub async fn handle(
         &mut self,
-        pacemaker: &mut PaceMaker,
+        pacemaker_actions: &mut PacemakerActions,
         from: TConsensusSpec::Addr,
         current_height: NodeHeight,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
@@ -74,9 +80,9 @@ where TConsensusSpec: ConsensusSpec
             Ok(Some((_, high_pc))) => {
                 // Reset the leader timeout (not the block timer) - this mitigates the chance of our node sending a
                 // NEWVIEW just before we are ready to propose
-                pacemaker.reset_leader_timeout(&high_pc);
+                pacemaker_actions.reset_leader_timeout(high_pc.height());
                 // We've reached quorum, trigger a check to see if we should propose immediately
-                pacemaker.beat();
+                pacemaker_actions.beat();
             },
             Ok(None) => {
                 // No quorum yet, do nothing

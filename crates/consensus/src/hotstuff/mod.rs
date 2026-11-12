@@ -31,6 +31,7 @@ mod local_command_validator;
 mod on_catch_up_sync;
 mod on_message_validate;
 mod pacemaker;
+mod pacemaker_action;
 mod state_machine;
 mod state_tree_gc;
 pub mod substate_store;

@@ -86,6 +86,7 @@ use crate::{
         on_receive_request_missing_transactions::OnReceiveRequestMissingTransactions,
         on_receive_vote::OnReceiveVoteHandler,
         pacemaker::{PaceMaker, PacemakerEvent},
+        pacemaker_action::PacemakerActions,
         state_tree_gc::StateTreeGc,
         substate_store::ShardedStateTree,
         transaction_manager::{ConsensusTransactionManager, UncommittedTemplateStore},
@@ -152,6 +153,8 @@ pub struct HotstuffWorker<TConsensusSpec: ConsensusSpec> {
     next_epoch_changes_layout: Option<(Epoch, bool)>,
     epoch_manager: TConsensusSpec::EpochManager,
     pacemaker: PaceMaker,
+    /// Pacemaker actions requested by the handler call in progress, applied once it returns.
+    pacemaker_actions: PacemakerActions,
     shutdown: ShutdownSignal,
 }
 impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
@@ -292,6 +295,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             next_epoch: None,
             next_epoch_changes_layout: None,
             pacemaker,
+            pacemaker_actions: PacemakerActions::new(),
             hooks,
             tx_events,
             shutdown,
@@ -785,11 +789,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let is_any_block_unparked = !local_proposals.is_empty() || !foreign_proposals.is_empty();
 
         for msg in foreign_proposals {
-            if let Err(e) = self
+            let result = self
                 .on_receive_foreign_proposal
-                .handle_received(&mut self.pacemaker, msg, epoch_state.local_committee_info())
-                .await
-            {
+                .handle_received(&mut self.pacemaker_actions, msg, epoch_state.local_committee_info())
+                .await;
+            self.pacemaker.apply(&mut self.pacemaker_actions);
+            if let Err(e) = result {
                 self.on_failure("check_if_block_can_be_unparked -> on_receive_foreign_proposal", &e)
                     .await;
                 return Err(e);
@@ -851,10 +856,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 .set_pending_end_of_epoch(eoe_block, commit_qc);
             // Attempt to complete immediately. If the oracle is still behind, this will re-defer
             // and a later EpochChanged event will retry.
-            let _ = self
+            let result = self
                 .on_receive_local_proposal
-                .try_resume_pending_end_of_epoch(&mut self.pacemaker)
-                .await?;
+                .try_resume_pending_end_of_epoch(&mut self.pacemaker_actions)
+                .await;
+            self.pacemaker.apply(&mut self.pacemaker_actions);
+            result?;
         }
         Ok(())
     }
@@ -865,11 +872,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         if !self.on_receive_local_proposal.has_pending_end_of_epoch() {
             return Ok(());
         }
-        if let Err(err) = self
+        let result = self
             .on_receive_local_proposal
-            .try_resume_pending_end_of_epoch(&mut self.pacemaker)
-            .await
-        {
+            .try_resume_pending_end_of_epoch(&mut self.pacemaker_actions)
+            .await;
+        self.pacemaker.apply(&mut self.pacemaker_actions);
+        if let Err(err) = result {
             error!(
                 target: LOG_TARGET,
                 "Failed to resume deferred end-of-epoch processing: {err}"
@@ -1607,23 +1615,27 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         msg: HotstuffMessage,
     ) -> Result<(), HotStuffError> {
         match msg {
-            HotstuffMessage::NewView(message) => log_err(
-                "on_receive_new_view",
-                self.on_receive_new_view
-                    .handle(&mut self.pacemaker, epoch_state, current_height, from, *message)
-                    .await,
-            ),
+            HotstuffMessage::NewView(message) => {
+                let result = self
+                    .on_receive_new_view
+                    .handle(&mut self.pacemaker_actions, epoch_state, current_height, from, *message)
+                    .await;
+                self.pacemaker.apply(&mut self.pacemaker_actions);
+                log_err("on_receive_new_view", result)
+            },
             HotstuffMessage::Proposal(msg) => log_err(
                 "on_receive_local_proposal",
                 self.on_proposal_message(epoch_state, current_height, *msg, ProposalOrigin::Live)
                     .await,
             ),
-            HotstuffMessage::ForeignProposal(msg) => log_err(
-                "on_receive_foreign_proposal (received)",
-                self.on_receive_foreign_proposal
-                    .handle_received(&mut self.pacemaker, msg, epoch_state.local_committee_info())
-                    .await,
-            ),
+            HotstuffMessage::ForeignProposal(msg) => {
+                let result = self
+                    .on_receive_foreign_proposal
+                    .handle_received(&mut self.pacemaker_actions, msg, epoch_state.local_committee_info())
+                    .await;
+                self.pacemaker.apply(&mut self.pacemaker_actions);
+                log_err("on_receive_foreign_proposal (received)", result)
+            },
             HotstuffMessage::ForeignProposalNotification(msg) => log_err(
                 "on_receive_foreign_proposal (notification)",
                 self.on_receive_foreign_proposal
@@ -1634,12 +1646,14 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 "on_receive_foreign_proposal (request)",
                 self.on_receive_foreign_proposal.handle_requested(from, msg).await,
             ),
-            HotstuffMessage::Vote(msg) => log_err(
-                "on_receive_vote",
-                self.on_receive_vote
-                    .handle(&mut self.pacemaker, from, current_height, epoch_state, msg)
-                    .await,
-            ),
+            HotstuffMessage::Vote(msg) => {
+                let result = self
+                    .on_receive_vote
+                    .handle(&mut self.pacemaker_actions, from, current_height, epoch_state, msg)
+                    .await;
+                self.pacemaker.apply(&mut self.pacemaker_actions);
+                log_err("on_receive_vote", result)
+            },
             HotstuffMessage::MissingTransactionsRequest(msg) => {
                 self.on_receive_request_missing_txs.handle(from, msg);
                 Ok(())
@@ -1677,12 +1691,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         origin: ProposalOrigin,
     ) -> Result<(), HotStuffError> {
         let proposed_by = *msg.block.proposed_by();
-        match log_err(
-            "on_receive_local_proposal",
-            self.on_receive_local_proposal
-                .handle(&mut self.pacemaker, epoch_state, msg, origin)
-                .await,
-        ) {
+        let result = self
+            .on_receive_local_proposal
+            .handle(&mut self.pacemaker_actions, epoch_state, msg, origin)
+            .await;
+        self.pacemaker.apply(&mut self.pacemaker_actions);
+        match log_err("on_receive_local_proposal", result) {
             Ok(no_vote) => {
                 let current_height = self.pacemaker.current_height();
                 if let Some(mut catch_up) = self.worker_state.catch_up.take() {

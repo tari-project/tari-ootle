@@ -4,14 +4,16 @@
 use std::{cmp, pin::Pin, time::Duration};
 
 use log::*;
-use tari_consensus_types::HighPc;
 use tari_ootle_common_types::{Epoch, NodeHeight};
 use tokio::{
     sync::watch,
     time::{Instant, Sleep},
 };
 
-use crate::hotstuff::current_view::{CurrentView, View};
+use crate::hotstuff::{
+    current_view::{CurrentView, View},
+    pacemaker_action::{PacemakerAction, PacemakerActions},
+};
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::pacemaker";
 const MAX_DELTA: Duration = Duration::from_secs(300);
@@ -19,7 +21,7 @@ const MAX_DELTA: Duration = Duration::from_secs(300);
 const OFFSET_BLOCK_TIME: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy)]
-pub enum PacemakerEvent {
+pub(crate) enum PacemakerEvent {
     /// Propose if this node is the leader and there is something to propose.
     Beat,
     /// Propose if this node is the leader, even if the block is empty. `forced_height` is set when a timeout
@@ -34,7 +36,7 @@ pub enum PacemakerEvent {
 /// worker, which polls [`PaceMaker::next_event`] in its event loop, so every state change is applied before the next
 /// timer is observed.
 #[derive(Debug)]
-pub struct PaceMaker {
+pub(crate) struct PaceMaker {
     view: View,
     published_view: watch::Sender<View>,
     high_pc_height: NodeHeight,
@@ -156,25 +158,37 @@ impl PaceMaker {
         self.is_beat_pending = true;
     }
 
-    pub fn force_beat(&mut self, forced_height: NodeHeight) {
-        self.pending_forced_height = Some(forced_height);
+    /// Applies the actions a handler requested, in the order it requested them.
+    pub fn apply(&mut self, actions: &mut PacemakerActions) {
+        for action in actions.drain() {
+            match action {
+                PacemakerAction::Beat => self.beat(),
+                PacemakerAction::ForceBeat { height } => self.force_beat(height),
+                PacemakerAction::EnterView {
+                    epoch,
+                    height,
+                    high_pc_height,
+                } => self.enter_view(epoch, height, high_pc_height),
+                PacemakerAction::ResetLeaderTimeout { high_pc_height } => self.reset(high_pc_height, false),
+                PacemakerAction::SetEpoch { epoch } => self.set_epoch(epoch),
+            }
+        }
     }
 
-    /// Restarts the leader timeout, leaving the block timer running.
-    pub fn reset_leader_timeout(&mut self, high_pc: &HighPc) {
-        self.reset(high_pc.height(), false);
+    fn force_beat(&mut self, forced_height: NodeHeight) {
+        self.pending_forced_height = Some(forced_height);
     }
 
     /// Enters `(epoch, height)` and restarts both timers if it is later than the current view, otherwise does
     /// nothing.
-    pub fn enter_view(&mut self, epoch: Epoch, height: NodeHeight, high_pc_height: NodeHeight) {
+    fn enter_view(&mut self, epoch: Epoch, height: NodeHeight, high_pc_height: NodeHeight) {
         if self.enter(View::new(epoch, height)) {
             self.reset(high_pc_height, true);
         }
     }
 
     /// Moves to height zero of `epoch` and restarts both timers. Called once the end of epoch block is committed.
-    pub fn set_epoch(&mut self, epoch: Epoch) {
+    fn set_epoch(&mut self, epoch: Epoch) {
         self.set_view(View::new(epoch, NodeHeight::zero()));
         info!(target: LOG_TARGET, "🧿 PACEMAKER: reset View updated to {}", self.view);
         self.reset(NodeHeight::zero(), true);
@@ -360,6 +374,21 @@ mod tests {
 
         pacemaker.enter_view(Epoch(1), NodeHeight(1), NodeHeight(1));
         assert_eq!(next_leader_timeout(&mut pacemaker).await, 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn actions_apply_in_the_order_they_were_requested() {
+        let mut pacemaker = started(Duration::from_secs(2)).await;
+        let mut actions = PacemakerActions::new();
+        actions.set_epoch(Epoch(2));
+        actions.enter_view(Epoch(2), NodeHeight(3), NodeHeight(2));
+        actions.beat();
+
+        pacemaker.apply(&mut actions);
+
+        assert_eq!(pacemaker.current_view(), View::new(Epoch(2), NodeHeight(3)));
+        assert!(matches!(ready_event(&mut pacemaker).await, Some(PacemakerEvent::Beat)));
+        assert!(actions.drain().next().is_none());
     }
 
     #[tokio::test]

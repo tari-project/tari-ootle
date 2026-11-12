@@ -57,7 +57,7 @@ use crate::{
         on_propose::drop_executions_of_uninserted_proposal,
         on_ready_to_vote_on_local_block::{LocalNextEpochView, OnReadyToVoteOnLocalBlock},
         on_receive_foreign_proposal::OnReceiveForeignProposalHandler,
-        pacemaker::PaceMaker,
+        pacemaker_action::PacemakerActions,
         transaction_manager::ConsensusTransactionManager,
     },
     messages::{ForeignProposalNotificationMessage, HotstuffMessage, ProposalMessage, VoteMessage},
@@ -172,7 +172,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
     #[allow(clippy::too_many_lines)]
     pub async fn handle(
         &mut self,
-        pacemaker: &mut PaceMaker,
+        pacemaker_actions: &mut PacemakerActions,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         msg: ProposalMessage,
         origin: ProposalOrigin,
@@ -218,7 +218,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             let view_height = existing
                 .timeout_certificate()
                 .map_or(justify_height, |tc| tc.height().max(justify_height));
-            pacemaker.enter_view(existing.epoch(), view_height, justify_height);
+            pacemaker_actions.enter_view(existing.epoch(), view_height, justify_height);
             if !origin.is_catch_up() {
                 self.vote_on_proposal_processed_through_catch_up(epoch_state, &existing)
                     .await?;
@@ -327,11 +327,11 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             return Ok(None);
         }
 
-        // The worker polls the pacemaker only between events, so no leader timeout fires while the block is processed.
-        // Entering the view the block justifies restarts the timeout; if the view does not advance and the deadline
-        // has passed, the timeout fires once the worker polls the pacemaker again.
+        // No leader timeout fires while the block is processed: the worker applies the pacemaker actions and polls the
+        // pacemaker's timers only after this handler returns. Entering the view the block justifies restarts the
+        // timeout; if the view does not advance and the deadline has passed, the timeout fires on the next poll.
         let result = self
-            .process_valid_block(pacemaker, epoch_state, valid_block, origin)
+            .process_valid_block(pacemaker_actions, epoch_state, valid_block, origin)
             .await;
 
         result.inspect_err(|err| {
@@ -414,7 +414,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
     async fn process_valid_block(
         &mut self,
-        pacemaker: &mut PaceMaker,
+        pacemaker_actions: &mut PacemakerActions,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         valid_block: ValidBlock,
         origin: ProposalOrigin,
@@ -427,7 +427,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             .await?;
 
         self.process_block(
-            pacemaker,
+            pacemaker_actions,
             epoch_state.epoch(),
             *epoch_state.local_committee_info(),
             epoch_state.local_committee(),
@@ -440,7 +440,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
     async fn process_block(
         &mut self,
-        pacemaker: &mut PaceMaker,
+        pacemaker_actions: &mut PacemakerActions,
         current_epoch: Epoch,
         local_committee_info: CommitteeInfo,
         local_committee: &Committee<TConsensusSpec::Addr>,
@@ -561,7 +561,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         let no_vote = self
             .process_block_decision(
-                pacemaker,
+                pacemaker_actions,
                 local_committee_info,
                 local_committee,
                 process_result,
@@ -575,7 +575,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
     async fn process_block_decision(
         &mut self,
-        pacemaker: &mut PaceMaker,
+        pacemaker_actions: &mut PacemakerActions,
         local_committee_info: CommitteeInfo,
         local_committee: &Committee<TConsensusSpec::Addr>,
         process_block_result: ProcessBlockResult,
@@ -597,7 +597,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             let Some(decision) = block_decision.local_decision
         {
             // Enter the highest view justified by this block
-            pacemaker.enter_view(
+            pacemaker_actions.enter_view(
                 valid_block.epoch(),
                 block_decision.highest_qc_view(),
                 block_decision.high_pc.height(),
@@ -643,14 +643,15 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             // The QC of the block we're processing is the QC that committed the EOE via the
             // 3-chain rule. Use it as the commit proof.
             let commit_qc = valid_block.justify().clone();
-            self.process_end_of_epoch(pacemaker, eoe_block, commit_qc).await?;
+            self.process_end_of_epoch(pacemaker_actions, eoe_block, commit_qc)
+                .await?;
         }
 
         self.propose_foreign_proposals(local_committee_info, block_decision.commit_blocks);
 
         // Propose quickly for the end-of-epoch chain
         if is_accept_decision && is_epoch_end {
-            pacemaker.beat();
+            pacemaker_actions.beat();
         }
 
         Ok(block_decision.no_vote_reason)
@@ -659,7 +660,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
     #[expect(clippy::too_many_lines)]
     async fn process_end_of_epoch(
         &mut self,
-        pacemaker: &mut PaceMaker,
+        pacemaker_actions: &mut PacemakerActions,
         eoe_block: Block,
         commit_qc: ProposalCertificate,
     ) -> Result<(), HotStuffError> {
@@ -844,7 +845,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             });
         }
 
-        pacemaker.set_epoch(next_epoch);
+        pacemaker_actions.set_epoch(next_epoch);
         self.publish_event(HotstuffEvent::EpochChanged {
             epoch: next_epoch,
             registered_shard_group: next_shard_group,
@@ -877,7 +878,10 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
     /// Retry deferred end-of-epoch processing. The worker polls this so that the resume happens
     /// as soon as the oracle has written the epoch row, without waiting for the base-layer scan
     /// to finish. If the oracle is still not ready, `process_end_of_epoch` will re-defer.
-    pub async fn try_resume_pending_end_of_epoch(&mut self, pacemaker: &mut PaceMaker) -> Result<bool, HotStuffError> {
+    pub async fn try_resume_pending_end_of_epoch(
+        &mut self,
+        pacemaker_actions: &mut PacemakerActions,
+    ) -> Result<bool, HotStuffError> {
         let Some(pending) = self.pending_end_of_epoch.take() else {
             return Ok(false);
         };
@@ -888,7 +892,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             "▶️ Attempting deferred end-of-epoch processing for EOE block {}",
             pending.eoe_block.id()
         );
-        self.process_end_of_epoch(pacemaker, pending.eoe_block, pending.commit_qc)
+        self.process_end_of_epoch(pacemaker_actions, pending.eoe_block, pending.commit_qc)
             .await?;
         Ok(true)
     }

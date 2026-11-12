@@ -34,6 +34,7 @@ impl VaultFreezeFlags {
         Self(ALL_FLAGS)
     }
 
+    #[must_use]
     pub const fn validate(self) -> bool {
         self.0 & Self::all().0 == self.0
     }
@@ -42,18 +43,21 @@ impl VaultFreezeFlags {
         let mut mask = 1u8;
 
         iter::from_fn(move || {
-            if mask > ALL_FLAGS {
-                return None;
-            }
-            if (self.0 & mask) != 0 {
-                let flag = VaultFreezeFlag::from_byte(mask).expect("mask is always a valid flag");
+            while mask <= ALL_FLAGS {
+                let current = mask;
                 mask <<= 1; // Move to the next bit
-                Some(flag)
-            } else {
-                mask <<= 1; // Move to the next bit
-                None
+                if (self.0 & current) != 0 {
+                    return Some(VaultFreezeFlag::from_byte(current).expect("mask is always a valid flag"));
+                }
             }
+            None
         })
+    }
+}
+
+impl From<VaultFreezeFlag> for VaultFreezeFlags {
+    fn from(flag: VaultFreezeFlag) -> Self {
+        Self(flag as u8)
     }
 }
 
@@ -74,7 +78,7 @@ impl Display for VaultFreezeFlags {
     }
 }
 
-#[derive(Clone, Debug, Copy, Encode, Decode, CborLen)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
 pub enum VaultFreezeFlag {
@@ -116,6 +120,8 @@ impl Display for VaultFreezeFlag {
 
 #[cfg(test)]
 mod tests {
+    use tari_template_abi::rust::string::ToString;
+
     use super::*;
 
     #[test]
@@ -138,6 +144,15 @@ mod tests {
         assert!(matches!(iter.next(), Some(VaultFreezeFlag::Deposits)));
         assert!(matches!(iter.next(), Some(VaultFreezeFlag::Withdrawals)));
         assert!(iter.next().is_none()); // No more flags
+    }
+
+    #[test]
+    fn it_iterates_and_formats_when_first_flag_is_not_set() {
+        let withdrawals_only = VaultFreezeFlags::from(VaultFreezeFlag::Withdrawals);
+        let collected: Vec<_> = withdrawals_only.iter().collect();
+        assert_eq!(collected, vec![VaultFreezeFlag::Withdrawals]);
+        assert_eq!(withdrawals_only.iter().count(), 1);
+        assert_eq!(withdrawals_only.to_string(), "Withdrawals");
     }
 
     #[test]

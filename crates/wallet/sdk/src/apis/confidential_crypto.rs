@@ -47,20 +47,11 @@ impl ConfidentialCryptoApi {
     ) -> Result<ConfidentialWithdrawProof, ConfidentialCryptoApiError> {
         let proof = confidential::create_withdraw_proof(
             inputs,
-            input_revealed_amount
-                .into()
-                .non_negative_checked()
-                .ok_or(ConfidentialCryptoApiError::NegativeAmount)?,
+            input_revealed_amount.into(),
             output_statement,
-            output_revealed_amount
-                .into()
-                .non_negative_checked()
-                .ok_or(ConfidentialCryptoApiError::NegativeAmount)?,
+            output_revealed_amount.into(),
             change_statement,
-            change_revealed_amount
-                .into()
-                .non_negative_checked()
-                .ok_or(ConfidentialCryptoApiError::NegativeAmount)?,
+            change_revealed_amount.into(),
         )?;
         Ok(proof)
     }
@@ -123,6 +114,4 @@ pub enum ConfidentialCryptoApiError {
     WalletCryptoError(#[from] WalletCryptoError),
     #[error("Confidential proof error: {0}")]
     ConfidentialProofError(#[from] StealthProofError),
-    #[error("Negative amount")]
-    NegativeAmount,
 }

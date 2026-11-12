@@ -231,6 +231,8 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         Ok(true)
     }
 
+    /// Attempts to grant every lock in `id_locks` to `transaction_id`, or none of them: if any lock fails, all
+    /// locks granted to `transaction_id` in this block are released before returning.
     pub fn try_lock_all<I, L>(
         &mut self,
         transaction_id: TransactionId,
@@ -685,8 +687,9 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         self.shard_output_bytes.values().copied().max().unwrap_or(0)
     }
 
-    /// Whether putting `diff` would take any shard past `max_bytes` written in this block.
-    pub fn diff_exceeds_shard_output_bytes(&self, diff: &SubstateDiff, max_bytes: usize) -> bool {
+    /// The bytes written to the first shard that putting `diff` would take past `max_bytes` in this block, or `None`
+    /// if every shard stays within it.
+    pub fn diff_shard_output_bytes_over(&self, diff: &SubstateDiff, max_bytes: usize) -> Option<usize> {
         let downs = diff.down_iter().map(|(id, version)| {
             let shard = VersionedSubstateIdRef::new(id, *version).to_shard(self.chain.num_preshards);
             (shard, tari_bor::encoded_len(id))
@@ -696,12 +699,12 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
             (shard, up_encoded_len(id, substate))
         });
         let mut totals = HashMap::<Shard, usize>::new();
-        downs.chain(ups).any(|(shard, bytes)| {
+        downs.chain(ups).find_map(|(shard, bytes)| {
             let total = totals
                 .entry(shard)
                 .or_insert_with(|| self.shard_output_bytes.get(&shard).copied().unwrap_or(0));
             *total = total.saturating_add(bytes);
-            *total > max_bytes
+            (*total > max_bytes).then_some(*total)
         })
     }
 
@@ -797,6 +800,11 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
 
     pub fn changes(&self) -> &Vec<SubstateChange> {
         self.log.changes()
+    }
+
+    /// The latest change to `id` made by the block being built.
+    pub fn block_change(&self, id: &SubstateId) -> Option<&SubstateChange> {
+        self.log.get_head(id)
     }
 
     pub fn generate_shard_state_change_bitmap(&self) -> Vec<bool> {

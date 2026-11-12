@@ -2308,6 +2308,20 @@ fn stealth_build_outputs_statement_error_envelopes() {
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "INVALID");
     unsafe { ootle_result_free(r) };
+
+    // Uppercase revealed_receiver_hex → PARSE.
+    let upper_receiver = CArg::new(&"AA".repeat(32));
+    let r = unsafe {
+        ootle_build_stealth_outputs_statement_with_seed(
+            net,
+            args.intent.ptr(),
+            args.seed_hex.ptr(),
+            upper_receiver.ptr(),
+        )
+    };
+    assert!(!ok(&r));
+    assert_eq!(error_code(&r), "PARSE");
+    unsafe { ootle_result_free(r) };
 }
 
 // --- (8) leak check (looped, amplifies any per-iteration leak above cross-thread noise) ----------

@@ -17,7 +17,10 @@ pub fn move_database<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::Resu
     let (from, to) = (from.as_ref(), to.as_ref());
     let moved = rename_if_exists(from.as_os_str().to_owned(), to.as_os_str().to_owned())?;
     for suffix in SIDE_FILE_SUFFIXES {
-        rename_if_exists(with_suffix(from, suffix), with_suffix(to, suffix))?;
+        let to_side = with_suffix(to, suffix);
+        if !rename_if_exists(with_suffix(from, suffix), to_side.clone())? && moved {
+            remove_if_exists(to_side)?;
+        }
     }
     Ok(moved)
 }
@@ -32,6 +35,14 @@ fn rename_if_exists(from: OsString, to: OsString) -> io::Result<bool> {
     match fs::rename(&from, &to) {
         Ok(()) => Ok(true),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
+fn remove_if_exists(path: OsString) -> io::Result<()> {
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err),
     }
 }
@@ -79,5 +90,23 @@ mod tests {
             fs::read_to_string(temp.path().join("wallet.sqlite.bak-wal")).unwrap(),
             "stale"
         );
+    }
+
+    #[test]
+    fn stale_destination_side_files_are_removed_when_source_has_none() {
+        let temp = tempfile::tempdir().unwrap();
+        let from = temp.path().join("wallet.sqlite");
+        let to = temp.path().join("wallet.sqlite.bak");
+        fs::write(&from, "fresh-db").unwrap();
+        fs::write(&to, "old-db").unwrap();
+        fs::write(temp.path().join("wallet.sqlite.bak-wal"), "stale-wal").unwrap();
+        fs::write(temp.path().join("wallet.sqlite.bak-shm"), "stale-shm").unwrap();
+        fs::write(temp.path().join("wallet.sqlite.bak-journal"), "stale-journal").unwrap();
+
+        assert!(move_database(&from, &to).unwrap());
+        assert_eq!(fs::read_to_string(&to).unwrap(), "fresh-db");
+        assert!(!temp.path().join("wallet.sqlite.bak-wal").exists());
+        assert!(!temp.path().join("wallet.sqlite.bak-shm").exists());
+        assert!(!temp.path().join("wallet.sqlite.bak-journal").exists());
     }
 }

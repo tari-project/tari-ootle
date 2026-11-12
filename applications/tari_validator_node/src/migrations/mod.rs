@@ -50,6 +50,8 @@ use tari_state_store_rocksdb::{
 
 use crate::genesis_state::create_genesis_state;
 
+mod v1;
+
 const LOG_TARGET: &str = "tari::validator_node::migrations";
 
 pub fn migrate<TAddr: NodeAddressable + 'static>(
@@ -81,11 +83,21 @@ pub fn migrate<TAddr: NodeAddressable + 'static>(
                  directory and resync."
             );
         },
-        Some(version) => {
-            anyhow::bail!(
-                "Database schema version {version} is older than this binary's {CURRENT_VERSION}, and no migration \
-                 upgrades it. Delete the validator's data directory and resync."
-            );
+        Some(mut version) => {
+            while version < CURRENT_VERSION {
+                info!(target: LOG_TARGET, "Migrating database from version {version} to {}", version + 1);
+                match version {
+                    0 => v1::migrate(tx)?,
+                    other => anyhow::bail!(
+                        "Database schema version {other} is older than this binary's {CURRENT_VERSION}, and no \
+                         migration upgrades it. Delete the validator's data directory and resync."
+                    ),
+                }
+                version += 1;
+                tx.db()
+                    .cf(DatabaseMigrationVersion)?
+                    .put(&ByteColumn, &version, OPERATION)?;
+            }
         },
         // A fresh database: lay down the genesis state and stamp the current version.
         None => {
@@ -102,8 +114,10 @@ pub fn migrate<TAddr: NodeAddressable + 'static>(
 
 #[cfg(test)]
 mod tests {
-    use tari_ootle_storage::{StateStore, StorageError};
-    use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+    use tari_consensus_types::BlockId;
+    use tari_ootle_storage::{StateStore, StateStoreReadTransaction, StorageError};
+    use tari_sidechain::FixedHash;
+    use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore, column_families::chain::PendingChainIndex};
     use tempfile::TempDir;
 
     use super::*;
@@ -148,6 +162,25 @@ mod tests {
         let (db, _tmp) = store_stamped(CURRENT_VERSION);
         run_migrate(&db).unwrap();
         assert_eq!(stored_version(&db), CURRENT_VERSION);
+    }
+
+    #[test]
+    fn a_version_0_database_records_its_uncommitted_blocks_as_executed() {
+        let (db, _tmp) = store_stamped(0);
+        let pending = BlockId::new(FixedHash::new([5u8; 32]));
+        db.with_write_tx(|tx| {
+            tx.db()
+                .cf(PendingChainIndex)?
+                .put(&pending, &BlockId::zero(), OPERATION)?;
+            Ok::<_, StorageError>(())
+        })
+        .unwrap();
+
+        run_migrate(&db).unwrap();
+
+        assert_eq!(stored_version(&db), CURRENT_VERSION);
+        let tx = db.create_read_tx().unwrap();
+        assert!(tx.blocks_is_executed(&pending).unwrap());
     }
 
     #[test]

@@ -89,7 +89,6 @@ use tari_template_lib_types::{
     Amount,
     ComponentAddress,
     ConfidentialOutputAddress,
-    EncryptedData,
     NonFungibleId,
     ResourceAddress,
     ResourceType,
@@ -1194,7 +1193,6 @@ pub enum ClaimBurnProof {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct ClaimBurnProofContents {
     pub claim_proof: MinotariBurnClaimProof,
-    pub encrypted_data: EncryptedData,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

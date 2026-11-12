@@ -399,8 +399,9 @@ fn a_nested_return_value_is_charged_per_item() {
     );
 }
 
-/// A return value priced above what the transaction can cover fails it out of compute, with the
-/// return-value charge as the points it required. Run in the fee intent, whose flat credit is the
+/// A return value holding more items than the transaction can pay for fails it out of compute. The
+/// engine reads no more of it than the transaction can pay for, and is paid for what it read: the
+/// credit is spent to within an item's price. Run in the fee intent, whose flat credit is the
 /// allowance.
 #[test]
 fn an_unaffordable_return_value_fails_out_of_compute() {
@@ -412,9 +413,8 @@ fn an_unaffordable_return_value_fails_out_of_compute() {
     test.set_fee_table(fee_table);
     test.enable_fees();
 
-    let mut len =
-        u32::try_from(limits::FREE_COMPUTE_GRACE_POINTS / limits::NativeExecutionPoints::PER_RETURN_VALUE_ITEM)
-            .unwrap();
+    let per_item = limits::NativeExecutionPoints::PER_RETURN_VALUE_ITEM;
+    let mut len = u32::try_from(limits::FREE_COMPUTE_GRACE_POINTS / per_item).unwrap();
     while return_value_charge(len) <= limits::FREE_COMPUTE_GRACE_POINTS {
         len += 1;
     }
@@ -432,8 +432,23 @@ fn an_unaffordable_return_value_fails_out_of_compute() {
     );
 
     assert_reject_reason(
-        reason,
-        format!("requiring {} points exceeds the fee intent's", return_value_charge(len)),
+        reason.clone(),
+        format!(
+            "requiring {} points exceeds the fee intent's",
+            limits::return_value_points(0, 1)
+        ),
+    );
+    let message = reason.to_string();
+    let consumed: u64 = message
+        .split("compute credit: ")
+        .nth(1)
+        .and_then(|rest| rest.split(' ').next())
+        .and_then(|consumed| consumed.parse().ok())
+        .unwrap_or_else(|| panic!("no consumed points in {message}"));
+    assert!(
+        consumed > limits::FREE_COMPUTE_GRACE_POINTS - per_item,
+        "the items read must be paid for: {consumed} of {} consumed",
+        limits::FREE_COMPUTE_GRACE_POINTS
     );
 }
 

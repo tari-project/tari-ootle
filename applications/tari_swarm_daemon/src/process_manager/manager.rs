@@ -733,6 +733,12 @@ impl ProcessManager {
             .await
             .context("waiting for initial scanning to complete")?;
 
+        // A VN added again under a name it held before a restart resumes its keys and registration
+        if vn.is_registered().await? {
+            info!("🟢 Validator node {} is already registered", vn.instance().name());
+            return Ok(());
+        }
+
         vn.prepare_registration_transaction().await?;
 
         Ok(())

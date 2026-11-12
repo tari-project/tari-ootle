@@ -71,13 +71,6 @@ pub async fn handle_create_transfer_proof(
     let granted = &auth.permissions;
     let sdk = context.wallet_sdk();
 
-    if req.reveal_amount.is_negative() {
-        return Err(invalid_request(format!(
-            "Amount to send must be positive. Revealed amount was {}",
-            req.reveal_amount
-        )));
-    }
-
     let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
     enforce_scopes(granted, &[Permission::Confidential(
         Crud::Create,

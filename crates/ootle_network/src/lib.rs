@@ -4,6 +4,11 @@
 // Support no_std environments
 #![cfg_attr(not(feature = "std"), no_std)]
 
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+
+#[cfg(not(feature = "std"))]
+use alloc::{format, string::String};
 use core::{
     convert::TryFrom,
     fmt,
@@ -66,6 +71,16 @@ impl NetworkParseError {
         Self(msg.into())
     }
 }
+
+#[cfg(not(feature = "std"))]
+impl Display for NetworkParseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "Failed to parse network: {}", self.0)
+    }
+}
+
+#[cfg(not(feature = "std"))]
+impl core::error::Error for NetworkParseError {}
 
 impl FromStr for Network {
     type Err = NetworkParseError;

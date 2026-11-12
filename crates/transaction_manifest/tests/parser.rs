@@ -1773,3 +1773,82 @@ fn duplicate_keyword_args_in_create_account_and_publish_template_are_rejected() 
         assert!(err.to_string().contains(expected), "unexpected error: {err}");
     }
 }
+
+#[test]
+fn top_level_intents_and_empty_function_calls_are_capped() {
+    let globals = HashMap::from([("a".to_string(), caller_component())]);
+
+    let direct_main = format!("fn main() {{ {} }}", "a.b();".repeat(10_001));
+    let err = parse_manifest(&direct_main, globals.clone(), Default::default(), Default::default())
+        .err()
+        .expect("Expected TooManyInstructions error for >10,000 top-level intents, but got Ok");
+    assert!(
+        err.to_string().contains("expands to more than"),
+        "Expected TooManyInstructions error, got: {err}"
+    );
+
+    let empty_calls = format!("fn e() {{}} fn main() {{ {} }}", "e();".repeat(10_001));
+    let err = parse_manifest(&empty_calls, HashMap::new(), Default::default(), Default::default())
+        .err()
+        .expect("Expected TooManyInstructions error for >10,000 empty function calls, but got Ok");
+    assert!(
+        err.to_string().contains("expands to more than"),
+        "Expected TooManyInstructions error, got: {err}"
+    );
+}
+
+#[test]
+fn workspace_only_positions_reject_unaliased_globals_and_let_blob_validates_input() {
+    let globals = HashMap::from([("pk".to_string(), PK1.parse().unwrap())]);
+    for stmt in [
+        "authorize!(pk);",
+        "drop_authorize!(pk);",
+        "create_account!(pk, bucket = pk);",
+    ] {
+        let manifest = format!("fn main() {{ {stmt} }}");
+        let err = parse_manifest(&manifest, globals.clone(), Default::default(), HashMap::new())
+            .err()
+            .unwrap_or_else(|| panic!("expected error for `{stmt}`"));
+        assert!(
+            err.to_string().contains("workspace value"),
+            "expected workspace value error for `{stmt}`, got: {err}"
+        );
+    }
+
+    let unused_missing_blob = r#"fn main() { let x = blob!("missing"); }"#;
+    let err = parse_manifest(unused_missing_blob, HashMap::new(), Default::default(), HashMap::new())
+        .err()
+        .expect("let binding to a missing blob must error");
+    assert!(
+        err.to_string().contains("blob!('missing')"),
+        "unexpected error for missing blob binding: {err}"
+    );
+}
+
+#[test]
+fn non_fungible_id_macro_enforces_u8_and_u16_bounds() {
+    let valid = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+        fn main() {{
+            MyTemplate::create(non_fungible_id!(255u8), non_fungible_id!(65535u16));
+        }}
+    "#
+    );
+    parse_manifest(&valid, HashMap::new(), Default::default(), Default::default()).unwrap();
+
+    for invalid_lit in ["256u8", "65536u16"] {
+        let invalid = format!(
+            r#"
+            use template_{LIST_TEMPLATE} as MyTemplate;
+            fn main() {{
+                MyTemplate::create(non_fungible_id!({invalid_lit}));
+            }}
+        "#
+        );
+        assert!(
+            parse_manifest(&invalid, HashMap::new(), Default::default(), Default::default()).is_err(),
+            "expected non_fungible_id!({invalid_lit}) to be rejected"
+        );
+    }
+}

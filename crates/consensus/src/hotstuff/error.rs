@@ -360,6 +360,18 @@ pub enum ProposalValidationError {
         block_epoch: Epoch,
     },
 
+    #[error(
+        "Foreign proposal for block {block_id} from {shard_group} pins transaction {transaction_id} to \
+         {locked_epoch}, earlier than its minimum epoch {min_epoch}"
+    )]
+    ForeignTransactionPinnedBeforeMinEpoch {
+        block_id: BlockId,
+        shard_group: ShardGroup,
+        transaction_id: TransactionId,
+        locked_epoch: Epoch,
+        min_epoch: Epoch,
+    },
+
     #[error("Foreign proposal commit proof error: {0}")]
     ForeignProposalCommitProofError(#[from] ForeignProposalCommitProofError),
 
@@ -449,10 +461,16 @@ impl ProposalValidationError {
     /// which commands it sends in full, so two messages carrying the same block can differ in them. An error in that
     /// part says nothing about the block, so nothing is recorded against its block id and another delivery of the
     /// block is still accepted.
+    ///
+    /// `FutureEpoch` is the local node's own condition: it has not yet reached the epoch window of the signed header.
+    /// Recording that against the block id would refuse the proposal after this node catches up, so the message is
+    /// turned away and a later delivery is evaluated afresh.
     pub fn rejects_message_not_block(&self) -> bool {
         matches!(
             self,
-            Self::ForeignPledgesNotCommitted { .. } | Self::ForeignProposalWithholdsCommand { .. }
+            Self::ForeignPledgesNotCommitted { .. } |
+                Self::ForeignProposalWithholdsCommand { .. } |
+                Self::FutureEpoch { .. }
         )
     }
 }

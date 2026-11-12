@@ -104,6 +104,8 @@ windows-native-keyring-store = { workspace = true }
 # assert against the real network ceiling rather than drifting from a hand-copied number.
 serde-saphyr = { workspace = true }
 tari_consensus = { workspace = true }
+tari_indexer_client = { workspace = true, default-features = false }
+tari_ootle_light_client = { workspace = true, features = ["test-fixtures"] }
 tari_utilities = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }

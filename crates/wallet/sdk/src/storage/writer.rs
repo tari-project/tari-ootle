@@ -19,7 +19,7 @@ use tari_template_lib::types::{
     UtxoAddress,
     UtxoId,
     VaultId,
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
 };
 use webauthn_rs::prelude::Passkey;
 
@@ -57,7 +57,7 @@ use crate::{
         WalletLockId,
         WalletTransactionUpdate,
     },
-    storage::{CommittableStore, QueuedUtxo, WalletStorageError},
+    storage::{CommittableStore, QueuedEntry, QueuedUtxo, WalletStorageError},
 };
 
 pub trait WalletStoreWriter: CommittableStore {
@@ -186,23 +186,16 @@ pub trait WalletStoreWriter: CommittableStore {
         lock_id: WalletLockId,
     ) -> Result<StealthOutputModel, WalletStorageError>;
 
-    fn stealth_outputs_lock_many(
-        &mut self,
-        resource_address: &ResourceAddress,
-        utxos: &[&PedersenCommitmentBytes],
-        lock_id: WalletLockId,
-    ) -> Result<(), WalletStorageError>;
-
     /// Account-scoped lock: flips the named outputs to `LockedForSpend` and binds them to `lock_id`, restricted to
     /// rows owned by `account_address`. The account condition on the update is what makes caller-supplied commitments
     /// safe to lock: a commitment belonging to another account cannot be locked through this path even if it shares
     /// the resource. Errors (leaving the write transaction to roll back) unless every requested commitment matched an
     /// owned row.
     ///
-    /// This method performs only the account-scoped status/lock flip; it does **not** independently validate
-    /// spend-eligibility (e.g. `Unspent`/same-lock `LockedUnconfirmed` status, `owner_key_id`, `is_burnt`,
-    /// `is_frozen`, `is_condition_spendable`). Callers must validate status and eligibility within the same write
-    /// transaction before invoking this, otherwise ineligible outputs would be silently locked.
+    /// Enforces both account ownership and spend-eligibility (`Unspent` with `is_on_chain = true`, or
+    /// `LockedUnconfirmed` already bound to `lock_id`, plus `owner_key_id IS NOT NULL`, `is_burnt = false`,
+    /// `is_frozen = false`, and `is_condition_spendable = true`), verifying all requested commitments match before
+    /// updating any row.
     fn stealth_outputs_lock_many_for_account(
         &mut self,
         account_address: &ComponentAddress,
@@ -211,6 +204,8 @@ pub trait WalletStoreWriter: CommittableStore {
         lock_id: WalletLockId,
     ) -> Result<(), WalletStorageError>;
     fn stealth_outputs_insert(&mut self, output: &StealthOutputModel) -> Result<(), WalletStorageError>;
+    /// Deletes the output at `address` if it is held as invalid. Returns whether it was deleted.
+    fn stealth_outputs_delete_invalid(&mut self, address: &UtxoAddress) -> Result<bool, WalletStorageError>;
     /// Marks the output spent, as a spend of `version` takes it down, and records `version` as
     /// [`stealth_outputs_record_spent_version`](Self::stealth_outputs_record_spent_version) does.
     fn stealth_outputs_mark_as_spent(
@@ -413,12 +408,19 @@ pub trait WalletStoreWriter: CommittableStore {
         resource_address: &ResourceAddress,
         items: I,
     ) -> Result<(), WalletStorageError>;
-    fn utxo_process_queue_remove_item(
+    /// Removes each of `entries` that is still queued at its generation. An entry queued again since it was read
+    /// stays queued. Returns the number removed.
+    fn utxo_process_queue_ack(&mut self, entries: &[QueuedEntry]) -> Result<usize, WalletStorageError>;
+    /// Records spends of outputs of the resource that the wallet does not hold, after every one recorded before, while
+    /// any UTXO of the resource is queued for recovery. With none queued, no lookup can need them, so they and every
+    /// spend recorded for the resource before are removed instead.
+    fn utxo_unheld_spends_record(
         &mut self,
-        resource_address: ResourceAddress,
-        tag: UtxoTag,
-        public_nonce: RistrettoPublicKeyBytes,
+        resource_address: &ResourceAddress,
+        commitments: &[PedersenCommitmentBytes],
     ) -> Result<(), WalletStorageError>;
+    /// Removes the recorded unheld spends at or below `watermark`. Returns the number removed.
+    fn utxo_unheld_spends_prune(&mut self, watermark: u64) -> Result<usize, WalletStorageError>;
 
     // Address book
     fn address_book_insert(

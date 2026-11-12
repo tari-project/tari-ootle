@@ -11,6 +11,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
     task::{Context, Poll},
+    time::Duration,
 };
 
 use log::*;
@@ -18,11 +19,12 @@ use ootle_network::Network;
 use tari_base_node_client::{
     BaseNodeClient,
     BaseNodeClientError,
-    futures_util::{StreamExt, TryStreamExt, stream},
+    futures_util::{Stream, StreamExt, TryStreamExt, stream},
     grpc::GrpcBaseNodeClient,
     types::{BaseLayerConsensusConstants, BaseLayerMetadata},
 };
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle, ValidatorNodeChange};
+use tari_node_components::blocks::BlockHeader;
 use tari_ootle_common_types::{Epoch, displayable::Displayable, optional::Optional};
 use tari_ootle_storage::global::BlockHeaderModel;
 use tari_sidechain::FixedHash;
@@ -48,6 +50,11 @@ const BOUNDARY_HEADER_FETCH_CONCURRENCY: usize = 16;
 /// the number of concurrent header fetches for very long catch-ups; the remainder is picked up by
 /// the next scan round via the normal `has_more` loop.
 const MAX_BOUNDARIES_PER_BATCH: u64 = 2_000;
+
+/// Longest wait for the next header of a header stream. Unary requests are bounded by the client's
+/// request timeout, but a stream that stops delivering mid-response is not, and a base node that stalls
+/// it would otherwise hold the scan round, and failover, indefinitely.
+const HEADER_STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// An event produced while scanning a batch of base-layer blocks.
 ///
@@ -479,7 +486,6 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
                 .get_header_by_hash(hash)
                 .await?;
             self.last_scanned_validator_node_mr = Some(header.validator_node_mr.into_array().into());
-            // cached_header = Some(header);
         }
 
         let constants = self
@@ -503,25 +509,6 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
         let scan_epoch = batch.scan_epoch;
         let reached_lag_tip = (batch.last_scanned_height >= lag_tip_height).then_some(tip.tip_hash);
         self.resolve_changes_and_commit(batch, reached_lag_tip).await?;
-
-        // let scan_height = constants.epoch_to_height(scan_epoch);
-        // if self.last_scanned_validator_node_mr.is_none() {
-        //     // Initial validator node download
-        //     let mut stream = self.base_node_mut().get_validator_nodes(scan_height).await?;
-        //     while let Some(node) = stream.try_next().await? {
-        //         self.pending_events
-        //             .push_back(EpochEvent::ActiveValidatorNodeSetChanged {
-        //                 epoch: scan_epoch,
-        //                 node_changes: vec![ValidatorNodeChange::Add {
-        //                     claim_public_key: node.public_key,
-        //                     validator_node_public_key: node.public_key,
-        //                     activation_epoch: scan_epoch,
-        //                     minimum_value_promise: 0,
-        //                     shard_key: node.shard_key,
-        //                 }],
-        //             });
-        //     }
-        // }
 
         if self.last_scanned_height < lag_tip_height {
             info!(
@@ -609,11 +596,26 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
         let mut last_scanned_hash = self.last_scanned_hash;
         let mut last_scanned_height = self.last_scanned_height;
         let mut scan_epoch = constants.height_to_epoch(start_scan_height);
-        while let Some(header) = header_stream.try_next().await? {
+        // `select_base_node` verified the scanned block is on this node's chain, but the stream is
+        // requested by height. Each header must extend the one before it, starting from the scanned
+        // block, or the batch would continue a different chain than the one already scanned.
+        let mut expected_prev_hash = self.last_scanned_block().map(|(_, hash)| hash);
+        while let Some(header) = next_header(&mut header_stream).await? {
             let current_epoch = constants.height_to_epoch(header.height);
             let header_height = header.height;
+            let prev_hash = FixedHash::from(header.prev_hash.into_array());
+            if let Some(expected) = expected_prev_hash &&
+                prev_hash != expected
+            {
+                return Err(BaseLayerOracleError::HeaderDoesNotExtendScannedChain {
+                    height: header_height,
+                    prev_hash,
+                    expected,
+                });
+            }
             // Note: Cant use header.hash() because it uses CURRENT_NETWORK global
             let header_hash = hash_header(self.network, &header);
+            expected_prev_hash = Some(header_hash);
             let current_validator_node_mr = FixedHash::from(header.validator_node_mr.into_array());
             // Keep only the fields the store persists; the full `header` (incl. its pow_data blob)
             // is dropped at the end of this iteration.
@@ -693,6 +695,10 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
     /// trailing position-only header (the window end) advances the scan position when the window
     /// ends mid-epoch; it carries no events and is not MR-sampled (its MR equals its epoch
     /// boundary's, already handled).
+    ///
+    /// The headers are fetched independently by height, so this path cannot check that they extend
+    /// the scanned block the way `scan_full_headers` does. It relies on the `select_base_node` check
+    /// made at the start of the round.
     async fn scan_epoch_boundaries(
         &mut self,
         constants: &BaseLayerConsensusConstants,
@@ -727,7 +733,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
                 let mut client = base_client.clone();
                 async move {
                     let mut header_stream = client.stream_headers(height, 1).await?;
-                    let header = header_stream.try_next().await?.ok_or_else(|| {
+                    let header = next_header(&mut header_stream).await?.ok_or_else(|| {
                         BaseLayerOracleError::InvalidBaseNodeResponse(format!(
                             "base node returned no header at height {height}"
                         ))
@@ -1048,6 +1054,18 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static, TCli
     }
 }
 
+/// Takes the next header from a base node header stream, failing if none arrives within
+/// `HEADER_STREAM_STALL_TIMEOUT`.
+async fn next_header<S>(stream: &mut S) -> Result<Option<BlockHeader>, BaseLayerOracleError>
+where S: Stream<Item = Result<BlockHeader, BaseNodeClientError>> + Unpin {
+    time::timeout(HEADER_STREAM_STALL_TIMEOUT, stream.try_next())
+        .await
+        .map_err(|_| BaseLayerOracleError::HeaderStreamStalled {
+            timeout: HEADER_STREAM_STALL_TIMEOUT,
+        })?
+        .map_err(BaseLayerOracleError::BaseNodeError)
+}
+
 /// Returns the boundary block hash stored for `epoch`, or `None` if it has not been scanned.
 ///
 /// A stored header only counts as the boundary when its height is exactly the epoch's first height:
@@ -1100,6 +1118,17 @@ pub enum BaseLayerOracleError {
     },
     #[error("No configured base node is usable: {details}")]
     NoUsableBaseNode { details: String },
+    #[error(
+        "Base node sent header {height} with previous hash {prev_hash}, which does not extend the scanned chain at \
+         {expected}"
+    )]
+    HeaderDoesNotExtendScannedChain {
+        height: u64,
+        prev_hash: FixedHash,
+        expected: FixedHash,
+    },
+    #[error("Base node sent no header for {timeout:.0?} mid-stream")]
+    HeaderStreamStalled { timeout: Duration },
 }
 
 enum BlockchainProgression {
@@ -1468,8 +1497,17 @@ mod tests {
         }
     }
 
+    /// Sets each header's `prev_hash` to the hash of the header before it.
+    fn link(mut chain: Vec<BlockHeader>) -> Vec<BlockHeader> {
+        for i in 1..chain.len() {
+            let prev_hash = hash_header(NETWORK, &chain[i - 1]);
+            chain[i].prev_hash = prev_hash.into_array().into();
+        }
+        chain
+    }
+
     fn linear_chain(heights: std::ops::RangeInclusive<u64>) -> Vec<BlockHeader> {
-        heights.map(|h| make_header(h, h)).collect()
+        link(heights.map(|h| make_header(h, h)).collect())
     }
 
     /// Pins the ordering the deferred end-of-epoch bug depended on: during a multi-batch catch-up the
@@ -1697,7 +1735,7 @@ mod tests {
     fn forked_chain(chain_a: &[BlockHeader], fork_height: u64, tip: u64) -> Vec<BlockHeader> {
         let mut chain = chain_a[..=fork_height as usize].to_vec();
         chain.extend((fork_height + 1..=tip).map(|h| make_header(h, h + 10_000)));
-        chain
+        link(chain)
     }
 
     fn make_inner_with_fallbacks(
@@ -1771,6 +1809,34 @@ mod tests {
         sync_to_tip(&mut inner).await;
         assert_eq!(inner.last_scanned_height, 17);
         assert_eq!(store.hash_at(17), Some(hash_header(NETWORK, &chain_b[17])));
+    }
+
+    /// A base node that has the scanned block but streams headers from another chain above it fails
+    /// the round; the batch is not committed onto that chain.
+    #[tokio::test]
+    async fn batch_that_does_not_extend_the_scanned_block_is_rejected() {
+        let store = InMemoryStore::default();
+        let chain_a = linear_chain(0..=20);
+        let client = MockBaseNode::new(chain_a.clone());
+        let mut inner = make_inner(store.clone(), client.clone(), 5);
+        sync_to_tip(&mut inner).await;
+        assert_eq!(inner.last_scanned_height, 15);
+
+        // Serves chain A's block 15, so it passes the base node check, but heights 16.. come from a
+        // chain that forked at 12.
+        let mut inconsistent = chain_a[..=15].to_vec();
+        inconsistent.extend(forked_chain(&chain_a, 12, 25).split_off(16));
+        client.set_chain(inconsistent);
+
+        let err = inner.scan_blockchain(false).await.unwrap_err();
+        assert!(
+            matches!(err, BaseLayerOracleError::HeaderDoesNotExtendScannedChain { height: 16, expected, .. } if expected == hash_header(NETWORK, &chain_a[15])),
+            "unexpected error: {err}"
+        );
+        assert_eq!(inner.last_scanned_height, 15);
+        assert_eq!(inner.last_scanned_hash, Some(hash_header(NETWORK, &chain_a[15])));
+        assert_eq!(store.heights(), (1..=15).collect::<Vec<_>>());
+        assert!(inner.pending_events.is_empty());
     }
 
     /// When the active base node is unreachable the scan moves to the next one, and stays there after
@@ -1888,13 +1954,16 @@ mod tests {
     /// Linear chain whose `validator_node_mr` is a function of the epoch, so the MR changes exactly
     /// at each epoch boundary — the trigger for a deferred `get_validator_node_changes` fetch.
     fn chain_with_epoch_mr(heights: std::ops::RangeInclusive<u64>) -> Vec<BlockHeader> {
-        heights
-            .map(|h| {
-                let mut header = make_header(h, h);
-                header.validator_node_mr = tari_common_types::types::FixedHash::from([(h / EPOCH_LENGTH) as u8; 32]);
-                header
-            })
-            .collect()
+        link(
+            heights
+                .map(|h| {
+                    let mut header = make_header(h, h);
+                    header.validator_node_mr =
+                        tari_common_types::types::FixedHash::from([(h / EPOCH_LENGTH) as u8; 32]);
+                    header
+                })
+                .collect(),
+        )
     }
 
     /// A minimal, convertible grpc validator-node-change (a Remove with a valid 32-byte key).

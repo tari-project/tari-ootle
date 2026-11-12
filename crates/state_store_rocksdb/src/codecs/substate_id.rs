@@ -5,7 +5,7 @@ use std::io::{Cursor, Write};
 
 use borsh::BorshDeserialize;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::VersionedSubstateIdRef;
+use tari_ootle_common_types::{SubstateVersion, VersionedSubstateIdRef};
 
 use crate::{
     codecs::{DbDecoder, DbEncoder, EncodeVec},
@@ -66,7 +66,7 @@ impl<'a> DbEncoder<&'a SubstateId> for SubstateIdCodec {
 impl<'a> DbEncoder<VersionedSubstateIdRef<'a>> for SubstateIdCodec {
     fn encode_len(&self, value: &VersionedSubstateIdRef<'a>) -> Result<usize, RocksDbStorageError> {
         self.get_substate_id_encoded_len(value.substate_id())
-            .map(|len| len + size_of::<u32>())
+            .map(|len| len + size_of::<SubstateVersion>())
     }
 
     fn encode_into<W: Write>(
@@ -86,7 +86,7 @@ impl<'a> DbEncoder<VersionedSubstateIdRef<'a>> for SubstateIdCodec {
 
 #[cfg(test)]
 mod tests {
-    use tari_template_lib_types::{ComponentAddress, ObjectKey};
+    use tari_template_lib_types::{ComponentAddress, NonFungibleAddress, NonFungibleId, ObjectKey, ResourceAddress};
 
     use super::*;
 
@@ -102,5 +102,43 @@ mod tests {
         let encoded = codec.encode(&substate_id).unwrap();
         let decoded: SubstateId = codec.decode_exact(&encoded).unwrap();
         assert_eq!(substate_id, decoded);
+    }
+
+    #[test]
+    fn encode_versioned_substate_id_ref_preserves_full_u64_version() {
+        let substate_id = new_substate_id(1);
+        let codec = SubstateIdCodec;
+        let id_bytes = codec.encode(&substate_id).unwrap();
+
+        let v1 = VersionedSubstateIdRef::new(&substate_id, SubstateVersion::new(1));
+        let v2 = VersionedSubstateIdRef::new(&substate_id, SubstateVersion::new(2));
+
+        let encoded_v1 = codec.encode(&v1).unwrap();
+        let encoded_v2 = codec.encode(&v2).unwrap();
+
+        assert_eq!(encoded_v1.len(), codec.encode_len(&v1).unwrap());
+        assert_eq!(encoded_v1.len(), id_bytes.len() + size_of::<SubstateVersion>());
+        assert_eq!(&encoded_v1[..id_bytes.len()], id_bytes.as_slice());
+        assert_eq!(&encoded_v1[id_bytes.len()..], &1u64.to_be_bytes());
+        assert_ne!(encoded_v1, encoded_v2);
+
+        let (decoded_id, consumed) = codec.decode(&encoded_v1).unwrap();
+        assert_eq!(decoded_id, substate_id);
+        assert_eq!(consumed, id_bytes.len());
+
+        // A SubstateId whose borsh encoding is 95 bytes produces a 103-byte versioned key (spilling past
+        // EncodeVec::FIXED_SIZE = 100); under-reporting encode_len by 4 bytes previously took the 100-byte stack path
+        // and failed with WriteZero.
+        let nft_id = NonFungibleId::try_from_string("a".repeat(41)).unwrap();
+        let long_id = SubstateId::NonFungible(NonFungibleAddress::new(
+            ResourceAddress::from_array([2; ObjectKey::LENGTH]),
+            nft_id,
+        ));
+        let long_id_len = codec.encode_len(&long_id).unwrap();
+        assert!((93..=96).contains(&long_id_len), "unexpected long_id_len: {long_id_len}");
+        let versioned_long = VersionedSubstateIdRef::new(&long_id, SubstateVersion::new(0x0102_0304_0506_0708));
+        let encoded_long = codec.encode(&versioned_long).unwrap();
+        assert_eq!(encoded_long.len(), long_id_len + size_of::<SubstateVersion>());
+        assert_eq!(&encoded_long[long_id_len..], &0x0102_0304_0506_0708u64.to_be_bytes());
     }
 }

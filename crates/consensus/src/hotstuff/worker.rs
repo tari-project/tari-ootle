@@ -2031,7 +2031,7 @@ impl<TAddr> CatchUp<TAddr> {
     pub fn set_next_batch(&mut self, current_height: NodeHeight, timeout: Duration) -> bool {
         self.expected_batch_height = (current_height + NodeHeight(99)).min(self.remote_height);
         self.reset_timeout(timeout);
-        self.expected_batch_height < self.remote_height
+        current_height < self.remote_height
     }
 
     pub fn reset_timeout(&mut self, timeout: Duration) {
@@ -2082,6 +2082,32 @@ mod tests {
         #[test]
         fn a_checkpoint_synced_past_the_leaf_wins() {
             assert_eq!(select_starting_epoch(Some(Epoch(3)), Some(Epoch(1))), Some(Epoch(4)));
+        }
+    }
+
+    mod catch_up {
+        use super::*;
+
+        const TIMEOUT: Duration = Duration::from_secs(30);
+
+        #[test]
+        fn a_single_batch_catch_up_finishes_when_remote_height_is_reached() {
+            let mut catch_up = CatchUp::new(NodeHeight(50), NodeHeight(0), TIMEOUT, "peer");
+            assert_eq!(catch_up.expected_batch_height, NodeHeight(50));
+            assert!(!catch_up.set_next_batch(NodeHeight(50), TIMEOUT));
+        }
+
+        #[test]
+        fn a_multi_batch_catch_up_requests_the_final_batch_capped_at_remote_height() {
+            let mut catch_up = CatchUp::new(NodeHeight(150), NodeHeight(0), TIMEOUT, "peer");
+            assert_eq!(catch_up.expected_batch_height, NodeHeight(99));
+
+            // Reaching the end of the first batch schedules the final batch, capped at `remote_height`.
+            assert!(catch_up.set_next_batch(NodeHeight(99), TIMEOUT));
+            assert_eq!(catch_up.expected_batch_height, NodeHeight(150));
+
+            // Reaching `remote_height` completes catch-up.
+            assert!(!catch_up.set_next_batch(NodeHeight(150), TIMEOUT));
         }
     }
 }

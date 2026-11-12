@@ -52,7 +52,7 @@ macro_rules! invoke_arg {
 macro_rules! invoke_args {
     () => (Vec::<$crate::types::bytes::Bytes>::new());
 
-    ($($args:expr),+) => {{
+    ($($args:expr),+ $(,)?) => {{
         let mut args = Vec::<_>::with_capacity($crate::__expr_counter!($($args),+));
         $(
             $crate::args::__push(&mut args, $crate::invoke_arg!(&$args));
@@ -71,4 +71,15 @@ pub fn __push<T>(v: &mut Vec<T>, arg: T) {
 
 pub mod __reexport {
     pub use tari_bor;
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn invoke_args_supports_trailing_comma() {
+        let without_comma = invoke_args![1u32, "two"];
+        let with_comma = invoke_args![1u32, "two",];
+        assert_eq!(without_comma, with_comma);
+        assert_eq!(with_comma.len(), 2);
+    }
 }

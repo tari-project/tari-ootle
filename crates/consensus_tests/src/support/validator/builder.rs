@@ -229,7 +229,7 @@ impl ValidatorBuilder {
             shutdown_signal.clone(),
         );
 
-        let current_view = worker.pacemaker().current_view().clone();
+        let current_view = worker.current_view();
 
         let (tx_current_state, rx_current_state) = watch::channel(ConsensusCurrentState::default());
         let sync_manager = TestSyncManager::default();

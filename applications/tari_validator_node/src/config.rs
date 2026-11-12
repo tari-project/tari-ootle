@@ -33,6 +33,7 @@ use tari_common::{
     DefaultConfigLoader,
     SubConfigPath,
     configuration::{CommonConfig, ConfigList, StringList},
+    exit_codes::{ExitCode, ExitError},
 };
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_logging::LoggingConfig;
@@ -122,7 +123,7 @@ pub struct ValidatorNodeConfig {
     pub json_rpc_allowed_hosts: StringList,
     /// Template config
     pub templates: TemplateConfig,
-    /// Fee claim public key
+    /// Wallet-provided fee claim public key. A nonzero key is required to start the validator.
     pub fee_claim_public_key: RistrettoPublicKey,
     /// The burn rate council this node writes into genesis. Genesis is part of what every node on a
     /// network agrees on, so every node must be configured with the same council, or none: with none
@@ -190,6 +191,19 @@ pub struct ValidatorNodeConfig {
     /// raised to it.
     #[serde(default = "default_pinned_checkpoint_epochs")]
     pub pinned_checkpoint_epochs: u64,
+    /// The number of epochs before the current one whose blocks, certificates, foreign proposals and finalized
+    /// transaction records the state store keeps. Peers more than this many epochs behind cannot sync these from
+    /// this node, and bounded state sync is refused once its range is older than this window. Disk use grows
+    /// linearly with it. A value below [`MIN_EPOCH_HISTORY_LENGTH`] is raised to it.
+    #[serde(default = "default_epoch_history_length")]
+    pub epoch_history_length: u64,
+    /// The number of epochs, counted from the destruction each proves, that the state store keeps substate down proofs
+    /// and state version proofs for. An older destruction is served unproven.
+    #[serde(default = "default_down_proof_history_length")]
+    pub down_proof_history_length: u64,
+    /// The number of state tree versions behind the latest that each shard keeps stale nodes for.
+    #[serde(default = "default_state_history_length")]
+    pub state_history_length: u64,
     /// Local diagnostic event log
     #[serde(default)]
     pub diagnostics: DiagnosticsConfig,
@@ -220,6 +234,22 @@ pub const MIN_PINNED_CHECKPOINT_EPOCHS: u64 = 2;
 
 fn default_pinned_checkpoint_epochs() -> u64 {
     DatabaseOptions::default().pinned_checkpoint_epochs
+}
+
+/// The fewest epochs before the current one a validator keeps blocks for. The previous epoch's blocks are still read
+/// while the current one starts.
+pub const MIN_EPOCH_HISTORY_LENGTH: u64 = 1;
+
+fn default_epoch_history_length() -> u64 {
+    DatabaseOptions::default().epoch_history_length
+}
+
+fn default_down_proof_history_length() -> u64 {
+    DatabaseOptions::default().down_proof_history_length
+}
+
+fn default_state_history_length() -> u64 {
+    DatabaseOptions::default().state_history_length
 }
 
 /// The validator's local record of abnormal events (leader failures, consensus errors, sync and
@@ -273,6 +303,17 @@ fn default_diagnostics_max_age_secs() -> u64 {
 }
 
 impl ValidatorNodeConfig {
+    pub fn validate_fee_claim_public_key(&self) -> Result<(), ExitError> {
+        if self.fee_claim_public_key == RistrettoPublicKey::default() {
+            return Err(ExitError::new(
+                ExitCode::ConfigError,
+                "validator_node.fee_claim_public_key must be configured with a public key from your wallet before \
+                 starting the validator",
+            ));
+        }
+        Ok(())
+    }
+
     /// Database options for the state store this node opens.
     ///
     /// The memory budget is one capacity covering the block cache and memtables together, split so
@@ -286,6 +327,9 @@ impl ValidatorNodeConfig {
             .with_memory_budget_bytes(self.state_store_memory_budget_bytes)
             .with_memtable_budget_bytes(self.state_store_memory_budget_bytes / 2)
             .with_pinned_checkpoint_epochs(self.pinned_checkpoint_epochs.max(MIN_PINNED_CHECKPOINT_EPOCHS))
+            .with_epoch_history_length(self.epoch_history_length.max(MIN_EPOCH_HISTORY_LENGTH))
+            .with_down_proof_history_length(self.down_proof_history_length)
+            .with_state_history_length(self.state_history_length)
     }
 
     pub fn set_base_path<P: AsRef<Path>>(&mut self, base_path: P) {
@@ -355,7 +399,6 @@ impl Default for ValidatorNodeConfig {
             enable_permissive_cors: false,
             json_rpc_allowed_hosts: StringList::default(),
             templates: TemplateConfig::default(),
-            // Burn your fees
             fee_claim_public_key: RistrettoPublicKey::default(),
             genesis_council: GenesisCouncilConfig::default(),
             dont_create_id: false,
@@ -369,6 +412,9 @@ impl Default for ValidatorNodeConfig {
             max_consensus_messaging_queue_bytes: default_max_consensus_messaging_queue_bytes(),
             state_store_memory_budget_bytes: default_state_store_memory_budget_bytes(),
             pinned_checkpoint_epochs: default_pinned_checkpoint_epochs(),
+            epoch_history_length: default_epoch_history_length(),
+            down_proof_history_length: default_down_proof_history_length(),
+            state_history_length: default_state_history_length(),
             diagnostics: DiagnosticsConfig::default(),
             logging: crate::logging::default_logging_config(),
         }
@@ -459,4 +505,21 @@ fn default_state_sync_progress_timeout_secs() -> u64 {
 
 fn default_state_sync_min_throughput_bytes_per_sec() -> u64 {
     tari_rpc_state_sync::DEFAULT_SYNC_MIN_THROUGHPUT_BYTES_PER_SEC
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_app_utilities::keypair::RistrettoKeypair;
+
+    use super::*;
+
+    #[test]
+    fn a_wallet_claim_key_is_required_for_startup() {
+        let mut config = ValidatorNodeConfig::default();
+        assert!(config.validate_fee_claim_public_key().is_err());
+        let wallet_key = RistrettoKeypair::random(&mut rand::rng());
+        config.fee_claim_public_key = wallet_key.public_key().clone();
+        config.validate_fee_claim_public_key().unwrap();
+        assert_eq!(&config.fee_claim_public_key, wallet_key.public_key());
+    }
 }

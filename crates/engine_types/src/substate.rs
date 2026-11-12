@@ -30,7 +30,7 @@ use std::{
 use borsh::{BorshDeserialize, BorshSerialize};
 use ootle_network::Network;
 use serde::{Deserialize, Serialize};
-use tari_bor::{BorError, decode_exact_with_max_depth, decode_with_max_depth, encode};
+use tari_bor::{BorError, decode_exact_with_max_depth, encode};
 use tari_template_lib::types::{
     ClaimedOutputTombstoneAddress,
     ComponentAddress,
@@ -67,7 +67,7 @@ use crate::{
     non_fungible::NonFungibleContainer,
     published_template::{PublishedTemplate, PublishedTemplateAddress, PublishedTemplateMetadata},
     resource::Resource,
-    substate_hasher::{SubstateHashMessage, SubstateValueHashMessage},
+    substate_hasher::SubstateHashMessage,
     transaction_receipt::TransactionReceipt,
     utxo::Utxo,
     vault::Vault,
@@ -111,7 +111,7 @@ impl Substate {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, BorError> {
-        decode_with_max_depth(bytes, limits::MAX_CBOR_NESTING_DEPTH)
+        decode_exact_with_max_depth(bytes, limits::MAX_CBOR_NESTING_DEPTH)
     }
 
     pub fn to_value_hash(&self, network: Network, epoch: Epoch) -> Hash32 {
@@ -186,9 +186,11 @@ pub fn hash_published_template_metadata(
     epoch: Epoch,
 ) -> Hash32 {
     let proto_version = ProtocolVersion::at(network, epoch);
-    let message =
-        SubstateHashMessage::from_value_message(proto_version, SubstateValueHashMessage::Template(metadata.into()));
-    hash_substate_message(message, version, epoch)
+    hash_substate_message(
+        SubstateHashMessage::template_metadata(proto_version, metadata),
+        version,
+        epoch,
+    )
 }
 
 fn hash_substate_message(message: SubstateHashMessage<'_>, version: SubstateVersion, epoch: Epoch) -> Hash32 {
@@ -689,9 +691,9 @@ impl FromStr for SubstateId {
                 let addr = ResourceAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::Resource(addr))
             },
-            Some((address_prefixes::NON_FUNGIBLE, rest)) => {
+            Some((address_prefixes::NON_FUNGIBLE, _)) => {
                 // nft_{resource_hex}_{id_type}_{id}
-                let addr = NonFungibleAddress::from_str(rest).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
+                let addr = NonFungibleAddress::from_str(s).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::NonFungible(addr))
             },
             Some((address_prefixes::VAULT, addr)) => {
@@ -705,25 +707,25 @@ impl FromStr for SubstateId {
             },
             Some((address_prefixes::TRANSACTION_RECEIPT, addr)) => {
                 let tx_receipt_addr =
-                    TransactionReceiptAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
+                    TransactionReceiptAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::TransactionReceipt(tx_receipt_addr))
             },
             Some((address_prefixes::TEMPLATE, addr)) => {
-                let addr = Hash32::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
+                let addr = Hash32::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::Template(addr.into()))
             },
             Some((address_prefixes::VALIDATOR_FEE_POOL, addr)) => {
                 let addr =
-                    ValidatorFeePoolAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
+                    ValidatorFeePoolAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::ValidatorFeePool(addr))
             },
-            Some((address_prefixes::UTXO, addr)) => {
-                let addr = UtxoAddress::from_str(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
+            Some((address_prefixes::UTXO, _)) => {
+                let addr = UtxoAddress::from_str(s).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::Utxo(addr))
             },
-            Some((address_prefixes::CONFIDENTIAL_OUTPUT, addr)) => {
+            Some((address_prefixes::CONFIDENTIAL_OUTPUT, _)) => {
                 let addr =
-                    ConfidentialOutputAddress::from_str(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
+                    ConfidentialOutputAddress::from_str(s).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::ConfidentialOutput(addr))
             },
             Some(_) | None => Err(InvalidSubstateIdFormat(s.to_string())),
@@ -1219,6 +1221,22 @@ mod tests {
             check(
                 "utxo_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff",
             );
+            check(
+                "coutput_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff",
+            );
+        }
+
+        #[test]
+        fn rejects_double_prefixed_substate_ids_and_preserves_full_input_in_error() {
+            for malformed in [
+                "nft_nft_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_str_SpecialNft",
+                "utxo_utxo_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff",
+                "coutput_coutput_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff",
+                "template_not_hex",
+            ] {
+                let err = SubstateId::from_str(malformed).unwrap_err();
+                assert_eq!(err.0, malformed);
+            }
         }
     }
 
@@ -1337,6 +1355,23 @@ mod tests {
             for value in &values {
                 assert_eq!(tari_bor::encoded_len(value), encode(value).unwrap().len(), "{value:?}");
             }
+        }
+    }
+
+    mod substate_from_bytes_exact {
+        use super::*;
+
+        fn sample_value() -> SubstateValue {
+            SubstateValue::ClaimedOutputTombstone(ClaimedOutputTombstone { value: 1 })
+        }
+
+        #[test]
+        fn rejects_substate_from_bytes_with_trailing_bytes() {
+            let substate = Substate::new(SubstateVersion::ZERO, sample_value());
+            let mut bytes = substate.to_bytes();
+            bytes.extend_from_slice(b"trailing_malicious_bytes");
+            let err = Substate::from_bytes(&bytes).unwrap_err();
+            assert!(err.to_string().contains("remaining on input"));
         }
     }
 }

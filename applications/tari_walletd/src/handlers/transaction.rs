@@ -22,12 +22,12 @@ use tari_ootle_wallet_sdk::{
     models::{
         KeyId,
         LockOwner,
-        OutputStatus,
         StealthUtxoSpendKeyId,
         TransactionContext,
         TransactionStatus,
         WalletEvent,
         WalletLockId,
+        WalletTransaction,
     },
     storage::{ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
@@ -59,7 +59,7 @@ use tari_ootle_walletd_client::{
 };
 use tari_template_lib_types::ComponentAddress;
 use tari_transaction_manifest::{ManifestInstructions, parse_manifest};
-use tokio::{task, time};
+use tokio::{sync::broadcast, task, time};
 
 use super::context::HandlerContext;
 use crate::{
@@ -82,6 +82,8 @@ use crate::{
             invalid_request,
             not_found,
             transaction_rejected,
+            validate_transaction_for_approval,
+            validate_transaction_for_network,
         },
         transaction_requests::{ensure_free_locks_of, ensure_locks_owned_by},
     },
@@ -101,6 +103,14 @@ pub async fn handle_submit_instruction(
     context.authorize(token, &[Permission::Transactions(Crud::Create)])?;
     authorize_component_upgrades(context, token, &component_upgrades(&[], &req.instructions))?;
     context.enforce_max_fee_limit(req.max_fee)?;
+    if let (Some(min_epoch), Some(max_epoch)) = (req.min_epoch, req.max_epoch) &&
+        min_epoch > max_epoch
+    {
+        return Err(invalid_params(
+            "min_epoch",
+            Some(format!("min_epoch ({min_epoch}) cannot exceed max_epoch ({max_epoch})")),
+        ));
+    }
     let sdk = context.wallet_sdk();
 
     let fee_account = get_account(&req.fee_account, &sdk.accounts_api())?;
@@ -190,9 +200,8 @@ async fn submit_inner(
     lock_claimant: Option<LockOwner>,
 ) -> Result<TransactionSubmitResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    req.transaction
-        .validate_blob_references()
-        .map_err(|e| invalid_params("transaction.blobs", Some(e.to_string())))?;
+    validate_transaction_for_approval(context.config().network, &req.transaction)?;
+    validate_epoch_bounds(&req.transaction)?;
     ensure_transaction_signers(sdk, &req.seal_signer, &req.other_signers)?;
     reject_detect_inputs_with_signatures(req.detect_inputs, &req.signatures)?;
     let detected_inputs = if req.detect_inputs {
@@ -257,7 +266,9 @@ async fn submit_inner(
 
     let transaction = sdk.signer_api().sign(req.seal_signer, transaction)?;
 
-    // Linked locks are finalized or released when the transaction resolves.
+    // Linked locks are finalized or released when the transaction resolves. The claim check shares this write with the
+    // link because a transaction request claims a lock by listing it, which leaves the lock row as it was: the service
+    // re-links the same locks when it stores the transaction, and that link cannot see a request's claim.
     let tx_id = transaction.calculate_id();
     if !req.lock_ids.is_empty() {
         sdk.store().with_write_tx(|tx| {
@@ -287,7 +298,7 @@ async fn submit_inner(
     // the request.
     let submission = task::spawn(async move {
         let submission = transaction_service
-            .submit_transaction_with_opts(transaction, tx_context, None)
+            .submit_transaction_with_locks(transaction, tx_context, lock_ids.clone())
             .await;
         if let Err(err) = &submission &&
             let Err(unlink_err) = unlink_locks_of_unstored_transaction(&task_sdk, tx_id, &lock_ids)
@@ -328,6 +339,21 @@ fn unlink_locks_of_unstored_transaction(
     })
 }
 
+fn validate_epoch_bounds(transaction: &UnsignedTransaction) -> Result<(), anyhow::Error> {
+    if let Some(min_epoch) = transaction.min_epoch() &&
+        min_epoch > transaction.max_epoch()
+    {
+        return Err(invalid_params(
+            "transaction.min_epoch",
+            Some(format!(
+                "min_epoch ({min_epoch}) cannot exceed max_epoch ({})",
+                transaction.max_epoch()
+            )),
+        ));
+    }
+    Ok(())
+}
+
 /// Signatures collected out of band are made over the transaction body as submitted, and detecting inputs adds to
 /// that body, so a request cannot ask for both.
 fn reject_detect_inputs_with_signatures(
@@ -362,32 +388,21 @@ fn derive_stealth_signers(
 ) -> Result<Vec<StealthUtxoSpendKeyId>, anyhow::Error> {
     let mut signers = IndexSet::new();
 
-    for lock_id in lock_ids {
-        let Some(outputs) = sdk.stealth_outputs_api().get_locked_by_lock_id(*lock_id).optional()? else {
-            continue;
-        };
-
-        for output in outputs {
-            // Only inputs being spent need a spend signature. The same lock
-            // also holds the change outputs it created (`LockedUnconfirmed`),
-            // which are not being spent by this transaction.
-            if !matches!(output.status, OutputStatus::LockedForSpend) {
-                continue;
-            }
-            // A view-only output has no spend key: the wallet can see it but
-            // cannot spend it, so a transaction that tries is malformed.
-            let account_key_id = output.owner_key_id.ok_or_else(|| {
-                invalid_request(format!(
-                    "Cannot spend view-only stealth output {} (lock {lock_id}): no owner key",
-                    output.commitment
-                ))
-            })?;
-            signers.insert(StealthUtxoSpendKeyId {
-                account_key_id,
-                view_key_id: output.view_only_key_id,
-                public_nonce: output.sender_public_nonce,
-            });
-        }
+    for output in sdk.stealth_outputs_api().get_locked_for_spend(lock_ids)? {
+        // A view-only output has no spend key: the wallet can see it but
+        // cannot spend it, so a transaction that tries is malformed.
+        let account_key_id = output.owner_key_id.ok_or_else(|| {
+            invalid_request(format!(
+                "Cannot spend view-only stealth output {}{}: no owner key",
+                output.commitment,
+                output.lock_id.map(|id| format!(" (lock {id})")).unwrap_or_default()
+            ))
+        })?;
+        signers.insert(StealthUtxoSpendKeyId {
+            account_key_id,
+            view_key_id: output.view_only_key_id,
+            public_nonce: output.sender_public_nonce,
+        });
     }
 
     Ok(signers.into_iter().collect())
@@ -515,9 +530,8 @@ async fn submit_dry_run_inner(
     req: TransactionSubmitDryRunRequest,
 ) -> Result<TransactionSubmitDryRunResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    req.transaction
-        .validate_blob_references()
-        .map_err(|e| invalid_params("transaction.blobs", Some(e.to_string())))?;
+    validate_transaction_for_network(context.config().network, &req.transaction)?;
+    validate_epoch_bounds(&req.transaction)?;
     ensure_transaction_signers(sdk, &req.seal_signer, &req.other_signers)?;
     reject_detect_inputs_with_signatures(req.detect_inputs, &req.signatures)?;
 
@@ -807,24 +821,9 @@ pub async fn handle_wait_result(
 ) -> Result<TransactionWaitResultResponse, anyhow::Error> {
     context.authorize(token, &[Permission::Transactions(Crud::Read)])?;
     let mut events = context.notifier().subscribe();
-    let transaction = context
-        .wallet_sdk()
-        .transaction_api()
-        .get(req.transaction_id)
-        .optional()?
-        .ok_or_else(|| not_found(format!("Transaction {}", req.transaction_id)))?;
-
-    // A transaction rejected before consensus has no finalize result and emits no further events.
-    let has_outcome =
-        transaction.finalize.is_some() || matches!(transaction.status, TransactionStatus::InvalidTransaction);
-    if has_outcome {
-        return Ok(TransactionWaitResultResponse {
-            transaction_id: req.transaction_id,
-            result: transaction.finalize,
-            status: transaction.status,
-            final_fee: transaction.final_fee.unwrap_or_default(),
-            timed_out: false,
-        });
+    let mut transaction = get_wallet_transaction(context, req.transaction_id)?;
+    if let Some(outcome) = outcome_of(&transaction) {
+        return Ok(outcome);
     }
 
     let mut timeout = match req.timeout_secs {
@@ -838,6 +837,18 @@ pub async fn handle_wait_result(
             event = events.recv() => {
                 match event {
                     Ok(event) => Some(event),
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(
+                            target: LOG_TARGET,
+                            "wait_result lagged by {n} events while waiting on {}; re-checking store",
+                            req.transaction_id
+                        );
+                        transaction = get_wallet_transaction(context, req.transaction_id)?;
+                        if let Some(outcome) = outcome_of(&transaction) {
+                            return Ok(outcome);
+                        }
+                        continue;
+                    },
                     Err(e) => return Err(anyhow!("Unexpected event stream error: {}", e)),
                 }
             },
@@ -875,6 +886,32 @@ pub async fn handle_wait_result(
             },
         };
     }
+}
+
+fn get_wallet_transaction(
+    context: &HandlerContext,
+    transaction_id: TransactionId,
+) -> Result<WalletTransaction, anyhow::Error> {
+    context
+        .wallet_sdk()
+        .transaction_api()
+        .get(transaction_id)
+        .optional()?
+        .ok_or_else(|| not_found(format!("Transaction {transaction_id}")))
+}
+
+/// The wait result for a stored transaction that has an outcome: a finalize result, or rejection before consensus.
+/// A transaction rejected before consensus has no finalize result and emits no further events.
+fn outcome_of(transaction: &WalletTransaction) -> Option<TransactionWaitResultResponse> {
+    let has_outcome =
+        transaction.finalize.is_some() || matches!(transaction.status, TransactionStatus::InvalidTransaction);
+    has_outcome.then(|| TransactionWaitResultResponse {
+        transaction_id: transaction.id,
+        result: transaction.finalize.clone(),
+        status: transaction.status,
+        final_fee: transaction.final_fee.unwrap_or_default(),
+        timed_out: false,
+    })
 }
 
 pub async fn handle_publish_template(
@@ -1067,8 +1104,9 @@ mod tests {
     };
     use tari_ootle_transaction::{ComponentReference, Instruction, TransactionBuilder};
     use tari_ootle_wallet_sdk::{
-        models::{KeyBranch, WalletLock, WalletTransactionUpdate},
-        storage::WalletStoreReader,
+        apis::key_manager::KeyManagerApiError,
+        models::{AuthLoginRequestEvent, KeyBranch, WalletLock, WalletTransactionUpdate},
+        storage::{WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
     };
     use tari_ootle_walletd_client::ComponentAddressOrName;
     use tari_template_lib_types::{ComponentAddress, TemplateAddress, crypto::RistrettoPublicKeyBytes};
@@ -1558,5 +1596,199 @@ mod tests {
         ] {
             signer.generate_signature(key, &unsigned).unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn submit_and_dry_run_refuse_nonexistent_imported_keys() {
+        let daemon = TestDaemon::start().await;
+        let reader = daemon.api_key("reader", "transactions:read");
+        let account = KeyId::derived(KeyBranch::Account, 0);
+        let missing_imported = KeyId::imported(999_999);
+        let assert_missing = |err: anyhow::Error, field: &str| {
+            assert_invalid_params(&err, field);
+            assert!(err.to_string().contains("does not exist"), "{err}");
+        };
+
+        let err = handle_submit(
+            &daemon.context,
+            Some(&daemon.session),
+            submit_request(missing_imported, vec![]),
+        )
+        .await
+        .unwrap_err();
+        assert_missing(err, "seal_signer");
+
+        let err = handle_submit(
+            &daemon.context,
+            Some(&daemon.session),
+            submit_request(account, vec![missing_imported]),
+        )
+        .await
+        .unwrap_err();
+        assert_missing(err, "other_signers");
+
+        let err = handle_submit_dry_run(&daemon.context, Some(&reader), submit_request(missing_imported, vec![]))
+            .await
+            .unwrap_err();
+        assert_missing(err, "seal_signer");
+
+        let err = handle_submit_dry_run(
+            &daemon.context,
+            Some(&reader),
+            submit_request(account, vec![missing_imported]),
+        )
+        .await
+        .unwrap_err();
+        assert_missing(err, "other_signers");
+
+        let key_manager = daemon.context.wallet_sdk().key_manager_api();
+        assert!(matches!(
+            key_manager.is_signing_key(missing_imported),
+            Err(KeyManagerApiError::KeyNotFound { .. })
+        ));
+    }
+
+    /// `accounts.create_stealth_transfer_statement` creates a lock for its
+    /// caller, who then submits with it.
+    #[tokio::test]
+    async fn a_caller_submits_with_its_own_lock_once() {
+        let daemon = TestDaemon::start_with_transaction_service().await;
+        let tool = daemon.api_key("tool", "transactions:create,transactions:read");
+        let lock_id = lock_for(&daemon, owner_of(&daemon, &tool));
+
+        let transaction_id = handle_submit(&daemon.context, Some(&tool), submit_with_locks(vec![lock_id]))
+            .await
+            .unwrap()
+            .transaction_id;
+        assert_eq!(get_lock(&daemon, lock_id).transaction_id, Some(transaction_id));
+
+        // The lock now belongs to that transaction.
+        let err = handle_submit(&daemon.context, Some(&tool), submit_with_locks(vec![lock_id]))
+            .await
+            .unwrap_err();
+        assert_invalid_params(&err, "lock_ids");
+        assert_eq!(get_lock(&daemon, lock_id).transaction_id, Some(transaction_id));
+    }
+
+    #[tokio::test]
+    async fn submit_refuses_a_lock_a_live_request_holds() {
+        let daemon = TestDaemon::start().await;
+        let lock_id = lock_for(&daemon, owner_of(&daemon, &daemon.session));
+        daemon
+            .context
+            .wallet_sdk()
+            .store()
+            .with_write_tx(|tx| {
+                tx.transaction_request_insert(
+                    &UnsignedTransaction::new(Network::LocalNet.as_byte(), Epoch(100)),
+                    KeyId::derived(KeyBranch::Account, 0),
+                    &[],
+                    &[],
+                    &[lock_id],
+                    None,
+                    Duration::from_secs(600),
+                )
+            })
+            .unwrap();
+
+        let err = handle_submit(&daemon.context, Some(&daemon.session), submit_with_locks(vec![lock_id]))
+            .await
+            .unwrap_err();
+        assert_invalid_params(&err, "lock_ids");
+    }
+
+    #[tokio::test]
+    async fn submit_and_dry_run_reject_wrong_network_dry_run_and_inverted_epoch_bounds() {
+        let daemon = TestDaemon::start_with_transaction_service().await;
+        let tool = daemon.api_key("tool", "transactions:create,transactions:read");
+        let lock_id = lock_for(&daemon, owner_of(&daemon, &tool));
+        let account = KeyId::derived(KeyBranch::Account, 0);
+
+        let wrong_network = UnsignedTransaction::new(Network::MainNet.as_byte(), Epoch(100));
+        let dry_run = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
+            .with_dry_run(true)
+            .build_unsigned();
+        let inverted_epochs = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
+            .with_min_epoch(Some(Epoch(200)))
+            .build_unsigned();
+
+        for (tx, expected_field) in [
+            (wrong_network.clone(), "transaction.network"),
+            (dry_run, "transaction.dry_run"),
+            (inverted_epochs.clone(), "transaction.min_epoch"),
+        ] {
+            let err = handle_submit(&daemon.context, Some(&tool), TransactionSubmitRequest {
+                transaction: tx,
+                lock_ids: vec![lock_id],
+                ..submit_request(account, vec![])
+            })
+            .await
+            .unwrap_err();
+            assert_invalid_params(&err, expected_field);
+            assert_eq!(get_lock(&daemon, lock_id).transaction_id, None);
+        }
+
+        for (tx, expected_field) in [
+            (wrong_network, "transaction.network"),
+            (inverted_epochs, "transaction.min_epoch"),
+        ] {
+            let err = handle_submit_dry_run(&daemon.context, Some(&tool), TransactionSubmitDryRunRequest {
+                transaction: tx,
+                ..submit_request(account, vec![])
+            })
+            .await
+            .unwrap_err();
+            assert_invalid_params(&err, expected_field);
+        }
+
+        let err = handle_submit_instruction(&daemon.context, Some(&daemon.session), CallInstructionRequest {
+            min_epoch: Some(200),
+            max_epoch: Some(100),
+            ..upgrade_call_request()
+        })
+        .await
+        .unwrap_err();
+        assert_invalid_params(&err, "min_epoch");
+    }
+
+    #[tokio::test]
+    async fn wait_result_recovers_from_broadcast_lag_by_rechecking_store() {
+        let daemon = TestDaemon::start().await;
+        let sdk = daemon.context.wallet_sdk();
+        let transaction = Transaction::builder_localnet(Epoch(1))
+            .allocate_component_address("component")
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method("component", "new", args!["bucket"])
+            .build_and_seal(&RistrettoSecretKey::from(1u64));
+        let transaction_id = sdk
+            .transaction_api()
+            .insert_new_transaction(transaction, None, &[], false, &[])
+            .unwrap();
+
+        let wait = handle_wait_result(&daemon.context, Some(&daemon.session), TransactionWaitResultRequest {
+            transaction_id,
+            timeout_secs: Some(5),
+        });
+        tokio::pin!(wait);
+        assert!(futures::poll!(&mut wait).is_pending());
+
+        sdk.store()
+            .with_write_tx(|tx| {
+                tx.transactions_update(
+                    WalletTransactionUpdate::new(transaction_id).with_new_status(TransactionStatus::InvalidTransaction),
+                )
+            })
+            .unwrap();
+        // The test notifier's capacity of 10 rounds up to a 16-slot broadcast buffer, so 32 events overflow it.
+        for _ in 0..32 {
+            daemon.context.notifier().notify(AuthLoginRequestEvent);
+        }
+
+        let resp = time::timeout(Duration::from_secs(5), wait)
+            .await
+            .expect("wait_result should finish after re-checking store on lag")
+            .unwrap();
+        assert!(!resp.timed_out);
+        assert_eq!(resp.status, TransactionStatus::InvalidTransaction);
     }
 }

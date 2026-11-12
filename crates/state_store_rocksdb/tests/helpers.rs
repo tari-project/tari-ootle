@@ -37,6 +37,7 @@ use tari_ootle_storage::{
         CommandsCommitProof,
         ForeignProposal,
         ForeignProposalRecord,
+        LockedEpoch,
         MultiShardAtom,
         SubstateCreated,
         SubstateRecord,
@@ -68,10 +69,11 @@ pub const fn num_preshards() -> NumPreshards {
     NumPreshards::P256
 }
 
-/// Create a RocksDbStateStore and a temporary directory
+/// Create a RocksDbStateStore and a temporary directory. It keeps one epoch of history, so that epoch cleanup at epoch
+/// `n` prunes epoch `n - 1`.
 /// NOTE: this takes around 1.5 s on my machine (AMD Ryzen 9 5950X, SSD)
 pub fn create_rocksdb() -> (RocksDbStateStore<String>, TempDir) {
-    create_rocksdb_with_opts(DatabaseOptions::default())
+    create_rocksdb_with_opts(DatabaseOptions::default().with_epoch_history_length(1))
 }
 
 pub fn create_rocksdb_with_opts(opts: DatabaseOptions) -> (RocksDbStateStore<String>, TempDir) {
@@ -90,6 +92,7 @@ pub fn create_tx_atom() -> MultiShardAtom {
         transaction_fee: 0,
         leader_fee: None,
         fee_intent_only: false,
+        locked_epoch: LockedEpoch::new(Epoch(1), Default::default(), Default::default()),
     }
 }
 

@@ -1,7 +1,10 @@
 //    Copyright 2023 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use tari_consensus::traits::{ConsensusSpec, hooks::CompositeHook};
+use tari_consensus::{
+    leader_selection::SmoothWeightedRoundRobin,
+    traits::{ConsensusSpec, hooks::CompositeHook},
+};
 use tari_engine::state_store::memory::ReadOnlyMemoryStateStore;
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_ootle_app_utilities::transaction_executor::TariTransactionProcessor;
@@ -15,7 +18,6 @@ use crate::{
     consensus::{
         TariBlockTransactionExecutor,
         TariBlockTransactionValidator,
-        leader_selection::RoundRobinLeaderStrategy,
         signer_service::TariSignatureService,
         // template_metadata_hooks::TemplateMetadataHooks,
     },
@@ -44,7 +46,7 @@ impl ConsensusSpec for TariConsensusSpec {
     #[cfg(feature = "metrics")]
     type Hooks = CompositeHook<TemplatePrewarmHooks, CompositeHook<PrometheusConsensusMetrics, DiagnosticHooks>>;
     type InboundMessaging = ConsensusInboundMessaging<NopLogger>;
-    type LeaderStrategy = RoundRobinLeaderStrategy;
+    type LeaderStrategy = SmoothWeightedRoundRobin;
     type OutboundMessaging = ConsensusOutboundMessaging<NopLogger>;
     type SignerService = TariSignatureService;
     type StateStore = ValidatorNodeStateStore;

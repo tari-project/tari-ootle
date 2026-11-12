@@ -1,6 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::HashSet;
+
 use anyhow::anyhow;
 use minicbor::{CborLen, Decode, Encode};
 use ootle_network::Network;
@@ -54,6 +56,15 @@ impl CommandsCommitProof {
         })
     }
 
+    /// Carries by its hash every full command that a proof generated for `shard_group` would carry by its hash, so the
+    /// proof holds the commands in the form [`CommandOrHash::for_shard_group`] gives. Each entry's merkle leaf is
+    /// unchanged.
+    pub fn prune_for_shard_group(&mut self, shard_group: ShardGroup) -> Result<(), UnknownProtocolVersionError> {
+        match self {
+            Self::V1(proof) => proof.prune_for_shard_group(shard_group),
+        }
+    }
+
     pub fn sidechain_block_commit_proof(&self) -> &SidechainBlockCommitProof {
         match self {
             Self::V1(proof) => proof.commit_proof(),
@@ -70,12 +81,6 @@ impl CommandsCommitProof {
     pub fn protocol_version(&self) -> Result<ProtocolVersion, UnknownProtocolVersionError> {
         match self {
             Self::V1(proof) => proof.protocol_version(),
-        }
-    }
-
-    pub fn validate_header(&self) -> Result<(), ForeignProposalCommitProofError> {
-        match self {
-            Self::V1(proof) => proof.validate_header(),
         }
     }
 
@@ -114,19 +119,32 @@ impl CommandsCommitProofV1 {
         ProtocolVersion::try_from(self.commit_proof.header.protocol_version)
     }
 
+    pub fn prune_for_shard_group(&mut self, shard_group: ShardGroup) -> Result<(), UnknownProtocolVersionError> {
+        let protocol_version = self.protocol_version()?;
+        for entry in &mut self.commands {
+            if let CommandOrHash::Command(command) = entry &&
+                let Some(pruned) = CommandOrHash::pruned_for_shard_group(protocol_version, command, shard_group)
+            {
+                *entry = CommandOrHash::Pruned(pruned);
+            }
+        }
+        Ok(())
+    }
+
     pub fn validate_committed(
         &self,
         network: Network,
         quorum_threshold: VotePower,
         committee: &dyn SigningCommittee,
     ) -> Result<(), ForeignProposalCommitProofError> {
+        self.validate_header()?;
         self.validate_command_merkle_root()?;
         self.commit_proof
             .validate_committed(network.as_byte(), quorum_threshold.value(), committee)?;
         Ok(())
     }
 
-    pub fn validate_header(&self) -> Result<(), ForeignProposalCommitProofError> {
+    fn validate_header(&self) -> Result<(), ForeignProposalCommitProofError> {
         self.validate_well_formed()?;
         let header = &self.commit_proof.header;
         if header.height == 0 {
@@ -177,6 +195,33 @@ impl CommandsCommitProofV1 {
         Ok(())
     }
 
+    /// The command merkle root is computed over the set of leaves, so it cannot tell a list from one that repeats or
+    /// reorders its entries. A block's commands are key-unique and in block order (see [`BlockCommands`]), so the
+    /// proof must name each command once and carry its full commands in that order.
+    ///
+    /// [`BlockCommands`]: crate::consensus_models::BlockCommands
+    fn validate_commands_canonical(&self) -> Result<(), ForeignProposalCommitProofError> {
+        let protocol_version = self.protocol_version()?;
+        let mut leaves = HashSet::with_capacity(self.commands.len());
+        let mut previous: Option<&Command> = None;
+        for entry in &self.commands {
+            let leaf = entry.merkle_leaf(protocol_version);
+            if !leaves.insert(leaf) {
+                return Err(ForeignProposalCommitProofError::RepeatedCommand { leaf });
+            }
+            if let Some(command) = entry.command() {
+                if let Some(previous) = previous.filter(|p| p.as_ordering() >= command.as_ordering()) {
+                    return Err(ForeignProposalCommitProofError::CommandOutOfOrder {
+                        previous: previous.to_string(),
+                        command: command.to_string(),
+                    });
+                }
+                previous = Some(command);
+            }
+        }
+        Ok(())
+    }
+
     fn validate_well_formed(&self) -> Result<(), ForeignProposalCommitProofError> {
         const MAX_COMMANDS: usize = 1000;
 
@@ -192,6 +237,8 @@ impl CommandsCommitProofV1 {
                 self.commands.len()
             )));
         }
+
+        self.validate_commands_canonical()?;
 
         // Since CompressedPublicKey is a variable length vec, we make double sure that the length is correct.
         if self
@@ -249,19 +296,32 @@ impl CommandOrHash {
     /// The form a foreign commit proof for `shard_group` carries `command` in, for a block proposed under
     /// `protocol_version`.
     pub fn for_shard_group(protocol_version: ProtocolVersion, command: &Command, shard_group: ShardGroup) -> Self {
+        match Self::pruned_for_shard_group(protocol_version, command, shard_group) {
+            Some(pruned) => Self::Pruned(pruned),
+            None => Self::Command(command.clone()),
+        }
+    }
+
+    /// The pruned form of `command` if a foreign commit proof for `shard_group` carries it only by its hash, or `None`
+    /// if the proof carries it in full.
+    fn pruned_for_shard_group(
+        protocol_version: ProtocolVersion,
+        command: &Command,
+        shard_group: ShardGroup,
+    ) -> Option<PrunedCommand> {
         let full_command_shard_groups = command.full_command_shard_groups();
         if full_command_shard_groups.contains(&shard_group) {
-            return Self::Command(command.clone());
+            return None;
         }
         match protocol_version {
-            ProtocolVersion::V0 => match command {
-                Command::EndEpoch(_) => Self::Command(command.clone()),
+            ProtocolVersion::V0 | ProtocolVersion::V1 => match command {
+                Command::EndEpoch(_) => None,
                 Command::LocalOnly(_) |
                 Command::LocalPrepare(_) |
                 Command::LocalAccept(_) |
                 Command::AllAccept(_) |
                 Command::SomeAccept(_) |
-                Command::ForeignProposal(_) => Self::Pruned(PrunedCommand {
+                Command::ForeignProposal(_) => Some(PrunedCommand {
                     hash: command.hash(protocol_version),
                     full_command_shard_groups,
                 }),
@@ -273,7 +333,7 @@ impl CommandOrHash {
     pub fn merkle_leaf(&self, protocol_version: ProtocolVersion) -> FixedHash {
         match (self, protocol_version) {
             (Self::Command(cmd), _) => cmd.merkle_leaf(protocol_version),
-            (Self::Pruned(pruned), ProtocolVersion::V0) => {
+            (Self::Pruned(pruned), ProtocolVersion::V0 | ProtocolVersion::V1) => {
                 command_leaf(&pruned.hash, &pruned.full_command_shard_groups)
             },
         }
@@ -372,7 +432,7 @@ mod tests {
         }
     }
 
-    fn atom() -> MultiShardAtom {
+    fn atom(id: u8) -> MultiShardAtom {
         let mut evidence = Evidence::empty();
         evidence.add_shard_group(input_group()).insert(
             SubstateId::Component(ComponentAddress::from_array([1; ObjectKey::LENGTH])),
@@ -385,20 +445,22 @@ mod tests {
             SubstateVersion::ZERO,
         );
         MultiShardAtom {
-            id: TransactionId::new([3; 32]),
+            id: TransactionId::new([id; 32]),
             decision: Decision::Commit,
             evidence,
             transaction_fee: 0,
             leader_fee: None,
             fee_intent_only: false,
+            locked_epoch: crate::consensus_models::LockedEpoch::zero(),
         }
     }
 
+    /// The commands of a block, in block order.
     fn commands() -> Vec<Command> {
         vec![
-            Command::LocalPrepare(atom()),
-            Command::LocalAccept(atom()),
-            Command::AllAccept(atom()),
+            Command::LocalPrepare(atom(3)),
+            Command::LocalAccept(atom(4)),
+            Command::AllAccept(atom(5)),
             Command::EndEpoch(EndEpochAtom::new(FixedHash::zero())),
         ]
     }
@@ -480,6 +542,81 @@ mod tests {
     }
 
     #[test]
+    fn an_honest_proof_is_well_formed_for_every_shard_group() {
+        for shard_group in [input_group(), output_group(), uninvolved_group()] {
+            honest_proof(ProtocolVersion::V0, shard_group)
+                .validate_well_formed()
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_proof_that_repeats_a_command_is_not_well_formed() {
+        let local_accept = &commands()[1];
+        let pruned_local_accept = CommandOrHash::Pruned(PrunedCommand {
+            hash: local_accept.hash(ProtocolVersion::V0),
+            full_command_shard_groups: local_accept.full_command_shard_groups(),
+        });
+        let cases = [
+            (
+                "repeated full entry",
+                input_group(),
+                CommandOrHash::Command(local_accept.clone()),
+            ),
+            ("repeated pruned entry", uninvolved_group(), pruned_local_accept.clone()),
+            ("full entry repeated as pruned", input_group(), pruned_local_accept),
+        ];
+        for (case, shard_group, repeat) in cases {
+            let mut proof = honest_proof(ProtocolVersion::V0, shard_group);
+            proof.commands.insert(2, repeat);
+            assert!(
+                matches!(
+                    proof.validate_well_formed(),
+                    Err(ForeignProposalCommitProofError::RepeatedCommand { leaf })
+                        if leaf == local_accept.merkle_leaf(ProtocolVersion::V0)
+                ),
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_proof_that_carries_commands_out_of_block_order_is_not_well_formed() {
+        let mut proof = honest_proof(ProtocolVersion::V0, input_group());
+        proof.commands.swap(0, 1);
+        proof.validate_command_merkle_root().unwrap();
+        assert!(matches!(
+            proof.validate_well_formed(),
+            Err(ForeignProposalCommitProofError::CommandOutOfOrder { .. })
+        ));
+    }
+
+    #[test]
+    fn pruning_a_proof_carrying_every_command_in_full_gives_the_proof_generated_for_the_shard_group() {
+        for shard_group in [input_group(), output_group(), uninvolved_group()] {
+            let commands = commands();
+            let entries = commands.iter().cloned().map(CommandOrHash::Command).collect();
+            let mut proof = CommandsCommitProof::V1(proof(ProtocolVersion::V0, &commands, entries));
+            proof.prune_for_shard_group(shard_group).unwrap();
+            assert_eq!(
+                proof,
+                CommandsCommitProof::V1(honest_proof(ProtocolVersion::V0, shard_group)),
+                "{shard_group}"
+            );
+        }
+    }
+
+    #[test]
+    fn pruning_leaves_a_proof_generated_for_the_shard_group_unchanged() {
+        for shard_group in [input_group(), output_group(), uninvolved_group()] {
+            let honest = CommandsCommitProof::V1(honest_proof(ProtocolVersion::V0, shard_group));
+            let mut pruned = honest.clone();
+            pruned.prune_for_shard_group(shard_group).unwrap();
+            assert_eq!(pruned, honest, "{shard_group}");
+        }
+    }
+
+    #[test]
     fn an_end_epoch_command_keeps_its_bare_hash_leaf_and_is_carried_in_full() {
         let end_epoch = &commands()[3];
         assert_eq!(
@@ -488,6 +625,50 @@ mod tests {
         );
         let proof = honest_proof(ProtocolVersion::V0, uninvolved_group());
         assert_eq!(proof.commands[3], CommandOrHash::Command(end_epoch.clone()));
+    }
+
+    #[test]
+    fn validate_committed_rejects_a_malformed_or_unsigned_header() {
+        struct EmptyCommittee;
+        impl SigningCommittee for EmptyCommittee {
+            fn len(&self) -> usize {
+                0
+            }
+
+            fn member(&self, _index: usize) -> Option<(&[u8], u64)> {
+                None
+            }
+        }
+
+        let mut empty_cmds = honest_proof(ProtocolVersion::V0, uninvolved_group());
+        empty_cmds.commands.clear();
+        empty_cmds.commit_proof.header.command_merkle_root = FixedHash::zero();
+        let empty_err = empty_cmds
+            .validate_committed(Network::LocalNet, VotePower::of(1), &EmptyCommittee)
+            .unwrap_err();
+        assert!(
+            matches!(&empty_err, ForeignProposalCommitProofError::Invalid(e) if e.to_string().contains("must have at least one command")),
+            "unexpected error: {empty_err}"
+        );
+
+        let mut zero_height = honest_proof(ProtocolVersion::V0, uninvolved_group());
+        zero_height.commit_proof.header.height = 0;
+        let height_err = zero_height
+            .validate_committed(Network::LocalNet, VotePower::of(1), &EmptyCommittee)
+            .unwrap_err();
+        assert!(
+            matches!(&height_err, ForeignProposalCommitProofError::Invalid(e) if e.to_string().contains("Header height is 0")),
+            "unexpected error: {height_err}"
+        );
+
+        let unsigned = honest_proof(ProtocolVersion::V0, uninvolved_group());
+        let signature_err = unsigned
+            .validate_committed(Network::LocalNet, VotePower::of(1), &EmptyCommittee)
+            .unwrap_err();
+        assert!(
+            matches!(&signature_err, ForeignProposalCommitProofError::Invalid(e) if e.to_string().contains("Signature verification failed")),
+            "unexpected error: {signature_err}"
+        );
     }
 }
 
@@ -501,6 +682,10 @@ pub enum ForeignProposalCommitProofError {
     UnknownProtocolVersion(#[from] UnknownProtocolVersionError),
     #[error("Sidechain Proof Validation Error: {0}")]
     SidechainProofValidationError(#[from] SidechainProofValidationError),
+    #[error("The commit proof lists the command with merkle leaf {leaf} more than once")]
+    RepeatedCommand { leaf: FixedHash },
+    #[error("The commit proof lists command {command} after {previous}, but block order places it first")]
+    CommandOutOfOrder { previous: String, command: String },
     #[error("The foreign proposal was invalid: {0}")]
     Invalid(#[from] anyhow::Error),
 }

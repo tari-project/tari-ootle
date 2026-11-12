@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, fmt::Display, num::NonZeroU64, ops::Deref, time::Instant};
+use std::{collections::HashMap, fmt::Display, ops::Deref, time::Instant};
 
 use log::*;
 use ootle_byte_type::ToByteType;
@@ -11,11 +11,12 @@ use tari_consensus_types::{
     HighestSeenBlock,
     LastProposed,
     LeafBlock,
+    PcId,
     ProposalCertificate,
     TimeoutCertificate,
 };
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
-use tari_engine_types::{commit_result::RejectReason, fees::FeeScaleSchedule};
+use tari_engine_types::fees::FeeScaleSchedule;
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     Epoch,
@@ -37,7 +38,6 @@ use tari_ootle_storage::{
         Block,
         BlockCommands,
         BlockHeader,
-        BlockTransactionExecution,
         BookkeepingModel,
         Command,
         EndEpochAtom,
@@ -45,14 +45,10 @@ use tari_ootle_storage::{
         ForeignProposalRecord,
         ForeignProposalStatus,
         LockedEpoch,
-        MultiShardAtom,
-        PendingShardStateTreeDiff,
         ProposalFilter,
         TransactionExecution,
         TransactionPool,
         TransactionPoolRecord,
-        TransactionPoolStage,
-        TransactionRecord,
     },
 };
 use tari_ootle_transaction::TransactionId;
@@ -64,33 +60,20 @@ use crate::{
     hotstuff::{
         EpochEndDrain,
         HotstuffConfig,
-        abort_if_local_prepared_expired,
-        abort_local_prepared_for_epoch_end,
-        apply_leader_fee_to_substate_store,
         block_change_set::ProposedBlockChangeSet,
-        calculate_state_merkle_root,
-        command_derivation::{DerivedCommand, derive_local_only_command, derive_new_multishard_command},
+        command_sequencer::{BlockTotals, CommandSequencer, Refusal, block_state_root},
         epoch_state::EpochState,
         error::HotStuffError,
         exceeds_block_foreign_proposal_bytes,
         exhaust_burn_rate::resolve_epoch_exhaust_burn_rate,
-        filter_diff_for_committee,
         foreign_proposal_processor::process_foreign_block,
-        local_pledged_inputs,
         process_newly_justified_block,
-        substate_store::{InputPledge, PendingSubstateStore},
-        transaction_manager::{
-            ConsensusTransactionManager,
-            MultishardLockScope,
-            PledgedTransaction,
-            PreparedTransaction,
-            TransactionLockConflicts,
-            lock_multishard_execution,
-        },
+        substate_store::PendingSubstateStore,
+        transaction_manager::{ConsensusTransactionManager, TransactionLockConflicts},
     },
     messages::{HotstuffMessage, ProposalMessage},
     tracing::TraceTimer,
-    traits::{CertificateStore, ConsensusSpec, OutboundMessaging, ValidatorSignerService, WriteableSubstateStore},
+    traits::{CertificateStore, ConsensusSpec, OutboundMessaging, ValidatorSignerService},
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_propose";
@@ -223,8 +206,6 @@ where TConsensusSpec: ConsensusSpec
                     invalid_foreign_proposals,
                 } = next_block;
 
-                lock_conflicts.save_for_block(tx, next_block.id())?;
-
                 // Invalid leaves the unconfirmed index, so a proposal rejected here is not selected into a
                 // later block. Selection is what makes such a failure repeat: the batch query returns every
                 // proposal still in that index, and a validation failure is deterministic across leaders.
@@ -237,6 +218,7 @@ where TConsensusSpec: ConsensusSpec
                 }
 
                 drop_executions_of_uninserted_proposal(tx, epoch)?;
+                lock_conflicts.save_for_block(tx, next_block.id())?;
 
                 // Add executions for this block
                 if !executed_transactions.is_empty() {
@@ -326,63 +308,6 @@ where TConsensusSpec: ConsensusSpec
         Ok(())
     }
 
-    /// Returns Ok(None) if the command cannot be sequenced yet due to lock conflicts.
-    fn transaction_pool_record_to_command<TTx: StateStoreReadTransaction>(
-        &self,
-        state_anchor: &LeafBlock,
-        locked_epoch: &LockedEpoch,
-        pool_tx: TransactionPoolRecord,
-        local_committee_info: &CommitteeInfo,
-        change_set: &ProposedBlockChangeSet,
-        substate_store: &mut PendingSubstateStore<TTx>,
-        executed_transactions: &mut HashMap<TransactionId, TransactionExecution>,
-        lock_conflicts: &mut TransactionLockConflicts,
-    ) -> Result<Option<Command>, HotStuffError> {
-        match pool_tx.current_stage() {
-            TransactionPoolStage::New => self.prepare_transaction(
-                state_anchor,
-                locked_epoch,
-                pool_tx,
-                local_committee_info,
-                change_set,
-                substate_store,
-                executed_transactions,
-                lock_conflicts,
-            ),
-            // Leader thinks all foreign PREPARE pledges have been received (condition for LocalPrepared stage to be
-            // ready)
-            TransactionPoolStage::LocalPrepared => self.local_accept_transaction(
-                state_anchor,
-                local_committee_info,
-                change_set,
-                pool_tx,
-                substate_store,
-                executed_transactions,
-            ),
-
-            // Leader thinks that all foreign ACCEPT pledges have been received and, we are ready to accept the result
-            // (COMMIT/ABORT)
-            TransactionPoolStage::LocalAccepted => self.accept_transaction(
-                state_anchor,
-                &pool_tx,
-                local_committee_info,
-                substate_store,
-                executed_transactions,
-            ),
-            // Not reachable as there is nothing to propose for these stages. To confirm that all local nodes
-            // agreed with the Accept, more (possibly empty) blocks with QCs will be
-            // proposed and accepted, otherwise the Accept block will not be committed.
-            TransactionPoolStage::AllAccepted |
-            TransactionPoolStage::SomeAccepted |
-            TransactionPoolStage::LocalOnly => {
-                unreachable!(
-                    "It is invalid for TransactionPoolStage::{} to be ready to propose",
-                    pool_tx.current_stage()
-                )
-            },
-        }
-    }
-
     /// What an end-of-epoch block for `epoch` commits the next epoch to, or `None` while this node does not yet
     /// know the next epoch's boundary hash or committees.
     async fn resolve_next_epoch_commitment(&self, epoch: Epoch) -> Result<Option<NextEpochCommitment>, HotStuffError> {
@@ -452,7 +377,6 @@ where TConsensusSpec: ConsensusSpec
 
         let should_not_propose_commands = is_end_of_epoch_in_chain || end_epoch.is_some();
 
-        let mut total_leader_fee = 0u64;
         // The block the candidate extends from, and the point at which every speculative state and pool read for
         // this proposal is taken. The candidate's parent is the justify block itself, or the last of the dummy
         // blocks that fill a timeout gap - empty blocks carrying justify_block's accumulated_data and state forward
@@ -470,12 +394,11 @@ where TConsensusSpec: ConsensusSpec
 
         let mut substate_store =
             PendingSubstateStore::init(tx, state_anchor_leaf, self.config.consensus_constants.num_preshards)?
-                .with_pledge_budget(self.config.consensus_constants.max_block_pledge_bytes);
-
-        let mut executed_transactions = HashMap::new();
+                .with_pledge_budget(self.config.consensus_constants.max_block_pledge_bytes)
+                .with_input_load_budget(self.config.consensus_constants.max_block_input_load_bytes);
 
         let proposal_filter = epoch_end_drain.proposal_filter(epoch, local_committee_info.shard_group());
-        let batch = if should_not_propose_commands {
+        let mut batch = if should_not_propose_commands {
             ProposalBatch::default()
         } else {
             self.fetch_next_proposal_batch(tx, state_anchor_leaf, next_height, &proposal_filter)?
@@ -496,65 +419,16 @@ where TConsensusSpec: ConsensusSpec
 
         // NOTE: the block for the change set is not used.
         let mut change_set = ProposedBlockChangeSet::new(state_anchor_leaf);
-        let mut invalid_foreign_proposals = Vec::new();
-        let mut dropped_foreign_proposals = false;
-
-        // No need to include evidence from justified block if no transactions are included in the next block
-        if !batch.transactions.is_empty() {
-            // A replica evaluates this block as: the newly justified block, then the commands in block order
-            // (foreign proposals sort before the transaction commands, see `BlockCommands`), all against
-            // a single change set. The commands generated below must be derived from that same sequence, or
-            // the proposer commits to an atom no replica can reproduce and the block is unvotable.
-            // TODO: we dont need to process transactions here that are not in the batch
-            process_newly_justified_block(tx, &justify_block, high_qc_id, local_committee_info, &mut change_set)?;
-
-            // A failed `process_foreign_block` leaves whatever it wrote before the error behind, and the
-            // transaction commands below are derived from the change set, so that partial state would shape
-            // atoms no replica reproduces. Restoring this snapshot is what keeps a rejected foreign proposal
-            // from reaching them.
-            let mut change_set_before_foreign_proposals =
-                (!batch.foreign_proposals.is_empty()).then(|| change_set.clone());
-
-            for fp in &batch.foreign_proposals {
-                // Resolves pending transaction pool records along the chain the substate store is built on:
-                // the justify block under a dummy chain, the extended leaf otherwise. A replica's store is
-                // built on the block it is evaluating, whose parent chain runs back through any dummies to
-                // the justify block.
-                if let Err(err) =
-                    process_foreign_block(tx, fp, local_committee_info, &mut substate_store, &mut change_set)
-                {
-                    // Dropping the proposals is safe for every error class and is what keeps a block whose
-                    // commands no replica can reproduce off the wire. Propagating instead would take the
-                    // whole consensus loop down over a remote committee's proposal.
-                    warn!(
-                        target: LOG_TARGET,
-                        "⚠️❌ Foreign proposal {} failed to process while proposing: {err}. Dropping every \
-                         foreign proposal from this block.",
-                        fp.to_atom().block_id,
-                    );
-
-                    // Only a validation failure condemns the proposal: it is a property of the proposal
-                    // itself, so every leader reaches the same verdict. Every other error is a statement
-                    // about this node, and a proposal discarded on one would never be proposed again.
-                    if err.validation_error().is_some() {
-                        invalid_foreign_proposals.push(fp.to_atom().block_id);
-                    }
-
-                    change_set = change_set_before_foreign_proposals
-                        .take()
-                        .expect("snapshot is taken whenever there is a foreign proposal to restore from");
-                    // The proposals already applied to the discarded change set are not re-applied, so none
-                    // of them may be proposed here. They keep their `New` status and are proposed again next
-                    // round.
-                    commands.retain(|cmd| !matches!(cmd, Command::ForeignProposal(_)));
-                    dropped_foreign_proposals = true;
-                    break;
-                }
-            }
-
-            // Add all (ABORT) executions that may have resulted from foreign proposals
-            executed_transactions.extend(change_set.take_transaction_executions());
-        }
+        let invalid_foreign_proposals = process_proposal_batch_foreign_proposals(
+            tx,
+            &justify_block,
+            high_qc_id,
+            local_committee_info,
+            &mut substate_store,
+            &mut batch,
+            &mut commands,
+            &mut change_set,
+        )?;
 
         let locked_epoch = LockedEpoch::new(
             highest_seen_block.epoch(),
@@ -583,6 +457,15 @@ where TConsensusSpec: ConsensusSpec
         // this, so honest proposals are never rejected.
         let max_block_execution_points = self.config.consensus_constants.max_block_execution_points;
         let mut execution_points_total = 0u64;
+        let sequencer = CommandSequencer::for_proposal(
+            &self.transaction_manager,
+            local_committee_info,
+            state_anchor_leaf,
+            epoch,
+            locked_epoch,
+            self.config.consensus_constants.max_block_shard_output_bytes,
+        );
+        let mut totals = BlockTotals::extending(accumulated_data.total_exhaust_burn);
         for (idx, mut transaction) in batch.transactions.into_iter().enumerate() {
             // Always attempt at least the first transaction before honouring the deadline so we make
             // progress even when a single transaction is slow to execute.
@@ -622,79 +505,59 @@ where TConsensusSpec: ConsensusSpec
                 );
                 continue;
             }
-            let expired_abort = abort_if_local_prepared_expired(&mut transaction, epoch).or_else(|| {
-                let is_waiting = proposal_filter.aborts_waiting_prepared() &&
-                    !transaction.is_ready_for_pending_stage(local_committee_info.shard_group());
-                is_waiting
-                    .then(|| abort_local_prepared_for_epoch_end(&mut transaction))
-                    .flatten()
-            });
-            // Replicas withhold their vote unless the updated record is ready to leave its stage, so readiness is
-            // judged on the same record here.
-            if !transaction.is_ready_for_pending_stage(local_committee_info.shard_group()) {
-                debug!(
-                    target: LOG_TARGET,
-                    "🌿 PROPOSE: transaction {} is not ready to leave stage {} after this block's updates. Deferring.",
-                    transaction.id(),
-                    transaction.current_stage(),
-                );
-                continue;
-            }
-            // Capture before the record is moved. The processing work below (incl. execution) is incurred
-            // whether or not a command is produced, so accumulate for every processed transaction.
+            // The processing work below (incl. execution) is incurred whether or not a command is produced, so it is
+            // accumulated for every processed transaction.
             executed_weight += transaction.proposal_weight();
             num_executed += 1;
             let tx_id = *transaction.id();
-            if let Some(execution) = expired_abort {
-                executed_transactions.insert(tx_id, execution);
-            }
-            // Entries already present (e.g. foreign-proposal aborts from the change set) were not executed
-            // for this block, so only count executions newly produced by the command conversion below.
-            let had_execution = executed_transactions.contains_key(&tx_id);
-            let maybe_command = self.transaction_pool_record_to_command(
-                &state_anchor_leaf,
-                // This locked epoch is used to set the transaction LockedEpoch if necessary
-                &locked_epoch,
+            let sequencing = sequencer.sequence(
                 transaction,
-                local_committee_info,
-                &change_set,
+                proposal_filter.aborts_waiting_prepared(),
                 &mut substate_store,
-                &mut executed_transactions,
-                &mut lock_conflicts,
+                &change_set,
             )?;
-            if let Some(command) = maybe_command {
-                // Count points only for transactions actually proposed in this block: the budget bounds
-                // replica re-execution per block, mirroring the validation-side sum over block commands. A
-                // skipped transaction (e.g. lock conflict) is counted in the later block that proposes it;
-                // its propose-time execution cost here is bounded by the soft deadline above.
-                if !had_execution && let Some(execution) = executed_transactions.get(&tx_id) {
-                    execution_points_total =
-                        execution_points_total.saturating_add(execution.result().total_execution_points());
-                }
-                total_leader_fee = total_leader_fee
-                    .checked_add(
-                        command
-                            .committing()
-                            .and_then(|tx| tx.leader_fee())
-                            .map(|f| f.fee)
-                            .unwrap_or(0),
-                    )
-                    .ok_or_else(|| {
-                        HotStuffError::InvariantError("Leader fee overflow when summing for block".to_string())
-                    })?;
-                let exhaust_burn_portion = command
-                    .exhaust_burn_portion(local_committee_info.shard_group())
-                    .ok_or_else(|| {
-                        HotStuffError::InvariantError(format!(
-                            "Local shard group {} is not in the evidence of committing command {command}",
-                            local_committee_info.shard_group(),
-                        ))
-                    })?;
-                accumulated_data.total_exhaust_burn += u128::from(exhaust_burn_portion);
-                commands.push(command);
+            match sequencing {
+                Ok(derived) => {
+                    // Points count only for transactions proposed in this block: the budget bounds replica
+                    // re-execution per block, mirroring the validation-side sum over block commands. A transaction
+                    // left out is counted in the later block that proposes it; its propose-time execution cost here
+                    // is bounded by the soft deadline above.
+                    if let Some(execution) = &derived.execution {
+                        execution_points_total =
+                            execution_points_total.saturating_add(execution.result().total_execution_points());
+                    }
+                    commands.push(sequencer.commit(derived, &mut change_set, &mut totals)?);
+                },
+                Err(Refusal {
+                    reason,
+                    lock_conflicts: conflicts,
+                }) => {
+                    // A transaction left out holds no locks in the block, as on every replica, which never sequences
+                    // it: later transactions would otherwise read its locks as held by a transaction the block
+                    // commits.
+                    substate_store.release_new_locks(&tx_id);
+                    if conflicts.is_empty() {
+                        debug!(
+                            target: LOG_TARGET,
+                            "🌿 PROPOSE: leaving transaction {tx_id} out of this block: {reason}",
+                        );
+                    } else {
+                        warn!(
+                            target: LOG_TARGET,
+                            "⚠️ PROPOSE: transaction {tx_id} has deferrable lock conflicts, leaving it out of this \
+                             block: {reason}",
+                        );
+                        lock_conflicts.add(tx_id, conflicts);
+                    }
+                },
             }
         }
         timer.done();
+        accumulated_data.total_exhaust_burn = totals.exhaust_burn;
+        let total_leader_fee = totals.leader_fee;
+        // Every execution this block produced, including the aborts this block's foreign proposals decided for
+        // transactions it does not sequence
+        let executed_transactions = change_set.take_transaction_executions().into_iter().collect();
 
         let commands = BlockCommands::init(commands).map_err(|e| {
             HotStuffError::InvariantError(format!(
@@ -730,29 +593,14 @@ where TConsensusSpec: ConsensusSpec
             commands.display()
         );
 
-        // Add proposer fee substate
-        if total_leader_fee > 0 {
-            // Apply leader fee to substate store before we calculate the state root
-            apply_leader_fee_to_substate_store(
-                &mut substate_store,
-                local_claim_public_key_bytes,
-                local_committee_info.num_preshards(),
-                local_committee_info.shard_group().start(),
-                total_leader_fee,
-            )?;
-        }
-
         let timer = TraceTimer::info(LOG_TARGET, "Propose calculate state root");
-        let pending_tree_diffs =
-            PendingShardStateTreeDiff::get_all_up_to_commit_block(tx, state_anchor_leaf.block_id())?;
-        let (state_root, _) = calculate_state_merkle_root(
+        let (state_root, _) = block_state_root(
             tx,
-            local_committee_info.shard_group(),
-            pending_tree_diffs,
-            substate_store.changes()
-                .iter()
-                // Calculate for local shards only and the global shard
-                .filter(|ch| local_committee_info.shard_group().contains_or_global(&ch.shard())),
+            local_committee_info,
+            state_anchor_leaf.block_id(),
+            &mut substate_store,
+            local_claim_public_key_bytes,
+            total_leader_fee,
             self.config.network,
             epoch,
         )?;
@@ -809,14 +657,7 @@ where TConsensusSpec: ConsensusSpec
 
         Ok(NextBlock {
             block: next_block,
-            // A proposal the block no longer carries a command for must not ride along on the wire: a
-            // replica that has not seen it stores it as `New` on receipt, which re-seeds the committee with
-            // a proposal this node has just condemned.
-            foreign_proposals: if dropped_foreign_proposals {
-                Vec::new()
-            } else {
-                batch.foreign_proposals
-            },
+            foreign_proposals: batch.foreign_proposals,
             executed_transactions,
             lock_conflicts,
             invalid_foreign_proposals,
@@ -895,380 +736,80 @@ where TConsensusSpec: ConsensusSpec
             commands: vec![],
         })
     }
+}
 
-    /// Prepares a New transaction for the block being proposed, or leaves it out. A transaction left out holds no locks
-    /// in the block, as on every replica, which never prepares it: later transactions read a local-only lock as held by
-    /// a transaction the block commits.
-    fn prepare_transaction<TTx: StateStoreReadTransaction>(
-        &self,
-        state_anchor: &LeafBlock,
-        locked_epoch: &LockedEpoch,
-        pool_tx: TransactionPoolRecord,
-        local_committee_info: &CommitteeInfo,
-        change_set: &ProposedBlockChangeSet,
-        substate_store: &mut PendingSubstateStore<TTx>,
-        executed_transactions: &mut HashMap<TransactionId, TransactionExecution>,
-        lock_conflicts: &mut TransactionLockConflicts,
-    ) -> Result<Option<Command>, HotStuffError> {
-        let transaction_id = *pool_tx.id();
-        let command = self.derive_prepare_command(
-            state_anchor,
-            locked_epoch,
-            pool_tx,
-            local_committee_info,
-            change_set,
-            substate_store,
-            executed_transactions,
-            lock_conflicts,
-        )?;
-        if command.is_none() {
-            substate_store.release_new_locks(&transaction_id);
-        }
-        Ok(command)
-    }
+/// Evaluates the newly justified block and any foreign proposals in `batch` against `change_set`.
+///
+/// If a foreign proposal fails `process_foreign_block`, every foreign proposal is stripped from `commands` and
+/// `batch.foreign_proposals`, `change_set` is restored to its pre-foreign-proposal snapshot, and any proposal that
+/// failed with a validation error is returned so the caller marks it `Invalid`.
+#[allow(clippy::too_many_arguments)]
+fn process_proposal_batch_foreign_proposals<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    justify_block: &Block,
+    high_qc_id: PcId,
+    local_committee_info: &CommitteeInfo,
+    substate_store: &mut PendingSubstateStore<TTx>,
+    batch: &mut ProposalBatch,
+    commands: &mut Vec<Command>,
+    change_set: &mut ProposedBlockChangeSet,
+) -> Result<Vec<BlockId>, HotStuffError> {
+    let mut invalid_foreign_proposals = Vec::new();
 
-    #[allow(clippy::too_many_lines)]
-    fn derive_prepare_command<TTx: StateStoreReadTransaction>(
-        &self,
-        state_anchor: &LeafBlock,
-        locked_epoch: &LockedEpoch,
-        mut pool_tx: TransactionPoolRecord,
-        local_committee_info: &CommitteeInfo,
-        change_set: &ProposedBlockChangeSet,
-        substate_store: &mut PendingSubstateStore<TTx>,
-        executed_transactions: &mut HashMap<TransactionId, TransactionExecution>,
-        lock_conflicts: &mut TransactionLockConflicts,
-    ) -> Result<Option<Command>, HotStuffError> {
-        info!(
-            target: LOG_TARGET,
-            "👨‍🔧 PROPOSE: PREPARE transaction {}",
-            pool_tx.id(),
-        );
+    if !batch.transactions.is_empty() || !batch.foreign_proposals.is_empty() {
+        // A replica evaluates this block as: the newly justified block, then the commands in block order
+        // (foreign proposals sort before the transaction commands, see `BlockCommands`), all against
+        // a single change set. The commands generated below must be derived from that same sequence, or
+        // the proposer commits to an atom no replica can reproduce and the block is unvotable.
+        // TODO: we dont need to process transactions here that are not in the batch
+        process_newly_justified_block(tx, justify_block, high_qc_id, local_committee_info, change_set)?;
 
-        // Update locked epoch if needed
-        pool_tx.update_locked_epoch(locked_epoch.clone());
+        // A failed `process_foreign_block` leaves whatever it wrote before the error behind, and the
+        // transaction commands below are derived from the change set, so that partial state would shape
+        // atoms no replica reproduces. Restoring this snapshot is what keeps a rejected foreign proposal
+        // from reaching them.
+        let mut change_set_before_foreign_proposals = (!batch.foreign_proposals.is_empty()).then(|| change_set.clone());
 
-        let prepared = self
-            .transaction_manager
-            .prepare_for_proposal(
-                substate_store,
-                local_committee_info,
-                &pool_tx,
-                *state_anchor,
-                change_set,
-            )
-            .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
-
-        if prepared.lock_status().is_deferrable_conflict() {
-            warn!(
-                target: LOG_TARGET,
-                "⚠️ Transaction {} has lock conflicts, but no hard conflicts. Skipping proposing this transaction...",
-                pool_tx.id(),
-            );
-
-            lock_conflicts.add(*pool_tx.id(), prepared.into_lock_status().into_lock_conflicts());
-            return Ok(None);
-        }
-
-        match prepared {
-            PreparedTransaction::PledgeBudgetReached { total_bytes, max_bytes } => {
-                info!(
+        for fp in &batch.foreign_proposals {
+            // Resolves pending transaction pool records along the chain the substate store is built on:
+            // the justify block under a dummy chain, the extended leaf otherwise. A replica's store is
+            // built on the block it is evaluating, whose parent chain runs back through any dummies to
+            // the justify block.
+            if let Err(err) = process_foreign_block(tx, fp, local_committee_info, substate_store, change_set) {
+                // Dropping the proposals is safe for every error class and is what keeps a block whose
+                // commands no replica can reproduce off the wire. Propagating instead would take the
+                // whole consensus loop down over a remote committee's proposal.
+                warn!(
                     target: LOG_TARGET,
-                    "📦 PROPOSE: transaction {} would take the block's pledge to {total_bytes} bytes, past the \
-                     {max_bytes} budget. Deferring it to a later block",
-                    pool_tx.id(),
-                );
-                Ok(None)
-            },
-            PreparedTransaction::InputsLocked { .. } => Err(HotStuffError::InvariantError(format!(
-                "Transaction {} was prepared as having its inputs locked without a deferrable lock conflict",
-                pool_tx.id(),
-            ))),
-            PreparedTransaction::LocalOnly(local) => {
-                let pool_tx_id = *pool_tx.id();
-                let derived = derive_local_only_command(pool_tx, *local, local_committee_info).map_err(|refusal| {
-                    HotStuffError::InvariantError(format!(
-                        "PROPOSE: LocalOnly transaction {} cannot be sequenced: {refusal}",
-                        pool_tx_id,
-                    ))
-                })?;
-                info!(
-                    target: LOG_TARGET,
-                    "🏠️ Transaction {} is local only, proposing {}",
-                    pool_tx_id,
-                    derived.command,
+                    "⚠️❌ Foreign proposal {} failed to process while proposing: {err}. Dropping every \
+                     foreign proposal from this block.",
+                    fp.to_atom().block_id,
                 );
 
-                if let Some(diff) = derived.committed_diff() {
-                    if substate_store.diff_exceeds_shard_output_bytes(
-                        diff,
-                        self.config.consensus_constants.max_block_shard_output_bytes,
-                    ) {
-                        info!(
-                            target: LOG_TARGET,
-                            "📦 PROPOSE: shard output budget reached, deferring LocalOnly transaction {} to a later block",
-                            pool_tx_id,
-                        );
-                        return Ok(None);
-                    }
-                    if let Err(err) = substate_store.put_diff(diff) {
-                        // A lock failure or DOWN input is an expected conflict under contention - skip the
-                        // transaction this round. Any other store error is fatal and must be propagated.
-                        let lock_err = err.ok_lock_failed()?;
-                        warn!(
-                            target: LOG_TARGET,
-                            "🔒 Skipping LocalOnly transaction {} while proposing due to input conflict: {}",
-                            pool_tx_id,
-                            lock_err,
-                        );
-                        return Ok(None);
-                    }
+                // Only a validation failure condemns the proposal: it is a property of the proposal
+                // itself, so every leader reaches the same verdict. Every other error is a statement
+                // about this node, and a proposal discarded on one would never be proposed again.
+                if err.validation_error().is_some() {
+                    invalid_foreign_proposals.push(fp.to_atom().block_id);
                 }
 
-                let DerivedCommand { command, execution, .. } = derived;
-                if let Some(execution) = execution {
-                    executed_transactions.insert(pool_tx_id, execution);
-                }
-                Ok(Some(command))
-            },
-
-            PreparedTransaction::MultiShard(multishard) => {
-                let pool_tx_id = *pool_tx.id();
-                let DerivedCommand { command, execution, .. } =
-                    derive_new_multishard_command(pool_tx, multishard, local_committee_info)?;
-                info!(
-                    target: LOG_TARGET,
-                    "🌍 Transaction involves foreign shard groups, proposing {command}",
-                );
-                if let Some(execution) = execution {
-                    executed_transactions.insert(pool_tx_id, execution);
-                }
-                Ok(Some(command.into_command()))
-            },
-        }
-    }
-
-    fn local_accept_transaction<TTx: StateStoreReadTransaction>(
-        &self,
-        state_anchor: &LeafBlock,
-        local_committee_info: &CommitteeInfo,
-        change_set: &ProposedBlockChangeSet,
-        mut tx_rec: TransactionPoolRecord,
-        substate_store: &mut PendingSubstateStore<TTx>,
-        executed_transactions: &mut HashMap<TransactionId, TransactionExecution>,
-    ) -> Result<Option<Command>, HotStuffError> {
-        // Only set to abort if either the local or one or more foreign shards decided to ABORT
-        if tx_rec.current_decision().is_abort() {
-            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom())));
-        }
-
-        let locked_epoch = tx_rec.locked_epoch().ok_or_else(|| {
-            HotStuffError::InvariantError(format!(
-                "PROPOSE: local_accept_transaction: Transaction {} is in LocalPrepared stage but has no locked epoch",
-                tx_rec.id(),
-            ))
-        })?;
-
-        let tx = substate_store.read_transaction();
-        let transaction = tx_rec.get_transaction(tx)?;
-        let execution = self.execute_transaction(
-            substate_store,
-            local_committee_info,
-            state_anchor,
-            transaction,
-            change_set,
-            locked_epoch.clone(),
-        )?;
-
-        if execution.decision().is_commit() {
-            // Preparing the transaction bounded what its inputs alone may pledge, so only the block budget applies
-            let pledge = substate_store.pledge_inputs(
-                local_pledged_inputs(&tx_rec, local_committee_info.shard_group()),
-                usize::MAX,
-            )?;
-            if let InputPledge::BlockBudgetReached { total_bytes, max_bytes } = pledge {
-                info!(
-                    target: LOG_TARGET,
-                    "📦 PROPOSE: LocalAccept of transaction {} would take the block's pledge to {total_bytes} bytes, \
-                     past the {max_bytes} budget. Deferring it to a later block",
-                    tx_rec.id(),
-                );
-                return Ok(None);
+                *change_set = change_set_before_foreign_proposals
+                    .take()
+                    .expect("snapshot is taken whenever there is a foreign proposal to restore from");
+                // The proposals already applied to the discarded change set are not re-applied, so none
+                // of them may be proposed here. They keep their `New` status and are proposed again next
+                // round.
+                commands.retain(|cmd| !matches!(cmd, Command::ForeignProposal(_)));
+                // A proposal the block no longer carries a command for must not ride along on the wire: a
+                // replica that has not seen it stores it as `New` on receipt, which re-seeds the committee with
+                // a proposal this node has just condemned.
+                batch.foreign_proposals.clear();
+                break;
             }
         }
-
-        // Try to lock all local outputs
-        let locked = lock_multishard_execution(
-            substate_store,
-            local_committee_info,
-            *tx_rec.id(),
-            execution,
-            MultishardLockScope::LocalOutputs,
-            tx_rec.is_fee_intent_only(),
-        )
-        .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
-        if let Some(err) = locked.lock_status.failures().first() {
-            warn!(
-                target: LOG_TARGET,
-                "⚠️ Failed to lock outputs for transaction {}: {}",
-                tx_rec.id(),
-                err,
-            );
-            // If the transaction does not lock, we propose to abort it
-            let execution =
-                TransactionExecution::abort(tx_rec.id(), RejectReason::FailedToLockOutputs(err.to_string()));
-            tx_rec.update_from_execution(
-                local_committee_info.num_preshards(),
-                local_committee_info.num_committees(),
-                &execution,
-            );
-
-            executed_transactions.insert(*tx_rec.id(), execution);
-            return Ok(Some(Command::LocalAccept(tx_rec.get_current_multi_shard_atom())));
-        }
-
-        tx_rec.update_from_execution(
-            local_committee_info.num_preshards(),
-            local_committee_info.num_committees(),
-            &locked.execution,
-        );
-        if locked.fee_intent_only {
-            tx_rec.set_fee_intent_only(true);
-        }
-        executed_transactions.insert(*tx_rec.id(), locked.execution);
-        // If we locally decided to ABORT, we are still saying that we think all prepared and, after execution decide to
-        // ABORT. When we enter the acceptance phase, we will propose SomeAccept for this case.
-        let atom = self.get_multi_shard_atom_with_leader_fee(&tx_rec)?;
-        Ok(Some(Command::LocalAccept(atom)))
     }
 
-    fn accept_transaction<TTx: StateStoreReadTransaction>(
-        &self,
-        state_anchor: &LeafBlock,
-        tx_rec: &TransactionPoolRecord,
-        local_committee_info: &CommitteeInfo,
-        substate_store: &mut PendingSubstateStore<TTx>,
-        executed_transactions: &HashMap<TransactionId, TransactionExecution>,
-    ) -> Result<Option<Command>, HotStuffError> {
-        if tx_rec.current_decision().is_abort() {
-            return Ok(Some(Command::SomeAccept(tx_rec.get_current_multi_shard_atom())));
-        }
-
-        // A foreign proposal in this block may have replaced the stored execution with its fee-intent commit
-        let stored_execution;
-        let execution = match executed_transactions.get(tx_rec.id()) {
-            Some(execution) => execution,
-            None => {
-                let tx = substate_store.read_transaction();
-                stored_execution = tx_rec
-                    .get_pending_execution_for_block(tx, state_anchor)
-                    .optional()?
-                    .ok_or_else(|| {
-                        HotStuffError::InvariantError(format!(
-                            "accept_transaction: Transaction {} has COMMIT decision but execution is missing",
-                            tx_rec.id(),
-                        ))
-                    })?;
-                stored_execution.transaction_execution()
-            },
-        };
-        let diff = execution.result().finalize.any_accept().ok_or_else(|| {
-            HotStuffError::InvariantError(format!(
-                "local_accept_transaction: Transaction {} has COMMIT decision but execution failed when proposing",
-                tx_rec.id(),
-            ))
-        })?;
-        let filtered_diff = filter_diff_for_committee(local_committee_info, diff);
-        if substate_store.diff_exceeds_shard_output_bytes(
-            &filtered_diff,
-            self.config.consensus_constants.max_block_shard_output_bytes,
-        ) {
-            info!(
-                target: LOG_TARGET,
-                "📦 PROPOSE: shard output budget reached, deferring AllAccept transaction {} to a later block",
-                tx_rec.id(),
-            );
-            return Ok(None);
-        }
-        if let Err(err) = substate_store.put_diff(&filtered_diff) {
-            // A lock failure or DOWN input is an expected conflict under contention - skip the transaction this
-            // round. Any other store error is fatal and must be propagated.
-            let lock_err = err.ok_lock_failed()?;
-            warn!(
-                target: LOG_TARGET,
-                "🔒 Skipping Accept transaction {} while proposing due to input conflict: {}",
-                tx_rec.id(),
-                lock_err,
-            );
-            return Ok(None);
-        }
-        let atom = self.get_multi_shard_atom_with_leader_fee(tx_rec)?;
-        Ok(Some(Command::AllAccept(atom)))
-    }
-
-    fn get_multi_shard_atom_with_leader_fee(
-        &self,
-        tx_rec: &TransactionPoolRecord,
-    ) -> Result<MultiShardAtom, HotStuffError> {
-        let mut atom = tx_rec.get_current_multi_shard_atom();
-        if tx_rec.current_decision().is_commit() {
-            let num_involved_shard_groups = tx_rec.evidence().num_shard_groups();
-            let involved = NonZeroU64::new(num_involved_shard_groups as u64).ok_or_else(|| {
-                HotStuffError::InvariantError(format!(
-                    "PROPOSE: Transaction {} involves zero shard groups",
-                    tx_rec.id(),
-                ))
-            })?;
-            let leader_fee = tx_rec.calculate_leader_fee(involved);
-            atom.leader_fee = Some(leader_fee);
-        }
-        Ok(atom)
-    }
-
-    fn execute_transaction<TTx: StateStoreReadTransaction>(
-        &self,
-        substate_store: &PendingSubstateStore<TTx>,
-        local_committee_info: &CommitteeInfo,
-        state_anchor: &LeafBlock,
-        transaction: TransactionRecord,
-        change_set: &ProposedBlockChangeSet,
-        locked_epoch: LockedEpoch,
-    ) -> Result<TransactionExecution, HotStuffError> {
-        let tx = substate_store.read_transaction();
-        // Should have been executed already if all inputs are local
-        if let Some(execution) =
-            BlockTransactionExecution::get_pending_for_block(tx, transaction.id(), state_anchor).optional()?
-        {
-            info!(
-                target: LOG_TARGET,
-                "👨‍🔧 PROPOSE: Using existing transaction execution {} ({})",
-                transaction.id(), execution.decision(),
-            );
-            return Ok(execution.into_transaction_execution());
-        }
-
-        let mut pledged = PledgedTransaction::load_pledges(tx, state_anchor, transaction)?;
-        let transaction_id = *pledged.id();
-        pledged
-            .foreign_pledges
-            .extend(change_set.get_foreign_pledges(&transaction_id).cloned());
-
-        info!(
-            target: LOG_TARGET,
-            "👨‍🔧 PROPOSE: Executing transaction {} (pledges: {} local, {} foreign)",
-            pledged.id(), pledged.local_pledges.len(), pledged.foreign_pledges.len(),
-        );
-
-        self.transaction_manager
-            .execute(
-                substate_store,
-                local_committee_info,
-                locked_epoch,
-                state_anchor.epoch,
-                pledged,
-            )
-            .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))
-    }
+    Ok(invalid_foreign_proposals)
 }
 
 #[derive(Default)]
@@ -1337,12 +878,15 @@ fn subtract_weight_checked(remaining_weight: Option<u64>, by: u64) -> Option<u64
     remaining_weight.and_then(|w| w.checked_sub(by)).filter(|w| *w > 0)
 }
 
-/// Drops the executions of this node's last proposal in `epoch` if that proposal was never inserted.
+/// Drops the executions and lock conflicts of this node's last proposal in `epoch` if that proposal was never
+/// inserted.
 ///
-/// `OnPropose` records a proposal's executions before its block is inserted, so a proposal that is never inserted
-/// leaves executions with no block. Execution reuse rejects them within the epoch because the block is absent, but not
-/// in a later epoch, where epoch GC has pruned committed blocks too. This runs before each proposal and in the
-/// transaction that ends the epoch, which precedes any pruning of the epoch's blocks, so they do not outlive it.
+/// `OnPropose` records a proposal's executions and lock conflicts before its block is inserted, so a proposal that is
+/// never inserted leaves records with no block. Execution reuse rejects those executions within the epoch because the
+/// block is absent, but not in a later epoch, where epoch GC has pruned committed blocks too; and neither `on_commit`
+/// nor `delete_orphaned_block_and_children` reaches the uninserted block's lock conflicts. This runs before each
+/// proposal and in the transaction that ends the epoch, which precedes any pruning of the epoch's blocks, so they do
+/// not outlive it.
 pub(crate) fn drop_executions_of_uninserted_proposal<TTx>(tx: &mut TTx, epoch: Epoch) -> Result<(), StorageError>
 where
     TTx: StateStoreWriteTransaction + Deref,
@@ -1352,6 +896,7 @@ where
         !Block::record_exists(&**tx, &previous.block_id)?
     {
         tx.block_transaction_executions_remove_any_by_block_id(&previous.block_id)?;
+        tx.lock_conflicts_remove_by_block_id(&previous.block_id)?;
     }
     Ok(())
 }
@@ -1469,6 +1014,113 @@ mod tests {
             assert_eq!(subtract_weight_checked(Some(40), 100), None);
             // Once None, it stays None.
             assert_eq!(subtract_weight_checked(None, 1), None);
+        }
+    }
+
+    mod process_proposal_batch_foreign_proposals {
+        use tari_engine_types::fees::ExhaustBurnRate;
+        use tari_ootle_common_types::{NumPreshards, ProtocolVersion, ShardGroup, VotePower};
+        use tari_ootle_storage::consensus_models::{BlockHeaderMetadata, BlockPledge, CommandsCommitProof};
+        use tari_ootle_transaction::Network;
+        use tari_sidechain::{FixedHash, SidechainBlockCommitProof, SidechainBlockHeader};
+        use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+
+        use super::*;
+
+        const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
+        const NETWORK: Network = Network::LocalNet;
+
+        fn foreign_proposal_with_unknown_protocol_version() -> ForeignProposal {
+            let metadata = BlockHeaderMetadata {
+                total_leader_fee: 0,
+                timestamp: 0,
+                extra_data: ExtraData::new(),
+                timeout_certificate_id: None,
+                is_dummy: false,
+            };
+            let header = SidechainBlockHeader {
+                network: NETWORK.as_byte(),
+                protocol_version: u32::MAX,
+                parent_id: Default::default(),
+                justify_id: Default::default(),
+                height: 1,
+                epoch: 0,
+                epoch_hash: Default::default(),
+                shard_group: tari_sidechain::ShardGroup {
+                    start: 128,
+                    end_inclusive: 255,
+                },
+                proposed_by: Default::default(),
+                state_merkle_root: Default::default(),
+                command_merkle_root: Default::default(),
+                transaction_merkle_root: Default::default(),
+                signature: Default::default(),
+                accumulated_data: Default::default(),
+                metadata_hash: metadata.calculate_hash(),
+            };
+            let commit_proof = CommandsCommitProof::new_latest(vec![], SidechainBlockCommitProof {
+                header,
+                proof_elements: vec![],
+            });
+            ForeignProposal::new(commit_proof, BlockPledge::default(), metadata)
+        }
+
+        #[test]
+        fn an_invalid_foreign_proposal_with_no_local_transactions_is_dropped_and_condemned() {
+            let tmp = tempfile::tempdir().unwrap();
+            let store = RocksDbStateStore::<String>::open(tmp.path(), DatabaseOptions::default()).unwrap();
+            let mut zero = Block::zero_block(NETWORK, NUM_PRESHARDS);
+            let local_group = ShardGroup::new(0, 127);
+            let genesis = Block::genesis(
+                NETWORK,
+                ProtocolVersion::V0,
+                Epoch(0),
+                FixedHash::zero(),
+                local_group,
+                FixedHash::zero(),
+                None,
+                ExhaustBurnRate::new(0),
+            );
+            store
+                .with_write_tx(|tx| {
+                    zero.justify().save(tx)?;
+                    zero.insert(tx)?;
+                    zero.add_justify_qc(tx, &PcId::zero())?;
+                    genesis.justify().save(tx)?;
+                    genesis.insert(tx)
+                })
+                .unwrap();
+
+            let fp = foreign_proposal_with_unknown_protocol_version();
+            let atom = fp.to_atom();
+            let mut batch = ProposalBatch {
+                foreign_proposals: vec![fp],
+                transactions: vec![],
+                commands: vec![],
+            };
+            let mut commands = vec![Command::ForeignProposal(atom.clone())];
+            let committee_info = CommitteeInfo::new(NUM_PRESHARDS, 1, 2, local_group, Epoch(0), VotePower::of(1));
+
+            let invalid_foreign_proposals = store
+                .with_read_tx(|tx| {
+                    let mut substate_store = PendingSubstateStore::init(tx, genesis.as_leaf(), NUM_PRESHARDS).unwrap();
+                    let mut change_set = ProposedBlockChangeSet::new(genesis.as_leaf());
+                    process_proposal_batch_foreign_proposals(
+                        tx,
+                        &genesis,
+                        genesis.justify().calculate_id(),
+                        &committee_info,
+                        &mut substate_store,
+                        &mut batch,
+                        &mut commands,
+                        &mut change_set,
+                    )
+                })
+                .unwrap();
+
+            assert!(commands.is_empty(), "block must carry no ForeignProposal command");
+            assert_eq!(invalid_foreign_proposals, vec![atom.block_id]);
+            assert!(batch.foreign_proposals.is_empty());
         }
     }
 }

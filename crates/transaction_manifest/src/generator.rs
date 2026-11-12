@@ -118,6 +118,11 @@ impl ManifestInstructionGenerator {
             instructions.extend(self.translate_intent(intent)?);
         }
 
+        // `fee_main()` runs in its own phase before `main()` and the runtime clears the workspace at the fee
+        // checkpoint, so bindings and workspace IDs from `main()` must not bleed into `fee_main()`.
+        self.bindings.clear();
+        self.current_workspace_id = WorkspaceId::default();
+
         let mut fee_instructions = Vec::with_capacity(ast.parsed.fee_instruction_intents.len());
         for intent in ast.parsed.fee_instruction_intents {
             fee_instructions.extend(self.translate_intent(intent)?);
@@ -132,6 +137,15 @@ impl ManifestInstructionGenerator {
 
     #[expect(clippy::too_many_lines)]
     fn translate_intent(&mut self, intent: ManifestIntent) -> Result<Vec<Instruction>, ManifestError> {
+        // Every visited intent is charged, whether or not it emits anything, so a call tree of empty
+        // bodies cannot expand without bound.
+        self.generated_instructions = self.generated_instructions.saturating_add(1);
+        if self.generated_instructions > MAX_GENERATED_INSTRUCTIONS {
+            return Err(ManifestError::TooManyInstructions {
+                max: MAX_GENERATED_INSTRUCTIONS,
+            });
+        }
+
         match intent {
             ManifestIntent::InvokeTemplate(InvokeIntent {
                 output_variable,
@@ -247,10 +261,12 @@ impl ManifestInstructionGenerator {
                 Ok(vec![])
             },
             ManifestIntent::AssignBlob(assign) => {
-                self.bindings.insert(
-                    assign.variable_name.to_string(),
-                    Binding::Blob(assign.blob_name.to_string()),
-                );
+                let blob_name = assign.blob_name.to_string();
+                if !self.blob_inputs.contains_key(&blob_name) {
+                    return Err(ManifestError::BlobNotProvided { name: blob_name });
+                }
+                self.bindings
+                    .insert(assign.variable_name.to_string(), Binding::Blob(blob_name));
                 Ok(vec![])
             },
             ManifestIntent::DropAllProofs => Ok(vec![Instruction::DropAllProofsInWorkspace]),
@@ -309,14 +325,6 @@ impl ManifestInstructionGenerator {
                 self.call_depth += 1;
                 let mut instructions = Vec::with_capacity(body.len());
                 for intent in body {
-                    // Every visited intent is charged, whether or not it emits anything, so a call tree of empty
-                    // bodies cannot expand without bound.
-                    self.generated_instructions = self.generated_instructions.saturating_add(1);
-                    if self.generated_instructions > MAX_GENERATED_INSTRUCTIONS {
-                        return Err(ManifestError::TooManyInstructions {
-                            max: MAX_GENERATED_INSTRUCTIONS,
-                        });
-                    }
                     instructions.extend(self.translate_intent(intent)?);
                 }
                 self.call_depth -= 1;
@@ -525,13 +533,12 @@ impl ManifestInstructionGenerator {
     }
 
     fn get_workspace_id(&self, name: &str) -> Result<WorkspaceOffsetId, ManifestError> {
-        match self.bindings.get(name) {
-            Some(Binding::Workspace(id)) => Ok(*id),
-            Some(Binding::Input(_)) => Err(ManifestError::InvalidVariableType(format!(
+        match self.resolve(name)? {
+            Resolved::Workspace(id) => Ok(id),
+            Resolved::Value(_) => Err(ManifestError::InvalidVariableType(format!(
                 "'{name}' is an input value, but this position requires a workspace value"
             ))),
-            Some(Binding::Blob(_)) => Err(Self::misplaced_blob(name)),
-            None => Err(ManifestError::UndefinedVariable { name: name.to_string() }),
+            Resolved::Blob => Err(Self::misplaced_blob(name)),
         }
     }
 

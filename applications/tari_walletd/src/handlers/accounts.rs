@@ -17,7 +17,6 @@ use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
     commit_result::{ExecutionFailureCode, RejectReason},
     component::derive_component_address_from_public_key,
-    confidential::ClaimBurnOutputData,
     fees::FEE_ESTIMATE_ALLOWANCE,
     stealth::{ClaimBurnShape, declared_input_bytes, persisted_utxo_bytes},
     substate::SubstateId,
@@ -30,6 +29,7 @@ use tari_ootle_common_types::{
     ShardGroup,
     SubstateRequirement,
     optional::Optional,
+    response_status::ResponseErrorStatus,
     shard::Shard,
 };
 use tari_ootle_transaction::{Transaction, TransactionBuilder, args};
@@ -49,6 +49,8 @@ use tari_ootle_wallet_sdk::{
         stealth_outputs::StealthOutputsApiError,
         stealth_transfer::{StealthTransferApiError, StealthTransferParams, TransferOutput, TransferStatementSpec},
         substate::{SubstateApiError, ValidatorScanResult},
+        transaction::TransactionApiError,
+        validator_set::ValidatorSetApiError,
     },
     models::{
         AccountWithAddress,
@@ -60,7 +62,7 @@ use tari_ootle_wallet_sdk::{
     },
     network::WalletNetworkInterface,
 };
-use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceHandle;
+use tari_ootle_wallet_sdk_services::transaction_service::{TransactionServiceError, TransactionServiceHandle};
 use tari_ootle_walletd_client::{
     ComponentAddressOrName,
     permissions::{Crud, Permission, ReadOnly},
@@ -647,6 +649,47 @@ pub async fn handle_claim_burn(
         proof_file_name,
     )
     .await
+    .map_err(ClaimBurnError::into_inner)
+}
+
+/// Why [`execute_claim_burn`] could not dry run or submit a claim. The split lets an unattended caller tell a
+/// network that has not taken the claim yet from a claim that cannot succeed.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ClaimBurnError {
+    /// The indexer could not be read, or did not answer the dry run.
+    #[error(transparent)]
+    Network(anyhow::Error),
+    /// The wallet could not store or lock the claim transaction for submission.
+    #[error(transparent)]
+    Wallet(anyhow::Error),
+    /// The claim cannot succeed: it could not be built from the proof, or the dry run rejected it.
+    #[error(transparent)]
+    Invalid(anyhow::Error),
+}
+
+impl ClaimBurnError {
+    pub(crate) fn into_inner(self) -> anyhow::Error {
+        match self {
+            Self::Network(error) | Self::Wallet(error) | Self::Invalid(error) => error,
+        }
+    }
+
+    /// Classifies a failed dry run. The indexer answers a transaction it finds invalid with
+    /// [`ResponseErrorStatus::TransactionRejected`], and an executed but rejected one as a rejected query result;
+    /// those claims cannot succeed. Any other failure is the indexer not answering.
+    fn from_dry_run(error: TransactionServiceError) -> Self {
+        match error {
+            TransactionServiceError::TransactionApiError(
+                TransactionApiError::NetworkInterfaceError {
+                    status: ResponseErrorStatus::TransactionRejected { .. },
+                    ..
+                } |
+                TransactionApiError::InvalidTransactionQueryResponse { .. } |
+                TransactionApiError::DryRunMismatchError { .. },
+            ) => Self::Invalid(error.into()),
+            error => Self::Network(error.into()),
+        }
+    }
 }
 
 /// Core claim burn logic: decrypts the burn proof, builds and signs the claim transaction,
@@ -661,9 +704,11 @@ pub(crate) async fn execute_claim_burn(
     max_epoch: Epoch,
     is_dry_run: bool,
     proof_file_name: Option<String>,
-) -> Result<ClaimBurnResponse, anyhow::Error> {
+) -> Result<ClaimBurnResponse, ClaimBurnError> {
     // A claim declares no input of its own; the TARI resource is the one every transaction declares.
-    let input_pricing = DeclaredInputPricing::fetch(sdk, [SubstateId::from(TARI_TOKEN)]).await?;
+    let input_pricing = DeclaredInputPricing::fetch(sdk, [SubstateId::from(TARI_TOKEN)])
+        .await
+        .map_err(ClaimBurnError::Network)?;
     let transaction = build_claim_burn_transaction(
         sdk,
         account,
@@ -672,11 +717,15 @@ pub(crate) async fn execute_claim_burn(
         max_epoch,
         is_dry_run,
         &input_pricing,
-    )?;
+    )
+    .map_err(ClaimBurnError::Invalid)?;
 
     if is_dry_run {
         let transaction_id = transaction.calculate_id();
-        let result = transaction_service.submit_dry_run_transaction(transaction).await?;
+        let result = transaction_service
+            .submit_dry_run_transaction(transaction)
+            .await
+            .map_err(ClaimBurnError::from_dry_run)?;
         let required_fees = result.finalize.required_fees();
         return Ok(ClaimBurnResponse {
             transaction_id,
@@ -686,14 +735,16 @@ pub(crate) async fn execute_claim_burn(
     }
 
     // Link the transaction to the account the burn is claimed into, and (if present) carry the proof
-    // file name so the claim-burn monitor can track it.
+    // file name so the claim-burn monitor can track it. A failed network submission leaves the transaction
+    // stored for the transaction service's poll to submit again, so an error here is the wallet's own.
     let mut tx_context = TransactionContext::with_accounts([*account.component_address()]);
     if let Some(file_name) = proof_file_name {
         tx_context = tx_context.with_kind(TransactionContextKind::ClaimBurn { file_name });
     }
     let tx_id = transaction_service
         .submit_transaction_with_opts(transaction, Some(tx_context), None)
-        .await?;
+        .await
+        .map_err(|e| ClaimBurnError::Wallet(e.into()))?;
 
     Ok(ClaimBurnResponse {
         transaction_id: tx_id,
@@ -702,7 +753,7 @@ pub(crate) async fn execute_claim_burn(
     })
 }
 
-/// Decrypts the burn proof and builds the claim transaction, signed by the claim key.
+/// Builds the claim transaction, signed by the claim key.
 #[allow(clippy::too_many_lines)]
 fn build_claim_burn_transaction(
     sdk: &crate::WalletSdk,
@@ -713,10 +764,7 @@ fn build_claim_burn_transaction(
     is_dry_run: bool,
     input_pricing: &DeclaredInputPricing,
 ) -> Result<Transaction, anyhow::Error> {
-    let ClaimBurnProofContents {
-        encrypted_data: claimed_encrypted_data,
-        claim_proof,
-    } = proof_contents;
+    let ClaimBurnProofContents { claim_proof } = proof_contents;
 
     let account_owner_key_id = account
         .owner_key_id()
@@ -770,16 +818,8 @@ fn build_claim_burn_transaction(
         stealth_claim_pk,
     );
 
-    let decrypted = sdk.stealth_crypto_api().decrypt_utxo_data(
-        &claimed_encrypted_data,
-        &claim_proof.commitment,
-        account_owner_key.secret(),
-        &sender_offset_pub_key,
-        true,
-    )?;
-
-    // The secrets required to spend the claimed output
-    let claimed = decrypted.into_mask_and_value();
+    // The ownership proof checked above binds the claimed value to the burn commitment
+    let claimed_value = claim_proof.value;
 
     let mask = sdk.key_manager_api().next_key(KeyBranch::StealthMask)?;
     let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
@@ -802,17 +842,10 @@ fn build_claim_burn_transaction(
         &nonce,
     );
 
-    // We'll create an output with the same encrypted data that was used on L1 burn. Note that this is not strictly
-    // necessary. The engine will create the output with whatever you give it, so we could reencrypt.
-    let output_data = ClaimBurnOutputData {
-        encrypted_data: claimed_encrypted_data,
-    };
-
     // Builds the claim revealing `fee` out of the claimed value, returning the signed transaction and the
     // statement that reveals the fee.
     let build = |fee: u64| -> Result<(Transaction, StealthTransferStatement), anyhow::Error> {
-        let final_amount = claimed
-            .value
+        let final_amount = claimed_value
             .checked_sub(fee)
             .ok_or_else(|| invalid_params("max_fee", Some("more fees paid than claimed amount")))?;
 
@@ -842,8 +875,8 @@ fn build_claim_burn_transaction(
         };
 
         let pay_fee_and_mint_output = sdk.stealth_crypto_api().generate_transfer_statement(
-            iter::once(StealthInputWitness::new(claimed.clone())),
-            Amount::zero(),
+            iter::empty::<StealthInputWitness>(),
+            Amount::from(claimed_value),
             iter::once(&output_witness),
             // The claim key signs this transaction, so it is the only badge in scope to take the revealed fee.
             Some(RevealedOutput::new(Amount::from(fee), stealth_claim_pk)),
@@ -852,10 +885,11 @@ fn build_claim_burn_transaction(
         let transaction = Transaction::builder(network.as_byte(), max_epoch)
             .with_fee_instructions_builder(|fee_builder| {
                 fee_builder
-                    // Mint the UTXO
-                    .claim_burn(claim_proof.clone(), output_data.clone())
-                    // Transfer the UTXO to another UTXO with some revealed output for fees
-                    .stealth_transfer(TARI_TOKEN, pay_fee_and_mint_output.clone())
+                    // Reveal the claimed value in a bucket
+                    .claim_burn(claim_proof.clone())
+                    .put_last_instruction_output_on_workspace("claimed")
+                    // Pay the bucket into a stealth output, revealing the fee
+                    .stealth_transfer_with_input_bucket(TARI_TOKEN, pay_fee_and_mint_output.clone(), "claimed")
                     // Pay fee
                     .put_last_instruction_output_on_workspace("fee")
                     .pay_fee_from_bucket("fee")
@@ -1371,9 +1405,6 @@ pub async fn handle_confidential_transfer(
     let sdk = context.wallet_sdk().clone();
     let notifier = context.notifier().clone();
 
-    if req.amount.is_negative() {
-        return Err(invalid_params("amount", Some("must be positive")));
-    }
     let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
     enforce_scopes(&granted, &[Permission::Transfer(
         Crud::Create,
@@ -1412,22 +1443,14 @@ pub async fn handle_confidential_transfer(
             })
             .await?;
 
-        // `transfer` links its lock to the transaction, and only a stored transaction resolves a linked lock. A dry
-        // run is never stored, and a failed submission may leave nothing stored.
+        // `transfer` has already released a dry run's lock. Otherwise this handler holds a timed lock that the
+        // submission links in the same write that stores the transaction, so the lock is unlinked exactly when the
+        // wallet stored nothing.
         let transaction_id = transfer.transaction.calculate_id();
         if req.dry_run {
             let result = transaction_service
                 .submit_dry_run_transaction(transfer.transaction)
-                .await;
-            if let Err(err) = &result &&
-                let Err(release_err) = sdk.transaction_api().release_locks_of_unstored_transaction(transaction_id)
-            {
-                warn!(
-                    target: LOG_TARGET,
-                    "Transfer {transaction_id} failed ({err}) and its locked inputs could not be released: {release_err}"
-                );
-            }
-            let result = result?;
+                .await?;
             return Ok(ConfidentialTransferResponse {
                 transaction_id,
                 required_fees: Some(result.finalize.required_fees()),
@@ -1441,11 +1464,12 @@ pub async fn handle_confidential_transfer(
             .submit_transaction_with_opts(
                 transfer.transaction,
                 Some(TransactionContext::with_accounts(linked_accounts)),
-                None,
+                Some(transfer.transaction_proof_id),
             )
             .await;
+        // A submission can fail after the transaction is stored, and the poll then submits it with the lock linked.
         if let Err(err) = &submission &&
-            let Err(release_err) = sdk.transaction_api().release_locks_of_unstored_transaction(transaction_id)
+            let Err(release_err) = sdk.locks_api().release_unlinked_lock(transfer.transaction_proof_id)
         {
             warn!(
                 target: LOG_TARGET,
@@ -1887,7 +1911,7 @@ impl DeclaredInputPricing {
     const UNPROVEN_READ_RETRY_WINDOW: Duration = Duration::from_secs(30);
 
     /// Reads the substates `ids` names from the network, and the layout the latest end-of-epoch
-    /// checkpoints describe, one per shard group (see [`committees_of_checkpoint_layout`]).
+    /// checkpoints describe, one per shard group (see [`latest_checkpoint_layout`]).
     async fn fetch<I: IntoIterator<Item = SubstateId>>(sdk: &WalletSdk, ids: I) -> Result<Self, anyhow::Error> {
         let ids = ids.into_iter().collect::<HashSet<_>>().into_iter().collect::<Vec<_>>();
         let started = tokio::time::Instant::now();
@@ -1913,13 +1937,7 @@ impl DeclaredInputPricing {
             .collect();
 
         let num_preshards = NumPreshards::current();
-        let checkpoints = sdk.get_network_interface().get_latest_shard_group_checkpoints().await?;
-        let num_committees = committees_of_checkpoint_layout(
-            num_preshards,
-            checkpoints
-                .iter()
-                .map(|checkpoint| (checkpoint.epoch, checkpoint.shard_group)),
-        );
+        let num_committees = committees_of_checkpoint_layout(num_preshards, latest_checkpoint_layout(sdk).await?);
         Ok(Self {
             value_bytes,
             num_preshards,
@@ -1942,6 +1960,33 @@ impl DeclaredInputPricing {
             input_bytes,
             transaction.input_fanout(self.num_preshards, self.num_committees),
         )
+    }
+}
+
+/// The epoch and shard group of the latest end-of-epoch checkpoint of every shard group, in shard
+/// order. A verifying wallet takes only checkpoints it verified as the network's latest, and none
+/// while it cannot verify them, as in the epoch it anchors in: no layout prices the input fanout
+/// from above (see [`committees_of_checkpoint_layout`]).
+async fn latest_checkpoint_layout(sdk: &WalletSdk) -> Result<Vec<(Epoch, ShardGroup)>, anyhow::Error> {
+    if !sdk.sdk_config().indexer_trust.is_verify() {
+        return Ok(sdk
+            .get_network_interface()
+            .get_latest_shard_group_checkpoints()
+            .await?
+            .into_iter()
+            .map(|checkpoint| (checkpoint.epoch, checkpoint.shard_group))
+            .collect());
+    }
+    match sdk.validator_set_api().verified_checkpoint_layout().await {
+        Ok(layout) => Ok(layout),
+        Err(ValidatorSetApiError::StoreError(err)) => Err(err.into()),
+        Err(err) => {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️ No verified checkpoint layout to price the input fanout by: {err}. Pricing one committee per shard."
+            );
+            Ok(vec![])
+        },
     }
 }
 
@@ -3841,6 +3886,7 @@ mod claim_burn_fee_tests {
     };
     use tari_ootle_address::Network;
     use tari_ootle_common_types::base_layer_hashing::ownership_proof_hasher64;
+    use tari_ootle_light_client::test_fixtures::{ValidatorSetFixture, high, low};
     use tari_ootle_transaction::Instruction;
     use tari_ootle_wallet_sdk::{
         IndexerTrust,
@@ -3854,7 +3900,10 @@ mod claim_burn_fee_tests {
     use tari_utilities::SafePassword;
 
     use super::*;
-    use crate::WalletSdk;
+    use crate::{
+        WalletSdk,
+        handlers::test_support::{FakeIndexer, TestDaemon, checkpoint_signed_by, handover_checkpoint},
+    };
 
     /// What the burn being claimed is worth.
     const CLAIMED_VALUE: u64 = 5_000_000_000;
@@ -3906,8 +3955,7 @@ mod claim_burn_fee_tests {
     }
 
     /// An L1 burn of `value` made out to the test account, as the L1 wallet would produce it: a stealth
-    /// claim key derived from the account key, an ownership proof by the commitment's mask, and the
-    /// value and mask encrypted to the account.
+    /// claim key derived from the account key and an ownership proof by the commitment's mask.
     fn burn_to_account(test: &ClaimTest, value: u64) -> ClaimBurnProofContents {
         let crypto = test.sdk.stealth_crypto_api();
         let account_key = test
@@ -3921,9 +3969,6 @@ mod claim_burn_fee_tests {
 
         let mask = RistrettoSecretKey::random(&mut rand::rng());
         let commitment = commit_u64_amount(&mask, value).to_byte_type();
-        let encrypted_data = crypto
-            .encrypt_value_and_mask(value, &mask, &sender_offset_public_key, account_key.secret(), None)
-            .unwrap();
         let sidechain_id: Option<&[u8]> = None;
         let message = ownership_proof_hasher64(Network::LocalNet)
             .chain(&commitment.as_bytes())
@@ -3969,7 +4014,6 @@ mod claim_burn_fee_tests {
                     block_output_proof: mmr_proof(),
                 },
             },
-            encrypted_data,
         }
     }
 
@@ -3981,7 +4025,7 @@ mod claim_burn_fee_tests {
                 Instruction::StealthTransfer { statement, .. } => Some(statement),
                 _ => None,
             })
-            .expect("a claim spends the claimed UTXO in a stealth transfer")
+            .expect("a claim pays the claimed bucket into a stealth transfer")
     }
 
     fn revealed_fee(transaction: &Transaction) -> Amount {
@@ -4016,6 +4060,75 @@ mod claim_burn_fee_tests {
                 "{layout:?}"
             );
         }
+    }
+
+    async fn priced_committees(daemon: &TestDaemon) -> u32 {
+        DeclaredInputPricing::fetch(daemon.context.wallet_sdk(), [])
+            .await
+            .unwrap()
+            .num_committees
+    }
+
+    async fn checkpoint_layout(daemon: &TestDaemon) -> Vec<(Epoch, ShardGroup)> {
+        latest_checkpoint_layout(daemon.context.wallet_sdk()).await.unwrap()
+    }
+
+    /// In the epoch a verifying wallet anchors in, it trusts no validator set that the latest checkpoints can be
+    /// verified against.
+    #[tokio::test]
+    async fn a_verifying_wallet_prices_one_committee_per_shard_in_the_epoch_it_anchors_in() {
+        let indexer = FakeIndexer::spawn().await;
+        indexer.end_epoch(&ValidatorSetFixture::new(1), &ValidatorSetFixture::new(2));
+        let daemon = TestDaemon::start_with_indexer(&indexer, IndexerTrust::Verify).await;
+        daemon.context.wallet_sdk().validator_set_api().sync().await.unwrap();
+
+        assert_eq!(checkpoint_layout(&daemon).await, vec![]);
+        assert_eq!(priced_committees(&daemon).await, NumPreshards::current().as_u32());
+    }
+
+    #[tokio::test]
+    async fn a_verifying_wallet_takes_only_the_checkpoint_layout_it_verifies() {
+        let sets = [1, 2, 3].map(ValidatorSetFixture::new);
+        let indexer = FakeIndexer::spawn().await;
+        indexer.end_epoch(&sets[0], &sets[1]);
+        let daemon = TestDaemon::start_with_indexer(&indexer, IndexerTrust::Verify).await;
+        daemon.context.wallet_sdk().validator_set_api().sync().await.unwrap();
+
+        indexer.end_epoch(&sets[1], &sets[2]);
+        let low_checkpoint = handover_checkpoint(low(), &sets[1], &sets[2]);
+        indexer.list_shard_group_checkpoints(vec![
+            low_checkpoint.clone(),
+            checkpoint_signed_by(high(), &sets[1], &sets[2], &sets[0].high),
+        ]);
+        assert_eq!(
+            checkpoint_layout(&daemon).await,
+            vec![],
+            "a checkpoint that another committee signed"
+        );
+
+        indexer.list_shard_group_checkpoints(vec![low_checkpoint, handover_checkpoint(high(), &sets[1], &sets[2])]);
+        assert_eq!(checkpoint_layout(&daemon).await, vec![
+            (Epoch(2), low()),
+            (Epoch(2), high())
+        ]);
+    }
+
+    /// A trusting wallet takes the layout the indexer lists as it is.
+    #[tokio::test]
+    async fn a_trusting_wallet_takes_the_listed_checkpoint_layout() {
+        let sets = [1, 2, 3].map(ValidatorSetFixture::new);
+        let indexer = FakeIndexer::spawn().await;
+        indexer.end_epoch(&sets[0], &sets[1]);
+        indexer.list_shard_group_checkpoints(vec![
+            handover_checkpoint(low(), &sets[0], &sets[1]),
+            checkpoint_signed_by(high(), &sets[0], &sets[1], &sets[2].high),
+        ]);
+        let daemon = TestDaemon::start_with_indexer(&indexer, IndexerTrust::Trust).await;
+
+        assert_eq!(checkpoint_layout(&daemon).await, vec![
+            (Epoch(1), low()),
+            (Epoch(1), high())
+        ]);
     }
 
     /// Prices the TARI resource every claim declares at a nominal size, on a network of two shard
@@ -4107,5 +4220,51 @@ mod claim_burn_fee_tests {
 
         assert!(local_price(&transaction) > 100);
         assert_eq!(revealed_fee(&transaction), Amount::from(100u64));
+    }
+}
+
+#[cfg(test)]
+mod claim_burn_dry_run_failure_tests {
+    use super::*;
+
+    fn network_interface_error(status: ResponseErrorStatus) -> TransactionServiceError {
+        TransactionApiError::NetworkInterfaceError {
+            message: status.to_string(),
+            status,
+        }
+        .into()
+    }
+
+    #[test]
+    fn a_dry_run_the_indexer_rejects_is_an_invalid_claim() {
+        let rejected = network_interface_error(ResponseErrorStatus::TransactionRejected {
+            message: "input substate is down".to_string(),
+        });
+        assert!(matches!(
+            ClaimBurnError::from_dry_run(rejected),
+            ClaimBurnError::Invalid(_)
+        ));
+        let rejected_result = TransactionApiError::InvalidTransactionQueryResponse {
+            details: "Transaction rejected by dry run: invalid proof".to_string(),
+        };
+        assert!(matches!(
+            ClaimBurnError::from_dry_run(rejected_result.into()),
+            ClaimBurnError::Invalid(_)
+        ));
+    }
+
+    #[test]
+    fn a_dry_run_the_indexer_does_not_answer_is_a_network_failure() {
+        let unavailable = network_interface_error(ResponseErrorStatus::InternalError {
+            message: "Indexer request failed with status 503: no committee".to_string(),
+        });
+        assert!(matches!(
+            ClaimBurnError::from_dry_run(unavailable),
+            ClaimBurnError::Network(_)
+        ));
+        assert!(matches!(
+            ClaimBurnError::from_dry_run(TransactionServiceError::ServiceShutdown),
+            ClaimBurnError::Network(_)
+        ));
     }
 }

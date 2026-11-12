@@ -12,11 +12,7 @@ mod workspace_ids;
 
 pub use named_component_call::*;
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_engine_types::{
-    confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
-    indexed_value::IndexedValue,
-    substate::SubstateId,
-};
+use tari_engine_types::{confidential::MinotariBurnClaimProof, indexed_value::IndexedValue, substate::SubstateId};
 use tari_ootle_common_types::{Epoch, InputDeclaration, declare_input, declare_inputs};
 use tari_template_lib_types::{
     Amount,
@@ -112,14 +108,23 @@ impl TransactionBuilder<MainIntent> {
     /// prior builder and — unlike [`Transaction::builder`] — no `max_epoch` decided up front.
     pub fn from_unsigned<T: Into<UnsignedTransaction>>(unsigned_transaction: T) -> Self {
         let unsigned_transaction = unsigned_transaction.into();
+        let mut workspace_ids = WorkspaceIds::new();
+        for instruction in unsigned_transaction
+            .instructions()
+            .iter()
+            .chain(unsigned_transaction.fee_instructions())
+        {
+            if let Some(id) = instruction.allocated_workspace_id() {
+                workspace_ids.advance_past(id);
+            }
+        }
+        let mut fee_builder = Self::new_fee_builder(unsigned_transaction.network(), unsigned_transaction.max_epoch());
+        fee_builder.workspace_ids = workspace_ids.clone();
         Self {
-            fee_instruction_builder: Some(Box::new(Self::new_fee_builder(
-                unsigned_transaction.network(),
-                unsigned_transaction.max_epoch(),
-            ))),
+            fee_instruction_builder: Some(Box::new(fee_builder)),
             reserved_blob_slots: 0,
             unsigned_transaction,
-            workspace_ids: WorkspaceIds::new(),
+            workspace_ids,
             blob_ids: BlobIds::new(),
             _discriminator: std::marker::PhantomData,
             fill_inputs: false,
@@ -262,9 +267,10 @@ impl TransactionBuilder<MainIntent> {
             .fee_instruction_builder
             .take()
             .expect("Fee instruction builder is None");
-        self.unsigned_transaction
-            .inputs_mut()
-            .extend(fee_builder.unsigned_transaction.inputs_mut().drain(..));
+        declare_inputs(
+            self.unsigned_transaction.inputs_mut(),
+            fee_builder.unsigned_transaction.inputs_mut().drain(..),
+        );
 
         let fee_blobs = std::mem::take(fee_builder.unsigned_transaction.blobs_mut());
         // A transaction may hold `BlobIndex::MAX + 1` blobs, so the count alone does not fit a
@@ -349,6 +355,11 @@ impl TransactionBuilder<FeeIntent> {
 }
 
 impl<D> TransactionBuilder<D> {
+    /// Returns the next workspace ID.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the workspace ID range is exhausted.
     pub fn next_workspace_id(&self) -> args::WorkspaceId {
         self.workspace_ids.next_id()
     }
@@ -399,6 +410,10 @@ impl<D> TransactionBuilder<D> {
     /// builder's. Fee instructions from `other` are NOT merged — fees should be managed on the
     /// outer builder.
     ///
+    /// The merged inputs are the union of both builders' declared inputs. `other`'s instructions
+    /// keep the inputs `other` declared for them, so this builder's auto-fill setting applies only
+    /// to instructions added to it directly.
+    ///
     /// This is the low-level primitive behind the higher-level `chain` method on
     /// `OotleInvoke`.
     ///
@@ -407,13 +422,11 @@ impl<D> TransactionBuilder<D> {
     /// - If the combined blob count would exceed the `BlobIndex` range (256 blobs total).
     /// - If a named blob in `other` collides with one already registered on `self`.
     pub fn merge(mut self, other: TransactionBuilder<D>) -> Self {
-        let workspace_id_offset = self.workspace_ids.next_id();
-        let other_next_workspace_id = other.workspace_ids.next_id();
         // A transaction may hold `BlobIndex::MAX + 1` blobs, so the count alone does not fit a
         // `BlobIndex`; only an offset a blob is actually placed at has to.
         let own_blob_count = self.unsigned_transaction.blobs().len();
         let other_blob_count = other.unsigned_transaction.blobs().len();
-        let combined = own_blob_count + other_blob_count;
+        let combined = self.blobs_spoken_for_elsewhere() + own_blob_count + other_blob_count;
         assert!(
             combined <= BlobIndex::MAX as usize + 1,
             "merged blob count {combined} exceeds BlobIndex range",
@@ -426,14 +439,18 @@ impl<D> TransactionBuilder<D> {
 
         let TransactionBuilder {
             unsigned_transaction: mut other_tx,
+            workspace_ids: other_workspace_ids,
             blob_ids: other_blob_ids,
             ..
         } = other;
 
+        let workspace_id_offset = self.workspace_ids.merge(other_workspace_ids);
+
         // Merge inputs first (before consuming the transaction)
-        self.unsigned_transaction
-            .inputs_mut()
-            .extend(other_tx.inputs().iter().cloned());
+        declare_inputs(
+            self.unsigned_transaction.inputs_mut(),
+            other_tx.inputs().iter().cloned(),
+        );
 
         // Move other's blobs over, appending in order so existing indices on `other`'s
         // instructions just shift by `blob_id_offset` after remapping.
@@ -460,10 +477,6 @@ impl<D> TransactionBuilder<D> {
             instruction.remap_blob_ids(blob_id_offset);
             self.unsigned_transaction.instructions_mut().push(instruction);
         }
-
-        // Advance workspace ID counter past merged IDs
-        self.workspace_ids
-            .set_next_id(workspace_id_offset + other_next_workspace_id);
 
         self
     }
@@ -551,7 +564,7 @@ impl<D> TransactionBuilder<D> {
 
     fn add_input_for_component_ref(&mut self, component_ref: &ComponentReference) {
         if let Some(address) = component_ref.address() {
-            self.unsigned_transaction.inputs_mut().insert((*address).into());
+            declare_input(self.unsigned_transaction.inputs_mut(), (*address).into());
         }
     }
 
@@ -795,12 +808,16 @@ impl<D> TransactionBuilder<D> {
         name: N,
         bytes: B,
     ) -> Result<Self, BlobIndexOverflow> {
+        let idx = self.push_blob_checked(bytes.into())?;
+        self.blob_ids.insert(name.into(), idx);
+        Ok(self)
+    }
+
+    fn push_blob_checked(&mut self, blob: Blob) -> Result<BlobIndex, BlobIndexOverflow> {
         if self.blobs_spoken_for_elsewhere() + self.unsigned_transaction.blobs().len() >= Blobs::MAX_BLOBS {
             return Err(BlobIndexOverflow { max: Blobs::MAX_BLOBS });
         }
-        let idx = self.unsigned_transaction.add_blob(bytes.into())?;
-        self.blob_ids.insert(name.into(), idx);
-        Ok(self)
+        self.unsigned_transaction.add_blob(blob)
     }
 
     /// Blobs the other half of the transaction already holds, which this half's additions share a
@@ -824,8 +841,7 @@ impl<D> TransactionBuilder<D> {
     /// Panics if the transaction's blob count would exceed the `BlobIndex` range.
     pub fn publish_template<B: Into<Blob>>(mut self, binary: B) -> Self {
         let idx = self
-            .unsigned_transaction
-            .add_blob(binary.into())
+            .push_blob_checked(binary.into())
             .expect("transaction blob count exceeds BlobIndex range");
         self.add_instruction(Instruction::PublishTemplate {
             binary: idx,
@@ -845,8 +861,7 @@ impl<D> TransactionBuilder<D> {
         metadata_hash: H,
     ) -> Self {
         let idx = self
-            .unsigned_transaction
-            .add_blob(binary.into())
+            .push_blob_checked(binary.into())
             .expect("transaction blob count exceeds BlobIndex range");
         self.add_instruction(Instruction::PublishTemplate {
             binary: idx,
@@ -887,11 +902,10 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
-    pub fn claim_burn(self, claim: MinotariBurnClaimProof, output_data: ClaimBurnOutputData) -> Self {
-        self.add_instruction(Instruction::ClaimBurn {
-            claim: Box::new(claim),
-            output_data,
-        })
+    /// Claims an L1 burn. The instruction's output is a bucket of the burn's value, which the transaction must
+    /// move on, e.g. with [`Self::put_last_instruction_output_on_workspace`].
+    pub fn claim_burn(self, claim: MinotariBurnClaimProof) -> Self {
+        self.add_instruction(Instruction::ClaimBurn { claim: Box::new(claim) })
     }
 
     pub fn claim_validator_fees(self, address: ValidatorFeePoolAddress) -> Self {
@@ -926,11 +940,7 @@ impl<D> TransactionBuilder<D> {
     pub fn add_instruction(mut self, instruction: Instruction) -> Self {
         let id = instruction.allocated_workspace_id();
         if let Some(id) = id {
-            // + 1 because the current id counter is the next available id
-            let next_id = id.checked_add(1).expect("Workspace ID overflow");
-            if next_id > self.workspace_ids.next_id() {
-                self.workspace_ids.set_next_id(next_id);
-            }
+            self.workspace_ids.advance_past(id);
         }
         self.add_inputs_for_instruction(&instruction);
         self.unsigned_transaction.instructions_mut().push(instruction);
@@ -994,18 +1004,23 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
+    fn add_inputs_for_raw_arg<F>(&mut self, bytes: &[u8], make_declaration: F)
+    where F: FnMut(SubstateId) -> InputDeclaration {
+        if let Ok(indexed) = IndexedValue::from_raw(bytes) {
+            declare_inputs(
+                self.unsigned_transaction.inputs_mut(),
+                indexed
+                    .referenced_substates()
+                    .filter(SubstateId::is_declarable_input)
+                    .map(make_declaration),
+            );
+        }
+    }
+
     fn add_inputs_for_args(&mut self, args: &[InstructionArg]) {
         for arg in args {
-            if let Some(bytes) = arg.as_literal_bytes() &&
-                let Ok(indexed) = IndexedValue::from_raw(bytes)
-            {
-                declare_inputs(
-                    self.unsigned_transaction.inputs_mut(),
-                    indexed
-                        .referenced_substates()
-                        .filter(SubstateId::is_declarable_input)
-                        .map(InputDeclaration::write),
-                );
+            if let Some(bytes) = arg.as_literal_bytes() {
+                self.add_inputs_for_raw_arg(bytes, InputDeclaration::write);
             }
         }
     }
@@ -1024,15 +1039,20 @@ impl<D> TransactionBuilder<D> {
                 self.add_inputs_for_args(args);
             },
             Instruction::StealthTransfer {
-                resource_address_ref, ..
+                resource_address_ref,
+                statement,
+                ..
             } => {
                 // NOTE: UTXO inputs may have come from previous instructions, and therefore are not an existing
                 // on-chain substate input. This means the user will have to manually add them as inputs as required.
 
                 self.add_input_for_resource_ref(resource_address_ref);
+                for arg in statement.script_path_template_functions().flat_map(|tf| &tf.args) {
+                    self.add_inputs_for_raw_arg(arg, InputDeclaration::read);
+                }
             },
             Instruction::ClaimValidatorFees { address, .. } => {
-                self.unsigned_transaction.inputs_mut().insert((*address).into());
+                declare_input(self.unsigned_transaction.inputs_mut(), (*address).into());
             },
             Instruction::Assert {
                 assertion:
@@ -1040,11 +1060,7 @@ impl<D> TransactionBuilder<D> {
                     Assertion::BucketContainsNonFungibles { resource_address, .. },
                 ..
             } => {
-                if *resource_address != TARI_TOKEN {
-                    self.unsigned_transaction
-                        .inputs_mut()
-                        .insert((*resource_address).into());
-                }
+                self.add_resource_input(*resource_address);
             },
             Instruction::UpdateComponentTemplate { component, migrate, .. } => {
                 self.add_input_for_component_ref(component);
@@ -1085,12 +1101,7 @@ impl<D> TransactionBuilder<D> {
     fn resolve_resource_ref(&self, resx_ref: NamedResourceRef) -> ResourceAddressRef {
         match resx_ref {
             NamedResourceRef::Address(addr) => addr.into(),
-            NamedResourceRef::Workspace(id) => {
-                let id = self.workspace_ids.get(id.name()).unwrap_or_else(|| {
-                    panic!("Workspace key '{}' not found", id.name());
-                });
-                WorkspaceOffsetId::new(id).into()
-            },
+            NamedResourceRef::Workspace(id) => self.get_workspace_offset_id_from_named_arg(id.name()).into(),
         }
     }
 

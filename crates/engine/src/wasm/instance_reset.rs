@@ -14,9 +14,10 @@
 //!   instantiation left in it (the active data segments), captured once per loaded template.
 //! * **Mutable globals** are restored: [`ResettableState`] exports every one the module defines, so the engine can read
 //!   each initial value and write it back.
-//! * **Tables** are immutable: `table.set`, `table.grow`, `table.fill` and `table.copy` are refused at compile.
+//! * **Tables** are immutable: `table.set`, `table.grow`, `table.fill`, `table.copy` and `table.init` are refused at
+//!   compile.
 //! * **Segments** are stateless: passive segments are refused, so every segment is dropped at instantiation and
-//!   `memory.init`, `table.init`, `data.drop` and `elem.drop` cannot change anything.
+//!   `memory.init`, `data.drop` and `elem.drop` cannot change anything.
 //!
 //! The globals the metering middlewares add are not restored and need not be: they are appended
 //! after [`ResettableState`] runs, the engine sets the meter before every call, and the bulk
@@ -105,6 +106,11 @@ impl<'a> FunctionMiddleware<'a> for FunctionResettableState {
             Operator::TableGrow { .. } |
             Operator::TableFill { .. } |
             Operator::TableCopy { .. } => Err(refused(format!("operator {operator:?} modifies a table"))),
+            // Every element segment is dropped at instantiation, so `table.init` can only trap or
+            // copy nothing, and wasmer re-syncs the whole table after a zero-length copy.
+            Operator::TableInit { .. } => Err(refused(format!(
+                "operator {operator:?} copies from an element segment, and none is kept after instantiation"
+            ))),
             operator => {
                 state.push_operator(operator);
                 Ok(())
@@ -397,6 +403,9 @@ mod tests {
             let wat = format!(r#"(module (table 1 4 funcref) (func {op}))"#);
             assert!(refusal(&wat).contains("modifies a table"), "{op} was not refused");
         }
+        let wat = r#"(module (table 1 1 funcref) (func $f) (elem (i32.const 0) func $f)
+                       (func (table.init 0 (i32.const 0) (i32.const 0) (i32.const 0))))"#;
+        assert!(refusal(wat).contains("element segment"), "table.init was not refused");
     }
 
     #[test]

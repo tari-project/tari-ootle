@@ -29,21 +29,25 @@ use crate::limits;
 /// All arithmetic on offsets / lengths is checked. Adversarial inputs are
 /// rejected with an explicit error rather than panicking or wrapping.
 pub fn extract_template_def(code: &[u8]) -> Result<TemplateDef, ExtractTemplateDefError> {
+    let mut section = None;
     for payload in Parser::new(0).parse_all(code) {
         if let Payload::CustomSection(reader) = payload? &&
             reader.name() == TEMPLATE_DEF_CUSTOM_SECTION
         {
-            return decode_template_def_from_blob(reader.data());
+            // The engine refuses a module with more than one definition, so this reader refuses it too.
+            if section.replace(reader.data()).is_some() {
+                return Err(ExtractTemplateDefError::DuplicateSection);
+            }
         }
     }
 
-    Err(ExtractTemplateDefError::SectionMissing)
+    decode_template_def_from_blob(section.ok_or(ExtractTemplateDefError::SectionMissing)?)
 }
 
 /// Decode a `[u32 LE: full_len] || [bor bytes]` blob (the format produced by
 /// `TemplateDef::encode_for_wasm_embedding`). `full_len` is the total length
-/// including the 4-byte prefix itself; the bor payload occupies
-/// `blob[4..full_len]`.
+/// including the 4-byte prefix itself, and must equal `blob.len()`. The bor
+/// payload `blob[4..]` must decode as exactly one `TemplateDef` item.
 fn decode_template_def_from_blob(blob: &[u8]) -> Result<TemplateDef, ExtractTemplateDefError> {
     if blob.len() < WASM_PTR_SIZE {
         return Err(ExtractTemplateDefError::SectionTooShort { len: blob.len() });
@@ -52,13 +56,13 @@ fn decode_template_def_from_blob(blob: &[u8]) -> Result<TemplateDef, ExtractTemp
         .try_into()
         .expect("blob.len() >= WASM_PTR_SIZE checked above");
     let full_len = u32::from_le_bytes(prefix) as usize;
-    if full_len < WASM_PTR_SIZE || full_len > blob.len() {
+    if full_len != blob.len() {
         return Err(ExtractTemplateDefError::SectionLengthMismatch {
             declared: full_len,
             actual: blob.len(),
         });
     }
-    tari_bor::decode_with_max_depth(&blob[WASM_PTR_SIZE..full_len], limits::MAX_CBOR_NESTING_DEPTH)
+    tari_bor::decode_exact_with_max_depth(&blob[WASM_PTR_SIZE..full_len], limits::MAX_CBOR_NESTING_DEPTH)
         .map_err(ExtractTemplateDefError::Decode)
 }
 
@@ -68,6 +72,8 @@ pub enum ExtractTemplateDefError {
     Parse(#[from] BinaryReaderError),
     #[error("Module has no `{TEMPLATE_DEF_CUSTOM_SECTION}` custom section")]
     SectionMissing,
+    #[error("Module has more than one `{TEMPLATE_DEF_CUSTOM_SECTION}` custom section")]
+    DuplicateSection,
     #[error("`{TEMPLATE_DEF_CUSTOM_SECTION}` custom section is too short ({len} bytes) to hold a length prefix")]
     SectionTooShort { len: usize },
     #[error("`{TEMPLATE_DEF_CUSTOM_SECTION}` declares length {declared} but the section is {actual} bytes")]
@@ -78,7 +84,7 @@ pub enum ExtractTemplateDefError {
 
 #[cfg(test)]
 mod tests {
-    use tari_template_abi::{ArgDef, FunctionDef, TemplateDef, TemplateDefV1, Type, version};
+    use tari_template_abi::{ArgDef, FunctionDef, FunctionKind, TemplateDef, TemplateDefV2, Type, version};
     use tari_template_builtin::all_builtin_templates;
 
     use super::*;
@@ -119,7 +125,7 @@ mod tests {
     }
 
     fn synthetic_template_def() -> TemplateDef {
-        TemplateDef::V1(TemplateDefV1 {
+        TemplateDef::V2(TemplateDefV2 {
             template_name: "Synthetic".to_string(),
             abi_version: version::LATEST_TEMPLATE_VERSION,
             functions: Vec::new(),
@@ -133,18 +139,17 @@ mod tests {
         const LEVELS: usize = 100_000;
 
         fn def_with_arg_type(arg_type: Type) -> TemplateDef {
-            TemplateDef::V1(TemplateDefV1 {
+            TemplateDef::V2(TemplateDefV2 {
                 template_name: "Synthetic".to_string(),
                 abi_version: version::LATEST_TEMPLATE_VERSION,
                 functions: vec![FunctionDef {
                     name: "f".to_string(),
+                    kind: FunctionKind::Function,
                     arguments: vec![ArgDef {
                         name: "a".to_string(),
                         arg_type,
                     }],
                     output: Type::Unit,
-                    is_mut: false,
-                    is_migration: false,
                 }],
             })
         }
@@ -200,6 +205,19 @@ mod tests {
     }
 
     #[test]
+    fn rejects_a_second_definition_section() {
+        let blob = synthetic_template_def().encode_for_wasm_embedding().expect("encode");
+        let mut wasm = make_wasm_with_custom_section(TEMPLATE_DEF_CUSTOM_SECTION, &blob);
+        let second = make_wasm_with_custom_section(TEMPLATE_DEF_CUSTOM_SECTION, &blob);
+        wasm.extend_from_slice(&second[8..]);
+
+        match extract_template_def(&wasm) {
+            Err(ExtractTemplateDefError::DuplicateSection) => {},
+            other => panic!("expected DuplicateSection, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn rejects_malformed_section_length() {
         // Length prefix declares more bytes than the section actually holds.
         let mut blob = vec![0u8; 16];
@@ -208,6 +226,26 @@ mod tests {
         match extract_template_def(&wasm) {
             Err(ExtractTemplateDefError::SectionLengthMismatch { .. }) => {},
             other => panic!("expected SectionLengthMismatch, got {:?}", other),
+        }
+
+        // Length prefix declares fewer bytes than the section actually holds.
+        let mut blob = synthetic_template_def().encode_for_wasm_embedding().expect("encode");
+        blob.push(0x00);
+        let wasm = make_wasm_with_custom_section(TEMPLATE_DEF_CUSTOM_SECTION, &blob);
+        match extract_template_def(&wasm) {
+            Err(ExtractTemplateDefError::SectionLengthMismatch { .. }) => {},
+            other => panic!("expected SectionLengthMismatch, got {:?}", other),
+        }
+
+        // Trailing CBOR bytes inside the declared section length are rejected.
+        let mut payload = tari_bor::encode(&synthetic_template_def()).expect("encode");
+        payload.push(0x00);
+        let mut blob = ((payload.len() + WASM_PTR_SIZE) as u32).to_le_bytes().to_vec();
+        blob.extend_from_slice(&payload);
+        let wasm = make_wasm_with_custom_section(TEMPLATE_DEF_CUSTOM_SECTION, &blob);
+        match extract_template_def(&wasm) {
+            Err(ExtractTemplateDefError::Decode(_)) => {},
+            other => panic!("expected Decode error for trailing bytes, got {:?}", other),
         }
     }
 }

@@ -243,8 +243,8 @@ pub(super) fn check_height(block: &Block) -> Result<(), ProposalValidationError>
     Ok(())
 }
 
-/// A block may only come from the effective leader of the view below it: the round-robin leader of
-/// that view, or - when that validator is suspended - the first validator after it that is not.
+/// A block may only come from the effective leader of the view below it: the leader strategy's leader
+/// of that view, or - when that validator is suspended - the first leader of a later view that is not.
 ///
 /// `skip_set` must be the one anchored on the block's justify, which is the state every node that
 /// can act on this block has committed.
@@ -312,6 +312,20 @@ pub(super) fn check_proposal_certificate<TConsensusSpec: ConsensusSpec>(
     committee: &Committee<TConsensusSpec::Addr>,
     signing_service: &TConsensusSpec::SignerService,
 ) -> Result<(), ProposalValidationError> {
+    check_justify_precedes_block(candidate_block)?;
+    check_quorum_certificate_signatures::<TConsensusSpec>(
+        network,
+        candidate_block.justify().into(),
+        committee,
+        signing_service,
+    )?;
+
+    Ok(())
+}
+
+/// Checks that the justify of `candidate_block` accepts a lower block of the same shard group. The shard group lies
+/// outside both the certificate id and the signed vote message, so the candidate block is what binds it.
+pub fn check_justify_precedes_block(candidate_block: &Block) -> Result<(), ProposalValidationError> {
     let qc = candidate_block.justify();
     if candidate_block.height() <= qc.height() {
         return Err(ProposalValidationError::CandidateBlockNotHigherThanJustify {
@@ -319,8 +333,24 @@ pub(super) fn check_proposal_certificate<TConsensusSpec: ConsensusSpec>(
             candidate_block_height: candidate_block.height(),
         });
     }
-
-    check_quorum_certificate_signatures::<TConsensusSpec>(network, qc.into(), committee, signing_service)?;
+    if qc.shard_group() != candidate_block.shard_group() {
+        return Err(ProposalValidationError::InvalidShardGroup {
+            block_id: *candidate_block.id(),
+            shard_group: qc.shard_group(),
+            details: format!(
+                "Justify QC shard group {} does not match candidate block shard group {}",
+                qc.shard_group(),
+                candidate_block.shard_group()
+            ),
+        });
+    }
+    if !qc.decision().is_accept() {
+        return Err(ProposalValidationError::JustifyBlockInvalid {
+            proposed_by: candidate_block.proposed_by().to_string(),
+            block_id: *candidate_block.id(),
+            details: format!("Justify QC has decision {}, expected Accept", qc.decision()),
+        });
+    }
 
     Ok(())
 }
@@ -424,15 +454,10 @@ pub fn check_quorum_certificate_signatures<TConsensusSpec: ConsensusSpec>(
     signing_service: &TConsensusSpec::SignerService,
 ) -> Result<(), ProposalValidationError> {
     // The "zero block" is the deterministic per-epoch genesis, known to every node without a vote, so a
-    // QC that justifies it is exempt from quorum/signature validation. Only a `ProposalCertificate` in
-    // canonical genesis shape (height zero, zero parent, zero header hash) qualifies for the exemption;
-    // everything else - including a `TimeoutCertificate` - falls through to the checks below.
-    if let Some(pc) = qc.as_proposal_certificate() &&
-        pc.height().is_zero() &&
-        *pc.signatures() == ProposalCertificate::genesis_signatures() &&
-        pc.justifies_zero_block() &&
-        pc.parent_id().is_zero()
-    {
+    // QC that justifies it is exempt from quorum/signature validation. Only a `ProposalCertificate` that
+    // satisfies `ProposalCertificate::justifies_zero_block` qualifies for the exemption; everything else -
+    // including a `TimeoutCertificate` - falls through to the checks below.
+    if qc.as_proposal_certificate().is_some_and(|pc| pc.justifies_zero_block()) {
         return Ok(());
     }
 
@@ -500,7 +525,7 @@ fn check_proposal_certificate_signatures<TConsensusSpec: ConsensusSpec>(
 /// activates a new scheme names it here.
 fn is_qc_signature_scheme_accepted(protocol_version: ProtocolVersion, signatures: &QcSignatures) -> bool {
     match (protocol_version, signatures) {
-        (ProtocolVersion::V0, QcSignatures::Schnorr { .. }) => true,
+        (ProtocolVersion::V0 | ProtocolVersion::V1, QcSignatures::Schnorr { .. }) => true,
     }
 }
 
@@ -548,7 +573,7 @@ fn check_timeout_certificate_signatures<TConsensusSpec: ConsensusSpec>(
 /// that activates a new scheme names it here.
 fn is_tc_signature_scheme_accepted(protocol_version: ProtocolVersion, signatures: &TcSignatures) -> bool {
     match (protocol_version, signatures) {
-        (ProtocolVersion::V0, TcSignatures::Schnorr { .. }) => true,
+        (ProtocolVersion::V0 | ProtocolVersion::V1, TcSignatures::Schnorr { .. }) => true,
     }
 }
 
@@ -737,7 +762,7 @@ mod tests {
     }
 
     #[test]
-    fn every_network_requires_v0_from_genesis() {
+    fn every_network_requires_its_scheduled_version() {
         for network in [
             Network::MainNet,
             Network::StageNet,
@@ -747,7 +772,14 @@ mod tests {
             Network::LocalNet,
         ] {
             for epoch in [Epoch(0), Epoch(1000)] {
-                assert!(!is_rejected(network, ProtocolVersion::V0, epoch), "{network} {epoch}");
+                let scheduled = ProtocolVersion::at(network, epoch);
+                for version in [ProtocolVersion::V0, ProtocolVersion::V1] {
+                    assert_eq!(
+                        is_rejected(network, version, epoch),
+                        version != scheduled,
+                        "{network} {epoch} {version}"
+                    );
+                }
             }
         }
     }

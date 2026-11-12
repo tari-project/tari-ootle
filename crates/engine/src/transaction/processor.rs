@@ -48,7 +48,7 @@ use tari_ootle_transaction::{
     call_arg,
     call_args,
 };
-use tari_template_abi::FunctionDef;
+use tari_template_abi::{FunctionDef, FunctionKind, Receiver};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args::{BucketAction, BucketGetAmountArg, BucketRef, WorkspaceAction},
@@ -82,6 +82,7 @@ use crate::{
         RuntimeInterfaceImpl,
         RuntimeModule,
         StateTracker,
+        reject_transient_values,
         scope::{CallScope, FrameWriteMode, PushCallFrame},
     },
     state_store::StateReader,
@@ -459,7 +460,7 @@ where
                 args,
             } => Self::call_function(template_provider, runtime, &template_address, &function, args, None).map(Some),
             Instruction::CallMethod { call, method, args } => {
-                Self::call_method(template_provider, runtime, call, &method, args, None).map(Some)
+                Self::call_method(template_provider, runtime, call, &method, args, None, None).map(Some)
             },
             // Basically names an output on the workspace so that you can refer to it as an
             // Arg::Variable
@@ -471,9 +472,9 @@ where
                 Self::drop_all_proofs_in_workspace(runtime)?;
                 Ok(None)
             },
-            Instruction::ClaimBurn { claim, output_data } => {
-                runtime.interface().claim_burn(*claim, output_data)?;
-                Ok(None)
+            Instruction::ClaimBurn { claim } => {
+                let bucket_id = runtime.interface().claim_burn(*claim)?;
+                Ok(Some(IndexedValue::from_type(&bucket_id)?))
             },
             Instruction::ClaimValidatorFees { address, max_amount } => {
                 let bucket_id = runtime.interface().claim_validator_fees(address, max_amount)?;
@@ -595,7 +596,7 @@ where
                         name: f.name.to_string(),
                     })
                     .and_then(|f| {
-                        if f.is_migration {
+                        if f.is_migration() {
                             Ok(f)
                         } else {
                             Err(TransactionErrorKind::NotAMigrationFunction { name: f.name.clone() })
@@ -826,7 +827,7 @@ where
 
                 if let Some(workspace_id) = workspace_id {
                     let args = call_args![WorkspaceOffset(workspace_id)];
-                    Self::invoke_component(template, runtime, component, ACCOUNT_DEPOSIT_METHOD, args, None)?;
+                    Self::invoke_component(template, runtime, component, ACCOUNT_DEPOSIT_METHOD, args, None, None)?;
                 }
 
                 // The instruction output is always the ComponentAddress
@@ -925,19 +926,21 @@ where
                     name: function.to_string(),
                 })?;
 
-        if function_def.is_migration {
-            return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
-                name: function_def.name.clone(),
-            });
-        }
-
-        // A method runs only in its component's frame, after the component's access rules. A static frame has
-        // neither, and carries the template's identity.
-        if function_def.has_receiver() {
-            return Err(TransactionErrorKind::MethodCalledAsFunction {
-                template_address: *template_address,
-                name: function_def.name.clone(),
-            });
+        match function_def.kind {
+            FunctionKind::Function => {},
+            FunctionKind::Migration { .. } => {
+                return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
+                    name: function_def.name.clone(),
+                });
+            },
+            // A method runs only in its component's frame, after the component's access rules. A static frame has
+            // neither, and carries the template's identity.
+            FunctionKind::Method(_) => {
+                return Err(TransactionErrorKind::MethodCalledAsFunction {
+                    template_address: *template_address,
+                    name: function_def.name.clone(),
+                });
+            },
         }
 
         let resolved_args = runtime.interface().resolve_args(None, &args)?;
@@ -945,6 +948,12 @@ where
             .iter()
             .map(IndexedWellKnownTypes::from_value)
             .collect::<Result<_, _>>()?;
+        // A read-only frame can neither use nor return a bucket, proof or address allocation. Its only caller is a
+        // spend script, whose bound arguments are committed in a UTXO's condition root and evaluated in a later
+        // transaction, so a transient handle in them can only name an object of the spending transaction.
+        if restrict_frame_to == Some(FrameWriteMode::ReadOnly) {
+            reject_transient_values("Read-only call arguments", &arg_scope)?;
+        }
         let frame = PushCallFrame::Static {
             template_address: *template_address,
             module_name: template.template_name().to_string(),
@@ -975,6 +984,7 @@ where
         method: &str,
         args: Vec<InstructionArg>,
         restrict_frame_to: Option<FrameWriteMode>,
+        arg_scope: Option<IndexedWellKnownTypes>,
     ) -> Result<IndexedValue, TransactionErrorKind> {
         let component = runtime.interface().load_component(call)?;
         let template_address = component.template_address;
@@ -993,9 +1003,11 @@ where
             .interface()
             .track_template_loaded(&template_address, template.code_size())?;
 
-        Self::invoke_component(template, runtime, component, method, args, restrict_frame_to)
+        Self::invoke_component(template, runtime, component, method, args, restrict_frame_to, arg_scope)
     }
 
+    /// Calls `method` on `component`. The callee frame's argument scope is `arg_scope` when given, and otherwise
+    /// every substate the resolved `args` name.
     fn invoke_component(
         template: LoadedTemplate,
         runtime: &Runtime,
@@ -1003,6 +1015,7 @@ where
         method: &str,
         args: Vec<InstructionArg>,
         restrict_frame_to: Option<FrameWriteMode>,
+        arg_scope: Option<IndexedWellKnownTypes>,
     ) -> Result<IndexedValue, TransactionErrorKind> {
         let template_def = template.shared_template_def();
         let function_def = template_def
@@ -1011,23 +1024,20 @@ where
                 name: method.to_string(),
             })?;
 
-        if function_def.is_migration {
-            return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
-                name: function_def.name.clone(),
-            });
-        }
-
-        if !function_def.has_receiver() {
-            return Err(TransactionErrorKind::FunctionCalledAsMethod {
-                component_address: component.address,
-                name: function_def.name.clone(),
-            });
-        }
-
-        let lock_flag = if function_def.is_mut {
-            LockFlag::Write
-        } else {
-            LockFlag::Read
+        let lock_flag = match function_def.kind {
+            FunctionKind::Method(Receiver::RefMut) => LockFlag::Write,
+            FunctionKind::Method(Receiver::Ref) => LockFlag::Read,
+            FunctionKind::Migration { .. } => {
+                return Err(TransactionErrorKind::CannotCallMigrationFunctionDirectly {
+                    name: function_def.name.clone(),
+                });
+            },
+            FunctionKind::Function => {
+                return Err(TransactionErrorKind::FunctionCalledAsMethod {
+                    component_address: component.address,
+                    name: function_def.name.clone(),
+                });
+            },
         };
 
         let component_lock = runtime.interface().lock_component(component.address, lock_flag)?;
@@ -1035,11 +1045,14 @@ where
         let resolved_args = runtime
             .interface()
             .resolve_args(Some(InstructionArg::from_type(&component.address)?), &args)?;
-        let arg_scope = resolved_args
-            .iter()
-            .skip(1)
-            .map(IndexedWellKnownTypes::from_value)
-            .collect::<Result<_, _>>()?;
+        let arg_scope = match arg_scope {
+            Some(arg_scope) => arg_scope,
+            None => resolved_args
+                .iter()
+                .skip(1)
+                .map(IndexedWellKnownTypes::from_value)
+                .collect::<Result<_, _>>()?,
+        };
 
         runtime.interface().push_call_frame(
             PushCallFrame::ForComponent {

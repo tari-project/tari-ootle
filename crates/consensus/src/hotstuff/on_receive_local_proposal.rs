@@ -10,6 +10,7 @@ use tari_consensus_types::{
     Decision,
     HighPc,
     LastSentVote,
+    LastVoted,
     PcId,
     ProposalCertificate,
     ProposalVote,
@@ -62,7 +63,12 @@ use crate::{
     messages::{ForeignProposalNotificationMessage, HotstuffMessage, ProposalMessage, VoteMessage},
     tracing::TraceTimer,
     traits::{CertificateStore, ConsensusSpec, OutboundMessaging, ValidatorSignerService, hooks::ConsensusHooks},
-    validations::{authenticate_foreign_proposal, check_proposed_by_leader, is_authenticated_commit_proof_stored},
+    validations::{
+        are_block_foreign_proposals_matched,
+        authenticate_foreign_proposal,
+        check_proposed_by_leader,
+        is_authenticated_commit_proof_stored,
+    },
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_receive_local_proposal";
@@ -73,7 +79,8 @@ pub struct OnReceiveLocalProposalHandler<TConsensusSpec: ConsensusSpec> {
     epoch_manager: TConsensusSpec::EpochManager,
     leader_strategy: TConsensusSpec::LeaderStrategy,
     pacemaker: PaceMakerHandle,
-    on_ready_to_vote_on_local_block: OnReadyToVoteOnLocalBlock<TConsensusSpec>,
+    on_ready_to_vote_on_local_block:
+        OnReadyToVoteOnLocalBlock<TConsensusSpec::StateStore, TConsensusSpec::TransactionExecutor>,
     change_set: Option<ProposedBlockChangeSet>,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     signing_service: TConsensusSpec::SignerService,
@@ -85,6 +92,16 @@ pub struct OnReceiveLocalProposalHandler<TConsensusSpec: ConsensusSpec> {
     /// until the local oracle observes the new epoch.
     pending_end_of_epoch: Option<PendingEndOfEpoch>,
     reported_divergence: ReportedDivergence,
+    unvoted_catch_up_block: Option<UnvotedCatchUpBlock>,
+}
+
+/// The most recent block processed from a catch-up delivery that this node would have voted on had it arrived as a
+/// proposal. Whether a block comes as a catch-up response is the sending peer's choice, so a proposal for the block
+/// that arrives afterwards still gets the vote.
+#[derive(Debug, Clone, Copy)]
+struct UnvotedCatchUpBlock {
+    block_id: BlockId,
+    decision: QuorumDecision,
 }
 
 #[derive(Debug, Clone)]
@@ -156,6 +173,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             change_set: None,
             pending_end_of_epoch: None,
             reported_divergence: ReportedDivergence::default(),
+            unvoted_catch_up_block: None,
         }
     }
 
@@ -195,6 +213,9 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         // to the stored tip: the node buffers all higher proposals as "future" and re-requests
         // catch-up forever. Making the re-entry idempotent — advancing to the view the stored block
         // justifies — lets the node recover. `enter_view` is monotonic, so this never rewinds.
+        //
+        // A proposal for a block first processed from a catch-up delivery also gets the vote that
+        // delivery withheld.
         let already_processed = self.store.with_read_tx(|tx| {
             if Block::record_exists(tx, block.id())? {
                 Ok::<_, HotStuffError>(Some(Block::get(tx, block.id())?))
@@ -211,6 +232,10 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             self.pacemaker
                 .enter_view(existing.epoch(), view_height, justify_height)
                 .await?;
+            if !origin.is_catch_up() {
+                self.vote_on_proposal_processed_through_catch_up(epoch_state, &existing)
+                    .await?;
+            }
             return Ok(None);
         }
 
@@ -230,6 +255,19 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             return Ok(None);
         };
 
+        if !self
+            .store
+            .with_read_tx(|tx| are_block_foreign_proposals_matched(tx, valid_block.block(), &foreign_proposals))?
+        {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️❌ Rejecting proposal for block {}: embedded foreign proposals do not match the block's \
+                 foreign proposal commands",
+                valid_block,
+            );
+            return Ok(None);
+        }
+
         if !self.are_foreign_proposals_authentic(&foreign_proposals).await? {
             // An unauthenticated proposal says nothing about its block id, so nothing is recorded against it, leaving
             // the block id free for the genuine proposal
@@ -241,7 +279,9 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             for foreign_proposal in foreign_proposals {
                 let mut foreign_proposal = ForeignProposalRecord::new(foreign_proposal);
                 if foreign_proposal.exists(&**tx)? {
-                    // This is expected behaviour, we may receive the same foreign proposal multiple times
+                    // This is expected behaviour, we may receive the same foreign proposal multiple times. A proposal
+                    // already marked invalid is refused at voting (`check_foreign_proposal_record`), so the block is
+                    // still stored and this node can follow the chain if the block is certified anyway.
                     debug!(
                         target: LOG_TARGET,
                         "FOREIGN PROPOSAL: Already received proposal for block {}",
@@ -253,7 +293,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
                 if let Err(err) = self.on_receive_foreign_proposal.validate_and_save(
                     tx,
-                    &foreign_proposal,
+                    &mut foreign_proposal,
                     epoch_state.local_committee_info(),
                 ) {
                     if let Some(err) = err.validation_error().filter(|err| err.rejects_message_not_block()) {
@@ -274,6 +314,19 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     }
                     error!(target: LOG_TARGET, "Error processing foreign proposal: {}", err);
                     return Err(err);
+                }
+            }
+
+            for fp_atom in valid_block.block().all_foreign_proposals() {
+                if !fp_atom.exists(&**tx)? {
+                    // The block id is left unmarked for another delivery of the block with its foreign proposals
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️❌ Rejecting delivery of block {}: foreign proposal {} has not been received",
+                        valid_block,
+                        fp_atom.block_id,
+                    );
+                    return Ok(false);
                 }
             }
 
@@ -304,6 +357,46 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 self.hooks.on_block_validation_failed(&err);
             }
         })
+    }
+
+    /// Casts the vote withheld from `block` when it was processed from a catch-up delivery, now that it has arrived
+    /// as a proposal. As for any proposal, the vote is only cast above the height this node last voted at.
+    async fn vote_on_proposal_processed_through_catch_up(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        block: &Block,
+    ) -> Result<(), HotStuffError> {
+        let Some(unvoted) = self
+            .unvoted_catch_up_block
+            .take_if(|unvoted| unvoted.block_id == *block.id())
+        else {
+            return Ok(());
+        };
+        if block.epoch() != epoch_state.epoch() {
+            return Ok(());
+        }
+        let last_voted = self
+            .store
+            .with_read_tx(|tx| LastVoted::get(tx, block.epoch()).optional())?;
+        if let Some(last_voted) = last_voted &&
+            block.height() <= last_voted.height()
+        {
+            debug!(
+                target: LOG_TARGET,
+                "Not voting on proposal {}: already voted at height {}",
+                block,
+                last_voted.height(),
+            );
+            return Ok(());
+        }
+
+        info!(
+            target: LOG_TARGET,
+            "🗳️ Voting on proposal {}, first processed from a catch-up delivery",
+            block,
+        );
+        self.vote_on_block(epoch_state.local_committee(), block, unvoted.decision)
+            .await
     }
 
     /// Foreign proposals embedded in a local proposal are relayed by the local leader rather than fetched from the
@@ -374,6 +467,11 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         let em_epoch = self.epoch_manager.current_epoch().await?;
         let is_epoch_end = valid_block.block().is_epoch_end();
+        let has_local_accept_abort = valid_block
+            .block()
+            .commands()
+            .iter()
+            .any(|cmd| cmd.local_accept().is_some_and(|atom| atom.decision.is_abort()));
 
         // Our own view of the next epoch, used by the voter to ratify what an EndEpoch block commits it to. The
         // boundary hash is `None` if we have not observed that boundary, and the validator set hash is `None` until
@@ -387,6 +485,12 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             let next_epoch = current_epoch + Epoch(1);
             LocalNextEpochView {
                 epoch_hash: self.epoch_manager.get_observed_epoch_hash(next_epoch).await?,
+                validator_set_hash: self.epoch_manager.get_validator_set_hash(next_epoch).await.optional()?,
+            }
+        } else if has_local_accept_abort && em_epoch <= current_epoch {
+            let next_epoch = current_epoch + Epoch(1);
+            LocalNextEpochView {
+                epoch_hash: None,
                 validator_set_hash: self.epoch_manager.get_validator_set_hash(next_epoch).await.optional()?,
             }
         } else {
@@ -403,11 +507,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         // such an abort or ends the epoch. A node that knows the next epoch's validator set has assigned its
         // committees, so it can tell their number; that covers every node able to vote for an EndEpoch, including one
         // whose oracle has not yet advanced past `current_epoch`.
-        let has_local_accept_abort = valid_block
-            .block()
-            .commands()
-            .iter()
-            .any(|cmd| cmd.local_accept().is_some_and(|atom| atom.decision.is_abort()));
         let knows_next_epoch_committees = em_epoch > current_epoch || local_next_epoch.validator_set_hash.is_some();
         let next_epoch_changes_layout = (has_local_accept_abort || is_epoch_end) &&
             knows_next_epoch_committees &&
@@ -440,6 +539,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     can_propose_epoch_end,
                     local_next_epoch,
                     next_epoch_changes_layout,
+                    origin,
                     &mut change_set,
                 )?;
 
@@ -467,7 +567,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         }
 
         // If accepted, the changeset is already saved, otherwise we log everything here for debugging
-        if !process_result.block_decision.is_accept() {
+        if !change_set.is_accept() {
             change_set.log_everything_dropped();
         }
         // Clear and reuse the memory allocated for changeset
@@ -521,9 +621,13 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             if origin.is_catch_up() {
                 debug!(
                     target: LOG_TARGET,
-                    "🌐 Not voting on {}: it arrived through catch-up, so the committee has already certified it",
+                    "🌐 Not voting on {}: it arrived through catch-up. A proposal for it later gets the vote.",
                     valid_block.block(),
                 );
+                self.unvoted_catch_up_block = Some(UnvotedCatchUpBlock {
+                    block_id: *valid_block.id(),
+                    decision,
+                });
             } else {
                 self.vote_on_block(local_committee, valid_block.block(), decision)
                     .await?;
@@ -737,6 +841,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     genesis.as_last_executed().set(tx)?;
                     genesis.as_last_voted().set(tx)?;
                     genesis.justify().as_high_pc().set(tx)?;
+                    genesis.commit_block_without_state_changes(tx, &genesis.justify().calculate_id())?;
                 }
 
                 Ok::<_, HotStuffError>(())
@@ -1204,8 +1309,8 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
     // The notification is gossiped on a single network-wide topic, so it only needs to be published once. The target
     // shard groups are carried in the message and receivers that are not in the audience ignore it.
     // TODO: all local VNs will broadcast this. Perhaps we can reduce this to $f+1$.
-    // The shard groups are sorted so that the encoded payload is deterministic: every local VN produces identical
-    // bytes for the same block, allowing gossipsub's content-addressed message id to deduplicate the broadcasts.
+    // Gossip message ids are scoped to the author, so each local VN's broadcast propagates separately and receivers
+    // deduplicate them by block id. The shard groups are sorted so that the encoded payload is deterministic.
     let mut shard_groups = non_local_shard_groups.into_iter().collect::<Vec<_>>();
     shard_groups.sort_by_key(|sg| sg.encode_as_u32());
     if let Err(err) = outbound_messaging

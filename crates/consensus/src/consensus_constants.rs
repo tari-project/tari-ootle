@@ -45,6 +45,16 @@ const MAX_TRANSACTION_SIZE_BYTES: usize = 1_310_720; // 1 MiB + 256 KiB
 /// A max-size substate with half a MiB to spare, so a transaction reading one is never aborted.
 const MAX_BLOCK_PLEDGE_BYTES: usize = 1536 * 1024;
 
+/// Four max-size substates. A transaction reading a few large substates is admitted, while the decoded state one
+/// transaction makes a validator hold stays within a few hundred MiB even for values that expand many times over
+/// when decoded.
+const MAX_TRANSACTION_INPUT_LOAD_BYTES: usize = 4 * 1024 * 1024;
+
+/// Four transactions at the per-transaction cap, or sixteen that each read a max-size substate. Decoding this much
+/// CBOR is a small fraction of the block time on validator hardware, and honest traffic — a few KiB of account,
+/// vault and resource state per transaction — stays far below it.
+const MAX_BLOCK_INPUT_LOAD_BYTES: usize = 16 * 1024 * 1024;
+
 /// Leaves 1.5 MiB of the 4 MiB transport frame for the local block the foreign proposals travel with. Nothing bounds
 /// a block's encoded size directly: the 1.5 MiB is an estimate of what `max_block_weight` and
 /// `max_commands_in_block` admit.
@@ -169,6 +179,27 @@ pub struct ConsensusConstants {
     /// never aborted. CONSENSUS RULE: must be uniform network-wide, otherwise nodes diverge on block
     /// validity and on which transactions abort.
     pub max_block_pledge_bytes: usize,
+    /// The most encoded bytes of input substates a shard group loads from its own state for any one transaction,
+    /// to execute it or to pledge them. A transaction's inputs are loaded, decoded and copied before its fee intent
+    /// runs, and a transaction whose fee intent fails pays nothing, so this is what bounds the work a transaction
+    /// can force on a validator without paying for it. The inputs are measured as they load and loading stops at
+    /// the first that takes the total past the cap; such a transaction is aborted, since no block could execute
+    /// it. Must admit a max-size substate (`limits::ENGINE_LIMITS.max_substate_size`) and at least
+    /// `max_block_pledge_bytes`, so that the pledge rule stays the one that decides a pledge. CONSENSUS RULE:
+    /// must be uniform network-wide, otherwise nodes diverge on which transactions abort.
+    pub max_transaction_input_load_bytes: usize,
+    /// The most encoded bytes of input substates a block may have a shard group load from its own state across
+    /// all of its transactions, counting every load, since each transaction decodes and copies its inputs anew.
+    /// A leader defers a transaction that would take the block past it, and a validator stops evaluating a block
+    /// at the first input that does and withholds its vote, so neither loads more than this for one block.
+    /// Must be at least `max_transaction_input_load_bytes`, so a transaction at the cap fits an empty block. A
+    /// leader counts the inputs of transactions it then leaves out of the block as well, so a validator never
+    /// counts more than the leader did for the same block. The loads of a transaction aborted for exceeding the
+    /// per-transaction cap count too, and the input that trips that cap is the one input not checked against this
+    /// budget first, so a block ends past this by at most one substate (`limits::ENGINE_LIMITS.max_substate_size`),
+    /// and only once: every later load is refused. CONSENSUS RULE: must be uniform network-wide, otherwise nodes
+    /// diverge on block validity.
+    pub max_block_input_load_bytes: usize,
     /// The most encoded bytes of foreign proposals a leader packs into a block that carries more than
     /// one. A local proposal travels with every foreign proposal it includes, in one message that must
     /// fit the transport's frame limit (4 MiB), so this must leave room for the block itself. That room
@@ -256,6 +287,8 @@ impl ConsensusConstants {
         max_block_shard_output_bytes: MAX_BLOCK_SHARD_OUTPUT_BYTES,
         max_block_validation_shard_output_bytes: MAX_BLOCK_VALIDATION_SHARD_OUTPUT_BYTES,
         max_block_pledge_bytes: MAX_BLOCK_PLEDGE_BYTES,
+        max_transaction_input_load_bytes: MAX_TRANSACTION_INPUT_LOAD_BYTES,
+        max_block_input_load_bytes: MAX_BLOCK_INPUT_LOAD_BYTES,
         max_block_foreign_proposal_bytes: MAX_BLOCK_FOREIGN_PROPOSAL_BYTES,
         max_block_validation_foreign_proposal_bytes: MAX_BLOCK_VALIDATION_FOREIGN_PROPOSAL_BYTES,
         exhaust_burn_rate: ExhaustBurnRate::new(500), // 5%
@@ -314,6 +347,8 @@ impl ConsensusConstants {
         max_block_shard_output_bytes: MAX_BLOCK_SHARD_OUTPUT_BYTES,
         max_block_validation_shard_output_bytes: MAX_BLOCK_VALIDATION_SHARD_OUTPUT_BYTES,
         max_block_pledge_bytes: MAX_BLOCK_PLEDGE_BYTES,
+        max_transaction_input_load_bytes: MAX_TRANSACTION_INPUT_LOAD_BYTES,
+        max_block_input_load_bytes: MAX_BLOCK_INPUT_LOAD_BYTES,
         max_block_foreign_proposal_bytes: MAX_BLOCK_FOREIGN_PROPOSAL_BYTES,
         max_block_validation_foreign_proposal_bytes: MAX_BLOCK_VALIDATION_FOREIGN_PROPOSAL_BYTES,
         exhaust_burn_rate: ExhaustBurnRate::new(10_000), // 100%
@@ -364,6 +399,8 @@ impl ConsensusConstants {
         max_block_shard_output_bytes: MAX_BLOCK_SHARD_OUTPUT_BYTES,
         max_block_validation_shard_output_bytes: MAX_BLOCK_VALIDATION_SHARD_OUTPUT_BYTES,
         max_block_pledge_bytes: MAX_BLOCK_PLEDGE_BYTES,
+        max_transaction_input_load_bytes: MAX_TRANSACTION_INPUT_LOAD_BYTES,
+        max_block_input_load_bytes: MAX_BLOCK_INPUT_LOAD_BYTES,
         max_block_foreign_proposal_bytes: MAX_BLOCK_FOREIGN_PROPOSAL_BYTES,
         max_block_validation_foreign_proposal_bytes: MAX_BLOCK_VALIDATION_FOREIGN_PROPOSAL_BYTES,
         exhaust_burn_rate: ExhaustBurnRate::new(500), // 5%
@@ -428,6 +465,8 @@ impl ConsensusConstants {
             max_block_shard_output_bytes: MAX_BLOCK_SHARD_OUTPUT_BYTES,
             max_block_validation_shard_output_bytes: MAX_BLOCK_VALIDATION_SHARD_OUTPUT_BYTES,
             max_block_pledge_bytes: MAX_BLOCK_PLEDGE_BYTES,
+            max_transaction_input_load_bytes: MAX_TRANSACTION_INPUT_LOAD_BYTES,
+            max_block_input_load_bytes: MAX_BLOCK_INPUT_LOAD_BYTES,
             max_block_foreign_proposal_bytes: MAX_BLOCK_FOREIGN_PROPOSAL_BYTES,
             max_block_validation_foreign_proposal_bytes: MAX_BLOCK_VALIDATION_FOREIGN_PROPOSAL_BYTES,
             exhaust_burn_rate: ExhaustBurnRate::new(500), // 5%
@@ -594,6 +633,27 @@ mod tests {
             );
             assert!(constants.max_block_foreign_proposal_bytes >= constants.max_block_pledge_bytes);
             assert!(constants.max_block_foreign_proposal_bytes + ESTIMATED_BLOCK_ROOM_BYTES <= FRAME_BYTES);
+        }
+    }
+
+    /// A transaction whose inputs alone are over the per-transaction load cap is aborted, so the cap must admit a
+    /// max-size substate with room for its id, and anything a shard group may pledge, so the pledge rule is the one
+    /// that decides a pledge. A leader defers a transaction that would take the block past the block budget, so a
+    /// transaction at the cap must fit an empty block.
+    #[test]
+    fn input_loads_admit_a_max_size_substate_and_fit_a_block() {
+        for constants in [
+            ConsensusConstants::mainnet(),
+            ConsensusConstants::devnet(7),
+            ConsensusConstants::esmeralda(),
+            ConsensusConstants::testnet(),
+        ] {
+            assert!(
+                constants.max_transaction_input_load_bytes >=
+                    tari_engine_types::limits::ENGINE_LIMITS.max_substate_size + 64 * 1024
+            );
+            assert!(constants.max_transaction_input_load_bytes >= constants.max_block_pledge_bytes);
+            assert!(constants.max_block_input_load_bytes >= constants.max_transaction_input_load_bytes);
         }
     }
 

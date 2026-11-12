@@ -48,9 +48,9 @@ variables; no config file needs to be mounted.
 docker run -d --name walletd \
   -v walletd-data:/data \
   -p 127.0.0.1:5100:5100 \
-  -e TARI_NETWORK=esmeralda \
+  -e TARI_NETWORK=mainnet \
   -e JRPC_LISTEN_ON=0.0.0.0:5100 \
-  -e OOTLE_WALLETD_INDEXER_API_URL=https://ootle-indexer-a.tari.com/,https://ootle-indexer-b.tari.com/ \
+  -e OOTLE_WALLETD_INDEXER_API_URL=https://indexer-a.ootle.tari.com/,https://indexer-b.ootle.tari.com/ \
   -e OOTLE_WALLETD_KEYRING_PASSWORD=<password> \
   ghcr.io/tari-project/ootle-walletd:vX.Y.Z
 
@@ -62,7 +62,7 @@ curl -fsS http://127.0.0.1:5100/health
 | `TARI_NETWORK` | `--network` | `esmeralda` | Network to join |
 | `TARI_BASE_DIR` | `--base-path` / `-b` | `/data` | Data directory; the wallet uses `<base>/<network>/` |
 | `JRPC_LISTEN_ON` | `--listen-on` | `127.0.0.1:5100` | JSON-RPC, web UI and `/health` listener. Set `0.0.0.0:<port>` only when something outside the container's network namespace must reach it (`docker run -p`, ECS `bridge` mode); see [Running headless in ECS](#running-headless-in-ecs) |
-| `OOTLE_WALLETD_INDEXER_API_URL` | `--indexer-api-url` / `-i` | the network preset (Esmeralda: the two public Tari indexers) | Comma-separated indexer URLs; one is picked at random, the rest are failovers |
+| `OOTLE_WALLETD_INDEXER_API_URL` | `--indexer-api-url` / `-i` | the network preset (Mainnet and Esmeralda: two public Tari indexers each) | Comma-separated indexer URLs; one is picked at random, the rest are failovers |
 | `OOTLE_WALLETD_KEYRING_PASSWORD` | `--override-keyring-password` | none | Password that encrypts the wallet seed. **Required in a container** |
 | `OOTLE_WALLETD_AUTHENTICATION` | `--authentication` | `webauthn` | `webauthn` or `none` |
 | `OOTLE_WALLETD_AUTO_CLAIM_BURNS` | `--auto-claim-burns` | `true` | Claim burn proofs found in the burn proof directory |
@@ -157,22 +157,38 @@ Both images get the same tags. Released tags follow `vX.Y.Z` semver. Pre-release
 
 ## Verifying signatures
 
-CI signs each pushed image by digest with cosign keyless signing (GitHub OIDC). Verify a release
-image against the release tag ref:
+CI pushes each image by digest, signs the digest with cosign keyless signing (GitHub OIDC), and
+only then points the tags at it. The signing certificate names the workflow ref the image was
+built from, so verify a release against the exact tag you mean to deploy, not a pattern: any
+release's signature would satisfy a pattern, so a tag moved to an older signed image would pass.
+
+Tags can be moved, so resolve the tag to a digest once, verify that digest, and deploy that same
+digest:
 
 ```bash
-cosign verify ghcr.io/tari-project/ootle-walletd:vX.Y.Z \
-  --certificate-identity-regexp '^https://github\.com/tari-project/tari-ootle/\.github/workflows/build_dockers\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' \
+VERSION=vX.Y.Z
+IMAGE=ghcr.io/tari-project/ootle-walletd
+DIGEST=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)
+
+cosign verify "$IMAGE@$DIGEST" \
+  --certificate-identity "https://github.com/tari-project/tari-ootle/.github/workflows/build_dockers.yml@refs/tags/$VERSION" \
   --certificate-github-workflow-trigger push \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+echo "$IMAGE@$DIGEST"   # deploy this reference
 ```
 
-and a `development` image against the branch:
+Verify a `development` image the same way, resolving the `development` tag and using the branch
+ref as the identity:
 
 ```bash
-cosign verify ghcr.io/tari-project/ootle-walletd:development \
+DIGEST=$(docker buildx imagetools inspect "$IMAGE:development" --format '{{json .Manifest}}' | jq -r .digest)
+cosign verify "$IMAGE@$DIGEST" \
   --certificate-identity https://github.com/tari-project/tari-ootle/.github/workflows/build_dockers.yml@refs/heads/development \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-Tags can be moved; in ECS, pin the image by the verified digest (`ootle-walletd@sha256:...`).
+In ECS, pin the image by the verified digest (`ootle-walletd@sha256:...`), never by tag alone. A
+`tag@sha256:...` reference is pulled by its digest, so verify the digest, not the tag. Where you
+need a particular source commit, also check the certificate's commit with
+`--certificate-github-workflow-sha <commit>`.

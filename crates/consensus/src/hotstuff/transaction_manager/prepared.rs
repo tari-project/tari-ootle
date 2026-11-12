@@ -15,6 +15,12 @@ pub enum PreparedTransaction {
         total_bytes: usize,
         max_bytes: usize,
     },
+    /// Loading the transaction's local inputs would take the block past the input bytes it may load. Nothing was
+    /// locked for it. A proposer defers the transaction; a validator withholds its vote from the block.
+    InputLoadBudgetReached {
+        total_bytes: usize,
+        max_bytes: usize,
+    },
     /// One or more of the transaction's declared local inputs are locked by another transaction in a way that no
     /// execution of it could lock alongside, and none of those inputs names a version. The lock status is always a
     /// deferrable conflict. The transaction was not executed and nothing was locked for it.
@@ -43,7 +49,7 @@ impl PreparedTransaction {
                 LocalPreparedTransaction::EarlyAbort { .. } => &DEFAULT_LOCK_STATUS,
             },
             Self::MultiShard(multishard) => &multishard.lock_status,
-            Self::PledgeBudgetReached { .. } => &DEFAULT_LOCK_STATUS,
+            Self::PledgeBudgetReached { .. } | Self::InputLoadBudgetReached { .. } => &DEFAULT_LOCK_STATUS,
             Self::InputsLocked { lock_status } => lock_status,
         }
     }
@@ -55,7 +61,7 @@ impl PreparedTransaction {
                 LocalPreparedTransaction::EarlyAbort { .. } => LockStatus::new(),
             },
             Self::MultiShard(multishard) => multishard.lock_status,
-            Self::PledgeBudgetReached { .. } => LockStatus::new(),
+            Self::PledgeBudgetReached { .. } | Self::InputLoadBudgetReached { .. } => LockStatus::new(),
             Self::InputsLocked { lock_status } => lock_status,
         }
     }

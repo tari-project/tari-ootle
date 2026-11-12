@@ -3,6 +3,7 @@
 
 use std::time::{Duration, Instant};
 
+use tari_engine_types::limits;
 use tari_ootle_transaction::{args, builder::named_args::NamedArg};
 use tari_template_lib::types::ComponentAddress;
 use tari_template_test_tooling::{ExecutionPoints, TemplateTest};
@@ -13,9 +14,13 @@ const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
 const N: u32 = 3_000;
 const TIMES: u32 = 40;
+/// How many times slower than the baseline a rewrite may run. Quadratic validation is about `N` times
+/// slower, so this bound catches it while leaving room for a loaded CI runner's wall-clock noise.
+const MAX_SLOWDOWN: u32 = 10;
 
 /// The fastest of a few runs, so that one run slowed by other work on the machine does not decide the
-/// comparison.
+/// comparison, with the call's execution points. The charge for decoding `args` is taken off the native
+/// points, so calls with different arguments compare by the work their state writes do.
 fn timed_call(
     test: &mut TemplateTest,
     component: ComponentAddress,
@@ -30,7 +35,18 @@ fn timed_call(
         })
         .min()
         .unwrap();
-    (fastest, test.last_execution_points())
+    let mut points = test.last_execution_points();
+    points.native -= args.iter().map(literal_arg_points).sum::<u64>();
+    (fastest, points)
+}
+
+fn literal_arg_points(arg: &NamedArg) -> u64 {
+    match arg {
+        NamedArg::Literal(bytes) => {
+            limits::engine_arg_points(bytes.len() as u64, tari_bor::count_data_items(bytes).unwrap())
+        },
+        _ => panic!("timed calls take literal arguments only"),
+    }
 }
 
 /// Rewrites a state of `N` references that the previous state already held, as the baseline the other
@@ -55,7 +71,7 @@ fn state_write_validation_is_linear_in_references() {
 
     assert_eq!(kept_points.native, replaced_points.native);
     assert!(
-        replaced_elapsed < kept_elapsed * 3,
+        replaced_elapsed < kept_elapsed * MAX_SLOWDOWN,
         "rewriting {N} references {TIMES} times took {replaced_elapsed:.2?} when every reference was new, against \
          {kept_elapsed:.2?} when none was, for the same charge"
     );
@@ -79,7 +95,7 @@ fn state_write_validation_is_linear_in_vaults() {
 
     assert_eq!(kept_points.native, reversed_points.native);
     assert!(
-        reversed_elapsed < kept_elapsed * 3,
+        reversed_elapsed < kept_elapsed * MAX_SLOWDOWN,
         "rewriting {N} vaults {TIMES} times took {reversed_elapsed:.2?}, against {kept_elapsed:.2?} for {N} resource \
          references"
     );

@@ -2,7 +2,6 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    cmp,
     collections::{HashMap, VecDeque},
     task::{Context, Poll},
 };
@@ -126,10 +125,17 @@ where TCodec: Codec + Send + Clone + 'static
 
                 sink
             },
-            None => match self.pending_outbound_dials.get(&peer_id) {
-                Some((sink, _)) => {
+            None => match self.pending_outbound_dials.get_mut(&peer_id) {
+                Some((sink, _)) if !sink.is_closed() => {
                     tracing::debug!("return a pending outbound dial {}", sink.stream_id());
                     sink.clone()
+                },
+                Some(pending_dial) => {
+                    let (sink, stream) = stream::channel(stream_id, peer_id);
+                    tracing::debug!("replace closed pending outbound dial stream with {stream_id}");
+                    *pending_dial = (sink.clone(), stream);
+                    self.next_outbound_stream_id();
+                    sink
                 },
                 None => {
                     let stream_id = self.next_outbound_stream_id();
@@ -202,7 +208,7 @@ where TCodec: Codec + Send + Clone + 'static
 
         if let Some(sink) = connection.pending_sink {
             self.pending_events
-                .push_back(ToSwarm::GenerateEvent(Event::InboundFailure {
+                .push_back(ToSwarm::GenerateEvent(Event::OutboundFailure {
                     peer_id,
                     stream_id: sink.stream_id(),
                     error: Error::ConnectionClosed,
@@ -253,7 +259,9 @@ where TCodec: Codec + Send + Clone + 'static
     ) {
         let mut connection = Connection::new(connection_id, remote_address);
 
-        if let Some((sink, stream)) = self.pending_outbound_dials.remove(&peer_id) {
+        if let Some((sink, stream)) = self.pending_outbound_dials.remove(&peer_id) &&
+            !sink.is_closed()
+        {
             connection.stream_id = Some(stream.stream_id());
             connection.pending_sink = Some(sink);
             handler.on_behaviour_event(stream);
@@ -402,8 +410,8 @@ impl<TMsg> Connections<TMsg> {
     }
 
     pub(self) fn next_active_sink(&mut self) -> Option<&MessageSink<TMsg>> {
-        let initial_last_selected = cmp::min(self.last_selected_index, self.connections.len() - 1);
-        let (last_index, sink) = cycle_once(self.connections.len(), initial_last_selected, |i| {
+        let start = self.sticky_start_index()?;
+        let (last_index, sink) = cycle_once(self.connections.len(), start, |i| {
             let conn = self
                 .connections
                 .get(i)
@@ -416,8 +424,8 @@ impl<TMsg> Connections<TMsg> {
     }
 
     pub(self) fn next_pending_sink(&mut self) -> Option<&MessageSink<TMsg>> {
-        let initial_last_selected = cmp::min(self.last_selected_index, self.connections.len() - 1);
-        let (last_index, sink) = cycle_once(self.connections.len(), initial_last_selected, |i| {
+        let start = self.sticky_start_index()?;
+        let (last_index, sink) = cycle_once(self.connections.len(), start, |i| {
             let conn = self
                 .connections
                 .get(i)
@@ -427,6 +435,13 @@ impl<TMsg> Connections<TMsg> {
 
         self.last_selected_index = last_index;
         Some(sink)
+    }
+
+    /// The search for a sink starts at the last selected connection so that consecutive messages share one stream and
+    /// keep their order. The index is clamped because connections may have closed since it was recorded.
+    fn sticky_start_index(&self) -> Option<usize> {
+        let last = self.connections.len().checked_sub(1)?;
+        Some(self.last_selected_index.min(last))
     }
 
     /// Forgets streams whose handler task has ended so that the next message opens a new stream on the connection.
@@ -452,32 +467,18 @@ impl<TMsg> Default for Connections<TMsg> {
 
 fn cycle_once<T, F>(n: usize, start: usize, mut f: F) -> Option<(usize, T)>
 where F: FnMut(usize) -> Option<T> {
-    let mut did_wrap = false;
-    let mut i = start;
-    if n == 0 {
-        return None;
-    }
-    if i >= n {
+    if n == 0 || start >= n {
         return None;
     }
 
-    loop {
-        // Did we find a value?
+    for offset in 0..n {
+        let i = (start + offset) % n;
         if let Some(t) = f(i) {
             return Some((i, t));
         }
-
-        // Are we back at where we started?
-        if did_wrap && i == start {
-            return None;
-        }
-
-        i = (i + 1) % n;
-        // Did we wrap around?
-        if i == 0 {
-            did_wrap = true;
-        }
     }
+
+    None
 }
 
 #[cfg(test)]
@@ -528,6 +529,35 @@ mod tests {
     }
 
     #[test]
+    fn consecutive_sink_selections_stay_on_one_connection() {
+        let peer_id = PeerId::random();
+        let mut connections = Connections::<Vec<u8>>::new();
+        let mut streams = Vec::new();
+        for id in 0..2 {
+            let mut connection = Connection::new(ConnectionId::new_unchecked(id), None);
+            let (sink, stream) = stream::channel(id as StreamId, peer_id);
+            connection.stream_id = Some(sink.stream_id());
+            connection.message_sink = Some(sink.clone());
+            connection.pending_sink = Some(sink);
+            connections.push(connection);
+            streams.push(stream);
+        }
+
+        let first = connections.next_active_sink().unwrap().stream_id();
+        assert_eq!(connections.next_active_sink().unwrap().stream_id(), first);
+        assert_eq!(connections.next_pending_sink().unwrap().stream_id(), first);
+
+        // The selected connection closes, leaving the recorded index past the end.
+        connections.last_selected_index = 1;
+        connections.connections.pop();
+        assert_eq!(connections.next_active_sink().unwrap().stream_id(), 0);
+
+        connections.connections.clear();
+        assert!(connections.next_active_sink().is_none());
+        assert!(connections.next_pending_sink().is_none());
+    }
+
+    #[test]
     fn cycle_once_works() {
         assert_eq!(cycle_once(0, 0, |_| -> Option<()> { panic!() }), None);
         assert_eq!(cycle_once(1, 0, Some), Some((0, 0)));
@@ -540,6 +570,70 @@ mod tests {
         assert_eq!(
             cycle_once(10, 2, |i| { if i == 1 { Some(()) } else { None } }),
             Some((1, ()))
+        );
+
+        let mut visited = Vec::new();
+        assert_eq!(
+            cycle_once(4, 2, |i| {
+                visited.push(i);
+                None::<()>
+            }),
+            None
+        );
+        assert_eq!(visited, vec![2, 3, 0, 1]);
+    }
+
+    #[test]
+    fn closed_pending_dial_channel_is_replaced_without_a_second_dial() {
+        let mut behaviour = Behaviour::<TestCodec>::new(StreamProtocol::new("/test/1"), Config::default());
+        let peer_id = PeerId::random();
+        let mut cx = Context::from_waker(Waker::noop());
+
+        let first_sink = behaviour.obtain_message_channel(peer_id);
+        assert!(matches!(poll_event(&mut behaviour), ToSwarm::Dial { .. }));
+        assert!(behaviour.poll(&mut cx).is_pending());
+
+        // Close the pending dial's stream while the dial is still in flight.
+        behaviour.pending_outbound_dials.get_mut(&peer_id).unwrap().1.close();
+        assert!(first_sink.is_closed());
+
+        // Sending a new message while the dial is in flight must succeed on a fresh channel without re-dialing.
+        behaviour.send_message(peer_id, b"hello".to_vec()).unwrap();
+        assert!(
+            behaviour.poll(&mut cx).is_pending(),
+            "replacing a closed pending dial stream must not emit a duplicate Dial"
+        );
+
+        let connection_id = ConnectionId::new_unchecked(1);
+        let addr: Multiaddr = "/memory/1".parse().unwrap();
+        let mut handler = behaviour
+            .handle_established_outbound_connection(connection_id, peer_id, &addr, Endpoint::Dialer, PortUse::Reuse)
+            .unwrap();
+        assert!(matches!(
+            handler.poll(&mut cx),
+            Poll::Ready(libp2p::swarm::ConnectionHandlerEvent::OutboundSubstreamRequest { protocol })
+                if *protocol.info() != first_sink.stream_id()
+        ));
+    }
+
+    #[test]
+    fn closed_pending_dial_channel_is_not_opened_when_connection_establishes() {
+        let mut behaviour = Behaviour::<TestCodec>::new(StreamProtocol::new("/test/1"), Config::default());
+        let peer_id = PeerId::random();
+        let mut cx = Context::from_waker(Waker::noop());
+
+        let _sink = behaviour.obtain_message_channel(peer_id);
+        assert!(matches!(poll_event(&mut behaviour), ToSwarm::Dial { .. }));
+        behaviour.pending_outbound_dials.get_mut(&peer_id).unwrap().1.close();
+
+        let connection_id = ConnectionId::new_unchecked(1);
+        let addr: Multiaddr = "/memory/1".parse().unwrap();
+        let mut handler = behaviour
+            .handle_established_outbound_connection(connection_id, peer_id, &addr, Endpoint::Dialer, PortUse::Reuse)
+            .unwrap();
+        assert!(
+            handler.poll(&mut cx).is_pending(),
+            "a closed pending dial stream should not open an outbound substream when the connection establishes"
         );
     }
 }

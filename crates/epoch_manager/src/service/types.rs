@@ -20,7 +20,7 @@ use tari_state_tree::ValidatorSetCommitteeProof;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::oneshot;
 
-use crate::{error::EpochManagerError, service::NetworkDescription};
+use crate::{PendingActivation, error::EpochManagerError, service::NetworkDescription};
 
 type Reply<T> = oneshot::Sender<Result<T, EpochManagerError>>;
 
@@ -138,5 +138,8 @@ pub enum EpochManagerRequest<TAddr> {
     },
     GetBirthdayEpoch {
         reply: Reply<Option<Epoch>>,
+    },
+    GetPendingActivation {
+        reply: Reply<Option<PendingActivation>>,
     },
 }

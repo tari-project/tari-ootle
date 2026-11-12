@@ -97,7 +97,7 @@ where TConsensusSpec: ConsensusSpec
             .await;
 
         match result {
-            Ok(Some((quorum_votes, _))) => {
+            Ok(Some(quorum_votes)) => {
                 let new_tc =
                     create_timeout_certificate(epoch_state.local_committee(), current_epoch, height, &quorum_votes)?;
                 let high_tc = self.store.with_write_tx(|tx| new_tc.update_highest(tx))?;

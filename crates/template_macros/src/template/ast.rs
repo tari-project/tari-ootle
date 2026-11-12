@@ -23,7 +23,6 @@
 use std::fmt::{Debug, Formatter};
 
 use proc_macro2::Span;
-use quote::ToTokens;
 use syn::{
     Error,
     Field,
@@ -124,8 +123,15 @@ impl TemplateAst {
                     }
                 },
                 Item::Impl(impl_item) => {
-                    if let Type::Path(path) = &*impl_item.self_ty {
-                        let template_name_ref = template_name.as_ref().expect("struct not defined before impl");
+                    if impl_item.trait_.is_none() &&
+                        let Type::Path(path) = &*impl_item.self_ty
+                    {
+                        let Some(template_name_ref) = template_name.as_ref() else {
+                            return Err(Error::new(
+                                impl_item.span(),
+                                "template struct must be defined before its impl block",
+                            ));
+                        };
                         if path.path.is_ident(template_name_ref) {
                             for impl_item_mut in &mut impl_item.items {
                                 if let Some(func) = Self::get_function_from_item(impl_item_mut) {
@@ -367,9 +373,26 @@ fn has_explicit_cbor_index<'a, I: IntoIterator<Item = &'a syn::Attribute>>(attrs
             return true;
         }
         if attr.path().is_ident("cbor") {
-            // Crude but effective: parse the tokens and look for `n(...)` or `b(...)`.
-            let s = attr.to_token_stream().to_string();
-            if s.contains("n (") || s.contains("b (") {
+            let mut found = false;
+            // minicbor's derive reports malformed `cbor(..)` attributes, so a parse error here only
+            // stops the scan.
+            let _parse_result = attr.parse_nested_meta(|meta| {
+                if meta.input.peek(syn::token::Paren) {
+                    if meta.path.is_ident("n") || meta.path.is_ident("b") {
+                        found = true;
+                    }
+                    let content;
+                    syn::parenthesized!(content in meta.input);
+                    content.parse::<proc_macro2::TokenStream>()?;
+                } else if meta.input.peek(syn::Token![=]) {
+                    meta.input.parse::<syn::Token![=]>()?;
+                    meta.input.parse::<syn::Expr>()?;
+                } else {
+                    // Flag item such as `skip` or `transparent`.
+                }
+                Ok(())
+            });
+            if found {
                 return true;
             }
         }
@@ -445,7 +468,7 @@ impl TemplateAst {
                     is_migration: m.attrs.iter().any(|attr| attr.path().is_ident("migration")),
                 })
             },
-            _ => todo!("get_function_from_item does not support anything other than functions/methods"),
+            _ => None,
         }
     }
 
@@ -530,15 +553,6 @@ pub struct FunctionAst {
     // pub is_public: bool,
 }
 
-impl FunctionAst {
-    /// Returns true if the any argument is a &mut Self receiver
-    pub fn is_mut(&self) -> bool {
-        self.input_types
-            .iter()
-            .any(|t| matches!(t, TypeAst::Receiver { mutability: true }))
-    }
-}
-
 pub enum TypeAst {
     Receiver {
         mutability: bool,
@@ -562,6 +576,39 @@ impl Debug for TypeAst {
                 write!(f, "Tuple {{ name: {:?}, type_tuple: {:?} }}", name, type_tuple)
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod cbor_index_tests {
+    use syn::{Attribute, parse_quote};
+
+    use super::has_explicit_cbor_index;
+
+    fn detects(attr: Attribute) -> bool {
+        has_explicit_cbor_index([&attr])
+    }
+
+    #[test]
+    fn detects_bare_index_attributes() {
+        assert!(detects(parse_quote!(#[n(3)])));
+        assert!(detects(parse_quote!(#[b(3)])));
+    }
+
+    #[test]
+    fn detects_nested_cbor_index() {
+        assert!(detects(parse_quote!(#[cbor(n(7))])));
+        assert!(detects(parse_quote!(#[cbor(b(1))])));
+        assert!(detects(parse_quote!(#[cbor(with = "codec", n(2))])));
+    }
+
+    #[test]
+    fn ignores_cbor_attributes_without_an_index() {
+        assert!(!detects(parse_quote!(#[cbor(encode_with = "f")])));
+        assert!(!detects(parse_quote!(#[cbor(skip)])));
+        assert!(!detects(parse_quote!(#[cbor(tag(42))])));
+        // A bound string mentioning `Fn (..)` is a literal, not an index item.
+        assert!(!detects(parse_quote!(#[cbor(decode_bound = "T: Fn (u8)")])));
     }
 }
 
@@ -601,8 +648,13 @@ mod stateless_tests {
         assert_eq!(ast.functions.len(), 2);
         assert_eq!(ast.functions[0].name, "add");
         assert_eq!(ast.functions[1].name, "mul");
-        // No function touches `self`, so none is mutable.
-        assert!(ast.functions.iter().all(|f| !f.is_mut()));
+        // A stateless template has no component, so no function takes a receiver.
+        assert!(
+            ast.functions
+                .iter()
+                .flat_map(|f| &f.input_types)
+                .all(|t| !matches!(t, super::TypeAst::Receiver { .. }))
+        );
     }
 
     #[test]

@@ -43,7 +43,11 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::{
     AtomicDb,
-    global::{GlobalDb, MetadataKey, models::ValidatorNode},
+    global::{
+        GlobalDb,
+        MetadataKey,
+        models::{ShardGroupSize, ValidatorNode},
+    },
 };
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_sidechain::FixedHash;
@@ -94,6 +98,10 @@ where TSpec: EpochManagerSpec
 
     pub fn config(&self) -> &EpochManagerConfig {
         &self.config
+    }
+
+    pub fn node_public_key(&self) -> &RistrettoPublicKeyBytes {
+        &self.node_public_key
     }
 
     pub fn load_initial_state(&mut self) -> Result<(), EpochManagerError> {
@@ -396,23 +404,30 @@ where TSpec: EpochManagerSpec
         epoch: Epoch,
         substate_address: SubstateAddress,
     ) -> Result<Committee<TSpec::Addr>, EpochManagerError> {
-        let num_vns = self.get_total_validator_count(epoch)?;
-        if num_vns == 0 {
+        let num_committees = self.get_number_of_committees(epoch)?;
+        let shard_group = substate_address.to_shard_group(self.config.num_preshards, num_committees);
+
+        let mut tx = self.global_db.create_transaction()?;
+        let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
+        let committee = validator_node_db.get_committee_for_shard_group(epoch, shard_group, usize::MAX)?;
+        if committee.is_empty() {
             return Err(EpochManagerError::NoCommitteeVns {
                 substate_address,
                 epoch,
             });
         }
-
-        let num_committees = calculate_num_committees(num_vns, self.config.committee_size);
-        let shard_group = substate_address.to_shard_group(self.config.num_preshards, num_committees);
-
-        let committee = self.get_committee_for_shard_group(epoch, shard_group, None)?;
         Ok(committee)
     }
 
     pub fn get_number_of_committees(&self, epoch: Epoch) -> Result<u32, EpochManagerError> {
-        let num_vns = self.get_total_validator_count(epoch)?;
+        let mut tx = self.global_db.create_transaction()?;
+        let leaves = self.global_db.epochs(&mut tx).get_validator_set_leaves(epoch)?;
+        if !leaves.is_empty() {
+            return u32::try_from(leaves.len()).map_err(|_| EpochManagerError::IntegerOverflow {
+                func: "get_number_of_committees",
+            });
+        }
+        let num_vns = self.global_db.validator_nodes(&mut tx).count(epoch)?;
         Ok(calculate_num_committees(num_vns, self.config.committee_size))
     }
 
@@ -448,10 +463,7 @@ where TSpec: EpochManagerSpec
     }
 
     pub fn get_num_committees(&self, epoch: Epoch) -> Result<u32, EpochManagerError> {
-        let total_vns = self.get_total_validator_count(epoch)?;
-        let committee_size = self.config.committee_size;
-        let num_committees = calculate_num_committees(total_vns, committee_size);
-        Ok(num_committees)
+        self.get_number_of_committees(epoch)
     }
 
     pub fn get_committee_info_for_substate(
@@ -472,11 +484,11 @@ where TSpec: EpochManagerSpec
         let num_committees = self.get_number_of_committees(epoch)?;
         let mut tx = self.global_db.create_transaction()?;
         let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
-        let num_validators = validator_node_db.count_in_shard_group(epoch, shard_group)?;
-        // NOTE: currently each validator has a vote power of 1, so the total vote power is equal to the number of
-        // validators. This may change in the future if e.g. we introduce staking.
-        let total_vote_power = VotePower::of(num_validators);
-        let num_validators = u32::try_from(num_validators).map_err(|_| EpochManagerError::IntegerOverflow {
+        let ShardGroupSize {
+            num_members,
+            total_power,
+        } = validator_node_db.size_of_shard_group(epoch, shard_group)?;
+        let num_validators = u32::try_from(num_members).map_err(|_| EpochManagerError::IntegerOverflow {
             func: "get_committee_info",
         })?;
         Ok(CommitteeInfo::new(
@@ -485,7 +497,7 @@ where TSpec: EpochManagerSpec
             num_committees,
             shard_group,
             epoch,
-            total_vote_power,
+            total_power,
         ))
     }
 
@@ -652,6 +664,10 @@ mod tests {
     }
 
     fn register(manager: &EpochManager<TestSpec>, byte: u8, start_epoch: Epoch) {
+        register_with_power(manager, byte, start_epoch, VotePower::of(1));
+    }
+
+    fn register_with_power(manager: &EpochManager<TestSpec>, byte: u8, start_epoch: Epoch, power: VotePower) {
         let mut tx = manager.global_db.create_transaction().unwrap();
         manager
             .global_db
@@ -662,10 +678,50 @@ mod tests {
                 SubstateAddress::from_array([byte; SubstateAddress::LENGTH]),
                 start_epoch,
                 public_key(byte),
-                VotePower::of(1),
+                power,
             )
             .unwrap();
         tx.commit().unwrap();
+    }
+
+    #[test]
+    fn committee_total_power_is_the_member_count_when_every_power_is_one() {
+        let mut manager = create_epoch_manager();
+        for byte in 1..=7 {
+            register(&manager, byte, Epoch(1));
+        }
+        manager.advance_to_epoch(Epoch(2), FixedHash::zero()).unwrap();
+
+        let info = manager
+            .get_committee_info(Epoch(2), ShardGroup::all_shards(NumPreshards::P256))
+            .unwrap();
+        assert_eq!(info.num_shard_group_members(), 7);
+        assert_eq!(info.total_power(), VotePower::of(7));
+        assert_eq!(info.max_failures(), VotePower::of(2));
+        assert_eq!(info.quorum_threshold(), VotePower::of(5));
+    }
+
+    #[test]
+    fn committee_total_power_sums_member_power() {
+        let mut manager = create_epoch_manager();
+        for (byte, power) in [(1, 1), (2, 2), (3, 3), (4, 5)] {
+            register_with_power(&manager, byte, Epoch(1), VotePower::of(power));
+        }
+        manager.advance_to_epoch(Epoch(2), FixedHash::zero()).unwrap();
+
+        let all_shards = ShardGroup::all_shards(NumPreshards::P256);
+        let info = manager.get_committee_info(Epoch(2), all_shards).unwrap();
+        assert_eq!(info.num_shard_group_members(), 4);
+        assert_eq!(info.total_power(), VotePower::of(11));
+        // n - (n - 1) / 3 over power: 11 - 3
+        assert_eq!(info.max_failures(), VotePower::of(3));
+        assert_eq!(info.quorum_threshold(), VotePower::of(8));
+
+        let committee = manager
+            .get_committee_for_shard_group(Epoch(2), all_shards, None)
+            .unwrap();
+        assert_eq!(committee.total_power(), info.total_power());
+        assert_eq!(committee.quorum_threshold(), info.quorum_threshold());
     }
 
     /// A second assignment for an epoch must leave exactly the validators registered for it at that point: a
@@ -795,5 +851,49 @@ mod tests {
             .get_validator_set_committee_proof(Epoch(2), ShardGroup::new(0u32, 127u32))
             .unwrap_err();
         assert!(err.is_not_found_error(), "{err}");
+    }
+
+    #[test]
+    fn assigned_epoch_committee_count_and_substate_routing_are_preserved_across_later_registration_changes() {
+        let mut manager = create_epoch_manager();
+        for byte in 1..=10 {
+            register(&manager, byte, Epoch(2));
+        }
+        manager.advance_to_epoch(Epoch(2), FixedHash::zero()).unwrap();
+        manager.lock_epoch(Epoch(2)).unwrap();
+
+        for byte in 11..=20 {
+            register(&manager, byte, Epoch(2));
+        }
+
+        assert_eq!(manager.get_num_committees(Epoch(2)).unwrap(), 1);
+        assert_eq!(manager.get_num_committees(Epoch(3)).unwrap(), 2);
+
+        let substate_addr = SubstateAddress::zero();
+        let committee = manager.get_committee_for_substate(Epoch(2), substate_addr).unwrap();
+        assert_eq!(committee.len(), 10);
+
+        let info = manager
+            .get_committee_info_for_substate(Epoch(2), substate_addr)
+            .unwrap();
+        assert_eq!(info.num_committees(), 1);
+        assert_eq!(info.num_shard_group_members(), 10);
+
+        let net_desc = manager.get_network_description().unwrap();
+        assert_eq!(net_desc.num_committees(), 1);
+
+        for byte in 1..=20 {
+            manager.deactivate_validator_node(public_key(byte), Epoch(2)).unwrap();
+        }
+        let committee = manager.get_committee_for_substate(Epoch(2), substate_addr).unwrap();
+        assert_eq!(committee.len(), 10);
+
+        assert!(matches!(
+            manager.get_committee_for_substate(Epoch(5), substate_addr),
+            Err(EpochManagerError::NoCommitteeVns {
+                substate_address,
+                epoch: Epoch(5),
+            }) if substate_address == substate_addr
+        ));
     }
 }

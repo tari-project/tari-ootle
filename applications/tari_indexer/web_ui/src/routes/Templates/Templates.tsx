@@ -74,20 +74,27 @@ function formatType(type: Type): string {
   if ("Other" in type) {
     return (type as { Other: { name: string } }).Other.name;
   }
+  if ("WellKnown" in type) {
+    return (type as { WellKnown: string }).WellKnown;
+  }
   return JSON.stringify(type);
 }
 
-function formatSelfParam(func: FunctionDef): string {
-  const hasSelf = func.arguments.some((arg) => arg.name === "self");
-  if (!hasSelf) return "";
-  return func.is_mut ? "&mut self" : "&self";
+function isMethod(func: FunctionDef): boolean {
+  return typeof func.kind === "object" && "Method" in func.kind;
 }
 
-function formatSignature(func: FunctionDef, isMethod: boolean): React.ReactNode {
-  const selfParam = isMethod ? formatSelfParam(func) : "";
-  const visibleArgs = func.arguments.filter((arg) => arg.name !== "self");
-  const argParts = visibleArgs.map((a) => `${a.name}: ${formatType(a.arg_type)}`);
-  if (selfParam) argParts.unshift(selfParam);
+function formatLeadingParam(func: FunctionDef): string {
+  const kind = func.kind;
+  if (kind === "Function") return "";
+  if ("Method" in kind) return kind.Method === "RefMut" ? "&mut self" : "&self";
+  return `from: ${formatType(kind.Migration.from)}`;
+}
+
+function formatSignature(func: FunctionDef): React.ReactNode {
+  const leadingParam = formatLeadingParam(func);
+  const argParts = func.arguments.map((a) => `${a.name}: ${formatType(a.arg_type)}`);
+  if (leadingParam) argParts.unshift(leadingParam);
   const params = argParts.join(", ");
   const output = formatType(func.output);
 
@@ -99,7 +106,7 @@ function formatSignature(func: FunctionDef, isMethod: boolean): React.ReactNode 
   );
 }
 
-function FunctionList({ functions, isMethod }: { functions: FunctionDef[]; isMethod: boolean }) {
+function FunctionList({ functions }: { functions: FunctionDef[] }) {
   return (
     <Stack spacing={0.5}>
       {functions.map((func) => (
@@ -112,7 +119,7 @@ function FunctionList({ functions, isMethod }: { functions: FunctionDef[]; isMet
             px: 1,
           }}
         >
-          {formatSignature(func, isMethod)}
+          {formatSignature(func)}
         </Box>
       ))}
     </Stack>
@@ -124,29 +131,28 @@ function TemplateDetails({ data }: { data: any }) {
   // but the JS client types it as { template_definition: TemplateDef }.
   // Handle both shapes.
   const definition = data.definition || data.template_definition;
-  const name = data.name || definition?.V1?.template_name;
+  const name = data.name || definition?.V2?.template_name;
   const codeSize = data.code_size;
 
   if (!definition) {
     return <Alert severity="warning">No template definition found in response.</Alert>;
   }
 
-  const defV1 = definition.V1;
-  if (!defV1) {
+  const def = definition.V2;
+  if (!def) {
     return <Alert severity="warning">Unsupported template definition version.</Alert>;
   }
 
-  const allFunctions = defV1.functions || [];
-  const isSelfParam = (arg: { name: string }) => arg.name === "self";
-  const methods = allFunctions.filter((f: FunctionDef) => f.arguments.some(isSelfParam));
-  const functions = allFunctions.filter((f: FunctionDef) => !f.arguments.some(isSelfParam));
+  const allFunctions = def.functions || [];
+  const methods = allFunctions.filter(isMethod);
+  const functions = allFunctions.filter((f: FunctionDef) => !isMethod(f));
 
   return (
     <Stack spacing={3}>
       <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
         <Typography variant="h6">{name}</Typography>
         {codeSize != null && <Chip label={`${(codeSize / 1024).toFixed(1)} KB`} size="small" variant="outlined" />}
-        <Chip label={`ABI v${defV1.abi_version}`} size="small" variant="outlined" />
+        <Chip label={`ABI v${def.abi_version}`} size="small" variant="outlined" />
       </Box>
 
       <Divider />
@@ -154,14 +160,14 @@ function TemplateDetails({ data }: { data: any }) {
       {functions.length > 0 && (
         <>
           <Typography variant="subtitle2">Functions ({functions.length})</Typography>
-          <FunctionList functions={functions} isMethod={false} />
+          <FunctionList functions={functions} />
         </>
       )}
 
       {methods.length > 0 && (
         <>
           <Typography variant="subtitle2">Methods ({methods.length})</Typography>
-          <FunctionList functions={methods} isMethod={true} />
+          <FunctionList functions={methods} />
         </>
       )}
     </Stack>

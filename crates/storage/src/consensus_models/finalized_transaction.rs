@@ -83,6 +83,7 @@ mod tests {
             transaction_fee: 0,
             leader_fee: None,
             fee_intent_only: false,
+            locked_epoch: crate::consensus_models::LockedEpoch::zero(),
         }
     }
 

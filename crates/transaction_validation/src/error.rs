@@ -22,6 +22,15 @@ pub enum TransactionValidationError {
     TemplateNotFound { address: TemplateAddress },
     #[error("{transaction_id} has no fee instructions")]
     NoFeeInstructions { transaction_id: TransactionId },
+    #[error("{transaction_id} has no fee instruction that can pay a fee")]
+    NoFeePaymentInFeeInstructions { transaction_id: TransactionId },
+    #[error(
+        "{transaction_id} fee instruction {index} is not permitted in the fee intent; move it to the main instructions"
+    )]
+    DisallowedFeeInstruction {
+        transaction_id: TransactionId,
+        index: usize,
+    },
     #[error("Output substate exists in transaction {transaction_id}")]
     OutputSubstateExists { transaction_id: TransactionId },
     #[error("Validator fee claim instruction in transaction {transaction_id} contained invalid epoch {given_epoch}")]
@@ -29,6 +38,8 @@ pub enum TransactionValidationError {
         transaction_id: TransactionId,
         given_epoch: Epoch,
     },
+    #[error("Minimum epoch ({min_epoch}) is greater than maximum epoch ({max_epoch}) in transaction")]
+    MinEpochGreaterThanMaxEpoch { min_epoch: Epoch, max_epoch: Epoch },
     #[error("Current epoch ({current_epoch}) is less than minimum epoch ({min_epoch}) required for transaction")]
     CurrentEpochLessThanMinimum { current_epoch: Epoch, min_epoch: Epoch },
     #[error("Current epoch ({current_epoch}) is greater than maximum epoch ({max_epoch}) required for transaction")]
@@ -198,7 +209,10 @@ impl TransactionValidationError {
             },
 
             // Properties of the transaction itself, on which every node agrees.
+            Self::MinEpochGreaterThanMaxEpoch { .. } |
             Self::NoFeeInstructions { .. } |
+            Self::NoFeePaymentInFeeInstructions { .. } |
+            Self::DisallowedFeeInstruction { .. } |
             Self::InvalidSignature |
             Self::MainSignerDidNotSign { .. } |
             Self::TransactionNotSigned { .. } |

@@ -1,7 +1,10 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::DerefMut,
+};
 
 use log::*;
 use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
@@ -16,7 +19,7 @@ use tari_ootle_common_types::{
     displayable::Displayable,
     optional::{IsNotFoundError, Optional},
 };
-use tari_ootle_transaction::MAX_TRANSACTION_INPUTS;
+use tari_ootle_transaction::{MAX_TRANSACTION_INPUTS, TransactionId};
 use tari_ootle_wallet_crypto::{
     DecryptedData,
     OutputWitness,
@@ -152,13 +155,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         amount: A,
         max_inputs: usize,
     ) -> Result<(Vec<InputSpendData>, Amount), StealthOutputsApiError> {
-        let amount = amount
-            .into()
-            .non_negative_checked()
-            .ok_or_else(|| StealthOutputsApiError::InvalidParameter {
-                param: "amount",
-                reason: "lock_outputs_for_at_least_amount: Amount must be non-negative".to_string(),
-            })?;
+        let amount = amount.into();
         if amount.is_zero() {
             return Ok((Vec::new(), Amount::zero()));
         }
@@ -398,12 +395,6 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         selection_algo: InputSelectionAlgorithm,
         max_inputs: usize,
     ) -> Result<Selection, StealthOutputsApiError> {
-        if amount.is_negative() {
-            return Err(StealthOutputsApiError::InvalidParameter {
-                param: "amount",
-                reason: "lock_outputs_internal: Amount cannot be negative".to_string(),
-            });
-        }
         // A selection's inputs are spent by one statement, so no selection may be given more than one statement can
         // carry — the per-transaction total is the sum of the budgets, not a bound on any one of them.
         if max_inputs == 0 || max_inputs > MAX_TRANSFER_INPUTS {
@@ -496,7 +487,12 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                     .collect::<Vec<_>>();
 
                 // Lock the selected outputs
-                tx.stealth_outputs_lock_many(resource_address, result.selected_keys(), locked_by_id)?;
+                tx.stealth_outputs_lock_many_for_account(
+                    account_address,
+                    resource_address,
+                    result.selected_keys(),
+                    locked_by_id,
+                )?;
 
                 Ok(Selection {
                     outputs,
@@ -521,6 +517,42 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
             .store
             .with_read_tx(|tx| tx.stealth_outputs_get_locked_by_lock_id(lock_id))?;
         Ok(outputs)
+    }
+
+    /// The stealth outputs a transaction holding `lock_ids` spends: each lock's `LockedForSpend` outputs, in lock
+    /// order. These are the outputs the wallet signs a spend for when it submits under these locks. A lock holding no
+    /// stealth outputs contributes none.
+    pub fn get_locked_for_spend(
+        &self,
+        lock_ids: &[WalletLockId],
+    ) -> Result<Vec<StealthOutputModel>, StealthOutputsApiError> {
+        let outputs = self.store.with_read_tx(|tx| locked_for_spend(tx, lock_ids))?;
+        Ok(outputs)
+    }
+
+    /// The wallet's stealth outputs that a transaction submitted under `lock_ids` spends, each once.
+    ///
+    /// Before the transaction finalizes these are [`Self::get_locked_for_spend`]. Finalizing marks the spent outputs
+    /// `Spent` and takes them out of the lock, so once the wallet stores `transaction_id`'s finalized result, the
+    /// wallet outputs its diff downs are included too. Both are read in one snapshot, so an output that finalizes
+    /// concurrently is found through one source or the other.
+    pub fn get_spent_under_locks(
+        &self,
+        lock_ids: &[WalletLockId],
+        transaction_id: Option<TransactionId>,
+    ) -> Result<Vec<StealthOutputModel>, StealthOutputsApiError> {
+        let outputs = self.store.with_read_tx(|tx| {
+            let mut outputs = locked_for_spend(tx, lock_ids)?;
+            if let Some(transaction_id) = transaction_id {
+                outputs.extend(downed_by_finalized_transaction(tx, transaction_id)?);
+            }
+            Ok::<_, WalletStorageError>(outputs)
+        })?;
+        let mut seen = HashSet::with_capacity(outputs.len());
+        Ok(outputs
+            .into_iter()
+            .filter(|output| seen.insert(output.to_utxo_address()))
+            .collect())
     }
 
     pub fn add_output(&self, output: &StealthOutputModel) -> Result<(), StealthOutputsApiError> {
@@ -670,34 +702,10 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(count)
     }
 
-    /// Inserts `utxo`, or updates the stored output's burnt and frozen flags and, while it is unspent, its status.
-    /// Returns whether the stored output was inserted or changed.
+    /// Inserts `utxo`, or updates the stored output as [`upsert_utxo_in`] does. Returns whether the stored output was
+    /// inserted or changed.
     pub fn upsert_utxo(&self, utxo: &StealthOutputModel) -> Result<bool, StealthOutputsApiError> {
-        let changed = self.store.with_write_tx(|tx| {
-            // TODO(perf): consider a dedicated exists query
-            let maybe_utxo = tx
-                .stealth_outputs_get_by_commitment(&utxo.resource_address, &utxo.commitment)
-                .optional()?;
-            if let Some(prev_utxo) = maybe_utxo {
-                let new_status = match prev_utxo.status {
-                    OutputStatus::Unspent => Some(utxo.status),
-                    // If not unspent, don't allow status to be changed.
-                    // EDGE-CASE: scanning picks up a local UTXO that we know was spent
-                    _ => None,
-                };
-                // A burn is final, so a burnt output stays burnt.
-                let is_burnt = prev_utxo.is_burnt || utxo.is_burnt;
-                let changed = new_status.is_some_and(|status| status != prev_utxo.status) ||
-                    prev_utxo.is_burnt != is_burnt ||
-                    prev_utxo.is_frozen != utxo.is_frozen;
-                let address = utxo.to_utxo_address();
-                tx.stealth_outputs_update(&address, Some(is_burnt), new_status, Some(utxo.is_frozen))?;
-                Ok::<_, WalletStorageError>(changed)
-            } else {
-                tx.stealth_outputs_insert(utxo)?;
-                Ok(true)
-            }
-        })?;
+        let changed = self.store.with_write_tx(|tx| upsert_utxo_in(tx, utxo))?;
         Ok(changed)
     }
 
@@ -868,6 +876,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         let network = self.config_api.get_network()?;
 
         let mut found_utxos_count = 0usize;
+        let mut held_utxos_count = 0usize;
         let mut num_outputs = 0usize;
         let mut touched_balances = HashSet::new();
         let mut burnt = Vec::new();
@@ -891,10 +900,11 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 if held.is_some() || utxo.output().is_none() || all_used_view_only_keys.is_some() {
                     break (tx, held);
                 }
-                drop(tx);
+                tx.rollback()?;
                 all_used_view_only_keys = Some(self.all_used_view_only_keys()?);
             };
             if let Some(held) = held {
+                held_utxos_count += 1;
                 info!(
                     target: LOG_TARGET,
                     "Output already exists in the wallet. Updating. (commitment: {})",
@@ -970,9 +980,11 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         if num_outputs > 0 {
             info!(
                 target: LOG_TARGET,
-                "✅️ Found {}/{} stealth outputs owned by this wallet.",
-                found_utxos_count,
+                "✅️ Found {}/{} stealth outputs owned by this wallet ({} new, {} already held).",
+                found_utxos_count + held_utxos_count,
                 num_outputs,
+                found_utxos_count,
+                held_utxos_count,
             );
         }
 
@@ -1280,6 +1292,98 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
             .encrypt_value_and_mask(amount, &mask.key, public_key, &nonce_secret, memo)?;
         Ok((public_nonce, data))
     }
+}
+
+/// Each lock's `LockedForSpend` outputs. A lock also holds the change its statement creates (`LockedUnconfirmed`),
+/// which its transaction does not spend.
+/// Inserts `utxo`, or updates the stored output's burnt and frozen flags and, while it is unspent, its status. An
+/// output stored as invalid is replaced when `utxo` is not invalid: `utxo` was validated with a key that owns it, where
+/// the stored one was validated with another account's key that only decrypts it. Returns whether the stored output was
+/// inserted or changed.
+pub fn upsert_utxo_in<TTx, TReader>(tx: &mut TTx, utxo: &StealthOutputModel) -> Result<bool, WalletStorageError>
+where
+    TTx: WalletStoreWriter + DerefMut<Target = TReader>,
+    TReader: WalletStoreReader,
+{
+    // TODO(perf): consider a dedicated exists query
+    let maybe_utxo = tx
+        .stealth_outputs_get_by_commitment(&utxo.resource_address, &utxo.commitment)
+        .optional()?;
+    let Some(prev_utxo) = maybe_utxo else {
+        tx.stealth_outputs_insert(utxo)?;
+        return Ok(true);
+    };
+    let address = utxo.to_utxo_address();
+    // A burn is final, so a burnt output stays burnt.
+    let is_burnt = prev_utxo.is_burnt || utxo.is_burnt;
+    if prev_utxo.status == OutputStatus::Invalid && utxo.status != OutputStatus::Invalid {
+        tx.stealth_outputs_delete_invalid(&address)?;
+        tx.stealth_outputs_insert(&StealthOutputModel {
+            is_burnt,
+            ..utxo.clone()
+        })?;
+        return Ok(true);
+    }
+    let new_status = match prev_utxo.status {
+        OutputStatus::Unspent => Some(utxo.status),
+        // If not unspent, don't allow status to be changed.
+        // EDGE-CASE: scanning picks up a local UTXO that we know was spent
+        _ => None,
+    };
+    let changed = new_status.is_some_and(|status| status != prev_utxo.status) ||
+        prev_utxo.is_burnt != is_burnt ||
+        prev_utxo.is_frozen != utxo.is_frozen;
+    tx.stealth_outputs_update(&address, Some(is_burnt), new_status, Some(utxo.is_frozen))?;
+    Ok(changed)
+}
+
+fn locked_for_spend<R: WalletStoreReader>(
+    reader: &mut R,
+    lock_ids: &[WalletLockId],
+) -> Result<Vec<StealthOutputModel>, WalletStorageError> {
+    let mut outputs = Vec::new();
+    for lock_id in lock_ids {
+        let Some(locked) = reader.stealth_outputs_get_locked_by_lock_id(*lock_id).optional()? else {
+            continue;
+        };
+        outputs.extend(
+            locked
+                .into_iter()
+                .filter(|output| matches!(output.status, OutputStatus::LockedForSpend)),
+        );
+    }
+    Ok(outputs)
+}
+
+/// The wallet's stealth outputs that `transaction_id`'s finalized diff downs. Empty until the wallet stores a
+/// finalized result for the transaction.
+fn downed_by_finalized_transaction<R: WalletStoreReader>(
+    reader: &mut R,
+    transaction_id: TransactionId,
+) -> Result<Vec<StealthOutputModel>, WalletStorageError> {
+    let Some(transaction) = reader.transactions_get(transaction_id).optional()? else {
+        return Ok(Vec::new());
+    };
+    let downed = transaction
+        .finalized_diff()
+        .map(|diff| {
+            diff.down_iter()
+                .filter_map(|(id, _)| id.as_utxo_address())
+                .collect::<HashSet<_>>()
+        })
+        .unwrap_or_default();
+    if downed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let commitments = downed
+        .iter()
+        .map(|address| address.id().into_commitment_bytes())
+        .collect::<Vec<_>>();
+    Ok(reader
+        .stealth_outputs_get_by_commitments(&commitments)?
+        .into_iter()
+        .filter(|output| downed.contains(&output.to_utxo_address()))
+        .collect())
 }
 
 /// What [`StealthOutputsApi::verify_and_update_outputs`] changed.

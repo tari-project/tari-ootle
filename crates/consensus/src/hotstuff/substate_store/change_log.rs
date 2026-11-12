@@ -54,6 +54,22 @@ pub(super) struct ChangeLog {
     head: HashMap<SubstateId, usize>,
     /// Append only list of changes ordered oldest to newest
     changes: Vec<SubstateChange>,
+    /// What the `put_diff` in progress has overwritten
+    undo: Option<UndoLog>,
+}
+
+/// The entries a [`ChangeLog::put_diff`] overwrites, in the order it overwrote them, so that a failure part way can
+/// restore the log as it was before the diff.
+#[derive(Debug, Clone, Default)]
+struct UndoLog {
+    /// The number of changes before the diff
+    num_changes: usize,
+    /// Each `pending` entry the diff set, with its previous index
+    pending: Vec<(SubstateAddress, Option<usize>)>,
+    /// Each `head` entry the diff set, with its previous index
+    head: Vec<(SubstateId, Option<usize>)>,
+    /// Each change from before the diff that the diff rewrote in place, with its previous value
+    rewritten: Vec<(usize, SubstateChange)>,
 }
 
 impl ChangeLog {
@@ -82,17 +98,47 @@ impl ChangeLog {
     }
 
     fn get_head_mut(&mut self, id: &SubstateId) -> Option<&mut SubstateChange> {
-        self.head
-            .get(id)
-            .map(|&pos| self.changes.get_mut(pos).expect("diff and head are not in sync"))
+        let pos = *self.head.get(id)?;
+        let change = self.changes.get_mut(pos).expect("diff and head are not in sync");
+        if let Some(undo) = &mut self.undo &&
+            pos < undo.num_changes
+        {
+            undo.rewritten.push((pos, change.clone()));
+        }
+        Some(change)
     }
 
     fn insert(&mut self, change: SubstateChange) {
         let index = self.changes.len();
-        self.pending.insert(change.to_substate_address(), index);
-        self.head
-            .insert(change.versioned_substate_id().substate_id().clone(), index);
+        let address = change.to_substate_address();
+        let id = change.versioned_substate_id().substate_id().clone();
+        let prev_pending = self.pending.insert(address, index);
+        let prev_head = self.head.insert(id.clone(), index);
+        if let Some(undo) = &mut self.undo {
+            undo.pending.push((address, prev_pending));
+            undo.head.push((id, prev_head));
+        }
         self.changes.push(change)
+    }
+
+    /// Restores the log to what it was when `undo` began recording.
+    fn rollback(&mut self, undo: UndoLog) {
+        self.changes.truncate(undo.num_changes);
+        for (pos, change) in undo.rewritten.into_iter().rev() {
+            self.changes[pos] = change;
+        }
+        for (address, prev) in undo.pending.into_iter().rev() {
+            match prev {
+                Some(index) => self.pending.insert(address, index),
+                None => self.pending.remove(&address),
+            };
+        }
+        for (id, prev) in undo.head.into_iter().rev() {
+            match prev {
+                Some(index) => self.head.insert(id, index),
+                None => self.head.remove(&id),
+            };
+        }
     }
 
     pub fn get<B: SubstateLayer>(
@@ -209,14 +255,6 @@ impl ChangeLog {
 
     /// Records `change` once the version it replaces is DOWN (an UP) or the version it spends is UP (a DOWN).
     pub fn put<B: SubstateLayer>(&mut self, base: &B, change: SubstateChange) -> Result<(), SubstateStoreError> {
-        self.put_then(base, change, |_| {})
-    }
-
-    fn put_then<B, F>(&mut self, base: &B, change: SubstateChange, on_put: F) -> Result<(), SubstateStoreError>
-    where
-        B: SubstateLayer,
-        F: FnOnce(&SubstateChange),
-    {
         match &change {
             SubstateChange::Up { id, substate, .. } => {
                 if let Some(v) = substate.previous_version() {
@@ -228,40 +266,65 @@ impl ChangeLog {
             },
         }
 
-        on_put(&change);
         self.insert(change);
         Ok(())
     }
 
-    /// Puts every DOWN, then every UP, then every validator fee withdrawal in `diff`, calling `on_put` with each
-    /// DOWN and UP as it is recorded. A failure part way leaves the changes before it recorded.
+    /// Puts every DOWN, then every UP, then every validator fee withdrawal in `diff`, then calls `on_put` with each
+    /// DOWN and UP. A failure part way leaves `self` unchanged and does not call `on_put`.
     pub fn put_diff<B, F>(&mut self, base: &B, diff: &SubstateDiff, mut on_put: F) -> Result<(), SubstateStoreError>
     where
         B: SubstateLayer,
         F: FnMut(&SubstateChange),
     {
+        let num_changes = self.changes.len();
+        self.undo = Some(UndoLog {
+            num_changes,
+            ..UndoLog::default()
+        });
+        let result = self.put_diff_changes(base, diff);
+        let undo = self.undo.take().expect("set above");
+        match result {
+            Ok(num_puts) => {
+                for change in &self.changes[num_changes..num_changes + num_puts] {
+                    on_put(change);
+                }
+                Ok(())
+            },
+            Err(err) => {
+                self.rollback(undo);
+                Err(err)
+            },
+        }
+    }
+
+    /// The changes of [`Self::put_diff`]. Returns the number of DOWNs and UPs, which precede the withdrawals.
+    fn put_diff_changes<B: SubstateLayer>(
+        &mut self,
+        base: &B,
+        diff: &SubstateDiff,
+    ) -> Result<usize, SubstateStoreError> {
+        let num_changes = self.changes.len();
         let num_preshards = base.num_preshards();
         for (id, version) in diff.down_iter() {
             let id = VersionedSubstateId::new(id.clone(), *version);
             let shard = id.to_shard(num_preshards);
             debug!(target: LOG_TARGET, "🔽️ Down: {id} {shard}");
-            self.put_then(base, SubstateChange::Down { id, shard }, &mut on_put)?;
+            self.put(base, SubstateChange::Down { id, shard })?;
         }
 
         for (id, substate) in diff.up_iter() {
             let vid = VersionedSubstateIdRef::new(id, substate.version());
             let shard = vid.to_shard(num_preshards);
             debug!(target: LOG_TARGET, "🔼️ Up: {} v{} {}", id, substate.version(), shard);
-            self.put_then(
-                base,
-                SubstateChange::Up {
-                    id: id.clone(),
-                    shard,
-                    substate: Box::new(substate.clone()),
-                },
-                &mut on_put,
-            )?;
+            self.put(base, SubstateChange::Up {
+                id: id.clone(),
+                shard,
+                substate: Box::new(substate.clone()),
+            })?;
         }
+
+        let num_puts = self.changes.len() - num_changes;
 
         for withdraw in diff.validator_fee_withdrawals() {
             let id = withdraw.address.into();
@@ -300,6 +363,30 @@ impl ChangeLog {
             )?;
         }
 
+        Ok(num_puts)
+    }
+
+    /// Puts UP the version following the DOWN `id`, with the value returned by `creator`.
+    fn create_after_down<TErr, FCreate>(
+        &mut self,
+        id: &VersionedSubstateId,
+        creator: FCreate,
+        num_preshards: NumPreshards,
+    ) -> Result<(), TErr>
+    where
+        TErr: From<SubstateStoreError>,
+        FCreate: FnOnce(Option<VersionedSubstateIdRef<'_>>) -> Result<SubstateValue, TErr>,
+    {
+        let next_version = id
+            .version()
+            .checked_next()
+            .ok_or_else(|| SubstateStoreError::InvariantError {
+                details: format!("Substate {id} cannot be incremented"),
+            })?;
+        let value = creator(Some(id.as_versioned_ref()))?;
+        let next_id = VersionedSubstateId::new(id.substate_id().clone(), next_version);
+        debug!(target: LOG_TARGET, "Creating substate in place: {}", next_id);
+        self.insert_next_up(next_id, value, num_preshards);
         Ok(())
     }
 
@@ -328,10 +415,8 @@ impl ChangeLog {
                     return updater(substate.substate_value_mut());
                 },
                 SubstateChange::Down { id, .. } => {
-                    let next_id = id.to_next_version();
-                    debug!(target: LOG_TARGET, "Creating substate in place: {}", next_id);
-                    let value = creator(Some(id.as_versioned_ref()))?;
-                    self.insert_next_up(next_id, value, num_preshards);
+                    let id = id.clone();
+                    self.create_after_down(&id, creator, num_preshards)?;
                 },
             }
             return Ok(());
@@ -346,10 +431,7 @@ impl ChangeLog {
                     self.insert(head_change);
                 },
                 SubstateChange::Down { id, .. } => {
-                    let next_id = id.to_next_version();
-                    debug!(target: LOG_TARGET, "Creating substate in place: {}", next_id);
-                    let value = creator(Some(id.as_versioned_ref()))?;
-                    self.insert_next_up(next_id, value, num_preshards);
+                    self.create_after_down(id, creator, num_preshards)?;
                 },
             }
             return Ok(());
@@ -375,10 +457,6 @@ impl ChangeLog {
                     .ok_or_else(|| SubstateStoreError::InvariantError {
                         details: format!("Substate {id} version {version} cannot be incremented"),
                     })?;
-                self.insert(SubstateChange::Down {
-                    id: VersionedSubstateId::new(id.clone(), version),
-                    shard,
-                });
                 let mut substate_value = substate.into_substate_value();
                 debug!(
                     target: LOG_TARGET,
@@ -388,6 +466,10 @@ impl ChangeLog {
                     next_version
                 );
                 updater(&mut substate_value)?;
+                self.insert(SubstateChange::Down {
+                    id: VersionedSubstateId::new(id.clone(), version),
+                    shard,
+                });
                 let substate = Substate::new(next_version, substate_value);
                 self.insert(SubstateChange::Up {
                     id,
@@ -421,5 +503,141 @@ impl ChangeLog {
             id: id.into_substate_id(),
         };
         self.insert(up);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_engine_types::{ValidatorFeePool, substate::SubstateValue};
+    use tari_ootle_common_types::SubstateVersion;
+    use tari_template_lib_types::ValidatorFeePoolAddress;
+
+    use super::*;
+
+    struct SingleUpLayer {
+        id: SubstateId,
+        substate: Substate,
+    }
+
+    impl SubstateLayer for SingleUpLayer {
+        fn num_preshards(&self) -> NumPreshards {
+            NumPreshards::P256
+        }
+
+        fn get_substate(&self, id: VersionedSubstateIdRef<'_>) -> Result<Substate, SubstateStoreError> {
+            if id.substate_id() == &self.id && id.version() == self.substate.version() {
+                Ok(self.substate.clone())
+            } else {
+                Err(SubstateStoreError::SubstateNotFound { id: id.to_owned() })
+            }
+        }
+
+        fn is_version_up(&self, id: VersionedSubstateIdRef<'_>) -> Result<Option<bool>, SubstateStoreError> {
+            if id.substate_id() == &self.id && id.version() == self.substate.version() {
+                Ok(Some(true))
+            } else {
+                Ok(None)
+            }
+        }
+
+        fn latest_change(&self, id: &SubstateId) -> Result<SubstateChange, SubstateStoreError> {
+            if id == &self.id {
+                let vid = VersionedSubstateIdRef::new(&self.id, self.substate.version());
+                Ok(SubstateChange::Up {
+                    id: self.id.clone(),
+                    shard: vid.to_shard(NumPreshards::P256),
+                    substate: Box::new(self.substate.clone()),
+                })
+            } else {
+                Err(SubstateStoreError::SubstateNotFound {
+                    id: VersionedSubstateId::new(id.clone(), SubstateVersion::ZERO),
+                })
+            }
+        }
+
+        fn latest_version(&self, id: &SubstateId) -> Result<LatestSubstateVersion, SubstateStoreError> {
+            if id == &self.id {
+                Ok(LatestSubstateVersion::new(self.substate.version(), true))
+            } else {
+                Err(SubstateStoreError::SubstateNotFound {
+                    id: VersionedSubstateId::new(id.clone(), SubstateVersion::ZERO),
+                })
+            }
+        }
+
+        fn block_head_change(&self, _id: &SubstateId) -> Option<&SubstateChange> {
+            None
+        }
+    }
+
+    #[test]
+    fn failed_update_in_place_does_not_record_orphan_down_change() {
+        let pool_addr = ValidatorFeePoolAddress::from_array([7; 32]);
+        let pool_id = SubstateId::ValidatorFeePool(pool_addr);
+        let base = SingleUpLayer {
+            id: pool_id.clone(),
+            substate: Substate::new(
+                SubstateVersion::ZERO,
+                SubstateValue::ValidatorFeePool(ValidatorFeePool::new([7; 32].into(), 100)),
+            ),
+        };
+        let mut log = ChangeLog::new();
+        let err = log
+            .update_in_place(
+                &base,
+                &pool_id,
+                |_| {
+                    Err::<(), _>(SubstateStoreError::InvariantError {
+                        details: "updater failed".to_string(),
+                    })
+                },
+                |_| unreachable!(),
+            )
+            .unwrap_err();
+        assert!(matches!(err, SubstateStoreError::InvariantError { .. }));
+        assert!(
+            log.changes().is_empty(),
+            "failed update_in_place must not leave a Down change"
+        );
+        let still_up = log
+            .get(&base, VersionedSubstateIdRef::new(&pool_id, SubstateVersion::ZERO))
+            .unwrap();
+        assert_eq!(still_up.substate_value().as_validator_fee_pool().unwrap().amount(), 100);
+    }
+
+    #[test]
+    fn update_in_place_over_max_version_down_returns_invariant_error_instead_of_panicking() {
+        let pool_addr = ValidatorFeePoolAddress::from_array([9; 32]);
+        let pool_id = SubstateId::ValidatorFeePool(pool_addr);
+        let max_ver = SubstateVersion::from(u64::MAX);
+        let base = SingleUpLayer {
+            id: pool_id.clone(),
+            substate: Substate::new(
+                max_ver,
+                SubstateValue::ValidatorFeePool(ValidatorFeePool::new([9; 32].into(), 50)),
+            ),
+        };
+        let mut log = ChangeLog::new();
+        let vid = VersionedSubstateId::new(pool_id.clone(), max_ver);
+        log.put(&base, SubstateChange::Down {
+            shard: vid.to_shard(NumPreshards::P256),
+            id: vid,
+        })
+        .unwrap();
+
+        let err = log
+            .update_in_place(
+                &base,
+                &pool_id,
+                |_| unreachable!(),
+                |_| {
+                    Ok::<_, SubstateStoreError>(SubstateValue::ValidatorFeePool(ValidatorFeePool::new(
+                        [9; 32].into(),
+                        50,
+                    )))
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(err, SubstateStoreError::InvariantError { .. }));
     }
 }

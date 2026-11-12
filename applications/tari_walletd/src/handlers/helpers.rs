@@ -6,12 +6,13 @@ use std::{collections::HashSet, fmt::Display, path::Path, time::Duration};
 use anyhow::anyhow;
 use ootle_byte_type::ToByteType;
 use tari_engine_types::component::derive_component_address_from_public_key;
+use tari_ootle_address::Network;
 use tari_ootle_app_utilities::burn_claim_proof::claim_proof_from_l1;
 use tari_ootle_common_types::{
     SubstateRequirement,
     optional::{IsNotFoundError, Optional},
 };
-use tari_ootle_transaction::TransactionId;
+use tari_ootle_transaction::{Instruction, ResourceAddressRef, TransactionId, UnsignedTransaction};
 use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkSpec,
@@ -21,7 +22,7 @@ use tari_ootle_wallet_sdk::{
 use tari_ootle_walletd_client::{ComponentAddressOrName, types::ClaimBurnProofContents};
 use tari_sidechain::CompleteClaimBurnProof;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib_types::{ComponentAddress, EncryptedData};
+use tari_template_lib_types::{ComponentAddress, ResourceAddress, stealth::StealthTransferStatement};
 use tokio::{sync::broadcast, time};
 
 use crate::server::ApplicationErrorCode;
@@ -184,6 +185,26 @@ pub(super) fn invalid_params<T: Display>(field: &str, details: Option<T>) -> any
     .into()
 }
 
+/// Whether a caller-named key may sign, refusing an imported key id the wallet holds no key at as an
+/// invalid `field`.
+pub(super) fn is_signing_key<TSpec: WalletSdkSpec>(
+    sdk: &WalletSdk<TSpec>,
+    field: &str,
+    key_id: &KeyId,
+) -> Result<bool, anyhow::Error> {
+    sdk.key_manager_api()
+        .is_signing_key(*key_id)
+        .optional()?
+        .ok_or_else(|| {
+            invalid_params(
+                field,
+                Some(format!(
+                    "{key_id} does not exist: the wallet holds no imported key with that id"
+                )),
+            )
+        })
+}
+
 /// Refuses a caller-named key unless it may sign (see [`KeyId::is_signing_key`]). The key manager
 /// refuses the same keys when signing; checking here names the offending request field.
 pub(super) fn ensure_signing_key<TSpec: WalletSdkSpec>(
@@ -191,7 +212,7 @@ pub(super) fn ensure_signing_key<TSpec: WalletSdkSpec>(
     field: &str,
     key_id: &KeyId,
 ) -> Result<(), anyhow::Error> {
-    if sdk.key_manager_api().is_signing_key(*key_id)? {
+    if is_signing_key(sdk, field, key_id)? {
         return Ok(());
     }
     Err(invalid_params(
@@ -201,6 +222,76 @@ pub(super) fn ensure_signing_key<TSpec: WalletSdkSpec>(
              sign"
         )),
     ))
+}
+
+/// Checks a transaction submitted for approval is committable on this wallet's network: its blob references resolve,
+/// its network byte is `network`, and it is not a dry run. Transaction requests and signing requests share these rules.
+pub(super) fn validate_transaction_for_approval(
+    network: Network,
+    transaction: &UnsignedTransaction,
+) -> Result<(), anyhow::Error> {
+    validate_transaction_for_network(network, transaction)?;
+
+    if transaction.is_dry_run() {
+        return Err(invalid_params(
+            "transaction.dry_run",
+            Some("a dry-run transaction cannot be committed, so this wallet never signs it"),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Checks a transaction's blob references resolve and its network byte is `network`. Dry runs and approvals share
+/// these rules.
+pub(super) fn validate_transaction_for_network(
+    network: Network,
+    transaction: &UnsignedTransaction,
+) -> Result<(), anyhow::Error> {
+    transaction
+        .validate_blob_references()
+        .map_err(|e| invalid_params("transaction.blobs", Some(e.to_string())))?;
+
+    if transaction.network() != network.as_byte() {
+        return Err(invalid_params(
+            "transaction.network",
+            Some(format!(
+                "the transaction is for network byte {:#04x}, but this wallet is on {network} ({:#04x})",
+                transaction.network(),
+                network.as_byte()
+            )),
+        ));
+    }
+
+    Ok(())
+}
+
+/// The statements of the transaction's `Instruction::StealthTransfer`s, each paired with its resource address when
+/// the instruction names one. The engine executes these statements as written, so the outputs they list are the
+/// outputs the transaction creates.
+pub(super) fn extract_stealth_statements(
+    transaction: &UnsignedTransaction,
+) -> Vec<(Option<ResourceAddress>, &StealthTransferStatement)> {
+    transaction
+        .fee_instructions()
+        .iter()
+        .chain(transaction.instructions())
+        .filter_map(|instruction| {
+            let Instruction::StealthTransfer {
+                resource_address_ref,
+                statement,
+                ..
+            } = instruction
+            else {
+                return None;
+            };
+            let resource = match resource_address_ref {
+                ResourceAddressRef::Address(address) => Some(*address),
+                ResourceAddressRef::Workspace(_) => None,
+            };
+            Some((resource, statement))
+        })
+        .collect()
 }
 
 /// [`ensure_signing_key`] for a transaction's `seal_signer` and each of its `other_signers`.
@@ -316,11 +407,14 @@ pub(super) fn general_error<T: Display>(details: T) -> anyhow::Error {
     application_error(ApplicationErrorCode::GeneralError, details)
 }
 
-/// Reject anything that isn't a single, non-`..` path component, so caller-supplied
-/// names cannot escape the burn-proof directory via `Path::join`.
+/// Accepts only a single `Component::Normal` path component containing no `/` or `\` separator, so
+/// caller-supplied names cannot escape the burn-proof directory via `Path::join`. `.` and `..` parse as
+/// `CurDir` and `ParentDir` and are rejected; names such as `a..b.json` are accepted.
 pub(crate) fn validate_burn_proof_file_name(file_name: &str) -> anyhow::Result<()> {
-    let p = Path::new(file_name);
-    if p.components().count() != 1 || file_name.contains("..") {
+    let mut components = Path::new(file_name).components();
+    let is_single_normal =
+        matches!(components.next(), Some(std::path::Component::Normal(_))) && components.next().is_none();
+    if !is_single_normal || file_name.contains(['/', '\\']) {
         return Err(anyhow!("Invalid file name"));
     }
     Ok(())
@@ -329,18 +423,8 @@ pub(crate) fn validate_burn_proof_file_name(file_name: &str) -> anyhow::Result<(
 /// Converts a `CompleteClaimBurnProof` (the L1 burn proof file format) into the
 /// `ClaimBurnProofContents` used by the wallet daemon for claim transactions.
 pub(crate) fn complete_burn_proof_to_contents(proof: CompleteClaimBurnProof) -> anyhow::Result<ClaimBurnProofContents> {
-    let encrypted_data = EncryptedData::try_from(proof.encrypted_data).map_err(|len| {
-        anyhow!(
-            "Invalid encrypted data length: {}. Expected max length: {}",
-            len,
-            EncryptedData::MAX_MEMO_SIZE
-        )
-    })?;
     let claim_proof = claim_proof_from_l1(&proof.claim_proof).map_err(|e| anyhow!("Invalid burn proof: {e}"))?;
-    Ok(ClaimBurnProofContents {
-        claim_proof,
-        encrypted_data,
-    })
+    Ok(ClaimBurnProofContents { claim_proof })
 }
 
 #[cfg(test)]
@@ -406,5 +490,32 @@ mod tests {
             .unwrap_err();
         assert!(!is_not_found_code(&err));
         assert!(err.downcast_ref::<TestError>().is_some());
+    }
+
+    #[test]
+    fn validate_burn_proof_file_name_accepts_only_plain_file_names() {
+        assert!(validate_burn_proof_file_name("proof.json").is_ok());
+        assert!(validate_burn_proof_file_name("0123-deadbeef.json").is_ok());
+        assert!(validate_burn_proof_file_name("a..b.json").is_ok());
+        assert!(validate_burn_proof_file_name("..json").is_ok());
+
+        for invalid in [
+            "",
+            ".",
+            "..",
+            "/",
+            "\\",
+            "sub/proof.json",
+            "sub\\proof.json",
+            "sub/",
+            "sub/.",
+            "../proof.json",
+            "..\\proof.json",
+        ] {
+            assert!(
+                validate_burn_proof_file_name(invalid).is_err(),
+                "expected '{invalid}' to be rejected"
+            );
+        }
     }
 }

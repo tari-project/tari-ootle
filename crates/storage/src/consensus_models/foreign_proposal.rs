@@ -18,7 +18,7 @@ use tari_ootle_transaction::TransactionId;
 use tari_sidechain::{FixedHash, QuorumCertificate};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
-use super::{BlockHeaderMetadata, BlockPledge, Command, CommandOrHash, CommandsCommitProof, LockedEpoch};
+use super::{BlockHeaderMetadata, BlockPledge, Command, CommandOrHash, CommandsCommitProof};
 use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
 /// How many epochs either side of the local epoch a foreign proposal may come from. Prepare and accept rounds may
@@ -85,6 +85,11 @@ impl ForeignProposalRecord {
 
     pub fn proposal(&self) -> &ForeignProposal {
         &self.proposal
+    }
+
+    /// See [`CommandsCommitProof::prune_for_shard_group`].
+    pub fn prune_for_shard_group(&mut self, shard_group: ShardGroup) -> Result<(), UnknownProtocolVersionError> {
+        self.proposal.prune_for_shard_group(shard_group)
     }
 
     pub fn into_proposal(self) -> ForeignProposal {
@@ -410,6 +415,11 @@ impl ForeignProposal {
         &self.commit_proof
     }
 
+    /// See [`CommandsCommitProof::prune_for_shard_group`].
+    pub fn prune_for_shard_group(&mut self, shard_group: ShardGroup) -> Result<(), UnknownProtocolVersionError> {
+        self.commit_proof.prune_for_shard_group(shard_group)
+    }
+
     pub fn block_pledge(&self) -> &BlockPledge {
         &self.block_pledge
     }
@@ -423,8 +433,8 @@ impl ForeignProposal {
         self.block_metadata.calculate_hash() == self.commit_proof.sidechain_block_commit_proof().header.metadata_hash
     }
 
-    /// The exhaust burn rate the proposing block names for its epoch, which every transaction this proposal pins
-    /// settles at. Validation rejects a proposal whose proven metadata names none.
+    /// The exhaust burn rate the proposing block names for its epoch. Validation rejects a proposal whose proven
+    /// metadata names none.
     pub fn exhaust_burn_rate(&self) -> Option<ExhaustBurnRate> {
         self.block_metadata.try_exhaust_burn_rate()
     }
@@ -452,12 +462,6 @@ impl ForeignProposal {
 
     pub fn epoch_hash(&self) -> &FixedHash {
         &self.commit_proof.sidechain_block_commit_proof().header().epoch_hash
-    }
-
-    /// The execution context this proposal pins a transaction to, at the `exhaust_burn_rate` the proposing block
-    /// names (see [`Self::exhaust_burn_rate`]).
-    pub fn to_locked_epoch(&self, exhaust_burn_rate: ExhaustBurnRate) -> LockedEpoch {
-        LockedEpoch::new(self.epoch(), self.epoch_hash().into_array().into(), exhaust_burn_rate)
     }
 
     pub fn proposed_by(&self) -> RistrettoPublicKeyBytes {

@@ -166,9 +166,12 @@ impl TryFrom<proto::rpc::EpochCheckpoint> for EpochCheckpoint {
     type Error = anyhow::Error;
 
     fn try_from(value: proto::rpc::EpochCheckpoint) -> Result<Self, Self::Error> {
-        // Defensive check to mitigate DoS attacks
-        if value.shard_tree_summary.len() > 100_000 {
-            return Err(anyhow!("too many shard roots (num={})", value.shard_tree_summary.len()));
+        let max_shards = Shard::max().as_u32() as usize + 1;
+        if value.shard_tree_summary.len() > max_shards {
+            return Err(anyhow!(
+                "too many shard roots (num={}, max={max_shards})",
+                value.shard_tree_summary.len()
+            ));
         }
 
         let shard_tree_summary = value
@@ -212,6 +215,7 @@ impl From<tari_consensus::hotstuff::ConsensusCurrentState> for proto::rpc::Conse
             Idle => proto::rpc::ConsensusState::Idle,
             CheckSync => proto::rpc::ConsensusState::CheckSync,
             Syncing => proto::rpc::ConsensusState::Syncing,
+            Presyncing => proto::rpc::ConsensusState::Presyncing,
             Running => proto::rpc::ConsensusState::Running,
             Sleeping => proto::rpc::ConsensusState::Sleeping,
             Shutdown => proto::rpc::ConsensusState::Shutdown,
@@ -227,6 +231,7 @@ impl From<proto::rpc::ConsensusState> for tari_consensus::hotstuff::ConsensusCur
             proto::rpc::ConsensusState::Idle => Idle,
             proto::rpc::ConsensusState::CheckSync => CheckSync,
             proto::rpc::ConsensusState::Syncing => Syncing,
+            proto::rpc::ConsensusState::Presyncing => Presyncing,
             proto::rpc::ConsensusState::Running => Running,
             proto::rpc::ConsensusState::Sleeping => Sleeping,
             proto::rpc::ConsensusState::Shutdown => Shutdown,

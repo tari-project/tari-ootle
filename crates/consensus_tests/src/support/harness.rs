@@ -54,6 +54,7 @@ use tokio::{
 
 use super::{
     MessageFilter,
+    MessageInjector,
     NetworkSendObserver,
     TEST_NUM_PRESHARDS,
     TEST_WASM_EXECUTION_POINTS,
@@ -64,7 +65,7 @@ use super::{
 };
 use crate::{
     support::{
-        RoundRobinLeaderStrategy,
+        SmoothWeightedRoundRobin,
         ValidatorChannels,
         address::TestAddress,
         epoch_manager::TestEpochManager,
@@ -80,7 +81,7 @@ use crate::{
 pub struct Test {
     validators: HashMap<TestAddress, Validator>,
     network: TestNetwork,
-    _leader_strategy: RoundRobinLeaderStrategy,
+    _leader_strategy: SmoothWeightedRoundRobin,
     _epoch_manager: TestEpochManager,
     num_committees: u32,
     submitted_transactions: Vec<TransactionId>,
@@ -426,9 +427,14 @@ impl Test {
         self.network.start();
     }
 
+    /// Waits until every validator that is active at its current epoch runs consensus.
     pub async fn wait_for_all_validators_to_start_consensus(&mut self) {
         let mut complete = HashSet::new();
-        let total_validators = self.validators.len();
+        let total_validators = self
+            .validators
+            .values()
+            .filter(|v| !v.epoch_manager.is_pending_activation())
+            .count();
         loop {
             let validators = self.validators.values_mut();
             for validator in validators {
@@ -685,6 +691,7 @@ pub struct TestBuilder {
     rocks_path: Option<String>,
     timeout: Option<Duration>,
     message_filter: Option<MessageFilter>,
+    message_injector: Option<MessageInjector>,
     send_observer: Option<NetworkSendObserver>,
     failure_nodes: Vec<TestAddress>,
     config: HotstuffConfig,
@@ -702,6 +709,7 @@ impl TestBuilder {
             timeout: Some(DEFAULT_PACEMAKER_BLOCK_TIME * 3),
             rocks_path: None,
             message_filter: None,
+            message_injector: None,
             send_observer: None,
             failure_nodes: Vec::new(),
             claim_keys: None,
@@ -741,6 +749,8 @@ impl TestBuilder {
                     max_block_validation_shard_output_bytes:
                         tari_ootle_common_types::MAX_BLOCK_VALIDATION_SHARD_OUTPUT_BYTES,
                     max_block_pledge_bytes: ConsensusConstants::DEVNET.max_block_pledge_bytes,
+                    max_transaction_input_load_bytes: ConsensusConstants::DEVNET.max_transaction_input_load_bytes,
+                    max_block_input_load_bytes: ConsensusConstants::DEVNET.max_block_input_load_bytes,
                     max_block_foreign_proposal_bytes: ConsensusConstants::DEVNET.max_block_foreign_proposal_bytes,
                     max_block_validation_foreign_proposal_bytes: ConsensusConstants::DEVNET
                         .max_block_validation_foreign_proposal_bytes,
@@ -812,6 +822,11 @@ impl TestBuilder {
         self
     }
 
+    pub fn with_message_injector(mut self, message_injector: MessageInjector) -> Self {
+        self.message_injector = Some(message_injector);
+        self
+    }
+
     pub fn with_message_filter(mut self, message_filter: MessageFilter) -> Self {
         self.message_filter = Some(message_filter);
         self
@@ -831,7 +846,7 @@ impl TestBuilder {
     }
 
     async fn build_validators(
-        leader_strategy: &RoundRobinLeaderStrategy,
+        leader_strategy: &SmoothWeightedRoundRobin,
         epoch_manager: &TestEpochManager,
         rocks_path_override: Option<String>,
         config: HotstuffConfig,
@@ -905,7 +920,7 @@ impl TestBuilder {
         let committees = build_committees(self.committees);
         let num_committees = u32::try_from(committees.len()).expect("WAAAY too many committees");
 
-        let leader_strategy = RoundRobinLeaderStrategy::new();
+        let leader_strategy = SmoothWeightedRoundRobin::new();
         let (tx_epoch_events, _) = broadcast::channel(10);
         let epoch_manager = TestEpochManager::new(tx_epoch_events);
         epoch_manager.add_committees(committees).await;
@@ -923,7 +938,12 @@ impl TestBuilder {
             shutdown.to_signal(),
         )
         .await;
-        let network = spawn_network(channels, shutdown.to_signal(), self.message_filter);
+        let network = spawn_network(
+            channels,
+            shutdown.to_signal(),
+            self.message_filter,
+            self.message_injector,
+        );
 
         Test {
             validators,

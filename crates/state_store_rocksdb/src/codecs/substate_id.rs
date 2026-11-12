@@ -135,7 +135,10 @@ mod tests {
             nft_id,
         ));
         let long_id_len = codec.encode_len(&long_id).unwrap();
-        assert!((93..=96).contains(&long_id_len), "unexpected long_id_len: {long_id_len}");
+        assert!(
+            (93..=96).contains(&long_id_len),
+            "unexpected long_id_len: {long_id_len}"
+        );
         let versioned_long = VersionedSubstateIdRef::new(&long_id, SubstateVersion::new(0x0102_0304_0506_0708));
         let encoded_long = codec.encode(&versioned_long).unwrap();
         assert_eq!(encoded_long.len(), long_id_len + size_of::<SubstateVersion>());

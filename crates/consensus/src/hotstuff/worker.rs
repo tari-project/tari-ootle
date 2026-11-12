@@ -353,21 +353,21 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         }
 
         let next_epoch = starting_epoch + Epoch(1);
-        if !self
+        if self
             .epoch_manager
             .is_this_validator_registered_for_epoch(next_epoch)
             .await?
         {
             info!(
                 target: LOG_TARGET,
-                "💤 This validator is not registered for next epoch {next_epoch}. Will stop consensus once the \
-                 current epoch {starting_epoch} has transitioned."
+                "🌟 Oracle is at epoch {oracle_epoch} but consensus is resuming at {starting_epoch}. Seeding epoch \
+                 {oracle_epoch} so that EndEpoch can be proposed.",
             );
         } else {
             info!(
                 target: LOG_TARGET,
-                "🌟 Oracle is at epoch {oracle_epoch} but consensus is resuming at {starting_epoch}. Seeding epoch \
-                 {oracle_epoch} so that EndEpoch can be proposed.",
+                "💤 This validator is not registered for next epoch {next_epoch}. Will stop consensus once the \
+                 current epoch {starting_epoch} has transitioned."
             );
         }
         update_next_epoch_target(&mut self.next_epoch, starting_epoch, oracle_epoch, Instant::now());

@@ -117,11 +117,12 @@ impl PaceMaker {
                            },
                             PacemakerRequest::Start { high_pc_height } => {
                                 info!(target: LOG_TARGET, "🚀 Starting pacemaker at leaf height {} and high QC: {}", self.current_view, high_pc_height);
-                                leader_failure_suspended = false;
-                                leader_failure_triggered_during_suspension = false;
                                 if started {
                                     continue;
                                 }
+                                num_timeouts = 0;
+                                leader_failure_suspended = false;
+                                leader_failure_triggered_during_suspension = false;
                                 self.current_high_pc_height = high_pc_height;
                                 info!(target: LOG_TARGET, "Reset! Current height: {}, Delta: {:.2?}", self.current_view, self.delta_time());
                                 leader_timeout.as_mut().reset(self.leader_timeout());
@@ -132,6 +133,7 @@ impl PaceMaker {
                             PacemakerRequest::Stop => {
                                 info!(target: LOG_TARGET, "💤 Stopping pacemaker");
                                 started = false;
+                                num_timeouts = 0;
                                 leader_failure_suspended = false;
                                 leader_failure_triggered_during_suspension = false;
                                 // TODO: we could use futures-rs Either
@@ -154,7 +156,7 @@ impl PaceMaker {
                                     leader_failure_triggered_during_suspension = false;
                                     leader_timeout.as_mut().reset(self.leader_timeout());
                                     info!(target: LOG_TARGET, "⚠️ Resumed leader timeout! Current view: {}, Delta: {:.2?}", self.current_view, self.delta_time());
-                                    num_timeouts += 1;
+                                    num_timeouts = num_timeouts.saturating_add(1);
                                     on_leader_timeout.leader_timed_out(LeaderTimeout {
                                         current_height: self.current_view.get_height(),
                                         current_high_pc: self.current_high_pc_height,
@@ -183,7 +185,7 @@ impl PaceMaker {
                         leader_failure_triggered_during_suspension = true;
                     } else {
                         info!(target: LOG_TARGET, "⚠️ Leader timeout! Current view: {}, Delta: {:.2?}", self.current_view, self.delta_time());
-                        num_timeouts += 1;
+                        num_timeouts = num_timeouts.saturating_add(1);
                         on_leader_timeout.leader_timed_out(LeaderTimeout {
                             current_height: self.current_view.get_height(),
                             current_high_pc: self.current_high_pc_height,
@@ -240,4 +242,49 @@ fn far_future() -> tokio::time::Instant {
     // or convert specific date in the future to instant.
     // 1000 years overflows on macOS, 100 years overflows on FreeBSD.
     tokio::time::Instant::from_std(Instant::now() + Duration::from_secs(86400 * 365 * 30))
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_common_types::Epoch;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn duplicate_start_does_not_cancel_suspended_leader_timeout() {
+        tokio::time::pause();
+        let pacemaker = PaceMaker::new(Duration::from_secs(1));
+        let handle = pacemaker.clone_handle();
+        let mut on_leader_timeout = handle.get_on_leader_timeout();
+        pacemaker.spawn();
+
+        handle.start(Epoch(1), NodeHeight(1), NodeHeight(1)).await.unwrap();
+        handle.suspend_leader_timeout().await.unwrap();
+        handle.start(Epoch(1), NodeHeight(1), NodeHeight(1)).await.unwrap();
+
+        tokio::time::advance(Duration::from_secs(10)).await;
+        tokio::task::yield_now().await;
+
+        handle.resume_leader_timeout().await.unwrap();
+        let timeout = on_leader_timeout.wait().await;
+        assert_eq!(timeout.num_timeouts, 1);
+    }
+
+    #[tokio::test]
+    async fn stop_and_restart_resets_timeout_counter() {
+        tokio::time::pause();
+        let pacemaker = PaceMaker::new(Duration::from_secs(1));
+        let handle = pacemaker.clone_handle();
+        let mut on_leader_timeout = handle.get_on_leader_timeout();
+        pacemaker.spawn();
+
+        handle.start(Epoch(1), NodeHeight(1), NodeHeight(1)).await.unwrap();
+        tokio::time::advance(Duration::from_secs(10)).await;
+        assert_eq!(on_leader_timeout.wait().await.num_timeouts, 1);
+
+        handle.stop().await.unwrap();
+        handle.start(Epoch(1), NodeHeight(2), NodeHeight(2)).await.unwrap();
+        tokio::time::advance(Duration::from_secs(10)).await;
+        assert_eq!(on_leader_timeout.wait().await.num_timeouts, 1);
+    }
 }

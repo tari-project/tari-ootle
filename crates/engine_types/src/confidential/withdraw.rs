@@ -36,8 +36,7 @@ pub fn withdraw_native_points(proof: &ConfidentialWithdrawProof, has_view_key: b
     if proof.is_revealed_only() {
         return 0;
     }
-    let num_outputs =
-        u64::from(proof.output_proof.output.is_some()) + u64::from(proof.output_proof.change_statement.is_some());
+    let num_outputs = proof.output_proof.num_confidential_outputs() as u64;
     let surcharge = if has_view_key {
         P::PER_OUTPUT_VIEWABLE_SURCHARGE
     } else {

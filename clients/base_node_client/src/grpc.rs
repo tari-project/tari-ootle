@@ -53,6 +53,11 @@ const LOG_TARGET: &str = "tari::validator_node::app";
 /// nodes to try moves on to them within seconds.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Bounds each request up to the base node's response headers, so a base node that accepts connections
+/// but stops answering fails the request. A streamed response body is not covered, so callers bound the
+/// wait for each streamed item themselves.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
 type Client = BaseNodeGrpcClient<tonic::transport::Channel>;
 
 #[derive(Clone)]
@@ -76,6 +81,7 @@ impl GrpcBaseNodeClient {
         if self.client.is_none() {
             let channel = Endpoint::from_shared(self.endpoint.to_string())?
                 .connect_timeout(CONNECT_TIMEOUT)
+                .timeout(REQUEST_TIMEOUT)
                 .connect()
                 .await?;
             self.client = Some(Client::new(channel));

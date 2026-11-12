@@ -1073,7 +1073,62 @@ async fn merged_fallback_with_single_utxo_releases_pre_fallback_lock_and_spends_
     assert_eq!(output.fee_inputs.inputs[0].commitment, commitment);
     assert_eq!(output.transfer_inputs.inputs.len(), 1);
     assert!(!output.transfer_inputs.inputs[0].is_on_chain);
-    assert_eq!(output.transfer_inputs.inputs[0].value, Amount::from(450u64));
+    assert_eq!(output.transfer_inputs.inputs[0].value, 450);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn transfer_of_another_resource_without_fee_swap_does_not_look_up_tari() {
+    // Any lookup of the uncached TARI resource reaches the network and panics.
+    let test = Test::without_tari_resource();
+    let account = test
+        .sdk()
+        .accounts_api()
+        .get_account_by_address(&Test::test_account_address())
+        .unwrap();
+    let resource_address = resource_address_from_seed(7);
+    test.sdk()
+        .resources_api()
+        .upsert_resource(
+            &resource_address,
+            &Resource::new(
+                ResourceType::Stealth,
+                SubstateOwnerRule::None,
+                ResourceAccessRules::new(),
+                Metadata::new(),
+                None,
+                None,
+                6,
+                false,
+            ),
+        )
+        .unwrap();
+    add_owned_stealth_output(&test, &account, STEALTH_TARI_RESOURCE_ADDRESS, 500);
+    add_owned_stealth_output(&test, &account, resource_address, 500);
+
+    let (_lock, output) = test
+        .sdk()
+        .stealth_transfer_api()
+        .transfer(account.clone(), StealthTransferParams {
+            fee_params: TransferFeeParams::new(UtxoInputSelection::ConfidentialOnly),
+            input_selection: UtxoInputSelection::ConfidentialOnly,
+            outputs: vec![TransferOutput {
+                address: account.address().clone(),
+                revealed_amount: Amount::zero(),
+                blinded_amount: 100,
+                memo: None,
+                pay_to: PayTo::StealthPublicKey,
+            }],
+            badge_usage: BadgeUsage::None,
+            resource_address,
+            max_fee: 50,
+            max_epoch: Epoch(10),
+            is_dry_run: false,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(output.fee_inputs.inputs.len(), 1);
+    assert_eq!(output.transfer_inputs.inputs.len(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]

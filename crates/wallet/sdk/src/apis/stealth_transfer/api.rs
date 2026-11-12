@@ -737,11 +737,11 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             .as_ref()
             .map(|swap| swap.input_resource)
             .unwrap_or(TARI_TOKEN);
-        let fee_resource_view_key = if fee_resource == params.resource_address {
-            resource_view_key.clone()
-        } else {
-            self.substate_api
-                .fetch_resource(fee_resource)
+        // Without a swap the fee is paid in TARI, whose resource carries no view key.
+        let fee_resource_view_key = match params.fee_params.pay_fee_with_swap.as_ref() {
+            Some(swap) if swap.input_resource != params.resource_address => self
+                .substate_api
+                .fetch_resource(swap.input_resource)
                 .await?
                 .view_key()
                 .map(RistrettoPublicKey::convert_from_byte_type)
@@ -749,7 +749,9 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 .map_err(|e| StealthTransferApiError::InvalidParameter {
                     param: "fee_resource_view_key",
                     reason: format!("Invalid fee resource view key: {e}"),
-                })?
+                })?,
+            Some(_) => resource_view_key.clone(),
+            None => None,
         };
 
         // Critical section - TODO: use a DB transaction

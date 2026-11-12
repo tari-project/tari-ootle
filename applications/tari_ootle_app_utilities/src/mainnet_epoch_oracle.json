@@ -7,43 +7,43 @@
             "public_key": "fa4e3963f426aa881f5956f99b20737326c6621227bb074fe47a5c5d54954403",
             "claim_key": "fc7a4e077dd9968c2d850575eb274e07af7bc595d1c24dec41b00cca636a9909",
             "shard_group": { "start": 1, "end_inclusive": 256 },
-            "registration_epoch": 37960
+            "registration_epoch": 38362
         },
         {
             "public_key": "c445006d2d7555bd65c4d7569f99646efe23d070c63679efd5cb7105cce73048",
             "claim_key": "fc7a4e077dd9968c2d850575eb274e07af7bc595d1c24dec41b00cca636a9909",
             "shard_group": { "start": 1, "end_inclusive": 256 },
-            "registration_epoch": 37960
+            "registration_epoch": 38362
         },
         {
             "public_key": "da4fdeeebc997ca1ab7d3b34a3fec1792f462dfbdbf19e5f3e47feef03df030c",
             "claim_key": "fc7a4e077dd9968c2d850575eb274e07af7bc595d1c24dec41b00cca636a9909",
             "shard_group": { "start": 1, "end_inclusive": 256 },
-            "registration_epoch": 37960
+            "registration_epoch": 38362
         },
         {
             "public_key": "82e0018ee71779d63b068695b9b70d10ac498e7ba2e3a64ebe2c654a88e5192a",
             "claim_key": "fc7a4e077dd9968c2d850575eb274e07af7bc595d1c24dec41b00cca636a9909",
             "shard_group": { "start": 1, "end_inclusive": 256 },
-            "registration_epoch": 37960
+            "registration_epoch": 38362
         },
         {
             "public_key": "dcfec0c59abdd1777e170034f4fb07a724f6300616ffafdad4cf139c36c86865",
             "claim_key": "fc7a4e077dd9968c2d850575eb274e07af7bc595d1c24dec41b00cca636a9909",
             "shard_group": { "start": 1, "end_inclusive": 256 },
-            "registration_epoch": 37960
+            "registration_epoch": 38362
         },
         {
             "public_key": "68f671118bcf2e17aa44381b76a34e55f0d2ac9ef57865497688f0de508ea65d",
             "claim_key": "fc7a4e077dd9968c2d850575eb274e07af7bc595d1c24dec41b00cca636a9909",
             "shard_group": { "start": 1, "end_inclusive": 256 },
-            "registration_epoch": 37960
+            "registration_epoch": 38362
         },
         {
             "public_key": "445e5b791db686ce9202a227e9d54f7864d28d399e998b78bc51b5a26f8f1950",
             "claim_key": "fc7a4e077dd9968c2d850575eb274e07af7bc595d1c24dec41b00cca636a9909",
             "shard_group": { "start": 1, "end_inclusive": 256 },
-            "registration_epoch": 37960
+            "registration_epoch": 38362
         }
     ]
 }

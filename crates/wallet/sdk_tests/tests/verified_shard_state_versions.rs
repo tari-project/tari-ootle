@@ -10,7 +10,7 @@ mod support;
 use std::collections::HashMap;
 
 use tari_ootle_common_types::{Epoch, ShardGroup, StateVersion, shard::Shard};
-use tari_ootle_light_client::test_fixtures::{CheckpointSpec, ValidatorSetFixture, checkpoint_entry, high};
+use tari_ootle_light_client::test_fixtures::{CheckpointSpec, ValidatorSetFixture, checkpoint_entry, high, low};
 use tari_ootle_wallet_sdk::{IndexerTrust, apis::validator_set::ValidatorSetApiError, models::CheckpointStateVersion};
 
 use crate::support::{ProvingNetwork, TestWithNetwork};
@@ -206,4 +206,82 @@ async fn an_empty_list_has_no_shard_state_versions() {
     let (network, test) = anchored_wallet(&sets).await;
     network.list_shard_group_checkpoints(vec![]);
     assert!(verified_versions(&test).await.is_empty());
+}
+
+#[tokio::test]
+async fn verified_checkpoint_layout_returns_sorted_verified_shard_groups_and_rejects_unverified_checkpoints() {
+    let sets = sets();
+    let (network, test) = anchored_wallet(&sets).await;
+
+    let layout = test
+        .sdk()
+        .validator_set_api()
+        .verified_checkpoint_layout()
+        .await
+        .unwrap();
+    assert_eq!(layout, vec![(Epoch(2), low()), (Epoch(2), high())]);
+
+    end_low_epoch(&network, &sets, 2, 20);
+    network.serve_latest_checkpoint(high_checkpoint(&sets, 2, &sets[0], 99));
+    let err = test
+        .sdk()
+        .validator_set_api()
+        .verified_checkpoint_layout()
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ValidatorSetApiError::Unverified(_)));
+}
+
+/// Until the epoch it anchored in ends, a wallet trusts no validator set for the epoch of the checkpoints it anchored
+/// on, so it cannot verify them.
+#[tokio::test]
+async fn the_checkpoint_layout_does_not_verify_in_the_epoch_the_wallet_anchored_in() {
+    let sets = sets();
+    let network = ProvingNetwork::new(&sets, 0);
+    network.serve_latest_checkpoint(high_checkpoint(&sets, 0, &sets[0], 5));
+    let test = TestWithNetwork::with_network_trusting(network, IndexerTrust::Verify);
+
+    let err = test
+        .sdk()
+        .validator_set_api()
+        .verified_checkpoint_layout()
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ValidatorSetApiError::NoTrustedValidatorSet { epoch } if epoch == Epoch(1)),
+        "{err}"
+    );
+}
+
+/// Checkpoints of an epoch before the one that named the latest trusted validator set verify, but are not the
+/// network's latest layout.
+#[tokio::test]
+async fn a_checkpoint_layout_of_an_earlier_epoch_is_rejected() {
+    let sets = sets();
+    let (network, test) = anchored_wallet(&sets).await;
+    let api = test.sdk().validator_set_api();
+
+    end_low_epoch(&network, &sets, 2, 20);
+    network.serve_latest_checkpoint(high_checkpoint(&sets, 2, &sets[2], 15));
+    assert_eq!(api.verified_checkpoint_layout().await.unwrap(), vec![
+        (Epoch(3), low()),
+        (Epoch(3), high())
+    ]);
+
+    network.list_shard_group_checkpoints(vec![
+        checkpoint_entry(CheckpointSpec {
+            shard_state_versions: vec![(LOW_SHARD, 10)],
+            ..CheckpointSpec::handover(&sets[1], &sets[2])
+        }),
+        high_checkpoint(&sets, 1, &sets[1], 7),
+    ]);
+    let err = api.verified_checkpoint_layout().await.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            ValidatorSetApiError::OutdatedLatestCheckpoint { shard_group, epoch, latest_ended }
+                if shard_group == low() && epoch == Epoch(2) && latest_ended == Epoch(3)
+        ),
+        "{err}"
+    );
 }

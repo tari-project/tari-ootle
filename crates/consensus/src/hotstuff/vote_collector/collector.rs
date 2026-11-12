@@ -40,8 +40,7 @@ pub struct VoteCollector<V: Vote> {
 }
 
 impl<V: Vote + Display + Clone> VoteCollector<V>
-where
-    V::AggregationKey: Clone,
+where V::AggregationKey: Clone
 {
     pub fn new() -> Self {
         Self {
@@ -208,7 +207,12 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
     /// All votes at `(epoch, height)` remain stored until [`Self::clear_votes_before`] prunes the view so that a
     /// signer equivocating after the quorum is still detected and votes for sibling forks or `Reject` decisions are
     /// preserved.
-    pub fn take_accept_votes(&mut self, epoch: Epoch, height: NodeHeight, agg_key: &V::AggregationKey) -> Option<Vec<V>>
+    pub fn take_accept_votes(
+        &mut self,
+        epoch: Epoch,
+        height: NodeHeight,
+        agg_key: &V::AggregationKey,
+    ) -> Option<Vec<V>>
     where
         V::AggregationKey: Clone,
     {

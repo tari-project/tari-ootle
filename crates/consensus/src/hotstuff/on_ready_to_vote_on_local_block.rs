@@ -332,15 +332,11 @@ where
                 .with_input_load_budget(self.config.consensus_constants.max_block_input_load_bytes);
         let mut totals = BlockTotals::extending(parent.header().total_accumulated_exhaust_burn());
         let max_validation_execution_points = self.config.consensus_constants.max_block_validation_execution_points;
-        let mut block_execution_points = 0u64;
         let num_foreign_proposals = block.all_foreign_proposals().count();
         let mut foreign_proposal_bytes = 0usize;
 
         let command_validator = LocalCommandValidator::new(&self.transaction_manager, &self.local_validator_pk);
         for cmd in block.commands() {
-            let had_execution_before_cmd = cmd
-                .transaction()
-                .is_some_and(|atom| proposed_block_change_set.transaction_execution(atom.id()).is_some());
             match cmd {
                 Command::LocalOnly(atom) => {
                     if let Some(reason) = command_validator.evaluate_local_only_command(
@@ -549,21 +545,17 @@ where
             // pushes it over the limit stops block execution (no-vote), bounding the compute a misbehaving
             // leader can extract from replicas. Both halves are deterministic — metering is, and the native
             // price is a pure function of the declared statement — so every replica computes identical totals
-            // and stops at the same command. Commands executed for this block have an execution in the change set;
-            // finalization commands (AllAccept/SomeAccept) reuse a prior block's execution and add nothing.
-            if let Some(points) =
-                command_execution_points_to_charge(cmd, had_execution_before_cmd, proposed_block_change_set)
-            {
-                block_execution_points = block_execution_points.saturating_add(points);
-                if block_execution_points > max_validation_execution_points {
-                    let reason = NoVoteReason::BlockExecutionPointsExceeded {
-                        total_points: block_execution_points,
-                        max_points: max_validation_execution_points,
-                    };
-                    warn!(target: LOG_TARGET, "❌ NO VOTE: {reason}");
-                    proposed_block_change_set.set_no_vote(reason);
-                    return Ok(());
-                }
+            // and stops at the same command. Each command adds the points of the execution it is derived from to the
+            // block totals, as the proposer's does; finalization commands (AllAccept/SomeAccept) derive from none
+            // and add nothing, whichever execution an earlier command in the block placed in the change set.
+            if totals.execution_points > max_validation_execution_points {
+                let reason = NoVoteReason::BlockExecutionPointsExceeded {
+                    total_points: totals.execution_points,
+                    max_points: max_validation_execution_points,
+                };
+                warn!(target: LOG_TARGET, "❌ NO VOTE: {reason}");
+                proposed_block_change_set.set_no_vote(reason);
+                return Ok(());
             }
         }
 
@@ -986,21 +978,6 @@ fn exceeds_block_validation_weight(
     num_transaction_commands > 1 && block_execution_weight > max_validation_weight
 }
 
-/// Returns the execution points `cmd` adds to the block: the points of an execution this command placed in the change
-/// set.
-fn command_execution_points_to_charge(
-    cmd: &Command,
-    had_execution_before_cmd: bool,
-    proposed_block_change_set: &ProposedBlockChangeSet,
-) -> Option<u64> {
-    if had_execution_before_cmd {
-        return None;
-    }
-    let atom = cmd.transaction()?;
-    let execution = proposed_block_change_set.transaction_execution(atom.id())?;
-    Some(execution.result().total_execution_points())
-}
-
 /// Ratifies the next epoch's validator set hash that an end-of-epoch block names against this node's own. A block
 /// that names none is refused whatever this node knows, and a node that has not assigned the next epoch's committees
 /// abstains.
@@ -1116,69 +1093,6 @@ mod tests {
             // A single transaction heavier than the whole cap must stay committable (liveness).
             assert!(!exceeds_block_validation_weight(1_000_000, 1, 15_000));
             assert!(!exceeds_block_validation_weight(0, 0, 15_000));
-        }
-    }
-
-    mod command_execution_points_to_charge {
-        use std::time::Duration;
-
-        use tari_consensus_types::LeafBlock;
-        use tari_engine_types::{
-            commit_result::{AbortReason, ExecuteResult, FinalizeResult, TransactionResult},
-            fees::FeeReceipt,
-            substate::SubstateDiff,
-        };
-        use tari_ootle_common_types::{NodeHeight, NumPreshards};
-        use tari_ootle_storage::consensus_models::{Evidence, LockedEpoch, MultiShardAtom, TransactionExecution};
-        use tari_ootle_transaction::TransactionId;
-
-        use super::*;
-
-        #[test]
-        fn charges_points_only_when_command_created_the_execution() {
-            let leaf = LeafBlock {
-                block_id: BlockId::zero(),
-                height: NodeHeight(1),
-                epoch: Epoch(1),
-                shard_group: ShardGroup::all_shards(NumPreshards::P256),
-            };
-            let mut change_set = ProposedBlockChangeSet::new(leaf);
-            let tx_id = TransactionId::new([9; 32]);
-            let execution = TransactionExecution::new(
-                ExecuteResult {
-                    finalize: FinalizeResult::new(
-                        tx_id.into_array().into(),
-                        vec![],
-                        vec![],
-                        TransactionResult::Accept(SubstateDiff::new()),
-                        FeeReceipt::default(),
-                    ),
-                    execution_time: Duration::ZERO,
-                    execute_epoch: None,
-                    wasm_execution_points: 400,
-                    native_execution_points: 100,
-                },
-                vec![],
-                vec![],
-            );
-            change_set.add_transaction_execution(tx_id, execution).unwrap();
-
-            let cmd = Command::SomeAccept(MultiShardAtom {
-                id: tx_id,
-                decision: Decision::Abort(AbortReason::ForeignPledgeInputConflict),
-                evidence: Evidence::empty(),
-                transaction_fee: 0,
-                leader_fee: None,
-                fee_intent_only: true,
-                locked_epoch: LockedEpoch::new(Epoch(1), Default::default(), Default::default()),
-            });
-
-            // When the command itself produced the execution (`had_execution_before_cmd == false`), charge its points.
-            assert_eq!(command_execution_points_to_charge(&cmd, false, &change_set), Some(500));
-
-            // When an earlier command (e.g. ForeignProposal) in the same block already inserted the execution
-            // (`had_execution_before_cmd == true`), finalization must not double-charge execution points.
-            assert_eq!(command_execution_points_to_charge(&cmd, true, &change_set), None);
         }
     }
 
@@ -2156,8 +2070,8 @@ mod tests {
         #[test]
         #[expect(clippy::too_many_lines)]
         fn foreign_proposal_adopting_fee_intent_does_not_charge_execution_points_on_all_accept_in_same_block() {
-            let local_sg = ShardGroup::new(0, 127);
-            let foreign_sg = ShardGroup::new(128, 255);
+            let local_sg = ShardGroup::new(1, 128);
+            let foreign_sg = ShardGroup::new(129, 256);
             let mut fixture = VoterFixture::in_committee(local_sg, 2);
             fixture
                 .voter
@@ -2276,7 +2190,11 @@ mod tests {
             );
 
             let decision = fixture.handle_block(&block_2);
-            assert_eq!(decision.no_vote_reason, None);
+            assert!(
+                decision.no_vote_reason.is_none(),
+                "unexpected no_vote_reason: {:?}",
+                decision.no_vote_reason
+            );
             assert_eq!(decision.local_decision, Some(QuorumDecision::Accept));
         }
 
@@ -2284,8 +2202,8 @@ mod tests {
         /// `SomeAccept` for it, the vote loop votes for the block.
         #[test]
         fn foreign_proposal_aborting_transaction_votes_for_some_accept_in_same_block() {
-            let local_sg = ShardGroup::new(0, 127);
-            let foreign_sg = ShardGroup::new(128, 255);
+            let local_sg = ShardGroup::new(1, 128);
+            let foreign_sg = ShardGroup::new(129, 256);
             let mut fixture = VoterFixture::in_committee(local_sg, 2);
 
             let transaction = Transaction::builder_localnet(Epoch(10)).build_and_seal(&PrivateKey::from(2u64));
@@ -2376,7 +2294,11 @@ mod tests {
             );
 
             let decision = fixture.handle_block(&block_2);
-            assert_eq!(decision.no_vote_reason, None);
+            assert!(
+                decision.no_vote_reason.is_none(),
+                "unexpected no_vote_reason: {:?}",
+                decision.no_vote_reason
+            );
             assert_eq!(decision.local_decision, Some(QuorumDecision::Accept));
         }
     }

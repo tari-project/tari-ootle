@@ -103,18 +103,20 @@ impl<'a, P: Provider> AccountInvokeBuilder<'a, P> {
             resource_address,
             required: true,
         });
-        // We need the substate of the recipient account to deposit into, if it exists
-        self.want_list.insert(WantInput::SpecificSubstate {
-            substate_id: to_component_addr.into(),
-            required: false,
-        });
-        // We need the vault to deposit into, if it exists
-        self.want_list.insert(WantInput::VaultForResource {
-            component_address: to_component_addr,
-            resource_address,
-            // If it doesn't exist, the  CreateAccount instruction will create it
-            required: false,
-        });
+        if to_component_addr != from_component_addr {
+            // We need the substate of the recipient account to deposit into, if it exists
+            self.want_list.insert(WantInput::SpecificSubstate {
+                substate_id: to_component_addr.into(),
+                required: false,
+            });
+            // We need the vault to deposit into, if it exists
+            self.want_list.insert(WantInput::VaultForResource {
+                component_address: to_component_addr,
+                resource_address,
+                // If it doesn't exist, the CreateAccount instruction will create it
+                required: false,
+            });
+        }
 
         self.builder = self
             .builder
@@ -140,5 +142,67 @@ impl<'a, P: Provider> AccountInvokeBuilder<'a, P> {
     ) -> Self {
         self.builder = self.builder.publish_template_with_metadata(template, metadata_hash);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, sync::Weak};
+
+    use tari_ootle_common_types::engine_types::substate::{Substate, SubstateId};
+
+    use super::*;
+    use crate::{Network, keys::OotleSecretKey, provider::ProviderResult};
+
+    struct TestProvider {
+        address: Address,
+    }
+
+    impl Provider for TestProvider {
+        type Client = ();
+
+        fn network(&self) -> Network {
+            Network::LocalNet
+        }
+
+        fn weak_client(&self) -> Weak<Self::Client> {
+            Weak::new()
+        }
+
+        fn default_signer_address(&self) -> &Address {
+            &self.address
+        }
+
+        async fn resolve_input_want_list(
+            &self,
+            transaction: UnsignedTransaction,
+            _want_list: &HashSet<WantInput>,
+        ) -> ProviderResult<UnsignedTransaction> {
+            Ok(transaction)
+        }
+
+        async fn fetch_substates<I: IntoIterator<Item = SubstateId> + Send>(
+            &self,
+            _substate_ids: I,
+        ) -> ProviderResult<HashMap<SubstateId, Substate>> {
+            Ok(HashMap::new())
+        }
+    }
+
+    #[test]
+    fn public_transfer_to_self_does_not_add_optional_duplicate_vault_want() {
+        let secret = OotleSecretKey::random(Network::LocalNet);
+        let address = secret.to_address();
+        let provider = TestProvider {
+            address: address.clone(),
+        };
+
+        let builder = AccountInvokeBuilder::new(&provider, Epoch(1)).public_transfer(&address, TARI_TOKEN, 100u64);
+        assert_eq!(builder.want_list.len(), 1);
+        assert!(builder.want_list.contains(&WantInput::VaultForResource {
+            component_address: address.to_account_address(),
+            resource_address: TARI_TOKEN,
+            required: true,
+        }));
     }
 }

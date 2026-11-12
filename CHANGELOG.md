@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.53.3](https://github.com/tari-project/tari-ootle/compare/v0.53.2...v0.53.3) (2026-11-11)
+
+Rust clients read fee receipts from JSON again.
+
+### ⚠️ Upgrade notes
+
+- **App and SDK developers:** do not use 0.53.2 crates to read receipts over JSON-RPC; upgrade to
+  0.53.3. Validators and indexers on 0.53.2 are unaffected. (#3712)
+
+### Bug fixes
+
+- **engine_types:** `FeeBreakdown` decoding keeps rows in wire order and rejects only repeated
+  sources, so wallet daemon responses no longer fail with "FeeBreakdown sources are repeated or out
+  of ascending order". (#3712)
+
 ## [0.53.2](https://github.com/tari-project/tari-ootle/compare/v0.53.1...v0.53.2) (2026-11-11)
 
 Engine metering and confidential validation tighten, the wallet daemon defaults to MainNet, and

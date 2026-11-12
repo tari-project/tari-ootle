@@ -1619,7 +1619,7 @@ where
                                 action: ComponentAction::GetState.into(),
                             })?
                     } else {
-                        state.read_lock_substate_in_scope(SubstateId::Component(component_address))?
+                        state.read_lock_substate(SubstateId::Component(component_address))?
                     };
 
                     // We only allow mutating of the current component.

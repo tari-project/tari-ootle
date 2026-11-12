@@ -88,6 +88,14 @@ pub enum NoVoteReason {
     ForeignProposalAlreadyConfirmed,
     #[error("Foreign proposal processing failed")]
     ForeignProposalProcessingFailed,
+    #[error("The leader proposed foreign proposal {block_id}, which failed validation when this node received it")]
+    ForeignProposalInvalid { block_id: BlockId },
+    #[error("The leader named shard group {atom} for foreign proposal {block_id}, but the proposal is from {actual}")]
+    ForeignProposalShardGroupMismatch {
+        block_id: BlockId,
+        atom: ShardGroup,
+        actual: ShardGroup,
+    },
     #[error("The node is not at the end of the epoch")]
     NotEndOfEpoch,
     #[error("The node is not at the end of the epoch and other commands are present")]
@@ -183,6 +191,15 @@ pub enum NoVoteReason {
         locked_epoch: Epoch,
         block_epoch: Epoch,
     },
+    #[error(
+        "The leader sequenced transaction {transaction_id}, whose minimum epoch is {min_epoch}, in a block of the \
+         earlier {block_epoch}"
+    )]
+    MinEpochAfterBlock {
+        transaction_id: TransactionId,
+        min_epoch: Epoch,
+        block_epoch: Epoch,
+    },
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -219,6 +236,8 @@ impl NoVoteReason {
             Self::ForeignProposalNotReceived => "ForeignProposalNotReceived",
             Self::ForeignProposalAlreadyConfirmed => "ForeignProposalAlreadyConfirmed",
             Self::ForeignProposalProcessingFailed => "ForeignProposalProcessingFailed",
+            Self::ForeignProposalInvalid { .. } => "ForeignProposalInvalid",
+            Self::ForeignProposalShardGroupMismatch { .. } => "ForeignProposalShardGroupMismatch",
             Self::NotEndOfEpoch => "NotEndOfEpoch",
             Self::EndOfEpochWithOtherCommands => "EndOfEpochWithOtherCommands",
             Self::CommandsAfterEndOfEpoch => "CommandsAfterEndOfEpoch",
@@ -244,6 +263,7 @@ impl NoVoteReason {
             Self::ConflictingTransactionProposed { .. } => "ConflictingTransactionProposed",
             Self::LockedEpochDisagreement { .. } => "LockedEpochDisagreement",
             Self::LockedEpochAfterBlock { .. } => "LockedEpochAfterBlock",
+            Self::MinEpochAfterBlock { .. } => "MinEpochAfterBlock",
         }
     }
 }

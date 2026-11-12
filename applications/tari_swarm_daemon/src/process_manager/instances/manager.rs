@@ -48,7 +48,13 @@ const CONSENSUS_CONSTANTS_TEMPLATE: &str = r#"# Consensus constants for this swa
 use crate::{
     config::{InstanceConfig, InstanceType},
     logger::FORWARDED_TARGET,
-    process_definitions::{CONSENSUS_CONSTANTS_FILE_NAME, ProcessContext, get_definition},
+    process_definitions::{
+        CLAIM_KEY_FILE_NAME,
+        CLAIM_PUBLIC_KEY_SETTINGS_KEY,
+        CONSENSUS_CONSTANTS_FILE_NAME,
+        ProcessContext,
+        get_definition,
+    },
     process_manager::{
         AllocatedPorts,
         IndexerProcess,
@@ -112,7 +118,7 @@ impl InstanceManager {
 
             // The key outlives a restart, and creating it again fails because the account name is taken
             if instance.instance_type.is_wallet_daemon_create_key() &&
-                fs::try_exists(self.base_path.join("processes").join("claim_key.json"))
+                fs::try_exists(self.base_path.join("processes").join(CLAIM_KEY_FILE_NAME))
                     .await
                     .unwrap_or(false)
             {
@@ -168,16 +174,21 @@ impl InstanceManager {
     /// Forks an instance of `instance_type` that the config does not list. It starts with the settings
     /// and envs of the first configured instance of that type, so it finds the rest of the swarm the
     /// way that instance does, and `settings` override any of them.
+    /// With no `instance_name`, the instance takes the name the config gives its next instance of
+    /// that type, so it reuses that process directory (and keys) when added again after a restart,
+    /// and raising the entry's `num_instances` forks it again.
     pub async fn create_instance(
         &mut self,
         executable: &Executable,
         instance_type: InstanceType,
-        instance_name: String,
+        instance_name: Option<String>,
         settings: HashMap<String, String>,
     ) -> anyhow::Result<InstanceId> {
-        // Names that slugify alike share a process directory, so they count as the same name
-        let slug = slugify(&instance_name);
-        if self.instances().any(|i| slugify(i.name()) == slug) {
+        let instance_name = match instance_name {
+            Some(name) => name,
+            None => self.next_config_name(instance_type),
+        };
+        if self.is_name_taken(&instance_name) {
             return Err(anyhow!(
                 "Instance with name '{instance_name}' already exists. Please choose a different name"
             ));
@@ -193,6 +204,30 @@ impl InstanceManager {
 
         self.fork_new(executable, instance_type, instance_name, None, envs, new_settings)
             .await
+    }
+
+    /// Names that slugify alike share a process directory, so they count as the same name
+    fn is_name_taken(&self, name: &str) -> bool {
+        let slug = slugify(name);
+        self.instances().any(|i| slugify(i.name()) == slug)
+    }
+
+    /// The first name, in the config's naming of `instance_type`, that no instance holds.
+    fn next_config_name(&self, instance_type: InstanceType) -> String {
+        let config = self
+            .config
+            .iter()
+            .find(|c| c.instance_type == instance_type)
+            .cloned()
+            .unwrap_or_else(|| InstanceConfig::new(instance_type));
+        let mut index = 0;
+        loop {
+            let name = config.instance_name(index);
+            if !self.is_name_taken(&name) {
+                return name;
+            }
+            index += 1;
+        }
     }
 
     pub async fn fork_new(
@@ -263,7 +298,7 @@ impl InstanceManager {
 
         // Special handling to set the claim public key if we find a file containing one
         if instance_type.is_validator() {
-            let claim_public_key_file = processes_path.join("claim_key.json");
+            let claim_public_key_file = processes_path.join(CLAIM_KEY_FILE_NAME);
             if claim_public_key_file.exists() {
                 let file = File::open(&claim_public_key_file)
                     .await
@@ -277,7 +312,7 @@ impl InstanceManager {
                     .and_then(|pk| pk.as_str())
                     .ok_or_else(|| anyhow!("Failed to extract public key from claim public key file: {claim_data}"))?;
                 info!("Setting claim public key to {}", claim_public_key);
-                instance_settings.insert("claim_public_key".to_string(), claim_public_key.to_string());
+                instance_settings.insert(CLAIM_PUBLIC_KEY_SETTINGS_KEY.to_string(), claim_public_key.to_string());
             }
         }
 
@@ -694,7 +729,7 @@ mod tests {
             .create_instance(
                 &executable,
                 InstanceType::MinoTariNode,
-                "extra-node".to_string(),
+                Some("extra-node".to_string()),
                 HashMap::from([("overridden".to_string(), "request".to_string())]),
             )
             .await
@@ -716,7 +751,7 @@ mod tests {
             .create_instance(
                 &executable,
                 InstanceType::MinoTariNode,
-                "extra-node".to_string(),
+                Some("extra-node".to_string()),
                 HashMap::new(),
             )
             .await
@@ -727,12 +762,71 @@ mod tests {
             .create_instance(
                 &executable,
                 InstanceType::MinoTariNode,
-                "Extra Node".to_string(),
+                Some("Extra Node".to_string()),
                 HashMap::new(),
             )
             .await
             .unwrap_err();
         assert!(err.to_string().contains("already exists"), "{err}");
         assert_eq!(manager.instances().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_unnamed_instance_takes_the_first_free_config_name() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_path = temp_dir.path().to_path_buf();
+        let executable = stub_executable(&base_path).await;
+        let config = InstanceConfig::new(InstanceType::MinoTariNode).with_name("Node");
+        let mut manager = InstanceManager::new(
+            base_path.clone(),
+            Network::LocalNet,
+            HashMap::new(),
+            vec![config],
+            47200,
+        );
+
+        let mut create = async |name: Option<&str>| {
+            let id = manager
+                .create_instance(
+                    &executable,
+                    InstanceType::MinoTariNode,
+                    name.map(ToString::to_string),
+                    HashMap::new(),
+                )
+                .await
+                .unwrap();
+            manager.instances().find(|i| i.id() == id).unwrap().name().to_string()
+        };
+
+        assert_eq!(create(None).await, "Node-#00");
+        assert_eq!(create(Some("Node-#01")).await, "Node-#01");
+        assert_eq!(create(Some("unrelated")).await, "unrelated");
+        assert_eq!(create(None).await, "Node-#02");
+        assert!(base_path.join("processes").join(slugify("Node-#02")).is_dir());
+    }
+
+    #[tokio::test]
+    async fn a_validator_without_a_claim_key_is_not_forked() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_path = temp_dir.path().to_path_buf();
+        let executable = Executable {
+            instance_type: InstanceType::TariValidatorNode,
+            ..stub_executable(&base_path).await
+        };
+        let mut manager = InstanceManager::new(base_path, Network::LocalNet, HashMap::new(), vec![], 47100);
+
+        let err = manager
+            .create_instance(
+                &executable,
+                InstanceType::TariValidatorNode,
+                Some("vn".to_string()),
+                HashMap::new(),
+            )
+            .await
+            .unwrap_err();
+        let err = format!("{err:#}");
+        assert!(err.contains("no fee claim public key"), "{err}");
+        assert!(err.contains(CLAIM_KEY_FILE_NAME), "{err}");
+        assert_eq!(manager.instances().count(), 0);
     }
 }

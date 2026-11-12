@@ -22,7 +22,7 @@ use tari_ootle_wallet_sdk::{
 use tari_ootle_walletd_client::{ComponentAddressOrName, types::ClaimBurnProofContents};
 use tari_sidechain::CompleteClaimBurnProof;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib_types::{ComponentAddress, EncryptedData, ResourceAddress, stealth::StealthTransferStatement};
+use tari_template_lib_types::{ComponentAddress, ResourceAddress, stealth::StealthTransferStatement};
 use tokio::{sync::broadcast, time};
 
 use crate::server::ApplicationErrorCode;
@@ -230,6 +230,24 @@ pub(super) fn validate_transaction_for_approval(
     network: Network,
     transaction: &UnsignedTransaction,
 ) -> Result<(), anyhow::Error> {
+    validate_transaction_for_network(network, transaction)?;
+
+    if transaction.is_dry_run() {
+        return Err(invalid_params(
+            "transaction.dry_run",
+            Some("a dry-run transaction cannot be committed, so this wallet never signs it"),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Checks a transaction's blob references resolve and its network byte is `network`. Dry runs and approvals share
+/// these rules.
+pub(super) fn validate_transaction_for_network(
+    network: Network,
+    transaction: &UnsignedTransaction,
+) -> Result<(), anyhow::Error> {
     transaction
         .validate_blob_references()
         .map_err(|e| invalid_params("transaction.blobs", Some(e.to_string())))?;
@@ -242,13 +260,6 @@ pub(super) fn validate_transaction_for_approval(
                 transaction.network(),
                 network.as_byte()
             )),
-        ));
-    }
-
-    if transaction.is_dry_run() {
-        return Err(invalid_params(
-            "transaction.dry_run",
-            Some("a dry-run transaction cannot be committed, so this wallet never signs it"),
         ));
     }
 
@@ -396,11 +407,14 @@ pub(super) fn general_error<T: Display>(details: T) -> anyhow::Error {
     application_error(ApplicationErrorCode::GeneralError, details)
 }
 
-/// Reject anything that isn't a single, non-`..` path component, so caller-supplied
-/// names cannot escape the burn-proof directory via `Path::join`.
+/// Accepts only a single `Component::Normal` path component containing no `/` or `\` separator, so
+/// caller-supplied names cannot escape the burn-proof directory via `Path::join`. `.` and `..` parse as
+/// `CurDir` and `ParentDir` and are rejected; names such as `a..b.json` are accepted.
 pub(crate) fn validate_burn_proof_file_name(file_name: &str) -> anyhow::Result<()> {
-    let p = Path::new(file_name);
-    if p.components().count() != 1 || file_name.contains("..") {
+    let mut components = Path::new(file_name).components();
+    let is_single_normal =
+        matches!(components.next(), Some(std::path::Component::Normal(_))) && components.next().is_none();
+    if !is_single_normal || file_name.contains(['/', '\\']) {
         return Err(anyhow!("Invalid file name"));
     }
     Ok(())
@@ -409,18 +423,8 @@ pub(crate) fn validate_burn_proof_file_name(file_name: &str) -> anyhow::Result<(
 /// Converts a `CompleteClaimBurnProof` (the L1 burn proof file format) into the
 /// `ClaimBurnProofContents` used by the wallet daemon for claim transactions.
 pub(crate) fn complete_burn_proof_to_contents(proof: CompleteClaimBurnProof) -> anyhow::Result<ClaimBurnProofContents> {
-    let encrypted_data = EncryptedData::try_from(proof.encrypted_data).map_err(|len| {
-        anyhow!(
-            "Invalid encrypted data length: {}. Expected max length: {}",
-            len,
-            EncryptedData::MAX_MEMO_SIZE
-        )
-    })?;
     let claim_proof = claim_proof_from_l1(&proof.claim_proof).map_err(|e| anyhow!("Invalid burn proof: {e}"))?;
-    Ok(ClaimBurnProofContents {
-        claim_proof,
-        encrypted_data,
-    })
+    Ok(ClaimBurnProofContents { claim_proof })
 }
 
 #[cfg(test)]
@@ -486,5 +490,32 @@ mod tests {
             .unwrap_err();
         assert!(!is_not_found_code(&err));
         assert!(err.downcast_ref::<TestError>().is_some());
+    }
+
+    #[test]
+    fn validate_burn_proof_file_name_accepts_only_plain_file_names() {
+        assert!(validate_burn_proof_file_name("proof.json").is_ok());
+        assert!(validate_burn_proof_file_name("0123-deadbeef.json").is_ok());
+        assert!(validate_burn_proof_file_name("a..b.json").is_ok());
+        assert!(validate_burn_proof_file_name("..json").is_ok());
+
+        for invalid in [
+            "",
+            ".",
+            "..",
+            "/",
+            "\\",
+            "sub/proof.json",
+            "sub\\proof.json",
+            "sub/",
+            "sub/.",
+            "../proof.json",
+            "..\\proof.json",
+        ] {
+            assert!(
+                validate_burn_proof_file_name(invalid).is_err(),
+                "expected '{invalid}' to be rejected"
+            );
+        }
     }
 }

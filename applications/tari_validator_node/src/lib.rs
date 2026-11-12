@@ -61,7 +61,12 @@ use tari_ootle_storage_sqlite::{SqliteDbFactory, global::SqliteGlobalDbAdapter};
 use tari_shutdown::Shutdown;
 use tokio::task;
 
-pub use crate::config::{ApplicationConfig, MIN_PINNED_CHECKPOINT_EPOCHS, ValidatorNodeConfig};
+pub use crate::config::{
+    ApplicationConfig,
+    MIN_EPOCH_HISTORY_LENGTH,
+    MIN_PINNED_CHECKPOINT_EPOCHS,
+    ValidatorNodeConfig,
+};
 use crate::{
     bootstrap::{Services, spawn_services},
     consensus::spec::ValidatorNodeStateStore,
@@ -98,6 +103,7 @@ pub async fn run_validator_node(
     config: ApplicationConfig,
     shutdown: Shutdown,
 ) -> Result<(), anyhow::Error> {
+    config.validator_node.validate_fee_claim_public_key()?;
     info!(target: LOG_TARGET, "Starting validator node on network {}", config.network);
 
     let db_factory = SqliteDbFactory::new(config.validator_node.get_global_db_path());
@@ -260,6 +266,24 @@ impl EpochManagerSpec for ValidatorNodeEpochManagerSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn missing_claim_key_prevents_startup_before_database_creation() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut validator_config = config::ValidatorNodeConfig::default();
+        validator_config.data_dir = dir.path().join("validator-data");
+        let config = ApplicationConfig {
+            common: Default::default(),
+            validator_node: validator_config,
+            epoch_oracle: Default::default(),
+            peer_seeds: Default::default(),
+            network: tari_ootle_transaction::Network::LocalNet,
+        };
+        let identity = RistrettoKeypair::random(&mut rand::rng());
+        let err = run_validator_node(identity, config, Shutdown::new()).await.unwrap_err();
+        assert!(err.to_string().contains("fee_claim_public_key"));
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
 
     #[test]
     fn preload_crypto_services_does_not_panic() {

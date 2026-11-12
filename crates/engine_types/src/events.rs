@@ -133,7 +133,10 @@ impl Event {
 
     pub fn validate_custom_topic<T: AsRef<str>>(topic: T) -> Result<(), String> {
         let s = topic.as_ref();
-        if topic.as_ref().starts_with(STANDARD_TOPIC_PREFIX) {
+        if s.split('.').any(str::is_empty) {
+            return Err("topic cannot be empty or contain empty segments".to_string());
+        }
+        if s.starts_with(STANDARD_TOPIC_PREFIX) {
             return Err("topics starting with 'std.' are reserved for standard events".to_string());
         }
 
@@ -217,6 +220,11 @@ mod tests {
     fn a_template_cannot_reach_the_fee_topic() {
         // What makes matching on the topic safe: only the engine can emit it.
         assert!(Event::validate_custom_topic(std_event("vault", "pay_fee")).is_err());
+        assert!(Event::validate_custom_topic("").is_err());
+        assert!(Event::validate_custom_topic(".").is_err());
+        assert!(Event::validate_custom_topic("foo.").is_err());
+        assert!(Event::validate_custom_topic(".foo").is_err());
+        assert!(Event::validate_custom_topic("a..b").is_err());
     }
 
     #[test]

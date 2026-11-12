@@ -324,7 +324,14 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
         let current_epoch = match select_starting_epoch(last_finalised_epoch, leaf_epoch) {
             Some(epoch) => epoch,
-            None => self.epoch_manager.current_epoch().await?,
+            // No peer holds a checkpoint to sync from, so no epoch of this network has finalised. Every node in that
+            // position opens the birthday epoch, whatever epoch its oracle has reached, so they all build the same
+            // genesis block and then step forward to the oracle's epoch together.
+            None => self.epoch_manager.get_birthday_epoch().await?.ok_or_else(|| {
+                HotStuffError::InvariantError(
+                    "Consensus started with no committed state before the birthday epoch was determined".to_string(),
+                )
+            })?,
         };
 
         let epoch_hash = self.epoch_manager.get_epoch_hash(current_epoch).await?;
@@ -338,10 +345,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     /// resuming a stalled epoch would propose `EndEpoch` until the next base-layer epoch boundary publishes a fresh
     /// event, leaving the committee stuck one epoch behind for an entire base-layer epoch.
     ///
-    /// Seeds the epoch immediately following `starting_epoch` and lets consensus progress naturally from there. If
-    /// the oracle is more than one epoch ahead, the committee transitions one epoch and the next `EpochChanged` event
-    /// (or peer QCs at a higher epoch) drives the rest.
-    async fn seed_next_epoch_from_oracle(&mut self, starting_epoch: Epoch) -> Result<(), HotStuffError> {
+    /// Seeds the oracle's epoch as the target, so the committee proposes `EndEpoch` in each epoch from `starting_epoch`
+    /// until it reaches the oracle's, without waiting for further `EpochChanged` events. Only registration for the
+    /// epoch after `starting_epoch` is checked here; each later epoch is checked as consensus transitions into it.
+    async fn seed_epoch_target_from_oracle(&mut self, starting_epoch: Epoch) -> Result<(), HotStuffError> {
         let oracle_epoch = self.epoch_manager.current_epoch().await?;
         if oracle_epoch <= starting_epoch {
             return Ok(());
@@ -363,10 +370,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
         info!(
             target: LOG_TARGET,
-            "🌟 Oracle is at epoch {oracle_epoch} but consensus is resuming at {starting_epoch}. Seeding next epoch \
-             {next_epoch} so that EndEpoch can be proposed.",
+            "🌟 Oracle is at epoch {oracle_epoch} but consensus is resuming at {starting_epoch}. Seeding epoch \
+             {oracle_epoch} so that EndEpoch can be proposed.",
         );
-        self.next_epoch = Some((next_epoch, Instant::now()));
+        self.next_epoch = Some((oracle_epoch, Instant::now()));
         Ok(())
     }
 
@@ -405,7 +412,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         self.recover_pending_end_of_epoch(current_epoch).await?;
 
         // Catch up on any epoch change the oracle observed before this worker subscribed to epoch events.
-        self.seed_next_epoch_from_oracle(current_epoch).await?;
+        self.seed_epoch_target_from_oracle(current_epoch).await?;
 
         self.publish_event(HotstuffEvent::EpochChanged {
             epoch: current_epoch,
@@ -472,6 +479,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
             // Need to update epoch state if the epoch has changed
             if epoch_state.epoch != current_epoch {
+                self.worker_state.has_processed_first_block = false;
                 let exhaust_burn_rate = self.epoch_exhaust_burn_rate(current_epoch)?;
                 epoch_state
                     .update_from_epoch_manager(&self.epoch_manager, current_epoch, exhaust_burn_rate)
@@ -511,8 +519,18 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             );
 
             tokio::select! {
-                Ok(event) = epoch_manager_events.recv() => {
-                    self.on_epoch_manager_event(event).await?;
+                result = epoch_manager_events.recv() => match result {
+                    Ok(event) => {
+                        self.on_epoch_manager_event(event).await?;
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(target: LOG_TARGET, "Epoch manager event subscriber lagged by {} event(s)", n);
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        return Err(HotStuffError::InternalChannelClosed {
+                            context: "receiving epoch manager event",
+                        });
+                    },
                 },
 
                 forced_height = on_force_beat.wait() => {
@@ -711,7 +729,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let made_progress = !transactions.is_empty();
         self.on_receive_new_transaction
             .process_requested(
-                epoch_state.epoch(),
+                epoch,
                 from.clone(),
                 block_id,
                 transactions,
@@ -2025,12 +2043,12 @@ impl<TAddr> CatchUp<TAddr> {
     }
 }
 
-/// The epoch consensus resumes in, or `None` for a node with no consensus state, which joins at the oracle's epoch.
+/// The epoch consensus resumes in, or `None` for a node with no consensus state, which opens the birthday epoch.
 ///
 /// A finalised checkpoint means its epoch ended, so consensus resumes in the next one. Without one, the persisted
 /// leaf's epoch has not ended: its committee either stalled there or moved on, and state sync has already decided
 /// which (a committee that moved on is synced from, leaving a checkpoint). Resuming at the leaf keeps this node on its
-/// committee's chain; `seed_next_epoch_from_oracle` then drives the transition to the next epoch. Starting at the
+/// committee's chain; `seed_epoch_target_from_oracle` then drives the transition to the next epoch. Starting at the
 /// oracle's epoch instead would create a genesis block the rest of the committee does not share.
 fn select_starting_epoch(last_finalised_epoch: Option<Epoch>, leaf_epoch: Option<Epoch>) -> Option<Epoch> {
     let after_checkpoint = last_finalised_epoch.map(|epoch| epoch + Epoch(1));

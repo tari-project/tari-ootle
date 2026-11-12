@@ -60,7 +60,7 @@ impl FeeState {
             });
         }
 
-        let Some(amount) = resource_container.unlocked_amount().to_u64_checked() else {
+        let Some(amount) = resource_container.unlocked_amount().to_u64_checked().filter(|&a| a > 0) else {
             return Err(RuntimeError::InvalidAmount {
                 amount: resource_container.unlocked_amount(),
                 reason: "Payed an invalid amount. Amount must be positive and not overflow".to_string(),
@@ -195,6 +195,9 @@ mod tests {
         let mut fee_state = FeeState::new();
         let resource = ResourceContainer::stealth(TARI_TOKEN, 100u64.into());
         let vault_id = VaultId::new(Default::default());
+        fee_state
+            .add_fee_payment_checked(ResourceContainer::stealth(TARI_TOKEN, 0u64.into()), Some(vault_id))
+            .unwrap_err();
         fee_state
             .add_fee_payment_checked(ResourceContainer::stealth(TARI_TOKEN, u128::MAX.into()), Some(vault_id))
             .unwrap_err();

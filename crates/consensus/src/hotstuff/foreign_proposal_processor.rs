@@ -791,7 +791,7 @@ fn has_all_foreign_input_pledges<TTx: StateStoreReadTransaction>(
     Ok(true)
 }
 
-fn get_or_sequence_transaction<TTx: StateStoreReadTransaction>(
+pub(crate) fn get_or_sequence_transaction<TTx: StateStoreReadTransaction>(
     tx: &TTx,
     num_preshards: NumPreshards,
     num_committees: u32,

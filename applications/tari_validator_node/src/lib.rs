@@ -21,7 +21,6 @@
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 mod backup_snapshot;
-mod base_layer;
 mod bootstrap;
 mod config;
 pub mod consensus;

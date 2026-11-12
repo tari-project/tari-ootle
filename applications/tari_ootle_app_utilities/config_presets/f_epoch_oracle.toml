@@ -20,6 +20,11 @@
 # The Tari base node's GRPC URL. If none is specified, http://localhost:{port} will be used where {port} is the network-specific default.
 #base_node_grpc_url = "http://localhost:18142"
 
+# Base node GRPC URLs to scan from, in order, when `base_node_grpc_url` (or the fallback in use) is unreachable. The
+# oracle stays on a fallback once it switches to it. A base node whose chain does not contain the last scanned block is
+# never used; if no configured base node has it, scanning halts with an error rather than rewinding.
+#fallback_base_node_grpc_urls = ["http://other-node:18142"]
+
 # Interval between base layer scans in seconds. Default is 30 seconds.
 #scanning_interval = 30
 

@@ -33,7 +33,6 @@ mod rest_api;
 #[cfg(feature = "web_ui")]
 mod web_ui;
 
-mod base_layer;
 mod event_query_limits;
 mod exhaust_burn_rate;
 pub mod ipc;

@@ -3,6 +3,7 @@
 
 use std::{
     collections::{HashMap, VecDeque},
+    fmt::{Display, Write},
     future::{Future, poll_fn},
     pin::Pin,
     sync::{
@@ -76,7 +77,7 @@ struct BatchScan {
 /// applied every event of the batch that reached it.
 struct ScanPosition {
     /// The L1 tip of the round this position completed, or `None` when this position is from an
-    /// intermediate batch or a reorg rewind that has not yet reached the round's lagged tip.
+    /// intermediate batch that has not yet reached the round's lagged tip.
     tip: Option<FixedHash>,
     block_hash: FixedHash,
     height: u64,
@@ -93,7 +94,11 @@ type TaskOutput<TStore, TClient> = (
 type ScanTask<TStore, TClient> = Pin<Box<dyn Future<Output = TaskOutput<TStore, TClient>> + Send>>;
 
 /// `TClient` defaults to [`GrpcBaseNodeClient`] for production; tests substitute a mock base node
-/// client so the scan/reorg logic can be driven without a live base node.
+/// client so the scan logic can be driven without a live base node.
+///
+/// The oracle scans from one base node at a time, chosen from a primary and optional fallbacks (see
+/// `select_base_node`). It never rewinds data it has scanned: a base node whose main chain no longer
+/// contains the last scanned block is refused, and scanning halts when no base node contains it.
 #[allow(clippy::struct_excessive_bools)]
 pub struct BaseLayerOracle<TStore, TClient = GrpcBaseNodeClient> {
     inner: Option<Box<BaseLayerOracleInner<TStore, TClient>>>,
@@ -118,7 +123,11 @@ struct BaseLayerOracleInner<TStore, TClient> {
     last_scanned_hash: Option<FixedHash>,
     last_epoch_hash: Option<FixedHash>,
     last_scanned_validator_node_mr: Option<FixedHash>,
-    base_node_client: TClient,
+    /// The primary base node followed by the fallbacks, in the order they are tried.
+    base_nodes: Vec<BaseNode<TClient>>,
+    /// Index into `base_nodes` of the node scans are served from. It changes only when that node fails
+    /// the `select_base_node` checks and another passes them.
+    active_base_node: usize,
     has_attempted_scan: bool,
     pending_events: VecDeque<EpochEvent>,
     /// The scan position `pending_events` brings the consumer to. Persisting it any earlier would
@@ -134,6 +143,37 @@ struct BaseLayerOracleInner<TStore, TClient> {
     /// obtains them. Shared with the owning `BaseLayerOracle`, which reads it while this inner state
     /// is away in a scan task. Zero until the first scan completes.
     epoch_length: Arc<AtomicU64>,
+}
+
+struct BaseNode<TClient> {
+    client: TClient,
+    /// Set once the node reports the network the oracle runs on. Checked on first use, so a fallback
+    /// that is unreachable at startup is checked once it comes up and before it serves a scan.
+    is_network_verified: bool,
+}
+
+impl<TClient> BaseNode<TClient> {
+    fn new(client: TClient) -> Self {
+        Self {
+            client,
+            is_network_verified: false,
+        }
+    }
+}
+
+/// Why `select_base_node` refused a base node for this scan round.
+#[derive(Debug, thiserror::Error)]
+enum BaseNodeRejection {
+    #[error("request failed: {0}")]
+    Unreachable(#[from] BaseNodeClientError),
+    #[error("base node reported invalid network byte {0}")]
+    InvalidNetwork(u8),
+    #[error("base node is on {actual}, expected {expected}")]
+    WrongNetwork { expected: Network, actual: Network },
+    #[error("base node tip {tip_height} is below the last scanned height {scanned_height}")]
+    Behind { tip_height: u64, scanned_height: u64 },
+    #[error("last scanned block {height} ({hash}) is not on the base node's main chain")]
+    MissingScannedBlock { height: u64, hash: FixedHash },
 }
 
 impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Clone + 'static, TClient: BaseNodeClient>
@@ -152,7 +192,8 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Clone + 'static, TCl
                 last_scanned_hash: None,
                 last_epoch_hash: None,
                 last_scanned_validator_node_mr: None,
-                base_node_client,
+                base_nodes: vec![BaseNode::new(base_node_client)],
+                active_base_node: 0,
                 has_attempted_scan: false,
                 pending_events: VecDeque::new(),
                 unpersisted_position: None,
@@ -168,9 +209,21 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Clone + 'static, TCl
             sleep_task: None,
         }
     }
+
+    /// Adds base nodes to scan from when the primary base node, or the fallback in use, cannot serve
+    /// the scan. They are tried in the given order after the primary.
+    #[must_use]
+    pub fn with_fallback_base_nodes<I: IntoIterator<Item = TClient>>(mut self, fallbacks: I) -> Self {
+        self.inner
+            .as_mut()
+            .expect("inner is Some until the first scan")
+            .base_nodes
+            .extend(fallbacks.into_iter().map(BaseNode::new));
+        self
+    }
 }
 
-impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClient>
+impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClient + Display>
     BaseLayerOracleInner<TStore, TClient>
 {
     /// The configured start height adjusted for the height lag. This is the minimum height
@@ -206,9 +259,129 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
         Ok(())
     }
 
+    fn base_node_mut(&mut self) -> &mut TClient {
+        &mut self.base_nodes[self.active_base_node].client
+    }
+
+    fn base_node_name(&self, index: usize) -> String {
+        self.base_nodes[index].client.to_string()
+    }
+
+    /// The last scanned block, or `None` before the first block in range is scanned. A zero hash is the
+    /// placeholder persisted for "no block scanned" and is treated the same as `None`.
+    fn last_scanned_block(&self) -> Option<(u64, FixedHash)> {
+        self.last_scanned_hash
+            .filter(|hash| *hash != FixedHash::zero())
+            .map(|hash| (self.last_scanned_height, hash))
+    }
+
+    /// Chooses the base node to scan from this round and returns its tip.
+    ///
+    /// The active node is checked first, then the others in configured order; the first to pass
+    /// becomes the active node and stays active until it fails. A node passes when it is reachable,
+    /// is on the oracle's network and, once a block has been scanned, has that block on its main
+    /// chain. A node without it is behind the scan position, or on a chain that diverged at least
+    /// `height_lag` blocks deep. The scan position is never rewound to follow such a node: events
+    /// already emitted from the scanned chain (epoch changes, validator node changes) cannot be
+    /// retracted. If no node passes, the round fails and the next round checks every node again, so
+    /// scanning resumes when any node serves the scanned chain.
+    async fn select_base_node(&mut self) -> Result<BaseLayerMetadata, BaseLayerOracleError> {
+        let num_nodes = self.base_nodes.len();
+        let mut rejections = Vec::with_capacity(num_nodes);
+        for offset in 0..num_nodes {
+            let index = (self.active_base_node + offset) % num_nodes;
+            match self.check_base_node(index).await {
+                Ok(tip) => {
+                    if index != self.active_base_node {
+                        warn!(
+                            target: LOG_TARGET,
+                            "🔀 Switching epoch oracle base node from {} to {}",
+                            self.base_node_name(self.active_base_node),
+                            self.base_node_name(index),
+                        );
+                        self.active_base_node = index;
+                    }
+                    return Ok(tip);
+                },
+                Err(rejection) => {
+                    let name = self.base_node_name(index);
+                    if matches!(rejection, BaseNodeRejection::MissingScannedBlock { .. }) {
+                        error!(target: LOG_TARGET, "🚨 Refusing base node {name}: {rejection}");
+                    } else {
+                        warn!(target: LOG_TARGET, "Base node {name} is unusable: {rejection}");
+                    }
+                    rejections.push((name, rejection));
+                },
+            }
+        }
+
+        let mut details = String::new();
+        for (name, rejection) in &rejections {
+            let separator = if details.is_empty() { "" } else { "; " };
+            let _ignore = write!(details, "{separator}{name}: {rejection}");
+        }
+        let is_scanned_block_missing = rejections
+            .iter()
+            .any(|(_, rejection)| matches!(rejection, BaseNodeRejection::MissingScannedBlock { .. }));
+        match self.last_scanned_block() {
+            Some((height, hash)) if is_scanned_block_missing => {
+                Err(BaseLayerOracleError::ScannedBlockNotOnAnyBaseNode { height, hash, details })
+            },
+            _ => Err(BaseLayerOracleError::NoUsableBaseNode { details }),
+        }
+    }
+
+    async fn check_base_node(&mut self, index: usize) -> Result<BaseLayerMetadata, BaseNodeRejection> {
+        let expected_network = self.network;
+        let last_scanned_block = self.last_scanned_block();
+        let last_scanned_tip = self.last_scanned_tip;
+        let node = &mut self.base_nodes[index];
+
+        if !node.is_network_verified {
+            let network_byte = node.client.get_network().await?;
+            let actual =
+                Network::try_from(network_byte).map_err(|_| BaseNodeRejection::InvalidNetwork(network_byte))?;
+            if actual != expected_network {
+                return Err(BaseNodeRejection::WrongNetwork {
+                    expected: expected_network,
+                    actual,
+                });
+            }
+            node.is_network_verified = true;
+        }
+
+        let tip = node.client.get_tip_info().await?;
+        let Some((scanned_height, scanned_hash)) = last_scanned_block else {
+            return Ok(tip);
+        };
+        // A tip already seen to extend the scanned block commits to the same chain, so the lookup
+        // below would find it again.
+        if last_scanned_tip == Some(tip.tip_hash) {
+            return Ok(tip);
+        }
+        if tip.height_of_longest_chain < scanned_height {
+            return Err(BaseNodeRejection::Behind {
+                tip_height: tip.height_of_longest_chain,
+                scanned_height,
+            });
+        }
+        if node
+            .client
+            .get_header_by_hash(&scanned_hash)
+            .await
+            .optional()?
+            .is_none()
+        {
+            return Err(BaseNodeRejection::MissingScannedBlock {
+                height: scanned_height,
+                hash: scanned_hash,
+            });
+        }
+        Ok(tip)
+    }
+
     async fn scan_blockchain(&mut self, force_sync: bool) -> Result<bool, BaseLayerOracleError> {
-        // fetch the new base layer info since the previous scan
-        let tip = self.base_node_client.get_tip_info().await?;
+        let tip = self.select_base_node().await?;
         if force_sync {
             info!(
                 target: LOG_TARGET,
@@ -220,7 +393,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
             return self.sync_blockchain(tip).await;
         }
 
-        match self.get_blockchain_progression(&tip).await? {
+        match self.get_blockchain_progression(&tip) {
             BlockchainProgression::Progressed => {
                 info!(
                     target: LOG_TARGET,
@@ -230,15 +403,6 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
                     tip.height_of_longest_chain
                         .saturating_sub(self.config.height_lag)
                 );
-                self.sync_blockchain(tip).await
-            },
-            BlockchainProgression::Reorged => {
-                warn!(
-                    target: LOG_TARGET,
-                    "⚠️ Base layer reorg detected at scanned height {}. Locating fork point.",
-                    self.last_scanned_height
-                );
-                self.handle_reorg(&tip).await?;
                 self.sync_blockchain(tip).await
             },
             BlockchainProgression::NoProgress => {
@@ -251,7 +415,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
 
     async fn emit_done_for_now_if_needed(&mut self, tip_height: u64) -> Result<(), BaseLayerOracleError> {
         if !self.has_attempted_scan {
-            let constants = self.base_node_client.get_consensus_constants(tip_height).await?;
+            let constants = self.base_node_mut().get_consensus_constants(tip_height).await?;
             self.epoch_length.store(constants.epoch_length(), Ordering::Relaxed);
             let lagged_height = tip_height.saturating_sub(self.config.height_lag);
             let epoch = constants.height_to_epoch(lagged_height);
@@ -266,209 +430,19 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
         Ok(())
     }
 
-    async fn get_blockchain_progression(
-        &mut self,
-        tip: &BaseLayerMetadata,
-    ) -> Result<BlockchainProgression, BaseLayerOracleError> {
+    /// `select_base_node` has already checked that `tip` extends the last scanned block, so the only
+    /// question left is whether it has buried new blocks past `height_lag`.
+    fn get_blockchain_progression(&mut self, tip: &BaseLayerMetadata) -> BlockchainProgression {
         let lagged_tip_height = tip.height_of_longest_chain.checked_sub(self.config.height_lag);
         let has_unscanned_lagged_blocks =
             lagged_tip_height.is_some_and(|lag_tip| lag_tip > self.effective_last_scanned_height());
-
-        // Short-circuit when the un-lagged tip is unchanged and no lagged blocks remain unscanned.
-        if self.last_scanned_tip.as_ref() == Some(&tip.tip_hash) && !has_unscanned_lagged_blocks {
-            return Ok(BlockchainProgression::NoProgress);
+        if has_unscanned_lagged_blocks {
+            return BlockchainProgression::Progressed;
         }
-        // Probe for reorgs using our deepest scanned block, NOT the un-lagged tip. The un-lagged
-        // tip naturally gets displaced every block or two when a competing miner's tip is
-        // orphaned — that lookup returns NotFound and declares "reorg" even though nothing at our
-        // (lagged) scan depth has changed. Using last_scanned_hash restricts reorg detection to
-        // changes that actually invalidate data we've stored.
-        match &self.last_scanned_hash {
-            Some(hash) => {
-                let header = self.base_node_client.get_header_by_hash(hash).await.optional()?;
-                if header.is_none() {
-                    return Ok(BlockchainProgression::Reorged);
-                }
-                if has_unscanned_lagged_blocks {
-                    Ok(BlockchainProgression::Progressed)
-                } else {
-                    self.last_scanned_tip = Some(tip.tip_hash);
-                    Ok(BlockchainProgression::NoProgress)
-                }
-            },
-            None => {
-                if has_unscanned_lagged_blocks {
-                    Ok(BlockchainProgression::Progressed)
-                } else {
-                    Ok(BlockchainProgression::NoProgress)
-                }
-            },
+        if self.last_scanned_block().is_some() {
+            self.last_scanned_tip = Some(tip.tip_hash);
         }
-    }
-
-    /// Recovers from a detected base-layer reorg by rewinding the scanner to the fork point.
-    ///
-    /// The fork point is the highest height whose canonical block we have already stored — everything
-    /// above it was built on the orphaned chain. We delete those stale headers and rewind our scan
-    /// position to the fork point, so the subsequent `sync_blockchain` re-fetches and stores the canonical
-    /// headers in their place. The epoch database therefore converges on the correct chain rather than
-    /// accumulating orphaned headers.
-    ///
-    /// We only attempt surgical recovery for reorgs within the confirmation depth (`height_lag`); a reorg
-    /// deeper than that is treated as unrecoverable — we discard all stored headers and rescan from the
-    /// start height. This matches the confirmation-depth guarantee (boundaries are only emitted once
-    /// `height_lag`-buried) and bounds the candidate window to `height_lag` heights.
-    ///
-    /// The whole candidate window is fetched in a single `stream_headers` call (one round-trip rather than
-    /// one per height) and the fork point is then located locally. "Canonical block at height `h` is in
-    /// our store" is monotonic — true at and below the fork, false above it — so scanning the window from
-    /// the top down stops at the fork.
-    async fn handle_reorg(&mut self, tip: &BaseLayerMetadata) -> Result<(), BaseLayerOracleError> {
-        let floor = self.lag_start_height();
-
-        // Without persisted headers there is nothing in the epoch DB to repair; rewind to the start of
-        // our range and let the normal scan re-emit events on the new chain.
-        if !self.config.features.sync_headers {
-            self.rewind_to_floor();
-            return Ok(());
-        }
-
-        let constants = self
-            .base_node_client
-            .get_consensus_constants(tip.height_of_longest_chain)
-            .await?;
-        // Bound the lookup epoch by the tip epoch (never excludes a stored header, even if the L1
-        // epoch_length constant changed since the header was stored).
-        let max_epoch = constants.height_to_epoch(tip.height_of_longest_chain);
-
-        // Candidate window is (search_floor, top]: the fork cannot be above the new canonical tip nor above
-        // the deepest height we scanned, and we only recover within `height_lag` of our scan position.
-        let top = self.last_scanned_height.min(tip.height_of_longest_chain);
-        let search_floor = self
-            .last_scanned_height
-            .saturating_sub(self.config.height_lag)
-            .max(floor);
-        if top > search_floor {
-            // Fetch the whole candidate window in one streamed request (the base node returns up to its
-            // new tip, so a chain-shortening reorg simply yields fewer headers). `window_len` is bounded by
-            // `height_lag`. Scoped so the stream (which borrows the base node client) is dropped before the
-            // store lookups below.
-            let window_len = top - search_floor;
-            let canonical = {
-                let mut stream = self
-                    .base_node_client
-                    .stream_headers(search_floor + 1, window_len)
-                    .await?;
-                let mut headers = Vec::with_capacity(window_len as usize);
-                while let Some(header) = stream.try_next().await? {
-                    headers.push(header);
-                }
-                headers
-            };
-
-            // Highest stored canonical block is the fork point (predicate is monotonic, so the first hit
-            // from the top is the answer).
-            for header in canonical.into_iter().rev() {
-                let canonical_hash = hash_header(self.network, &header);
-                if self
-                    .store
-                    .find_block_header_by_hash(max_epoch, &canonical_hash)
-                    .map_err(BaseLayerOracleError::StoreError)?
-                    .is_some()
-                {
-                    let fork_height = header.height;
-                    let num_deleted = self
-                        .store
-                        .delete_block_headers_above(fork_height)
-                        .map_err(BaseLayerOracleError::StoreError)?;
-                    info!(
-                        target: LOG_TARGET,
-                        "⚓ Base layer fork point at height {fork_height} ({canonical_hash}). Deleted \
-                         {num_deleted} stale header(s) above it; rewinding scanner."
-                    );
-                    self.last_scanned_height = fork_height;
-                    self.last_scanned_tip = None;
-                    self.last_scanned_hash = Some(canonical_hash);
-                    self.last_scanned_validator_node_mr = Some(header.validator_node_mr.into_array().into());
-                    self.reset_last_epoch_hash_to_boundary(constants.height_to_epoch(fork_height), &constants)?;
-                    self.unpersisted_position = Some(ScanPosition {
-                        tip: None,
-                        block_hash: canonical_hash,
-                        height: fork_height,
-                        epoch_hash: self.last_epoch_hash,
-                    });
-                    return Ok(());
-                }
-            }
-        }
-
-        // No common ancestor within the recoverable range: discard everything and rebuild from the start
-        // height. The re-scan re-crosses (and re-emits) every epoch boundary above the floor, so the epoch
-        // hashes self-correct.
-        let num_deleted = self
-            .store
-            .delete_block_headers_above(floor)
-            .map_err(BaseLayerOracleError::StoreError)?;
-        warn!(
-            target: LOG_TARGET,
-            "⚠️ Base layer reorg deeper than the recoverable range (start height {floor}). Deleted {num_deleted} \
-             header(s); rescanning from the start."
-        );
-        self.rewind_to_floor();
-        Ok(())
-    }
-
-    /// After rewinding to a fork point in `fork_epoch`, points `last_epoch_hash` back at the boundary block
-    /// that opened that epoch. Boundaries at or below the fork point are canonical, so this discards any
-    /// orphaned boundary hash carried over from a chain-shortening reorg — the re-scan resumes *above* the
-    /// fork point and so never re-crosses the fork epoch's own boundary to correct it.
-    ///
-    /// If that boundary block sits below our scan range (so we never emitted it), there is no stored hash
-    /// to restore. We clear `last_epoch_hash` rather than leave it: in that case it can only hold a
-    /// boundary from an epoch *above* the fork epoch (the fork epoch's own boundary is below the floor and
-    /// was never crossed), which a chain-shortening reorg has orphaned. `None` is the same "unknown"
-    /// sentinel used at startup, and the re-scan re-populates it on the next boundary it crosses.
-    fn reset_last_epoch_hash_to_boundary(
-        &mut self,
-        fork_epoch: Epoch,
-        constants: &BaseLayerConsensusConstants,
-    ) -> Result<(), BaseLayerOracleError> {
-        let boundary_height = fork_epoch.as_u64().saturating_mul(constants.epoch_length());
-        match self
-            .store
-            .get_first_block_header_in_epoch(fork_epoch)
-            .map_err(BaseLayerOracleError::StoreError)?
-        {
-            Some(boundary) if boundary.height == boundary_height => {
-                self.last_epoch_hash = Some(boundary.block_hash);
-            },
-            _ => {
-                debug!(
-                    target: LOG_TARGET,
-                    "Fork epoch {fork_epoch} boundary block is not within the scan range; clearing last_epoch_hash"
-                );
-                self.last_epoch_hash = None;
-            },
-        }
-        Ok(())
-    }
-
-    /// Resets the in-memory scan position to the start of our scan range, as on a fresh start. The
-    /// persisted position is corrected by the next successful `persist_scan_position`. `last_epoch_hash`
-    /// is cleared too so a reorg that orphaned the last boundary we crossed does not leave a stale hash;
-    /// the re-scan re-emits every boundary above the floor and re-populates it.
-    fn rewind_to_floor(&mut self) {
-        self.last_scanned_height = self.lag_start_height();
-        self.last_scanned_tip = None;
-        self.last_scanned_hash = None;
-        self.last_scanned_validator_node_mr = None;
-        self.last_epoch_hash = None;
-        self.unpersisted_position = Some(ScanPosition {
-            tip: None,
-            block_hash: FixedHash::zero(),
-            height: self.last_scanned_height,
-            epoch_hash: None,
-        });
+        BlockchainProgression::NoProgress
     }
 
     #[allow(clippy::too_many_lines)]
@@ -500,13 +474,16 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
         if self.last_scanned_validator_node_mr.is_none() &&
             let Some(ref hash) = self.last_scanned_hash
         {
-            let header = self.base_node_client.get_header_by_hash(hash).await?;
+            let header = self.base_nodes[self.active_base_node]
+                .client
+                .get_header_by_hash(hash)
+                .await?;
             self.last_scanned_validator_node_mr = Some(header.validator_node_mr.into_array().into());
             // cached_header = Some(header);
         }
 
         let constants = self
-            .base_node_client
+            .base_node_mut()
             .get_consensus_constants(tip.height_of_longest_chain)
             .await?;
         self.epoch_length.store(constants.epoch_length(), Ordering::Relaxed);
@@ -530,7 +507,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
         // let scan_height = constants.epoch_to_height(scan_epoch);
         // if self.last_scanned_validator_node_mr.is_none() {
         //     // Initial validator node download
-        //     let mut stream = self.base_node_client.get_validator_nodes(scan_height).await?;
+        //     let mut stream = self.base_node_mut().get_validator_nodes(scan_height).await?;
         //     while let Some(node) = stream.try_next().await? {
         //         self.pending_events
         //             .push_back(EpochEvent::ActiveValidatorNodeSetChanged {
@@ -556,7 +533,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
             return Ok(true);
         }
 
-        let lagged_height = match self.base_node_client.get_tip_info().await {
+        let lagged_height = match self.base_node_mut().get_tip_info().await {
             Ok(latest) => latest.height_of_longest_chain.saturating_sub(self.config.height_lag),
             Err(err) => {
                 warn!(
@@ -606,7 +583,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
         // note: 10_000 is the maximum permitted by the base node gRPC service
         let limit = 1_000.min(num_blocks);
 
-        let mut base_node_client = self.base_node_client.clone();
+        let mut base_node_client = self.base_node_mut().clone();
         info!(
             target: LOG_TARGET,
             "⛓️Starting header stream from {}-{}", start_scan_height, start_scan_height + limit
@@ -743,7 +720,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
         // Fetch the targeted headers concurrently; they are independent. Each task extracts only the
         // hash and validator-node MR the scan needs, so the full header (incl. its pow_data blob) is
         // dropped immediately rather than collecting up to MAX_BOUNDARIES_PER_BATCH of them.
-        let base_client = self.base_node_client.clone();
+        let base_client = self.base_node_mut().clone();
         let network = self.network;
         let mut samples: Vec<(u64, FixedHash, FixedHash)> = stream::iter(fetch_heights)
             .map(move |height| {
@@ -842,7 +819,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
 
         let mut fetched_changes: HashMap<usize, Vec<ValidatorNodeChange>> = HashMap::new();
         if !fetch_targets.is_empty() {
-            let base_client = self.base_node_client.clone();
+            let base_client = self.base_node_mut().clone();
             let sidechain_id = self.config.sidechain_id;
             fetched_changes = stream::iter(fetch_targets)
                 .map(move |(idx, epoch)| {
@@ -958,7 +935,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
     }
 }
 
-impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static, TClient: BaseNodeClient + 'static>
+impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static, TClient: BaseNodeClient + Display + 'static>
     BaseLayerOracle<TStore, TClient>
 {
     fn poll_next_event(&mut self, cx: &mut Context) -> Poll<Option<EpochEvent>> {
@@ -1053,7 +1030,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static, TCli
     }
 }
 
-impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static, TClient: BaseNodeClient + 'static>
+impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static, TClient: BaseNodeClient + Display + 'static>
     EpochEventOracle for BaseLayerOracle<TStore, TClient>
 {
     /// Returns a Future that returns the next event, completing a round of scanning if necessary.
@@ -1110,13 +1087,24 @@ pub enum BaseLayerOracleError {
     InvalidBaseNodeResponse(String),
     #[error("Epoch {epoch} overflows the base layer height space at epoch length {epoch_length}")]
     EpochHeightOverflow { epoch: Epoch, epoch_length: u64 },
+    #[error(
+        "Epoch oracle halted: last scanned base layer block {height} ({hash}) is not on the main chain of any usable \
+         base node. Either every reachable base node is on a fork, or the base layer reorged deeper than the \
+         confirmation depth; the oracle never rewinds past it. Point the node at a base node that has this block, or \
+         resync the node if the reorg is real. Base nodes: {details}"
+    )]
+    ScannedBlockNotOnAnyBaseNode {
+        height: u64,
+        hash: FixedHash,
+        details: String,
+    },
+    #[error("No configured base node is usable: {details}")]
+    NoUsableBaseNode { details: String },
 }
 
 enum BlockchainProgression {
     /// The blockchain has progressed since the last scan
     Progressed,
-    /// Reorg was detected
-    Reorged,
     /// The blockchain has not progressed since the last scan
     NoProgress,
 }
@@ -1125,6 +1113,7 @@ enum BlockchainProgression {
 mod tests {
     use std::{
         collections::{HashMap, VecDeque},
+        fmt::{Display, Formatter},
         sync::{
             Arc,
             Mutex,
@@ -1151,7 +1140,14 @@ mod tests {
     use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
     use tari_transaction_components::tari_amount::MicroMinotari;
 
-    use super::{BaseLayerOracle, BaseLayerOracleInner, hash_header, lookup_epoch_boundary_hash};
+    use super::{
+        BaseLayerOracle,
+        BaseLayerOracleError,
+        BaseLayerOracleInner,
+        BaseNode,
+        hash_header,
+        lookup_epoch_boundary_hash,
+    };
     use crate::{
         base_layer::{
             BaseLayerBlockHeaderStore,
@@ -1227,20 +1223,6 @@ mod tests {
             Ok(())
         }
 
-        fn find_block_header_by_hash(
-            &self,
-            max_epoch: Epoch,
-            block_hash: &FixedHash,
-        ) -> anyhow::Result<Option<BlockHeaderModel>> {
-            Ok(self
-                .headers
-                .lock()
-                .unwrap()
-                .iter()
-                .find(|m| m.block_hash == *block_hash && m.epoch <= max_epoch)
-                .cloned())
-        }
-
         fn get_first_block_header_in_epoch(&self, epoch: Epoch) -> anyhow::Result<Option<BlockHeaderModel>> {
             Ok(self
                 .headers
@@ -1251,20 +1233,17 @@ mod tests {
                 .min_by_key(|m| m.height)
                 .cloned())
         }
-
-        fn delete_block_headers_above(&self, height: u64) -> anyhow::Result<usize> {
-            let mut stored = self.headers.lock().unwrap();
-            let before = stored.len();
-            stored.retain(|m| m.height <= height);
-            Ok(before - stored.len())
-        }
     }
 
     /// Mock base node serving a configurable canonical chain (indexed by height). Swapping the chain
     /// simulates a reorg.
     #[derive(Clone)]
     struct MockBaseNode {
+        name: &'static str,
         chain: Arc<Mutex<Vec<BlockHeader>>>,
+        /// When true, every request fails as if the base node were unreachable.
+        offline: Arc<AtomicBool>,
+        network: Network,
         /// Validator-node changes served per epoch by `get_validator_node_changes`. Empty by default.
         vn_changes: Arc<Mutex<HashMap<u64, Vec<ValidatorNodeChange>>>>,
         /// Epochs `get_validator_node_changes` was called with. The deferred fetches run concurrently,
@@ -1276,8 +1255,15 @@ mod tests {
 
     impl MockBaseNode {
         fn new(chain: Vec<BlockHeader>) -> Self {
+            Self::named("primary", chain)
+        }
+
+        fn named(name: &'static str, chain: Vec<BlockHeader>) -> Self {
             Self {
+                name,
                 chain: Arc::new(Mutex::new(chain)),
+                offline: Arc::new(AtomicBool::new(false)),
+                network: NETWORK,
                 vn_changes: Arc::new(Mutex::new(HashMap::new())),
                 vn_calls: Arc::new(Mutex::new(Vec::new())),
                 vn_fail: Arc::new(Mutex::new(false)),
@@ -1286,6 +1272,20 @@ mod tests {
 
         fn set_chain(&self, chain: Vec<BlockHeader>) {
             *self.chain.lock().unwrap() = chain;
+        }
+
+        fn set_offline(&self, offline: bool) {
+            self.offline.store(offline, Ordering::Relaxed);
+        }
+
+        fn check_online(&self) -> Result<(), BaseNodeClientError> {
+            if self.offline.load(Ordering::Relaxed) {
+                return Err(BaseNodeClientError::GrpcStatus {
+                    code: tonic::Code::Unavailable,
+                    message: format!("{} is offline", self.name),
+                });
+            }
+            Ok(())
         }
 
         fn set_vn_changes(&self, changes: HashMap<u64, Vec<ValidatorNodeChange>>) {
@@ -1303,16 +1303,24 @@ mod tests {
         }
     }
 
+    impl Display for MockBaseNode {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.name)
+        }
+    }
+
     impl BaseNodeClient for MockBaseNode {
         async fn test_connection(&mut self) -> Result<(), BaseNodeClientError> {
-            Ok(())
+            self.check_online()
         }
 
         async fn get_network(&mut self) -> Result<u8, BaseNodeClientError> {
-            Ok(NETWORK.as_byte())
+            self.check_online()?;
+            Ok(self.network.as_byte())
         }
 
         async fn get_tip_info(&mut self) -> Result<BaseLayerMetadata, BaseNodeClientError> {
+            self.check_online()?;
             let chain = self.chain.lock().unwrap();
             let tip = chain.last().expect("chain must not be empty");
             Ok(BaseLayerMetadata {
@@ -1353,6 +1361,7 @@ mod tests {
         }
 
         async fn get_header_by_hash(&mut self, block_hash: &FixedHash) -> Result<BlockHeader, BaseNodeClientError> {
+            self.check_online()?;
             self.chain
                 .lock()
                 .unwrap()
@@ -1371,6 +1380,7 @@ mod tests {
             limit: u64,
         ) -> Result<impl Stream<Item = Result<BlockHeader, BaseNodeClientError>> + Unpin + Send, BaseNodeClientError>
         {
+            self.check_online()?;
             let chain = self.chain.lock().unwrap();
             let headers: Vec<_> = chain
                 .iter()
@@ -1434,7 +1444,8 @@ mod tests {
             last_scanned_hash: None,
             last_epoch_hash: None,
             last_scanned_validator_node_mr: None,
-            base_node_client: client,
+            base_nodes: vec![BaseNode::new(client)],
+            active_base_node: 0,
             has_attempted_scan: false,
             pending_events: VecDeque::new(),
             unpersisted_position: None,
@@ -1682,85 +1693,186 @@ mod tests {
         assert_eq!(lookup_epoch_boundary_hash(&store, 0, Epoch(2)).unwrap(), None);
     }
 
-    #[tokio::test]
-    async fn reorg_rewinds_to_fork_point_and_prunes_orphans() {
-        // height_lag = 5, tip = 20 -> lagged tip = 15. Scans heights 1..=15.
-        let store = InMemoryStore::default();
-        let chain_a = linear_chain(0..=20);
-        let client = MockBaseNode::new(chain_a.clone());
-        let mut inner = make_inner(store.clone(), client.clone(), 5);
-
-        sync_to_tip(&mut inner).await;
-        assert_eq!(inner.last_scanned_height, 15);
-        assert_eq!(store.heights(), (1..=15).collect::<Vec<_>>());
-
-        // Reorg diverging at height 13 (fork point 12), within the recoverable depth (15 - 5 = 10).
-        let mut chain_b = chain_a[..=12].to_vec();
-        chain_b.extend((13..=20).map(|h| make_header(h, h + 10_000)));
-        client.set_chain(chain_b.clone());
-
-        let tip_b = inner.base_node_client.get_tip_info().await.unwrap();
-        inner.handle_reorg(&tip_b).await.unwrap();
-
-        // Orphaned headers 13..=15 pruned; scan rewound to the fork point.
-        assert_eq!(inner.last_scanned_height, 12);
-        assert_eq!(store.heights(), (1..=12).collect::<Vec<_>>());
-        assert_eq!(inner.last_scanned_hash, Some(hash_header(NETWORK, &chain_b[12])));
-        // last_epoch_hash reset to the boundary that opened the fork epoch (epoch 2 -> height 10),
-        // not left at the orphaned epoch-3 boundary (height 15).
-        assert_eq!(inner.last_epoch_hash, Some(hash_header(NETWORK, &chain_a[10])));
+    /// Chain A up to `fork_height`, then distinct blocks up to `tip`.
+    fn forked_chain(chain_a: &[BlockHeader], fork_height: u64, tip: u64) -> Vec<BlockHeader> {
+        let mut chain = chain_a[..=fork_height as usize].to_vec();
+        chain.extend((fork_height + 1..=tip).map(|h| make_header(h, h + 10_000)));
+        chain
     }
 
+    fn make_inner_with_fallbacks(
+        store: InMemoryStore,
+        primary: MockBaseNode,
+        fallbacks: Vec<MockBaseNode>,
+    ) -> BaseLayerOracleInner<InMemoryStore, MockBaseNode> {
+        let mut inner = make_inner(store, primary, 5);
+        inner.base_nodes.extend(fallbacks.into_iter().map(BaseNode::new));
+        inner
+    }
+
+    /// A base node whose main chain no longer contains the last scanned block halts the scan. The
+    /// scanned headers and position stay as they are: the oracle never rewinds past what it emitted.
     #[tokio::test]
-    async fn reorg_scan_converges_on_new_chain() {
+    async fn scanned_block_missing_from_base_node_halts_without_rewinding() {
+        // height_lag = 5, tip = 20 -> scans heights 1..=15.
         let store = InMemoryStore::default();
         let chain_a = linear_chain(0..=20);
         let client = MockBaseNode::new(chain_a.clone());
         let mut inner = make_inner(store.clone(), client.clone(), 5);
+        sync_to_tip(&mut inner).await;
+        assert_eq!(inner.last_scanned_height, 15);
 
+        // Diverges at height 13, below the scanned block at 15.
+        client.set_chain(forked_chain(&chain_a, 12, 25));
+
+        let err = inner.scan_blockchain(false).await.unwrap_err();
+        assert!(
+            matches!(err, BaseLayerOracleError::ScannedBlockNotOnAnyBaseNode { height: 15, hash, .. } if hash == hash_header(NETWORK, &chain_a[15])),
+            "unexpected error: {err}"
+        );
+        assert_eq!(inner.last_scanned_height, 15);
+        assert_eq!(inner.last_scanned_hash, Some(hash_header(NETWORK, &chain_a[15])));
+        assert_eq!(store.heights(), (1..=15).collect::<Vec<_>>());
+        for h in 1..=15u64 {
+            assert_eq!(store.hash_at(h), Some(hash_header(NETWORK, &chain_a[h as usize])));
+        }
+        assert!(inner.pending_events.is_empty());
+    }
+
+    /// A halted scan resumes once the base node serves the scanned chain again.
+    #[tokio::test]
+    async fn halted_scan_resumes_when_base_node_returns_to_scanned_chain() {
+        let store = InMemoryStore::default();
+        let chain_a = linear_chain(0..=20);
+        let client = MockBaseNode::new(chain_a.clone());
+        let mut inner = make_inner(store.clone(), client.clone(), 5);
         sync_to_tip(&mut inner).await;
 
-        let mut chain_b = chain_a[..=12].to_vec();
-        chain_b.extend((13..=20).map(|h| make_header(h, h + 10_000)));
+        client.set_chain(forked_chain(&chain_a, 12, 25));
+        inner.scan_blockchain(false).await.unwrap_err();
+
+        client.set_chain(linear_chain(0..=25));
+        sync_to_tip(&mut inner).await;
+        assert_eq!(inner.last_scanned_height, 20);
+        assert_eq!(store.heights(), (1..=20).collect::<Vec<_>>());
+    }
+
+    /// A tip replaced above the scanned block is ordinary and must not halt the scan.
+    #[tokio::test]
+    async fn fork_above_the_scanned_block_is_followed() {
+        let store = InMemoryStore::default();
+        let chain_a = linear_chain(0..=20);
+        let client = MockBaseNode::new(chain_a.clone());
+        let mut inner = make_inner(store.clone(), client.clone(), 5);
+        sync_to_tip(&mut inner).await;
+
+        let chain_b = forked_chain(&chain_a, 17, 22);
         client.set_chain(chain_b.clone());
+        sync_to_tip(&mut inner).await;
+        assert_eq!(inner.last_scanned_height, 17);
+        assert_eq!(store.hash_at(17), Some(hash_header(NETWORK, &chain_b[17])));
+    }
 
-        // A full scan round detects the reorg, repairs the store, and re-scans the new chain.
+    /// When the active base node is unreachable the scan moves to the next one, and stays there after
+    /// the first recovers.
+    #[tokio::test]
+    async fn unreachable_base_node_fails_over_and_stays_on_the_fallback() {
+        let store = InMemoryStore::default();
+        let chain = linear_chain(0..=20);
+        let primary = MockBaseNode::named("primary", chain.clone());
+        let fallback = MockBaseNode::named("fallback", chain.clone());
+        let mut inner = make_inner_with_fallbacks(store.clone(), primary.clone(), vec![fallback.clone()]);
+        sync_to_tip(&mut inner).await;
+        assert_eq!(inner.active_base_node, 0);
+
+        primary.set_offline(true);
+        let extended = linear_chain(0..=25);
+        primary.set_chain(extended.clone());
+        fallback.set_chain(extended);
+        sync_to_tip(&mut inner).await;
+        assert_eq!(inner.active_base_node, 1);
+        assert_eq!(inner.last_scanned_height, 20);
+        assert_eq!(store.heights(), (1..=20).collect::<Vec<_>>());
+
+        primary.set_offline(false);
+        sync_to_tip(&mut inner).await;
+        assert_eq!(
+            inner.active_base_node, 1,
+            "a recovered primary must not take over from a working fallback"
+        );
+    }
+
+    /// A fallback that diverged below the scanned block is refused rather than followed, even though it
+    /// is the only reachable base node.
+    #[tokio::test]
+    async fn fallback_on_a_fork_below_the_scanned_block_is_refused() {
+        let store = InMemoryStore::default();
+        let chain_a = linear_chain(0..=20);
+        let primary = MockBaseNode::named("primary", chain_a.clone());
+        let fallback = MockBaseNode::named("fallback", forked_chain(&chain_a, 12, 30));
+        let mut inner = make_inner_with_fallbacks(store.clone(), primary.clone(), vec![fallback]);
         sync_to_tip(&mut inner).await;
 
+        primary.set_offline(true);
+        let err = inner.scan_blockchain(false).await.unwrap_err();
+        assert!(
+            matches!(err, BaseLayerOracleError::ScannedBlockNotOnAnyBaseNode {
+                height: 15,
+                ..
+            }),
+            "unexpected error: {err}"
+        );
+        assert_eq!(inner.active_base_node, 0);
         assert_eq!(inner.last_scanned_height, 15);
         assert_eq!(store.heights(), (1..=15).collect::<Vec<_>>());
-        // Heights above the fork now carry chain B's hashes; the orphaned chain A headers are gone.
         for h in 13..=15u64 {
-            assert_eq!(store.hash_at(h), Some(hash_header(NETWORK, &chain_b[h as usize])));
-        }
-        // Heights at and below the fork are untouched.
-        for h in 1..=12u64 {
             assert_eq!(store.hash_at(h), Some(hash_header(NETWORK, &chain_a[h as usize])));
         }
     }
 
+    /// A fallback still syncing below the scanned height cannot show the scanned block yet; it is
+    /// skipped as unusable, not treated as a fork.
     #[tokio::test]
-    async fn reorg_deeper_than_lag_triggers_full_rescan() {
+    async fn fallback_behind_the_scanned_height_is_skipped() {
         let store = InMemoryStore::default();
-        let chain_a = linear_chain(0..=20);
-        let client = MockBaseNode::new(chain_a.clone());
-        let mut inner = make_inner(store.clone(), client.clone(), 5);
-
+        let chain = linear_chain(0..=20);
+        let primary = MockBaseNode::named("primary", chain.clone());
+        let fallback = MockBaseNode::named("fallback", linear_chain(0..=10));
+        let mut inner = make_inner_with_fallbacks(store.clone(), primary.clone(), vec![fallback.clone()]);
         sync_to_tip(&mut inner).await;
+
+        primary.set_offline(true);
+        let err = inner.scan_blockchain(false).await.unwrap_err();
+        assert!(
+            matches!(err, BaseLayerOracleError::NoUsableBaseNode { .. }),
+            "unexpected error: {err}"
+        );
+        assert_eq!(inner.active_base_node, 0);
+
+        // Once it has synced past the scanned block it is used.
+        fallback.set_chain(chain);
+        sync_to_tip(&mut inner).await;
+        assert_eq!(inner.active_base_node, 1);
         assert_eq!(inner.last_scanned_height, 15);
+    }
 
-        // Diverge at height 8 (fork point 7), below the recoverable range (15 - 5 = 10): the scanner
-        // cannot find a common ancestor in [11, 15] and rebuilds from the start height.
-        let mut chain_b = chain_a[..=7].to_vec();
-        chain_b.extend((8..=20).map(|h| make_header(h, h + 10_000)));
-        client.set_chain(chain_b);
+    /// A fallback on another network is never used.
+    #[tokio::test]
+    async fn fallback_on_another_network_is_refused() {
+        let store = InMemoryStore::default();
+        let chain = linear_chain(0..=20);
+        let primary = MockBaseNode::named("primary", chain.clone());
+        let mut fallback = MockBaseNode::named("fallback", chain);
+        fallback.network = Network::Esmeralda;
+        let mut inner = make_inner_with_fallbacks(store, primary.clone(), vec![fallback]);
 
-        let tip_b = inner.base_node_client.get_tip_info().await.unwrap();
-        inner.handle_reorg(&tip_b).await.unwrap();
-
-        assert!(store.heights().is_empty());
+        primary.set_offline(true);
+        let err = inner.scan_blockchain(false).await.unwrap_err();
+        assert!(
+            matches!(&err, BaseLayerOracleError::NoUsableBaseNode { details } if details.contains("fallback: base node is on")),
+            "unexpected error: {err}"
+        );
         assert_eq!(inner.last_scanned_height, 0);
-        assert_eq!(inner.last_scanned_hash, None);
     }
 
     fn make_inner_syncing_vn_changes(
@@ -2176,54 +2288,6 @@ mod tests {
             epoch_changes(&resumed).into_iter().map(|(e, _)| e).collect::<Vec<_>>(),
             (201..=499).collect::<Vec<_>>(),
             "retry round must resume from Batch 1's committed height (1000) and emit epochs 201..=499"
-        );
-    }
-
-    /// A chain-shortening reorg whose new lagged tip sits at the fork point (`lag_tip_height ==
-    /// fork_height`) leaves no new blocks above the fork point for `sync_blockchain` to scan. The
-    /// rewound scan position and boundary hash must still be persisted and `DoneForNow` emitted.
-    #[tokio::test]
-    async fn reorg_to_shorter_chain_persists_rewound_position_and_emits_done_for_now() {
-        let store = InMemoryStore::default();
-        let chain_a = linear_chain(0..=20);
-        let mut oracle = BaseLayerOracle::new(
-            store.clone(),
-            MockBaseNode::new(chain_a.clone()),
-            make_config(5),
-            NETWORK,
-        );
-
-        next_events_until(&mut oracle, |e| matches!(e, EpochEvent::DoneForNow { .. })).await;
-        let mut cx = Context::from_waker(Waker::noop());
-        assert!(oracle.poll_next_event(&mut cx).is_pending());
-        drop(oracle);
-
-        // Chain B diverges above fork height 12 and ends at height 17 (lagged tip = 12 == fork_height).
-        let mut chain_b = chain_a[..=12].to_vec();
-        chain_b.extend((13..=17).map(|h| make_header(h, h + 10_000)));
-
-        let mut restarted = BaseLayerOracle::new(store.clone(), MockBaseNode::new(chain_b), make_config(5), NETWORK);
-        let events = next_events_until(&mut restarted, |e| matches!(e, EpochEvent::DoneForNow { .. })).await;
-        let expected_epoch_2_hash = hash_header(NETWORK, &chain_a[10]);
-        assert!(
-            matches!(
-                events.as_slice(),
-                [EpochEvent::DoneForNow { epoch: Epoch(2), epoch_hash }] if *epoch_hash == expected_epoch_2_hash
-            ),
-            "expected DoneForNow at rewound Epoch(2); got {events:?}"
-        );
-        assert!(restarted.poll_next_event(&mut cx).is_pending());
-        assert_eq!(
-            store
-                .get::<u64>(StoreKey::BaseLayerLastScannedBlockHeight.as_key_bytes())
-                .unwrap(),
-            Some(12)
-        );
-        assert_eq!(
-            store
-                .get::<FixedHash>(StoreKey::BaseLayerLastEpochHash.as_key_bytes())
-                .unwrap(),
-            Some(expected_epoch_2_hash)
         );
     }
 }

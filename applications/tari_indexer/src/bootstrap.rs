@@ -47,6 +47,7 @@ use tari_epoch_oracles::{
         BaseLayerEpochOracleConfig,
         BaseLayerEpochOracleFeatures,
         BaseLayerOracle,
+        check_base_nodes_at_startup,
     },
     configured::{ConfiguredEpochOracle, RealTimeEpochTicker},
     hybrid::{HybridEpochOracle, mpsc_ticker},
@@ -87,7 +88,6 @@ use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 use crate::{
     ApplicationConfig,
     IndexerEpochManagerSpec,
-    base_layer::verify_correct_network,
     config::PublishedIndexerConfig,
     dry_run::processor::DryRunTransactionProcessor,
     network_client::TariNetworkClient,
@@ -532,22 +532,27 @@ fn save_identities(config: &ApplicationConfig, identity: &RistrettoKeypair) -> a
     Ok(())
 }
 
-async fn create_base_layer_client(
+/// Creates a client for the primary base node and each fallback. Fails when none is reachable or a reachable one is
+/// on another network.
+async fn create_base_layer_clients(
     config: &ApplicationConfig,
     oracle_config: &EpochOracleConfig,
-) -> anyhow::Result<GrpcBaseNodeClient> {
-    let url = oracle_config.base_layer.base_node_grpc_url.clone().unwrap_or_else(|| {
-        let port = grpc_default_port(
-            ApplicationType::BaseNode,
-            convert_network_to_l1_network(&config.network),
-        );
-        format!("http://127.0.0.1:{port}")
-            .parse()
-            .expect("Default base node GRPC URL is malformed")
-    });
-    GrpcBaseNodeClient::connect(url)
-        .await
-        .context("Failed to create gRPC base node client")
+) -> anyhow::Result<Vec<GrpcBaseNodeClient>> {
+    let port = grpc_default_port(
+        ApplicationType::BaseNode,
+        convert_network_to_l1_network(&config.network),
+    );
+    let default_url = format!("http://127.0.0.1:{port}")
+        .parse()
+        .expect("Default base node GRPC URL is malformed");
+    let mut clients = oracle_config
+        .base_layer
+        .base_node_grpc_urls(default_url)
+        .into_iter()
+        .map(GrpcBaseNodeClient::new)
+        .collect::<Vec<_>>();
+    check_base_nodes_at_startup(&mut clients, config.network).await?;
+    Ok(clients)
 }
 
 async fn create_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Clone + Send + 'static>(
@@ -578,11 +583,11 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBloc
     store: TStore,
     consensus_constants: &ConsensusConstants,
 ) -> anyhow::Result<BaseLayerOracle<TStore>> {
-    let mut base_node_client = create_base_layer_client(config, oracle_config).await?;
-    verify_correct_network(&mut base_node_client, config.network).await?;
+    let mut clients = create_base_layer_clients(config, oracle_config).await?.into_iter();
+    let primary = clients.next().expect("the primary base node is always configured");
     Ok(BaseLayerOracle::new(
         store,
-        base_node_client,
+        primary,
         BaseLayerEpochOracleConfig {
             start_height: oracle_config.base_layer.start_height,
             height_lag: consensus_constants.base_layer_confirmations,
@@ -594,7 +599,8 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBloc
             },
         },
         config.network,
-    ))
+    )
+    .with_fallback_base_nodes(clients))
 }
 
 async fn create_configured_epoch_oracle<TStore: EpochOracleStore + Send>(

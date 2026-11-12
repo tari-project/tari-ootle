@@ -22,6 +22,11 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::{
+    fmt::{Display, Formatter},
+    time::Duration,
+};
+
 use futures_util::TryStreamExt;
 use log::*;
 use minotari_app_grpc::{
@@ -33,7 +38,7 @@ use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateVersion};
 use tari_sidechain::FixedHash;
 use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
 use tari_utilities::ByteArray;
-use tonic::codegen::tokio_stream::Stream;
+use tonic::{codegen::tokio_stream::Stream, transport::Endpoint};
 use url::Url;
 
 use crate::{
@@ -43,6 +48,10 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::validator_node::app";
+
+/// Bounds how long connecting to an unreachable base node blocks a caller, so a caller with other base
+/// nodes to try moves on to them within seconds.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 type Client = BaseNodeGrpcClient<tonic::transport::Channel>;
 
@@ -65,8 +74,11 @@ impl GrpcBaseNodeClient {
 
     async fn connection(&mut self) -> Result<&mut Client, BaseNodeClientError> {
         if self.client.is_none() {
-            let inner = Client::connect(self.endpoint.to_string()).await?;
-            self.client = Some(inner);
+            let channel = Endpoint::from_shared(self.endpoint.to_string())?
+                .connect_timeout(CONNECT_TIMEOUT)
+                .connect()
+                .await?;
+            self.client = Some(Client::new(channel));
         }
         self.client.as_mut().ok_or(BaseNodeClientError::ConnectionError)
     }
@@ -92,6 +104,12 @@ impl GrpcBaseNodeClient {
             }
         }
         Ok(count)
+    }
+}
+
+impl Display for GrpcBaseNodeClient {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.endpoint)
     }
 }
 

@@ -364,6 +364,12 @@ impl Default for FeeReceipt {
     }
 }
 
+/// The kind of work a fee charge pays for, one row of a [`FeeBreakdown`].
+///
+/// Append new variants at the end, with the next discriminant and `#[n]` index. Decoding a
+/// [`FeeBreakdown`] requires its rows in strictly ascending order of the derived `Ord`, which
+/// compares discriminants. Inserting, reordering or renumbering a variant changes that order,
+/// and committed receipts written under the old order then fail to decode.
 #[repr(u8)]
 #[derive(
     Debug,
@@ -461,7 +467,35 @@ impl FeeSource {
 pub struct FeeBreakdown {
     #[n(0)]
     #[cbor(with = "tari_bor::adapters::indexmap_codec")]
+    #[serde(deserialize_with = "deserialize_breakdown")]
     breakdown: IndexMap<FeeSource, u64>,
+}
+
+/// Keeps rows in wire order, so re-encoding a decoded breakdown reproduces the bytes it came from, and rejects a
+/// repeated source, matching `indexmap_codec` on the CBOR path.
+fn deserialize_breakdown<'de, D>(deserializer: D) -> Result<IndexMap<FeeSource, u64>, D::Error>
+where D: serde::Deserializer<'de> {
+    struct BreakdownVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for BreakdownVisitor {
+        type Value = IndexMap<FeeSource, u64>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "a map from FeeSource to u64")
+        }
+
+        fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut breakdown = IndexMap::with_capacity(map.size_hint().unwrap_or(0).min(FeeSource::ALL.len()));
+            while let Some((source, amount)) = map.next_entry()? {
+                if breakdown.insert(source, amount).is_some() {
+                    return Err(serde::de::Error::custom("FeeBreakdown source is repeated"));
+                }
+            }
+            Ok(breakdown)
+        }
+    }
+
+    deserializer.deserialize_map(BreakdownVisitor)
 }
 
 impl FeeBreakdown {
@@ -589,6 +623,14 @@ mod tests {
     }
 
     #[test]
+    fn fee_source_order_follows_consecutive_discriminants() {
+        for (index, source) in FeeSource::ALL.into_iter().enumerate() {
+            assert_eq!(source as usize, index, "{source:?} is out of declaration order");
+        }
+        assert!(FeeSource::ALL.is_sorted_by(|a, b| a < b));
+    }
+
+    #[test]
     fn widest_bounds_every_other_receipt() {
         let widest = minicbor::len(FeeReceipt::widest());
 
@@ -617,5 +659,69 @@ mod tests {
         breakdown.add(FeeSource::Initial, 100);
         breakdown.add(FeeSource::Initial, 0);
         assert_eq!(breakdown.iter().collect::<Vec<_>>(), vec![(&FeeSource::Initial, &100)]);
+    }
+
+    fn encode_breakdown_rows(rows: &[(FeeSource, u64)]) -> Vec<u8> {
+        let mut e = minicbor::Encoder::new(Vec::new());
+        e.array(1).unwrap().map(rows.len() as u64).unwrap();
+        for (source, amount) in rows {
+            e.encode(source).unwrap().u64(*amount).unwrap();
+        }
+        e.into_writer()
+    }
+
+    fn rows_of(breakdown: &FeeBreakdown) -> Vec<(FeeSource, u64)> {
+        breakdown.iter().map(|(source, amount)| (*source, *amount)).collect()
+    }
+
+    #[test]
+    fn decode_keeps_ascending_rows_as_stored_including_zero_charges() {
+        let rows = vec![
+            (FeeSource::Initial, 10),
+            (FeeSource::Storage, 30),
+            (FeeSource::WasmExecution, 20),
+            (FeeSource::InputFanout, 0),
+        ];
+        let bytes = encode_breakdown_rows(&rows);
+        let decoded: FeeBreakdown = tari_bor::decode(&bytes).unwrap();
+        assert_eq!(rows_of(&decoded), rows);
+        assert_eq!(tari_bor::encode(&decoded).unwrap(), bytes);
+
+        let json = r#"{"breakdown":{"Initial":10,"Storage":30,"WasmExecution":20,"InputFanout":0}}"#;
+        let deserialized: FeeBreakdown = serde_json::from_str(json).unwrap();
+        assert_eq!(rows_of(&deserialized), rows);
+        assert_eq!(serde_json::to_string(&deserialized).unwrap(), json);
+    }
+
+    #[test]
+    fn decode_keeps_wire_order() {
+        let rows = vec![
+            (FeeSource::WasmExecution, 20),
+            (FeeSource::Initial, 10),
+            (FeeSource::Storage, 30),
+        ];
+        let bytes = encode_breakdown_rows(&rows);
+        let decoded: FeeBreakdown = tari_bor::decode(&bytes).unwrap();
+        assert_eq!(rows_of(&decoded), rows);
+        assert_eq!(tari_bor::encode(&decoded).unwrap(), bytes);
+
+        let json = r#"{"breakdown":{"WasmExecution":20,"Initial":10,"Storage":30}}"#;
+        let deserialized: FeeBreakdown = serde_json::from_str(json).unwrap();
+        assert_eq!(rows_of(&deserialized), rows);
+        assert_eq!(serde_json::to_string(&deserialized).unwrap(), json);
+    }
+
+    #[test]
+    fn decode_rejects_repeated_sources() {
+        let bytes = encode_breakdown_rows(&[(FeeSource::Storage, 1), (FeeSource::Storage, 2)]);
+        let err = tari_bor::decode::<FeeBreakdown>(&bytes).unwrap_err();
+        assert!(err.to_string().contains("duplicate key"), "{err}");
+
+        let err = serde_json::from_str::<FeeBreakdown>(r#"{"breakdown":{"Storage":1,"Storage":2}}"#).unwrap_err();
+        assert!(err.to_string().contains("FeeBreakdown source is repeated"), "{err}");
+
+        let via_value: serde_json::Value =
+            serde_json::from_str(r#"{"breakdown":{"WasmExecution":20,"Initial":10}}"#).unwrap();
+        serde_json::from_value::<FeeBreakdown>(via_value).unwrap();
     }
 }

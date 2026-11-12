@@ -13,4 +13,5 @@ pub struct UtxoProcessQueue {
     pub _shard: Option<i32>,
     pub _state_version: Option<i64>,
     pub _created_at: time::PrimitiveDateTime,
+    pub _generation: i64,
 }

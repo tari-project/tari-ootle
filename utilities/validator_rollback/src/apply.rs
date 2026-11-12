@@ -2,7 +2,6 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::BTreeMap,
     iter,
     ops::Deref,
     path::PathBuf,
@@ -11,27 +10,19 @@ use std::{
 
 use anyhow::{Context, anyhow, bail};
 use clap::Args as ClapArgs;
-use tari_ootle_common_types::{Epoch, ShardGroup, SubstateAddress, optional::Optional, shard::Shard};
+use tari_ootle_common_types::{Epoch, ShardGroup, optional::Optional, shard::Shard};
 use tari_ootle_p2p::PeerAddress;
 use tari_ootle_storage::{
-    Ordering,
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
-    StorageError,
     consensus_models::{EpochCheckpoint, RollbackHistoryEntry},
 };
 use tari_state_store_rocksdb::{
     DatabaseOptions,
-    ReadView,
     RocksDbStateStore,
     codecs::ByteColumn,
-    column_families::{
-        bookkeeping::{CURRENT_SCHEMA_VERSION, DatabaseMigrationVersion},
-        state_sync_rewind_point::StateSyncMissingValueByShardQuery,
-        state_transition::{ByShardAndStateVersionQuery, StateTransitionCf, StateTransitionType},
-        substate::SubstateCf,
-    },
+    column_families::bookkeeping::{CURRENT_SCHEMA_VERSION, DatabaseMigrationVersion},
 };
 use tari_state_tree::Version;
 
@@ -185,7 +176,6 @@ pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
     let substate_rows = store.with_read_tx(|tx| -> anyhow::Result<_> {
         let mut rows = Vec::new();
         for (shard, version) in &state_versions {
-            check_shard_rewind_has_no_pruned_values(tx, *shard, *version)?;
             let mut per_shard = rollback_plan_collect_substates(tx, *shard, *version)?;
             rows.append(&mut per_shard);
         }
@@ -193,27 +183,68 @@ pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
     })?;
     let block_rows = store.with_read_tx(|tx| rollback_plan_collect_blocks(tx, target_epoch))?;
 
-    let audit_file =
-        std::fs::File::create(&audit_path).with_context(|| format!("creating audit file at {:?}", audit_path))?;
-    let mut writer = AuditWriter::new(std::io::BufWriter::new(audit_file))?;
+    let audit_basename = audit_path
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("")
+        .to_string();
+    let mut tx = store.create_write_tx()?;
+    if let Err(err) = (|| -> anyhow::Result<()> {
+        for (shard, version) in &state_versions {
+            rewind_shard(&mut tx, *shard, *version)?;
+        }
+        if !opts.dry_run {
+            rollback_delete_after_epoch(&mut tx, target_epoch).context("rollback_delete_after_epoch")?;
+            rollback_history_insert(&mut tx, &RollbackHistoryEntry {
+                target_epoch,
+                shard_group,
+                applied_at_unix_secs: now_unix,
+                tool_version: env!("CARGO_PKG_VERSION").to_string(),
+                audit_file_basename: audit_basename,
+            })
+            .context("rollback_history_insert")?;
+        }
+        Ok(())
+    })() {
+        let _ = tx.rollback();
+        return Err(err);
+    }
+    if opts.dry_run {
+        tx.rollback().context("rolling back dry-run write transaction")?;
+    }
 
-    write_header(
-        &mut writer,
-        target_epoch,
-        shard_group,
-        pre_rollback_tip,
-        state_versions.clone(),
-        env!("CARGO_PKG_VERSION"),
-        now_unix,
-        opts.dry_run,
-    )?;
+    let footer_snapshot = match (|| -> anyhow::Result<AuditCounters> {
+        let audit_file =
+            std::fs::File::create(&audit_path).with_context(|| format!("creating audit file at {:?}", audit_path))?;
+        let mut writer = AuditWriter::new(std::io::BufWriter::new(audit_file))?;
 
-    let mut counters = AuditCounters::default();
-    write_substate_plan(&mut writer, &mut counters, &substate_rows)?;
-    write_block_plan(&mut writer, &mut counters, &block_rows)?;
-    let footer_snapshot = clone_counters(&counters);
-    write_footer(&mut writer, counters)?;
-    writer.finish()?;
+        write_header(
+            &mut writer,
+            target_epoch,
+            shard_group,
+            pre_rollback_tip,
+            state_versions.clone(),
+            env!("CARGO_PKG_VERSION"),
+            now_unix,
+            opts.dry_run,
+        )?;
+
+        let mut counters = AuditCounters::default();
+        write_substate_plan(&mut writer, &mut counters, &substate_rows)?;
+        write_block_plan(&mut writer, &mut counters, &block_rows)?;
+        let footer_snapshot = clone_counters(&counters);
+        write_footer(&mut writer, counters)?;
+        writer.finish()?;
+        Ok(footer_snapshot)
+    })() {
+        Ok(snapshot) => snapshot,
+        Err(err) => {
+            if !opts.dry_run {
+                let _ = tx.rollback();
+            }
+            return Err(err);
+        },
+    };
 
     println!("Audit file written: {}", audit_path.display());
     println!(
@@ -243,100 +274,18 @@ pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
         return Ok(outcome);
     }
 
-    // Apply the rollback in a single atomic write transaction.
-    let audit_basename = audit_path
-        .file_name()
-        .and_then(|f| f.to_str())
-        .unwrap_or("")
-        .to_string();
-    if let Err(err) = store.with_write_tx(|tx| -> anyhow::Result<()> {
-        for (shard, version) in &state_versions {
-            rewind_shard(tx, *shard, *version)?;
+    if let Err(err) = tx.commit().context("committing rollback write transaction") {
+        if let Err(remove_err) = std::fs::remove_file(&audit_path) {
+            return Err(err.context(format!(
+                "failed to remove audit file at {} after commit failure: {remove_err}",
+                audit_path.display()
+            )));
         }
-        rollback_delete_after_epoch(tx, target_epoch).context("rollback_delete_after_epoch")?;
-        rollback_history_insert(tx, &RollbackHistoryEntry {
-            target_epoch,
-            shard_group,
-            applied_at_unix_secs: now_unix,
-            tool_version: env!("CARGO_PKG_VERSION").to_string(),
-            audit_file_basename: audit_basename,
-        })
-        .context("rollback_history_insert")?;
-        Ok(())
-    }) {
-        let _ = std::fs::remove_file(&audit_path);
         return Err(err);
     }
 
     println!("Rollback applied successfully.");
     Ok(outcome)
-}
-
-fn check_shard_rewind_has_no_pruned_values<TAddr>(
-    tx: &ReadView<'_, TAddr>,
-    shard: Shard,
-    version: Version,
-) -> anyhow::Result<()>
-where
-    TAddr: tari_ootle_common_types::NodeAddressable + serde::Serialize + serde::de::DeserializeOwned,
-{
-    const OPERATION: &str = "check_shard_rewind_has_no_pruned_values";
-
-    let db = tx.db();
-    let transitions_cf = db.cf(StateTransitionCf)?;
-    let transitions_query = db.cf(ByShardAndStateVersionQuery)?;
-    let substates_cf = db.cf(SubstateCf)?;
-    let missing_query = db.cf(StateSyncMissingValueByShardQuery)?;
-
-    let mut missing_values: BTreeMap<SubstateAddress, Version> = missing_query
-        .query_prefix_range_iterator(Ordering::Ascending, &shard)
-        .map(|entry| {
-            let ((_, address), created_at) = entry?;
-            Ok::<_, StorageError>((address, created_at))
-        })
-        .collect::<Result<_, _>>()?;
-
-    let start_version = version.saturating_add(1);
-    let versions: Vec<Version> = transitions_query
-        .query_range_key_iterator(Ordering::Descending, (shard, start_version)..(shard, Version::MAX))
-        .map(|res| {
-            let (_key_shard, state_version) = res?;
-            Ok::<_, StorageError>(state_version)
-        })
-        .collect::<Result<_, _>>()?;
-
-    for state_version in versions {
-        let record = transitions_cf.get(&(shard, state_version), OPERATION)?;
-        for transition in record.transitions.iter().rev() {
-            match transition.transition {
-                StateTransitionType::Up => {
-                    missing_values.remove(&transition.substate_address);
-                },
-                StateTransitionType::Down => {
-                    let substate = substates_cf.get(&transition.substate_address, OPERATION)?;
-                    if substate.substate_value.is_none() {
-                        missing_values.insert(transition.substate_address, substate.created.at_state_version);
-                    }
-                },
-            }
-        }
-    }
-
-    let mut earliest = None::<(SubstateAddress, Version)>;
-    for (address, created_at) in missing_values {
-        if earliest.is_none_or(|(_, earliest_version)| created_at < earliest_version) {
-            earliest = Some((address, created_at));
-        }
-    }
-
-    if let Some((address, created_at)) = earliest {
-        bail!(
-            "rolling {shard} back to v{version} leaves the substate at {address} (created at v{created_at}) up \
-             without its value, which epoch GC has pruned; roll back to a later epoch"
-        );
-    }
-
-    Ok(())
 }
 
 /// Rewinds `shard`'s state tree and substates to `version`.
@@ -444,9 +393,14 @@ mod tests {
 
     use tari_engine_types::{SubstateVersion, substate::SubstateId};
     use tari_ootle_storage::consensus_models::{SubstateCreated, SubstateDestroyed, SubstateRecord};
-    use tari_state_store_rocksdb::column_families::state_transition::{
-        StateTransitionModelDataV1,
-        StateTransitionRecordData,
+    use tari_state_store_rocksdb::column_families::{
+        state_transition::{
+            StateTransitionCf,
+            StateTransitionModelDataV1,
+            StateTransitionRecordData,
+            StateTransitionType,
+        },
+        substate::SubstateCf,
     };
     use tari_state_tree::TransitionAccumulator;
     use tari_template_lib_types::{ComponentAddress, Hash32, ObjectKey};
@@ -546,17 +500,17 @@ mod tests {
             })
             .unwrap();
 
-        let err = store
-            .with_read_tx(|tx| check_shard_rewind_has_no_pruned_values(tx, shard, 2))
-            .unwrap_err();
+        let mut tx = store.create_write_tx().unwrap();
+        let err = rewind_shard(&mut tx, shard, 2).unwrap_err();
+        tx.rollback().unwrap();
         assert!(
             err.to_string()
                 .contains("without its value, which epoch GC has pruned"),
             "unexpected error: {err}"
         );
 
-        store
-            .with_read_tx(|tx| check_shard_rewind_has_no_pruned_values(tx, shard, 1))
-            .unwrap();
+        let mut tx = store.create_write_tx().unwrap();
+        rewind_shard(&mut tx, shard, 1).unwrap();
+        tx.rollback().unwrap();
     }
 }

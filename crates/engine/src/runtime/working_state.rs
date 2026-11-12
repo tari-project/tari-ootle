@@ -1607,6 +1607,19 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(count)
     }
 
+    /// Rejects a state that would persist more than [`limits::EngineLimits::max_substate_outputs`] substates.
+    ///
+    /// Component, resource and vault addresses are drawn from a counter with the same bound, but a substate can be
+    /// created without one: every minted non-fungible is a substate of its own. Counted here, where the set to
+    /// persist is known, so the bound holds for every kind of substate.
+    pub fn enforce_substate_output_limit(&self) -> Result<(), RuntimeError> {
+        let count = self.store.mutated_substates().len();
+        if count > limits::ENGINE_LIMITS.max_substate_outputs {
+            return Err(LimitError::SubstateOutputsExceeded { count }.into());
+        }
+        Ok(())
+    }
+
     /// Rejects a state that would persist more than
     /// [`limits::EngineLimits::max_transaction_output_bytes`]: its mutated substates and its receipt.
     pub fn enforce_output_size_limit(&mut self) -> Result<(), RuntimeError> {

@@ -89,9 +89,6 @@ impl ModuleMiddleware for ResettableState {
                 return Err(refused(format!("mutable global {} has type {ty}", index.as_u32())));
             }
             let name = format!("{GLOBAL_EXPORT_PREFIX}{}", index.as_u32());
-            if module_info.exports.contains_key(&name) {
-                return Err(refused(format!("export name `{name}` is reserved")));
-            }
             module_info.exports.insert(name, ExportIndex::Global(index));
         }
         Ok(())

@@ -394,9 +394,9 @@ where
 
         // The notification stream ends when networking shuts down, but a session's substream can outlive it:
         // a QUIC connection stays open while any of its streams is held, so a peer can keep a session busy
-        // indefinitely. Sessions are aborted rather than drained, and awaiting each aborted task means every
-        // per-session service instance (and anything it owns, e.g. a state store handle) has been dropped by
-        // the time serve returns.
+        // indefinitely. Sessions are therefore aborted, and awaiting each aborted task ensures every per-session
+        // service instance (and anything it owns, e.g. a state store handle) has been dropped by the time serve
+        // returns.
         for task in &self.tasks {
             task.handle.abort();
         }

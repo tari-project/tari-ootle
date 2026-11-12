@@ -156,7 +156,7 @@ pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
         .unwrap_or_else(|| PathBuf::from(format!("./rollback-audit-{}-{}.bin", opts.target_epoch, now_unix)));
 
     // Open exclusive regardless of dry-run. The tool must refuse to run against a live
-    // validator either way — a dry-run against a process that then commits a block
+    // validator either way ��� a dry-run against a process that then commits a block
     // after we snapshot would produce a stale audit.
     let store: RocksDbStateStore<PeerAddress> = RocksDbStateStore::open(&opts.state_db, DatabaseOptions::default())
         .with_context(|| format!("opening state db at {:?}", opts.state_db))?;
@@ -392,7 +392,14 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
     use tari_engine_types::{SubstateVersion, substate::SubstateId};
-    use tari_ootle_storage::consensus_models::{SubstateCreated, SubstateDestroyed, SubstateRecord};
+    use tari_ootle_storage::consensus_models::{
+        BlockHeaderMetadata,
+        EndOfEpochCommand,
+        SubstateCreated,
+        SubstateDestroyed,
+        SubstateRecord,
+        TreeRootSummary,
+    };
     use tari_state_store_rocksdb::column_families::{
         state_transition::{
             StateTransitionCf,
@@ -402,7 +409,7 @@ mod tests {
         },
         substate::SubstateCf,
     };
-    use tari_state_tree::TransitionAccumulator;
+    use tari_state_tree::{SPARSE_MERKLE_PLACEHOLDER_HASH, TransitionAccumulator, TreeHash, compute_proof_for_hashes};
     use tari_template_lib_types::{ComponentAddress, Hash32, ObjectKey};
 
     use super::*;
@@ -426,6 +433,64 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    fn test_checkpoint(epoch: Epoch, shard: Shard, state_version: Version) -> EpochCheckpoint {
+        let zeros = "0000000000000000000000000000000000000000000000000000000000000000";
+        let key = TreeHash::new([1; 32]);
+        let (_, inclusion_proof) = compute_proof_for_hashes([key].into_iter(), key).unwrap();
+        let proof = serde_json::from_value(serde_json::json!({
+            "V1": {
+                "command": EndOfEpochCommand::new(Default::default()),
+                "commit_proof": {
+                    "header": {
+                        "network": 0,
+                        "protocol_version": 0,
+                        "parent_id": zeros,
+                        "justify_id": zeros,
+                        "height": 0,
+                        "epoch": epoch.as_u64(),
+                        "epoch_hash": zeros,
+                        "shard_group": {
+                            "start": shard.as_u32(),
+                            "end_inclusive": shard.as_u32(),
+                        },
+                        "proposed_by": zeros,
+                        "state_merkle_root": zeros,
+                        "command_merkle_root": zeros,
+                        "transaction_merkle_root": zeros,
+                        "signature": {
+                            "public_nonce": zeros,
+                            "signature": zeros,
+                        },
+                        "accumulated_data": {
+                            "total_exhaust_burn": 0,
+                        },
+                        "metadata_hash": zeros,
+                    },
+                    "proof_elements": [],
+                },
+                "inclusion_proof": inclusion_proof,
+            }
+        }))
+        .unwrap();
+        EpochCheckpoint::new(
+            proof,
+            [(shard, TreeRootSummary {
+                root_hash: SPARSE_MERKLE_PLACEHOLDER_HASH,
+                state_version,
+                transition_acc: TransitionAccumulator::zero(),
+            })]
+            .into_iter()
+            .collect(),
+            BlockHeaderMetadata {
+                total_leader_fee: 0,
+                timestamp: 0,
+                extra_data: Default::default(),
+                timeout_certificate_id: None,
+                is_dummy: false,
+            },
+        )
     }
 
     fn pruned_substate_record(seed: u8, shard: Shard, created_at: Version, destroyed_at: Version) -> SubstateRecord {
@@ -458,59 +523,86 @@ mod tests {
     }
 
     #[test]
-    fn preflight_detects_pruned_substate_restored_by_rewind_unless_also_uncreated() {
+    fn run_with_options_rejects_pruned_substate_before_creating_audit_file() {
         let tmp = TempTestDir::new("pruned_substate");
-        let store: RocksDbStateStore<PeerAddress> =
-            RocksDbStateStore::open(tmp.0.join("db"), DatabaseOptions::default()).unwrap();
+        let db_path = tmp.0.join("db");
         let shard = Shard::from_u32(1);
         let record = pruned_substate_record(7, shard, 2, 3);
         let address = record.to_substate_address();
 
-        store
-            .with_write_tx(|tx| -> anyhow::Result<()> {
-                let db = tx.db();
-                db.cf(SubstateCf)?.put(&address, &record, "test")?;
-                db.cf(StateTransitionCf)?.put(
-                    &(shard, 2),
-                    &StateTransitionModelDataV1 {
-                        epoch: Epoch(1),
-                        transitions: vec![StateTransitionRecordData {
-                            substate_address: address,
-                            transition: StateTransitionType::Up,
-                        }],
-                        state_version: 2,
-                        transition_acc: TransitionAccumulator::zero(),
-                    },
-                    "test",
-                )?;
-                db.cf(StateTransitionCf)?.put(
-                    &(shard, 3),
-                    &StateTransitionModelDataV1 {
-                        epoch: Epoch(2),
-                        transitions: vec![StateTransitionRecordData {
-                            substate_address: address,
-                            transition: StateTransitionType::Down,
-                        }],
-                        state_version: 3,
-                        transition_acc: TransitionAccumulator::zero(),
-                    },
-                    "test",
-                )?;
-                Ok(())
+        {
+            let store: RocksDbStateStore<PeerAddress> =
+                RocksDbStateStore::open(&db_path, DatabaseOptions::default()).unwrap();
+            store
+                .with_write_tx(|tx| -> anyhow::Result<()> {
+                    tx.epoch_checkpoint_save(&test_checkpoint(Epoch(0), shard, 1))?;
+                    tx.epoch_checkpoint_save(&test_checkpoint(Epoch(1), shard, 2))?;
+                    let db = tx.db();
+                    let migration_cf = db.cf(DatabaseMigrationVersion)?;
+                    migration_cf.put(&ByteColumn, &CURRENT_SCHEMA_VERSION, "test")?;
+                    db.cf(SubstateCf)?.put(&address, &record, "test")?;
+                    db.cf(StateTransitionCf)?.put(
+                        &(shard, 2),
+                        &StateTransitionModelDataV1 {
+                            epoch: Epoch(1),
+                            transitions: vec![StateTransitionRecordData {
+                                substate_address: address,
+                                transition: StateTransitionType::Up,
+                            }],
+                            state_version: 2,
+                            transition_acc: TransitionAccumulator::zero(),
+                        },
+                        "test",
+                    )?;
+                    db.cf(StateTransitionCf)?.put(
+                        &(shard, 3),
+                        &StateTransitionModelDataV1 {
+                            epoch: Epoch(2),
+                            transitions: vec![StateTransitionRecordData {
+                                substate_address: address,
+                                transition: StateTransitionType::Down,
+                            }],
+                            state_version: 3,
+                            transition_acc: TransitionAccumulator::zero(),
+                        },
+                        "test",
+                    )?;
+                    Ok(())
+                })
+                .unwrap();
+        }
+
+        for (label, dry_run) in [("dry_run", true), ("live", false)] {
+            let audit_out = tmp.0.join(format!("audit_{label}.bin"));
+            let err = run_with_options(ApplyOptions {
+                state_db: db_path.clone(),
+                target_epoch: 1,
+                shard_group: None,
+                audit_out: Some(audit_out.clone()),
+                dry_run,
             })
-            .unwrap();
+            .unwrap_err();
+            let msg = err.to_string();
+            assert!(
+                msg.contains("without its value, which epoch GC has pruned"),
+                "unexpected error ({label}): {msg}"
+            );
+            assert!(
+                !audit_out.exists(),
+                "audit file must not be created when preflight rejects rollback ({label})"
+            );
+        }
 
-        let mut tx = store.create_write_tx().unwrap();
-        let err = rewind_shard(&mut tx, shard, 2).unwrap_err();
-        tx.rollback().unwrap();
-        assert!(
-            err.to_string()
-                .contains("without its value, which epoch GC has pruned"),
-            "unexpected error: {err}"
-        );
-
-        let mut tx = store.create_write_tx().unwrap();
-        rewind_shard(&mut tx, shard, 1).unwrap();
-        tx.rollback().unwrap();
+        let ok_audit = tmp.0.join("audit_epoch0.bin");
+        let outcome = run_with_options(ApplyOptions {
+            state_db: db_path,
+            target_epoch: 0,
+            shard_group: None,
+            audit_out: Some(ok_audit.clone()),
+            dry_run: true,
+        })
+        .unwrap();
+        assert_eq!(outcome.substates_removed, 1);
+        assert!(ok_audit.exists());
     }
 }

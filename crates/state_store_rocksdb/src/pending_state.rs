@@ -122,7 +122,7 @@ impl StagedPendingState {
 pub(crate) enum PendingStateView<'a> {
     /// The state published when a read view's snapshot was taken.
     Pinned(PendingState),
-    /// A write transaction's state: the latest published one, until the transaction changes it, and from then on its
+    /// A write transaction's state: the state published when the transaction first reads it, and from then on its
     /// staged copy.
     Writer {
         shared: &'a SharedPendingState,
@@ -154,7 +154,8 @@ impl<'a> PendingStateView<'a> {
         }
     }
 
-    /// The staged copy changes are applied to, created from the latest published state on first use.
+    /// The staged copy changes are applied to. It is built on the state the transaction first read, or on the latest
+    /// published state if the transaction has not read any.
     ///
     /// # Panics
     /// On a pinned view, which belongs to a read view and is never written.
@@ -168,6 +169,10 @@ impl<'a> PendingStateView<'a> {
     }
 
     /// The state to publish to and the changes to publish, if this transaction changed any.
+    ///
+    /// A transaction that read the pending state without changing it returns `None`, so its commit is not checked
+    /// against later publishes. Every write of a pending-state record stages first, but a database write the caller
+    /// derives from a pending-state read alone is committed even if another transaction has published since.
     pub fn into_staged(self) -> Option<(&'a SharedPendingState, StagedPendingState)> {
         match self {
             Self::Pinned(_) => None,
@@ -202,14 +207,19 @@ mod tests {
             })
             .unwrap_err();
         assert!(!committed);
-        assert!(matches!(err, RocksDbStorageError::GeneralError { .. }));
+        assert!(
+            matches!(&err, RocksDbStorageError::GeneralError { message }
+                if message.contains("another write transaction changed the pending block state")),
+            "unexpected error: {err:?}"
+        );
+        assert_eq!(shared.published().generation, 1);
     }
 
     #[test]
     fn read_only_writer_does_not_produce_staged_state() {
         let shared = SharedPendingState::default();
         let writer = PendingStateView::writer(&shared);
-        let _ = writer.state();
+        let _state = writer.state();
         assert!(writer.into_staged().is_none());
     }
 }

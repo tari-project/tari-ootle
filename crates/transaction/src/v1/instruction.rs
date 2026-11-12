@@ -3,7 +3,7 @@
 
 use std::fmt::{Display, Formatter};
 
-use tari_engine_types::confidential::{ClaimBurnOutputData, MinotariBurnClaimProof};
+use tari_engine_types::confidential::MinotariBurnClaimProof;
 use tari_ootle_common_types::displayable::Displayable;
 use tari_template_lib_types::{
     Amount,
@@ -73,8 +73,6 @@ pub enum Instruction {
     ClaimBurn {
         #[n(0)]
         claim: Box<MinotariBurnClaimProof>,
-        #[n(1)]
-        output_data: ClaimBurnOutputData,
     },
     #[n(6)]
     ClaimValidatorFees {

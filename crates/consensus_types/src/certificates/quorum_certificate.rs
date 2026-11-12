@@ -25,7 +25,7 @@ impl QuorumCertificateRef<'_> {
     pub fn justifies_zero_block(&self) -> bool {
         match self {
             Self::ProposalCertificate(pc) => pc.justifies_zero_block(),
-            Self::TimeoutCertificate(tc) => tc.height().is_zero(),
+            Self::TimeoutCertificate(_) => false,
         }
     }
 
@@ -99,5 +99,28 @@ impl std::fmt::Display for QuorumCertificateRef<'_> {
             Self::ProposalCertificate(pc) => write!(f, "{}", pc),
             Self::TimeoutCertificate(tc) => write!(f, "{}", tc),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_common_types::{NumPreshards, ShardGroup};
+    use tari_sidechain::SignerBitmap;
+
+    use super::*;
+    use crate::TcSignatures;
+
+    #[test]
+    fn timeout_certificate_at_zero_height_never_justifies_zero_block() {
+        let tc = TimeoutCertificate::new(Epoch(0), NodeHeight::zero(), TcSignatures::Schnorr {
+            signers: SignerBitmap::default(),
+            timeouts: vec![],
+        });
+        let qc_ref = QuorumCertificateRef::from(&tc);
+        assert!(!qc_ref.justifies_zero_block());
+
+        let pc = ProposalCertificate::genesis(Epoch(0), ShardGroup::all_shards(NumPreshards::P64));
+        let pc_ref = QuorumCertificateRef::from(&pc);
+        assert!(pc_ref.justifies_zero_block());
     }
 }

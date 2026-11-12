@@ -712,6 +712,10 @@ impl From<&TcSignatures> for proto::consensus::TcSignatures {
     }
 }
 
+/// Maximum encoded byte length of a [`SignerBitmap`] for a committee of up to [`tari_sidechain::MAX_QC_SIGNATURES`]
+/// members (`n.div_ceil(8)`).
+const MAX_SIGNER_BITMAP_BYTES: usize = tari_sidechain::MAX_QC_SIGNATURES.div_ceil(8);
+
 impl TryFrom<proto::consensus::TcSignatures> for TcSignatures {
     type Error = anyhow::Error;
 
@@ -721,6 +725,13 @@ impl TryFrom<proto::consensus::TcSignatures> for TcSignatures {
             .ok_or_else(|| anyhow!("TC signature scheme not provided"))?
         {
             proto::consensus::tc_signatures::Scheme::Schnorr(schnorr) => {
+                if schnorr.signers.len() > MAX_SIGNER_BITMAP_BYTES {
+                    return Err(anyhow!(
+                        "TcSignatures signer bitmap is {} bytes, exceeding maximum {}",
+                        schnorr.signers.len(),
+                        MAX_SIGNER_BITMAP_BYTES
+                    ));
+                }
                 if schnorr.timeouts.len() > tari_sidechain::MAX_QC_SIGNATURES {
                     return Err(anyhow!(
                         "TcSignatures carries {} timeouts, exceeding maximum {}",
@@ -1152,6 +1163,13 @@ impl TryFrom<proto::consensus::QcSignatures> for QcSignatures {
             .ok_or_else(|| anyhow!("QC signature scheme not provided"))?
         {
             proto::consensus::qc_signatures::Scheme::Schnorr(schnorr) => {
+                if schnorr.signers.len() > MAX_SIGNER_BITMAP_BYTES {
+                    return Err(anyhow!(
+                        "QcSignatures signer bitmap is {} bytes, exceeding maximum {}",
+                        schnorr.signers.len(),
+                        MAX_SIGNER_BITMAP_BYTES
+                    ));
+                }
                 if schnorr.signatures.len() > tari_sidechain::MAX_QC_SIGNATURES {
                     return Err(anyhow!(
                         "QcSignatures carries {} signatures, exceeding maximum {}",
@@ -1498,6 +1516,53 @@ mod tests {
             )),
         };
         let err = TcSignatures::try_from(tc).unwrap_err();
+        assert!(err.to_string().contains("exceeding maximum"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn qc_and_tc_signer_bitmaps_up_to_the_maximum_decode_and_beyond_do_not() {
+        let qc_at_max = proto::consensus::QcSignatures {
+            scheme: Some(proto::consensus::qc_signatures::Scheme::Schnorr(
+                proto::consensus::SchnorrQcSignatures {
+                    signers: vec![0u8; MAX_SIGNER_BITMAP_BYTES],
+                    signatures: vec![],
+                },
+            )),
+        };
+        let decoded_qc = QcSignatures::try_from(qc_at_max).expect("bitmap at maximum length decodes");
+        assert_eq!(decoded_qc.signers().as_bytes().len(), MAX_SIGNER_BITMAP_BYTES);
+
+        let qc_over_max = proto::consensus::QcSignatures {
+            scheme: Some(proto::consensus::qc_signatures::Scheme::Schnorr(
+                proto::consensus::SchnorrQcSignatures {
+                    signers: vec![0u8; MAX_SIGNER_BITMAP_BYTES + 1],
+                    signatures: vec![],
+                },
+            )),
+        };
+        let err = QcSignatures::try_from(qc_over_max).unwrap_err();
+        assert!(err.to_string().contains("exceeding maximum"), "unexpected error: {err}");
+
+        let tc_at_max = proto::consensus::TcSignatures {
+            scheme: Some(proto::consensus::tc_signatures::Scheme::Schnorr(
+                proto::consensus::SchnorrTcSignatures {
+                    signers: vec![0u8; MAX_SIGNER_BITMAP_BYTES],
+                    timeouts: vec![],
+                },
+            )),
+        };
+        let decoded_tc = TcSignatures::try_from(tc_at_max).expect("bitmap at maximum length decodes");
+        assert_eq!(decoded_tc.signers().as_bytes().len(), MAX_SIGNER_BITMAP_BYTES);
+
+        let tc_over_max = proto::consensus::TcSignatures {
+            scheme: Some(proto::consensus::tc_signatures::Scheme::Schnorr(
+                proto::consensus::SchnorrTcSignatures {
+                    signers: vec![0u8; MAX_SIGNER_BITMAP_BYTES + 1],
+                    timeouts: vec![],
+                },
+            )),
+        };
+        let err = TcSignatures::try_from(tc_over_max).unwrap_err();
         assert!(err.to_string().contains("exceeding maximum"), "unexpected error: {err}");
     }
 

@@ -343,8 +343,9 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     /// event, leaving the committee stuck one epoch behind for an entire base-layer epoch.
     ///
     /// Seeds the oracle's epoch as the target, so the committee proposes `EndEpoch` in each epoch from `starting_epoch`
-    /// until it reaches the oracle's, without waiting for further `EpochChanged` events. Only registration for the
-    /// epoch after `starting_epoch` is checked here; each later epoch is checked as consensus transitions into it.
+    /// until it reaches the oracle's, without waiting for further `EpochChanged` events. The target is seeded whether
+    /// or not this validator is registered for the following epoch; an unregistered validator exits once the current
+    /// epoch transitions.
     async fn seed_epoch_target_from_oracle(&mut self, starting_epoch: Epoch) -> Result<(), HotStuffError> {
         let oracle_epoch = self.epoch_manager.current_epoch().await?;
         if oracle_epoch <= starting_epoch {
@@ -362,15 +363,14 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 "💤 This validator is not registered for next epoch {next_epoch}. Will stop consensus once the \
                  current epoch {starting_epoch} has transitioned."
             );
-            return Ok(());
+        } else {
+            info!(
+                target: LOG_TARGET,
+                "🌟 Oracle is at epoch {oracle_epoch} but consensus is resuming at {starting_epoch}. Seeding epoch \
+                 {oracle_epoch} so that EndEpoch can be proposed.",
+            );
         }
-
-        info!(
-            target: LOG_TARGET,
-            "🌟 Oracle is at epoch {oracle_epoch} but consensus is resuming at {starting_epoch}. Seeding epoch \
-             {oracle_epoch} so that EndEpoch can be proposed.",
-        );
-        self.next_epoch = Some((oracle_epoch, Instant::now()));
+        update_next_epoch_target(&mut self.next_epoch, starting_epoch, oracle_epoch, Instant::now());
         Ok(())
     }
 
@@ -479,17 +479,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 // We only clear next_epoch if we've reached it, If more than one eopch has progressed (edge case
                 // expected only on testnets with low difficulties) then we need to keep the next epoch
                 // in place so that we can quickly progress to the actual current epoch.
-                if let Some((next_epoch, _)) = self.next_epoch.as_ref() {
-                    if *next_epoch == current_epoch {
-                        self.next_epoch = None;
-                    } else {
-                        warn!(
-                            target: LOG_TARGET,
-                            "⚠️ this node/shard group is more than one epoch behind! Current epoch: {}, worker epoch: {}",
-                            next_epoch,
-                            current_epoch,
-                        );
-                    }
+                if let Some(remaining_target) = clear_reached_next_epoch(&mut self.next_epoch, current_epoch) {
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️ this node/shard group is more than one epoch behind! Current epoch: {}, worker epoch: {}",
+                        remaining_target,
+                        current_epoch,
+                    );
                 }
             }
 
@@ -894,32 +890,40 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 registered_shard_group,
                 activated_at,
             } => {
-                if registered_shard_group.is_none() {
-                    let current_epoch = self.pacemaker.current_epoch();
-                    if current_epoch < epoch {
+                let current_epoch = self.pacemaker.current_epoch();
+                match apply_epoch_changed(
+                    &mut self.next_epoch,
+                    current_epoch,
+                    epoch,
+                    registered_shard_group.is_some(),
+                    activated_at,
+                ) {
+                    EpochChangedOutcome::IgnoredStale => {},
+                    EpochChangedOutcome::NotRegisteredForCurrentEpoch => {
+                        info!(
+                            target: LOG_TARGET,
+                            "💤 This validator is not registered for epoch {}. Going to sleep.", epoch
+                        );
+                        return Err(HotStuffError::NotRegisteredForCurrentEpoch { epoch });
+                    },
+                    EpochChangedOutcome::RotatingOutAfterCurrentEpoch => {
                         info!(
                             target: LOG_TARGET,
                             "💤 This validator is not registered for next epoch {epoch}. Will stop consensus once the current epoch {current_epoch} has transitioned."
                         );
-                        return Ok(());
-                    }
-                    info!(
-                        target: LOG_TARGET,
-                        "💤 This validator is not registered for epoch {}. Going to sleep.", epoch
-                    );
-
-                    return Err(HotStuffError::NotRegisteredForCurrentEpoch { epoch });
+                        self.try_resume_pending_end_of_epoch().await?;
+                    },
+                    EpochChangedOutcome::Registered => {
+                        info!(
+                            target: LOG_TARGET,
+                            "🌟 This validator is registered for epoch {}.", epoch
+                        );
+                        // Oracle just observed `epoch`. If we previously deferred end-of-epoch
+                        // processing because the oracle was lagging, retry now that the data is
+                        // available.
+                        self.try_resume_pending_end_of_epoch().await?;
+                    },
                 }
-                info!(
-                    target: LOG_TARGET,
-                    "🌟 This validator is registered for epoch {}.", epoch
-                );
-                self.next_epoch = Some((epoch, activated_at));
-
-                // Oracle just observed `epoch`. If we previously deferred end-of-epoch
-                // processing because the oracle was lagging, retry now that the data is
-                // available.
-                self.try_resume_pending_end_of_epoch().await?;
             },
             // A running node is already a committee member, so it has nothing to presync.
             EpochManagerEvent::PendingActivation { .. } => {},
@@ -2070,6 +2074,74 @@ fn select_starting_epoch(last_finalised_epoch: Option<Epoch>, leaf_epoch: Option
     after_checkpoint.max(leaf_epoch)
 }
 
+/// Advances the worker's target epoch for proposing `EndEpoch` when `candidate_epoch` is ahead of `current_epoch`.
+///
+/// Ignores candidates at or behind `current_epoch`, never regresses an already-recorded future target epoch, and
+/// preserves the activation timestamp of an active future target so duplicate or subsequent `EpochChanged` events do
+/// not restart the `epoch_end_grace_period` or `epoch_end_drain_period` timers for ending `current_epoch`.
+fn update_next_epoch_target(
+    next_epoch: &mut Option<(Epoch, Instant)>,
+    current_epoch: Epoch,
+    candidate_epoch: Epoch,
+    activated_at: Instant,
+) {
+    if candidate_epoch <= current_epoch {
+        return;
+    }
+    *next_epoch = match *next_epoch {
+        Some((existing_epoch, existing_at)) if existing_epoch > current_epoch => {
+            Some((existing_epoch.max(candidate_epoch), existing_at))
+        },
+        _ => Some((candidate_epoch, activated_at)),
+    };
+}
+
+/// Clears `next_epoch` once `current_epoch` reaches or passes it, returning any remaining future target epoch.
+fn clear_reached_next_epoch(next_epoch: &mut Option<(Epoch, Instant)>, current_epoch: Epoch) -> Option<Epoch> {
+    match next_epoch.as_ref() {
+        Some((target_epoch, _)) if *target_epoch <= current_epoch => {
+            *next_epoch = None;
+            None
+        },
+        Some((target_epoch, _)) => Some(*target_epoch),
+        None => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EpochChangedOutcome {
+    /// Event is for an epoch strictly older than `current_epoch`; ignored without side effects.
+    IgnoredStale,
+    /// Event is for `current_epoch` and this validator is not registered for it.
+    NotRegisteredForCurrentEpoch,
+    /// Event is for a future epoch (`epoch > current_epoch`) in which this validator is not registered; `next_epoch`
+    /// is updated so the worker can finish and checkpoint `current_epoch` before exiting.
+    RotatingOutAfterCurrentEpoch,
+    /// Event is for `current_epoch` or a future epoch in which this validator is registered.
+    Registered,
+}
+
+fn apply_epoch_changed(
+    next_epoch: &mut Option<(Epoch, Instant)>,
+    current_epoch: Epoch,
+    event_epoch: Epoch,
+    is_registered: bool,
+    activated_at: Instant,
+) -> EpochChangedOutcome {
+    if event_epoch < current_epoch {
+        return EpochChangedOutcome::IgnoredStale;
+    }
+    if !is_registered {
+        if current_epoch < event_epoch {
+            update_next_epoch_target(next_epoch, current_epoch, event_epoch, activated_at);
+            return EpochChangedOutcome::RotatingOutAfterCurrentEpoch;
+        }
+        return EpochChangedOutcome::NotRegisteredForCurrentEpoch;
+    }
+    update_next_epoch_target(next_epoch, current_epoch, event_epoch, activated_at);
+    EpochChangedOutcome::Registered
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2123,6 +2195,114 @@ mod tests {
 
             // Reaching `remote_height` completes catch-up.
             assert!(!catch_up.set_next_batch(NodeHeight(150), TIMEOUT));
+        }
+    }
+
+    mod update_next_epoch_target {
+        use super::*;
+
+        #[test]
+        fn ignores_candidates_at_or_behind_current_epoch() {
+            let t0 = Instant::now();
+            let mut next_epoch = None;
+            update_next_epoch_target(&mut next_epoch, Epoch(2), Epoch(1), t0);
+            assert_eq!(next_epoch, None);
+            update_next_epoch_target(&mut next_epoch, Epoch(2), Epoch(2), t0);
+            assert_eq!(next_epoch, None);
+        }
+
+        #[test]
+        fn preserves_future_target_and_activation_timestamp_across_duplicate_or_older_events() {
+            let t0 = Instant::now();
+            let t1 = t0 + Duration::from_secs(5);
+            let mut next_epoch = None;
+
+            update_next_epoch_target(&mut next_epoch, Epoch(1), Epoch(3), t0);
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+
+            // An older or duplicate future event must not regress the target epoch or reset `t0`.
+            update_next_epoch_target(&mut next_epoch, Epoch(1), Epoch(2), t1);
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+            update_next_epoch_target(&mut next_epoch, Epoch(1), Epoch(3), t1);
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+
+            // A higher future target advances the target epoch while preserving `t0` for the current epoch.
+            update_next_epoch_target(&mut next_epoch, Epoch(1), Epoch(4), t1);
+            assert_eq!(next_epoch, Some((Epoch(4), t0)));
+        }
+
+        #[test]
+        fn replaces_stale_target_once_current_epoch_reaches_it() {
+            let t0 = Instant::now();
+            let t1 = t0 + Duration::from_secs(5);
+            let mut next_epoch = Some((Epoch(2), t0));
+
+            update_next_epoch_target(&mut next_epoch, Epoch(2), Epoch(3), t1);
+            assert_eq!(next_epoch, Some((Epoch(3), t1)));
+        }
+
+        #[test]
+        fn clears_reached_or_surpassed_target_epoch() {
+            let t0 = Instant::now();
+            let mut next_epoch = Some((Epoch(3), t0));
+
+            assert_eq!(clear_reached_next_epoch(&mut next_epoch, Epoch(2)), Some(Epoch(3)));
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+
+            assert_eq!(clear_reached_next_epoch(&mut next_epoch, Epoch(3)), None);
+            assert_eq!(next_epoch, None);
+
+            let mut stale_target = Some((Epoch(2), t0));
+            assert_eq!(clear_reached_next_epoch(&mut stale_target, Epoch(3)), None);
+            assert_eq!(stale_target, None);
+        }
+
+        #[test]
+        fn apply_epoch_changed_handles_rotating_out_and_stale_unregistered_events() {
+            let t0 = Instant::now();
+            let t1 = t0 + Duration::from_secs(5);
+            let mut next_epoch = None;
+
+            // A delayed unregistered event from an older epoch must not stop a validator running at Epoch(2).
+            assert_eq!(
+                apply_epoch_changed(&mut next_epoch, Epoch(2), Epoch(1), false, t0),
+                EpochChangedOutcome::IgnoredStale
+            );
+            assert_eq!(next_epoch, None);
+
+            // An unregistered event for the current epoch stops consensus immediately.
+            assert_eq!(
+                apply_epoch_changed(&mut next_epoch, Epoch(2), Epoch(2), false, t0),
+                EpochChangedOutcome::NotRegisteredForCurrentEpoch
+            );
+            assert_eq!(next_epoch, None);
+
+            // An unregistered event for a future epoch records `next_epoch` so the rotating-out validator can finish
+            // and checkpoint `current_epoch`, and preserves `t0` on duplicate delivery.
+            assert_eq!(
+                apply_epoch_changed(&mut next_epoch, Epoch(2), Epoch(3), false, t0),
+                EpochChangedOutcome::RotatingOutAfterCurrentEpoch
+            );
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+            assert_eq!(
+                apply_epoch_changed(&mut next_epoch, Epoch(2), Epoch(3), false, t1),
+                EpochChangedOutcome::RotatingOutAfterCurrentEpoch
+            );
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+
+            // A registered event at the current epoch does not pollute `next_epoch`, while a higher future registered
+            // event advances the target epoch and preserves `t0`.
+            let mut registered_next = None;
+            assert_eq!(
+                apply_epoch_changed(&mut registered_next, Epoch(2), Epoch(2), true, t0),
+                EpochChangedOutcome::Registered
+            );
+            assert_eq!(registered_next, None);
+            assert_eq!(
+                apply_epoch_changed(&mut next_epoch, Epoch(2), Epoch(4), true, t1),
+                EpochChangedOutcome::Registered
+            );
+            assert_eq!(next_epoch, Some((Epoch(4), t0)));
         }
     }
 }

@@ -53,6 +53,8 @@ mod presync;
 #[cfg(test)]
 mod proposal_certificate_signatures;
 #[cfg(test)]
+mod quorum_loss_recovery;
+#[cfg(test)]
 mod safe_node_predicate;
 #[cfg(test)]
 mod stale_qc_carry_forward;

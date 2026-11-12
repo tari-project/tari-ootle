@@ -223,7 +223,16 @@ where
             return Ok(Err(reason.into()));
         }
 
-        if let Err(pinned_after) = pin_new_transaction(&mut pool_record, &self.block_locked_epoch, self.shard_group()) {
+        let min_epoch = pool_record
+            .get_transaction(substate_store.read_transaction())?
+            .transaction()
+            .min_epoch();
+        if let Err(pinned_after) = pin_new_transaction(
+            &mut pool_record,
+            min_epoch,
+            &self.block_locked_epoch,
+            self.shard_group(),
+        ) {
             return Ok(Err(pinned_after.into_no_vote(transaction_id).into()));
         }
 

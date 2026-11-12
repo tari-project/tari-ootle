@@ -19,7 +19,7 @@ use tari_ootle_app_utilities::burn_claim_proof::{burn_output_proof_from_l1, clai
 use tari_ootle_walletd_client::types::{ClaimBurnProof, ClaimBurnProofContents};
 use tari_sidechain::{BurnClaimProof, CompleteClaimBurnProof};
 use tari_sidechain_l1::BurnOutputProof as L1BurnOutputProof;
-use tari_template_lib_types::{EncryptedData, crypto::PedersenCommitmentBytes};
+use tari_template_lib_types::crypto::PedersenCommitmentBytes;
 use tari_transaction_components::{
     tari_amount::T,
     transaction_components::{MemoField, memo_field::TxType},
@@ -184,7 +184,7 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
                 .map_err(|e| anyhow!("burn output proof parse error: {e}"))?,
             value: proof_resp.value,
         },
-        encrypted_data: proof_resp.encrypted_data.clone(),
+        encrypted_data: proof_resp.encrypted_data,
         mined_in_epoch: proof_resp
             .mined_in_epoch
             .ok_or_else(|| anyhow!("No mined_in_epoch in response"))?,
@@ -193,8 +193,6 @@ async fn when_i_wait_for_proof_to_confirm_on_wallet(
     let proof = ClaimBurnProofContents {
         claim_proof: claim_proof_from_l1(&complete_proof.claim_proof)
             .map_err(|e| anyhow!("burn claim proof conversion error: {e}"))?,
-        encrypted_data: EncryptedData::try_from(proof_resp.encrypted_data)
-            .map_err(|e| anyhow!("Encrypted data length is out of bounds: {e}",))?,
     };
 
     world.claim_proofs.insert(proof_name, CucumberClaimProof::Confirmed {

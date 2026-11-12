@@ -41,13 +41,7 @@ impl Vault {
                 item: "vault.address",
                 details: e.to_string(),
             })?,
-            vault_version: u64::try_from(self.vault_version)
-                .map(SubstateVersion::new)
-                .map_err(|e| WalletStorageError::DecodingError {
-                    operation: "try_into_vault",
-                    item: "vault.vault_version",
-                    details: e.to_string(),
-                })?,
+            vault_version: SubstateVersion::new(self.vault_version as u64),
             resource_address: ResourceAddress::from_str(&self.resource_address).map_err(|e| {
                 WalletStorageError::DecodingError {
                     operation: "try_into_vault",
@@ -80,7 +74,7 @@ impl Vault {
                     item: "vault.confidential_balance",
                     details: format!("Invalid confidential balance: {}", e),
                 })?,
-            divisibility: u8::try_from(self.divisibility as u32).map_err(|e| WalletStorageError::DecodingError {
+            divisibility: u8::try_from(self.divisibility).map_err(|e| WalletStorageError::DecodingError {
                 operation: "try_into_vault",
                 item: "vault.divisibility",
                 details: format!("Invalid divisibility: {}", e),

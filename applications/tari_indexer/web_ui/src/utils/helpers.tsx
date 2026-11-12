@@ -178,14 +178,14 @@ const isTimestampNew = (timestamp: string | null | undefined): boolean => {
   return diffMinutes <= 10;
 };
 
-const formatXTM = (amount: number | bigint): string => {
+const formatTari = (amount: number | bigint): string => {
   if (typeof amount !== "number" || isNaN(amount)) {
     return `0 ${CURRENCY.SYMBOL}`;
   }
   return `${(amount / CURRENCY.DIVISOR).toFixed(CURRENCY.DECIMALS)} ${CURRENCY.SYMBOL}`;
 };
 
-export { formatTimestamp, formatXTM, isTimestampNew, parseTimestamp, renderJson, validateHash };
+export { formatTari, formatTimestamp, isTimestampNew, parseTimestamp, renderJson, validateHash };
 
 export function bigintToDecimalString(int: Amount, decimalPlaces: number, locale: string = "en-US"): string {
   const number = typeof int === "bigint" ? int : BigInt(int);

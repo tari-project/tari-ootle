@@ -16,7 +16,7 @@ use tari_ootle_walletd_client::{
     types::{WebRtcStartRequest, WebRtcStartResponse},
 };
 
-use super::HandlerContext;
+use super::{HandlerContext, auth::jwt::AuthError};
 use crate::{server::ApplicationErrorCode, webrtc::webrtc_start_session};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::json_rpc";
@@ -40,16 +40,25 @@ pub fn handle_start(
             ),
         ));
     }
-    let granted = context.authorize(token, &[Permission::Webrtc]).map_err(|e| {
-        JsonRpcResponse::error(
-            answer_id.clone(),
-            JsonRpcError::new(
-                JsonRpcErrorReason::ApplicationError(ApplicationErrorCode::Unauthorized as i32),
-                format!("Not authorized: {e}"),
-                serde_json::Value::Null,
-            ),
-        )
-    })?;
+    let granted = context
+        .authorize_with_identity(token, &[Permission::Webrtc])
+        .and_then(|identity| {
+            if identity.delegated {
+                Err(AuthError::UserAuthOnly)
+            } else {
+                Ok(identity.permissions)
+            }
+        })
+        .map_err(|e| {
+            JsonRpcResponse::error(
+                answer_id.clone(),
+                JsonRpcError::new(
+                    JsonRpcErrorReason::ApplicationError(ApplicationErrorCode::Unauthorized as i32),
+                    format!("Not authorized: {e}"),
+                    serde_json::Value::Null,
+                ),
+            )
+        })?;
     let webrtc_start_request = value.parse_params::<WebRtcStartRequest>()?;
     let requested_permissions =
         serde_json::from_value::<Permissions>(webrtc_start_request.permissions).map_err(|e| {
@@ -132,5 +141,39 @@ mod tests {
 
         let body = serde_json::to_string(&response).unwrap();
         assert!(body.contains("WebRTC connections are disabled"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn webrtc_start_rejects_delegated_tokens() {
+        let daemon = TestDaemon::start().await;
+        let mut config = daemon.context.config().clone();
+        config.enable_webrtc = true;
+        let store = daemon.context.wallet_sdk().store().clone();
+        let context = Arc::new(HandlerContext::new(
+            daemon.context.wallet_sdk().clone(),
+            daemon.context.notifier().clone(),
+            daemon.context.transaction_service().clone(),
+            daemon.context.account_monitor().clone(),
+            config.clone(),
+            crate::handlers::auth::create_authenticator(&config, store).unwrap(),
+            "test jwt secret".parse().unwrap(),
+            daemon.context.shutdown_signal().clone(),
+        ));
+
+        for scope in ["admin", "webrtc"] {
+            let delegated = daemon.delegated_session(scope);
+            let request = JsonRpcExtractor {
+                parsed: serde_json::json!({ "signaling_server_token": "token", "permissions": ["webrtc"] }),
+                method: "webrtc.start".to_string(),
+                id: Id::Num(1),
+            };
+            let addresses = ("127.0.0.1:1".parse().unwrap(), "127.0.0.1:2".parse().unwrap());
+            let response = handle_start(context.clone(), request, Some(&delegated), addresses).unwrap_err();
+            let body = serde_json::to_string(&response).unwrap();
+            assert!(
+                body.contains("requires an interactive user session"),
+                "delegated token with scope '{scope}' must be rejected: {body}"
+            );
+        }
     }
 }

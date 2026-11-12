@@ -156,7 +156,7 @@ pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
         .unwrap_or_else(|| PathBuf::from(format!("./rollback-audit-{}-{}.bin", opts.target_epoch, now_unix)));
 
     // Open exclusive regardless of dry-run. The tool must refuse to run against a live
-    // validator either way ��� a dry-run against a process that then commits a block
+    // validator either way — a dry-run against a process that then commits a block
     // after we snapshot would produce a stale audit.
     let store: RocksDbStateStore<PeerAddress> = RocksDbStateStore::open(&opts.state_db, DatabaseOptions::default())
         .with_context(|| format!("opening state db at {:?}", opts.state_db))?;

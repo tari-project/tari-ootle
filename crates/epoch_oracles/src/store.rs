@@ -19,6 +19,7 @@ pub enum StoreKey {
     ConfiguredIsInitialized,
     ConfiguredCurrentEpoch,
     ConfiguredValidatorShardKeys,
+    ConfiguredFollowedConfig,
 }
 
 impl StoreKey {
@@ -31,6 +32,7 @@ impl StoreKey {
             Self::ConfiguredIsInitialized => b"configured_oracle.is_initialized",
             Self::ConfiguredCurrentEpoch => b"configured_oracle.current_epoch",
             Self::ConfiguredValidatorShardKeys => b"configured_oracle.validator_shard_keys",
+            Self::ConfiguredFollowedConfig => b"configured_oracle.followed_config",
         }
     }
 }

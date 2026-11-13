@@ -5,6 +5,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     future::poll_fn,
     iter,
+    mem,
     task::{Context, Poll},
 };
 
@@ -13,6 +14,7 @@ use log::*;
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle, ValidatorNodeChange};
 use tari_ootle_common_types::{Epoch, SubstateAddress, VotePower, displayable::Displayable};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+use tokio::sync::mpsc;
 
 use super::config::Config;
 use crate::{
@@ -50,8 +52,16 @@ pub struct ConfiguredEpochOracle<TStore, TTicker> {
     queued_validators: BTreeMap<Epoch, Vec<QueuedActivation>>,
     /// Validators to deactivate, by exit epoch.
     queued_exits: BTreeMap<Epoch, Vec<RistrettoPublicKeyBytes>>,
+    /// The last epoch whose activations and exits have been emitted.
+    processed_epoch: Epoch,
+    config_updates: Option<ConfigUpdates>,
     is_initialized: bool,
     is_done: bool,
+}
+
+struct ConfigUpdates {
+    receiver: mpsc::UnboundedReceiver<Option<Config>>,
+    awaiting_first: bool,
 }
 impl<TStore: EpochOracleStore + Send> ConfiguredEpochOracle<TStore, RealTimeEpochTicker> {
     pub fn create(config: Config, store: TStore) -> anyhow::Result<Self> {
@@ -73,6 +83,8 @@ impl<TStore: EpochOracleStore + Send> ConfiguredEpochOracle<TStore, RealTimeEpoc
             unpersisted_epoch: None,
             queued_validators: BTreeMap::new(),
             queued_exits: BTreeMap::new(),
+            processed_epoch: Epoch::zero(),
+            config_updates: None,
             is_initialized: false,
             is_done: false,
         })
@@ -89,9 +101,22 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             unpersisted_epoch: None,
             queued_validators: BTreeMap::new(),
             queued_exits: BTreeMap::new(),
+            processed_epoch: Epoch::zero(),
+            config_updates: None,
             is_initialized: false,
             is_done: false,
         }
+    }
+
+    /// Follows the configs sent on `receiver`, adopting each one that only schedules changes after the processed
+    /// epoch, and holds back epoch changes until the first message arrives. `None` releases them with no update, for
+    /// when no config could be fetched. The adopted config is recorded in the store and resumed from on restart.
+    pub fn with_config_updates(mut self, receiver: mpsc::UnboundedReceiver<Option<Config>>) -> Self {
+        self.config_updates = Some(ConfigUpdates {
+            receiver,
+            awaiting_first: true,
+        });
+        self
     }
 
     /// Pins the shard key a validator activated with, and rejects a config that no longer derives it.
@@ -139,8 +164,18 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             .store
             .get(StoreKey::ConfiguredCurrentEpoch.as_key_bytes())?
             .unwrap_or_else(Epoch::zero);
+        self.processed_epoch = epoch;
 
-        let mut skipped = 0usize;
+        // A node following config updates resumes from the last update it accepted. The config it was started with
+        // is then offered as an update, so a release carrying a newer config extends it.
+        let started_with = if self.config_updates.is_some() {
+            self.store
+                .get::<Config>(StoreKey::ConfiguredFollowedConfig.as_key_bytes())?
+                .map(|followed| mem::replace(&mut self.config, followed))
+        } else {
+            None
+        };
+
         for vn in &self.config.validators {
             // Validators that activated before this node recorded shard keys are pinned to whatever the config
             // derives now. Their rows already exist, so this run's config is the best available record of what they
@@ -150,6 +185,38 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             }
         }
 
+        let skipped = self.queue_pending_changes();
+
+        info!(
+            target: LOG_TARGET,
+            "☘️ Starting Configured epoch oracle from {epoch}. Epoch time is {}. {} validator activation(s) and {} exit(s) queued, {skipped} already applied",
+            self.config.epoch_time.as_ref().map(|d| d.display()).display(),
+            self.queued_validators.values().map(|vns| vns.len()).sum::<usize>(),
+            self.queued_exits.values().map(|vns| vns.len()).sum::<usize>(),
+        );
+
+        // Every pending registration is announced on each start, as far ahead of its activation as the config
+        // allows, so that a validator scheduled to join can sync its shard group's state before it activates and can
+        // resume doing so after a restart. A claim key rotation is not a new registration, so it is not announced.
+        self.announce_pending_registrations(|_| true);
+
+        // A followed config that already extends the one this node was started with is kept as is.
+        if let Some(config) = started_with &&
+            self.config.check_extends(&config, Epoch::zero()).is_err()
+        {
+            self.apply_config_update(config)?;
+        }
+
+        Ok(())
+    }
+
+    /// Queues every activation and exit in the config that takes effect after the processed epoch, replacing the
+    /// queues, and returns how many were skipped as already applied.
+    fn queue_pending_changes(&mut self) -> usize {
+        let epoch = self.processed_epoch;
+        self.queued_validators.clear();
+        self.queued_exits.clear();
+        let mut skipped = 0usize;
         for vn in &self.config.validators {
             // A rotation carries the registration's shard key: the new claim key must not reach shard key
             // derivation, or the validator would move within its committee when its claim key changes.
@@ -167,8 +234,8 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             for (activation_epoch, claim_key, kind) in activations {
                 // Skip activations whose epoch has already been processed in a previous run.
                 // Re-queuing them would emit a duplicate ActiveValidatorNodeSetChanged on the next tick,
-                // causing duplicate rows in the validator_nodes table. Config changes are only supported
-                // when starting from a fresh oracle store.
+                // causing duplicate rows in the validator_nodes table. A config may only add changes after the
+                // processed epoch; see `Config::check_extends`.
                 if activation_epoch <= epoch {
                     skipped += 1;
                     continue;
@@ -193,23 +260,17 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
                 }
             }
         }
+        skipped
+    }
 
-        info!(
-            target: LOG_TARGET,
-            "☘️ Starting Configured epoch oracle from {epoch}. Epoch time is {}. {} validator activation(s) and {} exit(s) queued, {skipped} already applied",
-            self.config.epoch_time.as_ref().map(|d| d.display()).display(),
-            self.queued_validators.values().map(|vns| vns.len()).sum::<usize>(),
-            self.queued_exits.values().map(|vns| vns.len()).sum::<usize>(),
-        );
-
-        // Every pending registration is announced on each start, as far ahead of its activation as the config
-        // allows, so that a validator scheduled to join can sync its shard group's state before it activates and can
-        // resume doing so after a restart. A claim key rotation is not a new registration, so it is not announced.
+    /// Announces each queued registration whose public key `filter` accepts.
+    fn announce_pending_registrations<F: Fn(&RistrettoPublicKeyBytes) -> bool>(&mut self, filter: F) {
+        let epoch = self.processed_epoch;
         let announcements = self
             .queued_validators
             .iter()
             .flat_map(|(activation_epoch, vns)| vns.iter().map(move |vn| (*activation_epoch, vn)))
-            .filter(|(_, vn)| vn.kind == ActivationKind::Registration)
+            .filter(|(_, vn)| vn.kind == ActivationKind::Registration && filter(&vn.public_key))
             .map(|(activation_epoch, vn)| EpochEvent::NewValidatorRegistered {
                 epoch,
                 claim_public_key: vn.claim_key,
@@ -219,7 +280,37 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             })
             .collect::<Vec<_>>();
         self.pending_events.extend(announcements);
+    }
 
+    /// Adopts `config` if it only schedules changes after the processed epoch on top of the current config, and
+    /// records it so that a restart resumes from it. A config that does not is ignored with a warning: it came from a
+    /// peer, and the current config stays in force.
+    fn apply_config_update(&mut self, config: Config) -> anyhow::Result<()> {
+        if config == self.config {
+            return Ok(());
+        }
+        if let Err(err) = config.check_extends(&self.config, self.processed_epoch) {
+            warn!(
+                target: LOG_TARGET,
+                "☘️ Ignoring epoch oracle config update at epoch {}: {err:#}", self.processed_epoch
+            );
+            return Ok(());
+        }
+
+        self.store
+            .set(StoreKey::ConfiguredFollowedConfig.as_key_bytes(), &config)?;
+        let prior = mem::replace(&mut self.config, config);
+        self.queue_pending_changes();
+        info!(
+            target: LOG_TARGET,
+            "☘️ Adopted epoch oracle config update at epoch {}: {} validator activation(s) and {} exit(s) queued",
+            self.processed_epoch,
+            self.queued_validators.values().map(|vns| vns.len()).sum::<usize>(),
+            self.queued_exits.values().map(|vns| vns.len()).sum::<usize>(),
+        );
+        self.announce_pending_registrations(|public_key| {
+            !prior.validators.iter().any(|vn| vn.public_key == *public_key)
+        });
         Ok(())
     }
 
@@ -320,6 +411,7 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
         }
 
         self.unpersisted_epoch = Some(next_epoch);
+        self.processed_epoch = next_epoch;
 
         Ok(())
     }
@@ -347,6 +439,28 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             {
                 self.is_done = true;
                 return Poll::Ready(Some(EpochEvent::error(err)));
+            }
+
+            if let Some(updates) = &mut self.config_updates {
+                match updates.receiver.poll_recv(cx) {
+                    Poll::Ready(Some(update)) => {
+                        updates.awaiting_first = false;
+                        if let Some(config) = update &&
+                            let Err(err) = self.apply_config_update(config)
+                        {
+                            self.is_done = true;
+                            return Poll::Ready(Some(EpochEvent::error(err)));
+                        }
+                        continue;
+                    },
+                    Poll::Ready(None) => {
+                        debug!(target: LOG_TARGET, "Epoch oracle config updates closed");
+                        self.config_updates = None;
+                    },
+                    // Epochs wait for the first update so that the changes it schedules are applied in order.
+                    Poll::Pending if updates.awaiting_first => return Poll::Pending,
+                    Poll::Pending => {},
+                }
             }
 
             match self.ticker.poll_tick(cx) {
@@ -502,7 +616,7 @@ mod tests {
         Config {
             epoch_time: Some(Duration::from_secs(1)),
             initial_epoch: Epoch(0),
-            base_time: time::OffsetDateTime::now_utc(),
+            base_time: time::OffsetDateTime::UNIX_EPOCH,
             validators,
         }
     }
@@ -974,6 +1088,190 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(changes, vec![("add", Epoch(3)), ("remove", Epoch(5))]);
+    }
+
+    fn following(
+        config: Config,
+        store: TestStore,
+        ticker: ScriptedTicker,
+    ) -> (
+        ConfiguredEpochOracle<TestStore, ScriptedTicker>,
+        tokio::sync::mpsc::UnboundedSender<Option<Config>>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let oracle = ConfiguredEpochOracle::with_custom_ticker(config, store, ticker).with_config_updates(rx);
+        (oracle, tx)
+    }
+
+    fn epoch_changes(events: &[EpochEvent]) -> Vec<Epoch> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                EpochEvent::EpochChanged { epoch, .. } => Some(*epoch),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_following_oracle_holds_epochs_until_the_first_update() {
+        let config = mk_config(vec![mk_validator(1, Epoch(1))]);
+        let (mut oracle, tx) = following(config, TestStore::default(), ticker_through(3));
+
+        let events = drive_events(&mut oracle);
+        assert!(epoch_changes(&events).is_empty(), "got {events:?}");
+
+        // No config could be fetched: the epochs go ahead under the config the oracle holds.
+        tx.send(None).unwrap();
+        let events = drive_events(&mut oracle);
+        assert_eq!(epoch_changes(&events), vec![Epoch(0), Epoch(1), Epoch(2), Epoch(3)]);
+    }
+
+    #[test]
+    fn a_first_update_from_a_fresh_store_replays_its_whole_validator_set() {
+        let release = mk_config(vec![mk_validator(1, Epoch(1))]);
+        let network = mk_config(vec![
+            mk_exiting_validator(1, Epoch(1), Epoch(5)),
+            mk_validator(2, Epoch(2)),
+        ]);
+        let (mut oracle, tx) = following(release, TestStore::default(), ticker_through(6));
+        tx.send(Some(network)).unwrap();
+
+        let events = drive_events(&mut oracle);
+
+        assert_eq!(added_or_removed(&events), vec![
+            (Epoch(2), mk_key(1), true),
+            (Epoch(3), mk_key(2), true),
+            (Epoch(5), mk_key(1), false)
+        ]);
+    }
+
+    #[test]
+    fn an_update_schedules_an_exit_after_the_processed_epoch() {
+        let config = mk_config(vec![mk_validator(1, Epoch(1)), mk_validator(2, Epoch(1))]);
+        let (mut oracle, tx) = following(config.clone(), TestStore::default(), ticker_through(3));
+        tx.send(Some(config.clone())).unwrap();
+        drive_events(&mut oracle);
+
+        let mut updated = config;
+        updated.validators[0].exit_epoch = Some(Epoch(5));
+        tx.send(Some(updated)).unwrap();
+        oracle.ticker = ticker_from(4, 6);
+        let events = drive_events(&mut oracle);
+
+        assert_eq!(removed_validators(&events), vec![(Epoch(5), mk_key(1))]);
+    }
+
+    #[test]
+    fn an_update_adding_a_new_validator_announces_it() {
+        let config = mk_config(vec![mk_validator(1, Epoch(1))]);
+        let (mut oracle, tx) = following(config.clone(), TestStore::default(), ticker_through(3));
+        tx.send(Some(config.clone())).unwrap();
+        drive_events(&mut oracle);
+
+        let joining = mk_validator(2, Epoch(5));
+        let shard_key = joining.calculate_shard_key();
+        let mut updated = config;
+        updated.validators.push(joining);
+        tx.send(Some(updated)).unwrap();
+        oracle.ticker = ticker_from(4, 6);
+        let events = drive_events(&mut oracle);
+
+        assert_eq!(announced_registrations(&events), vec![(Epoch(6), shard_key)]);
+        assert_eq!(
+            added_or_removed(&events),
+            vec![(Epoch(6), mk_key(2), true)],
+            "only the new validator activates"
+        );
+    }
+
+    #[test]
+    fn an_update_changing_a_processed_epoch_is_ignored() {
+        let config = mk_config(vec![mk_validator(1, Epoch(1)), mk_validator(2, Epoch(1))]);
+        let (mut oracle, tx) = following(config.clone(), TestStore::default(), ticker_through(3));
+        tx.send(Some(config.clone())).unwrap();
+        drive_events(&mut oracle);
+
+        let mut updated = config.clone();
+        updated.validators[0].exit_epoch = Some(Epoch(3));
+        tx.send(Some(updated)).unwrap();
+        oracle.ticker = ticker_from(4, 6);
+        let events = drive_events(&mut oracle);
+
+        assert!(removed_validators(&events).is_empty(), "got {events:?}");
+        assert_eq!(oracle.config, config);
+    }
+
+    #[test]
+    fn a_restarted_following_oracle_resumes_the_adopted_config() {
+        let release = mk_config(vec![mk_validator(1, Epoch(1)), mk_validator(2, Epoch(1))]);
+        let store = TestStore::default();
+        let mut adopted = release.clone();
+        adopted.validators[0].exit_epoch = Some(Epoch(5));
+        store
+            .set(StoreKey::ConfiguredFollowedConfig.as_key_bytes(), &adopted)
+            .unwrap();
+        store
+            .set(StoreKey::ConfiguredCurrentEpoch.as_key_bytes(), &Epoch(3))
+            .unwrap();
+
+        // The release config is older than the adopted one, and no update has arrived from the network yet.
+        let (mut oracle, tx) = following(release.clone(), store, ticker_from(3, 6));
+        tx.send(Some(release)).unwrap();
+        let events = drive_events(&mut oracle);
+
+        assert_eq!(removed_validators(&events), vec![(Epoch(5), mk_key(1))]);
+        assert_eq!(oracle.config, adopted);
+    }
+
+    #[test]
+    fn a_non_following_oracle_ignores_a_stored_followed_config() {
+        let release = mk_config(vec![mk_validator(1, Epoch(1))]);
+        let store = TestStore::default();
+        let mut adopted = release.clone();
+        adopted.validators[0].exit_epoch = Some(Epoch(5));
+        store
+            .set(StoreKey::ConfiguredFollowedConfig.as_key_bytes(), &adopted)
+            .unwrap();
+        let mut oracle = ConfiguredEpochOracle::with_custom_ticker(release, store, ticker_through(6));
+
+        let events = drive_events(&mut oracle);
+
+        assert!(removed_validators(&events).is_empty(), "got {events:?}");
+    }
+
+    /// Each change as (effective epoch, public key, is_add), where an `Add` takes effect at its activation epoch and a
+    /// `Remove` at its event's epoch.
+    fn added_or_removed(events: &[EpochEvent]) -> Vec<(Epoch, RistrettoPublicKeyBytes, bool)> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                EpochEvent::ActiveValidatorNodeSetChanged { epoch, node_changes } => Some((*epoch, node_changes)),
+                _ => None,
+            })
+            .flat_map(|(epoch, node_changes)| {
+                node_changes.iter().map(move |change| match change {
+                    ValidatorNodeChange::Add {
+                        validator_node_public_key,
+                        activation_epoch,
+                        ..
+                    } => (*activation_epoch, *validator_node_public_key, true),
+                    ValidatorNodeChange::Remove { public_key } => (epoch, *public_key, false),
+                })
+            })
+            .collect()
+    }
+
+    fn ticker_from(first_epoch: u64, last_epoch: u64) -> ScriptedTicker {
+        ScriptedTicker::new(
+            (first_epoch..=last_epoch)
+                .map(|e| EpochTickerData {
+                    epoch: Epoch(e),
+                    epoch_hash: FixedHash::zero(),
+                    done_for_now: e == last_epoch,
+                })
+                .collect(),
+        )
     }
 
     #[test]

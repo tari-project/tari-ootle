@@ -17,7 +17,7 @@ use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 /// `total_power × committee size` steps per call, so every committee's total power must stay a small integer.
 pub const MAX_TOTAL_VOTE_POWER: u64 = 1 << 16;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Config {
     #[serde(with = "ootle_serde::duration::optional_seconds")]
     pub epoch_time: Option<Duration>,
@@ -60,6 +60,91 @@ impl Config {
         }
         Ok(())
     }
+
+    /// Checks that `self` only schedules changes after `processed_epoch` on top of `prior`: new validators, claim key
+    /// changes and exits, each taking effect after `processed_epoch`. Everything `prior` holds is kept unchanged, so
+    /// a node that has processed `prior` up to `processed_epoch` reaches the same validator set as one that replays
+    /// `self` from a fresh store.
+    pub fn check_extends(&self, prior: &Config, processed_epoch: Epoch) -> anyhow::Result<()> {
+        self.validate()?;
+        if self.epoch_time != prior.epoch_time ||
+            self.initial_epoch != prior.initial_epoch ||
+            self.base_time != prior.base_time
+        {
+            bail!("The config changes the epoch schedule (epoch_time, initial_epoch or base_time)");
+        }
+
+        for prior_vn in &prior.validators {
+            let Some(vn) = self.validators.iter().find(|vn| vn.public_key == prior_vn.public_key) else {
+                bail!(
+                    "The config drops validator {}; remove a validator by setting its `exit_epoch`",
+                    prior_vn.public_key
+                );
+            };
+            if vn.claim_key != prior_vn.claim_key ||
+                vn.shard_group != prior_vn.shard_group ||
+                vn.registration_epoch != prior_vn.registration_epoch ||
+                vn.power != prior_vn.power
+            {
+                bail!(
+                    "The config changes the registration of validator {}, which is fixed once listed",
+                    vn.public_key
+                );
+            }
+            if let Some(change) = prior_vn
+                .claim_key_changes
+                .iter()
+                .find(|change| !vn.claim_key_changes.contains(change))
+            {
+                bail!(
+                    "The config drops or edits validator {}'s claim key change at epoch {}",
+                    vn.public_key,
+                    change.effective_epoch
+                );
+            }
+            if let Some(change) = vn.claim_key_changes.iter().find(|change| {
+                !prior_vn.claim_key_changes.contains(change) && change.effective_epoch <= processed_epoch
+            }) {
+                bail!(
+                    "The config adds a claim key change for validator {} at epoch {}, which this node has already \
+                     processed",
+                    vn.public_key,
+                    change.effective_epoch
+                );
+            }
+            match (prior_vn.exit_epoch, vn.exit_epoch) {
+                (Some(prior_exit), exit) if exit != Some(prior_exit) => {
+                    bail!(
+                        "The config changes validator {}'s exit epoch {prior_exit}",
+                        vn.public_key
+                    );
+                },
+                (None, Some(exit)) if exit <= processed_epoch => {
+                    bail!(
+                        "The config sets validator {}'s exit epoch to {exit}, which this node has already processed",
+                        vn.public_key
+                    );
+                },
+                _ => {},
+            }
+        }
+
+        for vn in &self.validators {
+            let is_new = !prior
+                .validators
+                .iter()
+                .any(|prior_vn| prior_vn.public_key == vn.public_key);
+            if is_new && vn.activation_epoch() <= processed_epoch {
+                bail!(
+                    "The config adds validator {} activating at epoch {}, which this node has already processed",
+                    vn.public_key,
+                    vn.activation_epoch()
+                );
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for Config {
@@ -86,7 +171,7 @@ impl Display for Config {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Validator {
     pub public_key: RistrettoPublicKeyBytes,
     /// The claim key this validator activates with.
@@ -118,7 +203,7 @@ pub struct Validator {
 ///
 /// Leader fees earned from `effective_epoch` onwards accrue to the fee pool derived from `claim_key`. Pools filled
 /// under a previous claim key are not migrated and remain claimable with that key.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ClaimKeyChange {
     pub effective_epoch: Epoch,
     pub claim_key: RistrettoPublicKeyBytes,
@@ -368,6 +453,7 @@ mod tests {
     fn mk_config(validators: Vec<Validator>) -> Config {
         Config {
             validators,
+            base_time: time::OffsetDateTime::UNIX_EPOCH,
             ..Config::default()
         }
     }
@@ -536,6 +622,123 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(validator.exit_epoch, None);
+    }
+
+    fn other_validator(registration_epoch: Epoch) -> Validator {
+        Validator {
+            public_key: mk_key(9),
+            registration_epoch,
+            ..mk_validator(vec![])
+        }
+    }
+
+    fn extends(prior: &Config, updated: &Config) -> Result<(), String> {
+        updated.check_extends(prior, Epoch(15)).map_err(|err| err.to_string())
+    }
+
+    #[test]
+    fn an_update_scheduling_changes_after_the_processed_epoch_extends_the_config() {
+        let prior = mk_config(vec![mk_validator(vec![])]);
+        let updated = mk_config(vec![
+            Validator {
+                exit_epoch: Some(Epoch(30)),
+                ..mk_validator(vec![ClaimKeyChange {
+                    effective_epoch: Epoch(20),
+                    claim_key: mk_key(3),
+                }])
+            },
+            other_validator(Epoch(15)),
+        ]);
+        extends(&prior, &updated).unwrap();
+        extends(&prior, &prior).unwrap();
+    }
+
+    #[test]
+    fn an_update_changing_what_was_already_processed_is_rejected() {
+        let prior = mk_config(vec![mk_validator(vec![])]);
+        let cases = [
+            (
+                mk_config(vec![Validator {
+                    exit_epoch: Some(Epoch(15)),
+                    ..mk_validator(vec![])
+                }]),
+                "already processed",
+            ),
+            (
+                mk_config(vec![mk_validator(vec![ClaimKeyChange {
+                    effective_epoch: Epoch(15),
+                    claim_key: mk_key(3),
+                }])]),
+                "already processed",
+            ),
+            (
+                mk_config(vec![mk_validator(vec![]), other_validator(Epoch(14))]),
+                "already processed",
+            ),
+            (mk_config(vec![other_validator(Epoch(20))]), "drops validator"),
+            (
+                mk_config(vec![Validator {
+                    claim_key: mk_key(3),
+                    ..mk_validator(vec![])
+                }]),
+                "changes the registration",
+            ),
+            (
+                Config {
+                    initial_epoch: Epoch(1),
+                    ..prior.clone()
+                },
+                "epoch schedule",
+            ),
+        ];
+        for (updated, expected) in cases {
+            let err = extends(&prior, &updated).unwrap_err();
+            assert!(err.contains(expected), "expected {expected:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn an_update_editing_a_scheduled_exit_or_rotation_is_rejected() {
+        let rotation = ClaimKeyChange {
+            effective_epoch: Epoch(20),
+            claim_key: mk_key(3),
+        };
+        let prior = mk_config(vec![Validator {
+            exit_epoch: Some(Epoch(30)),
+            ..mk_validator(vec![rotation.clone()])
+        }]);
+
+        let moved_exit = mk_config(vec![Validator {
+            exit_epoch: Some(Epoch(40)),
+            ..mk_validator(vec![rotation])
+        }]);
+        assert!(extends(&prior, &moved_exit).unwrap_err().contains("exit epoch"));
+
+        let dropped_rotation = mk_config(vec![Validator {
+            exit_epoch: Some(Epoch(30)),
+            ..mk_validator(vec![])
+        }]);
+        assert!(
+            extends(&prior, &dropped_rotation)
+                .unwrap_err()
+                .contains("drops or edits")
+        );
+    }
+
+    #[test]
+    fn a_config_round_trips_through_json() {
+        let config = Config {
+            epoch_time: Some(Duration::from_secs(1200)),
+            ..mk_config(vec![Validator {
+                exit_epoch: Some(Epoch(30)),
+                ..mk_validator(vec![ClaimKeyChange {
+                    effective_epoch: Epoch(20),
+                    claim_key: mk_key(3),
+                }])
+            }])
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert_eq!(serde_json::from_str::<Config>(&json).unwrap(), config);
     }
 
     #[test]

@@ -22,6 +22,12 @@ pub struct HybridEpochOracle<TStore> {
     trigger: mpsc::UnboundedSender<EpochTickerData>,
     has_initial_sync_completed: bool,
     last_triggered_epoch: Option<Epoch>,
+    /// The last epoch the configured oracle has emitted an `EpochChanged` for.
+    last_changed_epoch: Option<Epoch>,
+    /// A `DoneForNow` for an epoch the configured oracle has been triggered for but not yet emitted, which follows
+    /// that epoch's `EpochChanged`.
+    deferred_done_for_now: Option<(Epoch, FixedHash)>,
+    ready_event: Option<EpochEvent>,
 }
 
 impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> HybridEpochOracle<TStore> {
@@ -36,6 +42,9 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> Hybr
             trigger,
             has_initial_sync_completed: false,
             last_triggered_epoch: None,
+            last_changed_epoch: None,
+            deferred_done_for_now: None,
+            ready_event: None,
         }
     }
 }
@@ -44,6 +53,9 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> Epoc
     for HybridEpochOracle<TStore>
 {
     async fn next_epoch_event(&mut self) -> Option<EpochEvent> {
+        if let Some(event) = self.ready_event.take() {
+            return Some(event);
+        }
         loop {
             tokio::select! {
                 biased;
@@ -51,7 +63,16 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> Epoc
                 event = self.configured.next_epoch_event() => {
                     let event = event?;
                     debug!(target: LOG_TARGET, "📝 Configured epoch event: {}", event);
-                        return Some(event);
+                    if let EpochEvent::EpochChanged { epoch, .. } = &event {
+                        self.last_changed_epoch = Some(*epoch);
+                        if let Some((done_epoch, epoch_hash)) = self.deferred_done_for_now &&
+                            done_epoch == *epoch
+                        {
+                            self.deferred_done_for_now = None;
+                            self.ready_event = Some(EpochEvent::DoneForNow { epoch: done_epoch, epoch_hash });
+                        }
+                    }
+                    return Some(event);
                 },
                 event = self.base_layer.next_epoch_event() => {
                     let event = event?;
@@ -70,7 +91,13 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> Epoc
                         EpochEvent::DoneForNow {epoch, epoch_hash} if !self.has_initial_sync_completed => {
                             self.has_initial_sync_completed = true;
                             if self.last_triggered_epoch == Some(epoch) {
-                                return Some(EpochEvent::DoneForNow { epoch, epoch_hash });
+                                // The configured oracle may still hold the epoch back, and scanning is only done
+                                // once the epoch manager has the epoch.
+                                if self.last_changed_epoch == Some(epoch) {
+                                    return Some(EpochEvent::DoneForNow { epoch, epoch_hash });
+                                }
+                                self.deferred_done_for_now = Some((epoch, epoch_hash));
+                                continue;
                             }
                             self.last_triggered_epoch = Some(epoch);
                             let _ignore = self.trigger.send(EpochTickerData{

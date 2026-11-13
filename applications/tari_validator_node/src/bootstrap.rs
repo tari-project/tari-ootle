@@ -507,6 +507,7 @@ pub async fn spawn_services(
         consensus_handle.clone(),
         consensus_constants.max_transaction_size_bytes,
         epoch_history_length,
+        load_served_epoch_oracle_config(&config).await?,
     )
     .await?;
     handles.push(join_handle);
@@ -589,6 +590,7 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     consensus: ConsensusHandle,
     max_transaction_size_bytes: usize,
     epoch_history_length: u64,
+    epoch_oracle_config_json: Option<Arc<str>>,
 ) -> anyhow::Result<JoinHandle<Result<(), anyhow::Error>>> {
     let rpc_server = RpcServer::builder()
         .with_maximum_simultaneous_sessions(config.validator_node.rpc.max_simultaneous_sessions)
@@ -601,6 +603,7 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
             consensus,
             max_transaction_size_bytes,
             epoch_history_length,
+            epoch_oracle_config_json,
         ));
 
     let (notify_tx, notify_rx) = mpsc::unbounded_channel();
@@ -724,6 +727,18 @@ async fn create_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStor
             Ok(EpochOracle::Hybrid(oracle))
         },
     }
+}
+
+/// The JSON of the configured epoch oracle's config this node runs, which it serves so that indexers can follow
+/// changes to the validator set. None when the node runs the base layer oracle alone.
+async fn load_served_epoch_oracle_config(config: &ApplicationConfig) -> anyhow::Result<Option<Arc<str>>> {
+    let oracle_config = config.epoch_oracle.for_network(config.network);
+    if oracle_config.oracle_type == EpochOracleType::BaseLayer {
+        return Ok(None);
+    }
+    let configured = oracle_config.configured.load().await?;
+    let json = serde_json::to_string(&configured).context("Failed to serialize the epoch oracle config")?;
+    Ok(Some(json.into()))
 }
 
 async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Clone + 'static>(

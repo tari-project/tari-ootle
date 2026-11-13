@@ -58,9 +58,10 @@ pub fn generate_template(options: TemplateOptions, input: TokenStream) -> Result
         ast::inject_cbor_derives(&mut ast.module_content)?;
     }
 
-    let definition = generate_definition(&ast);
     let template_def = generate_template_def(&ast)?;
+    let definition = generate_definition(&ast, &template_def.well_known_checks);
     let dispatcher = generate_dispatcher(&ast)?;
+    let template_def = template_def.section;
 
     let output = quote! {
         #definition

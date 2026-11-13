@@ -78,8 +78,6 @@ pub enum HotStuffError {
         transaction_id: TransactionId,
         reject_reason: String,
     },
-    #[error("Pacemaker channel dropped: {details}")]
-    PacemakerChannelDropped { details: String },
     #[error(
         "Bad new view message: HighQC height {high_pc_height}, received new height {received_new_height}: {details}"
     )]
@@ -358,6 +356,18 @@ pub enum ProposalValidationError {
         transaction_id: TransactionId,
         locked_epoch: Epoch,
         block_epoch: Epoch,
+    },
+
+    #[error(
+        "Foreign proposal for block {block_id} from {shard_group} pins transaction {transaction_id} to \
+         {locked_epoch}, earlier than its minimum epoch {min_epoch}"
+    )]
+    ForeignTransactionPinnedBeforeMinEpoch {
+        block_id: BlockId,
+        shard_group: ShardGroup,
+        transaction_id: TransactionId,
+        locked_epoch: Epoch,
+        min_epoch: Epoch,
     },
 
     #[error("Foreign proposal commit proof error: {0}")]

@@ -37,21 +37,25 @@ use axum::{
 use include_dir::{Dir, include_dir};
 use log::*;
 use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
+use tari_shutdown::ShutdownSignal;
 use url::Url;
 
 const LOG_TARGET: &str = "tari::indexer::web_ui::server";
 
-pub async fn serve(address: SocketAddr, api_address: Url) -> Result<(), anyhow::Error> {
+pub async fn serve(
+    address: SocketAddr,
+    api_address: Url,
+    shutdown_signal: ShutdownSignal,
+) -> Result<(), anyhow::Error> {
     let api_address = Arc::new(api_address);
 
     let router = Router::new()
         .route("/rest_api_address", get(|| async move { api_address.to_string() }))
         .fallback(handler);
 
-    info!(target: LOG_TARGET, "🕸️ Web UI started at http://{}", address);
     let listener = try_bind_with_fallback(address).await?;
-    let server = axum::serve(listener, router);
-    info!(target: LOG_TARGET, "🕸️ Web UI listening on {}", server.local_addr()?);
+    let server = axum::serve(listener, router).with_graceful_shutdown(shutdown_signal);
+    info!(target: LOG_TARGET, "🕸️ Web UI started at http://{}", server.local_addr()?);
     server.await?;
 
     info!(target: LOG_TARGET, "Stopping Web UI");

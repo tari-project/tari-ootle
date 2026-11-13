@@ -8,7 +8,11 @@ use tari_ootle_common_types::SubstateRequirementRef;
 use tari_template_lib_types::{ResourceAddress, constants::TARI_TOKEN};
 
 use crate::{
-    rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult},
+    rest_api::{
+        context::HandlerContext,
+        error::ErrorResponse,
+        handlers::{HandlerResult, substates::substate_lookup_error},
+    },
     substate_manager::decode_substate,
 };
 
@@ -45,7 +49,7 @@ pub async fn get_resource(
         .substate_manager()
         .fetch_substate(SubstateRequirementRef::new(&resource_address, None))
         .await
-        .map_err(|e| ErrorResponse::internal_error(format!("Error getting resource: {}", e)))?
+        .map_err(substate_lookup_error)?
         .ok_or_else(|| ErrorResponse::not_found(format!("Resource {} not found", resource_address)))?;
 
     let substate = decode_substate(&resource_address, &fetched.substate)

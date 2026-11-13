@@ -146,7 +146,11 @@ where
                 )
             })?;
 
-            tokio::spawn(web_ui::server::serve(address, public_api_address));
+            tokio::spawn(web_ui::server::serve(
+                address,
+                public_api_address,
+                shutdown_signal.clone(),
+            ));
         }
     }
     #[cfg(not(feature = "web_ui"))]
@@ -167,6 +171,7 @@ where
 
     let mut epoch_manager_events = services.epoch_manager.subscribe();
     let mut epoch_events_closed = false;
+    let mut ipc_closed = false;
 
     loop {
         tokio::select! {
@@ -187,16 +192,19 @@ where
                 }
             },
 
-            Some(msg_result) = ipc_channel.next() => {
-                match msg_result {
-                    Ok(msg) => {
+            maybe_msg = ipc_channel.next(), if !ipc_closed => {
+                match maybe_msg {
+                    Some(Ok(msg)) => {
                         if let Err(err) = ipc::handle_ipc_message(&services, msg).await {
                             error!(target: LOG_TARGET, "Error handling IPC message: {}", err);
                         }
                     },
-                    Err(err) => {
+                    Some(Err(err)) => {
                         error!(target: LOG_TARGET, "Error receiving IPC message: {}", err);
-                    }
+                    },
+                    None => {
+                        ipc_closed = true;
+                    },
                 }
             },
 
@@ -206,8 +214,6 @@ where
             },
         }
     }
-
-    shutdown_signal.wait().await;
 
     Ok(())
 }

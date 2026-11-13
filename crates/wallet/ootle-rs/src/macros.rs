@@ -103,7 +103,7 @@ macro_rules! __ootle_template_inner {
     (@parse $name:ident
         [$($tpl:tt)*]
         [$($cmp:tt)*]
-        fn $method:ident(& self $(, $param:ident: $ptype:ty)*) $(-> $ret:ty)?;
+        fn $method:ident(& self $(, $param:ident: $ptype:ty)* $(,)?) $(-> $ret:ty)?;
         $($rest:tt)*
     ) => {
         $crate::__ootle_template_inner!(@parse $name
@@ -117,7 +117,7 @@ macro_rules! __ootle_template_inner {
     (@parse $name:ident
         [$($tpl:tt)*]
         [$($cmp:tt)*]
-        fn $method:ident(&mut self $(, $param:ident: $ptype:ty)*) $(-> $ret:ty)?;
+        fn $method:ident(&mut self $(, $param:ident: $ptype:ty)* $(,)?) $(-> $ret:ty)?;
         $($rest:tt)*
     ) => {
         $crate::__ootle_template_inner!(@parse $name
@@ -429,12 +429,13 @@ mod tests {
     // ComponentInterface (for methods) or TemplateInterface (for functions).
     ootle_template! {
         template TestStableCoin {
-            fn instantiate(initial_supply: Amount);
-            fn increase_supply(&mut self, amount: Amount);
+            fn instantiate(initial_supply: Amount,);
+            fn increase_supply(&mut self, amount: Amount,);
             fn decrease_supply(&mut self, amount: Amount);
             fn withdraw(&mut self, amount: Amount);
             fn deposit(&mut self);
             fn get_balance(&self);
+            fn allowance(&self, owner: Amount,) -> Amount;
         }
     }
 

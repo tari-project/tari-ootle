@@ -170,6 +170,12 @@ impl StealthUtxoStream {
                     Some(Ok(payload)) => {
                         let UtxoUpdatePayload { sos, update, eos } = payload;
                         if let Some(sos) = sos {
+                            if current_shard.is_some() {
+                                yield Err(UtxoWatcherError::DecodeError(
+                                    "StartOfShard received before preceding shard ended with EndOfShard".to_string(),
+                                ));
+                                return;
+                            }
                             let shard = Shard::from(sos.shard);
                             current_shard = Some(shard);
                             yield Ok(StealthUtxoFrame::StartOfShard {
@@ -181,6 +187,12 @@ impl StealthUtxoStream {
                             });
                         }
                         if let Some(update) = update {
+                            if current_shard.is_none() {
+                                yield Err(UtxoWatcherError::DecodeError(
+                                    "UTXO update received outside of StartOfShard..EndOfShard".to_string(),
+                                ));
+                                return;
+                            }
                             match convert_update(update) {
                                 Ok(frame) => yield Ok(frame),
                                 Err(err) => {
@@ -210,7 +222,14 @@ impl StealthUtxoStream {
                         yield Err(UtxoWatcherError::StreamError(err));
                         return;
                     },
-                    None => return,
+                    None => {
+                        if current_shard.is_some() {
+                            yield Err(UtxoWatcherError::DecodeError(
+                                "UTXO stream ended before EndOfShard".to_string(),
+                            ));
+                        }
+                        return;
+                    },
                 }
             }
         }

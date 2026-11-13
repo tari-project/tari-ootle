@@ -18,12 +18,7 @@ use tari_engine_types::{
     resource::Resource,
     substate::{Substate, SubstateId, SubstateValue},
 };
-use tari_indexer_client::types::{
-    EpochCheckpointEntry,
-    SubstateState,
-    ValidatorSetCommittee,
-    WatchedSubstateItem,
-};
+use tari_indexer_client::types::{EpochCheckpointEntry, SubstateState, ValidatorSetCommittee, WatchedSubstateItem};
 use tari_ootle_address::Network;
 use tari_ootle_common_types::{
     Epoch,

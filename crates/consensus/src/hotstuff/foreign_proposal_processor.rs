@@ -29,6 +29,7 @@ use tari_ootle_storage::{
         LockedEpoch,
         LockedSubstateValue,
         MultiShardAtom,
+        ShardGroupEvidence,
         TransactionExecution,
         TransactionPoolRecord,
         TransactionPoolStage,
@@ -189,6 +190,13 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                     }
                     .into());
                 };
+                check_evidence_within_shard_group(
+                    foreign_evidence,
+                    foreign_shard_group,
+                    local_committee_info,
+                    foreign_proposal_as_leaf,
+                    &atom.id,
+                )?;
 
                 let justify_qc_id = foreign_justify_qc_id(proposal).ok_or_else(|| {
                     HotStuffError::InvariantError(format!(
@@ -463,6 +471,13 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                     }
                     .into());
                 };
+                check_evidence_within_shard_group(
+                    foreign_evidence,
+                    foreign_shard_group,
+                    local_committee_info,
+                    foreign_proposal_as_leaf,
+                    &atom.id,
+                )?;
                 let justify_qc_id = foreign_justify_qc_id(proposal).ok_or_else(|| {
                     HotStuffError::InvariantError(format!(
                         "Foreign proposal {} does not contain a justify QC for shard group {} - this should have \
@@ -638,6 +653,27 @@ fn adopt_fee_intent_only<TTx: StateStoreReadTransaction>(
     }
     proposed_block_change_set.add_transaction_execution(*tx_rec.id(), execution)?;
     Ok(())
+}
+
+/// A shard group's evidence is adopted as that shard group's pledges, so it may name only substates the shard group
+/// holds. The foreign committee signed the evidence, which proves who pledged and not that the pledge was theirs to
+/// make.
+fn check_evidence_within_shard_group(
+    foreign_evidence: &ShardGroupEvidence,
+    foreign_shard_group: ShardGroup,
+    local_committee_info: &CommitteeInfo,
+    foreign_block: LeafBlock,
+    transaction_id: &TransactionId,
+) -> Result<(), ProposalValidationError> {
+    match foreign_evidence.first_substate_outside(foreign_shard_group, local_committee_info.num_preshards()) {
+        Some(substate_id) => Err(ProposalValidationError::ForeignInvalidPledge {
+            block: foreign_block,
+            transaction_id: *transaction_id,
+            shard_group: foreign_shard_group,
+            details: format!("Evidence names substate {substate_id}, which is outside the shard group's range"),
+        }),
+        None => Ok(()),
+    }
 }
 
 fn add_pledges(

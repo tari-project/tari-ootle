@@ -65,14 +65,15 @@ where TCodec: messaging::Codec + Send + Clone + 'static
 }
 
 /// Returns true if the given Multiaddr is supported by the Tari swarm, otherwise false.
-/// NOTE: this function only currently returns false for onion addresses.
+/// NOTE: this function only currently returns false for empty or onion addresses.
 pub fn is_supported_multiaddr(addr: &libp2p::Multiaddr) -> bool {
-    !addr.iter().any(|p| {
-        matches!(
-            p,
-            libp2p::core::multiaddr::Protocol::Onion(_, _) | libp2p::core::multiaddr::Protocol::Onion3(_)
-        )
-    })
+    !addr.is_empty() &&
+        !addr.iter().any(|p| {
+            matches!(
+                p,
+                libp2p::core::multiaddr::Protocol::Onion(_, _) | libp2p::core::multiaddr::Protocol::Onion3(_)
+            )
+        })
 }
 
 pub fn create_swarm<TCodec>(
@@ -211,7 +212,19 @@ where
     Ok(swarm)
 }
 
-fn create_gossipsub(keypair: &Keypair, config: &Config) -> Result<gossipsub::Behaviour, gossipsub::ConfigBuilderError> {
+fn create_gossipsub(keypair: &Keypair, config: &Config) -> Result<gossipsub::Behaviour, TariSwarmError> {
+    if config.gossip_sub_history_length == 0 {
+        return Err(TariSwarmError::BehaviourError(
+            "gossip_sub_history_length must be greater than 0".to_string(),
+        ));
+    }
+    if config.gossip_sub_history_gossip > config.gossip_sub_history_length {
+        return Err(TariSwarmError::BehaviourError(format!(
+            "gossip_sub_history_gossip ({}) must not exceed gossip_sub_history_length ({})",
+            config.gossip_sub_history_gossip, config.gossip_sub_history_length
+        )));
+    }
+
     // Everything gossipsub retains is set here rather than left to a library default: the
     // message cache, the duplicate cache and the per-connection send queue are all bounds
     // on how much memory a flood of gossip can make the node hold, and a bound nobody chose
@@ -225,19 +238,22 @@ fn create_gossipsub(keypair: &Keypair, config: &Config) -> Result<gossipsub::Beh
         .history_gossip(config.gossip_sub_history_gossip)
         .duplicate_cache_time(config.gossip_sub_duplicate_cache_time)
         .connection_handler_queue_len(config.gossip_sub_max_send_queue_messages)
-        .build()?;
+        .build()
+        .map_err(|e| TariSwarmError::BehaviourError(e.to_string()))?;
 
     let mut gossipsub = gossipsub::Behaviour::new(
         gossipsub::MessageAuthenticity::Signed(keypair.clone()),
         gossipsub_config,
     )
-    .unwrap();
+    .map_err(|e| TariSwarmError::BehaviourError(e.to_string()))?;
 
     if !config.gossip_sub_scored_topics.is_empty() {
         let (params, thresholds) = peer_score_params(&config.gossip_sub_scored_topics);
         // Only fails if the parameters are invalid or scoring is already active, both of
         // which are constructed here.
-        gossipsub.with_peer_score(params, thresholds).unwrap();
+        gossipsub
+            .with_peer_score(params, thresholds)
+            .map_err(TariSwarmError::BehaviourError)?;
     }
     Ok(gossipsub)
 }
@@ -347,4 +363,54 @@ fn peer_score_params(topics: &[String]) -> (gossipsub::PeerScoreParams, gossipsu
     };
 
     (params, gossipsub::PeerScoreThresholds::default())
+}
+
+#[cfg(test)]
+mod tests {
+    use libp2p::Multiaddr;
+
+    use super::*;
+
+    #[test]
+    fn is_supported_multiaddr_rejects_empty_and_onion_addresses() {
+        assert!(!is_supported_multiaddr(&Multiaddr::empty()));
+        assert!(!is_supported_multiaddr(
+            &"/onion/aaimaq4ygg2iegci:80".parse::<Multiaddr>().unwrap()
+        ));
+        assert!(!is_supported_multiaddr(
+            &"/onion3/vww6ybal4bd7szmgncyruucpgfkqahzddi37ktceo3ah7ngmcopnpyyd:1234"
+                .parse::<Multiaddr>()
+                .unwrap()
+        ));
+        assert!(is_supported_multiaddr(
+            &"/ip4/127.0.0.1/tcp/18000".parse::<Multiaddr>().unwrap()
+        ));
+    }
+
+    #[test]
+    fn create_gossipsub_validates_history_bounds() {
+        let keypair = Keypair::generate_ed25519();
+
+        let zero_history = Config {
+            gossip_sub_history_length: 0,
+            gossip_sub_history_gossip: 0,
+            ..Config::default()
+        };
+        assert!(matches!(
+            create_gossipsub(&keypair, &zero_history),
+            Err(TariSwarmError::BehaviourError(_))
+        ));
+
+        let gossip_exceeds_length = Config {
+            gossip_sub_history_length: 3,
+            gossip_sub_history_gossip: 4,
+            ..Config::default()
+        };
+        assert!(matches!(
+            create_gossipsub(&keypair, &gossip_exceeds_length),
+            Err(TariSwarmError::BehaviourError(_))
+        ));
+
+        assert!(create_gossipsub(&keypair, &Config::default()).is_ok());
+    }
 }

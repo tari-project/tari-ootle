@@ -1625,16 +1625,17 @@ impl WalletStoreReader for ReadTransaction<'_> {
     ) -> Result<NonFungibleToken, WalletStorageError> {
         use crate::schema::{non_fungible_tokens, vaults};
 
+        let canonical_nft_id = nft_id.to_canonical_string();
         let non_fungible_token = non_fungible_tokens::table
             .filter(non_fungible_tokens::resource_id.eq(resource_address.to_string()))
-            .filter(non_fungible_tokens::nft_id.eq(nft_id.to_string()))
+            .filter(non_fungible_tokens::nft_id.eq(&canonical_nft_id))
             .first::<crate::models::NonFungibleToken>(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general("non_fungible_token_get_by_nft_id", e))?;
         let non_fungible_token = non_fungible_token.ok_or_else(|| WalletStorageError::NotFound {
             operation: "non_fungible_token_get_by_nft_id",
             entity: "non_fungible_tokens".to_string(),
-            key: nft_id.to_string(),
+            key: canonical_nft_id,
         })?;
 
         let vault_id = non_fungible_token.vault_id;
@@ -1739,8 +1740,9 @@ impl WalletStoreReader for ReadTransaction<'_> {
     ) -> Result<ResourceAddress, WalletStorageError> {
         use crate::schema::{non_fungible_tokens, vaults};
 
+        let canonical_nft_id = nft_id.to_canonical_string();
         let vault_id = non_fungible_tokens::table
-            .filter(non_fungible_tokens::nft_id.eq(nft_id.to_string()))
+            .filter(non_fungible_tokens::nft_id.eq(&canonical_nft_id))
             .select(non_fungible_tokens::vault_id)
             .first::<i32>(self.connection())
             .optional()
@@ -1748,7 +1750,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
         let vault_id = vault_id.ok_or_else(|| WalletStorageError::NotFound {
             operation: "non_fungible_token_get_resource_address",
             entity: "non_fungible_tokens".to_string(),
-            key: nft_id.to_string(),
+            key: canonical_nft_id.clone(),
         })?;
 
         let resource_address = vaults::table
@@ -1760,7 +1762,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
         let resource_address = resource_address.ok_or_else(|| WalletStorageError::NotFound {
             operation: "non_fungible_token_get_resource_address",
             entity: "non_fungible_tokens".to_string(),
-            key: nft_id.to_string(),
+            key: canonical_nft_id,
         })?;
 
         ResourceAddress::from_str(&resource_address).map_err(|e| WalletStorageError::DecodingError {
@@ -2788,5 +2790,70 @@ mod tests {
             .and_then(|entries| entries.get(&(UtxoTag::new(u32::MAX), RistrettoPublicKeyBytes::default())))
             .unwrap();
         assert_eq!(queued.unspent_at, Some((max_shard, max_version)));
+    }
+
+    #[test]
+    fn non_fungible_token_lookups_use_canonical_nft_id_string() {
+        use std::collections::HashSet;
+
+        use tari_ootle_common_types::{Epoch, SubstateVersion};
+        use tari_ootle_wallet_sdk::models::KeyBranch;
+        use tari_template_lib_types::{ObjectKey, ResourceType};
+
+        let store = SqliteWalletStore::try_open(":memory:").unwrap();
+        store.run_migrations().unwrap();
+
+        let acct = ComponentAddress::from_array([1u8; 32]);
+        let vault_id = VaultId::new([10u8; 32].into());
+        let resource = ResourceAddress::new(ObjectKey::from_array([9u8; ObjectKey::LENGTH]));
+        let view_key = KeyId::derived(KeyBranch::ViewOnlyKey, 0);
+        let owner_key = Some(KeyId::derived(KeyBranch::Account, 0));
+        let nft_id = NonFungibleId::try_from_string("hello world").unwrap();
+        assert_eq!(nft_id.to_string(), nft_id.to_canonical_string());
+
+        {
+            let mut tx = store.create_write_tx().unwrap();
+            tx.accounts_insert(
+                Some("acct"),
+                &acct,
+                view_key,
+                owner_key,
+                &RistrettoPublicKeyBytes::from([1u8; 32]),
+                &HashSet::new(),
+                Epoch(0),
+                true,
+                false,
+            )
+            .unwrap();
+            tx.vaults_insert(VaultModel {
+                account_address: acct,
+                id: vault_id,
+                vault_version: SubstateVersion::new(0),
+                resource_address: resource,
+                resource_type: ResourceType::NonFungible,
+                revealed_balance: Amount::ZERO,
+                locked_revealed_balance: Amount::ZERO,
+                confidential_balance: Amount::ZERO,
+                token_symbol: None,
+                divisibility: 0,
+            })
+            .unwrap();
+            tx.non_fungible_token_upsert(&NonFungibleToken {
+                vault_id,
+                nft_id: nft_id.clone(),
+                resource_address: resource,
+                data: tari_bor::Value::Null,
+                mutable_data: tari_bor::Value::Null,
+                is_burnt: false,
+            })
+            .unwrap();
+            tx.commit().unwrap();
+        }
+
+        let mut tx = store.create_read_tx().unwrap();
+        let fetched = tx.non_fungible_token_get_by_nft_id(resource, nft_id.clone()).unwrap();
+        assert_eq!(fetched.nft_id, nft_id);
+        let fetched_res = tx.non_fungible_token_get_resource_address(nft_id).unwrap();
+        assert_eq!(fetched_res, resource);
     }
 }

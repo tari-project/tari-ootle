@@ -67,6 +67,8 @@ FLOOD_ACCOUNT_MIN = 60_000
 # What a wallet deposit brings a flood account up to; a transfer spends a few thousand µT of it.
 FLOOD_ACCOUNT_FUND = 200_000
 DEPOSIT_BATCH = 25
+# How long the indexer may take to serve flood accounts that a committed deposit funded.
+FLOOD_FUNDING_VISIBLE_TIMEOUT = 120
 TARI_TOKEN = "resource_" + "01" * 32
 LIQUIDITY_POOL_TEMPLATE = "template_" + "00" * 31 + "02"
 TARI = 1_000_000
@@ -616,6 +618,17 @@ class SmokeTest:
         info(f"💸 {SMOKE_ACCOUNT} funds {bold(len(missing))} new and tops up {bold(len(low))} flood account(s) "
              f"({fmt_tari(sum(t[2] for t in topups))})…")
         self.deposit(topups)
+        # The listing above cached each missing account's nonexistence on the indexer. A creation retracts that only
+        # once the indexer has synced the account's shard group, so funded accounts appear shard group by shard group.
+        deadline = time.monotonic() + FLOOD_FUNDING_VISIBLE_TIMEOUT
+        while True:
+            pending = [a[0] for a in self.flood_accounts(n) if a[3] is None or a[3] < FLOOD_ACCOUNT_MIN]
+            if not pending:
+                return
+            if time.monotonic() > deadline:
+                raise StageFailed(f"indexer still serves {len(pending)} funded flood account(s) as missing or unfunded "
+                                  f"after {FLOOD_FUNDING_VISIBLE_TIMEOUT}s (accounts {', '.join(map(str, pending[:5]))}…)")
+            time.sleep(3)
 
     def deposit(self, deposits):
         """Deposits revealed TARI from the smoketest account into each (owner public key, address or None when the

@@ -24,6 +24,7 @@ use tari_ootle_common_types::{
     ExtraFieldKey,
     NodeHeight,
     ProtocolVersion,
+    ShardGroup,
     ValidatorSetHash,
     committee::CommitteeInfo,
     displayable::Displayable,
@@ -63,7 +64,7 @@ use crate::{
         block_change_set::ProposedBlockChangeSet,
         command_sequencer::{BlockTotals, CommandSequencer, Refusal, block_state_root},
         epoch_state::EpochState,
-        error::HotStuffError,
+        error::{HotStuffError, ProposalValidationError},
         exceeds_block_foreign_proposal_bytes,
         exhaust_burn_rate::resolve_epoch_exhaust_burn_rate,
         foreign_proposal_processor::process_foreign_block,
@@ -110,6 +111,10 @@ struct NextBlock {
     /// Foreign proposals this node rejected while proposing. Recorded by the caller, which holds the write
     /// transaction, so that they leave the unconfirmed index and are not selected into a later block.
     invalid_foreign_proposals: Vec<BlockId>,
+    /// Unconfirmed foreign proposals naming this node's current shard group (e.g. stored before epoch rotation).
+    /// Deleted by the caller so they leave the unconfirmed index without writing an `Invalid` status against the
+    /// block id.
+    stale_foreign_proposals: Vec<BlockId>,
 }
 
 #[derive(Debug, Clone)]
@@ -204,6 +209,7 @@ where TConsensusSpec: ConsensusSpec
                     executed_transactions,
                     lock_conflicts,
                     invalid_foreign_proposals,
+                    stale_foreign_proposals,
                 } = next_block;
 
                 // Invalid leaves the unconfirmed index, so a proposal rejected here is not selected into a
@@ -215,6 +221,19 @@ where TConsensusSpec: ConsensusSpec
                         "⚠️ Marking foreign proposal {block_id} invalid: it failed validation while proposing"
                     );
                     ForeignProposalRecord::set_status_by_id(tx, &block_id, ForeignProposalStatus::Invalid, None)?;
+                }
+
+                // Stale records naming this validator's current shard group (stored in an earlier epoch before
+                // rotation) are deleted rather than marked `Invalid`: they leave `UnconfirmedIndex` so they
+                // neither consume `get_all_new`'s fetch limit nor hold `propose_now` set, while leaving no
+                // `Invalid` status if this validator later rotates back to a shard group that needs the block.
+                for block_id in stale_foreign_proposals {
+                    info!(
+                        target: LOG_TARGET,
+                        "🧹 Deleting stale foreign proposal {block_id} naming local shard group {}",
+                        local_committee_info.shard_group(),
+                    );
+                    ForeignProposalRecord::delete(tx, &block_id)?;
                 }
 
                 drop_executions_of_uninserted_proposal(tx, epoch)?;
@@ -401,7 +420,13 @@ where TConsensusSpec: ConsensusSpec
         let mut batch = if should_not_propose_commands {
             ProposalBatch::default()
         } else {
-            self.fetch_next_proposal_batch(tx, state_anchor_leaf, next_height, &proposal_filter)?
+            self.fetch_next_proposal_batch(
+                tx,
+                state_anchor_leaf,
+                next_height,
+                local_committee_info.shard_group(),
+                &proposal_filter,
+            )?
         };
         debug!(target: LOG_TARGET, "🌿 PROPOSE: {} (justify: {}) {batch}", highest_seen_block.height(), justify_block.height());
 
@@ -656,6 +681,7 @@ where TConsensusSpec: ConsensusSpec
             executed_transactions,
             lock_conflicts,
             invalid_foreign_proposals,
+            stale_foreign_proposals: batch.stale_foreign_proposals,
         })
     }
 
@@ -665,6 +691,7 @@ where TConsensusSpec: ConsensusSpec
         tx: &TTx,
         state_anchor_leaf: LeafBlock,
         next_height: NodeHeight,
+        local_shard_group: ShardGroup,
         proposal_filter: &ProposalFilter,
     ) -> Result<ProposalBatch, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "fetch_next_proposal_batch");
@@ -690,8 +717,9 @@ where TConsensusSpec: ConsensusSpec
             );
         }
 
-        let foreign_proposals = select_foreign_proposals(
+        let (foreign_proposals, stale_foreign_proposals) = select_foreign_proposals(
             foreign_proposals,
+            local_shard_group,
             self.config.consensus_constants.max_block_foreign_proposal_bytes,
         );
 
@@ -727,6 +755,7 @@ where TConsensusSpec: ConsensusSpec
 
         Ok(ProposalBatch {
             foreign_proposals: foreign_proposals.into_iter().map(|fp| fp.into_proposal()).collect(),
+            stale_foreign_proposals,
             transactions,
             commands: vec![],
         })
@@ -736,8 +765,9 @@ where TConsensusSpec: ConsensusSpec
 /// Evaluates the newly justified block and any foreign proposals in `batch` against `change_set`.
 ///
 /// If a foreign proposal fails `process_foreign_block`, every foreign proposal is stripped from `commands` and
-/// `batch.foreign_proposals`, `change_set` is restored to its pre-foreign-proposal snapshot, and any proposal that
-/// failed with a validation error is returned so the caller marks it `Invalid`.
+/// `batch.foreign_proposals`, `change_set` is restored to its pre-foreign-proposal snapshot, any proposal that failed
+/// with a proposal-intrinsic validation error is returned so the caller marks it `Invalid`, and any proposal rejected
+/// for naming the local shard group is appended to `batch.stale_foreign_proposals` for deletion.
 #[allow(clippy::too_many_arguments)]
 fn process_proposal_batch_foreign_proposals<TTx: StateStoreReadTransaction>(
     tx: &TTx,
@@ -781,11 +811,21 @@ fn process_proposal_batch_foreign_proposals<TTx: StateStoreReadTransaction>(
                     fp.to_atom().block_id,
                 );
 
-                // Only a validation failure condemns the proposal: it is a property of the proposal
-                // itself, so every leader reaches the same verdict. Every other error is a statement
-                // about this node, and a proposal discarded on one would never be proposed again.
-                if err.validation_error().is_some() {
-                    invalid_foreign_proposals.push(fp.to_atom().block_id);
+                // Only a validation failure that is a property of the proposal itself condemns it, so every
+                // leader reaches the same verdict. `ForeignProposalFromLocalShardGroup` depends on this node's
+                // current assignment: deleting the stale record instead of condemning it clears `UnconfirmedIndex`
+                // without leaving an `Invalid` tombstone if this validator later rotates back out.
+                match err.validation_error() {
+                    Some(ProposalValidationError::ForeignProposalFromLocalShardGroup { .. }) => {
+                        let block_id = fp.to_atom().block_id;
+                        if !batch.stale_foreign_proposals.contains(&block_id) {
+                            batch.stale_foreign_proposals.push(block_id);
+                        }
+                    },
+                    Some(_) => {
+                        invalid_foreign_proposals.push(fp.to_atom().block_id);
+                    },
+                    None => {},
                 }
 
                 *change_set = change_set_before_foreign_proposals
@@ -810,6 +850,7 @@ fn process_proposal_batch_foreign_proposals<TTx: StateStoreReadTransaction>(
 #[derive(Default)]
 struct ProposalBatch {
     pub foreign_proposals: Vec<ForeignProposal>,
+    pub stale_foreign_proposals: Vec<BlockId>,
     pub transactions: Vec<TransactionPoolRecord>,
     pub commands: Vec<Command>,
 }
@@ -827,18 +868,32 @@ impl Display for ProposalBatch {
 }
 
 /// Selects the foreign proposals for the next block from `foreign_proposals`, which are in the order they are stored,
-/// and returns them in the order a replica applies them.
+/// returning `(selected, stale_foreign_proposals)` with `selected` in the order a replica applies them.
 ///
-/// The block travels with every foreign proposal it includes, so they are taken in stored order for as long as they
-/// fit `max_bytes`. The rest stay new for a later block.
+/// Proposals naming `local_shard_group` (e.g. stored in an earlier epoch before this validator rotated into
+/// `local_shard_group`) are removed and their block ids returned in `stale_foreign_proposals` so the caller deletes
+/// them from storage — clearing `UnconfirmedIndex` without writing an `Invalid` status against the block id. The block
+/// travels with every foreign proposal it includes, so the remaining proposals are taken in stored order for as long as
+/// they fit `max_bytes`; the rest stay `New` for a later block.
 ///
 /// Applying foreign proposals is order-dependent (e.g. the first abort recorded for a transaction is the one it keeps),
 /// and the proposer derives the block's transaction commands from the state they leave behind. Replicas apply them in
 /// block command order, so the proposer must too, or it commits to atoms no replica reproduces.
 fn select_foreign_proposals(
     mut foreign_proposals: Vec<ForeignProposalRecord>,
+    local_shard_group: ShardGroup,
     max_bytes: usize,
-) -> Vec<ForeignProposalRecord> {
+) -> (Vec<ForeignProposalRecord>, Vec<BlockId>) {
+    let mut stale_foreign_proposals = Vec::new();
+    foreign_proposals.retain(|fp| {
+        if fp.proposal().shard_group_checked() == Some(local_shard_group) {
+            stale_foreign_proposals.push(*fp.block_id());
+            false
+        } else {
+            true
+        }
+    });
+
     let mut foreign_proposal_bytes = 0usize;
     let num_fitting = foreign_proposals
         .iter()
@@ -863,7 +918,7 @@ fn select_foreign_proposals(
     }
 
     foreign_proposals.sort_by(|a, b| a.to_atom().block_order_key().cmp(&b.to_atom().block_order_key()));
-    foreign_proposals
+    (foreign_proposals, stale_foreign_proposals)
 }
 
 /// Subtract `by` from the remaining block weight budget, returning `None` once the budget is
@@ -901,7 +956,7 @@ mod tests {
     use super::*;
 
     mod select_foreign_proposals {
-        use tari_ootle_common_types::{ExtraData, ShardGroup};
+        use tari_ootle_common_types::ExtraData;
         use tari_ootle_storage::consensus_models::{
             BlockCommands,
             BlockHeaderMetadata,
@@ -970,7 +1025,8 @@ mod tests {
         #[test]
         fn it_returns_the_selection_in_the_order_replicas_apply_it() {
             let stored = stored_out_of_block_order();
-            let selected = select_foreign_proposals(stored.clone(), usize::MAX);
+            let local_sg = ShardGroup::new(128u32, 255u32);
+            let (selected, stale) = select_foreign_proposals(stored.clone(), local_sg, usize::MAX);
 
             let block_order = BlockCommands::init(selected.iter().map(|fp| Command::ForeignProposal(fp.to_atom())))
                 .unwrap()
@@ -980,16 +1036,33 @@ mod tests {
 
             assert_ne!(atoms(&stored), block_order, "fixture must be stored out of block order");
             assert_eq!(atoms(&selected), block_order);
+            assert!(stale.is_empty());
         }
 
         #[test]
         fn it_selects_in_stored_order_within_the_byte_budget() {
             let stored = stored_out_of_block_order();
+            let local_sg = ShardGroup::new(128u32, 255u32);
             let max_bytes = tari_bor::encoded_len(stored[0].proposal());
 
-            let selected = select_foreign_proposals(stored.clone(), max_bytes);
+            let (selected, stale) = select_foreign_proposals(stored.clone(), local_sg, max_bytes);
 
             assert_eq!(atoms(&selected), atoms(&stored[..1]));
+            assert!(stale.is_empty());
+        }
+
+        #[test]
+        fn it_collects_proposals_naming_the_local_shard_group_for_deletion() {
+            let local_sg = ShardGroup::new(32u32, 63u32);
+            let stored = stored_out_of_block_order();
+            // `stored[0]` names `local_sg`, so removing it leaves the full byte budget for `stored[1]` and returns
+            // `stored[0]`'s block id for deletion from `UnconfirmedIndex`.
+            let max_bytes = tari_bor::encoded_len(stored[1].proposal());
+
+            let (selected, stale) = select_foreign_proposals(stored.clone(), local_sg, max_bytes);
+
+            assert_eq!(atoms(&selected), atoms(&stored[1..]));
+            assert_eq!(stale, vec![*stored[0].block_id()]);
         }
     }
 
@@ -1014,7 +1087,7 @@ mod tests {
 
     mod process_proposal_batch_foreign_proposals {
         use tari_engine_types::fees::ExhaustBurnRate;
-        use tari_ootle_common_types::{NumPreshards, ProtocolVersion, ShardGroup, VotePower};
+        use tari_ootle_common_types::{NumPreshards, ProtocolVersion, VotePower};
         use tari_ootle_storage::consensus_models::{BlockHeaderMetadata, BlockPledge, CommandsCommitProof};
         use tari_ootle_transaction::Network;
         use tari_sidechain::{FixedHash, SidechainBlockCommitProof, SidechainBlockHeader};
@@ -1025,7 +1098,7 @@ mod tests {
         const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
         const NETWORK: Network = Network::LocalNet;
 
-        fn foreign_proposal_with_unknown_protocol_version() -> ForeignProposal {
+        fn foreign_proposal_with(shard_group: ShardGroup, protocol_version: u32) -> ForeignProposal {
             let metadata = BlockHeaderMetadata {
                 total_leader_fee: 0,
                 timestamp: 0,
@@ -1035,15 +1108,15 @@ mod tests {
             };
             let header = SidechainBlockHeader {
                 network: NETWORK.as_byte(),
-                protocol_version: u32::MAX,
+                protocol_version,
                 parent_id: Default::default(),
                 justify_id: Default::default(),
                 height: 1,
                 epoch: 0,
                 epoch_hash: Default::default(),
                 shard_group: tari_sidechain::ShardGroup {
-                    start: 128,
-                    end_inclusive: 255,
+                    start: shard_group.start().as_u32(),
+                    end_inclusive: shard_group.end().as_u32(),
                 },
                 proposed_by: Default::default(),
                 state_merkle_root: Default::default(),
@@ -1058,6 +1131,10 @@ mod tests {
                 proof_elements: vec![],
             });
             ForeignProposal::new(commit_proof, BlockPledge::default(), metadata)
+        }
+
+        fn foreign_proposal_with_unknown_protocol_version() -> ForeignProposal {
+            foreign_proposal_with(ShardGroup::new(128, 255), u32::MAX)
         }
 
         #[test]
@@ -1090,6 +1167,7 @@ mod tests {
             let atom = fp.to_atom();
             let mut batch = ProposalBatch {
                 foreign_proposals: vec![fp],
+                stale_foreign_proposals: vec![],
                 transactions: vec![],
                 commands: vec![],
             };
@@ -1115,7 +1193,85 @@ mod tests {
 
             assert!(commands.is_empty(), "block must carry no ForeignProposal command");
             assert_eq!(invalid_foreign_proposals, vec![atom.block_id]);
+            assert!(batch.stale_foreign_proposals.is_empty());
             assert!(batch.foreign_proposals.is_empty());
+        }
+
+        #[test]
+        fn a_foreign_proposal_naming_the_local_shard_group_is_marked_for_deletion_without_condemning_it() {
+            let tmp = tempfile::tempdir().unwrap();
+            let store = RocksDbStateStore::<String>::open(tmp.path(), DatabaseOptions::default()).unwrap();
+            let mut zero = Block::zero_block(NETWORK, NUM_PRESHARDS);
+            let local_group = ShardGroup::new(0, 127);
+            let genesis = Block::genesis(
+                NETWORK,
+                ProtocolVersion::V0,
+                Epoch(0),
+                FixedHash::zero(),
+                local_group,
+                FixedHash::zero(),
+                None,
+                ExhaustBurnRate::new(0),
+            );
+            let fp = foreign_proposal_with(local_group, ProtocolVersion::V0.as_u32());
+            let record = ForeignProposalRecord::new(fp.clone());
+            let atom = fp.to_atom();
+            store
+                .with_write_tx(|tx| {
+                    zero.justify().save(tx)?;
+                    zero.insert(tx)?;
+                    zero.add_justify_qc(tx, &PcId::zero())?;
+                    genesis.justify().save(tx)?;
+                    genesis.insert(tx)?;
+                    record.save(tx)
+                })
+                .unwrap();
+
+            let mut batch = ProposalBatch {
+                foreign_proposals: vec![fp],
+                stale_foreign_proposals: vec![],
+                transactions: vec![],
+                commands: vec![],
+            };
+            let mut commands = vec![Command::ForeignProposal(atom.clone())];
+            let committee_info = CommitteeInfo::new(NUM_PRESHARDS, 1, 2, local_group, Epoch(0), VotePower::of(1));
+
+            let invalid_foreign_proposals = store
+                .with_read_tx(|tx| {
+                    assert!(ForeignProposalRecord::has_unconfirmed(tx, Epoch(0)).unwrap());
+                    let mut substate_store = PendingSubstateStore::init(tx, genesis.as_leaf(), NUM_PRESHARDS).unwrap();
+                    let mut change_set = ProposedBlockChangeSet::new(genesis.as_leaf());
+                    process_proposal_batch_foreign_proposals(
+                        tx,
+                        &genesis,
+                        genesis.justify().calculate_id(),
+                        &committee_info,
+                        &mut substate_store,
+                        &mut batch,
+                        &mut commands,
+                        &mut change_set,
+                    )
+                })
+                .unwrap();
+
+            assert!(commands.is_empty(), "block must carry no ForeignProposal command");
+            assert!(
+                invalid_foreign_proposals.is_empty(),
+                "local-shard-group mismatch depends on this validator's assignment and must not condemn the block id"
+            );
+            assert_eq!(batch.stale_foreign_proposals, vec![atom.block_id]);
+            assert!(batch.foreign_proposals.is_empty());
+
+            store
+                .with_write_tx(|tx| {
+                    for block_id in &batch.stale_foreign_proposals {
+                        ForeignProposalRecord::delete(tx, block_id)?;
+                    }
+                    assert!(!ForeignProposalRecord::record_exists(&**tx, &atom.block_id)?);
+                    assert!(!ForeignProposalRecord::has_unconfirmed(&**tx, Epoch(0))?);
+                    Ok::<_, StorageError>(())
+                })
+                .unwrap();
         }
     }
 }

@@ -775,6 +775,16 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             });
         }
 
+        if msg.proposal.shard_group_checked() == Some(epoch_state.local_committee_info().shard_group()) {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️ Foreign proposal block {} from {from} names the local shard group {}; discarding message",
+                msg.proposal,
+                epoch_state.local_committee_info().shard_group(),
+            );
+            return Ok(MessageValidationResult::Discard);
+        }
+
         let committee = match validations::resolve_foreign_committee(&self.epoch_manager, &msg.proposal).await {
             Ok(Some(committee)) => committee,
             Ok(None) => return Ok(MessageValidationResult::Discard),
@@ -796,10 +806,19 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             });
         }
 
+        self.admit_or_park_foreign_proposal(epoch_state.local_committee_info(), from, msg)
+    }
+
+    fn admit_or_park_foreign_proposal(
+        &self,
+        local_committee_info: &CommitteeInfo,
+        from: TConsensusSpec::Addr,
+        msg: ForeignProposalMessage,
+    ) -> Result<MessageValidationResult<TConsensusSpec::Addr>, HotStuffError> {
         self.store.with_write_tx(|tx| {
             let all_involved_transactions = msg
                 .proposal
-                .all_transaction_ids_in_committee(epoch_state.local_committee_info());
+                .all_transaction_ids_in_committee(local_committee_info);
             // CASE: all foreign proposals must include evidence
             let num_transactions = all_involved_transactions.clone().count();
             if num_transactions == 0 {
@@ -813,9 +832,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 return Ok(MessageValidationResult::Invalid {
                     from,
                     message: HotstuffMessage::ForeignProposal(msg),
-                    err: ProposalValidationError::NoTransactionsInCommittee {
-                        block_id,
-                    }.into(),
+                    err: ProposalValidationError::NoTransactionsInCommittee { block_id }.into(),
                 });
             }
 
@@ -841,8 +858,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             // The first parked message carrying a block holds its slot until unparked, so a message that withholds a
             // command or whose pledges its evidence does not commit to is turned away here, leaving the slot for
             // another delivery of the block.
-            if let Err(err) =
-                validate_foreign_proposal_contents(&msg.proposal, epoch_state.local_committee_info().shard_group()) &&
+            if let Err(err) = validate_foreign_proposal_contents(&msg.proposal, local_committee_info.shard_group()) &&
                 err.rejects_message_not_block()
             {
                 warn!(target: LOG_TARGET, "⚠️ Discarding foreign proposal from {from}: {err}");
@@ -1724,6 +1740,118 @@ mod tests {
                     Ok::<_, HotStuffError>(())
                 })
                 .unwrap();
+        }
+
+        fn make_foreign_proposal_in_shard_group(
+            epoch: Epoch,
+            shard_group: ShardGroup,
+        ) -> tari_ootle_storage::consensus_models::ForeignProposal {
+            use tari_ootle_storage::consensus_models::{
+                BlockHeaderMetadata,
+                BlockPledge,
+                CommandOrHash,
+                CommandsCommitProof,
+                ForeignProposal,
+                PrunedCommand,
+            };
+            use tari_sidechain::{SidechainBlockCommitProof, SidechainBlockHeader};
+
+            let metadata = BlockHeaderMetadata {
+                total_leader_fee: 0,
+                timestamp: 0,
+                extra_data: ExtraData::new(),
+                timeout_certificate_id: None,
+                is_dummy: false,
+            };
+            let commands = vec![CommandOrHash::Pruned(PrunedCommand {
+                hash: FixedHash::from([1u8; 32]),
+                full_command_shard_groups: vec![],
+            })];
+            let commit_proof = CommandsCommitProof::new_latest(commands, SidechainBlockCommitProof {
+                header: SidechainBlockHeader {
+                    network: Network::LocalNet.as_byte(),
+                    protocol_version: ProtocolVersion::at(Network::LocalNet, epoch).as_u32(),
+                    parent_id: Default::default(),
+                    justify_id: Default::default(),
+                    height: 1,
+                    epoch: epoch.as_u64(),
+                    epoch_hash: FixedHash::zero(),
+                    shard_group: tari_sidechain::ShardGroup {
+                        start: shard_group.start().as_u32(),
+                        end_inclusive: shard_group.end().as_u32(),
+                    },
+                    proposed_by: Default::default(),
+                    state_merkle_root: Default::default(),
+                    command_merkle_root: Default::default(),
+                    transaction_merkle_root: Default::default(),
+                    signature: Default::default(),
+                    accumulated_data: Default::default(),
+                    metadata_hash: metadata.calculate_hash(),
+                },
+                proof_elements: vec![],
+            });
+            ForeignProposal::new(commit_proof, BlockPledge::default(), metadata)
+        }
+
+        #[tokio::test]
+        async fn a_foreign_proposal_message_naming_the_local_shard_group_is_discarded_before_committee_resolution() {
+            let epoch = Epoch(1);
+            let local_shard_group = ShardGroup::new(0, 127);
+
+            let dir = tempfile::tempdir().unwrap();
+            let store = TestStore::open(dir.path(), DatabaseOptions::default()).unwrap();
+            let (tx_events, _rx_events) = broadcast::channel(1);
+            // `NoopStub::get_committee_by_shard_group` panics with `unimplemented!()`, so returning `Discard` also
+            // proves the message is dropped before foreign committee resolution.
+            let on_message_validate = OnMessageValidate::<TestSpec>::new(
+                HotstuffConfig {
+                    network: Network::LocalNet,
+                    sidechain_id: None,
+                    consensus_constants: ConsensusConstants::devnet(1),
+                    state_history_length: 10,
+                    pinned_checkpoint_epochs: 1,
+                    state_tree_cleanup_interval: Duration::from_secs(60),
+                    epoch_gc_interval: Duration::from_secs(60),
+                    epoch_end_grace_period: Duration::from_secs(1),
+                    epoch_end_drain_period: Duration::from_secs(1),
+                    catch_up_request_timeout: Duration::from_secs(5),
+                },
+                store,
+                NoopStub,
+                NoopStub,
+                NoopStub,
+                tx_events.downgrade(),
+            );
+
+            let proposal = make_foreign_proposal_in_shard_group(epoch, local_shard_group);
+            let epoch_state = EpochState {
+                epoch,
+                epoch_hash: FixedHash::zero(),
+                exhaust_burn_rate: ExhaustBurnRate::new(0),
+                local_committee_info: CommitteeInfo::new(
+                    NumPreshards::P256,
+                    1,
+                    2,
+                    local_shard_group,
+                    epoch,
+                    VotePower::of(1),
+                ),
+                local_committee: Arc::new(Committee::empty()),
+            };
+
+            let result = on_message_validate
+                .process_foreign_proposal(
+                    &epoch_state,
+                    RistrettoPublicKeyBytes::default(),
+                    ForeignProposalMessage::from(proposal),
+                )
+                .await
+                .unwrap();
+
+            assert!(
+                matches!(result, MessageValidationResult::Discard),
+                "expected local-shard-group ForeignProposalMessage to be discarded, got {result:?}"
+            );
         }
     }
 }

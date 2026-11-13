@@ -323,6 +323,110 @@ mod confirm_all_transitions {
 
         tx.rollback().unwrap();
     }
+
+    #[test]
+    fn pending_update_with_none_leader_fee_clears_committed_leader_fee() {
+        use tari_ootle_storage::consensus_models::LeaderFee;
+
+        let (db, _tmp) = create_rocksdb();
+        let mut tx = db.create_write_tx().unwrap();
+
+        let atom1 = create_tx_atom();
+        let network = Network::LocalNet;
+        let zero_block = Block::zero_block(network, num_preshards());
+        zero_block.insert(&mut tx).unwrap();
+        tx.proposal_certificates_save(zero_block.justify()).unwrap();
+        tx.blocks_set_qcs(zero_block.id(), Some(&PcId::zero()), Some(&PcId::zero()))
+            .unwrap();
+        let shard_group = zero_block.shard_group();
+
+        let block1 = Block::create(
+            network,
+            ProtocolVersion::V0,
+            *zero_block.id(),
+            zero_block.justify().clone(),
+            None,
+            NodeHeight(1),
+            Epoch(0),
+            shard_group,
+            Default::default(),
+            BlockCommands::init([Command::LocalPrepare(atom1.clone())]).unwrap(),
+            Default::default(),
+            Default::default(),
+            SchnorrSignatureBytes::zero(),
+            EpochTime::now().as_u64(),
+            FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
+            ExtraData::default(),
+        )
+        .unwrap();
+        block1.insert(&mut tx).unwrap();
+        block1.as_locked().set(&mut tx).unwrap();
+        block1.as_leaf().set(&mut tx).unwrap();
+
+        tx.transaction_pool_insert_new(atom1.id, atom1.decision, &Evidence::empty(), true, false, Epoch(1), 0)
+            .unwrap();
+
+        let mut rec = tx.transaction_pool_get_all(1000).unwrap().pop().unwrap();
+        rec.set_leader_fee(LeaderFee {
+            fee: 100,
+            exhaust_burn: 5,
+        });
+        rec.set_next_stage_and_readiness(TransactionPoolStage::LocalPrepared, shard_group)
+            .unwrap();
+        tx.transaction_pool_add_pending_update(&block1.as_leaf(), &TransactionPoolStatusUpdate::new(rec, true))
+            .unwrap();
+        tx.transaction_pool_confirm_all_transitions(&block1.as_leaf()).unwrap();
+
+        let committed = tx.transaction_pool_get_for_blocks(block1.id(), &atom1.id).unwrap();
+        assert_eq!(
+            committed.leader_fee(),
+            Some(&LeaderFee {
+                fee: 100,
+                exhaust_burn: 5
+            })
+        );
+
+        let block2 = Block::create(
+            network,
+            ProtocolVersion::V0,
+            *block1.id(),
+            zero_block.justify().clone(),
+            None,
+            NodeHeight(2),
+            Epoch(0),
+            shard_group,
+            Default::default(),
+            BlockCommands::init([Command::LocalAccept(atom1.clone())]).unwrap(),
+            Default::default(),
+            Default::default(),
+            SchnorrSignatureBytes::zero(),
+            EpochTime::now().as_u64(),
+            FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
+            ExtraData::default(),
+        )
+        .unwrap();
+        block2.insert(&mut tx).unwrap();
+        block2.as_leaf().set(&mut tx).unwrap();
+
+        let mut cleared = committed;
+        cleared.no_leader_fee();
+        cleared
+            .set_next_stage_and_readiness(TransactionPoolStage::LocalAccepted, shard_group)
+            .unwrap();
+        tx.transaction_pool_add_pending_update(&block2.as_leaf(), &TransactionPoolStatusUpdate::new(cleared, true))
+            .unwrap();
+
+        let overlaid = tx.transaction_pool_get_for_blocks(block2.id(), &atom1.id).unwrap();
+        assert!(overlaid.leader_fee().is_none());
+
+        tx.transaction_pool_confirm_all_transitions(&block2.as_leaf()).unwrap();
+        let after_confirm = tx.transaction_pool_get_for_blocks(block2.id(), &atom1.id).unwrap();
+        assert!(after_confirm.leader_fee().is_none());
+
+        tx.rollback().unwrap();
+    }
 }
 
 mod transaction_operations {

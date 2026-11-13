@@ -54,6 +54,7 @@ use tari_template_lib::{
         ResourceType,
         TemplateAddress,
         TransactionReceiptAddress,
+        UtxoId,
         VaultId,
         access_rules::RuleRequirement,
         crypto::PedersenCommitmentBytes,
@@ -197,6 +198,12 @@ pub enum RuntimeError {
         op: &'static str,
         resource_address: ResourceAddress,
         nf_id: NonFungibleId,
+    },
+    #[error("Invalid op '{op}' on burnt stealth UTXO {resource_address} id {utxo_id}")]
+    InvalidOpStealthUtxoBurnt {
+        op: &'static str,
+        resource_address: ResourceAddress,
+        utxo_id: UtxoId,
     },
     #[error("Bucket not found with id {bucket_id}")]
     BucketNotFound { bucket_id: BucketId },
@@ -624,6 +631,7 @@ impl RuntimeError {
 
             Self::VaultFrozen { .. } |
             Self::InvalidOpNonFungibleBurnt { .. } |
+            Self::InvalidOpStealthUtxoBurnt { .. } |
             Self::FreezeResourceMismatch { .. } |
             Self::RecallResourceMismatch { .. } => C::ResourceRestricted,
 

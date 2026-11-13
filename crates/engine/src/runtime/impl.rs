@@ -2501,11 +2501,24 @@ where
                 })?;
 
                 self.tracker.write_with(|state_mut| {
+                    let op = if arg.freeze {
+                        "freeze_stealth_utxo"
+                    } else {
+                        "unfreeze_stealth_utxo"
+                    };
                     for utxo in arg.utxos {
                         let id = SubstateId::Utxo(UtxoAddress::new(resource_address, utxo));
                         let locked = state_mut.write_lock_substate(id.clone())?;
 
                         let utxo_mut = state_mut.get_utxo_mut(&locked)?;
+                        if utxo_mut.is_burnt() {
+                            state_mut.unlock_substate(locked)?;
+                            return Err(RuntimeError::InvalidOpStealthUtxoBurnt {
+                                op,
+                                resource_address,
+                                utxo_id: utxo,
+                            });
+                        }
 
                         // Freeze is idempotent.
                         if arg.freeze {
@@ -5010,6 +5023,78 @@ mod tests {
             runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args),
             Err(RuntimeError::InvalidArgument { argument, .. }) if argument.ends_with("PayFeeArg")
         ));
+    }
+
+    #[test]
+    fn set_stealth_utxos_freeze_rejects_burnt_utxo() {
+        use tari_engine_types::{Utxo, resource::Resource};
+        use tari_template_lib::{args::SetFreezeStealthUtxosArg, types::UtxoId};
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let resource_address = ResourceAddress::new([21u8; 32].into());
+        let burnt_utxo_id = UtxoId::from_array([22u8; UtxoId::LENGTH]);
+        let burnt_address = UtxoAddress::new(resource_address, burnt_utxo_id);
+
+        let resource = Resource::new(
+            ResourceType::Stealth,
+            SubstateOwnerRule::None,
+            ResourceAccessRules::new().freezable(AccessRule::AllowAll, UpdateRule::Locked),
+            Metadata::new(),
+            None,
+            None,
+            0,
+            false,
+        );
+
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address: TemplateAddress::default(),
+                    module_name: "Test".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id: EntityId::default(),
+                },
+                None,
+            )
+            .unwrap();
+        runtime.tracker.write_with(|state| {
+            state.new_substate(resource_address, resource).unwrap();
+            state
+                .new_substate(burnt_address.clone(), Utxo {
+                    output: None,
+                    is_frozen: false,
+                })
+                .unwrap();
+        });
+
+        for (freeze, expected_op) in [(true, "freeze_stealth_utxo"), (false, "unfreeze_stealth_utxo")] {
+            let arg = EngineArgs::from(vec![
+                tari_bor::encode(&SetFreezeStealthUtxosArg {
+                    utxos: vec![burnt_utxo_id],
+                    freeze,
+                })
+                .unwrap()
+                .into(),
+            ]);
+            let err = runtime
+                .resource_invoke(
+                    ResourceRef::Ref(resource_address),
+                    ResourceAction::SetStealthUtxosFreeze,
+                    arg,
+                )
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    RuntimeError::InvalidOpStealthUtxoBurnt {
+                        op,
+                        resource_address: actual_res,
+                        utxo_id: actual_id,
+                    } if op == expected_op && actual_res == resource_address && actual_id == burnt_utxo_id
+                ),
+                "freeze={freeze} returned unexpected error: {err:?}"
+            );
+        }
     }
 
     #[test]

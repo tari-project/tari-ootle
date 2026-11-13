@@ -14,6 +14,7 @@ use tari_engine_types::{
     UtxoOutput,
     crypto::{ElgamalVerifiableBalance, ValueLookup, get_commitment_factory},
     resource_container::ResourceError,
+    substate::SubstateId,
 };
 use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType};
 use tari_ootle_transaction::{Epoch, Transaction, args};
@@ -1490,6 +1491,59 @@ fn a_frozen_utxo_cannot_be_burnt() {
         .get_utxo(UtxoAddress::new(faucet_resx, utxo_id))
         .unwrap();
     assert!(!utxo.is_burnt());
+}
+
+#[test]
+fn a_burnt_utxo_cannot_be_frozen_or_unfrozen() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let mint = stealth::generate_mint_statement([100u64], 0u64, None);
+    let (_faucet, faucet_resx) = setup_with_auth_hook(&mut test, &mint, true);
+    let utxo_id = utxo_id_of(&mint.output_masks[0], 100);
+    let utxo_addr = UtxoAddress::new(faucet_resx, utxo_id);
+    let proof = value_proof::generate_value_proof_mask_knowledge(100u64.into(), &mint.output_masks[0]);
+
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
+    test.execute_expect_success(
+        test.transaction()
+            .call_function(template_addr, "burn_utxo_of", args![faucet_resx, utxo_id, proof])
+            .finish()
+            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    let burnt_substate = test
+        .read_only_state_store()
+        .get_substate(&SubstateId::Utxo(utxo_addr.clone()))
+        .unwrap();
+    let burnt_version = burnt_substate.version();
+    assert!(burnt_substate.substate_value().as_utxo().unwrap().is_burnt());
+    assert!(!burnt_substate.substate_value().as_utxo().unwrap().is_frozen());
+
+    for (fn_name, expected_op) in [
+        ("freeze_utxos_of", "freeze_stealth_utxo"),
+        ("unfreeze_utxos_of", "unfreeze_stealth_utxo"),
+    ] {
+        let reason = test.execute_expect_failure(
+            test.transaction()
+                .call_function(template_addr, fn_name, args![faucet_resx, vec![utxo_id]])
+                .build_and_seal(test.secret_key()),
+            vec![],
+        );
+        assert_reject_reason(reason, RuntimeError::InvalidOpStealthUtxoBurnt {
+            op: expected_op,
+            resource_address: faucet_resx,
+            utxo_id,
+        });
+
+        let after = test
+            .read_only_state_store()
+            .get_substate(&SubstateId::Utxo(utxo_addr.clone()))
+            .unwrap();
+        assert_eq!(after.version(), burnt_version);
+        assert!(after.substate_value().as_utxo().unwrap().is_burnt());
+        assert!(!after.substate_value().as_utxo().unwrap().is_frozen());
+    }
 }
 
 /// A burn proves knowledge of the UTXO's opening whether or not the resource tracks its total supply, so only

@@ -445,13 +445,14 @@ where
         }
     }
 
-    // Every requested id is either answered or named as missing. A responder that accounts for
-    // none of them is not answering, and failing here keeps that from reading as "none of these
-    // substates exist".
-    if batch.substates.is_empty() && batch.missing.is_empty() {
+    // Every requested id must be either answered or named as missing. Failing when any requested
+    // id is omitted keeps a truncated response from dropping requested substates or reading an
+    // empty response as "none of these substates exist".
+    if answered.len() != requested.len() {
         return Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
-            "Node accounted for none of the {} requested substates",
-            substate_ids.len()
+            "Node accounted for {} of {} unique requested substates",
+            answered.len(),
+            requested.len()
         )));
     }
 
@@ -724,6 +725,16 @@ mod tests {
             .collect();
         let rejection = rejection_of(empty_frames, &[&id]).await;
         assert!(rejection.contains("more than 3 messages"), "{rejection}");
+    }
+
+    #[tokio::test]
+    async fn a_peer_must_account_for_every_requested_id() {
+        let (a, b) = (substate_id(), other_substate_id());
+        let rejection = rejection_of(vec![down_substate_frame(&a)], &[&a, &b]).await;
+        assert!(
+            rejection.contains("accounted for 1 of 2 unique requested substates"),
+            "{rejection}"
+        );
     }
 
     #[tokio::test(start_paused = true)]

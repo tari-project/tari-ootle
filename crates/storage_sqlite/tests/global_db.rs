@@ -606,3 +606,37 @@ fn set_committee_shard_selects_latest_active_registration() {
         assert_eq!(vn.fee_claim_public_key, expected_claim_key);
     }
 }
+
+#[test]
+fn get_by_public_key_returns_latest_registration_regardless_of_shard_key() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut validator_nodes = db.validator_nodes(&mut tx);
+
+    let pk = new_public_key();
+    let pk_bytes = pk.to_byte_type();
+    // The earlier registration has the higher shard_key; the latest registration wins.
+    let first_shard_key = SubstateAddress::from_array([2u8; SubstateAddress::LENGTH]);
+    let second_shard_key = SubstateAddress::from_array([1u8; SubstateAddress::LENGTH]);
+    let first_claim_key = new_public_key().to_byte_type();
+    let second_claim_key = new_public_key().to_byte_type();
+    let sg = ShardGroup::new(1, 10);
+
+    for (shard_key, claim_key) in [(first_shard_key, first_claim_key), (second_shard_key, second_claim_key)] {
+        validator_nodes
+            .insert_validator_node(
+                pk.clone().into(),
+                pk_bytes,
+                shard_key,
+                Epoch(10),
+                claim_key,
+                VotePower::of(1),
+            )
+            .unwrap();
+        validator_nodes.set_committee_shard(shard_key, sg, Epoch(10)).unwrap();
+    }
+
+    let vn = validator_nodes.get_by_public_key(Epoch(10), &pk_bytes).unwrap();
+    assert_eq!(vn.shard_key, second_shard_key);
+    assert_eq!(vn.fee_claim_public_key, second_claim_key);
+}

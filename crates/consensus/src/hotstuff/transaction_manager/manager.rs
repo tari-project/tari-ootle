@@ -427,9 +427,13 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             ));
         }
 
-        let resolved_inputs =
-            resolve_pledged_inputs(pledged_transaction.local_pledges, pledged_transaction.foreign_pledges);
         let transaction = pledged_transaction.transaction.transaction();
+        let foreign_inputs = declared_foreign_inputs(transaction, local_committee_info);
+        let resolved_inputs = resolve_pledged_inputs(
+            pledged_transaction.local_pledges,
+            pledged_transaction.foreign_pledges,
+            &foreign_inputs,
+        );
         self.executor.execute(
             transaction,
             execution_epoch,
@@ -930,9 +934,14 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         );
 
         let proposed_foreign_pledges = change_set.get_foreign_pledges(&transaction_id);
+        let foreign_inputs = non_local_inputs
+            .iter()
+            .map(InputDeclarationRef::substate_id)
+            .collect::<HashSet<_>>();
         let resolved_inputs = resolve_foreign_input_pledges(
             &transaction_id,
             foreign_pledges.into_iter().chain(proposed_foreign_pledges.cloned()),
+            &foreign_inputs,
         )?;
 
         // Check that we have all the required foreign input pledges
@@ -1301,20 +1310,34 @@ fn take_multishard_fee_intent_commit(execution: &mut TransactionExecution) -> Op
         .then_some(fee_intent_commit)
 }
 
+/// The substates `transaction` declares as inputs that `local_committee_info` does not hold locally (excluding both
+/// the local shard range and global substates, which every shard group resolves from its own state store).
+fn declared_foreign_inputs<'a>(
+    transaction: &'a Transaction,
+    local_committee_info: &CommitteeInfo,
+) -> HashSet<&'a SubstateId> {
+    transaction
+        .all_inputs_substate_ids_iter()
+        .filter(|id| !local_committee_info.includes_substate_id(id))
+        .collect()
+}
+
 /// Collects the input pledges of a transaction the local shard group has inputs in into the inputs it executes
-/// against, excluding output pledges. A substate the local shard group pledged resolves to the local pledge, whatever
-/// a foreign shard group pledged for it.
+/// against, excluding output pledges and any foreign pledge that is not in `declared_foreign_inputs`. A locally-held
+/// or global substate is never taken from a foreign pledge — even if the transaction did not declare it and
+/// `local_pledges` therefore has no entry for it — nor is an undeclared foreign substate.
 fn resolve_pledged_inputs(
     local_pledges: SubstatePledges,
     foreign_pledges: SubstatePledges,
+    declared_foreign_inputs: &HashSet<&SubstateId>,
 ) -> HashMap<SubstateRequirement, Substate> {
     let mut resolved_inputs = HashMap::new();
-    for (id, substate) in local_pledges
+    let local_inputs = local_pledges.into_iter().filter_map(SubstatePledge::into_input);
+    let foreign_inputs = foreign_pledges
         .into_iter()
-        .chain(foreign_pledges)
-        // Exclude any output pledges
-        .filter_map(|pledge| pledge.into_input())
-    {
+        .filter_map(SubstatePledge::into_input)
+        .filter(|(id, _)| declared_foreign_inputs.contains(id.substate_id()));
+    for (id, substate) in local_inputs.chain(foreign_inputs) {
         let version = id.version();
         resolved_inputs
             .entry(SubstateRequirement::from(id))
@@ -1323,17 +1346,23 @@ fn resolve_pledged_inputs(
     resolved_inputs
 }
 
-/// Collects the input pledges among `pledges` into the inputs a transaction executes against, excluding output
-/// pledges. Every pledge for a substate must be at the same version. A pledge's value is authenticated against its
-/// evidence's value hash when the foreign proposal is accepted (`BlockPledge::get_committed_pledge`), so only the
-/// version is compared here.
+/// Collects the input pledges for `declared_foreign_inputs` among `pledges` into the inputs an output-only
+/// transaction executes against, excluding output pledges and any foreign pledge for a locally-held, global, or
+/// undeclared substate. Every accepted pledge for a substate must be at the same version. A pledge's value is
+/// authenticated against its evidence's value hash when the foreign proposal is accepted
+/// (`BlockPledge::get_committed_pledge`), so only the version is compared here.
 fn resolve_foreign_input_pledges(
     transaction_id: &TransactionId,
     pledges: impl IntoIterator<Item = SubstatePledge>,
+    declared_foreign_inputs: &HashSet<&SubstateId>,
 ) -> Result<HashMap<SubstateRequirement, Substate>, BlockTransactionExecutorError> {
     let mut resolved_inputs = HashMap::new();
-    // Exclude any output pledges
-    for (id, substate) in pledges.into_iter().filter_map(|pledge| pledge.into_input()) {
+    // Exclude output pledges and any pledge that is not a declared non-local input
+    for (id, substate) in pledges
+        .into_iter()
+        .filter_map(SubstatePledge::into_input)
+        .filter(|(id, _)| declared_foreign_inputs.contains(id.substate_id()))
+    {
         let version = id.version();
         match resolved_inputs.entry(SubstateRequirement::from(id)) {
             Entry::Occupied(entry) => {
@@ -1641,10 +1670,12 @@ mod tests {
             local_value_hash
         );
 
-        let resolved = resolve_pledged_inputs(vec![local_pledge], vec![
-            foreign_pledge_of_local,
-            input_pledge(&foreign, 0),
-        ]);
+        let declared_foreign = HashSet::from([&foreign]);
+        let resolved = resolve_pledged_inputs(
+            vec![local_pledge],
+            vec![foreign_pledge_of_local, input_pledge(&foreign, 0)],
+            &declared_foreign,
+        );
 
         assert_eq!(resolved.len(), 2);
         assert_eq!(
@@ -1655,11 +1686,95 @@ mod tests {
     }
 
     #[test]
+    fn undeclared_and_global_foreign_pledges_are_excluded_from_resolved_inputs() {
+        let local = component_id(1);
+        let local_shard = shard_of(&local);
+        let declared_foreign = (2..=u8::MAX)
+            .map(component_id)
+            .find(|id| shard_of(id) != local_shard)
+            .unwrap();
+        let undeclared_foreign = ((2..=u8::MAX)
+            .map(component_id)
+            .find(|id| *id != declared_foreign && shard_of(id) != local_shard))
+        .unwrap();
+        let global = SubstateId::Component(BURN_RATE_GOVERNANCE_COMPONENT_ADDRESS);
+        assert!(global.is_global());
+
+        let committee = CommitteeInfo::new(
+            NumPreshards::P256,
+            1,
+            2,
+            ShardGroup::new(local_shard, local_shard),
+            Epoch(1),
+            VotePower::of(1),
+        );
+        assert!(committee.includes_substate_id(&local));
+        assert!(committee.includes_substate_id(&global));
+        assert!(!committee.includes_substate_id(&declared_foreign));
+
+        // Transaction declares local and declared_foreign, omitting global and undeclared_foreign so
+        // local_pledges carries no entry for global.
+        let tx = Transaction::builder_localnet(Epoch(10))
+            .add_input(SubstateRequirement::unversioned(local.clone()))
+            .add_input(SubstateRequirement::unversioned(declared_foreign.clone()))
+            .build_and_seal(&PrivateKey::from(1u64));
+        let foreign_set = declared_foreign_inputs(&tx, &committee);
+        assert!(foreign_set.contains(&declared_foreign));
+        assert!(!foreign_set.contains(&local));
+        assert!(!foreign_set.contains(&global));
+        assert!(!foreign_set.contains(&undeclared_foreign));
+
+        let resolved = resolve_pledged_inputs(
+            vec![input_pledge(&local, 0)],
+            vec![
+                input_pledge(&declared_foreign, 0),
+                input_pledge(&global, 5),
+                input_pledge(&undeclared_foreign, 2),
+            ],
+            &foreign_set,
+        );
+        assert!(resolved.contains_key(&local));
+        assert!(resolved.contains_key(&declared_foreign));
+        assert!(!resolved.contains_key(&global));
+        assert!(!resolved.contains_key(&undeclared_foreign));
+
+        // Output-only path: undeclared and global pledges (even at conflicting versions) are ignored rather than
+        // resolved into MemoryStateStore or triggering a version-conflict InvariantError.
+        let output_only_tx = Transaction::builder_localnet(Epoch(10))
+            .add_input(SubstateRequirement::unversioned(declared_foreign.clone()))
+            .build_and_seal(&PrivateKey::from(1u64));
+        let output_only_foreign = declared_foreign_inputs(&output_only_tx, &committee);
+        let output_only_resolved = resolve_foreign_input_pledges(
+            &TransactionId::default(),
+            [
+                input_pledge(&declared_foreign, 1),
+                input_pledge(&global, 3),
+                input_pledge(&global, 4),
+                input_pledge(&undeclared_foreign, 7),
+                input_pledge(&undeclared_foreign, 8),
+            ],
+            &output_only_foreign,
+        )
+        .unwrap();
+        assert_eq!(output_only_resolved.len(), 1);
+        assert_eq!(
+            output_only_resolved[&declared_foreign].version(),
+            SubstateVersion::new(1)
+        );
+        assert!(!output_only_resolved.contains_key(&global));
+        assert!(!output_only_resolved.contains_key(&undeclared_foreign));
+    }
+
+    #[test]
     fn duplicate_input_pledges_at_the_same_version_resolve_to_one_input() {
         let id = component_id(1);
-        let resolved =
-            resolve_foreign_input_pledges(&TransactionId::default(), [input_pledge(&id, 3), input_pledge(&id, 3)])
-                .unwrap();
+        let declared_foreign = HashSet::from([&id]);
+        let resolved = resolve_foreign_input_pledges(
+            &TransactionId::default(),
+            [input_pledge(&id, 3), input_pledge(&id, 3)],
+            &declared_foreign,
+        )
+        .unwrap();
         assert_eq!(resolved.len(), 1);
         assert_eq!(
             resolved[&SubstateRequirement::unversioned(id)].version(),
@@ -1670,9 +1785,13 @@ mod tests {
     #[test]
     fn input_pledges_for_one_substate_at_different_versions_are_an_invariant_error() {
         let id = component_id(1);
-        let err =
-            resolve_foreign_input_pledges(&TransactionId::default(), [input_pledge(&id, 3), input_pledge(&id, 4)])
-                .unwrap_err();
+        let declared_foreign = HashSet::from([&id]);
+        let err = resolve_foreign_input_pledges(
+            &TransactionId::default(),
+            [input_pledge(&id, 3), input_pledge(&id, 4)],
+            &declared_foreign,
+        )
+        .unwrap_err();
         assert!(matches!(err, BlockTransactionExecutorError::InvariantError(_)));
     }
 
@@ -1680,12 +1799,14 @@ mod tests {
     fn output_pledges_are_not_resolved_as_inputs() {
         let input = component_id(1);
         let output = component_id(2);
-        let resolved = resolve_foreign_input_pledges(&TransactionId::default(), [
-            input_pledge(&input, 0),
-            SubstatePledge::Output {
+        let declared_foreign = HashSet::from([&input, &output]);
+        let resolved = resolve_foreign_input_pledges(
+            &TransactionId::default(),
+            [input_pledge(&input, 0), SubstatePledge::Output {
                 substate_id: VersionedSubstateId::new(output.clone(), SubstateVersion::ZERO),
-            },
-        ])
+            }],
+            &declared_foreign,
+        )
         .unwrap();
         assert_eq!(resolved.len(), 1);
         assert!(resolved.contains_key(&input));

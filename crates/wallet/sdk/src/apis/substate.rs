@@ -96,11 +96,27 @@ where
         &self,
         ids: &[SubstateId],
     ) -> Result<HashMap<SubstateId, Substate>, SubstateApiError> {
+        self.get_substates_internal(ids, self.indexer_trust.is_verify()).await
+    }
+
+    /// Fetches the latest version of each of `ids` that exists for transaction signing. Under [`IndexerTrust::Verify`]
+    /// every substate returned is proven before signing instructions are assembled.
+    pub async fn get_substates_for_signing(
+        &self,
+        ids: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, Substate>, SubstateApiError> {
+        self.get_substates_internal(ids, self.indexer_trust.is_verify()).await
+    }
+
+    async fn get_substates_internal(
+        &self,
+        ids: &[SubstateId],
+        verify: bool,
+    ) -> Result<HashMap<SubstateId, Substate>, SubstateApiError> {
         if ids.is_empty() {
             return Ok(HashMap::new());
         }
 
-        let verify = self.indexer_trust.is_verify();
         let FetchedSubstates { substates, proofs } = self
             .network_interface
             .get_substates(ids, verify)
@@ -372,6 +388,27 @@ where
         address: &SubstateId,
         version_hint: Option<SubstateVersion>,
     ) -> Result<ValidatorScanResult, SubstateApiError> {
+        self.fetch_substate_internal(address, version_hint, self.indexer_trust.is_verify())
+            .await
+    }
+
+    /// Fetches `address` at `version_hint` or later for transaction signing. Under [`IndexerTrust::Verify`]
+    /// every substate returned is proven before signing instructions are assembled.
+    pub async fn fetch_substate_for_signing(
+        &self,
+        address: &SubstateId,
+        version_hint: Option<SubstateVersion>,
+    ) -> Result<ValidatorScanResult, SubstateApiError> {
+        self.fetch_substate_internal(address, version_hint, self.indexer_trust.is_verify())
+            .await
+    }
+
+    async fn fetch_substate_internal(
+        &self,
+        address: &SubstateId,
+        version_hint: Option<SubstateVersion>,
+        verify: bool,
+    ) -> Result<ValidatorScanResult, SubstateApiError> {
         debug!(
             target: LOG_TARGET,
             "Fetching for substate {} at version {}",
@@ -379,7 +416,6 @@ where
             version_hint.display()
         );
 
-        let verify = self.indexer_trust.is_verify();
         let resp = self
             .network_interface
             .query_substate(address, version_hint, false, verify)

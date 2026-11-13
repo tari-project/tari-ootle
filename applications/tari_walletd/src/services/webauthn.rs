@@ -352,7 +352,7 @@ where TStore: WalletStore
         passkey: Passkey,
         setup_token: Option<&str>,
     ) -> Result<u32, WebauthnServiceError> {
-        let session = self.registration_sessions.get(session_id.as_str()).await?;
+        let session = self.registration_sessions.remove(session_id.as_str()).await?;
         let (id, file_to_remove) = self.wallet_store.with_write_tx(|tx| {
             let existing = tx.webauthn_reg_list_passkeys()?;
             if !session.allow_existing && !existing.is_empty() {
@@ -392,7 +392,6 @@ where TStore: WalletStore
                 .and_then(|s| s.file_path);
             Ok((id, file_to_remove))
         })?;
-        let _unused = self.registration_sessions.remove(session_id.as_str()).await;
         if let Some(path) = file_to_remove &&
             let Err(err) = fs::remove_file(&path) &&
             err.kind() != io::ErrorKind::NotFound
@@ -459,8 +458,8 @@ where TStore: WalletStore
         Ok((challenge, session_id))
     }
 
-    pub async fn auth_passkey(&self, session_id: &str) -> Result<PasskeyAuthentication, WebauthnServiceError> {
-        Ok(self.auth_sessions.get(session_id).await?.passkey_auth.clone())
+    pub async fn take_auth_passkey(&self, session_id: &str) -> Result<PasskeyAuthentication, WebauthnServiceError> {
+        Ok(self.auth_sessions.remove(session_id).await?.passkey_auth)
     }
 
     /// Checks a verified assertion's signature counter against the stored credential and stores the
@@ -487,11 +486,6 @@ where TStore: WalletStore
             tx.webauthn_reg_update_passkey(&passkey)?;
             Ok(())
         })
-    }
-
-    pub async fn finish_authentication(&self, session_id: &str) -> Result<(), WebauthnServiceError> {
-        self.auth_sessions.remove(session_id).await?;
-        Ok(())
     }
 }
 
@@ -919,12 +913,46 @@ mod tests {
         assert!(!err.to_string().contains(issued.as_str()));
         assert!(!service.is_enrolled().unwrap());
 
-        // Session was not consumed because token check failed before session removal
-        service
+        // The failed attempt consumed `session_id`; a fresh ceremony with the valid setup token succeeds
+        let replay_err = service
             .finish_registration(session_id, passkey(), Some(issued.as_str()))
+            .await
+            .unwrap_err();
+        assert!(matches!(replay_err, WebauthnServiceError::SessionStore(_)));
+
+        let fresh_session = service
+            .start_registration("owner".to_string(), None, passkey_reg("owner"), false)
+            .await
+            .unwrap();
+        service
+            .finish_registration(fresh_session, passkey(), Some(issued.as_str()))
             .await
             .unwrap();
         assert!(service.is_enrolled().unwrap());
+    }
+
+    #[tokio::test]
+    async fn auth_and_registration_sessions_are_single_use() {
+        let (service, _temp) = service();
+        enrol(&service, "owner").await.unwrap();
+
+        let (_, auth_session_id) = service.start_authentication(&webauthn()).await.unwrap();
+        service.take_auth_passkey(&auth_session_id).await.unwrap();
+        let err = service.take_auth_passkey(&auth_session_id).await.unwrap_err();
+        assert!(matches!(err, WebauthnServiceError::SessionStore(_)));
+
+        let reg_session_id = service
+            .start_registration("owner".to_string(), None, passkey_reg("owner"), true)
+            .await
+            .unwrap();
+        let pk1 = passkey_with_cred_id("EBESExQVFhcYGRobHB0eHw");
+        let pk2 = passkey_with_cred_id("ICQoLDA0ODxAREhMUFRYXA");
+        let (first, second) = tokio::join!(
+            service.finish_registration(reg_session_id.clone(), pk1, None),
+            service.finish_registration(reg_session_id, pk2, None)
+        );
+        assert_eq!([first.is_ok(), second.is_ok()].iter().filter(|ok| **ok).count(), 1);
+        assert_eq!(service.wallet_passkeys().unwrap().len(), 2);
     }
 
     #[tokio::test]

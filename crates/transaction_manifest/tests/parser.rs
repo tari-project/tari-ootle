@@ -1852,3 +1852,103 @@ fn non_fungible_id_macro_enforces_u8_and_u16_bounds() {
         );
     }
 }
+
+#[test]
+fn substate_id_and_address_variable_forms_match_literal_encoding() {
+    const COMP_STR: &str = "component_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const TMPL_STR: &str = "template_1111111111111111111111111111111111111111111111111111111111111111";
+
+    let manifest = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+
+        fn main() {{
+            let comp = var!["comp"];
+            let alloc = new_component_addr!();
+            MyTemplate::create(
+                substate_id!("{COMP_STR}"),
+                substate_id!(comp),
+                substate_id!(tmpl),
+                [substate_id!("{COMP_STR}")],
+                [substate_id!(comp)],
+                address!("{COMP_STR}"),
+                address!(comp),
+                address!("{TMPL_STR}"),
+                address!(tmpl),
+                substate_id!(alloc),
+                address!(alloc),
+            );
+        }}
+    "#
+    );
+
+    let comp_id: SubstateId = COMP_STR.parse().unwrap();
+    let tmpl_id: SubstateId = TMPL_STR.parse().unwrap();
+    let globals = HashMap::from([
+        ("comp".to_string(), comp_id.clone().into()),
+        ("tmpl".to_string(), tmpl_id.clone().into()),
+    ]);
+
+    let ManifestInstructions { instructions, .. } =
+        parse_manifest(&manifest, globals, Default::default(), Default::default()).unwrap();
+
+    let Instruction::CallFunction { args, .. } = &instructions[1] else {
+        panic!("expected a function call");
+    };
+
+    // substate_id!(var) must encode SubstateId just like substate_id!("...")
+    assert_eq!(args[1], args[0], "substate_id!(comp) must match literal");
+    assert_eq!(args[1], call_arg!(comp_id));
+    assert_eq!(args[2], call_arg!(tmpl_id));
+    // List elements containing substate_id!(var) must also encode SubstateId
+    assert_eq!(args[4], args[3], "[substate_id!(comp)] must match literal");
+    // address!(var) must keep encoding the inner typed address
+    assert_eq!(args[6], args[5], "address!(comp) must match literal");
+    assert_eq!(args[8], args[7], "address!(tmpl) must match literal");
+    // Workspace variables remain workspace references
+    assert_eq!(args[9], InstructionArg::Workspace(WorkspaceOffsetId::new(0)));
+    assert_eq!(args[10], InstructionArg::Workspace(WorkspaceOffsetId::new(0)));
+}
+
+#[test]
+fn substate_id_and_address_macros_reject_non_substate_variables() {
+    let globals = HashMap::from([("num".to_string(), "42u64".parse().unwrap())]);
+    let blobs = HashMap::from([("wasm".to_string(), tari_ootle_transaction::Blob::from(vec![1u8]))]);
+
+    for expr in [
+        "substate_id!(num)",
+        "address!(num)",
+        "[substate_id!(num)]",
+        "[address!(num)]",
+    ] {
+        let manifest = format!(
+            r#"
+            use template_{LIST_TEMPLATE} as MyTemplate;
+            fn main() {{
+                let num = var!["num"];
+                MyTemplate::create({expr});
+            }}
+        "#
+        );
+        let err = parse_manifest(&manifest, globals.clone(), Default::default(), Default::default())
+            .err()
+            .unwrap_or_else(|| panic!("expected {expr} with integer variable to fail"));
+        assert!(err.to_string().contains("Invalid variable type"), "{expr}: {err}");
+    }
+
+    for expr in ["substate_id!(b)", "address!(b)"] {
+        let manifest = format!(
+            r#"
+            use template_{LIST_TEMPLATE} as MyTemplate;
+            fn main() {{
+                let b = blob!("wasm");
+                MyTemplate::create({expr});
+            }}
+        "#
+        );
+        let err = parse_manifest(&manifest, HashMap::new(), Default::default(), blobs.clone())
+            .err()
+            .unwrap_or_else(|| panic!("expected {expr} with blob binding to fail"));
+        assert!(err.to_string().contains("Invalid variable type"), "{expr}: {err}");
+    }
+}

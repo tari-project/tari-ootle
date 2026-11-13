@@ -108,9 +108,10 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
         }
     }
 
-    /// Follows the configs sent on `receiver`, adopting each one that only schedules changes after the processed
-    /// epoch, and holds back epoch changes until the first message arrives. `None` releases them with no update, for
-    /// when no config could be fetched. The adopted config is recorded in the store and resumed from on restart.
+    /// Follows the configs sent on `receiver`, adopting each one that agrees with the current config up to the
+    /// processed epoch, and holds back epoch changes until the first message arrives. `None` releases them with no
+    /// update, for when no config could be fetched. The adopted config is recorded in the store and resumed from on
+    /// restart.
     pub fn with_config_updates(mut self, receiver: mpsc::UnboundedReceiver<Option<Config>>) -> Self {
         self.config_updates = Some(ConfigUpdates {
             receiver,
@@ -221,15 +222,15 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             .unwrap_or_else(Epoch::zero);
         self.processed_epoch = epoch;
 
-        // A node following config updates resumes from the last update it accepted. The config it was started with
-        // is then offered as an update, so a release carrying a newer config extends it.
-        let started_with = if self.config_updates.is_some() {
-            self.store
+        // A node following config updates resumes from the last update it adopted, which matches the validator set
+        // it has processed. Updates fetched from then on move it forward.
+        if self.config_updates.is_some() &&
+            let Some(followed) = self
+                .store
                 .get::<Config>(StoreKey::ConfiguredFollowedConfig.as_key_bytes())?
-                .map(|followed| mem::replace(&mut self.config, followed))
-        } else {
-            None
-        };
+        {
+            self.config = followed;
+        }
 
         for vn in &self.config.validators {
             // Validators that activated before this node recorded shard keys are pinned to whatever the config
@@ -255,13 +256,6 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
         // allows, so that a validator scheduled to join can sync its shard group's state before it activates and can
         // resume doing so after a restart. A claim key rotation is not a new registration, so it is not announced.
         self.announce_pending_registrations(|_| true);
-
-        // A followed config that already extends the one this node was started with is kept as is.
-        if let Some(config) = started_with &&
-            self.config.check_extends(&config, Epoch::zero()).is_err()
-        {
-            self.apply_config_update(config)?;
-        }
 
         Ok(())
     }
@@ -290,8 +284,8 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             for (activation_epoch, claim_key, kind) in activations {
                 // Skip activations whose epoch has already been processed in a previous run.
                 // Re-queuing them would emit a duplicate ActiveValidatorNodeSetChanged on the next tick,
-                // causing duplicate rows in the validator_nodes table. A config may only add changes after the
-                // processed epoch; see `Config::check_extends`.
+                // causing duplicate rows in the validator_nodes table. A config update must agree with what was
+                // processed; see `Config::check_agrees_up_to`.
                 if activation_epoch <= epoch {
                     skipped += 1;
                     continue;
@@ -338,14 +332,14 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
         self.pending_events.extend(announcements);
     }
 
-    /// Adopts `config` if it only schedules changes after the processed epoch on top of the current config, and
-    /// records it so that a restart resumes from it. A config that does not is ignored with a warning: it came from a
-    /// peer, and the current config stays in force.
+    /// Adopts `config` if it agrees with the current config on everything up to the processed epoch, and records it
+    /// so that a restart resumes from it. A config that does not is ignored with a warning: it came from a peer, and
+    /// the current config stays in force.
     fn apply_config_update(&mut self, config: Config) -> anyhow::Result<()> {
         if config == self.config {
             return Ok(());
         }
-        if let Err(err) = config.check_extends(&self.config, self.processed_epoch) {
+        if let Err(err) = config.check_agrees_up_to(&self.config, self.processed_epoch) {
             warn!(
                 target: LOG_TARGET,
                 "☘️ Ignoring epoch oracle config update at epoch {}: {err:#}", self.processed_epoch
@@ -1330,6 +1324,25 @@ mod tests {
     }
 
     #[test]
+    fn an_update_rescheduling_a_pending_exit_moves_it() {
+        let config = mk_config(vec![
+            mk_validator(1, Epoch(1)),
+            mk_exiting_validator(2, Epoch(1), Epoch(5)),
+        ]);
+        let (mut oracle, tx) = following(config.clone(), TestStore::default(), ticker_through(3));
+        tx.send(Some(config.clone())).unwrap();
+        drive_events(&mut oracle);
+
+        let mut rescheduled = config;
+        rescheduled.validators[1].exit_epoch = Some(Epoch(7));
+        tx.send(Some(rescheduled)).unwrap();
+        oracle.ticker = ticker_from(4, 8);
+        let events = drive_events(&mut oracle);
+
+        assert_eq!(removed_validators(&events), vec![(Epoch(7), mk_key(2))]);
+    }
+
+    #[test]
     fn an_update_changing_a_processed_epoch_is_ignored() {
         let config = mk_config(vec![mk_validator(1, Epoch(1)), mk_validator(2, Epoch(1))]);
         let (mut oracle, tx) = following(config.clone(), TestStore::default(), ticker_through(3));
@@ -1359,9 +1372,9 @@ mod tests {
             .set(StoreKey::ConfiguredCurrentEpoch.as_key_bytes(), &Epoch(3))
             .unwrap();
 
-        // The release config is older than the adopted one, and no update has arrived from the network yet.
-        let (mut oracle, tx) = following(release.clone(), store, ticker_from(3, 6));
-        tx.send(Some(release)).unwrap();
+        // The release config is older than the adopted one, and no validator served a config at startup.
+        let (mut oracle, tx) = following(release, store, ticker_from(3, 6));
+        tx.send(None).unwrap();
         let events = drive_events(&mut oracle);
 
         assert_eq!(removed_validators(&events), vec![(Epoch(5), mk_key(1))]);

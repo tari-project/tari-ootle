@@ -67,6 +67,9 @@ where
             })
             .await
             .map_err(|e| Error::CodecError(e.into()))?;
+        if let Err(err) = framed.close().await {
+            tracing::warn!("Error closing outbound sync stream: {}", err);
+        }
         return Ok(Event::PeerBatchReceived {
             from_peer: peer_id,
             new_peers: 0,

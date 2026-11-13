@@ -109,7 +109,7 @@ impl TraitInfoCollector {
                             let ident = name_value
                                 .path
                                 .get_ident()
-                                .expect("Invalid syntax for #[rpc(...)] attribute");
+                                .ok_or_else(|| syn_error!(name_value, "Invalid syntax for #[rpc(...)] attribute"))?;
                             match ident.to_string().as_str() {
                                 "method" => {
                                     info.method_num = extract_u32(ident, &name_value.value)?;
@@ -146,6 +146,14 @@ impl TraitInfoCollector {
                     "Invalid syntax given to #[rpc(...)] attribute. Expected a name/value pair",
                 ));
             },
+        }
+
+        if info.method_num == 0 {
+            return Err(syn_error!(
+                node,
+                "`method` must be specified in `#[rpc(...)]` attribute for method `{}`",
+                info.method_ident,
+            ));
         }
 
         Ok(())
@@ -208,7 +216,7 @@ impl TraitInfoCollector {
         match &node.sig.output {
             ReturnType::Default => Err(invalid_return_type()),
             ReturnType::Type(_, ty) => match &**ty {
-                Type::Path(path) => match path.path.segments.first() {
+                Type::Path(path) => match path.path.segments.last() {
                     Some(syn::PathSegment {
                         arguments: syn::PathArguments::AngleBracketed(args),
                         ..
@@ -216,7 +224,7 @@ impl TraitInfoCollector {
                         let arg = args.args.first().ok_or_else(invalid_return_type)?;
                         match arg {
                             GenericArgument::Type(Type::Path(syn::TypePath { path, .. })) => {
-                                let ret_ty = path.segments.first().ok_or_else(invalid_return_type)?;
+                                let ret_ty = path.segments.last().ok_or_else(invalid_return_type)?;
                                 // Check if the response is streaming
                                 match ret_ty.ident.to_string().as_str() {
                                     "Response" => {
@@ -260,7 +268,7 @@ impl TraitInfoCollector {
                 Type::Path(syn::TypePath { path, .. }) => {
                     let path = path
                         .segments
-                        .first()
+                        .last()
                         .ok_or_else(|| syn_error!(request_arg, "unexpected type in trait definition"))?;
 
                     match &path.arguments {
@@ -328,5 +336,68 @@ fn extract_u32(ident: &syn::Ident, expr: &syn::Expr) -> syn::Result<u32> {
             ident,
             expr
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use quote::quote;
+
+    use super::*;
+
+    fn sample_trait() -> ItemTrait {
+        syn::parse2(quote! {
+            pub trait SampleRpc: Send + Sync + 'static {
+                #[rpc(method = 1)]
+                async fn ping(&self, request: Request<()>) -> Result<Response<u32>, RpcStatus>;
+                #[rpc(method = 2)]
+                async fn stream_items(&self, request: Request<u32>) -> Result<Streaming<u32>, RpcStatus>;
+            }
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn expands_server_only_or_client_only_without_panicking() {
+        let server_only: RpcTraitOptions =
+            syn::parse2(quote!(protocol_name = "/test/1.0", server_struct = SampleServer)).unwrap();
+        let expanded_server = expand_trait(sample_trait(), server_only).to_string();
+        assert!(expanded_server.contains("struct SampleServer"));
+
+        let client_only: RpcTraitOptions =
+            syn::parse2(quote!(protocol_name = "/test/1.0", client_struct = SampleClient)).unwrap();
+        let expanded_client = expand_trait(sample_trait(), client_only).to_string();
+        assert!(expanded_client.contains("struct SampleClient"));
+    }
+
+    #[test]
+    fn honours_custom_dep_module_in_server_and_client_code() {
+        let opts: RpcTraitOptions = syn::parse2(quote!(
+            protocol_name = "/test/1.0",
+            dep_module = custom_rpc_deps,
+            server_struct = SampleServer,
+            client_struct = SampleClient
+        ))
+        .unwrap();
+        let expanded = expand_trait(sample_trait(), opts).to_string();
+        assert!(expanded.contains("custom_rpc_deps :: Response :: new"));
+        assert!(expanded.contains("custom_rpc_deps :: RpcStatus :: unsupported_method"));
+        assert!(expanded.contains("custom_rpc_deps :: RpcClient"));
+        assert!(!expanded.contains("__macro_reexports"));
+    }
+
+    #[test]
+    #[should_panic(expected = "`method` must be specified")]
+    fn rejects_empty_rpc_attribute_without_method_id() {
+        let item: ItemTrait = syn::parse2(quote! {
+            pub trait BadRpc: Send + Sync + 'static {
+                #[rpc()]
+                async fn ping(&self, request: Request<()>) -> Result<Response<()>, RpcStatus>;
+            }
+        })
+        .unwrap();
+        let opts: RpcTraitOptions =
+            syn::parse2(quote!(protocol_name = "/test/1.0", server_struct = BadServer)).unwrap();
+        let _ = expand_trait(item, opts);
     }
 }

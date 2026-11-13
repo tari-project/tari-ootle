@@ -51,7 +51,9 @@ impl RpcCodeGenerator {
     }
 
     fn generate_server_code(&self) -> TokenStream {
-        let server_struct = self.options.server_struct.as_ref().unwrap();
+        let Some(server_struct) = self.options.server_struct.as_ref() else {
+            return TokenStream::new();
+        };
         let trait_ident = &self.trait_ident;
         let protocol_name = &self.options.protocol_name;
         let dep_mod = &self.options.dep_module_name;
@@ -63,7 +65,7 @@ impl RpcCodeGenerator {
                 let method_num = m.method_num;
                 let method_name = &m.method_ident;
                 let ret = if m.is_server_streaming {
-                    quote!(Ok(Response::new(resp.into_body())))
+                    quote!(Ok(#dep_mod::Response::new(resp.into_body())))
                 } else {
                     quote!(Ok(resp.map(IntoBody::into_body)))
                 };
@@ -83,10 +85,12 @@ impl RpcCodeGenerator {
             match req.method().id() {
                 #match_branches
 
-                id => Box::pin(#dep_mod::future::ready(Err(RpcStatus::unsupported_method(&format!(
-                    "Method identifier `{}` is not recognised or supported",
-                    id
-                ))))),
+                id => Box::pin(#dep_mod::future::ready(Err(
+                    #dep_mod::RpcStatus::unsupported_method(&format!(
+                        "Method identifier `{}` is not recognised or supported",
+                        id
+                    ))
+                ))),
             }
         };
 
@@ -152,9 +156,11 @@ impl RpcCodeGenerator {
     }
 
     fn generate_client_code(&self) -> TokenStream {
-        let client_struct = self.options.client_struct.as_ref().unwrap();
+        let Some(client_struct) = self.options.client_struct.as_ref() else {
+            return TokenStream::new();
+        };
         let protocol_name = &self.options.protocol_name;
-        let dep_mod = quote!(::tari_rpc_framework::__macro_reexports);
+        let dep_mod = &self.options.dep_module_name;
 
         let client_methods = self
             .rpc_methods

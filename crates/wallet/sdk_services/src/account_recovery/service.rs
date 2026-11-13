@@ -121,10 +121,10 @@ where
                     return;
                 },
             }
-            if not_found_accounts_count == self.abandon_after_not_found {
+            if not_found_accounts_count >= self.abandon_after_not_found {
                 info!(
                     target: LOG_TARGET,
-                    "No accounts found for {} consecutive keys. Assuming that we are done", self.abandon_after_not_found
+                    "No accounts found for {} consecutive keys. Assuming that we are done", not_found_accounts_count
                 );
                 break;
             }
@@ -172,6 +172,14 @@ where
     /// key may hold the only UTXOs that keep the scan going, and its account row must not be left in place of an
     /// account the user creates later.
     async fn try_recover_account_with_retries(&self, key: &DerivedWalletKey) -> Option<RecoveredAccount> {
+        let public_key = RistrettoPublicKey::from_secret_key(&key.key).to_byte_type();
+        let account_addr = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &public_key);
+        let existed_before = self
+            .wallet_sdk
+            .accounts_api()
+            .exists_by_address(&account_addr)
+            .unwrap_or(true);
+
         for attempt in 1..=MAX_ATTEMPTS_PER_KEY {
             match self.try_recover_account(key).await {
                 Ok(recovered) => return Some(recovered),
@@ -186,6 +194,18 @@ where
                     }
                 },
             }
+        }
+        if !existed_before &&
+            self.wallet_sdk
+                .accounts_api()
+                .exists_by_address(&account_addr)
+                .unwrap_or(false) &&
+            let Err(err) = self.wallet_sdk.accounts_api().delete_if_unused(&account_addr)
+        {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️ Error removing unconfirmed account {account_addr} after failed recovery scan: {err}"
+            );
         }
         None
     }

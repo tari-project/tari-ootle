@@ -371,6 +371,59 @@ async fn recovery_retries_a_key_that_fails_to_scan() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn recovery_cleans_up_unconfirmed_account_and_stops_when_abandon_after_not_found_is_zero() {
+    let (test, _network) = new_test();
+    let sdk = test.sdk().clone();
+    // Drop the monitor before running recovery so `refresh_account_for_recovery` fails across all retries
+    // after `try_recover_account` inserts the provisional account row at key index 0.
+    let notify = Notify::new(100);
+    let (_scanner_join, utxo_scanner_handle) = StealthUtxoScannerWorker::new(sdk.clone(), notify.clone()).spawn();
+    let (account_monitor, account_monitor_handle) = AccountMonitor::new(
+        notify.clone(),
+        sdk.clone(),
+        utxo_scanner_handle.clone(),
+        Shutdown::new().to_signal(),
+    );
+    drop(account_monitor);
+
+    let seed_birthday = sdk.key_manager_api().get_cipher_seed_birthday_epoch().unwrap();
+    let recovery = AccountRecoveryService::new(
+        sdk.clone(),
+        account_monitor_handle,
+        utxo_scanner_handle.clone(),
+        0,
+        seed_birthday,
+    );
+    tokio::time::timeout(Duration::from_secs(30), recovery.scan())
+        .await
+        .expect("recovery did not finish");
+
+    assert!(
+        !sdk.accounts_api()
+            .exists_by_address(&account_address_for_key_index(&test, 0))
+            .unwrap(),
+        "failed recovery scan must not leave an unconfirmed account row behind"
+    );
+
+    // With a running monitor and `abandon_after_not_found == 0`, the first unused key ends the scan cleanly.
+    let shutdown = Shutdown::new();
+    let (account_monitor, account_monitor_handle) =
+        AccountMonitor::new(notify, sdk.clone(), utxo_scanner_handle.clone(), shutdown.to_signal());
+    tokio::spawn(account_monitor.run());
+    let recovery = AccountRecoveryService::new(
+        sdk.clone(),
+        account_monitor_handle,
+        utxo_scanner_handle,
+        0,
+        seed_birthday,
+    );
+    tokio::time::timeout(Duration::from_secs(30), recovery.scan())
+        .await
+        .expect("recovery with abandon_after_not_found == 0 hung");
+    assert!(!sdk.config_api().get::<bool>(ConfigKey::RecoveryNeeded).unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn utxo_scanner_answers_every_waiting_scan_beyond_its_concurrency_limit() {
     const NUM_ACCOUNTS: u64 = 25;
 

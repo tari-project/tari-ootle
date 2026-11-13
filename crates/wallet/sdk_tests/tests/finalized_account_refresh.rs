@@ -153,3 +153,114 @@ async fn a_finalized_account_holding_only_known_vaults_is_not_read_from_the_netw
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn process_result_scopes_updated_nfts_to_the_vaults_own_resource_and_emits_account_changed() {
+    use std::collections::BTreeSet;
+
+    use tari_engine_types::non_fungible::NonFungibleContainer;
+    use tari_ootle_wallet_sdk::models::WalletEvent;
+    use tari_template_lib::types::{NonFungibleAddress, NonFungibleId, ObjectKey};
+
+    let nft_vault = vault_id(10);
+    let nft_resource_a = ResourceAddress::new(ObjectKey::from_array([0xaa; ObjectKey::LENGTH]));
+    let nft_resource_b = ResourceAddress::new(ObjectKey::from_array([0xbb; ObjectKey::LENGTH]));
+
+    let sets = (1..=2).map(ValidatorSetFixture::new).collect::<Vec<_>>();
+    let network = ProvingNetwork::new(&sets, 0);
+    let test = TestWithNetwork::without_accounts(network);
+    for resx in [nft_resource_a, nft_resource_b] {
+        test.sdk()
+            .resources_api()
+            .upsert_resource(
+                &resx,
+                &Resource::new(
+                    ResourceType::NonFungible,
+                    SubstateOwnerRule::None,
+                    ResourceAccessRules::new(),
+                    Metadata::new(),
+                    None,
+                    None,
+                    0,
+                    false,
+                ),
+            )
+            .unwrap();
+    }
+    let accounts_api = test.sdk().accounts_api();
+    accounts_api
+        .add_account(
+            Some("test"),
+            &account_address(),
+            KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+            KeyId::derived(KeyBranch::Account, 0),
+            Epoch::zero(),
+            true,
+            true,
+        )
+        .unwrap();
+    accounts_api
+        .add_vault(
+            account_address(),
+            nft_vault,
+            SubstateVersion::ZERO,
+            nft_resource_a,
+            ResourceType::NonFungible,
+            None,
+            0,
+        )
+        .unwrap();
+
+    let shared_id = NonFungibleId::from_u64(1);
+    let mut diff = SubstateDiff::new();
+    // Insert resource B's NFT with the same NonFungibleId first so an unscoped find() would pick it.
+    diff.up(
+        NonFungibleAddress::new(nft_resource_b, shared_id.clone()).into(),
+        Substate::new(
+            SubstateVersion::ZERO,
+            NonFungibleContainer::new(
+                tari_bor::to_value(&"wrong_resource_data").unwrap(),
+                tari_bor::to_value(&"wrong_mutable").unwrap(),
+            ),
+        ),
+    );
+    diff.up(
+        NonFungibleAddress::new(nft_resource_a, shared_id.clone()).into(),
+        Substate::new(
+            SubstateVersion::ZERO,
+            NonFungibleContainer::new(
+                tari_bor::to_value(&"correct_resource_data").unwrap(),
+                tari_bor::to_value(&"correct_mutable").unwrap(),
+            ),
+        ),
+    );
+    diff.up(
+        account_address().into(),
+        Substate::new(VERSION, account_value(&[nft_vault])),
+    );
+    diff.up(
+        nft_vault.into(),
+        Substate::new(
+            SubstateVersion::new(1),
+            Vault::new(ResourceContainer::non_fungible(
+                nft_resource_a,
+                BTreeSet::from([shared_id.clone()]),
+            )),
+        ),
+    );
+
+    let notify = Notify::new(10);
+    let mut rx = notify.subscribe();
+    let account_scanner = AccountScanner::new(notify, test.sdk().clone());
+    account_scanner
+        .process_result(TransactionId::default(), &diff, None)
+        .await
+        .unwrap();
+
+    let stored = test.sdk().non_fungible_api().get(nft_resource_a, shared_id).unwrap();
+    assert_eq!(stored.data, tari_bor::to_value(&"correct_resource_data").unwrap());
+    assert!(
+        matches!(rx.try_recv(), Ok(WalletEvent::AccountChangedOnChain(_))),
+        "adding an NFT to an existing NFT vault must emit AccountChangedOnChain"
+    );
+}

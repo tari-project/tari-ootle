@@ -36,24 +36,25 @@ fn default_page(title: &str, message: &str) -> String {
 mod enabled {
     use std::str::FromStr;
 
-    use include_dir::include_dir;
+    use axum::body::Body;
+    use include_dir::{Dir, include_dir};
 
     use super::*;
 
-    static PROJECT_DIR: include_dir::Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/web_ui/dist");
+    static PROJECT_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/web_ui/dist");
 
     pub async fn handler(uri: Uri) -> impl IntoResponse {
-        let path = uri.path();
+        serve_file(&PROJECT_DIR, uri.path())
+    }
 
-        // If path starts with /, strip it.
+    fn serve_file(dir: &'static Dir<'static>, path: &str) -> Response<Body> {
         let path = path.strip_prefix('/').unwrap_or(path);
+        let resolved = match dir.get_file(path) {
+            Some(file) => Some((file, path)),
+            None => dir.get_file("index.html").map(|file| (file, "index.html")),
+        };
 
-        // If the path is a file, return it. Otherwise use index.html (SPA)
-        if let Some(body) = PROJECT_DIR
-            .get_file(path)
-            .or_else(|| PROJECT_DIR.get_file("index.html"))
-            .and_then(|file| file.contents_utf8())
-        {
+        if let Some((file, path)) = resolved {
             let mime_type =
                 mime_guess::from_path(path).first_or_else(|| mime_guess::Mime::from_str("text/html").unwrap());
             let content_type = HeaderValue::from_str(mime_type.as_ref()).unwrap_or_else(|e| {
@@ -63,18 +64,58 @@ mod enabled {
             return Response::builder()
                 .header(header::CONTENT_TYPE, content_type)
                 .status(StatusCode::OK)
-                .body(body.to_owned())
+                .body(Body::from(file.contents()))
                 .unwrap();
         }
         Response::builder()
             .header(header::CONTENT_TYPE, HeaderValue::from_static("text/html"))
             .status(StatusCode::OK)
-            .body(default_page(
+            .body(Body::from(default_page(
                 "Web UI Build Failed",
                 "The web UI failed to build during compilation. The JSON-RPC API is still available. To fix this, \
                  ensure <code>pnpm</code> is installed and run a release build.",
-            ))
+            )))
             .unwrap()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use axum::body::to_bytes;
+        use include_dir::{DirEntry, File};
+
+        use super::*;
+
+        const WASM: &[u8] = b"\0asm\x01\0\0\0\xff\xfe";
+
+        static DIR: Dir<'static> = Dir::new("", &[
+            DirEntry::File(File::new("index.html", b"<html></html>")),
+            DirEntry::Dir(Dir::new("assets", &[DirEntry::File(File::new(
+                "assets/decoder.wasm",
+                WASM,
+            ))])),
+        ]);
+
+        async fn body(response: Response<Body>) -> Vec<u8> {
+            to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()
+        }
+
+        #[tokio::test]
+        async fn a_binary_asset_is_served_as_is() {
+            let response = serve_file(&DIR, "/assets/decoder.wasm");
+
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()[header::CONTENT_TYPE], "application/wasm");
+            assert_eq!(body(response).await, WASM);
+        }
+
+        #[tokio::test]
+        async fn an_unknown_path_is_served_the_index() {
+            let response = serve_file(&DIR, "/accounts/account.1");
+
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()[header::CONTENT_TYPE], "text/html");
+            assert_eq!(body(response).await, b"<html></html>");
+        }
     }
 }
 

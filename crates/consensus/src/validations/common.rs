@@ -323,10 +323,20 @@ pub(super) fn check_proposal_certificate<TConsensusSpec: ConsensusSpec>(
     Ok(())
 }
 
-/// Checks that the justify of `candidate_block` accepts a lower block of the same shard group. The shard group lies
-/// outside both the certificate id and the signed vote message, so the candidate block is what binds it.
+/// Checks that the justify of `candidate_block` accepts a lower block of the same epoch and shard group. Both the
+/// epoch and the shard group lie outside the certificate id, and a zero-block certificate carries no vote signatures
+/// (while a signed certificate from another epoch verifies against its own epoch when quorum members carry over), so
+/// the candidate block is what binds them.
 pub fn check_justify_precedes_block(candidate_block: &Block) -> Result<(), ProposalValidationError> {
     let qc = candidate_block.justify();
+    if qc.epoch() != candidate_block.epoch() {
+        return Err(ProposalValidationError::InvalidEpochInQc {
+            block_id: *candidate_block.id(),
+            qc_id: qc.calculate_id(),
+            qc_epoch: qc.epoch(),
+            current_epoch: candidate_block.epoch(),
+        });
+    }
     if candidate_block.height() <= qc.height() {
         return Err(ProposalValidationError::CandidateBlockNotHigherThanJustify {
             justify_block_height: qc.height(),

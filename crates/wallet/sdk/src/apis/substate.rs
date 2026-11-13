@@ -169,6 +169,9 @@ where
         let mut substate_ids = HashSet::with_capacity(top_level_substates.len());
 
         for parent_id in top_level_substates {
+            if !parent_id.is_declarable_input() {
+                continue;
+            }
             match self.store.with_read_tx(|tx| tx.substates_get(parent_id)).optional()? {
                 Some(parent) => {
                     debug!(
@@ -211,26 +214,7 @@ where
                         },
                         SubstateValue::Resource(_) => {},
                         SubstateValue::TransactionReceipt(_) => {
-                            let addr = substate_id
-                                .substate_id()
-                                .as_transaction_receipt_address()
-                                .ok_or_else(|| {
-                                    SubstateApiError::InvalidValidatorNodeResponse(format!(
-                                        "Transaction receipt substate and substate ID mismatch! Got {}",
-                                        substate_id
-                                    ))
-                                })?;
-                            let tx_receipt_addr = SubstateId::TransactionReceipt(addr);
-                            if substate_ids.contains(&tx_receipt_addr) {
-                                continue;
-                            }
-                            if unversioned {
-                                substate_ids.insert(tx_receipt_addr.into());
-                            } else {
-                                // Tx receipts are always v0
-                                substate_ids
-                                    .insert(SubstateRequirement::versioned(tx_receipt_addr, SubstateVersion::ZERO));
-                            }
+                            continue;
                         },
                         SubstateValue::Vault(vault) => {
                             let resx_addr = SubstateId::Resource(*vault.resource_address());
@@ -251,11 +235,12 @@ where
                         },
                         SubstateValue::ValidatorFeePool(_) => {
                             let resx_addr = SubstateId::Resource(TARI_TOKEN);
-                            if substate_ids.contains(&resx_addr) {
-                                continue;
-                            }
+                            self.insert_substate_if_absent(&resx_addr, unversioned, &mut substate_ids)
+                                .await?;
                         },
-                        SubstateValue::ClaimedOutputTombstone(_) => {},
+                        SubstateValue::ClaimedOutputTombstone(_) => {
+                            continue;
+                        },
                         SubstateValue::Template(_) => {},
                         SubstateValue::Utxo(_) => {
                             let addr = substate_id.substate_id().as_utxo_address().ok_or_else(|| {
@@ -291,10 +276,14 @@ where
                         "Adding substate {} to dependent substates from remote source",
                         substate_id
                     );
-                    substate_ids.insert(substate_id.into());
+                    if substate_id.substate_id().is_declarable_input() {
+                        substate_ids.replace(substate_id.into());
+                    }
                 },
             }
         }
+
+        substate_ids.retain(|requirement| requirement.substate_id().is_declarable_input());
 
         // `get_dependent_substates` and the parent fetches above carry the version from the wallet's
         // local store / network scan, ignoring the `unversioned` request. When the caller asked for
@@ -307,6 +296,22 @@ where
                 .into_iter()
                 .map(SubstateRequirement::into_unversioned)
                 .collect());
+        }
+
+        let unversioned_ids = substate_ids
+            .iter()
+            .filter(|req| req.version().is_none())
+            .map(|req| req.substate_id().clone())
+            .collect::<Vec<_>>();
+        for id in unversioned_ids {
+            match self.fetch_substate_from_network(&id, None).await.optional()? {
+                Some(ValidatorScanResult { id: versioned, .. }) => {
+                    substate_ids.replace(versioned.into());
+                },
+                None => {
+                    substate_ids.remove(&id);
+                },
+            }
         }
 
         Ok(substate_ids)
@@ -352,14 +357,19 @@ where
         unversioned: bool,
         substate_ids: &mut HashSet<SubstateRequirement>,
     ) -> Result<(), SubstateApiError> {
-        if substate_ids.contains(substate_id) {
+        if !substate_id.is_declarable_input() {
+            return Ok(());
+        }
+        if let Some(existing) = substate_ids.get(substate_id) &&
+            (unversioned || existing.version().is_some())
+        {
             return Ok(());
         }
         if unversioned {
             substate_ids.insert(substate_id.clone().into());
         } else {
             let ValidatorScanResult { id, .. } = self.fetch_substate_from_network(substate_id, None).await?;
-            substate_ids.insert(id.into());
+            substate_ids.replace(id.into());
         }
         Ok(())
     }
@@ -776,6 +786,24 @@ pub struct ValidatorScanResult {
     pub substate: SubstateValue,
 }
 
+fn insert_or_upgrade_requirement(substate_ids: &mut HashSet<SubstateRequirement>, requirement: SubstateRequirement) {
+    if !requirement.substate_id().is_declarable_input() {
+        return;
+    }
+    if requirement.version().is_some() {
+        substate_ids.replace(requirement);
+    } else {
+        substate_ids.insert(requirement);
+    }
+}
+
+fn add_referenced_substate(substate_ids: &mut HashSet<SubstateRequirement>, id: &SubstateId) {
+    if let Some(addr) = id.as_non_fungible_address() {
+        insert_or_upgrade_requirement(substate_ids, SubstateRequirement::unversioned(*addr.resource_address()));
+    }
+    insert_or_upgrade_requirement(substate_ids, SubstateRequirement::unversioned(id.clone()));
+}
+
 /// Adds `parent` and the substates the wallet store records it depending on to `substate_ids`, keeping only those a
 /// transaction may declare as inputs: the store also records the receipts of the wallet's own transactions, which a
 /// component may reference.
@@ -784,18 +812,23 @@ fn get_dependent_substates<TTx: WalletStoreReader>(
     parent: SubstateModel,
     substate_ids: &mut HashSet<SubstateRequirement>,
 ) -> Result<(), WalletStorageError> {
-    // TODO: this was done to just quickly get things to work but could cause endless recursion or have other bugs -
-    // time should be taken to improve this.
-    substate_ids.insert(parent.substate_id.clone().into());
+    let mut visited = HashSet::new();
+    visited.insert(parent.substate_id.substate_id().clone());
+    insert_or_upgrade_requirement(substate_ids, parent.substate_id.clone().into());
+    if let Some(addr) = parent.substate_id.substate_id().as_non_fungible_address() {
+        insert_or_upgrade_requirement(substate_ids, SubstateRequirement::unversioned(*addr.resource_address()));
+    }
+
     for child in parent.referenced_substates {
-        get_dependent_substates_inner(tx, &child, substate_ids)?;
+        add_referenced_substate(substate_ids, &child);
+        get_dependent_substates_inner(tx, &child, substate_ids, &mut visited)?;
     }
 
     let children = tx.substates_get_children(parent.substate_id.substate_id())?;
     for child in children {
         if let Some(addr) = child.substate_id.substate_id().as_non_fungible_address() {
             // Ensure that the associated resource is also included
-            substate_ids.insert(SubstateRequirement::unversioned(*addr.resource_address()));
+            insert_or_upgrade_requirement(substate_ids, SubstateRequirement::unversioned(*addr.resource_address()));
         }
         debug!(
             target: LOG_TARGET,
@@ -803,19 +836,26 @@ fn get_dependent_substates<TTx: WalletStoreReader>(
             child.substate_id,
             parent.substate_id
         );
-        substate_ids.insert(child.substate_id.into());
-        for child in child.referenced_substates {
-            get_dependent_substates_inner(tx, &child, substate_ids)?;
+        visited.insert(child.substate_id.substate_id().clone());
+        insert_or_upgrade_requirement(substate_ids, child.substate_id.into());
+        for referenced in child.referenced_substates {
+            add_referenced_substate(substate_ids, &referenced);
+            get_dependent_substates_inner(tx, &referenced, substate_ids, &mut visited)?;
         }
     }
     substate_ids.retain(|requirement| requirement.substate_id().is_declarable_input());
     Ok(())
 }
+
 fn get_dependent_substates_inner<TTx: WalletStoreReader>(
     tx: &mut TTx,
     id: &SubstateId,
     substate_ids: &mut HashSet<SubstateRequirement>,
+    visited: &mut HashSet<SubstateId>,
 ) -> Result<(), WalletStorageError> {
+    if !visited.insert(id.clone()) {
+        return Ok(());
+    }
     let Some(substate) = tx.substates_get(id).optional()? else {
         return Ok(());
     };
@@ -824,32 +864,17 @@ fn get_dependent_substates_inner<TTx: WalletStoreReader>(
         "Getting dependent substates for {}",
         substate.substate_id,
     );
-    substate_ids.insert(substate.substate_id.into());
+    insert_or_upgrade_requirement(substate_ids, substate.substate_id.into());
 
     for child in substate.referenced_substates {
-        if let Some(addr) = child.as_non_fungible_address() {
-            debug!(
-                target: LOG_TARGET,
-                "NonFungible substate {} owned by {}",
-                child,
-                id
-            );
-            // Ensure that the associated resource is also included
-            substate_ids.insert(SubstateRequirement::unversioned(*addr.resource_address()));
-        }
-
-        if substate_ids.contains(&child) {
-            continue;
-        }
-
-        get_dependent_substates_inner(tx, &child, substate_ids)?;
         debug!(
             target: LOG_TARGET,
             "Child substate {} owned by {}",
             child,
             id
         );
-        substate_ids.insert(child.into());
+        add_referenced_substate(substate_ids, &child);
+        get_dependent_substates_inner(tx, &child, substate_ids, visited)?;
     }
     Ok(())
 }

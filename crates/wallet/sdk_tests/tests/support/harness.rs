@@ -14,10 +14,11 @@ use tari_engine_types::{
     Utxo,
     UtxoOutput,
     crypto::{OutputBody, commit_amount},
+    encoded::Encoded,
     resource::Resource,
-    substate::{Substate, SubstateId},
+    substate::{Substate, SubstateId, SubstateValue},
 };
-use tari_indexer_client::types::{EpochCheckpointEntry, ValidatorSetCommittee, WatchedSubstateItem};
+use tari_indexer_client::types::{EpochCheckpointEntry, SubstateState, ValidatorSetCommittee, WatchedSubstateItem};
 use tari_ootle_address::Network;
 use tari_ootle_common_types::{
     Epoch,
@@ -601,5 +602,142 @@ impl TransactionStatusResponseError for PanicError {
 impl IsNotFoundError for PanicError {
     fn is_not_found_error(&self) -> bool {
         matches!(self, Self::NotFound)
+    }
+}
+
+/// Network interface that serves pre-configured substates from an in-memory map and panics on other calls.
+#[derive(Debug, Clone, Default)]
+pub struct CannedSubstateNetworkInterface {
+    substates: HashMap<SubstateId, (SubstateVersion, SubstateValue)>,
+}
+
+impl CannedSubstateNetworkInterface {
+    pub fn new<I>(entries: I) -> Self
+    where I: IntoIterator<Item = (SubstateId, SubstateVersion, SubstateValue)> {
+        Self {
+            substates: entries
+                .into_iter()
+                .map(|(id, version, value)| (id, (version, value)))
+                .collect(),
+        }
+    }
+}
+
+impl WalletNetworkInterface for CannedSubstateNetworkInterface {
+    type Error = PanicError;
+
+    async fn query_substate(
+        &self,
+        address: &SubstateId,
+        _version: Option<SubstateVersion>,
+        _local_search_only: bool,
+        _include_proof: bool,
+    ) -> Result<SubstateQueryResult, Self::Error> {
+        let (version, value) = self.substates.get(address).ok_or(PanicError::NotFound)?;
+        Ok(SubstateQueryResult {
+            version: *version,
+            state: SubstateState::Up {
+                substate: Encoded::encode(value).unwrap(),
+            },
+            proof: None,
+        })
+    }
+
+    async fn get_substates(&self, _: &[SubstateId], _: bool) -> Result<FetchedSubstates, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn submit_transaction(&self, _transaction: Transaction) -> Result<TransactionId, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn submit_transaction_envelope(
+        &self,
+        _transaction: TransactionEnvelope,
+    ) -> Result<TransactionId, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn submit_dry_run_transaction(
+        &self,
+        _transaction: Transaction,
+    ) -> Result<TransactionQueryResult, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn query_transaction_result(
+        &self,
+        _transaction_id: TransactionId,
+        _include_proof: bool,
+    ) -> Result<TransactionQueryResult, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn subscribe_transaction_finalized(&self) -> Result<TransactionFinalizedStream<Self::Error>, Self::Error> {
+        Ok(futures::stream::pending().boxed())
+    }
+
+    async fn fetch_template_definition(&self, _template_address: TemplateAddress) -> Result<TemplateDef, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn stream_stealth_utxo_updates(
+        &self,
+        _from_epoch: Epoch,
+        _resource_address: ResourceAddress,
+        _shard_state_versions: Vec<(Shard, StateVersion)>,
+        _unspent_only: bool,
+    ) -> Result<UtxoUpdateStream<Self::Error>, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn list_watched_substates(
+        &self,
+        _template_address: Option<TemplateAddress>,
+        _limit: Option<u64>,
+        _offset: Option<u64>,
+    ) -> Result<Vec<WatchedSubstateItem>, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn fetch_utxos(
+        &self,
+        _resource_address: ResourceAddress,
+        _tag_and_nonce_pairs: Vec<PlacedTagAndNoncePair>,
+    ) -> Result<FetchedUtxos, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn get_latest_epoch_checkpoint(&self, _shard: Shard) -> Result<EpochCheckpointEntry, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn get_latest_shard_group_checkpoints(&self) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn list_epoch_checkpoints(
+        &self,
+        _from_epoch: Epoch,
+        _limit: u32,
+        _shard: Shard,
+    ) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn get_committee(&self, _epoch: Epoch, _shard: Shard) -> Result<ValidatorSetCommittee, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn get_current_epoch(&self) -> Result<Epoch, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn get_consensus_epoch(&self) -> Result<Option<Epoch>, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn wait_until_ready(&self) -> Result<(), Self::Error> {
+        Ok(())
     }
 }

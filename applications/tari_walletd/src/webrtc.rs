@@ -265,10 +265,6 @@ async fn webrtc_start_session_with_config(
     shutdown_signal: ShutdownSignal,
     rtc_configuration: RTCConfiguration,
 ) -> anyhow::Result<()> {
-    // reqwest enables rustls/aws-lc-rs while webrtc (dtls) enables rustls/ring; install a
-    // process-level default provider before DTLS builds its certificate verifier so rustls does not panic.
-    drop(rustls::crypto::aws_lc_rs::default_provider().install_default());
-
     let api = APIBuilder::new().build();
     let pc = api.new_peer_connection(rtc_configuration).await?;
 
@@ -546,7 +542,7 @@ mod tests {
         oneshot::Receiver<()>,
         mpsc::UnboundedReceiver<Response>,
     ) {
-        drop(rustls::crypto::aws_lc_rs::default_provider().install_default());
+        crate::install_default_crypto_provider();
         let client_api = APIBuilder::new().build();
         let client_pc = client_api
             .new_peer_connection(RTCConfiguration::default())

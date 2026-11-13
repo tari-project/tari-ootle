@@ -17,7 +17,7 @@ pub fn convert_json_to_cbor(value: json::Value) -> Result<tari_bor::Value, MaxDe
 }
 
 fn convert_json_to_cbor_inner(value: json::Value, depth: usize) -> Result<tari_bor::Value, MaxDepthExceeded> {
-    if depth > MAX_DEPTH {
+    if depth >= MAX_DEPTH {
         return Err(MaxDepthExceeded);
     }
     match value {
@@ -67,5 +67,19 @@ mod tests {
 
         let float_val = convert_json_to_cbor(json::json!(1.5)).unwrap();
         assert_eq!(float_val, tari_bor::Value::Float(1.5));
+    }
+
+    #[test]
+    fn enforces_max_depth_consistent_with_indexed_value() {
+        let mut allowed = json::json!(1);
+        for _ in 0..(MAX_DEPTH - 1) {
+            allowed = json::Value::Array(vec![allowed]);
+        }
+        let cbor = convert_json_to_cbor(allowed).expect("49 nested containers (50 value levels) should succeed");
+        crate::indexed_value::IndexedValue::from_value(cbor)
+            .expect("IndexedValue::from_value must accept every CBOR value produced by convert_json_to_cbor");
+
+        let too_deep = (0..MAX_DEPTH).fold(json::json!(1), |acc, _| json::Value::Array(vec![acc]));
+        assert!(matches!(convert_json_to_cbor(too_deep), Err(MaxDepthExceeded)));
     }
 }

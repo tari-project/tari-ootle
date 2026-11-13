@@ -16,12 +16,7 @@ use log::*;
 use serde::{Serialize, de::DeserializeOwned};
 use tari_consensus_types::{BlockId, PcId, TcId};
 use tari_ootle_common_types::{Epoch, NodeAddressable, NodeHeight, ShardGroup, optional::Optional};
-use tari_ootle_storage::{
-    Ordering,
-    StateStoreWriteTransaction,
-    StorageError,
-    consensus_models::RollbackHistoryEntry,
-};
+use tari_ootle_storage::{Ordering, StateStoreWriteTransaction, StorageError, consensus_models::RollbackHistoryEntry};
 use tari_state_store_rocksdb::{
     codecs::ByteColumn,
     column_families::{

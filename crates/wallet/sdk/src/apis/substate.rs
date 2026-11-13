@@ -210,28 +210,7 @@ where
                                 .await?;
                         },
                         SubstateValue::Resource(_) => {},
-                        SubstateValue::TransactionReceipt(_) => {
-                            let addr = substate_id
-                                .substate_id()
-                                .as_transaction_receipt_address()
-                                .ok_or_else(|| {
-                                    SubstateApiError::InvalidValidatorNodeResponse(format!(
-                                        "Transaction receipt substate and substate ID mismatch! Got {}",
-                                        substate_id
-                                    ))
-                                })?;
-                            let tx_receipt_addr = SubstateId::TransactionReceipt(addr);
-                            if substate_ids.contains(&tx_receipt_addr) {
-                                continue;
-                            }
-                            if unversioned {
-                                substate_ids.insert(tx_receipt_addr.into());
-                            } else {
-                                // Tx receipts are always v0
-                                substate_ids
-                                    .insert(SubstateRequirement::versioned(tx_receipt_addr, SubstateVersion::ZERO));
-                            }
-                        },
+                        SubstateValue::TransactionReceipt(_) => {},
                         SubstateValue::Vault(vault) => {
                             let resx_addr = SubstateId::Resource(*vault.resource_address());
                             self.insert_substate_if_absent(&resx_addr, unversioned, &mut substate_ids)
@@ -251,9 +230,8 @@ where
                         },
                         SubstateValue::ValidatorFeePool(_) => {
                             let resx_addr = SubstateId::Resource(TARI_TOKEN);
-                            if substate_ids.contains(&resx_addr) {
-                                continue;
-                            }
+                            self.insert_substate_if_absent(&resx_addr, unversioned, &mut substate_ids)
+                                .await?;
                         },
                         SubstateValue::ClaimedOutputTombstone(_) => {},
                         SubstateValue::Template(_) => {},
@@ -295,6 +273,9 @@ where
                 },
             }
         }
+
+        // Transaction inputs carry declarable substates only.
+        substate_ids.retain(|requirement| requirement.substate_id().is_declarable_input());
 
         // `get_dependent_substates` and the parent fetches above carry the version from the wallet's
         // local store / network scan, ignoring the `unversioned` request. When the caller asked for

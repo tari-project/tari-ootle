@@ -6,6 +6,7 @@ use std::{str::FromStr, sync::Arc};
 use axum::{
     Extension,
     Router,
+    body::Body,
     http::{HeaderValue, Response, StatusCode, Uri, header},
     response::IntoResponse,
     routing::get,
@@ -95,6 +96,11 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         column_families::substate::SubstateCf,
         column_families::substate::HeadIndex,
         column_families::substate::UnprunedDownedValuesIndex,
+        column_families::substate_down_proof::SubstateDownProofCf,
+        column_families::substate_down_proof::SubstateDownProofEpochIndex,
+        column_families::state_version_proof::StateVersionProofRetentionCf,
+        column_families::state_version_proof::StateVersionProofEpochIndex,
+        column_families::state_version_proof::BlockCommitProofCitationCf,
         // column_families::state_transition::StateTransitionModel,
         // column_families::foreign_substate_pledge::ForeignSubstatePledgeModel,
         column_families::pending_state_tree_diff::PendingStateTreeDiffRecordCf,
@@ -144,22 +150,23 @@ async fn fallback_handler(uri: Uri) -> impl IntoResponse {
     let path = path.strip_prefix('/').unwrap_or(path);
 
     // If the path is a file, return it. Otherwise, use index.html (SPA)
-    if let Some(body) = WEB_DIR
+    if let Some((file, mime_path)) = WEB_DIR
         .get_file(path)
-        .or_else(|| WEB_DIR.get_file("index.html"))
-        .and_then(|file| file.contents_utf8())
+        .map(|file| (file, path))
+        .or_else(|| WEB_DIR.get_file("index.html").map(|file| (file, "index.html")))
     {
-        let mime_type = mime_guess::from_path(path).first_or_else(|| mime_guess::Mime::from_str("text/html").unwrap());
+        let mime_type =
+            mime_guess::from_path(mime_path).first_or_else(|| mime_guess::Mime::from_str("text/html").unwrap());
         return Response::builder()
             .header(header::CONTENT_TYPE, HeaderValue::from_str(mime_type.as_ref()).unwrap())
             .status(StatusCode::OK)
-            .body(body.to_owned())
+            .body(Body::from(file.contents()))
             .unwrap();
     }
     log::warn!(target: LOG_TARGET, "Not found {:?}", path);
     Response::builder()
         .status(StatusCode::NOT_FOUND)
-        .body(String::new())
+        .body(Body::empty())
         .unwrap()
 }
 

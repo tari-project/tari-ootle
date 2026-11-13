@@ -6,7 +6,7 @@ use std::{fmt, fmt::Display, io, str::FromStr};
 use bech32::{
     Bech32m,
     Hrp,
-    primitives::decode::{CheckedHrpstring, CheckedHrpstringError, PaddingError},
+    primitives::decode::{PaddingError, UncheckedHrpstring},
 };
 use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
 use ootle_network::{Network, NetworkParseError};
@@ -204,7 +204,10 @@ impl OotleAddress {
         const KL: usize = RistrettoPublicKeyBytes::length();
         // An address has a single encoding (up to letter case): only the Bech32m checksum is accepted, and the
         // trailing partial group of the 5-bit to 8-bit conversion must be at most 4 bits and all zero (BIP-173).
-        let checked = CheckedHrpstring::new::<Bech32m>(s)?;
+        let checked = UncheckedHrpstring::new(s)
+            .map_err(bech32::DecodeError::Parse)?
+            .validate_and_remove_checksum::<Bech32m>()
+            .map_err(bech32::DecodeError::Checksum)?;
         checked.validate_segwit_padding()?;
         let hrp = checked.hrp();
         let data: Vec<u8> = checked.byte_iter().collect();
@@ -281,8 +284,6 @@ impl FromStr for OotleAddress {
 pub enum OotleAddressError {
     #[error("Bech32 decode error: {0}")]
     Bech32DecodeError(#[from] bech32::DecodeError),
-    #[error("Bech32m decode error: {0}")]
-    Bech32mDecodeError(#[from] CheckedHrpstringError),
     #[error("Non-canonical Bech32m padding: {0}")]
     Bech32PaddingError(#[from] PaddingError),
     #[error("Bech32 encode error: {0}")]
@@ -452,10 +453,10 @@ mod tests {
         assert_eq!(addr.destination_tag(), None);
     }
 
-    fn canonical_payload(addr: &OotleAddress) -> (Hrp, Vec<u8>) {
-        let s = addr.to_bech32_string();
-        let checked = CheckedHrpstring::new::<Bech32m>(&s).unwrap();
-        (checked.hrp(), checked.byte_iter().collect())
+    /// Decodes with `bech32::decode`, which validates neither the checksum variant nor the padding. It is only
+    /// used here to show that a rejected string carries exactly the canonical payload.
+    fn lax_decode(s: &str) -> (Hrp, Vec<u8>) {
+        bech32::decode(s).unwrap()
     }
 
     fn encode_fes(hrp: &Hrp, fes: Vec<bech32::Fe32>) -> String {
@@ -471,23 +472,31 @@ mod tests {
     #[test]
     fn it_round_trips_through_the_test_encoder() {
         let addr = sample(2);
-        let (hrp, payload) = canonical_payload(&addr);
+        let (hrp, payload) = lax_decode(&addr.to_bech32_string());
         assert_eq!(encode_fes(&hrp, payload_fes(&payload)), addr.to_bech32_string());
     }
 
     #[test]
     fn it_rejects_a_legacy_bech32_checksum() {
         let addr = sample(2);
-        let (hrp, payload) = canonical_payload(&addr);
+        let (hrp, payload) = lax_decode(&addr.to_bech32_string());
         let legacy = bech32::encode::<bech32::Bech32>(hrp, &payload).unwrap();
+        assert_eq!(lax_decode(&legacy).1, payload);
+
         let err = OotleAddress::decode_bech32(&legacy).unwrap_err();
-        assert!(matches!(err, OotleAddressError::Bech32mDecodeError(_)), "{err}");
+        assert!(
+            matches!(
+                err,
+                OotleAddressError::Bech32DecodeError(bech32::DecodeError::Checksum(_))
+            ),
+            "{err}"
+        );
     }
 
     #[test]
     fn it_rejects_non_zero_padding_bits() {
         let addr = sample(2);
-        let (hrp, payload) = canonical_payload(&addr);
+        let (hrp, payload) = lax_decode(&addr.to_bech32_string());
         let mut fes = payload_fes(&payload);
         // 64 bytes (512 bits) occupy 103 five-bit groups, so the last group carries 3 padding bits.
         assert_eq!(fes.len(), 103);
@@ -495,6 +504,7 @@ mod tests {
         *last = bech32::Fe32::try_from(last.to_u8() | 1).unwrap();
         let non_canonical = encode_fes(&hrp, fes);
         assert_ne!(non_canonical, addr.to_bech32_string());
+        assert_eq!(lax_decode(&non_canonical).1, payload);
 
         let err = OotleAddress::decode_bech32(&non_canonical).unwrap_err();
         assert!(
@@ -504,13 +514,17 @@ mod tests {
     }
 
     #[test]
-    fn it_rejects_excess_padding() {
-        let addr = sample(2);
-        let (hrp, payload) = canonical_payload(&addr);
+    fn it_rejects_a_trailing_character_of_pure_padding() {
+        let addr = sample(2).with_destination_tag(DestinationTag::new_checked(vec![7]).unwrap());
+        let (hrp, payload) = lax_decode(&addr.to_bech32_string());
         let mut fes = payload_fes(&payload);
-        // 105 groups hold 525 bits: 65 whole bytes and a 5-bit partial group, one bit more than BIP-173 allows.
-        fes.extend([bech32::Fe32::Q, bech32::Fe32::Q]);
+        // 65 bytes (520 bits) fill 104 groups exactly. A 105th group adds 5 bits that do not complete a byte,
+        // more than the 4 bits of padding BIP-173 allows.
+        assert_eq!(fes.len() * 5, payload.len() * 8);
+        fes.push(bech32::Fe32::Q);
         let non_canonical = encode_fes(&hrp, fes);
+        assert_eq!(non_canonical.len(), addr.to_bech32_string().len() + 1);
+        assert_eq!(lax_decode(&non_canonical).1, payload);
 
         let err = OotleAddress::decode_bech32(&non_canonical).unwrap_err();
         assert!(

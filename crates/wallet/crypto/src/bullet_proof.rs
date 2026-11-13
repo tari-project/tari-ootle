@@ -20,18 +20,26 @@ use crate::OutputWitness;
 pub fn generate_extended_bullet_proof<'a, I: IntoIterator<Item = &'a OutputWitness>>(
     statements: I,
 ) -> Result<RangeProofBytes, RangeProofError> {
-    let mut extended_witnesses = statements
-        .into_iter()
-        .map(|stmt| {
-            let extended_mask =
-                RistrettoExtendedMask::assign(ExtensionDegree::DefaultPedersen, vec![stmt.mask.clone()]).unwrap();
-            RistrettoExtendedWitness {
-                mask: extended_mask,
-                value: stmt.amount,
-                minimum_value_promise: stmt.minimum_value_promise,
-            }
-        })
-        .collect::<Vec<_>>();
+    let mut iter = statements.into_iter();
+    let mut extended_witnesses = Vec::with_capacity(MAX_LAZY_BP_AGG_FACTORS);
+    for stmt in &mut iter {
+        if extended_witnesses.len() == MAX_LAZY_BP_AGG_FACTORS {
+            let count = MAX_LAZY_BP_AGG_FACTORS + 1 + iter.count();
+            return Err(RangeProofError::ProofConstructionError {
+                reason: format!(
+                    "Range proof aggregation factor {} exceeds the maximum supported {}",
+                    count, MAX_LAZY_BP_AGG_FACTORS
+                ),
+            });
+        }
+        let extended_mask =
+            RistrettoExtendedMask::assign(ExtensionDegree::DefaultPedersen, vec![stmt.mask.clone()])?;
+        extended_witnesses.push(RistrettoExtendedWitness {
+            mask: extended_mask,
+            value: stmt.amount,
+            minimum_value_promise: stmt.minimum_value_promise,
+        });
+    }
     if extended_witnesses.is_empty() {
         // If no output statements are provided, we return an empty range proof
         return Ok(RangeProofBytes::empty());
@@ -39,8 +47,7 @@ pub fn generate_extended_bullet_proof<'a, I: IntoIterator<Item = &'a OutputWitne
     if !extended_witnesses.len().is_power_of_two() {
         let num_to_add = extended_witnesses.len().next_power_of_two() - extended_witnesses.len();
         let default_mask =
-            RistrettoExtendedMask::assign(ExtensionDegree::DefaultPedersen, vec![RistrettoSecretKey::default()])
-                .unwrap();
+            RistrettoExtendedMask::assign(ExtensionDegree::DefaultPedersen, vec![RistrettoSecretKey::default()])?;
         // If the number of statements is not a power of two, we pad with zero witnesses
         extended_witnesses.extend(iter::repeat_n(
             RistrettoExtendedWitness {
@@ -53,15 +60,6 @@ pub fn generate_extended_bullet_proof<'a, I: IntoIterator<Item = &'a OutputWitne
     }
 
     let agg_factor = extended_witnesses.len();
-    if agg_factor > MAX_LAZY_BP_AGG_FACTORS {
-        return Err(RangeProofError::ProofConstructionError {
-            reason: format!(
-                "Range proof aggregation factor {} exceeds the maximum supported {}",
-                agg_factor, MAX_LAZY_BP_AGG_FACTORS
-            ),
-        });
-    }
-
     let output_range_proof =
         get_static_range_proof_service(agg_factor).construct_extended_proof(extended_witnesses, None)?;
 
@@ -119,6 +117,14 @@ mod tests {
         let witnesses = (0..=MAX_LAZY_BP_AGG_FACTORS)
             .map(|i| witness(1000 + i as u64))
             .collect::<Vec<_>>();
-        generate_extended_bullet_proof(&witnesses).unwrap_err();
+        let err = generate_extended_bullet_proof(&witnesses).unwrap_err();
+        assert!(
+            err.to_string().contains(&format!(
+                "Range proof aggregation factor {} exceeds the maximum supported {}",
+                MAX_LAZY_BP_AGG_FACTORS + 1,
+                MAX_LAZY_BP_AGG_FACTORS
+            )),
+            "unexpected error: {err}"
+        );
     }
 }

@@ -6,7 +6,7 @@ use std::time::Duration;
 use axum_extra::headers::authorization::Bearer;
 use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use log::*;
-use ootle_byte_type::{FromByteType, ToByteType};
+use ootle_byte_type::ToByteType;
 use serde_json::json;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
@@ -14,6 +14,7 @@ use tari_engine_types::{
     crypto::get_commitment_factory,
     substate::SubstateId,
 };
+use tari_ootle_address::{Network, OotleAddress};
 use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
 use tari_ootle_wallet_crypto::OutputWitness;
 use tari_ootle_wallet_sdk::{
@@ -61,6 +62,26 @@ const LOG_TARGET: &str = "tari::ootle::wallet_daemon::json_rpc::confidential";
 /// naming its size.
 const MAX_VAULT_COMMITMENTS_PER_REQUEST: usize = 1_000;
 
+fn validate_destination_address(
+    address: &OotleAddress,
+    wallet_network: Network,
+) -> Result<RistrettoPublicKey, anyhow::Error> {
+    if address.network() != wallet_network {
+        return Err(invalid_params(
+            "destination_address",
+            Some(format!(
+                "Destination address network ({}) does not match wallet network ({wallet_network})",
+                address.network()
+            )),
+        ));
+    }
+    let ristretto = address
+        .clone()
+        .into_ristretto_address()
+        .map_err(|e| invalid_params("destination_address", Some(format!("Invalid destination address: {e}"))))?;
+    Ok(ristretto.view_only_key)
+}
+
 #[allow(clippy::too_many_lines)]
 pub async fn handle_create_transfer_proof(
     context: &HandlerContext,
@@ -70,6 +91,26 @@ pub async fn handle_create_transfer_proof(
     let auth = context.check_auth_with_identity(token)?;
     let granted = &auth.permissions;
     let sdk = context.wallet_sdk();
+
+    let confidential_amount = req.confidential_amount.to_u64_checked().ok_or_else(|| {
+        invalid_request(format!(
+            "Confidential amount exceeds the maximum value supported in a single UTXO. Amount: {}",
+            req.confidential_amount
+        ))
+    })?;
+    let amount_to_transfer = req.confidential_amount.checked_add(req.reveal_amount).ok_or_else(|| {
+        invalid_request(format!(
+            "Amount to send must be greater than or equal to the amount to reveal. Amount = {}, Revealed = {}",
+            req.confidential_amount, req.reveal_amount
+        ))
+    })?;
+    if amount_to_transfer.is_zero() {
+        return Err(invalid_request("Amount to send must be greater than zero"));
+    }
+
+    // Outputs must be encrypted to the recipient's view key: that is the key a receiving wallet scans with,
+    // and any other key leaves it unable to recover the value and mask.
+    let destination_view_key = validate_destination_address(&req.destination_address, sdk.network())?;
 
     let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
     enforce_scopes(granted, &[Permission::Confidential(
@@ -86,12 +127,6 @@ pub async fn handle_create_transfer_proof(
         .locks_api()
         .create_owned_lock_with_timeout(Duration::from_secs(5 * 60), auth.lock_owner())?;
 
-    let amount_to_transfer = req.confidential_amount.checked_add(req.reveal_amount).ok_or_else(|| {
-        invalid_request(format!(
-            "Amount to send must be greater than or equal to the amount to reveal. Amount = {}, Revealed = {}",
-            req.confidential_amount, req.reveal_amount
-        ))
-    })?;
     // Lock inputs we're going to spend
     let (inputs, total_input_value) =
         sdk.confidential_outputs_api()
@@ -106,32 +141,6 @@ pub async fn handle_create_transfer_proof(
     );
 
     // TODO: Any errors from here need to unlock the outputs, ideally just roll back (refactor required but doable).
-
-    // TODO: Wrap up key/encrypted data handling in the wallet SDK
-    let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
-    let (nonce_secret, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
-
-    let confidential_amount = req.confidential_amount.to_u64_checked().ok_or_else(|| {
-        invalid_request(format!(
-            "Confidential amount exceeds the maximum value supported in a single UTXO. Amount: {}",
-            req.confidential_amount
-        ))
-    })?;
-
-    // Outputs must be encrypted to the recipient's view key: that is the key a receiving wallet scans with,
-    // and any other key leaves it unable to recover the value and mask.
-    let destination_view_key: RistrettoPublicKey = req
-        .destination_address
-        .view_only_key()
-        .try_from_byte_type()
-        .map_err(|e| invalid_params("destination_address", Some(format!("Invalid view key: {e}"))))?;
-    let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
-        confidential_amount,
-        &output_mask.key,
-        &destination_view_key,
-        &nonce_secret,
-        req.output_memo.as_ref(),
-    )?;
 
     let resource = sdk.substate_api().fetch_resource(req.resource_address).await?;
     let resource_view_key = resource.to_view_key_public_key().map_err(|_| {
@@ -155,13 +164,28 @@ pub async fn handle_create_transfer_proof(
         ))
     })?;
 
-    let output_statement = OutputWitness {
-        amount: confidential_amount,
-        mask: output_mask.key,
-        sender_public_nonce: public_nonce,
-        minimum_value_promise: MIN_CONFIDENTIAL_OUTPUT_VALUE_PROMISE,
-        encrypted_data,
-        resource_view_key: resource_view_key.clone(),
+    // TODO: Wrap up key/encrypted data handling in the wallet SDK
+    let maybe_output_statement = if confidential_amount > 0 {
+        let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
+        let (nonce_secret, public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
+            confidential_amount,
+            &output_mask.key,
+            &destination_view_key,
+            &nonce_secret,
+            req.output_memo.as_ref(),
+        )?;
+
+        Some(OutputWitness {
+            amount: confidential_amount,
+            mask: output_mask.key,
+            sender_public_nonce: public_nonce,
+            minimum_value_promise: MIN_CONFIDENTIAL_OUTPUT_VALUE_PROMISE,
+            encrypted_data,
+            resource_view_key: resource_view_key.clone(),
+        })
+    } else {
+        None
     };
 
     let maybe_change_statement = if change_amount_u64 > 0 {
@@ -214,7 +238,7 @@ pub async fn handle_create_transfer_proof(
         &inputs,
         // TODO: support for using revealed funds as input for proof generation
         Amount::zero(),
-        Some(&output_statement).filter(|o| o.amount > 0),
+        maybe_output_statement.as_ref(),
         req.reveal_amount,
         maybe_change_statement.as_ref(),
         Amount::zero(),
@@ -301,11 +325,7 @@ pub async fn handle_create_output_proof(
     let sdk = context.wallet_sdk();
     context.authorize(token, &[Permission::Confidential(Crud::Create, None)])?;
 
-    let destination_view_key: RistrettoPublicKey = req
-        .destination_address
-        .view_only_key()
-        .try_from_byte_type()
-        .map_err(|e| invalid_params("destination_address", Some(format!("Invalid view key: {e}"))))?;
+    let destination_view_key = validate_destination_address(&req.destination_address, sdk.network())?;
     let resource = sdk.substate_api().fetch_resource(req.resource_address).await?;
     let resource_view_key = resource
         .to_view_key_public_key()
@@ -459,9 +479,9 @@ pub async fn handle_view_vault_balance(
 
 #[cfg(test)]
 mod tests {
+    use ootle_byte_type::FromByteType;
     use tari_engine_types::resource::Resource;
-    use tari_ootle_address::{Network, OotleAddress};
-    use tari_ootle_common_types::{Epoch, optional::IsNotFoundError};
+    use tari_ootle_common_types::{Epoch, SubstateVersion, optional::IsNotFoundError};
     use tari_ootle_transaction::UnsignedTransaction;
     use tari_ootle_wallet_sdk::{
         crypto::memo::Memo,
@@ -470,11 +490,15 @@ mod tests {
     };
     use tari_ootle_walletd_client::types::TransactionRequestCreateRequest;
     use tari_template_lib_types::{
+        ComponentAddress,
+        EncryptedData,
         Metadata,
         ResourceAddress,
         ResourceType,
         SubstateOwnerRule,
+        VaultId,
         access_rules::ResourceAccessRules,
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     };
 
     use super::*;
@@ -603,5 +627,141 @@ mod tests {
             .unwrap();
         assert_eq!(decrypted.value(), 1_000);
         assert_eq!(decrypted.memo, Some(memo));
+    }
+
+    #[tokio::test]
+    async fn confidential_proofs_reject_invalid_amounts_and_destination_addresses_before_advancing_keys() {
+        let daemon = TestDaemon::start().await;
+        let sdk = daemon.context.wallet_sdk();
+        let view_key = sdk.key_manager_api().next_key(KeyBranch::ViewOnlyKey).unwrap();
+        let account_key = sdk.key_manager_api().next_key(KeyBranch::Account).unwrap();
+        let valid_address = OotleAddress::new(
+            Network::LocalNet,
+            view_key.to_public_key().to_byte_type(),
+            account_key.to_public_key().to_byte_type(),
+        );
+        let wrong_network_address = OotleAddress::new(
+            Network::MainNet,
+            view_key.to_public_key().to_byte_type(),
+            account_key.to_public_key().to_byte_type(),
+        );
+        let invalid_account_key_address = OotleAddress::new(
+            Network::LocalNet,
+            view_key.to_public_key().to_byte_type(),
+            RistrettoPublicKeyBytes::from([2u8; 32]),
+        );
+        let resource_address: ResourceAddress =
+            "resource_0000000000000000000000000000000000000000000000000000000000000001"
+                .parse()
+                .unwrap();
+        let account_address = ComponentAddress::from_array([0x11; 32]);
+        let vault_id = VaultId::new([0x22; 32]);
+        let view_key_id = KeyId::derived(KeyBranch::ViewOnlyKey, view_key.key_index());
+        let owner_key_id = KeyId::derived(KeyBranch::Account, account_key.key_index());
+        sdk.accounts_api()
+            .add_account(
+                Some("default"),
+                &account_address,
+                view_key_id,
+                owner_key_id,
+                Epoch::zero(),
+                true,
+                true,
+            )
+            .unwrap();
+        sdk.accounts_api()
+            .add_vault(
+                account_address,
+                vault_id,
+                SubstateVersion::ZERO,
+                resource_address,
+                ResourceType::Confidential,
+                Some("CONF".to_string()),
+                6,
+            )
+            .unwrap();
+        sdk.confidential_outputs_api()
+            .add_output(ConfidentialOutputModel {
+                account_address,
+                vault_id,
+                commitment: PedersenCommitmentBytes::from([0x33; 32]),
+                value: Amount::from(100u64),
+                sender_public_nonce: None,
+                view_only_key_id: view_key_id,
+                owner_key_id: Some(owner_key_id),
+                encrypted_data: EncryptedData::try_from(vec![0u8; EncryptedData::min_size()]).unwrap(),
+                public_asset_tag: None,
+                memo: None,
+                status: OutputStatus::Unspent,
+                lock_id: None,
+            })
+            .unwrap();
+
+        for bad_address in [wrong_network_address.clone(), invalid_account_key_address.clone()] {
+            let err = handle_create_output_proof(
+                &daemon.context,
+                Some(&daemon.session),
+                ConfidentialCreateOutputProofRequest {
+                    amount: 100,
+                    resource_address,
+                    destination_address: bad_address,
+                    output_memo: None,
+                },
+            )
+            .await
+            .unwrap_err();
+            assert!(err.to_string().contains("destination_address"), "{err}");
+        }
+
+        for (confidential_amount, reveal_amount, destination_address, expected_err) in [
+            (
+                Amount::new(u128::from(u64::MAX) + 1),
+                Amount::zero(),
+                valid_address.clone(),
+                "Confidential amount exceeds the maximum value supported in a single UTXO",
+            ),
+            (
+                Amount::zero(),
+                Amount::zero(),
+                valid_address.clone(),
+                "Amount to send must be greater than zero",
+            ),
+            (
+                Amount::from(100u64),
+                Amount::zero(),
+                wrong_network_address,
+                "destination_address",
+            ),
+            (
+                Amount::from(100u64),
+                Amount::zero(),
+                invalid_account_key_address,
+                "destination_address",
+            ),
+        ] {
+            let err = handle_create_transfer_proof(
+                &daemon.context,
+                Some(&daemon.session),
+                ProofsGenerateRequest {
+                    account: None,
+                    confidential_amount,
+                    reveal_amount,
+                    resource_address,
+                    destination_address,
+                    output_memo: None,
+                },
+            )
+            .await
+            .unwrap_err();
+            assert!(err.to_string().contains(expected_err), "{err}");
+        }
+
+        assert_eq!(
+            sdk.confidential_outputs_api().get_unspent_balance(&vault_id).unwrap(),
+            Amount::from(100u64),
+            "rejected requests must not leave vault outputs locked"
+        );
+        let mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask).unwrap();
+        assert_eq!(mask.key_index(), 0, "rejected requests must not advance ConfidentialMask");
     }
 }

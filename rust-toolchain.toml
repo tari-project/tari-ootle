@@ -12,4 +12,4 @@
 # other places to check:
 # - the CI files in .github folder
 [toolchain]
-channel = "1.97.1"
+channel = "1.100.0"

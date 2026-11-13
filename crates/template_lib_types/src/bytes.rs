@@ -7,7 +7,7 @@ use tari_template_abi::rust::{
 };
 
 #[cfg(feature = "serde")]
-use crate::serde_helpers::BytesVisitor;
+use crate::serde_helpers::{BytesCow, BytesVisitor};
 
 /// A wrapper around a byte buffer that encodes as CBOR major type 2 (Bytes).
 ///
@@ -137,13 +137,9 @@ where
                     .map_err(Error::custom)
             }
 
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
             where A: SeqAccess<'de> {
-                let mut bytes = Vec::with_capacity(seq.size_hint().unwrap_or(0));
-                while let Some(byte) = seq.next_element::<u8>()? {
-                    bytes.push(byte);
-                }
-                Ok(bytes.into_boxed_slice())
+                BytesVisitor::new().visit_seq(seq).map(BytesCow::into_owned)
             }
         }
 
@@ -214,6 +210,57 @@ mod tests {
             2,
             "JSON -> CBOR must yield a byte string, not an array"
         );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn deserialize_caps_dishonest_seq_size_hint() {
+        use serde::{
+            Deserialize as _,
+            de::{DeserializeSeed, Deserializer, SeqAccess, Visitor, value::Error as ValueError},
+        };
+
+        struct DishonestSeq(usize);
+        impl<'de> SeqAccess<'de> for DishonestSeq {
+            type Error = ValueError;
+
+            fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
+            where T: DeserializeSeed<'de> {
+                if self.0 == 0 {
+                    return Ok(None);
+                }
+                self.0 -= 1;
+                seed.deserialize(serde::de::IntoDeserializer::<ValueError>::into_deserializer(7u8))
+                    .map(Some)
+            }
+
+            fn size_hint(&self) -> Option<usize> {
+                Some(usize::MAX)
+            }
+        }
+
+        struct SeqDe;
+        impl<'de> Deserializer<'de> for SeqDe {
+            type Error = ValueError;
+
+            fn is_human_readable(&self) -> bool {
+                true
+            }
+
+            fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+            where V: Visitor<'de> {
+                visitor.visit_seq(DishonestSeq(3))
+            }
+
+            serde::forward_to_deserialize_any! {
+                bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+                bytes byte_buf option unit unit_struct newtype_struct seq tuple
+                tuple_struct map struct enum identifier ignored_any
+            }
+        }
+
+        let bytes = Bytes::deserialize(SeqDe).unwrap();
+        assert_eq!(bytes.as_slice(), &[7, 7, 7]);
     }
 }
 

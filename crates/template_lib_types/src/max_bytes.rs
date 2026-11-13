@@ -134,14 +134,8 @@ impl<'de, const N: usize> serde::Deserialize<'de> for MaxBytes<N> {
             MaxBytes::new_checked(bytes.into_boxed_slice())
                 .ok_or_else(|| serde::de::Error::custom(format!("byte array length exceeds maximum of {}", N)))
         } else {
-            let bytes = deserializer.deserialize_byte_buf(BytesVisitor::new())?;
-            if bytes.len() > N {
-                return Err(serde::de::Error::custom(format!(
-                    "byte array length exceeds maximum of {}",
-                    N
-                )));
-            }
-            Ok(MaxBytes::new_checked(bytes.into_owned()).expect("length checked above"))
+            let bytes = deserializer.deserialize_byte_buf(BytesVisitor::with_max_len(N))?;
+            Ok(MaxBytes::new_checked(bytes.into_owned()).expect("length checked by BytesVisitor"))
         }
     }
 }
@@ -236,6 +230,9 @@ mod tests {
             let serialized = tari_bor::encode(&bytes).unwrap();
             let err = tari_bor::decode::<MaxBytes<5>>(&serialized).unwrap_err();
             assert!(err.to_string().contains("byte array length exceeds maximum"));
+
+            let serde_err = tari_bor::serde_codec::from_slice::<MaxBytes<5>>(&serialized).unwrap_err();
+            assert!(serde_err.to_string().contains("at most 5 bytes"), "{serde_err}");
         }
     }
 }

@@ -61,12 +61,37 @@ impl<'a> AsRef<[u8]> for BytesCow<'a> {
     }
 }
 
+const MAX_PREALLOC_BYTES: usize = 1024;
+
 #[derive(Default)]
-pub struct BytesVisitor<'a>(PhantomData<&'a ()>);
+pub struct BytesVisitor<'a> {
+    max_len: Option<usize>,
+    _marker: PhantomData<&'a ()>,
+}
 
 impl<'a> BytesVisitor<'a> {
     pub const fn new() -> Self {
-        Self(PhantomData)
+        Self {
+            max_len: None,
+            _marker: PhantomData,
+        }
+    }
+
+    pub const fn with_max_len(max_len: usize) -> Self {
+        Self {
+            max_len: Some(max_len),
+            _marker: PhantomData,
+        }
+    }
+
+    fn check_len<E>(&self, len: usize) -> Result<(), E>
+    where E: Error {
+        if let Some(max) = self.max_len &&
+            len > max
+        {
+            return Err(E::invalid_length(len, self));
+        }
+        Ok(())
     }
 }
 
@@ -74,21 +99,27 @@ impl<'a> Visitor<'a> for BytesVisitor<'a> {
     type Value = BytesCow<'a>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("bytes (ByteVisitor in template_lib_types)")
+        match self.max_len {
+            Some(max) => write!(formatter, "at most {max} bytes"),
+            None => formatter.write_str("bytes (ByteVisitor in template_lib_types)"),
+        }
     }
 
     fn visit_borrowed_bytes<E>(self, v: &'a [u8]) -> Result<Self::Value, E>
     where E: Error {
+        self.check_len(v.len())?;
         Ok(BytesCow::Borrowed(v))
     }
 
     fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
     where E: Error {
+        self.check_len(v.len())?;
         Ok(BytesCow::Owned(v.into_boxed_slice()))
     }
 
     fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
     where E: Error {
+        self.check_len(v.len())?;
         Ok(BytesCow::Owned(v.to_vec().into_boxed_slice()))
     }
 
@@ -96,8 +127,16 @@ impl<'a> Visitor<'a> for BytesVisitor<'a> {
     /// as a sequence of integers and arrives here.
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
     where A: SeqAccess<'a> {
-        let mut bytes = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+        let max_prealloc = self
+            .max_len
+            .map_or(MAX_PREALLOC_BYTES, |max| max.min(MAX_PREALLOC_BYTES));
+        let mut bytes = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(max_prealloc));
         while let Some(byte) = seq.next_element::<u8>()? {
+            if let Some(max) = self.max_len &&
+                bytes.len() >= max
+            {
+                return Err(A::Error::invalid_length(bytes.len() + 1, &self));
+            }
             bytes.push(byte);
         }
         Ok(BytesCow::Owned(bytes.into_boxed_slice()))
@@ -218,6 +257,47 @@ mod tests {
         assert_eq!(
             json["pk"].as_str().expect("string"),
             "0101010101010101010101010101010101010101010101010101010101010101"
+        );
+    }
+
+    #[test]
+    fn bytes_visitor_caps_dishonest_seq_size_hint() {
+        use serde::de::{DeserializeSeed, SeqAccess, value::Error as ValueError};
+
+        struct DishonestSeq;
+        impl<'de> SeqAccess<'de> for DishonestSeq {
+            type Error = ValueError;
+
+            fn next_element_seed<T>(&mut self, _seed: T) -> Result<Option<T::Value>, Self::Error>
+            where T: DeserializeSeed<'de> {
+                Ok(None)
+            }
+
+            fn size_hint(&self) -> Option<usize> {
+                Some(usize::MAX)
+            }
+        }
+
+        let bytes = BytesVisitor::new().visit_seq(DishonestSeq).unwrap();
+        assert!(bytes.is_empty());
+    }
+
+    #[test]
+    fn bytes_visitor_enforces_max_len() {
+        use serde::de::value::Error as ValueError;
+
+        let ok = BytesVisitor::with_max_len(4).visit_bytes::<ValueError>(&[1, 2, 3, 4]).unwrap();
+        assert_eq!(ok.as_ref(), &[1, 2, 3, 4]);
+        assert!(BytesVisitor::with_max_len(4).visit_bytes::<ValueError>(&[1, 2, 3, 4, 5]).is_err());
+        assert!(
+            BytesVisitor::with_max_len(4)
+                .visit_borrowed_bytes::<ValueError>(&[1, 2, 3, 4, 5])
+                .is_err()
+        );
+        assert!(
+            BytesVisitor::with_max_len(4)
+                .visit_byte_buf::<ValueError>(vec![1, 2, 3, 4, 5])
+                .is_err()
         );
     }
 }

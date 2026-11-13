@@ -363,6 +363,10 @@ impl PartialTransaction {
         wants: WantList,
         extra_inputs: Vec<InputDeclaration>,
     ) -> Self {
+        let mut merged_extra = Vec::with_capacity(extra_inputs.len());
+        for req in extra_inputs {
+            push_unique(&mut merged_extra, req);
+        }
         Self {
             unsigned,
             wants: wants.0.clone(),
@@ -372,7 +376,7 @@ impl PartialTransaction {
                 .iter()
                 .filter_map(|s| SubstateId::from_str_checked(s).ok())
                 .collect(),
-            resolved: extra_inputs,
+            resolved: merged_extra,
             stealth_input_witnesses: Vec::new(),
             agg_input_mask: tari_crypto::ristretto::RistrettoSecretKey::default(),
             must_sign_with_account_key: false,
@@ -392,12 +396,16 @@ impl PartialTransaction {
     /// Folds an already-complete input set in directly (the explicit short-circuit path) and marks
     /// the partial fully resolved.
     fn with_explicit_inputs(unsigned: UnsignedTransaction, resolved: Vec<InputDeclaration>) -> Self {
+        let mut merged = Vec::with_capacity(resolved.len());
+        for req in resolved {
+            push_unique(&mut merged, req);
+        }
         Self {
             unsigned,
             wants: Vec::new(),
             cache: HashMap::new(),
             pending_fetch: Vec::new(),
-            resolved,
+            resolved: merged,
             stealth_input_witnesses: Vec::new(),
             agg_input_mask: tari_crypto::ristretto::RistrettoSecretKey::default(),
             must_sign_with_account_key: false,
@@ -1324,5 +1332,30 @@ mod tests {
             assert!(decl.is_write(), "resolved write must upgrade existing read");
             assert_eq!(decl.version(), Some(SubstateVersion::from(5)));
         }
+    }
+
+    #[test]
+    fn explicit_and_extra_inputs_merge_duplicate_substate_declarations() {
+        let id = SubstateId::Component(from_component());
+        let unsigned = TransactionBuilder::new(Network::Esmeralda.as_byte(), Epoch(1)).build_unsigned();
+
+        let explicit = PartialTransaction::new_with_explicit_inputs(unsigned.clone(), vec![
+            InputDeclaration::read(id.clone()),
+            InputDeclaration::write_versioned(id.clone(), 4),
+        ]);
+        assert_eq!(explicit.resolved_inputs().len(), 1);
+        assert!(explicit.resolved_inputs()[0].is_write());
+        assert_eq!(explicit.resolved_inputs()[0].version(), Some(SubstateVersion::from(4)));
+
+        let with_extra = PartialTransaction::new_for_wants_with_extra_inputs(unsigned, WantList(Vec::new()), vec![
+            InputDeclaration::read(id.clone()),
+            InputDeclaration::write_versioned(id, 7),
+        ]);
+        assert_eq!(with_extra.resolved_inputs().len(), 1);
+        assert!(with_extra.resolved_inputs()[0].is_write());
+        assert_eq!(
+            with_extra.resolved_inputs()[0].version(),
+            Some(SubstateVersion::from(7))
+        );
     }
 }

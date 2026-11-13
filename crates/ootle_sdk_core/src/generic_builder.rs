@@ -361,6 +361,11 @@ fn lower_owner_rule(rule: &OwnerRuleSpec) -> OwnerRule {
 /// Parses a lowercase-hex metadata multihash into the protocol's opaque `TemplateMetadataHash`. The multihash check
 /// is the SDK's convention for what wallets publish.
 fn parse_metadata_hash(hex: &str) -> Result<TemplateMetadataHash, OotleSdkError> {
+    if hex.bytes().any(|b| b.is_ascii_uppercase()) {
+        return Err(OotleSdkError::Parse(
+            "invalid metadata_hash hex: expected lowercase hex".to_string(),
+        ));
+    }
     let bytes = hex::decode(hex).map_err(|e| OotleSdkError::Parse(format!("invalid metadata_hash hex: {e}")))?;
     tari_ootle_template_metadata::MetadataHash::from_bytes(&bytes)
         .map(Into::into)
@@ -1356,5 +1361,29 @@ mod tests {
             .expect("component input must be present");
         assert!(decl.is_write(), "write extra_input must upgrade read explicit input");
         assert_eq!(decl.version(), Some(SubstateVersion::from(3)));
+    }
+
+    #[test]
+    fn publish_template_rejects_uppercase_metadata_hash_in_rust_construction() {
+        let valid_lower = "1220".to_string() + &"ab".repeat(32);
+        let invalid_upper = valid_lower.to_ascii_uppercase();
+        let intent = GenericTransactionIntent {
+            fee: BoundaryAmount::new(2000),
+            fee_payment: fee_from(from_component()),
+            fee_instructions: vec![],
+            instructions: vec![InstructionSpec::PublishTemplate {
+                blob_index: 0,
+                metadata_hash: Some(invalid_upper),
+            }],
+            blobs: vec![crate::types::generic_intent::BlobSpec { bytes: vec![1, 2, 3] }],
+            inputs: vec![InputRef::versioned(from_component().to_string(), 0)],
+            extra_inputs: vec![],
+            min_epoch: None,
+            max_epoch: 1,
+            dry_run: false,
+        };
+        let err = build_unsigned_instructions_with_wants(Network::Esmeralda, &intent).unwrap_err();
+        assert_eq!(err.code(), "PARSE");
+        assert!(err.to_string().contains("lowercase"), "{err}");
     }
 }

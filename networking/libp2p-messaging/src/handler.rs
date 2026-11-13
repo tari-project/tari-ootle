@@ -87,7 +87,7 @@ struct StreamTimeouts {
 
 impl<TCodec: Codec> Handler<TCodec> {
     pub fn new(peer_id: PeerId, protocol: StreamProtocol, config: &Config) -> Self {
-        let (pending_events_sender, pending_events_receiver) = mpsc::channel(20);
+        let (pending_events_sender, pending_events_receiver) = mpsc::channel(config.inbound_message_buffer_size);
         Self {
             peer_id,
             protocol,
@@ -195,9 +195,10 @@ where TCodec: Codec + Send + Clone + 'static
 
         if self.outbound_tasks.try_push(fut).is_err() {
             tracing::warn!("Dropping outbound stream because we are at capacity");
-            self.pending_events.push_back(Event::StreamClosed {
+            self.pending_events.push_back(Event::OutboundFailure {
                 peer_id: self.peer_id,
                 stream_id,
+                error: Error::ChannelClosed,
             });
             return;
         }
@@ -279,7 +280,12 @@ where
             OutboundWait::RemoteClosed => break Event::StreamClosed { peer_id, stream_id },
         };
 
-        match with_timeout(timeouts.send_recv, codec.encode_to(&mut peer_stream, msg)).await {
+        match with_timeout(timeouts.send_recv, async {
+            codec.encode_to(&mut peer_stream, msg).await?;
+            peer_stream.flush().await
+        })
+        .await
+        {
             None => {
                 break Event::OutboundFailure {
                     peer_id,
@@ -408,12 +414,32 @@ where TCodec: Codec + Send + Clone + 'static
             return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(event));
         }
 
-        for tasks in [&mut self.outbound_tasks, &mut self.inbound_tasks] {
-            while let Poll::Ready(result) = tasks.poll_unpin(cx) {
-                match result {
-                    Ok(event) => self.pending_close_events.push_back(event),
-                    Err(err) => self.pending_close_events.push_back(Event::Error(Error::Timeout(err))),
-                }
+        while let Poll::Ready(result) = self.outbound_tasks.poll_unpin(cx) {
+            match result {
+                Ok(event @ Event::OutboundFailure { peer_id, stream_id, .. }) => {
+                    self.pending_close_events.push_back(event);
+                    self.pending_close_events
+                        .push_back(Event::StreamClosed { peer_id, stream_id });
+                },
+                Ok(event) => self.pending_close_events.push_back(event),
+                Err(err) => self.pending_close_events.push_back(Event::Error(Error::Timeout(err))),
+            }
+        }
+        while let Poll::Ready(result) = self.inbound_tasks.poll_unpin(cx) {
+            match result {
+                Ok(event @ Event::InboundStreamClosed { .. }) => self.pending_close_events.push_back(event),
+                Ok(event) => {
+                    self.pending_close_events.push_back(event);
+                    self.pending_close_events.push_back(Event::InboundStreamClosed {
+                        peer_id: self.peer_id,
+                    });
+                },
+                Err(err) => {
+                    self.pending_close_events.push_back(Event::Error(Error::Timeout(err)));
+                    self.pending_close_events.push_back(Event::InboundStreamClosed {
+                        peer_id: self.peer_id,
+                    });
+                },
             }
         }
 
@@ -1025,6 +1051,68 @@ pub(crate) mod tests {
             Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::InboundStreamClosed {
                 peer_id: p,
             })) if p == peer_id
+        ));
+        assert!(handler.poll(&mut cx).is_pending());
+    }
+
+    #[test]
+    fn failed_streams_emit_close_events_and_capacity_overflow_emits_outbound_failure() {
+        let peer_id = PeerId::random();
+        let config = Config {
+            max_concurrent_streams_per_peer: 1,
+            ..Config::default()
+        };
+        let mut handler = Handler::<TestCodec>::new(peer_id, StreamProtocol::new("/test/1"), &config);
+        let mut cx = Context::from_waker(std::task::Waker::noop());
+
+        let (mut sink1, stream1) = stream::channel(10, peer_id);
+        let (sink2, stream2) = stream::channel(11, peer_id);
+        sink1.send(b"boom".to_vec()).unwrap();
+        handler.on_behaviour_event(stream1);
+        handler.on_behaviour_event(stream2);
+
+        for expected_id in [10, 11] {
+            assert!(matches!(
+                handler.poll(&mut cx),
+                Poll::Ready(ConnectionHandlerEvent::OutboundSubstreamRequest { protocol })
+                    if *protocol.info() == expected_id
+            ));
+        }
+
+        // Stream 10 opens and then fails on write; Stream 11 exceeds max_concurrent_streams_per_peer (1).
+        handler.handle_negotiated_outbound(TestStream::broken_write(io::ErrorKind::BrokenPipe), 10);
+        handler.handle_negotiated_outbound(TestStream::open(), 11);
+        assert!(sink2.is_closed());
+
+        assert!(matches!(
+            handler.poll(&mut cx),
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::OutboundStreamOpened {
+                stream_id: 10,
+                ..
+            }))
+        ));
+        assert!(matches!(
+            handler.poll(&mut cx),
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::OutboundFailure {
+                stream_id: 11,
+                error: Error::ChannelClosed,
+                ..
+            }))
+        ));
+        assert!(matches!(
+            handler.poll(&mut cx),
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::OutboundFailure {
+                stream_id: 10,
+                error: Error::CodecError(_),
+                ..
+            }))
+        ));
+        assert!(matches!(
+            handler.poll(&mut cx),
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(Event::StreamClosed {
+                stream_id: 10,
+                ..
+            }))
         ));
         assert!(handler.poll(&mut cx).is_pending());
     }

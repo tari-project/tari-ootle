@@ -56,6 +56,7 @@ use crate::handlers::{
     component_upgrades::component_upgrades,
     helpers,
     helpers::{OrJrpcNotFound, invalid_params, invalid_request, validate_transaction_for_approval},
+    transaction::validate_epoch_bounds,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::signing_requests";
@@ -153,6 +154,7 @@ fn validate_create_request(
     req: &SigningRequestCreateRequest,
 ) -> Result<Duration, anyhow::Error> {
     validate_transaction_for_approval(context.config().network, &req.transaction)?;
+    validate_epoch_bounds(&req.transaction)?;
 
     if req.memo.chars().count() > MAX_MEMO_CHARS {
         return Err(invalid_params(

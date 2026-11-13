@@ -355,7 +355,7 @@ where TSpec: WalletSdkSpec
                 account_address,
                 latest_vault.get_non_fungible_ids().len()
             );
-            self.update_vault_nfts(vault_id, latest_vault, updated_nft_data).await?;
+            has_changed |= self.update_vault_nfts(vault_id, latest_vault, updated_nft_data).await?;
         }
 
         // If the vault has revealed stealth tokens, we should also to scan for UTXOs
@@ -624,21 +624,14 @@ where TSpec: WalletSdkSpec
                 },
             };
 
-            let maybe_nft_contents = nft.contents();
+            let non_fungible = build_non_fungible_token(*latest_vault.resource_address(), vault_id, id, &nft);
 
-            let non_fungible = NonFungibleToken {
-                is_burnt: nft.is_burnt(),
-                resource_address: *latest_vault.resource_address(),
-                vault_id,
-                nft_id: id.clone(),
-                data: maybe_nft_contents
-                    .map(|nft| nft.data().clone())
-                    .unwrap_or(tari_bor::Value::Null),
-                mutable_data: maybe_nft_contents
-                    .map(|nft| nft.mutable_data().clone())
-                    .unwrap_or(tari_bor::Value::Null),
-            };
+            non_fungibles_api.save_nft(&non_fungible)?;
+            has_changed = true;
+        }
 
+        for (id, nft) in updated_nft_data_cache {
+            let non_fungible = build_non_fungible_token(*latest_vault.resource_address(), vault_id, id, &nft);
             non_fungibles_api.save_nft(&non_fungible)?;
             has_changed = true;
         }
@@ -694,6 +687,7 @@ where TSpec: WalletSdkSpec
             .filter(|(a, _)| a.is_vault())
             .map(|(a, s)| (a.as_vault_id().unwrap(), s))
             .collect::<HashMap<_, _>>();
+        let mut refreshed_vault_ids = HashSet::new();
 
         let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
         let utxos = diff
@@ -757,17 +751,9 @@ where TSpec: WalletSdkSpec
                         .add_vault_to_account_if_not_exist(&account_address, *vault_id, vault)
                         .await?;
 
-                    let updated_nfts = vault
-                        .get_non_fungible_ids()
-                        .iter()
-                        .filter_map(|nft_id| {
-                            diff.up_iter()
-                                .find(|(id, _)| id.as_non_fungible_address().map(|a| a.id()) == Some(nft_id))
-                                .and_then(|(_, s)| s.substate_value().non_fungible())
-                                .map(|nft| (nft_id.clone(), nft.clone()))
-                        })
-                        .collect();
+                    let updated_nfts = updated_nfts_for_vault(vault, diff);
 
+                    refreshed_vault_ids.insert(*vault_id);
                     has_changed |= self
                         .refresh_vault(
                             account_address,
@@ -835,18 +821,10 @@ where TSpec: WalletSdkSpec
             self.add_vault_to_account_if_not_exist(&account_addr, vault_id, vault)
                 .await?;
 
-            let updated_nfts = vault
-                .get_non_fungible_ids()
-                .iter()
-                .filter_map(|nft_id| {
-                    diff.up_iter()
-                        .find(|(id, _)| id.as_non_fungible_address().map(|a| a.id()) == Some(nft_id))
-                        .and_then(|(_, s)| s.substate_value().non_fungible())
-                        .map(|nft| (nft_id.clone(), nft.clone()))
-                })
-                .collect();
+            let updated_nfts = updated_nfts_for_vault(vault, diff);
 
             // Update the vault balance / confidential outputs
+            refreshed_vault_ids.insert(vault_id);
             self.refresh_vault(
                 account_addr,
                 vault_id,
@@ -857,6 +835,36 @@ where TSpec: WalletSdkSpec
             )
             .await?;
             updated_accounts.insert((account_addr, account_version));
+        }
+
+        let non_fungibles_api = self.wallet_sdk.non_fungible_api();
+        for (nft_addr, nft) in diff.up_iter().filter_map(|(id, s)| {
+            Some((id.as_non_fungible_address()?, s.substate_value().non_fungible()?))
+        }) {
+            let Some(stored_nft) = non_fungibles_api
+                .get(*nft_addr.resource_address(), nft_addr.id().clone())
+                .optional()?
+            else {
+                continue;
+            };
+            if refreshed_vault_ids.contains(&stored_nft.vault_id) {
+                continue;
+            }
+            let updated_token = build_non_fungible_token(
+                *nft_addr.resource_address(),
+                stored_nft.vault_id,
+                nft_addr.id().clone(),
+                nft,
+            );
+            non_fungibles_api.save_nft(&updated_token)?;
+            if let Some(vault) = accounts_api.get_vault(&stored_nft.vault_id).optional()? {
+                let account_version = substate_api
+                    .get_substate(&vault.account_address.into())
+                    .optional()?
+                    .map(|s| s.substate_id.version())
+                    .unwrap_or(SubstateVersion::ZERO);
+                updated_accounts.insert((vault.account_address, account_version));
+            }
         }
 
         for (account_address, resource_address) in touched_stealth_balances {
@@ -1119,4 +1127,88 @@ fn is_account(s: &Substate) -> bool {
         .component()
         .filter(|c| *c.template_address() == ACCOUNT_TEMPLATE_ADDRESS)
         .is_some()
+}
+
+fn updated_nfts_for_vault(vault: &Vault, diff: &SubstateDiff) -> HashMap<NonFungibleId, NonFungibleContainer> {
+    let resource_address = vault.resource_address();
+    vault
+        .get_non_fungible_ids()
+        .iter()
+        .filter_map(|nft_id| {
+            diff.up_iter()
+                .find(|(id, _)| {
+                    id.as_non_fungible_address()
+                        .is_some_and(|a| a.resource_address() == resource_address && a.id() == nft_id)
+                })
+                .and_then(|(_, s)| s.substate_value().non_fungible())
+                .map(|nft| (nft_id.clone(), nft.clone()))
+        })
+        .collect()
+}
+
+fn build_non_fungible_token(
+    resource_address: ResourceAddress,
+    vault_id: VaultId,
+    nft_id: NonFungibleId,
+    nft: &NonFungibleContainer,
+) -> NonFungibleToken {
+    let maybe_nft_contents = nft.contents();
+    NonFungibleToken {
+        is_burnt: nft.is_burnt(),
+        resource_address,
+        vault_id,
+        nft_id,
+        data: maybe_nft_contents
+            .map(|nft| nft.data().clone())
+            .unwrap_or(tari_bor::Value::Null),
+        mutable_data: maybe_nft_contents
+            .map(|nft| nft.mutable_data().clone())
+            .unwrap_or(tari_bor::Value::Null),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use tari_engine_types::resource_container::ResourceContainer;
+    use tari_template_lib_types::ObjectKey;
+
+    use super::*;
+
+    #[test]
+    fn updated_nfts_for_vault_filters_by_resource_address() {
+        let resource_a = ResourceAddress::new(ObjectKey::from_array([1u8; ObjectKey::LENGTH]));
+        let resource_b = ResourceAddress::new(ObjectKey::from_array([2u8; ObjectKey::LENGTH]));
+        let shared_id = NonFungibleId::from_u64(1);
+        let vault_a = Vault::new(ResourceContainer::non_fungible(
+            resource_a,
+            BTreeSet::from([shared_id.clone()]),
+        ));
+
+        let nft_a = NonFungibleContainer::new(
+            tari_bor::Value::Text("nft-a".to_string()),
+            tari_bor::Value::Integer(10.into()),
+        );
+        let nft_b = NonFungibleContainer::new(
+            tari_bor::Value::Text("nft-b".to_string()),
+            tari_bor::Value::Integer(20.into()),
+        );
+
+        let mut diff = SubstateDiff::new();
+        diff.up(
+            SubstateId::NonFungible(NonFungibleAddress::new(resource_b, shared_id.clone())),
+            Substate::new(0, nft_b),
+        );
+        diff.up(
+            SubstateId::NonFungible(NonFungibleAddress::new(resource_a, shared_id.clone())),
+            Substate::new(0, nft_a),
+        );
+
+        let updated = updated_nfts_for_vault(&vault_a, &diff);
+        assert_eq!(updated.len(), 1);
+        let contents = updated.get(&shared_id).unwrap().contents().unwrap();
+        assert_eq!(contents.data(), &tari_bor::Value::Text("nft-a".to_string()));
+        assert_eq!(contents.mutable_data(), &tari_bor::Value::Integer(10.into()));
+    }
 }

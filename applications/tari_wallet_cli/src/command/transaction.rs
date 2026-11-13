@@ -724,7 +724,7 @@ impl FromStr for CliArg {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(file) = s.strip_prefix('@') {
             let base64_data = fs::read_to_string(file).map_err(|e| anyhow!("Failed to read file {}: {}", file, e))?;
-            return Ok(CliArg::Blob(decode_exact(&base64_decode(base64_data)?)?));
+            return Ok(CliArg::Blob(decode_exact(&base64_decode(base64_data.trim())?)?));
         }
 
         if let Ok(v) = s.parse::<u64>() {
@@ -755,12 +755,12 @@ impl FromStr for CliArg {
             return Ok(CliArg::Bool(v));
         }
 
-        if let Ok(v) = s.parse::<SubstateId>() {
-            return Ok(CliArg::SubstateId(v));
-        }
-
         if let Some(v) = parse_template_address(s) {
             return Ok(CliArg::TemplateAddress(v));
+        }
+
+        if let Ok(v) = s.parse::<SubstateId>() {
+            return Ok(CliArg::SubstateId(v));
         }
 
         if let Some(("nft", nft_id)) = s.split_once('_') {
@@ -825,7 +825,8 @@ impl FromStr for NewResourceOutput {
         let (template_address, token_symbol) = s
             .split_once(':')
             .ok_or_else(|| anyhow!("Expected template address and token symbol"))?;
-        let template_address = TemplateAddress::from_hex(template_address)?;
+        let template_address = parse_template_address(template_address)
+            .map_or_else(|| TemplateAddress::from_hex(template_address), Ok)?;
         Ok(NewResourceOutput {
             template_address,
             token_symbol: token_symbol.to_string(),
@@ -859,10 +860,7 @@ impl FromStr for SpecificNonFungibleMintOutput {
         let resource_address = resource_address
             .as_resource_address()
             .ok_or_else(|| anyhow!("Expected resource address but got {}", resource_address))?;
-        let non_fungible_id = non_fungible_id
-            .split_once('_')
-            .map(|(_, b)| b)
-            .unwrap_or(non_fungible_id);
+        let non_fungible_id = non_fungible_id.strip_prefix("nft_").unwrap_or(non_fungible_id);
         let non_fungible_id =
             NonFungibleId::try_from_canonical_string(non_fungible_id).map_err(|e| anyhow!("{:?}", e))?;
         Ok(SpecificNonFungibleMintOutput {
@@ -928,4 +926,57 @@ fn parse_globals(globals: Vec<String>) -> Result<HashMap<String, ManifestValue>,
 fn base64_decode<T: AsRef<[u8]>>(s: T) -> Result<Vec<u8>, base64::DecodeError> {
     use base64::Engine;
     base64::prelude::BASE64_STANDARD.decode(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use base64::Engine;
+
+    use super::*;
+
+    #[test]
+    fn cli_arg_parses_template_address_and_trimmed_base64_file() {
+        let hex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        let canonical = format!("template_{hex}");
+        let arg = CliArg::from_str(&canonical).unwrap();
+        assert!(matches!(arg, CliArg::TemplateAddress(addr) if addr == TemplateAddress::from_hex(hex).unwrap()));
+
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let file_path = std::env::temp_dir().join(format!("tari_wallet_cli_arg_{}_{}.b64", std::process::id(), nanos));
+        let cbor_bytes = tari_bor::encode(&42u64).unwrap();
+        let encoded = format!("{}\n", base64::prelude::BASE64_STANDARD.encode(&cbor_bytes));
+        fs::write(&file_path, encoded).unwrap();
+
+        let file_arg = format!("@{}", file_path.display());
+        let parsed = CliArg::from_str(&file_arg).unwrap();
+        let _unused = fs::remove_file(&file_path);
+        assert!(matches!(parsed, CliArg::Blob(tari_bor::Value::Integer(v)) if v == 42u64.into()));
+    }
+
+    #[test]
+    fn specific_non_fungible_mint_output_parses_canonical_and_prefixed_ids() {
+        let res_str = "resource_0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        let out_u32 = SpecificNonFungibleMintOutput::from_str(&format!("{res_str},u32_42")).unwrap();
+        assert_eq!(out_u32.non_fungible_id, NonFungibleId::from_u32(42));
+
+        let out_prefixed = SpecificNonFungibleMintOutput::from_str(&format!("{res_str},nft_str_my_token")).unwrap();
+        assert_eq!(
+            out_prefixed.non_fungible_id,
+            NonFungibleId::try_from_string("my_token").unwrap()
+        );
+    }
+
+    #[test]
+    fn new_resource_output_accepts_canonical_and_hex_template_address() {
+        let hex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        let from_hex = NewResourceOutput::from_str(&format!("{hex}:TKN")).unwrap();
+        let from_canonical = NewResourceOutput::from_str(&format!("template_{hex}:TKN")).unwrap();
+        assert_eq!(from_hex.template_address, from_canonical.template_address);
+        assert_eq!(from_canonical.token_symbol, "TKN");
+    }
 }

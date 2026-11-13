@@ -4,7 +4,8 @@
 """Swarm smoke test: exercises the main transaction paths against a running local swarm.
 
 Stages (default order; select with --only / --skip):
-  flood         🚰 Faucet-claim flood via transaction_generator + transaction_submitter
+  flood         🚰 Transfer flood via transaction_generator + transaction_submitter from seed accounts
+                   that the faucet (swarm) or the smoketest account (--live) funds
   templates     📦 Publish freshly built templates through the wallet daemon
   stealth       🥷 tTARI stealth transfers between two wallet accounts
   token         🪙 Mint a stealth token from a new template, stealth-transfer it, dry-run vs real fee
@@ -30,8 +31,10 @@ Ports are discovered from the swarm daemon (default http://localhost:8080) unles
 
 --live runs against a live network (e.g. esmeralda) through the given wallet daemon and indexer. The
 swarm daemon is never contacted, so the stages that need it (claim_burn, epoch, health) skip, and fees
-are compared with previous live runs only. A public indexer rate-limits submissions per IP; the flood
-retries rate-limited submissions, so it runs at the indexer's sustained rate.
+are compared with previous live runs only. A live faucet is usually empty, so the wallet's default
+account (or --funder-account) funds the smoketest account, which funds the flood accounts. A public
+indexer rate-limits submissions per IP; the flood retries rate-limited submissions, so it runs at the
+indexer's sustained rate.
 
     scripts/smoke_test.py
     scripts/smoke_test.py --only templates,token,swap
@@ -58,6 +61,12 @@ REPO = Path(__file__).resolve().parent.parent
 TEMPLATE_DIR = REPO / "scripts" / "smoke_test_template"
 TEMPLATE_WASM = TEMPLATE_DIR / "target" / "wasm32-unknown-unknown" / "release" / "smoke_test_template.wasm"
 FEES_DIR = REPO / "data" / "smoke_test"
+FLOOD_SEED_FILE = FEES_DIR / "flood_seed"
+# A flood transfer moves 1,000 µT and locks a 50,000 µT fee allowance, so an account below this cannot send one.
+FLOOD_ACCOUNT_MIN = 60_000
+# What a wallet deposit brings a flood account up to; a transfer spends a few thousand µT of it.
+FLOOD_ACCOUNT_FUND = 200_000
+DEPOSIT_BATCH = 25
 TARI_TOKEN = "resource_" + "01" * 32
 LIQUIDITY_POOL_TEMPLATE = "template_" + "00" * 31 + "02"
 TARI = 1_000_000
@@ -82,7 +91,7 @@ STAGES = [
 ]
 OPT_IN_STAGES = {"epoch"}
 STAGE_TITLES = {
-    "flood": "🚰 Faucet-claim flood",
+    "flood": "🚰 Transfer flood",
     "templates": "📦 Publish templates",
     "stealth": "🥷 Stealth transfers",
     "token": "🪙 Stealth token from new template",
@@ -331,7 +340,9 @@ def build_template(nonce):
 
 
 def balances(wallet, account):
-    res = wallet.call("accounts.get_balances", {"account": {"Name": account}, "refresh": True})
+    """Balances of the wallet account named `account`, or of the one at that address when it is a component address."""
+    ref = {"ComponentAddress": account} if COMPONENT_ADDR_RE.match(account) else {"Name": account}
+    res = wallet.call("accounts.get_balances", {"account": ref, "refresh": True})
     return {b["resource_address"]: b for b in res["balances"]}
 
 
@@ -341,6 +352,10 @@ def revealed(entry):
 
 def total(entry):
     return int(entry["balance"]) + int(entry["confidential_balance"]) if entry else 0
+
+
+def account_label(account):
+    return account["account"].get("name") or short(account["account"]["component_address"])
 
 
 def fee_main(amount=TARI):
@@ -368,6 +383,9 @@ class SmokeTest:
         self.fees = {}  # operation -> [required fees, µT]
         self.overcharges = {}  # operation -> [fee paid above the required fee, µT]
         self.health_before = None
+        self.funder = None  # the account that funds the run on a live network
+        self._network = None
+        self.bins = REPO / "target" / "release"
 
     # ---- setup
 
@@ -386,6 +404,12 @@ class SmokeTest:
         info(f"🧪 account  {bold(SMOKE_ACCOUNT)} {verb} {dim(short(self.smoke['account']['component_address']))}")
         self.recv = self.wallet.call("accounts.create_or_get", {"account": {"Name": RECV_ACCOUNT}})
         info(f"📥 account  {bold(RECV_ACCOUNT)} {dim(short(self.recv['account']['component_address']))}")
+        if self.args.live:
+            self.funder = (self.wallet.call("accounts.get", {"name_or_address": {"Name": self.args.funder_account}})
+                           if self.args.funder_account else self.wallet.call("accounts.get_default"))
+            bal = total(balances(self.wallet, self.funder["account"]["component_address"]).get(TARI_TOKEN))
+            info(f"🏦 funder   {bold(account_label(self.funder))} {dim(short(self.funder['account']['component_address']))}"
+                 f" · {fmt_tari(bal)}")
         self.ensure_funds()
 
         if self.swarm.validators():
@@ -394,8 +418,39 @@ class SmokeTest:
             info(f"🩺 {len(self.health_before)} validators · heights {heights}")
 
     def ensure_funds(self):
+        self.ensure_balance(self.args.min_balance * TARI)
+
+    def ensure_balance(self, required):
+        """The smoketest account holds at least `required` revealed TARI: claimed from the faucet on the swarm, sent
+        by the funding account on a live network."""
         bal = revealed(balances(self.wallet, SMOKE_ACCOUNT).get(TARI_TOKEN))
-        if bal < self.args.min_balance * TARI:
+        if bal < required and self.args.live:
+            amount = required - bal
+            funder = self.funder["account"]["component_address"]
+            held = total(balances(self.wallet, funder).get(TARI_TOKEN))
+            if held < amount + TARI:
+                raise StageFailed(f"{account_label(self.funder)} holds {fmt_tari(held)}, but {SMOKE_ACCOUNT} needs "
+                                  f"{fmt_tari(amount)} more plus fees")
+            info(f"🏦 balance {fmt_tari(bal)} is low, {account_label(self.funder)} sends {fmt_tari(amount)}…")
+            res = self.wallet.call("accounts.stealth_transfer", {
+                "owner_account": {"ComponentAddress": funder},
+                "fee_params": {"input_selection": "PreferRevealed", "pay_fee_with_swap": None},
+                "input_selection": "PreferRevealed",
+                "resource_address": TARI_TOKEN,
+                "transfers": [{
+                    "destination_address": self.smoke["address"],
+                    "blinded_output_amount": 0,
+                    "revealed_output_amount": amount,
+                    "pay_to": "StealthPublicKey",
+                    "attach_sender_address": True,
+                }],
+                "max_fee": SPEND_BACK_MAX_FEE,
+                "dry_run": False,
+            })
+            self.wallet.wait(res["transaction_id"])
+            self.indexer_check(res["transaction_id"], "funder_transfer")
+            bal = revealed(balances(self.wallet, SMOKE_ACCOUNT).get(TARI_TOKEN))
+        elif bal < required:
             info(f"🚰 balance {fmt_tari(bal)} is low, claiming from the faucet…")
             res = self.wallet.call(
                 "accounts.create_free_test_coins",
@@ -405,9 +460,9 @@ class SmokeTest:
             self.indexer_check(res["transaction_id"], "faucet_claim")
             detail(f"+{fmt_tari(res['amount'])}")
             bal = revealed(balances(self.wallet, SMOKE_ACCOUNT).get(TARI_TOKEN))
+        if bal < required:
+            raise StageFailed(f"{SMOKE_ACCOUNT} holds {fmt_tari(bal)} revealed after funding, needs {fmt_tari(required)}")
         info(f"💰 balance  {fmt_tari(bal)}")
-
-    # ---- transaction plumbing
 
     def indexer_check(self, tx_id, op):
         """The indexer must report the transaction committed and serve the substates it wrote.
@@ -501,17 +556,99 @@ class SmokeTest:
             run(["cargo", "build", "--release", "-p", "transaction_generator", "-p", "transaction_submitter"])
             self._built_tools = True
 
-    def flood(self, n, quiet=False):
-        bins = REPO / "target" / "release"
+    def network(self):
+        if not self._network:
+            status, body = http_get(f"{self.indexer_url}/network")
+            if status != 200:
+                raise StageFailed(f"indexer does not report its network (HTTP {status})")
+            self._network = body["network"]
+        return self._network
+
+    def flood_seed(self):
+        """The seed of the accounts the flood transfers from. Kept across runs so that funded accounts are reused,
+        and random per checkout so that two people flooding one network do not spend from the same accounts."""
+        try:
+            return int(FLOOD_SEED_FILE.read_text())
+        except (OSError, ValueError):
+            seed = secrets.randbits(63)
+            FLOOD_SEED_FILE.parent.mkdir(parents=True, exist_ok=True)
+            FLOOD_SEED_FILE.write_text(str(seed))
+            return seed
+
+    def flood_accounts(self, n):
+        """(index, owner public key, address, TARI balance or None when the account does not exist) per account."""
+        out = run([self.bins / "transaction_generator", "accounts", "--account-seed", str(self.flood_seed()),
+                   "-n", str(n), "--indexer-url", self.indexer_url])
+        accounts = []
+        for line in out.splitlines():
+            index, pk, address, balance = line.split()
+            accounts.append((int(index), pk, address, None if balance == "-" else int(balance)))
+        return accounts
+
+    def fund_flood_accounts(self, n):
+        """Every flood account holds enough for a transfer. On the swarm the faucet creates missing accounts; on a
+        live network, and to top up an account that has run low, the smoketest account deposits into them."""
+        accounts = self.flood_accounts(n)
+        missing = [a for a in accounts if a[3] is None]
+        low = [a for a in accounts if a[3] is not None and a[3] < FLOOD_ACCOUNT_MIN]
+        if missing and not self.args.live:
+            first = missing[0][0]
+            if len(missing) != n - first:
+                raise StageFailed(f"flood accounts {', '.join(str(a[0]) for a in missing[:5])}… are missing between "
+                                  f"existing ones; delete {FLOOD_SEED_FILE} to start from a new seed")
+            info(f"🚰 claiming from the faucet into {bold(len(missing))} new flood account(s)…")
+            self.submit_flood("faucet", n, skip=first)
+            missing = []
+        to_fund = missing + low
+        if not to_fund:
+            return
+        topups = [(pk, address if balance is not None else None, FLOOD_ACCOUNT_FUND - (balance or 0))
+                  for _, pk, address, balance in to_fund]
+        info(f"💸 {SMOKE_ACCOUNT} funds {bold(len(missing))} new and tops up {bold(len(low))} flood account(s) "
+             f"({fmt_tari(sum(t[2] for t in topups))})…")
+        self.deposit(topups)
+
+    def deposit(self, deposits):
+        """Deposits revealed TARI from the smoketest account into each (owner public key, address or None when the
+        account does not exist yet, amount), in batches."""
+        account = self.smoke["account"]["component_address"]
+        self.ensure_balance(sum(amount for _, _, amount in deposits) + self.args.min_balance * TARI)
+        for i in range(0, len(deposits), DEPOSIT_BATCH):
+            lines = ["    let account = var![\"account\"];", "    let tari = var![\"tari\"];"]
+            variables = {"account": account, "tari": TARI_TOKEN}
+            for j, (pk, address, amount) in enumerate(deposits[i:i + DEPOSIT_BATCH]):
+                lines.append(f"    let b{j} = account.withdraw(tari, {amount});")
+                if address is None:
+                    lines.append(f"    let pk{j} = var![\"pk{j}\"];")
+                    lines.append(f"    create_account!(pk{j}, bucket = b{j});")
+                    variables[f"pk{j}"] = pk
+                else:
+                    lines.append(f"    let a{j} = var![\"a{j}\"];")
+                    lines.append(f"    a{j}.deposit(b{j});")
+                    variables[f"a{j}"] = address
+            manifest = fee_main() + "\nfn main() {\n" + "\n".join(lines) + "\n}\n"
+            res = self.wallet.call("transactions.submit_manifest", {
+                "manifest": manifest,
+                "variables": variables,
+                "seal_signer_key_id": self.smoke["account"]["owner_key_id"],
+                "signing_key_ids": [],
+                "max_fee": TARI,
+                "dry_run": False,
+                "blobs": {},
+            })
+            self.wallet.wait(res["transaction_id"])
+
+    def submit_flood(self, kind, n, skip=0):
+        """Generates `n` transactions of the generator's `kind` flood and submits all but the first `skip`. Returns
+        the submitter's counts and the submission time."""
         with tempfile.TemporaryDirectory(prefix="smoke-") as tmp:
-            out = Path(tmp) / "claims.bin"
-            if not quiet:
-                info(f"✍️  generating {bold(n)} faucet-claim transactions…")
-            run([bins / "transaction_generator", "write", "-n", str(n), "-o", out, "--indexer-url", self.indexer_url])
-            if not quiet:
-                info(f"🚀 submitting to {dim(self.indexer_url)}…")
+            out = Path(tmp) / f"{kind}.bin"
+            run([self.bins / "transaction_generator", "write", "-n", str(n), "-o", out, "--flood", kind,
+                 "--account-seed", str(self.flood_seed()), "--network", self.network(),
+                 "--indexer-url", self.indexer_url])
             started = time.monotonic()
-            output = run([bins / "transaction_submitter", "stress-test", "-f", out, "-a", self.indexer_url, "-y"])
+            output = run([self.bins / "transaction_submitter", "stress-test", "-f", out, "-a", self.indexer_url,
+                          "-k", str(skip), "-y"])
             elapsed = time.monotonic() - started
 
         stats = {}
@@ -526,27 +663,32 @@ class SmokeTest:
             stats[key] = int(m.group(1)) if m else None
         if stats["committed"] is None:
             raise StageFailed("could not parse submitter summary:\n" + "\n".join(output.splitlines()[-15:]))
-        breakdown = (
-            f"fee-only {stats['fee_only']} · rejected {stats['rejected']} · errored {stats['errored']}"
-        )
-        if stats["committed"] != n:
+        expected = n - skip
+        if stats["committed"] != expected:
+            breakdown = f"fee-only {stats['fee_only']} · rejected {stats['rejected']} · errored {stats['errored']}"
             reasons = sorted({l.strip() for l in output.splitlines() if re.search(r"reject|error|fail|abort", l, re.I)
                               and not re.match(r"\s*(Rejected|Errored|Fee charged)", l)})
-            raise StageFailed(f"only {stats['committed']}/{n} claims committed ({breakdown})"
+            raise StageFailed(f"only {stats['committed']}/{expected} {kind} transactions committed ({breakdown})"
                               + "".join(f"\n      {r[:200]}" for r in reasons[:5]))
-        if quiet:
-            return elapsed
-        detail(
-            f"submitted {stats['submitted']} · committed {stats['committed']} · fee-only {stats['fee_only']} · "
-            f"rejected {stats['rejected']} · errored {stats['errored']} · {elapsed:.1f}s "
-            f"(~{stats['committed'] / max(elapsed, 0.001):.1f} TPS)"
-        )
+        return stats, elapsed
+
+    def flood(self, n, quiet=False):
+        self.fund_flood_accounts(n)
+        if not quiet:
+            info(f"🚀 flooding {dim(self.indexer_url)} with {bold(n)} transfers…")
+        stats, elapsed = self.submit_flood("transfers", n)
+        if not quiet:
+            detail(
+                f"submitted {stats['submitted']} · committed {stats['committed']} · fee-only {stats['fee_only']} · "
+                f"rejected {stats['rejected']} · errored {stats['errored']} · {elapsed:.1f}s "
+                f"(~{stats['committed'] / max(elapsed, 0.001):.1f} TPS)"
+            )
         return elapsed
 
     def stage_flood(self):
         self.build_tx_tools()
         elapsed = self.flood(self.args.flood)
-        return f"{self.args.flood} claims committed in {elapsed:.1f}s"
+        return f"{self.args.flood} transfers committed in {elapsed:.1f}s"
 
     def consensus_epoch(self):
         """The lowest epoch any validator's consensus has reached. Consensus adopts a new epoch some
@@ -873,7 +1015,10 @@ fn main() {{
         hold its component yet. Receiving stealth transfers leaves an account without one."""
         address = account["account"]["component_address"]
         code, _ = http_get(f"{self.indexer_url}/substates/{address}")
-        if code == 404:
+        if code == 404 and self.args.live:
+            info(f"💸 {bold(name)} has no component on the network yet, depositing into it…")
+            self.deposit([(account["account"]["owner_public_key"], None, 1_000)])
+        elif code == 404:
             info(f"🚰 {bold(name)} has no component on the network yet, claiming from the faucet…")
             res = self.wallet.call(
                 "accounts.create_free_test_coins",
@@ -1107,6 +1252,9 @@ def main():
     p.add_argument("--swarm-url", default="http://localhost:8080")
     p.add_argument("--live", action="store_true",
                    help="run against a live network: never contact the swarm daemon; needs --wallet-url and --indexer-url")
+    p.add_argument("--funder-account",
+                   help="with --live, the wallet account that funds the run in place of the faucet (default: the "
+                        "wallet's default account)")
     p.add_argument("--wallet-url", help="walletd JSON-RPC URL, e.g. http://127.0.0.1:5100/json_rpc")
     p.add_argument("--peer-wallet-url", help="second walletd for the multi_wallet stage")
     p.add_argument("--indexer-url", help="indexer REST URL, e.g. http://127.0.0.1:12500")

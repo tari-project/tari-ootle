@@ -108,6 +108,10 @@ pub struct Validator {
     /// same power. Shard key derivation excludes it, so a validator's place in its committee is independent of stake.
     #[serde(default = "Validator::default_power")]
     pub power: NonZeroU64,
+    /// The first epoch in which this validator is no longer active. It stays in its committee up to and including
+    /// `exit_epoch - 1`. An exit is permanent: the validator cannot be listed again under the same public key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_epoch: Option<Epoch>,
 }
 
 /// A scheduled claim key rotation for a [`Validator`].
@@ -180,8 +184,30 @@ impl Validator {
                     change.effective_epoch
                 );
             }
+            // A rotation re-registers the validator, so one at or after the exit would bring it back.
+            if let Some(exit_epoch) = self.exit_epoch &&
+                change.effective_epoch >= exit_epoch
+            {
+                bail!(
+                    "Validator {}: claim key change at epoch {} must be before the validator's exit epoch {}",
+                    self.public_key,
+                    change.effective_epoch,
+                    exit_epoch
+                );
+            }
             previous_epoch = Some(change.effective_epoch);
             previous_key = &change.claim_key;
+        }
+
+        if let Some(exit_epoch) = self.exit_epoch &&
+            exit_epoch <= self.activation_epoch()
+        {
+            bail!(
+                "Validator {}: exit epoch {} must be after the validator's activation epoch {}",
+                self.public_key,
+                exit_epoch,
+                self.activation_epoch()
+            );
         }
 
         Ok(())
@@ -225,6 +251,7 @@ mod tests {
             registration_epoch: Epoch(10),
             claim_key_changes,
             power: NonZeroU64::MIN,
+            exit_epoch: None,
         }
     }
 
@@ -441,6 +468,74 @@ mod tests {
             ..mk_validator(vec![])
         };
         assert_eq!(mk_validator(vec![]).calculate_shard_key(), heavy.calculate_shard_key());
+    }
+
+    #[test]
+    fn exit_after_activation_is_valid() {
+        let validator = Validator {
+            exit_epoch: Some(Epoch(20)),
+            ..mk_validator(vec![ClaimKeyChange {
+                effective_epoch: Epoch(19),
+                claim_key: mk_key(3),
+            }])
+        };
+        validator.validate().unwrap();
+    }
+
+    #[test]
+    fn exit_at_or_before_activation_is_rejected() {
+        // The validator activates at 11, so it would never be active.
+        for epoch in [Epoch(5), Epoch(10), Epoch(11)] {
+            let err = Validator {
+                exit_epoch: Some(epoch),
+                ..mk_validator(vec![])
+            }
+            .validate()
+            .unwrap_err()
+            .to_string();
+            assert!(err.contains("must be after the validator's activation epoch"), "{err}");
+        }
+    }
+
+    #[test]
+    fn rotation_at_or_after_exit_is_rejected() {
+        for epoch in [Epoch(20), Epoch(25)] {
+            let err = Validator {
+                exit_epoch: Some(Epoch(20)),
+                ..mk_validator(vec![ClaimKeyChange {
+                    effective_epoch: epoch,
+                    claim_key: mk_key(3),
+                }])
+            }
+            .validate()
+            .unwrap_err()
+            .to_string();
+            assert!(err.contains("must be before the validator's exit epoch"), "{err}");
+        }
+    }
+
+    #[test]
+    fn exit_epoch_does_not_move_the_shard_key() {
+        let exiting = Validator {
+            exit_epoch: Some(Epoch(20)),
+            ..mk_validator(vec![])
+        };
+        assert_eq!(
+            mk_validator(vec![]).calculate_shard_key(),
+            exiting.calculate_shard_key()
+        );
+    }
+
+    #[test]
+    fn exit_epoch_defaults_to_none_when_omitted() {
+        let validator: Validator = serde_json::from_value(serde_json::json!({
+            "public_key": mk_key(1),
+            "claim_key": mk_key(2),
+            "shard_group": ShardGroup::new(1, 256),
+            "registration_epoch": Epoch(10),
+        }))
+        .unwrap();
+        assert_eq!(validator.exit_epoch, None);
     }
 
     #[test]

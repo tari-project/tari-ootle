@@ -189,7 +189,7 @@ fn build_unsigned_transaction(
     network: Network,
     intent: &StealthTransferIntent,
     transfer: StealthTransferStatement,
-    resolved_utxo_inputs: Vec<tari_ootle_common_types::InputDeclaration>,
+    mut resolved_utxo_inputs: Vec<tari_ootle_common_types::InputDeclaration>,
 ) -> Result<UnsignedTransaction, OotleSdkError> {
     let from_component: ComponentAddress = intent.from_account.to_internal()?;
     let resource: ResourceAddress = intent.resource_address.to_internal()?;
@@ -221,7 +221,7 @@ fn build_unsigned_transaction(
     // validated to sum to `revealed_output_amount` upstream.
     if intent.revealed_output_amount > 0 {
         builder = builder.put_last_instruction_output_on_workspace("output_bucket");
-        let needs_to_split = intent.outputs.len() > 1;
+        let needs_to_split = intent.outputs.iter().filter(|o| o.revealed_amount > 0).count() > 1;
         for (i, output) in intent.outputs.iter().enumerate() {
             if output.revealed_amount == 0 {
                 continue;
@@ -248,9 +248,14 @@ fn build_unsigned_transaction(
         .with_dry_run(intent.dry_run);
 
     // Attach the resolved input substates (the from-account component + its vault, resolved via the
-    // account wants, plus any stealth-input UTXOs). Without these the engine rejects the tx for
-    // missing input substates. The resource input is auto-added by `stealth_transfer*` — do not
-    // re-add it.
+    // account wants, plus any stealth-input UTXOs) and ensure non-XTR transfer resources are
+    // declared as a read input (`TransactionBuilder::new` has `fill_inputs: false`).
+    if resource != tari_template_lib_types::constants::TARI_TOKEN {
+        crate::inputs::push_unique(
+            &mut resolved_utxo_inputs,
+            tari_ootle_common_types::InputDeclaration::read(resource),
+        );
+    }
     builder = builder.with_inputs(resolved_utxo_inputs);
 
     Ok(builder.build_unsigned())
@@ -1606,5 +1611,47 @@ mod tests {
         };
         let err = assemble_from_intent(&intent, &entropy).unwrap_err();
         assert_eq!(err.code(), "VALIDATION");
+    }
+
+    #[test]
+    fn custom_resource_declares_read_input_and_single_revealed_among_multiple_outputs_does_not_split() {
+        use tari_engine_types::substate::SubstateId;
+        use tari_template_lib_types::{ObjectKey, ResourceAddress};
+
+        let custom_res = ResourceAddress::new(ObjectKey::from_array([0x44; ObjectKey::LENGTH]));
+        let custom_res_str = ResourceAddressStr::parse(custom_res.to_string()).unwrap();
+
+        let mut out0 = revealed_output_spec(3, 4, 500_000, 0);
+        out0.resource_address = custom_res_str.clone();
+        let mut out1 = revealed_output_spec(5, 6, 500_000, 500_000);
+        out1.resource_address = custom_res_str.clone();
+
+        let entropy = entropy_for(2, 150);
+        let intent = StealthTransferIntent {
+            from_account: from_component(),
+            resource_address: custom_res_str,
+            fee: BoundaryAmount::new(2000),
+            inputs: Vec::<StealthInputSpec>::new(),
+            outputs: vec![out0, out1],
+            revealed_input_amount: 1_500_000,
+            revealed_output_amount: 500_000,
+            min_epoch: None,
+            max_epoch: 1,
+            dry_run: false,
+            pay_fee_from_revealed: false,
+        };
+
+        let partial = assemble_from_intent(&intent, &entropy).unwrap();
+        let unsigned = partial.unsigned();
+        let decl = unsigned
+            .inputs()
+            .get(&SubstateId::Resource(custom_res))
+            .expect("custom transfer resource must be declared as an input");
+        assert!(decl.is_read(), "custom transfer resource must be a read input");
+        assert_eq!(
+            count_take_from_bucket(unsigned),
+            0,
+            "only one output carries a revealed slice, so no TakeFromBucket split should be emitted"
+        );
     }
 }

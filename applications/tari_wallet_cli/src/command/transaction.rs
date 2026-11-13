@@ -39,12 +39,14 @@ use tari_engine_types::{
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, InputDeclaration, SubstateAddress};
 use tari_ootle_transaction::{
+    Blob,
     Instruction,
     Transaction,
+    TransactionBuilder,
     TransactionId,
     UnsignedTransaction,
     args,
-    args::InstructionArg,
+    args::{InstructionArg, WorkspaceOffsetId},
     call_arg,
 };
 use tari_ootle_wallet_sdk::{apis::confidential_transfer::UtxoInputSelection, crypto::memo::Memo};
@@ -64,6 +66,7 @@ use tari_ootle_walletd_client::{
     },
 };
 use tari_template_lib::types::{
+    ComponentAddress,
     NonFungibleAddress,
     NonFungibleId,
     ResourceAddress,
@@ -71,7 +74,7 @@ use tari_template_lib::types::{
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
     crypto::RistrettoPublicKeyBytes,
 };
-use tari_transaction_manifest::{ManifestValue, parse_manifest};
+use tari_transaction_manifest::{ManifestInstructions, ManifestValue, parse_manifest};
 
 use crate::from_hex::FromHex;
 
@@ -150,6 +153,9 @@ pub struct SubmitManifestArgs {
     manifest: PathBuf,
     #[clap(long, short = 'g')]
     input_variables: Vec<String>,
+    /// Pass a blob input as NAME=PATH. May be specified multiple times.
+    #[clap(long = "blob", value_name = "NAME=PATH")]
+    blobs: Vec<String>,
     #[clap(flatten)]
     common: CommonSubmitArgs,
 }
@@ -333,18 +339,53 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
     Ok(())
 }
 
+fn parse_blob_inputs(values: Vec<String>) -> Result<HashMap<String, Blob>, anyhow::Error> {
+    let mut blob_inputs = HashMap::with_capacity(values.len());
+    for value in values {
+        let (name, path) = value
+            .split_once('=')
+            .ok_or_else(|| anyhow!("Invalid blob argument '{value}': expected NAME=PATH"))?;
+
+        let name = name.trim();
+        let path = path.trim();
+
+        if name.is_empty() {
+            anyhow::bail!("Invalid blob argument '{value}': blob name cannot be empty");
+        }
+        if path.is_empty() {
+            anyhow::bail!("Invalid blob argument '{value}': file path cannot be empty");
+        }
+        if blob_inputs.contains_key(name) {
+            anyhow::bail!("Duplicate blob name '{name}' in --blob arguments");
+        }
+
+        let bytes = fs::read(path).map_err(|e| anyhow!("Failed to read blob file '{path}' for '{name}': {e}"))?;
+
+        blob_inputs.insert(name.to_string(), Blob::new(bytes));
+    }
+    Ok(blob_inputs)
+}
+
 async fn handle_submit_manifest(
     args: SubmitManifestArgs,
     client: &mut WalletDaemonClient,
 ) -> Result<(), anyhow::Error> {
     let timer = Instant::now();
     let contents = fs::read_to_string(&args.manifest).map_err(|e| anyhow!("Failed to read manifest: {}", e))?;
+    let blob_inputs = parse_blob_inputs(args.blobs)?;
     let instructions = parse_manifest(
         &contents,
         parse_globals(args.input_variables)?,
         Default::default(),
-        Default::default(),
+        blob_inputs,
     )?;
+
+    if !instructions.fee_instructions.is_empty() {
+        println!(
+            "NOTE: Manifest specifies its own fee instructions. --max-fee will be ignored and no additional pay_fee \
+             instruction will be appended."
+        );
+    }
     let common = args.common;
 
     let fee_account;
@@ -367,18 +408,25 @@ async fn handle_submit_manifest(
     let max_epoch = common.resolve_max_epoch(current_epoch, default_transaction_validity_epochs)?;
 
     let builder = Transaction::builder(network.byte, max_epoch)
-        .with_fee_instructions_builder(|builder| {
-            builder.with_instructions(instructions.fee_instructions).call_method(
-                fee_account.component_address,
-                "pay_fee",
-                args![common.max_fee],
-            )
-        })
-        .with_instructions(instructions.instructions)
         .with_inputs(common.inputs)
         .with_min_epoch(common.min_epoch.map(Epoch));
 
-    let transaction = builder.build_unsigned();
+    let dump_account_address = match common.dump_outputs_into {
+        Some(dump_account) => {
+            let AccountGetResponse { account, .. } = client.accounts_get(dump_account).await?;
+            Some(account.component_address)
+        },
+        None => None,
+    };
+
+    let transaction = build_manifest_transaction(
+        builder,
+        instructions,
+        fee_account.component_address,
+        common.max_fee,
+        dump_account_address,
+    )?;
+
     summarize_transaction(&transaction);
 
     if common.dry_run {
@@ -413,6 +461,57 @@ async fn handle_submit_manifest(
     }
 
     Ok(())
+}
+
+fn build_manifest_transaction(
+    mut builder: TransactionBuilder,
+    instructions: ManifestInstructions,
+    fee_account: ComponentAddress,
+    max_fee: u64,
+    dump_outputs_into: Option<ComponentAddress>,
+) -> Result<UnsignedTransaction, anyhow::Error> {
+    builder = builder.with_fee_instructions_builder(|builder| {
+        if instructions.fee_instructions.is_empty() {
+            builder.call_method(fee_account, "pay_fee", args![max_fee])
+        } else {
+            builder.with_instructions(instructions.fee_instructions)
+        }
+    });
+
+    let last_instruction_is_put = instructions
+        .instructions
+        .iter()
+        .rev()
+        .find(|i| !matches!(i, Instruction::DropAllProofsInWorkspace | Instruction::Assert { .. }))
+        .and_then(|i| match i {
+            Instruction::PutLastInstructionOutputOnWorkspace { key } => Some(*key),
+            _ => None,
+        });
+
+    builder = builder.with_instructions(instructions.instructions);
+
+    if let Some(dump_account) = dump_outputs_into {
+        if let Some(key) = last_instruction_is_put {
+            builder = builder.add_instruction(Instruction::CallMethod {
+                call: dump_account.into(),
+                method: "deposit".try_into()?,
+                args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(key))],
+            });
+        } else {
+            builder =
+                builder
+                    .put_last_instruction_output_on_workspace("bucket")
+                    .call_method(dump_account, "deposit", args![Workspace("bucket")]);
+        }
+    }
+
+    let mut transaction = builder.build_unsigned();
+
+    for blob in instructions.blobs.iter().cloned() {
+        transaction.add_blob(blob)?;
+    }
+
+    Ok(transaction)
 }
 
 pub async fn handle_send(args: SendArgs, client: &mut WalletDaemonClient) -> Result<(), anyhow::Error> {
@@ -928,4 +1027,228 @@ fn parse_globals(globals: Vec<String>) -> Result<HashMap<String, ManifestValue>,
 fn base64_decode<T: AsRef<[u8]>>(s: T) -> Result<Vec<u8>, base64::DecodeError> {
     use base64::Engine;
     base64::prelude::BASE64_STANDARD.decode(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_transaction::{Blob, Blobs, args::WorkspaceOffsetId};
+
+    use super::*;
+
+    const MAX_FEE: u64 = 100;
+
+    fn fee_account() -> ComponentAddress {
+        ComponentAddress::from_array([1; 32])
+    }
+
+    fn build(instructions: ManifestInstructions, dump_outputs_into: Option<ComponentAddress>) -> UnsignedTransaction {
+        build_manifest_transaction(
+            Transaction::builder_localnet(Epoch(1)),
+            instructions,
+            fee_account(),
+            MAX_FEE,
+            dump_outputs_into,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn submit_manifest_attaches_blobs_without_changing_indices() {
+        let blob = Blob::new(vec![1, 2, 3]);
+        let instruction = Instruction::CallMethod {
+            call: ComponentAddress::from_array([2; 32]).into(),
+            method: "use_blob".try_into().unwrap(),
+            args: vec![InstructionArg::Blob(0)],
+        };
+
+        let transaction = build(
+            ManifestInstructions {
+                instructions: vec![instruction.clone()],
+                fee_instructions: vec![],
+                blobs: Blobs::from_vec(vec![blob.clone()]),
+            },
+            None,
+        );
+
+        assert_eq!(transaction.blobs().as_slice(), &[blob]);
+        assert_eq!(transaction.instructions(), &[instruction]);
+    }
+
+    #[test]
+    fn submit_manifest_preserves_provided_fee_instructions_without_appending_pay_fee() {
+        let fee_instruction = Instruction::DropAllProofsInWorkspace;
+
+        let transaction = build(
+            ManifestInstructions {
+                instructions: vec![],
+                fee_instructions: vec![fee_instruction.clone()],
+                blobs: Blobs::empty(),
+            },
+            None,
+        );
+
+        assert_eq!(transaction.fee_instructions(), &[fee_instruction]);
+    }
+
+    #[test]
+    fn submit_manifest_adds_pay_fee_when_fee_instructions_are_empty() {
+        let transaction = build(
+            ManifestInstructions {
+                instructions: vec![],
+                fee_instructions: vec![],
+                blobs: Blobs::empty(),
+            },
+            None,
+        );
+
+        assert_eq!(transaction.fee_instructions(), &[Instruction::CallMethod {
+            call: fee_account().into(),
+            method: "pay_fee".try_into().unwrap(),
+            args: vec![InstructionArg::from_type(&MAX_FEE).unwrap()],
+        }]);
+    }
+
+    #[test]
+    fn parse_blob_inputs_reads_files_and_rejects_malformed_values() {
+        let temp_dir = std::env::temp_dir().join(format!("tari_test_blobs_{}", std::process::id()));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let file_a = temp_dir.join("a.bin");
+        let file_b = temp_dir.join("b.bin");
+        fs::write(&file_a, b"blob_a_data").unwrap();
+        fs::write(&file_b, b"blob_b_data").unwrap();
+
+        let blobs = vec![
+            format!("payload_a={}", file_a.display()),
+            format!("payload_b={}", file_b.display()),
+        ];
+        let parsed = parse_blob_inputs(blobs).unwrap();
+        assert_eq!(parsed.get("payload_a").unwrap().as_bytes(), b"blob_a_data");
+        assert_eq!(parsed.get("payload_b").unwrap().as_bytes(), b"blob_b_data");
+
+        // Missing '=' separator
+        assert!(parse_blob_inputs(vec!["invalid".to_string()]).is_err());
+        // Empty name
+        assert!(parse_blob_inputs(vec![format!("={}", file_a.display())]).is_err());
+        // Empty path
+        assert!(parse_blob_inputs(vec!["payload=".to_string()]).is_err());
+        // Nonexistent file
+        assert!(parse_blob_inputs(vec!["payload=nonexistent_file_xyz.bin".to_string()]).is_err());
+        // Duplicate name
+        assert!(
+            parse_blob_inputs(vec![
+                format!("payload={}", file_a.display()),
+                format!("payload={}", file_b.display()),
+            ])
+            .is_err()
+        );
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn submit_manifest_end_to_end_with_blobs_and_dump_outputs_preserves_workspace_offsets() {
+        use tari_template_lib::types::TemplateAddress;
+
+        let manifest_src = r#"
+            use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as MyTemplate;
+
+            fn main() {
+                let comp = MyTemplate::new(blob!(payload_a));
+            }
+        "#;
+
+        let template_addr =
+            TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap();
+        let dump_account = ComponentAddress::from_array([3; 32]);
+
+        let mut blob_inputs = HashMap::new();
+        blob_inputs.insert("payload_a".to_string(), Blob::new(vec![1u8, 2, 3]));
+
+        let instructions = parse_manifest(manifest_src, HashMap::new(), Default::default(), blob_inputs).unwrap();
+
+        let transaction = build(instructions, Some(dump_account));
+
+        // The blob is attached to the transaction
+        assert_eq!(transaction.blobs().len(), 1);
+        assert_eq!(transaction.blobs().as_slice()[0].as_bytes(), &[1u8, 2, 3]);
+
+        // Hand-off of workspace keys:
+        // 0: PutLastInstructionOutputOnWorkspace { key: 0 } (from `let comp = ...`)
+        // The deposit reads the manifest's trailing workspace key.
+        assert_eq!(transaction.instructions(), &[
+            Instruction::CallFunction {
+                address: template_addr,
+                function: "new".try_into().unwrap(),
+                args: vec![InstructionArg::Blob(0)],
+            },
+            Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
+            Instruction::CallMethod {
+                call: dump_account.into(),
+                method: "deposit".try_into().unwrap(),
+                args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(0))],
+            },
+        ]);
+    }
+
+    #[test]
+    fn submit_manifest_appends_dump_outputs_instructions() {
+        let dump_account = ComponentAddress::from_array([3; 32]);
+        let manifest_instruction = Instruction::DropAllProofsInWorkspace;
+
+        let transaction = build(
+            ManifestInstructions {
+                instructions: vec![manifest_instruction.clone()],
+                fee_instructions: vec![],
+                blobs: Blobs::empty(),
+            },
+            Some(dump_account),
+        );
+
+        assert_eq!(transaction.instructions(), &[
+            manifest_instruction,
+            Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
+            Instruction::CallMethod {
+                call: dump_account.into(),
+                method: "deposit".try_into().unwrap(),
+                args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(0))],
+            },
+        ]);
+    }
+
+    #[test]
+    fn submit_manifest_reuses_workspace_key_across_trailing_drop_all_proofs() {
+        use tari_template_lib::types::TemplateAddress;
+
+        let template_addr =
+            TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap();
+        let dump_account = ComponentAddress::from_array([3; 32]);
+
+        let call = Instruction::CallFunction {
+            address: template_addr,
+            function: "new".try_into().unwrap(),
+            args: vec![],
+        };
+        let put = Instruction::PutLastInstructionOutputOnWorkspace { key: 0 };
+        let drop_proofs = Instruction::DropAllProofsInWorkspace;
+
+        let transaction = build(
+            ManifestInstructions {
+                instructions: vec![call.clone(), put.clone(), drop_proofs.clone()],
+                fee_instructions: vec![],
+                blobs: Blobs::empty(),
+            },
+            Some(dump_account),
+        );
+
+        assert_eq!(transaction.instructions(), &[
+            call,
+            put,
+            drop_proofs,
+            Instruction::CallMethod {
+                call: dump_account.into(),
+                method: "deposit".try_into().unwrap(),
+                args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(0))],
+            },
+        ]);
+    }
 }

@@ -5,8 +5,9 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::{Substate, SubstateDiff, SubstateId, SubstateValue};
+use tari_template_lib_types::address_prefixes;
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum SubstateType {
     Component,
@@ -22,18 +23,18 @@ pub enum SubstateType {
 }
 
 impl SubstateType {
-    pub fn as_prefix_str(&self) -> &str {
+    pub const fn as_prefix_str(&self) -> &'static str {
         match self {
-            SubstateType::Component => "component",
-            SubstateType::Resource => "resource",
-            SubstateType::Vault => "vault",
-            SubstateType::ClaimedOutputTombstone => "commitment",
-            SubstateType::NonFungible => "nft",
-            SubstateType::TransactionReceipt => "txreceipt",
-            SubstateType::ValidatorFeePool => "vnfp",
-            SubstateType::Template => "template",
-            SubstateType::Utxo => "utxo",
-            SubstateType::ConfidentialOutput => "coutput",
+            SubstateType::Component => address_prefixes::COMPONENT,
+            SubstateType::Resource => address_prefixes::RESOURCE,
+            SubstateType::Vault => address_prefixes::VAULT,
+            SubstateType::ClaimedOutputTombstone => address_prefixes::CLAIMED_OUTPUT_TOMBSTONE,
+            SubstateType::NonFungible => address_prefixes::NON_FUNGIBLE,
+            SubstateType::TransactionReceipt => address_prefixes::TRANSACTION_RECEIPT,
+            SubstateType::ValidatorFeePool => address_prefixes::VALIDATOR_FEE_POOL,
+            SubstateType::Template => address_prefixes::TEMPLATE,
+            SubstateType::Utxo => address_prefixes::UTXO,
+            SubstateType::ConfidentialOutput => address_prefixes::CONFIDENTIAL_OUTPUT,
         }
     }
 
@@ -131,6 +132,8 @@ pub fn check_diff_substate_types(diff: &SubstateDiff) -> Result<(), SubstateType
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use tari_engine_types::{resource_container::ResourceContainer, vault::Vault};
     use tari_template_lib_types::{ComponentAddress, VaultId, constants::TARI_TOKEN};
 
@@ -165,5 +168,31 @@ mod tests {
 
         diff.up(ComponentAddress::from_array([1; 32]).into(), Substate::new(1, vault()));
         check_diff_substate_types(&diff).unwrap_err();
+    }
+
+    #[test]
+    fn as_prefix_str_matches_substate_id_display_prefix() {
+        let hex32 = "7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff";
+        let cases = [
+            (SubstateType::Component, format!("component_{hex32}")),
+            (SubstateType::Resource, format!("resource_{hex32}")),
+            (SubstateType::Vault, format!("vault_{hex32}")),
+            (SubstateType::ClaimedOutputTombstone, format!("tombstone_{hex32}")),
+            (SubstateType::NonFungible, format!("nft_{hex32}_str_SpecialNft")),
+            (SubstateType::TransactionReceipt, format!("txreceipt_{hex32}")),
+            (SubstateType::ValidatorFeePool, format!("vnfp_{hex32}")),
+            (SubstateType::Template, format!("template_{hex32}")),
+            (SubstateType::Utxo, format!("utxo_{hex32}_{hex32}")),
+            (SubstateType::ConfidentialOutput, format!("coutput_{hex32}_{hex32}")),
+        ];
+
+        for (expected_type, raw_id) in cases {
+            let id = SubstateId::from_str(&raw_id).unwrap();
+            let substate_type = SubstateType::from(&id);
+            assert_eq!(substate_type, expected_type);
+            assert!(substate_type.matches(&id));
+            let (prefix, _) = id.to_string().split_once('_').unwrap();
+            assert_eq!(substate_type.as_prefix_str(), prefix);
+        }
     }
 }

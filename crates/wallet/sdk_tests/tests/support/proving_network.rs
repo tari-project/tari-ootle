@@ -76,6 +76,8 @@ struct ProvingNetworkState {
     /// Requests for a page of checkpoints to walk through.
     walk_requests: usize,
     substates: HashMap<SubstateId, ServedSubstate>,
+    /// Extra substates served in `get_substates` responses whether or not the request asked for them.
+    unrequested_substates: HashMap<SubstateId, ServedSubstate>,
     /// Versions served as gone down to requests that name them, beside the version `substates` serves.
     down_versions: HashMap<(SubstateId, SubstateVersion), Option<SubstateProof>>,
     /// How many of the next substate queries fail as if the indexer could not be reached.
@@ -135,6 +137,7 @@ impl ProvingNetwork {
                 unserved: None,
                 walk_requests: 0,
                 substates: HashMap::new(),
+                unrequested_substates: HashMap::new(),
                 down_versions: HashMap::new(),
                 failing_substate_queries: 0,
                 failing_substate_fetches: 0,
@@ -235,6 +238,25 @@ impl ProvingNetwork {
             value: Some(value),
             proof,
         });
+    }
+
+    /// Serves `id` at `version` holding `value` in every batch `get_substates` response, even when not requested.
+    pub fn serve_unrequested_substate(
+        &self,
+        id: SubstateId,
+        version: SubstateVersion,
+        value: SubstateValue,
+        proof: Option<SubstateProof>,
+    ) {
+        self.state
+            .lock()
+            .unwrap()
+            .unrequested_substates
+            .insert(id, ServedSubstate {
+                version,
+                value: Some(value),
+                proof,
+            });
     }
 
     /// Serves `id` as gone down at `version`, with `proof` to requests for proofs that name the version.
@@ -358,6 +380,18 @@ impl WalletNetworkInterface for ProvingNetwork {
             let Some(served) = state.substates.get(id) else {
                 continue;
             };
+            let Some(value) = &served.value else {
+                continue;
+            };
+            fetched.substates.insert(
+                id.clone(),
+                EncodedSubstate::new(served.version, Encoded::encode(value).unwrap()),
+            );
+            if let Some(proof) = served.proof.clone().filter(|_| include_proofs) {
+                fetched.proofs.insert(id.clone(), proof);
+            }
+        }
+        for (id, served) in &state.unrequested_substates {
             let Some(value) = &served.value else {
                 continue;
             };

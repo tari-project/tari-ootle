@@ -226,7 +226,6 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             return Ok(());
         }
 
-        let current_epoch = next_epoch - Epoch(1);
         self.store
             .set(StoreKey::ConfiguredCurrentEpoch.as_key_bytes(), &next_epoch)?;
 
@@ -252,7 +251,7 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             }
             self.pending_events
                 .push_back(EpochEvent::ActiveValidatorNodeSetChanged {
-                    epoch: current_epoch,
+                    epoch: epoch.saturating_sub(Epoch(1)),
                     node_changes: vns
                         .into_iter()
                         .map(|vn| ValidatorNodeChange::Add {
@@ -850,9 +849,9 @@ mod tests {
         assert_eq!(
             added_validators(&events)
                 .into_iter()
-                .map(|(_, claim_key, activation_epoch, _)| (claim_key, activation_epoch))
+                .map(|(event_epoch, claim_key, activation_epoch, _)| (event_epoch, claim_key, activation_epoch))
                 .collect::<Vec<_>>(),
-            vec![(v1.claim_key, Epoch(3)), (v2.claim_key, Epoch(5))],
+            vec![(Epoch(2), v1.claim_key, Epoch(3)), (Epoch(4), v2.claim_key, Epoch(5))],
             "validators activated across skipped epochs must retain their configured activation_epoch"
         );
     }

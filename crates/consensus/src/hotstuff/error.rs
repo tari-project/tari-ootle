@@ -78,8 +78,6 @@ pub enum HotStuffError {
         transaction_id: TransactionId,
         reject_reason: String,
     },
-    #[error("Pacemaker channel dropped: {details}")]
-    PacemakerChannelDropped { details: String },
     #[error(
         "Bad new view message: HighQC height {high_pc_height}, received new height {received_new_height}: {details}"
     )]

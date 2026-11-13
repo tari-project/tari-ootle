@@ -30,6 +30,7 @@
 - [Transaction Overview](https://ootle.tari.com/guides/transaction-overview/): How transactions are constructed and executed
 - [Tari CLI](https://ootle.tari.com/guides/cli/): Command-line tools for development
 - [Resources](https://ootle.tari.com/guides/resources/): Fungible, non-fungible, confidential, and stealth resource types
+- [Fungible Tokens (ERC-20)](https://ootle.tari.com/guides/fungible-tokens/): Tokens are native resources; a reusable token template, transfers, approve and transferFrom
 - [Authorization and Access](https://ootle.tari.com/guides/authorization-and-access/): `rule!` macro, `ComponentAccessRules`, `OwnerRule`, `CallerContext`
 - [Testing Your Template](https://ootle.tari.com/guides/testing-templates/): Unit-test templates with the template test tooling
 - [Stealth Transfers](https://ootle.tari.com/guides/stealth-resources/): Private transfers — commitments, stealth addresses, and condition trees
@@ -37,6 +38,13 @@
 - [How Burn Claims Work](https://ootle.tari.com/guides/claim-burn/): How burn claims are proven, verified against scanned L1 headers, and protected from double claims
 - [API Keys for AI Agents](https://ootle.tari.com/guides/agent-api-keys/): Issue and use API keys for agent-driven wallets
 - [Randomness in Templates](https://ootle.tari.com/guides/randomness/): Sources of randomness available inside a template
+
+## Validator Nodes
+
+- [Run a Validator Node](https://ootle.tari.com/validators/run-a-validator-node/): Install, generate the identity seed phrase, configure and start a validator; joining the validator set
+- [Networking and Ports](https://ootle.tari.com/validators/networking-and-ports/): Public p2p port, private JSON-RPC and metrics, firewall and Docker networking
+- [Operating a Validator](https://ootle.tari.com/validators/operating-a-validator/): Claiming fees, backups and restore, upgrades, logs and health checks
+- [Validator Node Requirements](https://ootle.tari.com/reference/validator-node-requirements/): CPU, memory and storage a validator needs
 
 ## Reference
 

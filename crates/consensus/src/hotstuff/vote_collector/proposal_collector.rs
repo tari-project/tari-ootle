@@ -18,7 +18,7 @@ use crate::{
         epoch_state::EpochState,
         error::HotStuffError,
         vote_collector::{
-            collector::exceeds_vote_lookahead,
+            collector::{exceeds_vote_lookahead, is_before_vote_window},
             helpers::{check_eligibility, record_equivocation},
         },
     },
@@ -84,12 +84,14 @@ where TConsensusSpec: ConsensusSpec
         let local_committee_info = epoch_state.local_committee_info();
         let current_epoch = epoch_state.epoch();
 
-        // Before any signature verification: a vote this far ahead is dropped by the collector, so the
-        // verification would be work done for nothing.
-        if exceeds_vote_lookahead(current_height, vote.block_height) {
+        // Check epoch and view bounds before querying epoch_manager or verifying the signature.
+        check_vote_fields(current_epoch, &vote)?;
+        if is_before_vote_window(current_height, vote.block_height) ||
+            exceeds_vote_lookahead(current_height, vote.block_height)
+        {
             warn!(
                 target: LOG_TARGET,
-                "🗑️ Discarding {} from {}: it is too far ahead of our current view {}/{}",
+                "🗑️ Discarding {} from {}: outside collectible view window around {}/{}",
                 vote,
                 from,
                 current_epoch,

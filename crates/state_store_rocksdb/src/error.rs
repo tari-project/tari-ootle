@@ -41,7 +41,7 @@ pub enum RocksDbStorageError {
     },
     #[error("Encode error: {source}")]
     EncodeError { source: anyhow::Error },
-    #[error("Encode error: {source}")]
+    #[error("Decode error: {source}")]
     DecodeError { source: anyhow::Error },
     #[error("Malformed data: {operation}: {details}")]
     MalformedData { operation: &'static str, details: String },

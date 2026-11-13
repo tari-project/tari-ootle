@@ -585,3 +585,259 @@ fn state_sync_missing_values_get_earliest_includes_max_substate_address() {
         .unwrap();
     assert_eq!(earliest, Some((max_addr, 7)));
 }
+
+#[test]
+fn template_provider_checks_liveness_and_value_presence() {
+    use tari_engine_types::{
+        published_template::{PublishedTemplate, PublishedTemplateAddress, TemplateBlob, TemplateName},
+        substate::{SubstateId, SubstateValue},
+    };
+    use tari_ootle_common_types::{
+        SubstateVersion,
+        VersionedSubstateId,
+        services::template_provider::TemplateProvider,
+        shard::Shard,
+    };
+    use tari_ootle_storage::{
+        StateStore,
+        StateStoreWriteTransaction,
+        consensus_models::{SubstateTransition, SubstateUpdateBatch, SubstateValueOrHash},
+    };
+    use tari_ootle_transaction::Network;
+    use tari_template_lib_types::{Hash32, TemplateAddress};
+
+    use crate::{DatabaseOptions, RocksDbStateStore};
+
+    fn make_template(seed: u8) -> (TemplateAddress, SubstateValue) {
+        let addr = TemplateAddress::from_array([seed; 32]);
+        let template = PublishedTemplate {
+            template_name: TemplateName::new_checked("TestTemplate").unwrap(),
+            author: Default::default(),
+            binary: TemplateBlob::new_checked(vec![seed; 8]).unwrap(),
+            at_epoch: 0,
+            metadata_hash: None,
+        };
+        (addr, SubstateValue::Template(template))
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    let store = RocksDbStateStore::<String>::open(tmp.path().join("db"), DatabaseOptions::default()).unwrap();
+
+    let (live_addr, live_val) = make_template(1);
+    let (destroyed_addr, destroyed_val) = make_template(2);
+    let hash_only_addr = TemplateAddress::from_array([3u8; 32]);
+
+    store
+        .with_write_tx(|tx| {
+            let mut batch = SubstateUpdateBatch::new(Network::LocalNet, Epoch(0));
+            batch.with_transition(Shard::first(), 1).extend([
+                SubstateTransition::Up {
+                    id: SubstateId::Template(PublishedTemplateAddress::from_hash(live_addr)),
+                    version: SubstateVersion::ZERO,
+                    substate_or_hash: SubstateValueOrHash::Value(Box::new(live_val)),
+                },
+                SubstateTransition::Up {
+                    id: SubstateId::Template(PublishedTemplateAddress::from_hash(destroyed_addr)),
+                    version: SubstateVersion::ZERO,
+                    substate_or_hash: SubstateValueOrHash::Value(Box::new(destroyed_val)),
+                },
+                SubstateTransition::Up {
+                    id: SubstateId::Template(PublishedTemplateAddress::from_hash(hash_only_addr)),
+                    version: SubstateVersion::ZERO,
+                    substate_or_hash: SubstateValueOrHash::Hash(Hash32::from_array([9u8; 32])),
+                },
+            ]);
+            batch
+                .with_transition(Shard::first(), 2)
+                .push(SubstateTransition::Down {
+                    id: VersionedSubstateId::new(
+                        SubstateId::Template(PublishedTemplateAddress::from_hash(destroyed_addr)),
+                        SubstateVersion::ZERO,
+                    ),
+                });
+            tx.substates_commit_batch(batch)
+        })
+        .unwrap();
+
+    assert!(store.has_template(&live_addr).unwrap());
+    assert!(store.get_template(&live_addr).unwrap().is_some());
+
+    assert!(!store.has_template(&destroyed_addr).unwrap());
+    assert!(store.get_template(&destroyed_addr).unwrap().is_none());
+
+    assert!(!store.has_template(&hash_only_addr).unwrap());
+    assert!(store.get_template(&hash_only_addr).unwrap().is_none());
+}
+
+#[test]
+#[expect(clippy::too_many_lines)]
+fn reader_zero_limit_and_descending_offset_bounds() {
+    use tari_common_types::types::CompressedPublicKey;
+    use tari_consensus_types::{Decision, PcId, ProposalCertificate, ShardGroupAccumulatedData};
+    use tari_ootle_common_types::{ExtraData, NumPreshards, ProtocolVersion, ShardGroup};
+    use tari_ootle_storage::{
+        StateStore,
+        StateStoreReadTransaction,
+        StateStoreWriteTransaction,
+        consensus_models::{
+            Block,
+            BlockCommands,
+            BlockHeader,
+            BlockHeaderMetadata,
+            BlockPledge,
+            CommandsCommitProof,
+            Evidence,
+            ForeignProposal,
+            ForeignProposalRecord,
+        },
+    };
+    use tari_ootle_transaction::Network;
+    use tari_sidechain::{QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
+    use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+
+    use crate::{DatabaseOptions, RocksDbStateStore};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let store = RocksDbStateStore::<String>::open(tmp.path().join("db"), DatabaseOptions::default()).unwrap();
+
+    let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+    let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
+    let justify = ProposalCertificate::new(
+        *zero.id().hash(),
+        *zero.id(),
+        zero.height(),
+        zero.epoch(),
+        shard_group,
+        ProposalCertificate::genesis_signatures(),
+        QuorumDecision::Accept,
+    );
+    let commands = BlockCommands::empty();
+    let header = BlockHeader::create_unsigned(
+        Network::LocalNet,
+        ProtocolVersion::V0,
+        *zero.id(),
+        justify.calculate_id(),
+        None,
+        NodeHeight(1),
+        Epoch(0),
+        shard_group,
+        RistrettoPublicKeyBytes::default(),
+        FixedHash::zero(),
+        &commands,
+        0,
+        1,
+        FixedHash::zero(),
+        ShardGroupAccumulatedData::default(),
+        ExtraData::new(),
+    )
+    .unwrap();
+    let block_a = Block::new(header, justify, commands, None);
+
+    let metadata = BlockHeaderMetadata {
+        total_leader_fee: 0,
+        timestamp: 0,
+        extra_data: Default::default(),
+        timeout_certificate_id: None,
+        is_dummy: false,
+    };
+    let proof = CommandsCommitProof::new_latest(vec![], SidechainBlockCommitProof {
+        header: SidechainBlockHeader {
+            network: 0,
+            protocol_version: 0,
+            parent_id: Default::default(),
+            justify_id: Default::default(),
+            height: 1,
+            epoch: 0,
+            epoch_hash: Default::default(),
+            shard_group: tari_sidechain::ShardGroup {
+                start: 0,
+                end_inclusive: 127,
+            },
+            proposed_by: CompressedPublicKey::default(),
+            state_merkle_root: Default::default(),
+            command_merkle_root: Default::default(),
+            transaction_merkle_root: Default::default(),
+            signature: Default::default(),
+            accumulated_data: Default::default(),
+            metadata_hash: metadata.calculate_hash(),
+        },
+        proof_elements: vec![],
+    });
+    let fp = ForeignProposalRecord::new(ForeignProposal::new(proof, BlockPledge::default(), metadata));
+
+    store
+        .with_write_tx(|tx| {
+            zero.insert(tx)?;
+            tx.blocks_set_qcs(zero.id(), Some(&PcId::zero()), Some(&PcId::zero()))?;
+            tx.locked_block_set(&zero.as_locked())?;
+            block_a.insert(tx)?;
+            tx.leaf_block_set(&block_a.as_leaf())?;
+            tx.foreign_proposals_save(&fp)?;
+            tx.transaction_pool_insert_new(
+                transaction_id_from_seed(1),
+                Decision::Commit,
+                &Evidence::empty(),
+                true,
+                false,
+                Epoch(10),
+                0,
+            )?;
+            Ok::<_, StorageError>(())
+        })
+        .unwrap();
+
+    store
+        .with_read_tx(|tx| {
+            assert!(tx.blocks_get_parent_chain(block_a.id(), 0)?.is_empty());
+            assert_eq!(tx.blocks_get_parent_chain(block_a.id(), 1)?.len(), 1);
+
+            assert!(tx.foreign_proposals_get_all_new(block_a.id(), 0)?.is_empty());
+            assert_eq!(tx.foreign_proposals_get_all_new(block_a.id(), 1)?.len(), 1);
+
+            assert!(
+                tx.blocks_get_all_between(Epoch(0), NodeHeight(0), NodeHeight(1), true, 0)?
+                    .is_empty()
+            );
+            assert_eq!(
+                tx.blocks_get_all_between(Epoch(0), NodeHeight(0), NodeHeight(1), true, 1)?
+                    .len(),
+                1
+            );
+
+            assert!(tx.blocks_get_paginated(0, 0, None, None, None, None)?.is_empty());
+            assert_eq!(tx.blocks_get_paginated(1, 0, None, None, None, None)?.len(), 1);
+
+            // Leaf height is 1: offset 1 returns genesis (height 0), offset 2 (> leaf height) returns empty
+            let at_leaf_offset = tx.blocks_get_paginated(10, 1, None, None, None, Some(Ordering::Descending))?;
+            assert_eq!(at_leaf_offset.len(), 1);
+            assert_eq!(at_leaf_offset[0].id(), zero.id());
+            assert!(
+                tx.blocks_get_paginated(10, 2, None, None, None, Some(Ordering::Descending))?
+                    .is_empty()
+            );
+
+            assert!(tx.transaction_pool_get_all(0)?.is_empty());
+            assert_eq!(tx.transaction_pool_get_all(1)?.len(), 1);
+
+            Ok::<_, StorageError>(())
+        })
+        .unwrap();
+}
+
+#[test]
+fn fixed_bytes_codec_rejects_wrong_length_and_decode_error_formats_correctly() {
+    use crate::{
+        codecs::{DbDecoder, DbEncoder, FixedBytesCodec},
+        error::RocksDbStorageError,
+    };
+
+    let codec = FixedBytesCodec::<4>;
+    assert_eq!(codec.encode_len(&[1u8, 2, 3, 4]).unwrap(), 4);
+    assert!(codec.encode_len(&[1u8, 2, 3]).is_err());
+    assert!(codec.encode(&[1u8, 2, 3]).is_err());
+    let mut buf = Vec::new();
+    assert!(codec.encode_into(&[1u8, 2, 3, 4, 5], &mut buf).is_err());
+
+    let err: RocksDbStorageError = <FixedBytesCodec<4> as DbDecoder<[u8; 4]>>::decode(&codec, &[1u8, 2]).unwrap_err();
+    assert!(err.to_string().starts_with("Decode error:"), "got: {err}");
+}

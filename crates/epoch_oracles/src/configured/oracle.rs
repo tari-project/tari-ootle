@@ -132,6 +132,61 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
         }
     }
 
+    /// The exits this node has emitted, as (public key, exit epoch).
+    fn applied_exits(&self) -> anyhow::Result<Vec<(RistrettoPublicKeyBytes, Epoch)>> {
+        Ok(self
+            .store
+            .get(StoreKey::ConfiguredAppliedExits.as_key_bytes())?
+            .unwrap_or_default())
+    }
+
+    /// Rejects a config whose exits up to `epoch` differ from the exits this node has applied.
+    ///
+    /// A node only applies an exit it reaches with the exit in its config. A node that was given the exit after
+    /// passing its epoch keeps the validator in its committees while its peers drop it, and disagrees with them on
+    /// the validator set from then on, so refuse to start instead.
+    fn verify_applied_exits(&self, epoch: Epoch) -> anyhow::Result<()> {
+        let applied = self.applied_exits()?;
+        for vn in &self.config.validators {
+            let Some(exit_epoch) = vn.exit_epoch.filter(|exit_epoch| *exit_epoch <= epoch) else {
+                continue;
+            };
+            if !applied.contains(&(vn.public_key, exit_epoch)) {
+                anyhow::bail!(
+                    "Validator {} exits at epoch {exit_epoch}, which this node passed (it is at epoch {epoch}) before \
+                     its config held the exit. This node still counts the validator and disagrees with the network on \
+                     the validator set. Resync it from a fresh epoch oracle store.",
+                    vn.public_key
+                );
+            }
+        }
+        for (public_key, exit_epoch) in applied {
+            let in_config = self
+                .config
+                .validators
+                .iter()
+                .any(|vn| vn.public_key == public_key && vn.exit_epoch == Some(exit_epoch));
+            if !in_config {
+                anyhow::bail!(
+                    "This node applied validator {public_key}'s exit at epoch {exit_epoch}, but the current config \
+                     does not hold that exit. An exit is fixed once its epoch is reached; restore it in the config."
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn record_applied_exits(&self, exits: &[RistrettoPublicKeyBytes], exit_epoch: Epoch) -> anyhow::Result<()> {
+        let mut applied = self.applied_exits()?;
+        for public_key in exits {
+            if !applied.contains(&(*public_key, exit_epoch)) {
+                applied.push((*public_key, exit_epoch));
+            }
+        }
+        self.store
+            .set(StoreKey::ConfiguredAppliedExits.as_key_bytes(), &applied)
+    }
+
     fn initialize(&mut self) -> anyhow::Result<()> {
         self.config.validate()?;
 
@@ -149,6 +204,7 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
                 self.verify_or_record_shard_key(vn.public_key, vn.calculate_shard_key())?;
             }
         }
+        self.verify_applied_exits(epoch)?;
 
         for vn in &self.config.validators {
             // A rotation carries the registration's shard key: the new claim key must not reach shard key
@@ -294,6 +350,7 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
                     "☘️ {} VNS exit at epoch {epoch} (current: {next_epoch})",
                     public_keys.len()
                 );
+                self.record_applied_exits(&public_keys, epoch)?;
                 // The epoch manager ends a registration at the epoch its `Remove` event names, so the event names the
                 // exit epoch itself: the validator stays in every committee before it.
                 self.pending_events
@@ -933,6 +990,12 @@ mod tests {
         store
             .set(StoreKey::ConfiguredCurrentEpoch.as_key_bytes(), &Epoch(5))
             .unwrap();
+        store
+            .set(StoreKey::ConfiguredAppliedExits.as_key_bytes(), &vec![(
+                mk_key(1),
+                Epoch(5),
+            )])
+            .unwrap();
         let ticker = ScriptedTicker::new(vec![EpochTickerData {
             epoch: Epoch(5),
             epoch_hash: FixedHash::zero(),
@@ -946,6 +1009,87 @@ mod tests {
             removed_validators(&events).is_empty(),
             "an already-applied exit must not be re-emitted; got {events:?}"
         );
+    }
+
+    #[test]
+    fn an_applied_exit_is_recorded_and_verified_on_restart() {
+        let config = mk_config(vec![mk_exiting_validator(1, Epoch(1), Epoch(5))]);
+        let store = TestStore::default();
+        let mut oracle = ConfiguredEpochOracle::with_custom_ticker(config.clone(), store, ticker_through(6));
+        drive_events(&mut oracle);
+
+        let store = oracle.store;
+        assert_eq!(
+            store
+                .get::<Vec<(RistrettoPublicKeyBytes, Epoch)>>(StoreKey::ConfiguredAppliedExits.as_key_bytes())
+                .unwrap(),
+            Some(vec![(mk_key(1), Epoch(5))])
+        );
+        let mut restarted = ConfiguredEpochOracle::with_custom_ticker(config, store, ticker_from(6, 6));
+        let events = drive_events(&mut restarted);
+        assert!(
+            !events.iter().any(|e| matches!(e, EpochEvent::Error(_))),
+            "got {events:?}"
+        );
+    }
+
+    #[test]
+    fn an_exit_received_after_its_epoch_stops_the_oracle() {
+        // A prior run passed epoch 5 under a config without the exit.
+        let store = TestStore::default();
+        store
+            .set(StoreKey::ConfiguredCurrentEpoch.as_key_bytes(), &Epoch(6))
+            .unwrap();
+        let config = mk_config(vec![mk_exiting_validator(1, Epoch(1), Epoch(5))]);
+        let mut oracle = ConfiguredEpochOracle::with_custom_ticker(config, store, ticker_from(6, 6));
+
+        let events = drive_events(&mut oracle);
+
+        match events.as_slice() {
+            [EpochEvent::Error(err)] => {
+                let err = err.to_string();
+                assert!(err.contains("Resync it from a fresh epoch oracle store"), "{err}");
+            },
+            _ => panic!("a late exit must stop the oracle; got {events:?}"),
+        }
+    }
+
+    #[test]
+    fn an_applied_exit_dropped_from_the_config_stops_the_oracle() {
+        let store = TestStore::default();
+        store
+            .set(StoreKey::ConfiguredCurrentEpoch.as_key_bytes(), &Epoch(6))
+            .unwrap();
+        store
+            .set(StoreKey::ConfiguredAppliedExits.as_key_bytes(), &vec![(
+                mk_key(1),
+                Epoch(5),
+            )])
+            .unwrap();
+        let config = mk_config(vec![mk_validator(1, Epoch(1))]);
+        let mut oracle = ConfiguredEpochOracle::with_custom_ticker(config, store, ticker_from(6, 6));
+
+        let events = drive_events(&mut oracle);
+
+        match events.as_slice() {
+            [EpochEvent::Error(err)] => {
+                let err = err.to_string();
+                assert!(err.contains("does not hold that exit"), "{err}");
+            },
+            _ => panic!("dropping an applied exit must stop the oracle; got {events:?}"),
+        }
+    }
+
+    fn ticker_from(first_epoch: u64, last_epoch: u64) -> ScriptedTicker {
+        ScriptedTicker::new(
+            (first_epoch..=last_epoch)
+                .map(|e| EpochTickerData {
+                    epoch: Epoch(e),
+                    epoch_hash: FixedHash::zero(),
+                    done_for_now: e == last_epoch,
+                })
+                .collect(),
+        )
     }
 
     #[test]

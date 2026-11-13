@@ -59,7 +59,8 @@
 # be given the new config at any point before that epoch.
 #
 # To remove a validator, set its `exit_epoch` to an epoch every node will reach after receiving the new config. A node
-# already past that epoch when it receives the config never applies the exit.
+# already past that epoch when it receives the config refuses to start, since it would disagree with the network on
+# the validator set; resync it from a fresh epoch oracle store.
 #
 # To rotate a claim key, add an entry to `claim_key_changes`; do not edit `claim_key`, which is fixed once the
 # validator has activated (it is an input to shard key derivation). Fees already earned under the previous key stay

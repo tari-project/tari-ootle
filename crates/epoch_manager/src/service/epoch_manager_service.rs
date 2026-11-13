@@ -1096,6 +1096,11 @@ mod tests {
             2,
             "the current epoch's committee must not change"
         );
+        assert_eq!(
+            service.inner.get_total_validator_count(Epoch(6)).unwrap(),
+            2,
+            "the validator must stay registered for the current epoch"
+        );
 
         service
             .activate_epoch(Epoch(7), FixedHash::from([2; 32]))

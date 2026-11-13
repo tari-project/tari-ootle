@@ -864,12 +864,7 @@ mod tests {
             47200,
         );
         manager
-            .create_instance(
-                &node_exec,
-                InstanceType::MinoTariNode,
-                "bn".to_string(),
-                HashMap::new(),
-            )
+            .create_instance(&node_exec, InstanceType::MinoTariNode, "bn".to_string(), HashMap::new())
             .await
             .unwrap();
 
@@ -882,8 +877,10 @@ mod tests {
             )
             .await
             .unwrap();
-        let custom_settings =
-            HashMap::from([(CLAIM_PUBLIC_KEY_SETTINGS_KEY.to_string(), "custom-claim-key".to_string())]);
+        let custom_settings = HashMap::from([(
+            CLAIM_PUBLIC_KEY_SETTINGS_KEY.to_string(),
+            "custom-claim-key".to_string(),
+        )]);
         let override_vn_id = manager
             .create_instance(
                 &vn_exec,

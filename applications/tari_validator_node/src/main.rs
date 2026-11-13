@@ -301,10 +301,7 @@ mod tests {
             .unwrap();
         let (resolved_words, resolved_file) =
             resolve_seed_words_args(Some(other_words.clone()), None, None, Some(path.as_path()));
-        assert_eq!(
-            load_seed_words(resolved_words, resolved_file).unwrap().unwrap(),
-            words
-        );
+        assert_eq!(load_seed_words(resolved_words, resolved_file).unwrap().unwrap(), words);
 
         let (resolved_words, resolved_file) =
             resolve_seed_words_args(None, Some(path.as_path()), Some(other_words.clone()), None);

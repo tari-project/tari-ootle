@@ -737,13 +737,10 @@ mod tests {
             secret_key: &'a RistrettoSecretKey,
             public_key: &'a RistrettoPublicKey,
         }
-        save_as_json(
-            &path,
-            &Mismatched {
-                secret_key: kp1.secret_key(),
-                public_key: kp2.public_key(),
-            },
-        )
+        save_as_json(&path, &Mismatched {
+            secret_key: kp1.secret_key(),
+            public_key: kp2.public_key(),
+        })
         .unwrap();
         assert!(matches!(load_keypair(&path), Err(IdentityError::JsonError(_))));
         assert!(matches!(

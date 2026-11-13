@@ -75,7 +75,9 @@ impl<A, B> Router<A, B> {
     pub fn add_service<T>(mut self, service: T) -> Router<T, Or<A, B>>
     where T: NamedProtocolService {
         let expected_protocol = StreamProtocol::new(<T as NamedProtocolService>::PROTOCOL_NAME);
-        self.protocol_names.push(expected_protocol.clone());
+        if !self.protocol_names.contains(&expected_protocol) {
+            self.protocol_names.push(expected_protocol.clone());
+        }
         let predicate = move |protocol: &StreamProtocol| expected_protocol == *protocol;
         Router {
             protocol_names: self.protocol_names,
@@ -320,3 +322,30 @@ where
 //         assert_eq!(proto_str, "/totally/real/protocol");
 //     }
 // }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestServiceA;
+    impl NamedProtocolService for TestServiceA {
+        const PROTOCOL_NAME: &'static str = "/tari/test-a/1.0.0";
+    }
+
+    struct TestServiceB;
+    impl NamedProtocolService for TestServiceB {
+        const PROTOCOL_NAME: &'static str = "/tari/test-b/1.0.0";
+    }
+
+    #[test]
+    fn add_service_deduplicates_protocol_names() {
+        let router = Router::new(RpcServer::new(), TestServiceA)
+            .add_service(TestServiceB)
+            .add_service(TestServiceA);
+
+        assert_eq!(router.all_protocols(), &[
+            StreamProtocol::new(TestServiceA::PROTOCOL_NAME),
+            StreamProtocol::new(TestServiceB::PROTOCOL_NAME),
+        ]);
+    }
+}

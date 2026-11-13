@@ -324,9 +324,20 @@ where TPeerStore: PeerStore
                     }
                 }
             },
+            Event::InboundRequestCompleted { .. } => {
+                if !self.remaining_want_peers.is_empty() {
+                    match block_on(self.store().difference(&self.want_peers)) {
+                        Ok(peers) => {
+                            self.remaining_want_peers = peers;
+                        },
+                        Err(err) => {
+                            tracing::error!("Failed to get peer from store: {}", err);
+                        },
+                    }
+                }
+            },
             Event::InboundStreamInterrupted { .. } => {},
             Event::OutboundStreamInterrupted { .. } => {},
-            Event::InboundRequestCompleted { .. } => {},
             Event::LocalPeerRecordUpdated => {},
             Event::Error(_) => {},
         }
@@ -428,5 +439,33 @@ mod tests {
 
         close_connection(&mut behaviour, peer_id, outbound_conn);
         assert!(!behaviour.active_outbound_connections.contains_key(&peer_id));
+    }
+
+    #[test]
+    fn inbound_request_completed_refreshes_remaining_want_peers() {
+        let store = MemoryPeerStore::new();
+        let mut behaviour = Behaviour::new(Keypair::generate_ed25519(), store.clone(), Config::default());
+
+        let wanted_kp = Arc::new(Keypair::generate_ed25519());
+        let wanted_peer_id = wanted_kp.public().to_peer_id();
+        block_on(behaviour.want_peers([wanted_peer_id])).unwrap();
+        assert!(behaviour.remaining_want_peers.contains(&wanted_peer_id));
+
+        // Simulate an inbound sync storing `wanted_peer_id`'s record and emitting `InboundRequestCompleted`.
+        let mut wanted_rec = LocalPeerRecord::new(wanted_kp);
+        let addr: Multiaddr = "/ip4/127.0.0.1/tcp/9001".parse().unwrap();
+        wanted_rec.add_address(addr);
+        block_on(store.put(SignedPeerRecord::from(wanted_rec))).unwrap();
+
+        behaviour.on_connection_handler_event(
+            wanted_peer_id,
+            ConnectionId::new_unchecked(1),
+            Event::InboundRequestCompleted {
+                peer_id: wanted_peer_id,
+                peers_sent: 0,
+                requested: 0,
+            },
+        );
+        assert!(behaviour.remaining_want_peers.is_empty());
     }
 }

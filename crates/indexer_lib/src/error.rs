@@ -5,7 +5,7 @@ use std::time;
 
 use tari_engine_types::{published_template::PublishedTemplateAddress, substate::SubstateId};
 use tari_epoch_manager::EpochManagerError;
-use tari_ootle_common_types::SubstateVersion;
+use tari_ootle_common_types::{SubstateVersion, substate_type::SubstateTypeMismatch};
 
 use crate::substate_cache::SubstateCacheError;
 
@@ -30,12 +30,16 @@ pub enum IndexerError {
         substate_id: SubstateId,
         details: String,
     },
+    #[error("{vn} served a value of the wrong type: {mismatch}")]
+    MistypedSubstateValue { vn: String, mismatch: SubstateTypeMismatch },
     #[error("{vn} served a template for {requested} whose author and binary hash derive {derived}")]
     TemplateAddressMismatch {
         vn: String,
         requested: PublishedTemplateAddress,
         derived: PublishedTemplateAddress,
     },
+    #[error("{vn} returned unrequested or duplicate substate {substate_id} in a batch")]
+    UnrequestedSubstateInBatch { vn: String, substate_id: SubstateId },
     #[error("Not found transaction for component address {0} and version {1}")]
     NotFoundTransaction(SubstateId, u32),
     #[error("Failed to get consensus constants: {0}")]

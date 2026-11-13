@@ -158,11 +158,14 @@ fn component_vault_id_strings(
         .body
         .to_indexed_well_known_types()
         .map_err(|e| OotleSdkError::Parse(format!("failed to index component state for {context}: {e}")))?;
-    Ok(indexed
-        .vault_ids()
-        .iter()
-        .map(|v| SubstateId::Vault(*v).to_string())
-        .collect())
+    let mut vault_ids = Vec::with_capacity(indexed.vault_ids().len());
+    for v in indexed.vault_ids() {
+        let id = SubstateId::Vault(*v).to_string();
+        if !vault_ids.contains(&id) {
+            vault_ids.push(id);
+        }
+    }
+    Ok(vault_ids)
 }
 
 /// Decodes any fetched substate value into a typed, kind-tagged [`DecodedSubstate`].
@@ -522,5 +525,18 @@ mod tests {
     fn malformed_substate_is_parse_error() {
         let err = decode_substate(&serde_json::json!({ "NotASubstate": 1 })).unwrap_err();
         assert_eq!(err.code(), "PARSE");
+    }
+
+    #[test]
+    fn duplicate_vault_refs_in_component_state_are_deduplicated() {
+        let r = resource(9);
+        let id = vault_id(1);
+        let v = fungible_vault(r, 1_000);
+        let account = account_substate_json(&[id, id]);
+        let wants = account_balance_wants(&account).expect("wants");
+        assert_eq!(wants, vec![SubstateId::Vault(id).to_string()]);
+        let balances = account_balances(&account, &[fetched_vault(id, &v)]).expect("balances");
+        assert_eq!(balances.len(), 1);
+        assert_eq!(balances[0].revealed_balance, 1_000);
     }
 }

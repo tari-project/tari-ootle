@@ -11,7 +11,7 @@
 //! Each write transaction stages its changes on a private copy of the state and publishes them only once its RocksDB
 //! commit has succeeded, so the state never holds anything the database does not.
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use crate::{
     block_diff_table::BlockDiffTable,
@@ -52,11 +52,6 @@ impl SharedPendingState {
         // The guarded state is replaced only after the RocksDB commit it mirrors has succeeded, so a panic while
         // holding the lock cannot leave it describing an uncommitted change.
         self.published.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    /// The latest published state.
-    pub fn latest(&self) -> PendingState {
-        self.with_published(PendingState::clone)
     }
 
     /// Runs `f` on the published state, holding off publishing until it returns. Publishing waits for the commit it
@@ -127,17 +122,22 @@ impl StagedPendingState {
 pub(crate) enum PendingStateView<'a> {
     /// The state published when a read view's snapshot was taken.
     Pinned(PendingState),
-    /// A write transaction's state: the latest published one, until the transaction changes it, and from then on its
+    /// A write transaction's state: the state published when the transaction first reads it, and from then on its
     /// staged copy.
     Writer {
         shared: &'a SharedPendingState,
+        read: OnceLock<StagedPendingState>,
         staged: Option<StagedPendingState>,
     },
 }
 
 impl<'a> PendingStateView<'a> {
     pub fn writer(shared: &'a SharedPendingState) -> Self {
-        Self::Writer { shared, staged: None }
+        Self::Writer {
+            shared,
+            read: OnceLock::new(),
+            staged: None,
+        }
     }
 
     pub fn state(&self) -> PendingState {
@@ -146,26 +146,80 @@ impl<'a> PendingStateView<'a> {
             Self::Writer {
                 staged: Some(staged), ..
             } => staged.state().clone(),
-            Self::Writer { shared, staged: None } => shared.latest(),
+            Self::Writer {
+                shared,
+                read,
+                staged: None,
+            } => read.get_or_init(|| shared.stage()).state().clone(),
         }
     }
 
-    /// The staged copy changes are applied to, created from the latest published state on first use.
+    /// The staged copy changes are applied to. It is built on the state the transaction first read, or on the latest
+    /// published state if the transaction has not read any.
     ///
     /// # Panics
     /// On a pinned view, which belongs to a read view and is never written.
     pub fn staged_mut(&mut self) -> &mut StagedPendingState {
         match self {
             Self::Pinned(_) => panic!("a read view's pending state is never written"),
-            Self::Writer { shared, staged } => staged.get_or_insert_with(|| shared.stage()),
+            Self::Writer { shared, read, staged } => {
+                staged.get_or_insert_with(|| read.take().unwrap_or_else(|| shared.stage()))
+            },
         }
     }
 
     /// The state to publish to and the changes to publish, if this transaction changed any.
+    ///
+    /// A transaction that read the pending state without changing it returns `None`, so its commit is not checked
+    /// against later publishes. Every write of a pending-state record stages first, but a database write the caller
+    /// derives from a pending-state read alone is committed even if another transaction has published since.
     pub fn into_staged(self) -> Option<(&'a SharedPendingState, StagedPendingState)> {
         match self {
             Self::Pinned(_) => None,
-            Self::Writer { shared, staged } => staged.map(|staged| (shared, staged)),
+            Self::Writer { shared, staged, .. } => staged.map(|staged| (shared, staged)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn writer_rejects_commit_when_published_state_changes_between_read_and_stage() {
+        let shared = SharedPendingState::default();
+
+        let mut writer1 = PendingStateView::writer(&shared);
+        let _initial_read = writer1.state();
+
+        let mut writer2 = PendingStateView::writer(&shared);
+        let _ = writer2.staged_mut();
+        let (shared2, staged2) = writer2.into_staged().unwrap();
+        shared2.commit_and_publish(staged2, || Ok(())).unwrap();
+
+        let _ = writer1.staged_mut();
+        let (shared1, staged1) = writer1.into_staged().unwrap();
+        let mut committed = false;
+        let err = shared1
+            .commit_and_publish(staged1, || {
+                committed = true;
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(!committed);
+        assert!(
+            matches!(&err, RocksDbStorageError::GeneralError { message }
+                if message.contains("another write transaction changed the pending block state")),
+            "unexpected error: {err:?}"
+        );
+        assert_eq!(shared.published().generation, 1);
+    }
+
+    #[test]
+    fn read_only_writer_does_not_produce_staged_state() {
+        let shared = SharedPendingState::default();
+        let writer = PendingStateView::writer(&shared);
+        let _state = writer.state();
+        assert!(writer.into_staged().is_none());
     }
 }

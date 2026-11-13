@@ -42,8 +42,14 @@ impl TryFrom<BlockHeaderModel> for global::BlockHeaderModel {
 
     fn try_from(value: BlockHeaderModel) -> Result<Self, Self::Error> {
         Ok(Self {
-            epoch: Epoch(value.epoch as u64),
-            height: value.height as u64,
+            epoch: u64::try_from(value.epoch)
+                .map(Epoch)
+                .map_err(|e| SqliteStorageError::ConversionError {
+                    reason: format!("Epoch invalid: {e}"),
+                })?,
+            height: u64::try_from(value.height).map_err(|e| SqliteStorageError::ConversionError {
+                reason: format!("Height invalid: {e}"),
+            })?,
             block_hash: value
                 .block_hash
                 .try_into()
@@ -97,9 +103,30 @@ mod tests {
         for len in [0, 31, 33] {
             let err = global::BlockHeaderModel::try_from(model(vec![4u8; len])).unwrap_err();
             assert!(
-                matches!(&err, SqliteStorageError::ConversionError { reason } if reason.starts_with("Block output merkle root invalid")),
+                matches!(
+                    &err,
+                    SqliteStorageError::ConversionError { reason }
+                        if reason.starts_with("Block output merkle root invalid")
+                ),
                 "len {len}: {err}"
             );
         }
+    }
+
+    #[test]
+    fn rejects_negative_epoch_or_height() {
+        let mut neg_epoch = model(vec![4u8; 32]);
+        neg_epoch.epoch = -1;
+        assert!(matches!(
+            global::BlockHeaderModel::try_from(neg_epoch),
+            Err(SqliteStorageError::ConversionError { .. })
+        ));
+
+        let mut neg_height = model(vec![4u8; 32]);
+        neg_height.height = -1;
+        assert!(matches!(
+            global::BlockHeaderModel::try_from(neg_height),
+            Err(SqliteStorageError::ConversionError { .. })
+        ));
     }
 }

@@ -1025,7 +1025,7 @@ mod tests {
         const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
         const NETWORK: Network = Network::LocalNet;
 
-        fn foreign_proposal_with_unknown_protocol_version() -> ForeignProposal {
+        fn foreign_proposal_with(shard_group: ShardGroup, protocol_version: u32) -> ForeignProposal {
             let metadata = BlockHeaderMetadata {
                 total_leader_fee: 0,
                 timestamp: 0,
@@ -1035,15 +1035,15 @@ mod tests {
             };
             let header = SidechainBlockHeader {
                 network: NETWORK.as_byte(),
-                protocol_version: u32::MAX,
+                protocol_version,
                 parent_id: Default::default(),
                 justify_id: Default::default(),
                 height: 1,
                 epoch: 0,
                 epoch_hash: Default::default(),
                 shard_group: tari_sidechain::ShardGroup {
-                    start: 128,
-                    end_inclusive: 255,
+                    start: shard_group.start().as_u32(),
+                    end_inclusive: shard_group.end().as_u32(),
                 },
                 proposed_by: Default::default(),
                 state_merkle_root: Default::default(),
@@ -1058,6 +1058,10 @@ mod tests {
                 proof_elements: vec![],
             });
             ForeignProposal::new(commit_proof, BlockPledge::default(), metadata)
+        }
+
+        fn foreign_proposal_with_unknown_protocol_version() -> ForeignProposal {
+            foreign_proposal_with(ShardGroup::new(128, 255), u32::MAX)
         }
 
         #[test]
@@ -1087,6 +1091,64 @@ mod tests {
                 .unwrap();
 
             let fp = foreign_proposal_with_unknown_protocol_version();
+            let atom = fp.to_atom();
+            let mut batch = ProposalBatch {
+                foreign_proposals: vec![fp],
+                transactions: vec![],
+                commands: vec![],
+            };
+            let mut commands = vec![Command::ForeignProposal(atom.clone())];
+            let committee_info = CommitteeInfo::new(NUM_PRESHARDS, 1, 2, local_group, Epoch(0), VotePower::of(1));
+
+            let invalid_foreign_proposals = store
+                .with_read_tx(|tx| {
+                    let mut substate_store = PendingSubstateStore::init(tx, genesis.as_leaf(), NUM_PRESHARDS).unwrap();
+                    let mut change_set = ProposedBlockChangeSet::new(genesis.as_leaf());
+                    process_proposal_batch_foreign_proposals(
+                        tx,
+                        &genesis,
+                        genesis.justify().calculate_id(),
+                        &committee_info,
+                        &mut substate_store,
+                        &mut batch,
+                        &mut commands,
+                        &mut change_set,
+                    )
+                })
+                .unwrap();
+
+            assert!(commands.is_empty(), "block must carry no ForeignProposal command");
+            assert_eq!(invalid_foreign_proposals, vec![atom.block_id]);
+            assert!(batch.foreign_proposals.is_empty());
+        }
+
+        #[test]
+        fn a_foreign_proposal_naming_the_local_shard_group_is_dropped_and_condemned() {
+            let tmp = tempfile::tempdir().unwrap();
+            let store = RocksDbStateStore::<String>::open(tmp.path(), DatabaseOptions::default()).unwrap();
+            let mut zero = Block::zero_block(NETWORK, NUM_PRESHARDS);
+            let local_group = ShardGroup::new(0, 127);
+            let genesis = Block::genesis(
+                NETWORK,
+                ProtocolVersion::V0,
+                Epoch(0),
+                FixedHash::zero(),
+                local_group,
+                FixedHash::zero(),
+                None,
+                ExhaustBurnRate::new(0),
+            );
+            store
+                .with_write_tx(|tx| {
+                    zero.justify().save(tx)?;
+                    zero.insert(tx)?;
+                    zero.add_justify_qc(tx, &PcId::zero())?;
+                    genesis.justify().save(tx)?;
+                    genesis.insert(tx)
+                })
+                .unwrap();
+
+            let fp = foreign_proposal_with(local_group, ProtocolVersion::V0.as_u32());
             let atom = fp.to_atom();
             let mut batch = ProposalBatch {
                 foreign_proposals: vec![fp],

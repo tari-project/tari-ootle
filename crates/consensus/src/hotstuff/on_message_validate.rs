@@ -775,6 +775,16 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             });
         }
 
+        if msg.proposal.shard_group_checked() == Some(epoch_state.local_committee_info().shard_group()) {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️ Foreign proposal block {} from {from} names the local shard group {}; discarding message",
+                msg.proposal,
+                epoch_state.local_committee_info().shard_group(),
+            );
+            return Ok(MessageValidationResult::Discard);
+        }
+
         let committee = match validations::resolve_foreign_committee(&self.epoch_manager, &msg.proposal).await {
             Ok(Some(committee)) => committee,
             Ok(None) => return Ok(MessageValidationResult::Discard),
@@ -796,10 +806,19 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             });
         }
 
+        self.admit_or_park_foreign_proposal(epoch_state.local_committee_info(), from, msg)
+    }
+
+    fn admit_or_park_foreign_proposal(
+        &self,
+        local_committee_info: &CommitteeInfo,
+        from: TConsensusSpec::Addr,
+        msg: ForeignProposalMessage,
+    ) -> Result<MessageValidationResult<TConsensusSpec::Addr>, HotStuffError> {
         self.store.with_write_tx(|tx| {
             let all_involved_transactions = msg
                 .proposal
-                .all_transaction_ids_in_committee(epoch_state.local_committee_info());
+                .all_transaction_ids_in_committee(local_committee_info);
             // CASE: all foreign proposals must include evidence
             let num_transactions = all_involved_transactions.clone().count();
             if num_transactions == 0 {
@@ -813,9 +832,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 return Ok(MessageValidationResult::Invalid {
                     from,
                     message: HotstuffMessage::ForeignProposal(msg),
-                    err: ProposalValidationError::NoTransactionsInCommittee {
-                        block_id,
-                    }.into(),
+                    err: ProposalValidationError::NoTransactionsInCommittee { block_id }.into(),
                 });
             }
 
@@ -841,8 +858,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             // The first parked message carrying a block holds its slot until unparked, so a message that withholds a
             // command or whose pledges its evidence does not commit to is turned away here, leaving the slot for
             // another delivery of the block.
-            if let Err(err) =
-                validate_foreign_proposal_contents(&msg.proposal, epoch_state.local_committee_info().shard_group()) &&
+            if let Err(err) = validate_foreign_proposal_contents(&msg.proposal, local_committee_info.shard_group()) &&
                 err.rejects_message_not_block()
             {
                 warn!(target: LOG_TARGET, "⚠️ Discarding foreign proposal from {from}: {err}");

@@ -453,5 +453,19 @@ mod template {
             proof.drop();
             self.vault.as_mut().unwrap().deposit(joined);
         }
+
+        pub fn read_vault_balance(vault_id: VaultId) -> Amount {
+            Vault::for_test(vault_id).balance()
+        }
+
+        pub fn read_vault_balance_in_component_context(&self, vault_id: VaultId) -> Amount {
+            Vault::for_test(vault_id).balance()
+        }
+
+        pub fn call_then_read_vault_balance(victim: ComponentAddress, vault_id: VaultId) -> Amount {
+            let _balances: Vec<(ResourceAddress, Amount)> =
+                ComponentManager::get(victim).call("get_balances", args![]);
+            Vault::for_test(vault_id).balance()
+        }
     }
 }

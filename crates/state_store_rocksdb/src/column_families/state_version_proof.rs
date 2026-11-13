@@ -4,10 +4,21 @@
 use tari_consensus_types::BlockId;
 use tari_ootle_common_types::{Epoch, shard::Shard};
 use tari_ootle_storage::consensus_models::StateVersionProof;
+use tari_ootle_transaction::TransactionId;
 use tari_state_tree::Version;
 
 use crate::{
-    codecs::{BlockIdCodec, BytesCodec, EpochCodec, KeyPrefix, NumberCodec, SerdeBridgeCodec, ShardCodec, UnitCodec},
+    codecs::{
+        BlockIdCodec,
+        BytesCodec,
+        EpochCodec,
+        KeyPrefix,
+        NumberCodec,
+        SerdeBridgeCodec,
+        ShardCodec,
+        TransactionIdCodec,
+        UnitCodec,
+    },
     column_families::cf_names,
     prefixed,
     traits::{Cf, QueryCf},
@@ -39,9 +50,10 @@ impl Cf for StateVersionProofCf {
 
 prefixed!(BlockCommitProofPrefix, KeyPrefix::BlockCommitProofs);
 
-/// The CBOR-encoded commit proof of each committed block that produced state versions, which the
-/// [`StateVersionProofCf`] entries naming the block are served with once the block is pruned. Deleted with the last
-/// of those entries, through [`BlockCommitProofCitationCf`].
+/// The CBOR-encoded commit proof of each committed block that produced state versions or finalized transactions, which
+/// the [`StateVersionProofCf`] entries and finalized transaction inclusions naming the block are served with once the
+/// block is pruned. Deleted with the last of those, through [`BlockCommitProofCitationCf`] and
+/// [`BlockCommitProofTransactionCitationCf`].
 pub struct BlockCommitProofCf;
 
 impl Cf for BlockCommitProofCf {
@@ -127,6 +139,35 @@ pub struct BlockCommitProofCitationByBlockQuery;
 
 impl QueryCf for BlockCommitProofCitationByBlockQuery {
     type Cf = BlockCommitProofCitationCf;
+    type Key = BlockId;
+    type KeyCodec = BlockIdCodec;
+}
+
+prefixed!(
+    BlockCommitProofTransactionCitationPrefix,
+    KeyPrefix::BlockCommitProofTransactionCitations
+);
+
+/// Per committed block, each transaction whose finalized transaction link holds an inclusion in the block. A
+/// transaction holds at most one inclusion, in the block that last finalized it.
+pub struct BlockCommitProofTransactionCitationCf;
+
+impl Cf for BlockCommitProofTransactionCitationCf {
+    type Key = (BlockId, TransactionId);
+    type KeyCodec = (BlockIdCodec, TransactionIdCodec);
+    type Prefix = BlockCommitProofTransactionCitationPrefix;
+    type Value = ();
+    type ValueCodec = UnitCodec;
+
+    fn name() -> &'static str {
+        cf_names::STATE_TREE
+    }
+}
+
+pub struct BlockCommitProofTransactionCitationByBlockQuery;
+
+impl QueryCf for BlockCommitProofTransactionCitationByBlockQuery {
+    type Cf = BlockCommitProofTransactionCitationCf;
     type Key = BlockId;
     type KeyCodec = BlockIdCodec;
 }

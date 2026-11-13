@@ -23,6 +23,8 @@ mod epoch_end_drain;
 #[cfg(test)]
 mod extends_justify;
 #[cfg(test)]
+mod finalized_transaction_proofs;
+#[cfg(test)]
 mod foreign_prepare_timeout;
 #[cfg(test)]
 mod foreign_proposal_committee;

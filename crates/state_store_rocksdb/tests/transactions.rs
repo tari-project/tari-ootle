@@ -552,7 +552,8 @@ mod transaction_execution_operations {
         .unwrap();
         let transactions = tx.transaction_pool_get_all(1000).unwrap();
         assert_eq!(transactions.len(), 1);
-        tx.transactions_finalize_all(Epoch(1), transactions.iter()).unwrap();
+        tx.transactions_finalize_all(Epoch(1), transactions.iter().map(|t| (t, None)))
+            .unwrap();
 
         let rec = tx.transactions_get(tx1.id()).unwrap();
         assert!(rec.is_finalized(&*tx).unwrap(), "Transaction should be finalized");
@@ -830,7 +831,8 @@ mod finalized_transaction_gc {
         )
         .unwrap();
         let pool = tx.transaction_pool_get_all(1000).unwrap();
-        tx.transactions_finalize_all(Epoch(1), pool.iter()).unwrap();
+        tx.transactions_finalize_all(Epoch(1), pool.iter().map(|t| (t, None)))
+            .unwrap();
         assert!(tx.transactions_exists(tx1.id()).unwrap());
         assert!(TransactionRecord::is_record_finalized(&*tx, tx1.id()).unwrap());
 
@@ -872,7 +874,8 @@ mod finalized_transaction_gc {
         )
         .unwrap();
         let pool = tx.transaction_pool_get_all(1000).unwrap();
-        tx.transactions_finalize_all(Epoch(1), pool.iter()).unwrap();
+        tx.transactions_finalize_all(Epoch(1), pool.iter().map(|t| (t, None)))
+            .unwrap();
 
         tx.epoch_cleanup(Epoch(10)).unwrap();
         assert!(tx.transactions_exists(tx1.id()).unwrap());
@@ -912,8 +915,10 @@ mod finalized_transaction_gc {
         let pool = tx.transaction_pool_get_all(1000).unwrap();
 
         // Finalized in epoch 1, then finalized again in epoch 5: the index entry moves.
-        tx.transactions_finalize_all(Epoch(1), pool.iter()).unwrap();
-        tx.transactions_finalize_all(Epoch(5), pool.iter()).unwrap();
+        tx.transactions_finalize_all(Epoch(1), pool.iter().map(|t| (t, None)))
+            .unwrap();
+        tx.transactions_finalize_all(Epoch(5), pool.iter().map(|t| (t, None)))
+            .unwrap();
         tx.epoch_cleanup(Epoch(2)).unwrap();
         assert!(
             tx.transactions_exists(tx1.id()).unwrap(),
@@ -924,7 +929,8 @@ mod finalized_transaction_gc {
         // Resurrected (as consensus does for an aborted id) and finalized again in epoch 7.
         tx.transactions_finalized_remove(tx1.id()).unwrap();
         assert!(!TransactionRecord::is_record_finalized(&*tx, tx1.id()).unwrap());
-        tx.transactions_finalize_all(Epoch(7), pool.iter()).unwrap();
+        tx.transactions_finalize_all(Epoch(7), pool.iter().map(|t| (t, None)))
+            .unwrap();
         tx.epoch_cleanup(Epoch(6)).unwrap();
         assert!(
             tx.transactions_exists(tx1.id()).unwrap(),
@@ -935,6 +941,195 @@ mod finalized_transaction_gc {
         tx.epoch_cleanup(Epoch(8)).unwrap();
         assert!(!tx.transactions_exists(tx1.id()).unwrap());
         assert!(!TransactionRecord::is_record_finalized(&*tx, tx1.id()).unwrap());
+
+        tx.rollback().unwrap();
+    }
+}
+
+mod finalized_transaction_inclusions {
+    use tari_consensus_types::BlockId;
+    use tari_ootle_common_types::{SubstateVersion, optional::Optional, shard::Shard};
+    use tari_ootle_storage::consensus_models::{
+        FinalizedTransactionInclusion,
+        StateVersionProof,
+        StateVersionProofSource,
+    };
+    use tari_state_tree::{KeyedProofTree, LeafKey, SparseMerkleProofExt, TreeHash};
+
+    use super::*;
+
+    fn block(seed: u8) -> BlockId {
+        BlockId::from([seed; 32])
+    }
+
+    fn proof(seed: u8) -> SparseMerkleProofExt {
+        let key = LeafKey::new(TreeHash::new([seed; 32]));
+        let tree = KeyedProofTree::build([(key, TreeHash::new([seed; 32]))]).unwrap();
+        tree.get_proof(&key).unwrap().1
+    }
+
+    fn inclusion(block_id: BlockId) -> FinalizedTransactionInclusion {
+        FinalizedTransactionInclusion {
+            block_id,
+            proof: proof(block_id.as_bytes()[0]),
+        }
+    }
+
+    /// Inserts `n` transactions into the pool, returning their pool records.
+    fn pool_transactions<T>(tx: &mut T, n: usize) -> Vec<TransactionPoolRecord>
+    where
+        T: StateStoreWriteTransaction + std::ops::Deref,
+        T::Target: StateStoreReadTransaction,
+    {
+        for _ in 0..n {
+            let rec = TransactionRecord::new(
+                Transaction::builder_localnet(Epoch(1))
+                    .add_instruction(Instruction::DropAllProofsInWorkspace)
+                    .add_input(SubstateRequirement::new(
+                        create_random_substate_id(),
+                        Some(SubstateVersion::ZERO),
+                    ))
+                    .build_and_seal(&PrivateKey::default()),
+            );
+            tx.transactions_insert(&rec).unwrap();
+            tx.transaction_pool_insert_new(
+                *rec.id(),
+                Decision::Commit,
+                &Evidence::empty(),
+                true,
+                false,
+                Epoch(1),
+                0,
+            )
+            .unwrap();
+        }
+        tx.transaction_pool_get_all(1000).unwrap()
+    }
+
+    fn finalize_in<T: StateStoreWriteTransaction>(
+        tx: &mut T,
+        epoch: Epoch,
+        block_id: BlockId,
+        transactions: &[TransactionPoolRecord],
+    ) {
+        tx.block_commit_proofs_insert(&block_id, b"commit proof").unwrap();
+        tx.transactions_finalize_all(epoch, transactions.iter().map(|t| (t, Some(inclusion(block_id)))))
+            .unwrap();
+    }
+
+    fn holds_commit_proof(tx: &impl StateStoreReadTransaction, block_id: BlockId) -> bool {
+        tx.block_commit_proofs_get(&block_id).optional().unwrap().is_some()
+    }
+
+    #[test]
+    fn an_inclusion_and_its_commit_proof_are_pruned_with_the_transaction() {
+        let (db, _tmp) = create_rocksdb();
+        let mut tx = db.create_write_tx().unwrap();
+        commit_chain(&mut tx, &create_chain(10));
+        let pool = pool_transactions(&mut tx, 1);
+        let id = *pool[0].id();
+
+        finalize_in(&mut tx, Epoch(1), block(1), &pool);
+        assert_eq!(
+            tx.finalized_transaction_inclusion_get(&id).unwrap(),
+            Some(inclusion(block(1)))
+        );
+        tx.epoch_cleanup(Epoch(1)).unwrap();
+        assert!(
+            holds_commit_proof(&*tx, block(1)),
+            "pruned while its transaction is retained"
+        );
+
+        // epoch_history_length is 1, so cleaning at epoch 2 prunes the bookkeeping finalized in epoch 1.
+        tx.epoch_cleanup(Epoch(2)).unwrap();
+        assert_eq!(tx.finalized_transaction_inclusion_get(&id).unwrap(), None);
+        assert!(!holds_commit_proof(&*tx, block(1)), "kept once no transaction cites it");
+
+        tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn a_commit_proof_is_kept_while_any_transaction_cites_it() {
+        let (db, _tmp) = create_rocksdb();
+        let mut tx = db.create_write_tx().unwrap();
+        let pool = pool_transactions(&mut tx, 2);
+
+        finalize_in(&mut tx, Epoch(1), block(1), &pool);
+        tx.transactions_finalized_remove(pool[0].id()).unwrap();
+        assert!(
+            holds_commit_proof(&*tx, block(1)),
+            "pruned while a transaction cites it"
+        );
+
+        tx.transactions_finalized_remove(pool[1].id()).unwrap();
+        assert!(!holds_commit_proof(&*tx, block(1)));
+
+        tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn refinalizing_a_transaction_releases_the_block_that_finalized_it_before() {
+        let (db, _tmp) = create_rocksdb();
+        let mut tx = db.create_write_tx().unwrap();
+        let pool = pool_transactions(&mut tx, 1);
+        let id = *pool[0].id();
+
+        finalize_in(&mut tx, Epoch(1), block(1), &pool);
+        finalize_in(&mut tx, Epoch(2), block(2), &pool);
+
+        assert_eq!(
+            tx.finalized_transaction_inclusion_get(&id).unwrap(),
+            Some(inclusion(block(2)))
+        );
+        assert!(!holds_commit_proof(&*tx, block(1)), "kept for a superseded inclusion");
+        assert!(holds_commit_proof(&*tx, block(2)));
+
+        tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn a_commit_proof_is_kept_until_neither_a_state_version_proof_nor_a_transaction_cites_it() {
+        let (db, _tmp) = create_rocksdb();
+        let mut tx = db.create_write_tx().unwrap();
+        let pool = pool_transactions(&mut tx, 1);
+        let shard = Shard::from_u32(1);
+        let version_proof = |block_id| StateVersionProof {
+            shard,
+            state_version: 5,
+            source: StateVersionProofSource::Committed { block_id },
+            shard_root_proof: proof(9),
+        };
+
+        tx.state_version_proofs_insert(&version_proof(block(1))).unwrap();
+        finalize_in(&mut tx, Epoch(1), block(1), &pool);
+
+        // Re-proving the version against another block releases the first block's state version citation.
+        tx.state_version_proofs_insert(&version_proof(block(2))).unwrap();
+        assert!(
+            holds_commit_proof(&*tx, block(1)),
+            "pruned while a transaction cites it"
+        );
+
+        tx.state_version_proofs_insert(&version_proof(block(1))).unwrap();
+        tx.transactions_finalized_remove(pool[0].id()).unwrap();
+        assert!(
+            holds_commit_proof(&*tx, block(1)),
+            "pruned while a state version proof cites it"
+        );
+
+        tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn a_transaction_finalized_without_an_inclusion_cites_no_block() {
+        let (db, _tmp) = create_rocksdb();
+        let mut tx = db.create_write_tx().unwrap();
+        let pool = pool_transactions(&mut tx, 1);
+
+        tx.transactions_finalize_all(Epoch(1), pool.iter().map(|t| (t, None)))
+            .unwrap();
+        assert_eq!(tx.finalized_transaction_inclusion_get(pool[0].id()).unwrap(), None);
+        tx.transactions_finalized_remove(pool[0].id()).unwrap();
 
         tx.rollback().unwrap();
     }

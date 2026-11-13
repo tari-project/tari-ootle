@@ -19,7 +19,7 @@ use tari_template_lib::types::{
     OwnerRule,
     TemplateAddress,
     VaultId,
-    access_rules::{RestrictedAccessRule, UpdateRule},
+    access_rules::{ComponentAccessRules, RestrictedAccessRule, UpdateRule},
     crypto::RistrettoPublicKeyBytes,
     rule,
 };
@@ -532,5 +532,50 @@ fn it_rejects_invalid_upgrade_rules_at_creation() {
         );
 
         assert_reject_reason(reason, expected);
+    }
+}
+
+#[test]
+fn it_rejects_upgrade_when_method_rule_becomes_static_function_or_migration() {
+    let mut test = TemplateTest::new(CRATE_PATH, vec![
+        "tests/templates/template_upgrade/v1",
+        "tests/templates/template_upgrade/v2",
+    ]);
+    let v1_template = test.get_template_address("TemplateV1");
+    let v2_template = test.get_template_address("TemplateV2");
+
+    // In TemplateV1, both `faulty_not_migrate_function` and `migrate_v1_to_v2` are `&self` methods, whereas in
+    // TemplateV2 they are a static `FunctionKind::Function` and a `#[migration]` `FunctionKind::Migration`.
+    let cases = [
+        ("faulty_not_migrate_function", "function"),
+        ("migrate_v1_to_v2", "migration"),
+    ];
+
+    for (method_name, expected_kind) in cases {
+        let access_rules = ComponentAccessRules::new()
+            .add_method_rule(method_name, AccessRule::DenyAll)
+            .default(AccessRule::AllowAll);
+        let component = create_component_with(&mut test, "new_with_access_rules", args![
+            OwnerRule::OwnedBySigner,
+            UpdateRule::Owner,
+            access_rules,
+            signers()
+        ]);
+
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet(Epoch(1))
+                .update_component_template_address_with_migrate(component, v2_template, "migrate_v1_to_v2", args![])
+                .finish()
+                .seal(test.secret_key()),
+            vec![],
+        );
+
+        assert_reject_reason(reason, RuntimeError::InvalidMethodAccessRule {
+            template_name: "TemplateV2".to_string(),
+            details: format!(
+                "'{method_name}' in template is a {expected_kind}, not a component method taking &self or &mut self"
+            ),
+        });
+        assert_eq!(template_address_of(&test, component), v1_template);
     }
 }

@@ -303,6 +303,65 @@ mod component_access_rules {
     }
 
     #[test]
+    fn create_and_set_access_rules_reject_static_function_in_method_rules() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+
+        let (owner_proof, _, owner_key) = test.create_owner_proof();
+
+        let access_rules_template = test.get_template_address("AccessRulesTest");
+        let rules_with_static_fn = ComponentAccessRules::new()
+            .add_method_rule("default_rules", AccessRule::DenyAll)
+            .default(AccessRule::AllowAll);
+
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet(Epoch(1))
+                .call_function(access_rules_template, "with_configured_rules", args![
+                    OwnerRule::OwnedBySigner,
+                    rules_with_static_fn.clone(),
+                    ResourceAccessRules::new(),
+                    AccessRule::DenyAll,
+                ])
+                .build_and_seal(&owner_key),
+            vec![owner_proof.clone()],
+        );
+
+        assert_reject_reason(reason, RuntimeError::InvalidMethodAccessRule {
+            template_name: "AccessRulesTest".to_string(),
+            details: "'default_rules' in template is a function, not a component method taking &self or &mut self"
+                .to_string(),
+        });
+
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_function(access_rules_template, "with_configured_rules", args![
+                    OwnerRule::OwnedBySigner,
+                    ComponentAccessRules::new().default(AccessRule::AllowAll),
+                    ResourceAccessRules::new(),
+                    AccessRule::DenyAll,
+                ])
+                .build_and_seal(&owner_key),
+            vec![owner_proof.clone()],
+        );
+
+        let component_address = test.return_values()[0].decoded::<ComponentAddress>().unwrap();
+
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(component_address, "set_component_access_rules", args![
+                    rules_with_static_fn
+                ])
+                .build_and_seal(&owner_key),
+            vec![owner_proof],
+        );
+
+        assert_reject_reason(reason, RuntimeError::InvalidMethodAccessRule {
+            template_name: "AccessRulesTest".to_string(),
+            details: "'default_rules' in template is a function, not a component method taking &self or &mut self"
+                .to_string(),
+        });
+    }
+
+    #[test]
     fn create_component_rejects_scoped_owner_rule() {
         let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 

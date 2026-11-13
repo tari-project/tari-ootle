@@ -3,6 +3,79 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.53.4](https://github.com/tari-project/tari-ootle/compare/v0.53.3...v0.53.4) (2026-11-13)
+
+A transaction may persist at most 1,000 substates, minted non-fungibles included. Consensus checks
+foreign evidence, `min_epoch` and vote windows more tightly, and the wallet daemon closes several
+session and WebRTC authorization gaps.
+
+### ⚠️ Upgrade notes
+
+- **Validators and indexers upgrade together.** The engine limit and scope check, foreign evidence
+  range check, `min_epoch` enforcement and block execution point accounting change which
+  transactions and blocks are accepted, with no activation epoch. (#3767, #3701, #3764, #3704,
+  #3522)
+- **Template authors and app developers:** a transaction whose main or fee intent persists more than
+  1,000 substates is rejected with `SubstateOutputsExceeded`. Every new or written substate counts,
+  including each minted non-fungible, so split large mints across transactions. (#3767)
+- **Template authors:** reading another component's template address requires that component to be
+  in the call's scope, as reading its state already did. (#3701)
+- **Wallet daemon clients:**
+  - `auth.list_sessions` and `auth.revoke` require an interactive admin session, and `auth.revoke`
+    returns not found for an unknown or expired session. (#3651)
+  - `webrtc.start` rejects delegated tokens. The WebRTC data channel always uses the session's scoped
+    token and rejects `auth.*`, `webauthn.*` and `webrtc.*` methods. (#3651, #3763)
+  - `nfts.transfer` rejects an empty or duplicated NFT list. (#3297)
+- **SDK hosts:** `ootle_sdk_core` byte and key types parse only lowercase hex. (#3738)
+
+### Features
+
+- **template_lib_types:** `ResourceAddress`, `VaultId` and `ClaimedOutputTombstoneAddress` gain
+  `from_array`. (#3757)
+- **docs:** a fungible token (ERC-20) guide with a tested `FungibleToken` template, and guides for
+  running, networking and operating a validator node. (#3756)
+
+### Bug fixes
+
+- **engine:** a main or fee intent is held to `max_substate_outputs` across every substate it
+  persists, and `GetTemplateAddress` on another component checks the call scope. (#3767, #3701)
+- **consensus:** foreign evidence naming a substate outside the foreign shard group is rejected, and
+  an input this shard group pledged resolves to its own pledge. (#3764)
+- **consensus:** a transaction is never pinned or committed in a block before its `min_epoch`, and a
+  transaction whose validity window is too far ahead is rejected as the sender's fault. (#3704,
+  #3667)
+- **consensus:** proposer and validators charge block execution points from the same derived
+  execution. (#3522)
+- **consensus:** votes are kept after a quorum forms so a later conflicting vote is caught as
+  equivocation, and wrong-epoch or out-of-window votes are dropped before any signature check.
+  (#3706)
+- **consensus:** a forced beat survives a block timer tick, the pacemaker runs inside the worker
+  loop, a validator rotating out drains and ends its last epoch, stale `EpochChanged` events are
+  ignored, and catch-up requests its final batch. (#3727, #3754, #3675, #3527)
+- **epoch_manager:** committee counts stay fixed once an epoch is committed, and a pending
+  activation clears when the validator exits or is deactivated. (#3459)
+- **epoch_oracles:** the configured oracle persists an epoch only after its events are consumed,
+  rejects global-shard or never-activating validators, and the base layer oracle forgets an orphaned
+  epoch hash after a reorg. (#3548, #3522)
+- **indexer:** a substate value whose type differs from its id, or a batch with unrequested,
+  duplicate or `DoesNotExist` entries, disqualifies the answering validator, and cached substates
+  are served when proof verification is off. (#3456, #3522)
+- **validator_node:** `get_committed_block_proof` shares the state sync read permits and response
+  budget, the RPC server ends open sessions at shutdown, and identity files are written atomically
+  with their public key checked against the secret key. (#3668, #3755, #3565)
+- **state_store_rocksdb:** a write transaction pins the pending state generation on its first read,
+  and versioned substate ids encode their full 64-bit version. (#3734, #3750)
+- **tari_bor:** serde decoding of `Value` enforces the 64-level depth limit, enums and indefinite
+  maps and arrays decode at their boundaries, and JSON numbers outside the CBOR range are rejected.
+  (#3707, #3761)
+- **wallet:** a stealth transfer that falls back to separate fee and transfer statements releases its
+  first input lock, and fee swaps and badges declare the account and vaults they touch. (#3296)
+- **ootle_sdk_core:** sealing a stealth transfer sets the main signer before signing, and account
+  balances count each vault once. (#3738)
+- **walletd:** validator fee handlers enforce account scopes, `substates.get` returns the latest
+  network version, and WebRTC sessions forward to the bound address and close their peer
+  connection. (#3297, #3751, #3763)
+
 ## [0.53.3](https://github.com/tari-project/tari-ootle/compare/v0.53.2...v0.53.3) (2026-11-11)
 
 Rust clients read fee receipts from JSON again.

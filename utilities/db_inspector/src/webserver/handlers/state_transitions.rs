@@ -54,6 +54,7 @@ pub async fn list(
             Box::new(cf.iterator(ordering, OPERATION))
         };
 
+    let has_key_prefix = column_families::state_transition::StateTransitionCf::key_prefix().is_some();
     let row_limit = req.limit.unwrap_or(1_000);
     let row_skip = req.page.unwrap_or(0).saturating_mul(row_limit);
     let mut skipped = 0usize;
@@ -62,7 +63,7 @@ pub async fn list(
     for result in iter {
         let ((shard, state_version), data) = result?;
         let encoded_key = cf.encode_key(&(shard, state_version));
-        let key_hex = hex::encode(&encoded_key);
+        let key_hex = hex::encode(&encoded_key[usize::from(has_key_prefix)..]);
         for (i, transition) in data.transitions.into_iter().enumerate() {
             count += 1;
             if skipped < row_skip {

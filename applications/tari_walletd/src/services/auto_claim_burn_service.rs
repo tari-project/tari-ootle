@@ -301,25 +301,23 @@ impl AutoClaimBurnService {
                     Epoch(mined)
                 },
                 Err(e) => {
-                    let pending = self.pending_claims.get_mut(&file_name).expect("just iterated");
-                    pending.retries += 1;
-                    let retries = pending.retries;
-                    if retries >= MAX_RETRIES_FILE_READ {
-                        error!(
-                            target: LOG_TARGET,
-                            "Failed to read burn proof '{}' to resolve its claim epoch after {} attempts: {}. \
-                             Removing from queue; the file remains in the burn proof directory for a manual claim.",
-                            file_name,
-                            retries,
-                            e,
-                        );
-                        self.pending_claims.remove(&file_name);
-                    } else {
+                    if let Some(retries) =
+                        record_transient_failure(&mut self.pending_claims, &file_name, MAX_RETRIES_FILE_READ)
+                    {
                         debug!(
                             target: LOG_TARGET,
-                            "Could not read burn proof '{}' (attempt {}/{}): {}; will retry next interval.",
+                            "Could not read burn proof '{}' (retry {}/{}): {}; will retry next interval.",
                             file_name,
                             retries,
+                            MAX_RETRIES_FILE_READ,
+                            e,
+                        );
+                    } else {
+                        error!(
+                            target: LOG_TARGET,
+                            "Failed to read burn proof '{}' to resolve its claim epoch after {} retries: {}. \
+                             Removing from queue; the file remains in the burn proof directory for a manual claim.",
+                            file_name,
                             MAX_RETRIES_FILE_READ,
                             e,
                         );
@@ -329,6 +327,7 @@ impl AutoClaimBurnService {
             };
             if let Some(pending) = self.pending_claims.get_mut(&file_name) {
                 pending.claim_after_epoch = Some(after);
+                pending.retries = 0;
             }
         }
     }
@@ -377,6 +376,7 @@ impl AutoClaimBurnService {
                         tx_id,
                     );
                     if let Some(pending) = self.pending_claims.get_mut(&file_name) {
+                        pending.retries = 0;
                         pending.in_flight = Some(InFlightClaim {
                             transaction_id: tx_id,
                             max_epoch: claim_max_epoch(current_epoch),
@@ -394,24 +394,21 @@ impl AutoClaimBurnService {
                     self.pending_claims.remove(&file_name);
                 },
                 Err(ClaimError::Transient { error: e, max_retries }) => {
-                    let pending = self.pending_claims.get_mut(&file_name).expect("just iterated");
-                    pending.retries += 1;
-                    if pending.retries >= max_retries {
+                    if let Some(retries) = record_transient_failure(&mut self.pending_claims, &file_name, max_retries) {
+                        warn!(
+                            target: LOG_TARGET,
+                            "Transient error auto-claiming '{}' (retry {}/{}), will retry next interval: {}",
+                            file_name,
+                            retries,
+                            max_retries,
+                            e,
+                        );
+                    } else {
                         error!(
                             target: LOG_TARGET,
                             "Giving up on '{}' after {} retries: {}. \
                              The file remains in the burn proof directory for manual retry.",
                             file_name,
-                            pending.retries,
-                            e,
-                        );
-                        self.pending_claims.remove(&file_name);
-                    } else {
-                        warn!(
-                            target: LOG_TARGET,
-                            "Transient error auto-claiming '{}' (attempt {}/{}), will retry next interval: {}",
-                            file_name,
-                            pending.retries,
                             max_retries,
                             e,
                         );
@@ -662,6 +659,24 @@ fn settle_claim(
             );
             pending_claims.remove(&file_name);
         },
+    }
+}
+
+/// Increments the transient-error counter for `file_name` and returns the updated retry count if within
+/// `max_retries`, or removes the claim from `pending_claims` and returns `None` once the budget is exceeded.
+fn record_transient_failure(
+    pending_claims: &mut HashMap<String, PendingClaim>,
+    file_name: &str,
+    max_retries: u32,
+) -> Option<u32> {
+    let pending = pending_claims.get_mut(file_name)?;
+    pending.retries += 1;
+    let retries = pending.retries;
+    if retries > max_retries {
+        pending_claims.remove(file_name);
+        None
+    } else {
+        Some(retries)
     }
 }
 
@@ -983,5 +998,21 @@ mod tests {
         assert!(!is_burn_not_yet_claimable(&RejectReason::FailedToLockInputs(
             "input conflict".to_string()
         )));
+    }
+
+    #[test]
+    fn transient_failure_keeps_claim_within_retry_budget_and_drops_once_exceeded() {
+        let mut queue = HashMap::from([("burn.json".to_string(), PendingClaim::new())]);
+        assert_eq!(
+            record_transient_failure(&mut queue, "burn.json", MAX_RETRIES_FILE_READ),
+            Some(1)
+        );
+        assert_eq!(queue["burn.json"].retries, 1);
+
+        assert_eq!(
+            record_transient_failure(&mut queue, "burn.json", MAX_RETRIES_FILE_READ),
+            None
+        );
+        assert!(queue.is_empty());
     }
 }

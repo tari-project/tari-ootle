@@ -323,7 +323,7 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
             let refuses_input = match existing.lock_type() {
                 SubstateLockType::Write => true,
                 SubstateLockType::Output => !existing.is_local_only(),
-                SubstateLockType::Read => lock.lock_type().is_write(),
+                SubstateLockType::Read => false,
             };
             if !refuses_input {
                 continue;

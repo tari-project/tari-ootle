@@ -3180,9 +3180,9 @@ mod tests {
 
             let writer = TransactionId::new([11; 32]);
             let write_v0 = VersionedSubstateIdLockIntent::write(versioned(&pool_id, 0), true);
+            // Execution may resolve the write-declared input to a READ, which the READ lock admits
             let pre_check = store.check_input_locks(&writer, [write_v0.clone()])?;
-            assert!(pre_check.is_deferrable_conflict(), "{pre_check:?}");
-            assert!(!pre_check.is_hard_conflict(), "{pre_check:?}");
+            assert!(!pre_check.is_any_failed(), "{pre_check:?}");
 
             let lock_res = store.try_lock_all(writer, [write_v0], false)?;
             assert!(lock_res.is_deferrable_conflict(), "{lock_res:?}");

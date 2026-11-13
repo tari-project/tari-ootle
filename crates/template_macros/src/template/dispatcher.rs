@@ -361,3 +361,40 @@ fn build_tuple_field_expr(base: Expr, i: u32) -> Expr {
 
     Expr::Field(field_expr)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use indoc::indoc;
+    use proc_macro2::TokenStream;
+    use syn::parse2;
+
+    use super::generate_dispatcher;
+    use crate::template::ast::TemplateAst;
+
+    #[test]
+    fn supports_nested_and_unit_tuple_returns() {
+        let ast = parse2::<TemplateAst>(
+            TokenStream::from_str(indoc! {"
+                mod tuple_test {
+                    pub struct TupleComponent {}
+                    impl TupleComponent {
+                        pub fn unit_ret(&self) -> () { }
+                        pub fn nested_ret(&self) -> (u32, (u64, String)) { (1, (2, String::new())) }
+                        pub fn nested_self_ret() -> (u32, (Self, String)) { (1, (Self {}, String::new())) }
+                        pub fn single_self_tuple() -> (Self,) { (Self {},) }
+                    }
+                }
+            "})
+            .unwrap(),
+        )
+        .unwrap();
+
+        let dispatcher = generate_dispatcher(&ast).unwrap().to_string();
+        // `nested_self_ret` must wrap `rtn.1.0` in `create_component` while preserving `rtn.0` and `rtn.1.1`.
+        assert!(dispatcher.contains("create_component (rtn . 1 . 0"), "{dispatcher}");
+        // `single_self_tuple` must preserve trailing comma so the 1-tuple remains a tuple.
+        assert!(dispatcher.contains("UpdateRule :: Locked ,) ,)"), "{dispatcher}");
+    }
+}

@@ -191,16 +191,21 @@ where LocalKeyProvider<C>: StealthOutputStatementFactory + InputDecryptor + Send
             )
         });
 
-        if let Some(balance_proof) = &balance_proof {
+        let is_balanced = match &balance_proof {
             // Every proof above is generated from our own key material, so a balance proof that does not
             // verify means the caller's input and output values do not balance.
-            if !validate_balance_proof_signature(balance_proof, &inputs_statement, &outputs_statement, &covenant_claims)
-            {
-                return Err(StealthProviderError::UnbalancedTransfer {
-                    total_revealed_input,
-                    output_amount: total_output_amount,
-                });
-            }
+            Some(balance_proof) => {
+                validate_balance_proof_signature(balance_proof, &inputs_statement, &outputs_statement, &covenant_claims)
+            },
+            // With no stealth inputs or outputs, `total_output_amount` is the revealed output alone, which must
+            // spend the revealed input exactly.
+            None => !total_revealed_input.is_zero() && total_revealed_input == total_output_amount,
+        };
+        if !is_balanced {
+            return Err(StealthProviderError::UnbalancedTransfer {
+                total_revealed_input,
+                output_amount: total_output_amount,
+            });
         }
 
         Ok(StealthTransferStatement {
@@ -328,17 +333,11 @@ impl<C: StealthKeyPrehashSigner<(Sr25519SignatureBytes, RistrettoPublicKey)> + S
 mod tests {
     use std::num::NonZeroU64;
 
-    use tari_crypto::keys::SecretKey;
     use tari_ootle_common_types::engine_types::{crypto::OutputBody, stealth::validate_transfer};
-    use tari_ootle_wallet_crypto::MaskAndValue;
     use tari_template_lib_types::{Amount, ResourceAddress, constants::TARI_TOKEN, stealth::StealthInput};
 
     use super::*;
-    use crate::{
-        Network,
-        key_provider::PrivateKeyProvider,
-        stealth::{BurnClaimKeyProvider, BurnClaimStatementSpec, ResolvedStealthInput},
-    };
+    use crate::{Network, key_provider::PrivateKeyProvider, stealth::ResolvedStealthInput};
 
     const VALUE: u64 = 1_000_000;
 
@@ -493,6 +492,39 @@ mod tests {
         assert!(statement.balance_proof.is_none());
     }
 
+    #[tokio::test]
+    async fn an_unbalanced_revealed_only_transfer_is_rejected() {
+        let provider = PrivateKeyProvider::random(Network::LocalNet);
+
+        let err = provider
+            .create_transfer_statement(ResolvedStealthTransferSpec {
+                inputs: vec![],
+                revealed_input_amount: Amount::from(VALUE),
+                outputs: vec![],
+                revealed_output: Some(RevealedOutput::new(Amount::from(VALUE - 1), a_receiver())),
+            })
+            .await
+            .expect_err("an unbalanced revealed-only transfer must be rejected");
+        assert!(
+            matches!(err, StealthProviderError::UnbalancedTransfer { .. }),
+            "expected UnbalancedTransfer, got {err:?}"
+        );
+
+        let empty_err = provider
+            .create_transfer_statement(ResolvedStealthTransferSpec {
+                inputs: vec![],
+                revealed_input_amount: Amount::zero(),
+                outputs: vec![],
+                revealed_output: None,
+            })
+            .await
+            .expect_err("an empty transfer with no inputs must be rejected");
+        assert!(
+            matches!(empty_err, StealthProviderError::UnbalancedTransfer { .. }),
+            "expected UnbalancedTransfer, got {empty_err:?}"
+        );
+    }
+
     /// A statement built by one wallet does not validate against another wallet's input: the mask
     /// recovered from a foreign output is not the one the commitment was built with.
     #[tokio::test]
@@ -550,41 +582,46 @@ mod tests {
         assert!(with_stealth_output.requires_balance_proof());
     }
 
-    /// A burn claim spends the minted burn UTXO into a stealth output plus a revealed fee, and the
-    /// engine accepts the resulting statement.
-    ///
-    /// The L1 burn output is encrypted to the claimant's *account* key (not its view-only key) with the
-    /// burn's sender-offset nonce, which is the shape `decrypt_burn_claim_output` expects.
+    /// A burn claim pays the claimed bucket into a stealth output plus a revealed fee, and the engine
+    /// accepts the resulting statement.
     #[tokio::test]
     async fn a_burn_claim_statement_balances_and_validates() {
         const FEE: u64 = 1000;
 
         let provider = PrivateKeyProvider::random(Network::LocalNet);
-        let account_pk = RistrettoPublicKey::from_secret_key(provider.credentials().account_secret());
-
-        // Stand in for the L1 burn: a commitment to `VALUE` under `mask`, encrypted to the claimant.
-        let (sender_offset_secret, sender_offset_public_key) = RistrettoPublicKey::random_keypair(&mut rand::rng());
-        let mask = RistrettoSecretKey::random(&mut rand::rng());
-        let commitment = MaskAndValue::new(VALUE, mask.clone()).to_commitment().to_byte_type();
-        let encrypted_data = StealthCryptoApi::new()
-            .encrypt_value_and_mask(VALUE, &mask, &account_pk, &sender_offset_secret, None)
-            .expect("encrypting the burn output must succeed");
-
         let statement = provider
-            .create_burn_claim_statement(BurnClaimStatementSpec {
-                commitment,
-                encrypted_data,
-                sender_offset_public_key,
-                output: output_to_self(&provider, VALUE - FEE),
-                revealed_output: Some(RevealedOutput::new(Amount::from(u128::from(FEE)), a_receiver())),
+            .create_transfer_statement(ResolvedStealthTransferSpec {
+                inputs: vec![],
+                revealed_input_amount: Amount::from(VALUE),
+                outputs: vec![output_to_self(&provider, VALUE - FEE)],
+                revealed_output: Some(RevealedOutput::new(Amount::from(FEE), a_receiver())),
             })
             .await
             .expect("a balanced burn claim must produce a statement");
 
         assert!(statement.balance_proof.is_some());
-        assert_eq!(statement.inputs_statement.inputs.len(), 1);
-        assert_eq!(statement.inputs_statement.inputs[0].commitment, commitment);
+        assert!(statement.inputs_statement.inputs.is_empty());
         validate_transfer(&statement, None).expect("the engine must accept the burn claim statement");
+
+        let err = provider
+            .create_transfer_statement(ResolvedStealthTransferSpec {
+                inputs: vec![],
+                revealed_input_amount: Amount::from(VALUE),
+                outputs: vec![output_to_self(&provider, VALUE)],
+                revealed_output: Some(RevealedOutput::new(Amount::from(FEE), a_receiver())),
+            })
+            .await
+            .expect_err("an unbalanced burn claim must be rejected");
+        match err {
+            StealthProviderError::UnbalancedTransfer {
+                total_revealed_input,
+                output_amount,
+            } => {
+                assert_eq!(total_revealed_input, Amount::from(VALUE));
+                assert_eq!(output_amount, Amount::from(VALUE + FEE));
+            },
+            err => panic!("expected UnbalancedTransfer, got {err:?}"),
+        }
     }
 
     /// `stealth_public_key` must agree with the key the signing methods actually use, since authorization signatures

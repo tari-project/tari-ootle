@@ -174,16 +174,21 @@ impl InstanceManager {
     /// Forks an instance of `instance_type` that the config does not list. It starts with the settings
     /// and envs of the first configured instance of that type, so it finds the rest of the swarm the
     /// way that instance does, and `settings` override any of them.
+    /// With no `instance_name`, the instance takes the name the config gives its next instance of
+    /// that type, so it reuses that process directory (and keys) when added again after a restart,
+    /// and raising the entry's `num_instances` forks it again.
     pub async fn create_instance(
         &mut self,
         executable: &Executable,
         instance_type: InstanceType,
-        instance_name: String,
+        instance_name: Option<String>,
         settings: HashMap<String, String>,
     ) -> anyhow::Result<InstanceId> {
-        // Names that slugify alike share a process directory, so they count as the same name
-        let slug = slugify(&instance_name);
-        if self.instances().any(|i| slugify(i.name()) == slug) {
+        let instance_name = match instance_name {
+            Some(name) => name,
+            None => self.next_config_name(instance_type),
+        };
+        if self.is_name_taken(&instance_name) {
             return Err(anyhow!(
                 "Instance with name '{instance_name}' already exists. Please choose a different name"
             ));
@@ -199,6 +204,30 @@ impl InstanceManager {
 
         self.fork_new(executable, instance_type, instance_name, None, envs, new_settings)
             .await
+    }
+
+    /// Names that slugify alike share a process directory, so they count as the same name
+    fn is_name_taken(&self, name: &str) -> bool {
+        let slug = slugify(name);
+        self.instances().any(|i| slugify(i.name()) == slug)
+    }
+
+    /// The first name, in the config's naming of `instance_type`, that no instance holds.
+    fn next_config_name(&self, instance_type: InstanceType) -> String {
+        let config = self
+            .config
+            .iter()
+            .find(|c| c.instance_type == instance_type)
+            .cloned()
+            .unwrap_or_else(|| InstanceConfig::new(instance_type));
+        let mut index = 0;
+        loop {
+            let name = config.instance_name(index);
+            if !self.is_name_taken(&name) {
+                return name;
+            }
+            index += 1;
+        }
     }
 
     pub async fn fork_new(
@@ -706,7 +735,7 @@ mod tests {
             .create_instance(
                 &executable,
                 InstanceType::MinoTariNode,
-                "extra-node".to_string(),
+                Some("extra-node".to_string()),
                 HashMap::from([("overridden".to_string(), "request".to_string())]),
             )
             .await
@@ -728,7 +757,7 @@ mod tests {
             .create_instance(
                 &executable,
                 InstanceType::MinoTariNode,
-                "extra-node".to_string(),
+                Some("extra-node".to_string()),
                 HashMap::new(),
             )
             .await
@@ -739,13 +768,47 @@ mod tests {
             .create_instance(
                 &executable,
                 InstanceType::MinoTariNode,
-                "Extra Node".to_string(),
+                Some("Extra Node".to_string()),
                 HashMap::new(),
             )
             .await
             .unwrap_err();
         assert!(err.to_string().contains("already exists"), "{err}");
         assert_eq!(manager.instances().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_unnamed_instance_takes_the_first_free_config_name() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_path = temp_dir.path().to_path_buf();
+        let executable = stub_executable(&base_path).await;
+        let config = InstanceConfig::new(InstanceType::MinoTariNode).with_name("Node");
+        let mut manager = InstanceManager::new(
+            base_path.clone(),
+            Network::LocalNet,
+            HashMap::new(),
+            vec![config],
+            47200,
+        );
+
+        let mut create = async |name: Option<&str>| {
+            let id = manager
+                .create_instance(
+                    &executable,
+                    InstanceType::MinoTariNode,
+                    name.map(ToString::to_string),
+                    HashMap::new(),
+                )
+                .await
+                .unwrap();
+            manager.instances().find(|i| i.id() == id).unwrap().name().to_string()
+        };
+
+        assert_eq!(create(None).await, "Node-#00");
+        assert_eq!(create(Some("Node-#01")).await, "Node-#01");
+        assert_eq!(create(Some("unrelated")).await, "unrelated");
+        assert_eq!(create(None).await, "Node-#02");
+        assert!(base_path.join("processes").join(slugify("Node-#02")).is_dir());
     }
 
     #[tokio::test]
@@ -762,7 +825,7 @@ mod tests {
             .create_instance(
                 &executable,
                 InstanceType::TariValidatorNode,
-                "vn".to_string(),
+                Some("vn".to_string()),
                 HashMap::new(),
             )
             .await

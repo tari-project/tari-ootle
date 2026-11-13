@@ -181,7 +181,7 @@ tari_shutdown = "6.3.0-pre.2"
 tari_transaction_components = "6.3.0-pre.2"
 
 tari_crypto = "0.24.1"
-tari_utilities = "0.10"
+tari_utilities = { version = "0.10", default-features = false, features = ["std"] }
 tari_hashing = "6.3.0-pre.2"
 # The published `tari_sidechain` that the minotari crates above depend on. It is a separate crate from the in-repo
 # `tari_sidechain`; minotari_app_grpc converts gRPC burn output proofs into its types.

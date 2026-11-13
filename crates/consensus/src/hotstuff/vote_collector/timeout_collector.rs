@@ -10,17 +10,21 @@ use tari_sidechain::SignerBitmap;
 
 use super::collector::VoteCollector;
 use crate::{
-    hotstuff::{
-        epoch_state::EpochState,
-        error::HotStuffError,
-        vote_collector::{collector::exceeds_vote_lookahead, helpers::check_eligibility},
-    },
+    hotstuff::{epoch_state::EpochState, error::HotStuffError, vote_collector::helpers::check_eligibility},
     tracing::TraceTimer,
     traits::{CertificateStore, ConsensusSpec, ValidatorSignatureVerifierService},
     validations::signed_vote::SignedTimeoutVote,
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::timeout_collector";
+
+/// Maximum number of distinct timeout views buffered per committee signer at once.
+///
+/// While a committee lacks quorum, `current_height` stands still as each leader timeout advances
+/// `next_timeout_height`, so a fixed lookahead window relative to `current_height` eventually drops every
+/// peer's NEWVIEW and prevents recovery. Bounding by signer instead caps total buffered timeout votes at
+/// `committee.len() * MAX_TIMEOUT_VOTES_PER_SENDER` while allowing recovery after arbitrarily long stalls.
+pub const MAX_TIMEOUT_VOTES_PER_SENDER: usize = 128;
 
 #[derive(Clone)]
 pub struct TimeoutVoteCollector<TConsensusSpec: ConsensusSpec> {
@@ -43,7 +47,7 @@ where TConsensusSpec: ConsensusSpec
         Self {
             network,
             store,
-            vote_collector: VoteCollector::new(),
+            vote_collector: VoteCollector::with_per_sender_limit(MAX_TIMEOUT_VOTES_PER_SENDER),
             epoch_manager,
             vote_signer_service,
         }
@@ -66,12 +70,10 @@ where TConsensusSpec: ConsensusSpec
         let current_epoch = epoch_state.epoch();
         let local_committee_info = epoch_state.local_committee_info();
 
-        // Before any signature verification: a vote this far ahead is dropped by the collector, so the
-        // verification would be work done for nothing.
-        if exceeds_vote_lookahead(current_height, vote.height) {
-            warn!(
+        if vote.height < current_height {
+            debug!(
                 target: LOG_TARGET,
-                "🗑️ Discarding {} from {}: it is too far ahead of our current view {}/{}",
+                "🗑️ Discarding {} from {}: it is behind our current view {}/{}",
                 vote,
                 from,
                 current_epoch,

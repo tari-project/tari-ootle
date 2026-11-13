@@ -19,6 +19,8 @@ const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::pacemaker";
 const MAX_DELTA: Duration = Duration::from_secs(300);
 /// Propose a block OFFSET_BLOCK_TIME sooner than the required block time
 const OFFSET_BLOCK_TIME: Duration = Duration::from_secs(1);
+/// Fixed network latency allowance added to every leader timeout deadline.
+const AVG_LATENCY: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum PacemakerEvent {
@@ -229,11 +231,15 @@ impl PaceMaker {
         self.block_timer.as_mut().reset(deadline);
     }
 
+    /// Lower bound on the interval between two [`PacemakerEvent::LeaderTimeout`] events at `block_time`.
+    pub const fn min_leader_timeout_interval(block_time: Duration) -> Duration {
+        block_time.saturating_add(AVG_LATENCY)
+    }
+
     /// The leader timeout is block_time + delta + latency, so it always elapses after the block timer.
     fn reset_leader_timeout_timer(&mut self) {
         // TODO: get real avg latency
-        let avg_latency = Duration::from_secs(2);
-        let deadline = Instant::now() + self.block_time + self.delta_time() + avg_latency;
+        let deadline = Instant::now() + self.block_time + self.delta_time() + AVG_LATENCY;
         self.leader_timeout.as_mut().reset(deadline);
     }
 

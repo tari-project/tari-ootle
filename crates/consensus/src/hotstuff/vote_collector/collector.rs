@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fmt::Display,
     sync::Arc,
 };
@@ -28,6 +28,27 @@ pub fn exceeds_vote_lookahead(current_height: NodeHeight, vote_height: NodeHeigh
     vote_height > current_height.saturating_add(MAX_VOTE_VIEW_LOOKAHEAD)
 }
 
+#[derive(Debug, Clone, Copy)]
+enum VoteStoreBound {
+    /// Discard votes whose height exceeds `current_height + max_lookahead`.
+    ViewLookahead(NodeHeight),
+    /// Retain at most `max_per_sender` views per signer, evicting a signer's oldest buffered view when a
+    /// higher-view vote arrives from that signer.
+    PerSender(usize),
+}
+
+impl Default for VoteStoreBound {
+    fn default() -> Self {
+        Self::ViewLookahead(MAX_VOTE_VIEW_LOOKAHEAD)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SaveVoteOutcome {
+    Saved,
+    Ignored,
+}
+
 #[derive(Clone)]
 pub struct VoteCollector<V: Vote> {
     store: Arc<RwLock<VoteStoreInner<V>>>,
@@ -37,6 +58,15 @@ impl<V: Vote + Display + Clone> VoteCollector<V> {
     pub fn new() -> Self {
         Self {
             store: Arc::new(RwLock::new(VoteStoreInner::new())),
+        }
+    }
+
+    pub fn with_per_sender_limit(max_per_sender: usize) -> Self {
+        assert!(max_per_sender > 0, "max_per_sender must be non-zero");
+        Self {
+            store: Arc::new(RwLock::new(VoteStoreInner::with_bound(VoteStoreBound::PerSender(
+                max_per_sender,
+            )))),
         }
     }
 
@@ -51,13 +81,15 @@ impl<V: Vote + Display + Clone> VoteCollector<V> {
         let mut access_mut = self.store.write().await;
         access_mut.clear_votes_before(current_epoch, current_height);
 
-        if exceeds_vote_lookahead(current_height, vote.height()) {
+        if let VoteStoreBound::ViewLookahead(max_lookahead) = access_mut.bound &&
+            vote.height() > current_height.saturating_add(max_lookahead)
+        {
             warn!(
                 target: LOG_TARGET,
                 "🗑️ Discarding {} from {}: it is more than {} views ahead of our current view {}/{}",
                 vote,
                 sender_vn.address,
-                MAX_VOTE_VIEW_LOOKAHEAD,
+                max_lookahead,
                 current_epoch,
                 current_height
             );
@@ -68,7 +100,9 @@ impl<V: Vote + Display + Clone> VoteCollector<V> {
         let height = vote.height();
         let agg_key = vote.aggregation_key();
         let vote_display = vote.to_string();
-        access_mut.save_vote(vote)?;
+        if access_mut.save_vote(vote)? == SaveVoteOutcome::Ignored {
+            return Ok(None);
+        }
 
         let accept_power = access_mut.accept_power(epoch, height, &agg_key, committee);
 
@@ -118,20 +152,47 @@ type SenderVotesCollection<V> = HashMap<RistrettoPublicKeyBytes, V>;
 
 #[derive(Debug, Default)]
 struct VoteStoreInner<V: Vote> {
-    /// Maps (Epoch,Height) -> map (key -> map (sender leaf hash -> vote))
-    /// The key is some type that uniquely keys the vote e.g BlockId or (Epoch,Height)
+    bound: VoteStoreBound,
+    /// Maps (Epoch,Height) -> map (sender public key -> vote)
     store: BTreeMap<(Epoch, NodeHeight), SenderVotesCollection<V>>,
+    /// Under `VoteStoreBound::PerSender`, tracks the `(Epoch, NodeHeight)` views currently held for each signer.
+    sender_views: HashMap<RistrettoPublicKeyBytes, BTreeSet<(Epoch, NodeHeight)>>,
 }
 
 impl<V: Vote + Display + Clone> VoteStoreInner<V> {
     const VOTE_BYTE_SIZE: usize = size_of::<V>() + size_of::<RistrettoPublicKeyBytes>();
 
     pub fn new() -> Self {
-        Self { store: BTreeMap::new() }
+        Self::with_bound(VoteStoreBound::default())
+    }
+
+    fn with_bound(bound: VoteStoreBound) -> Self {
+        if let VoteStoreBound::PerSender(max_per_sender) = bound {
+            assert!(max_per_sender > 0, "max_per_sender must be non-zero");
+        }
+        Self {
+            bound,
+            store: BTreeMap::new(),
+            sender_views: HashMap::new(),
+        }
     }
 
     fn clear_votes_before(&mut self, epoch: Epoch, height: NodeHeight) {
-        self.store = self.store.split_off(&(epoch, height.saturating_sub(NodeHeight(1))));
+        let cutoff = (epoch, height.saturating_sub(NodeHeight(1)));
+        let kept = self.store.split_off(&cutoff);
+        let dropped = std::mem::replace(&mut self.store, kept);
+        if matches!(self.bound, VoteStoreBound::PerSender(_)) {
+            for (dropped_view, votes) in dropped {
+                for pk in votes.into_keys() {
+                    if let Some(views) = self.sender_views.get_mut(&pk) {
+                        views.remove(&dropped_view);
+                        if views.is_empty() {
+                            self.sender_views.remove(&pk);
+                        }
+                    }
+                }
+            }
+        }
         self.log_buffer_size();
     }
 
@@ -141,10 +202,11 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
     /// The vote already held is kept and the incoming one discarded. The first vote may be the honest
     /// one — this node cannot tell which is — and it may already be counted towards a quorum an honest
     /// committee is forming, so dropping it would let an equivocator erase a real vote.
-    pub fn save_vote(&mut self, vote: V) -> Result<(), DuplicateVoteDetected<V>> {
+    pub fn save_vote(&mut self, vote: V) -> Result<SaveVoteOutcome, DuplicateVoteDetected<V>> {
         let epoch_height = (vote.epoch(), vote.height());
-        let view_votes_mut = self.store.entry(epoch_height).or_default();
-        if let Some(prev_vote) = view_votes_mut.get(vote.public_key()) {
+        let sender_pk = *vote.public_key();
+
+        if let Some(prev_vote) = self.store.get(&epoch_height).and_then(|v| v.get(&sender_pk)) {
             let is_same_vote = prev_vote.signature() == vote.signature();
             if is_same_vote {
                 debug!(
@@ -152,7 +214,7 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
                     "ℹ️  Received identical duplicate vote {}. Ignoring.",
                     vote,
                 );
-                return Ok(());
+                return Ok(SaveVoteOutcome::Ignored);
             }
 
             warn!(
@@ -163,14 +225,43 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
             return Err(DuplicateVoteDetected {
                 epoch: vote.epoch(),
                 height: vote.height(),
-                public_key: *vote.public_key(),
+                public_key: sender_pk,
                 previous_vote: prev_vote.clone(),
                 new_vote: vote,
             });
         }
 
-        view_votes_mut.insert(*vote.public_key(), vote);
-        Ok(())
+        if let VoteStoreBound::PerSender(max_per_sender) = self.bound {
+            let views = self.sender_views.entry(sender_pk).or_default();
+            if views.len() >= max_per_sender {
+                let &oldest_view = views
+                    .first()
+                    .expect("sender_views is non-empty when len >= max_per_sender >= 1");
+                if epoch_height < oldest_view {
+                    debug!(
+                        target: LOG_TARGET,
+                        "🗑️ Discarding {} from {}: per-sender buffer ({}) holds newer views starting at {}/{}",
+                        vote,
+                        sender_pk,
+                        max_per_sender,
+                        oldest_view.0,
+                        oldest_view.1,
+                    );
+                    return Ok(SaveVoteOutcome::Ignored);
+                }
+                views.pop_first();
+                if let Some(bucket) = self.store.get_mut(&oldest_view) {
+                    bucket.remove(&sender_pk);
+                    if bucket.is_empty() {
+                        self.store.remove(&oldest_view);
+                    }
+                }
+            }
+            views.insert(epoch_height);
+        }
+
+        self.store.entry(epoch_height).or_default().insert(sender_pk, vote);
+        Ok(SaveVoteOutcome::Saved)
     }
 
     /// Removes every vote at `(epoch, height)` and returns the Accept votes for `agg_key`.
@@ -183,6 +274,16 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
         let epoch_height = (epoch, height);
         // Once a block is decided at this height, votes for any losing fork at the same height can be dropped too.
         let votes = self.store.remove(&epoch_height)?;
+        if matches!(self.bound, VoteStoreBound::PerSender(_)) {
+            for pk in votes.keys() {
+                if let Some(views) = self.sender_views.get_mut(pk) {
+                    views.remove(&epoch_height);
+                    if views.is_empty() {
+                        self.sender_views.remove(pk);
+                    }
+                }
+            }
+        }
         Some(
             votes
                 .into_values()
@@ -637,5 +738,130 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(collector.store.read().await.store.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn per_sender_collector_reaches_quorum_far_beyond_proposal_lookahead() {
+        let collector = VoteCollector::<TestVote>::with_per_sender_limit(8);
+        let epoch = Epoch(1);
+        let stuck_height = NodeHeight(10);
+        let far_timeout_height = stuck_height + MAX_VOTE_VIEW_LOOKAHEAD + NodeHeight(200);
+        let voters = [pubkey(1), pubkey(2), pubkey(3), pubkey(4)];
+        let committee = committee(&voters);
+
+        let mk = |pk| TestVote {
+            epoch,
+            height: far_timeout_height,
+            block_id: FixedHash::zero(),
+            decision: QuorumDecision::Accept,
+            sig: ZERO_SIG,
+            public_key: pk,
+        };
+
+        for &voter in &voters[..2] {
+            assert!(
+                collector
+                    .collect_vote(&validator(voter), epoch, stuck_height, mk(voter), &committee)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+        }
+
+        let quorum = collector
+            .collect_vote(&validator(voters[2]), epoch, stuck_height, mk(voters[2]), &committee)
+            .await
+            .unwrap()
+            .expect("third vote should complete quorum beyond lookahead window");
+        assert_eq!(quorum.len(), 3);
+        assert!(collector.store.read().await.sender_views.is_empty());
+    }
+
+    #[tokio::test]
+    async fn per_sender_limit_caps_spammer_evicts_oldest_and_preserves_other_signers() {
+        let limit = 4;
+        let collector = VoteCollector::<TestVote>::with_per_sender_limit(limit);
+        let epoch = Epoch(1);
+        let current_height = NodeHeight(5);
+        let honest1 = pubkey(1);
+        let honest2 = pubkey(2);
+        let spammer = pubkey(3);
+        let absent = pubkey(4);
+        let committee = committee(&[honest1, honest2, spammer, absent]);
+
+        let mk = |pk, height| TestVote {
+            epoch,
+            height: NodeHeight(height),
+            block_id: FixedHash::zero(),
+            decision: QuorumDecision::Accept,
+            sig: ZERO_SIG,
+            public_key: pk,
+        };
+
+        // Honest members buffer a vote at view 40 (well past MAX_VOTE_VIEW_LOOKAHEAD).
+        collector
+            .collect_vote(&validator(honest1), epoch, current_height, mk(honest1, 40), &committee)
+            .await
+            .unwrap();
+
+        // Spammer sends 50 distinct future views (10..60).
+        for h in 10..60 {
+            collector
+                .collect_vote(&validator(spammer), epoch, current_height, mk(spammer, h), &committee)
+                .await
+                .unwrap();
+        }
+
+        {
+            let guard = collector.store.read().await;
+            let spammer_views = &guard.sender_views[&spammer];
+            assert_eq!(spammer_views.len(), limit);
+            // Only the 4 highest views (56..60) remain for the spammer.
+            let expected: BTreeSet<_> = (56..60).map(|h| (epoch, NodeHeight(h))).collect();
+            assert_eq!(spammer_views, &expected);
+            // Empty buckets from evicted spammer heights were removed, leaving honest1's view 40 + 4 spammer views.
+            assert_eq!(guard.store.len(), 1 + limit);
+        }
+
+        // A stale below-floor vote from the spammer (view 20 < 56) is ignored without evicting newer views.
+        collector
+            .collect_vote(&validator(spammer), epoch, current_height, mk(spammer, 20), &committee)
+            .await
+            .unwrap();
+        assert!(
+            !collector
+                .store
+                .read()
+                .await
+                .store
+                .contains_key(&(epoch, NodeHeight(20)))
+        );
+
+        // Honest members still reach quorum at view 58 using the spammer's retained vote, and honest1's view 40 was
+        // untouched.
+        collector
+            .collect_vote(&validator(honest1), epoch, current_height, mk(honest1, 58), &committee)
+            .await
+            .unwrap();
+        let quorum = collector
+            .collect_vote(&validator(honest2), epoch, current_height, mk(honest2, 58), &committee)
+            .await
+            .unwrap()
+            .expect("quorum should form at view 58");
+        assert_eq!(quorum.len(), 3);
+
+        // Advancing current_height past 58 clears old views and releases per-sender tracking cleanly.
+        collector
+            .collect_vote(&validator(honest1), epoch, NodeHeight(60), mk(honest1, 62), &committee)
+            .await
+            .unwrap();
+        let guard = collector.store.read().await;
+        assert_eq!(guard.sender_views.get(&spammer).map(|s| s.len()).unwrap_or(0), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "max_per_sender must be non-zero")]
+    fn with_per_sender_limit_rejects_zero() {
+        let _collector = VoteCollector::<TestVote>::with_per_sender_limit(0);
     }
 }

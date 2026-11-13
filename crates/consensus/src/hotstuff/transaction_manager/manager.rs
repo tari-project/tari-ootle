@@ -934,10 +934,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         );
 
         let proposed_foreign_pledges = change_set.get_foreign_pledges(&transaction_id);
-        let foreign_inputs = non_local_inputs
-            .iter()
-            .map(InputDeclarationRef::substate_id)
-            .collect::<HashSet<_>>();
+        let foreign_inputs = declared_foreign_inputs(transaction.transaction(), local_committee_info);
         let resolved_inputs = resolve_foreign_input_pledges(
             &transaction_id,
             foreign_pledges.into_iter().chain(proposed_foreign_pledges.cloned()),
@@ -1310,14 +1307,16 @@ fn take_multishard_fee_intent_commit(execution: &mut TransactionExecution) -> Op
         .then_some(fee_intent_commit)
 }
 
-/// The substates `transaction` declares as inputs that `local_committee_info` does not hold locally (excluding both
-/// the local shard range and global substates, which every shard group resolves from its own state store).
+/// The substates `transaction` requires as inputs — including the implicit XTR fee resource from
+/// [`Transaction::all_inputs_iter`] — that `local_committee_info` does not hold locally (excluding both the local
+/// shard range and global substates, which every shard group resolves from its own state store).
 fn declared_foreign_inputs<'a>(
     transaction: &'a Transaction,
     local_committee_info: &CommitteeInfo,
 ) -> HashSet<&'a SubstateId> {
     transaction
-        .all_inputs_substate_ids_iter()
+        .all_inputs_iter()
+        .map(|input| input.substate_id())
         .filter(|id| !local_committee_info.includes_substate_id(id))
         .collect()
 }
@@ -1693,10 +1692,10 @@ mod tests {
             .map(component_id)
             .find(|id| shard_of(id) != local_shard)
             .unwrap();
-        let undeclared_foreign = ((2..=u8::MAX)
+        let undeclared_foreign = (2..=u8::MAX)
             .map(component_id)
-            .find(|id| *id != declared_foreign && shard_of(id) != local_shard))
-        .unwrap();
+            .find(|id| *id != declared_foreign && shard_of(id) != local_shard)
+            .unwrap();
         let global = SubstateId::Component(BURN_RATE_GOVERNANCE_COMPONENT_ADDRESS);
         assert!(global.is_global());
 
@@ -1763,6 +1762,74 @@ mod tests {
         );
         assert!(!output_only_resolved.contains_key(&global));
         assert!(!output_only_resolved.contains_key(&undeclared_foreign));
+    }
+
+    #[test]
+    fn implicit_foreign_xtr_input_pledge_is_resolved_when_not_explicitly_declared() {
+        let xtr = SubstateId::Resource(STEALTH_TARI_RESOURCE_ADDRESS);
+        assert!(!xtr.is_global());
+        let xtr_shard = shard_of(&xtr);
+
+        // Pick a local shard distinct from XTR's shard so the executing committee relies on the XTR-holding
+        // committee's foreign pledge during fee payment.
+        let local = (1..=u8::MAX)
+            .map(component_id)
+            .find(|id| shard_of(id) != xtr_shard)
+            .unwrap();
+        let local_shard = shard_of(&local);
+        let declared_foreign = (1..=u8::MAX)
+            .map(component_id)
+            .find(|id| shard_of(id) != local_shard)
+            .unwrap();
+
+        let committee = CommitteeInfo::new(
+            NumPreshards::P256,
+            1,
+            2,
+            ShardGroup::new(local_shard, local_shard),
+            Epoch(1),
+            VotePower::of(1),
+        );
+        assert!(committee.includes_substate_id(&local));
+        assert!(!committee.includes_substate_id(&xtr));
+        assert!(!committee.includes_substate_id(&declared_foreign));
+
+        let tx = Transaction::builder_localnet(Epoch(10))
+            .add_input(SubstateRequirement::unversioned(local.clone()))
+            .add_input(SubstateRequirement::unversioned(declared_foreign.clone()))
+            .build_and_seal(&PrivateKey::from(1u64));
+        assert!(!tx.inputs().iter().any(|req| req.substate_id() == &xtr));
+
+        let foreign_set = declared_foreign_inputs(&tx, &committee);
+        assert!(foreign_set.contains(&xtr));
+        assert!(foreign_set.contains(&declared_foreign));
+
+        let resolved = resolve_pledged_inputs(
+            vec![input_pledge(&local, 0)],
+            vec![input_pledge(&declared_foreign, 0), input_pledge(&xtr, 0)],
+            &foreign_set,
+        );
+        assert_eq!(resolved.len(), 3);
+        assert!(resolved.contains_key(&local));
+        assert!(resolved.contains_key(&declared_foreign));
+        assert!(resolved.contains_key(&xtr));
+
+        // Output-only committee also resolves the implicit foreign XTR pledge.
+        let output_only_tx = Transaction::builder_localnet(Epoch(10))
+            .add_input(SubstateRequirement::unversioned(declared_foreign.clone()))
+            .build_and_seal(&PrivateKey::from(1u64));
+        let output_only_foreign = declared_foreign_inputs(&output_only_tx, &committee);
+        assert!(output_only_foreign.contains(&xtr));
+
+        let output_only_resolved = resolve_foreign_input_pledges(
+            &TransactionId::default(),
+            [input_pledge(&declared_foreign, 1), input_pledge(&xtr, 0)],
+            &output_only_foreign,
+        )
+        .unwrap();
+        assert_eq!(output_only_resolved.len(), 2);
+        assert!(output_only_resolved.contains_key(&declared_foreign));
+        assert!(output_only_resolved.contains_key(&xtr));
     }
 
     #[test]

@@ -191,6 +191,7 @@ fn lit_value(lit: Lit) -> syn::Result<Value> {
         },
         Lit::Bool(b) => Ok(Value::Bool(b.value)),
         Lit::ByteStr(b) => Ok(Value::Bytes(b.value())),
+        Lit::Byte(b) => Ok(Value::Integer(i128::from(b.value()))),
         Lit::Char(c) => Ok(Value::Text(c.value().to_string())),
         lit @ Lit::Float(_) => Err(syn::Error::new_spanned(lit, "float literals are not supported")),
         lit => Err(syn::Error::new_spanned(lit, "unsupported literal")),
@@ -198,7 +199,15 @@ fn lit_value(lit: Lit) -> syn::Result<Value> {
 }
 
 pub(crate) fn negative_int_value(lit: &LitInt) -> syn::Result<Value> {
-    let value = -lit.base10_parse::<i128>()?;
+    if matches!(lit.suffix(), "u8" | "u16" | "u32" | "u64" | "u128") {
+        return Err(syn::Error::new_spanned(
+            lit,
+            format!("cannot apply unary `-` to unsigned `{}` literal", lit.suffix()),
+        ));
+    }
+    let mag = lit.base10_parse::<u128>()?;
+    let pos = i128::try_from(mag).map_err(|_| syn::Error::new_spanned(lit, "integer out of CBOR range"))?;
+    let value = -pos;
     check_int_suffix(lit, value)?;
     Value::integer(value).ok_or_else(|| syn::Error::new_spanned(lit, "integer out of CBOR range"))
 }
@@ -335,8 +344,12 @@ mod tests {
     #[test]
     fn a_suffixed_integer_must_fit_its_suffix() {
         assert_eq!(cbor_from_macro(&mac("cbor!(255u8)")).unwrap(), Value::Integer(255));
+        assert_eq!(cbor_from_macro(&mac("cbor!(b'A')")).unwrap(), Value::Integer(65));
         assert!(cbor_from_macro(&mac("cbor!(256u8)")).is_err());
         assert!(cbor_from_macro(&mac("cbor!(-1u32)")).is_err());
+        assert!(cbor_from_macro(&mac("cbor!(-0u8)")).is_err());
+        assert!(cbor_from_macro(&mac("cbor!(-0u64)")).is_err());
+        assert!(cbor_from_macro(&mac("cbor!(-170141183460469231731687303715884105728i128)")).is_err());
     }
 
     #[test]

@@ -2389,14 +2389,16 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
-    /// Enforces the stealth-transfer limits and counts this transfer against the per-transaction totals. Must be
-    /// called before the transfer's input authorization, hooks and proof crypto run, so an over-limit transaction is
-    /// rejected before that work is done.
+    /// Enforces the stealth-transfer limits, validates commitment uniqueness across inputs and outputs, and counts
+    /// this transfer against the per-transaction totals. Must be called before the transfer's input authorization,
+    /// hooks and proof crypto run, so an over-limit or duplicate-commitment statement is rejected before that work is
+    /// done.
     pub(super) fn admit_stealth_transfer(
         &mut self,
         statement: StealthTransferStatement,
     ) -> Result<AdmittedStealthTransfer, RuntimeError> {
         check_stealth_transfer_limits(&limits::STEALTH_LIMITS, &statement)?;
+        stealth::validate_transfer_commitments(&statement)?;
         self.stealth_totals.admit(&limits::STEALTH_LIMITS, &statement)?;
         Ok(AdmittedStealthTransfer(statement))
     }
@@ -2762,6 +2764,64 @@ mod tests {
                 ArgumentValidationError::MaxStealthTransfersPerTransactionExceeded { .. }
             ))
         ));
+    }
+
+    #[test]
+    fn admit_stealth_transfer_rejects_duplicate_commitments_without_consuming_budget() {
+        use tari_template_lib::types::{
+            EncryptedData,
+            crypto::UtxoTag,
+            stealth::{StealthUnspentOutput, UnspentOutput},
+        };
+
+        fn sample_output(byte: u8) -> StealthUnspentOutput {
+            StealthUnspentOutput {
+                output: UnspentOutput {
+                    commitment: PedersenCommitmentBytes::from_bytes(&[byte; 32]).unwrap(),
+                    sender_public_nonce: RistrettoPublicKeyBytes::zero(),
+                    encrypted_data: EncryptedData::try_from(vec![0u8; EncryptedData::min_size()]).unwrap(),
+                    minimum_value_promise: 0,
+                    viewable_balance_proof: None,
+                },
+                auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::zero()),
+                tag: UtxoTag::new(0),
+            }
+        }
+
+        let mut state = test_working_state();
+        let base =
+            StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
+        let commit_a = PedersenCommitmentBytes::from_bytes(&[1u8; 32]).unwrap();
+
+        let mut dup_inputs = base.clone();
+        dup_inputs.inputs_statement.inputs = vec![StealthInput::new(commit_a), StealthInput::new(commit_a)];
+        assert!(matches!(
+            state.admit_stealth_transfer(dup_inputs),
+            Err(RuntimeError::ResourceError(ResourceError::InvalidSpend { details }))
+                if details.contains("Duplicate input commitment")
+        ));
+
+        let mut input_output_collision = base.clone();
+        input_output_collision.inputs_statement.inputs = vec![StealthInput::new(commit_a)];
+        input_output_collision.outputs_statement.outputs = vec![sample_output(1)];
+        assert!(matches!(
+            state.admit_stealth_transfer(input_output_collision),
+            Err(RuntimeError::ResourceError(ResourceError::InvalidSpend { details }))
+                if details.contains("duplicates an input commitment")
+        ));
+
+        let mut dup_outputs = base.clone();
+        dup_outputs.outputs_statement.outputs = vec![sample_output(2), sample_output(2)];
+        assert!(matches!(
+            state.admit_stealth_transfer(dup_outputs),
+            Err(RuntimeError::ResourceError(ResourceError::InvalidConfidentialProof { details }))
+                if details.contains("Duplicate output commitment")
+        ));
+
+        // None of the rejected statements may advance the per-transaction transfer counter.
+        for _ in 0..limits::STEALTH_LIMITS.max_transfers_per_transaction {
+            state.admit_stealth_transfer(base.clone()).unwrap();
+        }
     }
 
     #[test]

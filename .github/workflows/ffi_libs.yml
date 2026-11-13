@@ -78,7 +78,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # master (no version tag)
         with:
-          toolchain: ${{ matrix.platform == 'windows-x64' && '1.97.1-x86_64-pc-windows-gnu' || '1.97.1' }}
+          toolchain: ${{ matrix.platform == 'windows-x64' && '1.100.0-x86_64-pc-windows-gnu' || '1.100.0' }}
           targets: ${{ matrix.target }}
 
       - name: Build + stage native libs
@@ -88,7 +88,7 @@ jobs:
           # the MSVC host toolchain, which carries no std for x86_64-pc-windows-gnu ("can't find
           # crate for `core`"). RUSTUP_TOOLCHAIN outranks rust-toolchain.toml, so pin it here. Keep
           # it in step with the `toolchain:` input above.
-          RUSTUP_TOOLCHAIN: ${{ matrix.platform == 'windows-x64' && '1.97.1-x86_64-pc-windows-gnu' || '1.97.1' }}
+          RUSTUP_TOOLCHAIN: ${{ matrix.platform == 'windows-x64' && '1.100.0-x86_64-pc-windows-gnu' || '1.100.0' }}
         run: |
           scripts/build_ffi_lib.sh \
             --platform "${{ matrix.platform }}" \

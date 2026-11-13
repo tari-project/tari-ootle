@@ -436,8 +436,9 @@ impl BucketStore {
                 format!("bucket file {} contains a partial entry", path.display()),
             ));
         }
-        let entries = bytes
-            .chunks_exact(ENTRY_SIZE)
+        let (chunks, _) = bytes.as_chunks::<ENTRY_SIZE>();
+        let entries = chunks
+            .iter()
             .map(|c| {
                 (
                     u64::from_le_bytes(c[..8].try_into().expect("chunk is ENTRY_SIZE bytes")),

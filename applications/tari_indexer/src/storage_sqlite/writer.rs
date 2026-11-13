@@ -1199,7 +1199,10 @@ impl SqliteStoreWriteTransaction<'_> {
             .on_conflict(substate_cache_invalidations::substate_id)
             .do_update()
             .set((
-                substate_cache_invalidations::state_version.eq(state_version.as_u64() as i64),
+                // The journal keeps the highest state version that invalidated the substate.
+                substate_cache_invalidations::state_version.eq(diesel::dsl::sql::<diesel::sql_types::BigInt>(
+                    "max(state_version, excluded.state_version)",
+                )),
                 // A floor only ever rises. The transitions of one batch arrive in no stated order,
                 // and a destroy of the version below a creation must not lower what the creation
                 // showed.

@@ -90,17 +90,25 @@ impl TraitInfoCollector {
     }
 
     fn parse_attr(&self, node: &mut TraitItemFn, info: &mut RpcMethodInfo) -> syn::Result<()> {
-        let attr = node
-            .attrs
-            .iter()
-            .position(|at| at.meta.path().is_ident("rpc"))
-            .map(|pos| node.attrs.remove(pos))
-            .ok_or_else(|| {
-                let ident = node.sig.ident.to_string();
-                syn_error!(node, "Missing #[rpc(...)] attribute on method `{}`", ident)
-            })?;
+        let mut rpc_attrs = Vec::new();
+        node.attrs.retain(|attr| {
+            if attr.meta.path().is_ident("rpc") {
+                rpc_attrs.push(attr.clone());
+                false
+            } else {
+                true
+            }
+        });
+        let Some(attr) = rpc_attrs.first() else {
+            let ident = node.sig.ident.clone();
+            return Err(syn_error!(node, "Missing #[rpc(...)] attribute on method `{}`", ident));
+        };
+        if let Some(extra) = rpc_attrs.get(1) {
+            return Err(syn_error!(extra, "only one #[rpc(...)] attribute is allowed per method"));
+        }
 
-        match attr.meta {
+        let mut has_method = false;
+        match &attr.meta {
             Meta::List(meta_list) => {
                 let nested = meta_list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
                 for meta in nested {
@@ -109,9 +117,13 @@ impl TraitInfoCollector {
                             let ident = name_value
                                 .path
                                 .get_ident()
-                                .expect("Invalid syntax for #[rpc(...)] attribute");
+                                .ok_or_else(|| syn_error!(&name_value.path, "expected identifier in #[rpc(...)]"))?;
                             match ident.to_string().as_str() {
                                 "method" => {
+                                    if has_method {
+                                        return Err(syn_error!(ident, "`method` is specified more than once"));
+                                    }
+                                    has_method = true;
                                     info.method_num = extract_u32(ident, &name_value.value)?;
                                     self.validate_method_num(ident, info.method_num)?;
                                     if info.method_num == 0 {
@@ -148,6 +160,14 @@ impl TraitInfoCollector {
             },
         }
 
+        if !has_method {
+            return Err(syn_error!(
+                attr,
+                "#[rpc(...)] on method `{}` requires `method = <number>`",
+                info.method_ident
+            ));
+        }
+
         Ok(())
     }
 
@@ -175,7 +195,7 @@ impl TraitInfoCollector {
             .ok_or_else(|| syn_error!(node, "RPC method `{}` has no arguments.", node.sig.ident))?;
         match arg {
             FnArg::Receiver(receiver) => {
-                if receiver.mutability.is_some() {
+                if receiver.reference.is_none() || receiver.mutability.is_some() {
                     return Err(syn_error!(receiver, "Method receiver must be an immutable reference",));
                 }
             },
@@ -208,15 +228,15 @@ impl TraitInfoCollector {
         match &node.sig.output {
             ReturnType::Default => Err(invalid_return_type()),
             ReturnType::Type(_, ty) => match &**ty {
-                Type::Path(path) => match path.path.segments.first() {
+                Type::Path(path) => match path.path.segments.last() {
                     Some(syn::PathSegment {
+                        ident,
                         arguments: syn::PathArguments::AngleBracketed(args),
-                        ..
-                    }) => {
+                    }) if ident == "Result" => {
                         let arg = args.args.first().ok_or_else(invalid_return_type)?;
                         match arg {
                             GenericArgument::Type(Type::Path(syn::TypePath { path, .. })) => {
-                                let ret_ty = path.segments.first().ok_or_else(invalid_return_type)?;
+                                let ret_ty = path.segments.last().ok_or_else(invalid_return_type)?;
                                 // Check if the response is streaming
                                 match ret_ty.ident.to_string().as_str() {
                                     "Response" => {
@@ -254,14 +274,19 @@ impl TraitInfoCollector {
     }
 
     fn parse_request_type(&self, node: &TraitItemFn, info: &mut RpcMethodInfo) -> syn::Result<()> {
-        let request_arg = node.sig.inputs.get(1).expect("Missing request argument");
+        let request_arg = node
+            .sig
+            .inputs
+            .get(1)
+            .ok_or_else(|| syn_error!(&node.sig, "Missing request argument"))?;
         match request_arg {
             FnArg::Typed(syn::PatType { ty, .. }) => match &**ty {
                 Type::Path(syn::TypePath { path, .. }) => {
                     let path = path
                         .segments
-                        .first()
-                        .ok_or_else(|| syn_error!(request_arg, "unexpected type in trait definition"))?;
+                        .last()
+                        .filter(|seg| seg.ident == "Request")
+                        .ok_or_else(|| syn_error!(request_arg, "expected Request<T>"))?;
 
                     match &path.arguments {
                         PathArguments::AngleBracketed(args) => {
@@ -328,5 +353,60 @@ fn extract_u32(ident: &syn::Ident, expr: &syn::Expr) -> syn::Result<u32> {
             ident,
             expr
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use syn::parse_quote;
+
+    use super::*;
+
+    fn parse_method(mut item: syn::TraitItemFn) -> syn::Result<RpcMethodInfo> {
+        TraitInfoCollector::new().parse_trait_item_method(&mut item)
+    }
+
+    #[test]
+    fn rejects_missing_method_key() {
+        let item: syn::TraitItemFn = parse_quote! {
+            #[rpc()]
+            async fn foo(&self, req: Request<u32>) -> Result<Response<u32>, RpcStatus>;
+        };
+        let err = parse_method(item).unwrap_err();
+        assert!(err.to_string().contains("requires `method = <number>`"), "{err}");
+    }
+
+    #[test]
+    fn rejects_duplicate_rpc_attribute() {
+        let item: syn::TraitItemFn = parse_quote! {
+            #[rpc(method = 1)]
+            #[rpc(method = 2)]
+            async fn foo(&self, req: Request<u32>) -> Result<Response<u32>, RpcStatus>;
+        };
+        let err = parse_method(item).unwrap_err();
+        assert!(
+            err.to_string().contains("only one #[rpc(...)] attribute is allowed per method"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_method_key() {
+        let item: syn::TraitItemFn = parse_quote! {
+            #[rpc(method = 1, method = 2)]
+            async fn foo(&self, req: Request<u32>) -> Result<Response<u32>, RpcStatus>;
+        };
+        let err = parse_method(item).unwrap_err();
+        assert!(err.to_string().contains("`method` is specified more than once"), "{err}");
+    }
+
+    #[test]
+    fn rejects_by_value_self_receiver() {
+        let item: syn::TraitItemFn = parse_quote! {
+            #[rpc(method = 1)]
+            async fn foo(self, req: Request<u32>) -> Result<Response<u32>, RpcStatus>;
+        };
+        let err = parse_method(item).unwrap_err();
+        assert!(err.to_string().contains("Method receiver must be an immutable reference"), "{err}");
     }
 }

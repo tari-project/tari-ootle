@@ -22,6 +22,12 @@ pub trait TestRpcService: Send + Sync + 'static {
 
     #[rpc(method = 3)]
     async fn unit_streaming(&self, request: Request<()>) -> Result<Streaming<TestMessage>, RpcStatus>;
+
+    #[rpc(method = 4)]
+    async fn qualified_types(
+        &self,
+        request: tari_rpc_framework::Request<TestMessage>,
+    ) -> std::result::Result<tari_rpc_framework::Response<TestMessage>, tari_rpc_framework::RpcStatus>;
 }
 
 /// Streaming methods are generated with a variant that takes per-request options, including one
@@ -33,6 +39,7 @@ fn streaming_methods_are_generated_with_a_request_options_variant() {
         let _stream = client.streaming_with_options(TestMessage::default(), options).await;
         let _stream = client.unit_streaming_with_options(options).await;
         let _response = client.unary(TestMessage::default()).await;
+        let _response = client.qualified_types(TestMessage::default()).await;
     }
 
     let _ = call_each;

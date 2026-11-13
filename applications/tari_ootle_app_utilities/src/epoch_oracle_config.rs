@@ -111,6 +111,10 @@ pub enum EpochOracleType {
 pub struct BaseLayerOracleConfig {
     /// The Tari base node's GRPC URL. If none is specified, http://localhost:{port} will be used where {port} is the network-specific default.
     pub base_node_grpc_url: Option<Url>,
+    /// Base node GRPC URLs to scan from, in order, when `base_node_grpc_url` (or the fallback in use) cannot
+    /// serve the scan. A fallback whose chain does not contain the last scanned block is never used.
+    #[serde(default)]
+    pub fallback_base_node_grpc_urls: Vec<Url>,
     /// Interval between base layer scans in seconds.
     #[serde(with = "ootle_serde::duration::seconds")]
     pub scanning_interval: Duration,
@@ -118,10 +122,20 @@ pub struct BaseLayerOracleConfig {
     pub start_height: u64,
 }
 
+impl BaseLayerOracleConfig {
+    /// The primary base node URL followed by the fallbacks. `default_url` stands in for an unset primary.
+    pub fn base_node_grpc_urls(&self, default_url: Url) -> Vec<Url> {
+        std::iter::once(self.base_node_grpc_url.clone().unwrap_or(default_url))
+            .chain(self.fallback_base_node_grpc_urls.iter().cloned())
+            .collect()
+    }
+}
+
 impl Default for BaseLayerOracleConfig {
     fn default() -> Self {
         Self {
             base_node_grpc_url: None,
+            fallback_base_node_grpc_urls: Vec::new(),
             // NOTE: this essentially sets the maximum possible lag (assuming the base node is perfectly in sync) for
             // epoch change. Therefore, the `epoch_end_grace_period` in consensus settings should always be
             // greater than this value to avoid a race condition resulting in leader failure.
@@ -133,13 +147,18 @@ impl Default for BaseLayerOracleConfig {
 
 impl Display for BaseLayerOracleConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "url[{}], {:.2?}, start[{}]",
-            self.base_node_grpc_url.as_ref().display(),
-            self.scanning_interval,
-            self.start_height
-        )
+        write!(f, "url[{}]", self.base_node_grpc_url.as_ref().display())?;
+        if !self.fallback_base_node_grpc_urls.is_empty() {
+            write!(f, ", fallbacks[")?;
+            for (i, url) in self.fallback_base_node_grpc_urls.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{url}")?;
+            }
+            write!(f, "]")?;
+        }
+        write!(f, ", {:.2?}, start[{}]", self.scanning_interval, self.start_height)
     }
 }
 
@@ -246,6 +265,7 @@ mod tests {
     async fn mainnet_replaces_configured_oracle_type_and_start_height() {
         let mut config = load(Some("esmeralda"));
         config.base_layer.base_node_grpc_url = Some("http://10.0.0.1:18102".parse().unwrap());
+        config.base_layer.fallback_base_node_grpc_urls = vec!["http://10.0.0.2:18102".parse().unwrap()];
         config.base_layer.scanning_interval = Duration::from_secs(3);
         config.configured = ConfiguredOracleConfig::default();
 
@@ -255,6 +275,10 @@ mod tests {
         assert_eq!(
             mainnet.base_layer.base_node_grpc_url,
             config.base_layer.base_node_grpc_url
+        );
+        assert_eq!(
+            mainnet.base_layer.fallback_base_node_grpc_urls,
+            config.base_layer.fallback_base_node_grpc_urls
         );
         assert_eq!(mainnet.base_layer.scanning_interval, Duration::from_secs(3));
 
@@ -297,6 +321,40 @@ mod tests {
         let config = load(None);
         assert!(matches!(config.oracle_type, EpochOracleType::BaseLayer));
         assert!(config.configured.config_json.is_none());
+    }
+
+    #[test]
+    fn fallback_base_node_urls_load_after_the_primary() {
+        let cfg = Config::builder()
+            .add_source(File::from_str(PRESET, FileFormat::Toml))
+            .set_override("epoch_oracle.base_layer.base_node_grpc_url", "http://primary:18142")
+            .unwrap()
+            .set_override("epoch_oracle.base_layer.fallback_base_node_grpc_urls", vec![
+                "http://fallback-1:18142",
+                "http://fallback-2:18142",
+            ])
+            .unwrap()
+            .build()
+            .unwrap();
+        let config = EpochOracleConfig::load_from(&cfg).unwrap();
+
+        let urls = config
+            .base_layer
+            .base_node_grpc_urls("http://127.0.0.1:1".parse().unwrap())
+            .iter()
+            .map(Url::to_string)
+            .collect::<Vec<_>>();
+        assert_eq!(urls, [
+            "http://primary:18142/",
+            "http://fallback-1:18142/",
+            "http://fallback-2:18142/"
+        ]);
+    }
+
+    #[test]
+    fn unset_primary_base_node_url_uses_the_default() {
+        let urls = BaseLayerOracleConfig::default().base_node_grpc_urls("http://127.0.0.1:1".parse().unwrap());
+        assert_eq!(urls, vec!["http://127.0.0.1:1".parse::<Url>().unwrap()]);
     }
 
     #[tokio::test]

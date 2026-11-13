@@ -596,7 +596,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
             Type::F64 => self.deserialize_f64(visitor),
             Type::Bytes => visitor.visit_borrowed_bytes(self.decoder.bytes()?),
             Type::String => visitor.visit_borrowed_str(self.decoder.str()?),
-            Type::Null => {
+            Type::Null | Type::Undefined => {
                 self.decoder.skip()?;
                 visitor.visit_none()
             },
@@ -613,12 +613,10 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
             },
             Type::BytesIndef => visitor.visit_byte_buf(collect_indef_bytes(&mut self.decoder)?),
             Type::StringIndef => visitor.visit_string(collect_indef_str(&mut self.decoder)?),
-            t @ (Type::F16 | Type::Undefined | Type::Simple | Type::Break | Type::Unknown(_)) => {
-                Err(decode::Error::type_mismatch(t)
-                    .with_message("unexpected type")
-                    .at(self.decoder.position())
-                    .into())
-            },
+            t @ (Type::F16 | Type::Simple | Type::Break | Type::Unknown(_)) => Err(decode::Error::type_mismatch(t)
+                .with_message("unexpected type")
+                .at(self.decoder.position())
+                .into()),
         }
     }
 
@@ -711,7 +709,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     }
 
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        if Type::Null == self.decoder.datatype()? {
+        if matches!(self.decoder.datatype()?, Type::Null | Type::Undefined) {
             self.decoder.skip()?;
             visitor.visit_none()
         } else {
@@ -757,15 +755,30 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
 
     fn deserialize_tuple<V: Visitor<'de>>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error> {
         let p = self.decoder.position();
-        let n = self.decoder.array()?;
-        if Some(len as u64) != n {
-            return Err(
-                decode::Error::message(format!("invalid length {n:?}, was expecting: {len}"))
+        match self.decoder.array()? {
+            Some(n) => {
+                if n != len as u64 {
+                    return Err(
+                        decode::Error::message(format!("invalid length {n}, was expecting: {len}"))
+                            .at(p)
+                            .into(),
+                    );
+                }
+                visitor.visit_seq(Seq::new(self, Some(n)))
+            },
+            None => {
+                let val = visitor.visit_seq(Seq::new(self, None))?;
+                if BREAK != self.current()? {
+                    return Err(decode::Error::message(format!(
+                        "invalid indefinite tuple length, was expecting: {len}"
+                    ))
                     .at(p)
-                    .into(),
-            );
+                    .into());
+                }
+                self.read()?;
+                Ok(val)
+            },
         }
-        visitor.visit_seq(Seq::new(self, n))
     }
 
     fn deserialize_tuple_struct<V: Visitor<'de>>(
@@ -798,13 +811,31 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         visitor: V,
     ) -> Result<V::Value, Self::Error> {
         let p = self.decoder.position();
-        if Type::Map == self.decoder.datatype()? {
-            let m = self.decoder.map()?;
-            if m != Some(1) {
-                return Err(decode::Error::message("invalid enum map length").at(p).into());
-            }
+        match self.decoder.datatype()? {
+            Type::String | Type::StringIndef => visitor.visit_enum(UnitEnum::new(self)),
+            Type::Map => {
+                if self.decoder.map()? != Some(1) {
+                    return Err(decode::Error::message("invalid enum map length").at(p).into());
+                }
+                visitor.visit_enum(VariantEnum::new(self))
+            },
+            Type::MapIndef => {
+                self.decoder.map()?;
+                if BREAK == self.current()? {
+                    return Err(decode::Error::message("invalid enum map length").at(p).into());
+                }
+                let val = visitor.visit_enum(VariantEnum::new(self))?;
+                if BREAK != self.current()? {
+                    return Err(decode::Error::message("invalid enum map length").at(p).into());
+                }
+                self.read()?;
+                Ok(val)
+            },
+            t => Err(decode::Error::type_mismatch(t)
+                .with_message("expected enum string or single-entry map")
+                .at(p)
+                .into()),
         }
-        visitor.visit_enum(Enum::new(self))
     }
 
     fn deserialize_identifier<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
@@ -953,17 +984,17 @@ impl<'de> SeqAccess<'de> for ByteSeqAccessOwned {
     }
 }
 
-struct Enum<'a, 'de: 'a> {
+struct UnitEnum<'a, 'de: 'a> {
     deserializer: &'a mut Deserializer<'de>,
 }
 
-impl<'a, 'de> Enum<'a, 'de> {
+impl<'a, 'de> UnitEnum<'a, 'de> {
     fn new(d: &'a mut Deserializer<'de>) -> Self {
         Self { deserializer: d }
     }
 }
 
-impl<'de> EnumAccess<'de> for Enum<'_, 'de> {
+impl<'de> EnumAccess<'de> for UnitEnum<'_, 'de> {
     type Error = DecodeError;
     type Variant = Self;
 
@@ -972,11 +1003,58 @@ impl<'de> EnumAccess<'de> for Enum<'_, 'de> {
     }
 }
 
-impl<'de> VariantAccess<'de> for Enum<'_, 'de> {
+impl<'de> VariantAccess<'de> for UnitEnum<'_, 'de> {
     type Error = DecodeError;
 
     fn unit_variant(self) -> Result<(), Self::Error> {
         Ok(())
+    }
+
+    fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, _seed: T) -> Result<T::Value, Self::Error> {
+        Err(decode::Error::message("expected map for newtype enum variant")
+            .at(self.deserializer.decoder.position())
+            .into())
+    }
+
+    fn tuple_variant<V: Visitor<'de>>(self, _len: usize, _v: V) -> Result<V::Value, Self::Error> {
+        Err(decode::Error::message("expected map for tuple enum variant")
+            .at(self.deserializer.decoder.position())
+            .into())
+    }
+
+    fn struct_variant<V: Visitor<'de>>(self, _fields: &'static [&'static str], _v: V) -> Result<V::Value, Self::Error> {
+        Err(decode::Error::message("expected map for struct enum variant")
+            .at(self.deserializer.decoder.position())
+            .into())
+    }
+}
+
+struct VariantEnum<'a, 'de: 'a> {
+    deserializer: &'a mut Deserializer<'de>,
+}
+
+impl<'a, 'de> VariantEnum<'a, 'de> {
+    fn new(d: &'a mut Deserializer<'de>) -> Self {
+        Self { deserializer: d }
+    }
+}
+
+impl<'de> EnumAccess<'de> for VariantEnum<'_, 'de> {
+    type Error = DecodeError;
+    type Variant = Self;
+
+    fn variant_seed<V: DeserializeSeed<'de>>(self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error> {
+        seed.deserialize(&mut *self.deserializer).map(|v| (v, self))
+    }
+}
+
+impl<'de> VariantAccess<'de> for VariantEnum<'_, 'de> {
+    type Error = DecodeError;
+
+    fn unit_variant(self) -> Result<(), Self::Error> {
+        Err(decode::Error::message("unexpected map for unit enum variant")
+            .at(self.deserializer.decoder.position())
+            .into())
     }
 
     fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value, Self::Error> {
@@ -1167,5 +1245,65 @@ mod tests {
         assert_eq!(got_cow, "hi!");
         // Borrowed &str cannot borrow across indefinite-length chunks and must fail cleanly
         assert!(from_slice::<&str>(&indef_str).is_err());
+    }
+
+    #[test]
+    fn undefined_deserializes_via_any_and_option() {
+        use crate::Value;
+
+        // CBOR undefined (0xf7) matches minicbor::Decode for Value and check_value_form.
+        let undef = [0xf7];
+        assert_eq!(from_slice::<Value>(&undef).unwrap(), Value::Null);
+        assert_eq!(from_slice::<Option<u32>>(&undef).unwrap(), None);
+
+        // IEEE 754 binary16 (0xf9) remains rejected without minicbor's half feature.
+        assert!(from_slice::<Value>(&[0xf9, 0x3e, 0x00]).is_err());
+    }
+
+    #[test]
+    fn indef_tuples_enforce_exact_element_count() {
+        assert_eq!(from_slice::<(u8, u8)>(&[0x9f, 0x01, 0x02, 0xff]).unwrap(), (1, 2));
+        assert!(from_slice::<(u8, u8)>(&[0x9f, 0x01, 0xff]).is_err());
+        assert!(from_slice::<(u8, u8)>(&[0x9f, 0x01, 0x02, 0x03, 0xff]).is_err());
+        assert!(from_slice::<(u8, u8)>(&[0x9f, 0x01, 0x02]).is_err());
+    }
+
+    #[test]
+    fn enum_deserialization_enforces_map_and_unit_boundaries() {
+        #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+        enum SampleEnum {
+            Unit,
+            Newtype(u32),
+            Tuple(u8, u8),
+            Struct { a: u8 },
+        }
+
+        roundtrip(&SampleEnum::Unit);
+        roundtrip(&SampleEnum::Newtype(7));
+        roundtrip(&SampleEnum::Tuple(3, 4));
+        roundtrip(&SampleEnum::Struct { a: 9 });
+
+        // Indefinite-length 1-entry map for a newtype variant succeeds and consumes 0xff.
+        let indef_newtype = [0xbf, 0x67, b'N', b'e', b'w', b't', b'y', b'p', b'e', 0x07, 0xff];
+        assert_eq!(
+            from_slice::<SampleEnum>(&indef_newtype).unwrap(),
+            SampleEnum::Newtype(7)
+        );
+
+        // Indefinite-length map with an extra entry must fail.
+        let indef_extra = [
+            0xbf, 0x67, b'N', b'e', b'w', b't', b'y', b'p', b'e', 0x07, 0x61, b'x', 0x01, 0xff,
+        ];
+        assert!(from_slice::<SampleEnum>(&indef_extra).is_err());
+
+        // Unit variant wrapped in a 1-entry map {"Unit": 42} inside a 2-tuple header must not
+        // leave the map's value on the stream for the second tuple element.
+        let unit_in_map_smuggle = [0x82, 0xa1, 0x64, b'U', b'n', b'i', b't', 0x18, 0x2a];
+        assert!(from_slice::<(SampleEnum, u32)>(&unit_in_map_smuggle).is_err());
+
+        // Non-unit variant encoded as a bare string inside a 2-element array must not consume
+        // the sibling array element as its payload.
+        let bare_newtype_steal = [0x9f, 0x67, b'N', b'e', b'w', b't', b'y', b'p', b'e', 0x07, 0xff];
+        assert!(from_slice::<Vec<SampleEnum>>(&bare_newtype_steal).is_err());
     }
 }

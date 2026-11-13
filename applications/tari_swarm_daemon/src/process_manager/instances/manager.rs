@@ -5,14 +5,14 @@ use std::{
     collections::HashMap,
     io::BufReader as StdBufReader,
     net::{IpAddr, Ipv4Addr},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
     time::Duration,
 };
 
 use anyhow::{Context, anyhow};
 use indexmap::IndexMap;
-use log::{debug, info};
+use log::{debug, info, warn};
 use slug::slugify;
 use tari_ootle_wallet_sdk::Network;
 use tokio::{
@@ -65,6 +65,22 @@ use crate::{
         processes::{MinoTariMinerProcess, MinoTariNodeProcess, MinoTariWalletProcess, ValidatorNodeProcess},
     },
 };
+
+/// The `account_public_key` from the swarm's claim key file, or `None` when the file does not exist.
+fn read_claim_public_key_file(processes_path: &Path) -> anyhow::Result<Option<String>> {
+    let claim_public_key_file = processes_path.join(CLAIM_KEY_FILE_NAME);
+    if !claim_public_key_file.exists() {
+        return Ok(None);
+    }
+    let file = std::fs::File::open(&claim_public_key_file).context("Failed to open claim public key file")?;
+    let claim_data = serde_json::from_reader::<_, serde_json::Value>(StdBufReader::new(file))
+        .context("Failed to read claim public key file")?;
+    let claim_public_key = claim_data
+        .get("account_public_key")
+        .and_then(|pk| pk.as_str())
+        .ok_or_else(|| anyhow!("Failed to extract public key from claim public key file: {claim_data}"))?;
+    Ok(Some(claim_public_key.to_string()))
+}
 
 pub struct InstanceManager {
     base_path: PathBuf,
@@ -297,23 +313,12 @@ impl InstanceManager {
         fs::create_dir_all(&base_path).await.context("create_dir_all in fork")?;
 
         // Special handling to set the claim public key if we find a file containing one
-        if instance_type.is_validator() {
-            let claim_public_key_file = processes_path.join(CLAIM_KEY_FILE_NAME);
-            if claim_public_key_file.exists() {
-                let file = File::open(&claim_public_key_file)
-                    .await
-                    .context("Failed to open claim public key file")?;
-                let file = file.into_std().await;
-                let reader = StdBufReader::new(file);
-                let claim_data = serde_json::from_reader::<_, serde_json::Value>(reader)
-                    .context("Failed to read claim public key file")?;
-                let claim_public_key = claim_data
-                    .get("account_public_key")
-                    .and_then(|pk| pk.as_str())
-                    .ok_or_else(|| anyhow!("Failed to extract public key from claim public key file: {claim_data}"))?;
-                info!("Setting claim public key to {}", claim_public_key);
-                instance_settings.insert(CLAIM_PUBLIC_KEY_SETTINGS_KEY.to_string(), claim_public_key.to_string());
-            }
+        if instance_type.is_validator() &&
+            !instance_settings.contains_key(CLAIM_PUBLIC_KEY_SETTINGS_KEY) &&
+            let Some(claim_public_key) = read_claim_public_key_file(&processes_path)?
+        {
+            info!("Setting claim public key to {}", claim_public_key);
+            instance_settings.insert(CLAIM_PUBLIC_KEY_SETTINGS_KEY.to_string(), claim_public_key);
         }
 
         let context = ProcessContext::new(
@@ -606,11 +611,27 @@ impl InstanceManager {
         new_global_settings: HashMap<String, String>,
         new_instance_configs: &[InstanceConfig],
     ) {
+        // Derived as fork derives it, so the comparison below sees the settings a restart would use
+        let file_claim_public_key = if new_instance_configs.iter().any(|c| c.instance_type.is_validator()) {
+            read_claim_public_key_file(&self.base_path.join("processes")).unwrap_or_else(|err| {
+                warn!("Config reload could not read the swarm claim key: {err:#}");
+                None
+            })
+        } else {
+            None
+        };
         for instance_config in new_instance_configs {
             for i in 0..instance_config.num_instances {
                 let expected_name = instance_config.instance_name(i);
                 let mut new_settings = new_global_settings.clone();
                 new_settings.extend(instance_config.settings.clone());
+
+                if instance_config.instance_type.is_validator() &&
+                    !new_settings.contains_key(CLAIM_PUBLIC_KEY_SETTINGS_KEY) &&
+                    let Some(claim_public_key) = &file_claim_public_key
+                {
+                    new_settings.insert(CLAIM_PUBLIC_KEY_SETTINGS_KEY.to_string(), claim_public_key.clone());
+                }
 
                 if let Some(instance) = self.instances_mut().find(|inst| inst.name() == expected_name) {
                     let settings_changed = *instance.settings() != new_settings;
@@ -828,5 +849,90 @@ mod tests {
         assert!(err.contains("no fee claim public key"), "{err}");
         assert!(err.contains(CLAIM_KEY_FILE_NAME), "{err}");
         assert_eq!(manager.instances().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn validator_claim_key_follows_explicit_settings_and_the_claim_key_file_on_reload() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_path = temp_dir.path().to_path_buf();
+        let node_exec = stub_executable(&base_path).await;
+        let vn_exec = Executable {
+            instance_type: InstanceType::TariValidatorNode,
+            path: node_exec.path.clone(),
+        };
+        let claim_key_file = base_path.join("processes").join(CLAIM_KEY_FILE_NAME);
+        fs::create_dir_all(claim_key_file.parent().unwrap()).await.unwrap();
+        fs::write(&claim_key_file, r#"{"account_public_key":"file-claim-key"}"#)
+            .await
+            .unwrap();
+
+        let vn_config = InstanceConfig::new(InstanceType::TariValidatorNode);
+        let explicit_config = InstanceConfig::new(InstanceType::TariValidatorNode)
+            .with_name("ExplicitVn")
+            .with_setting(CLAIM_PUBLIC_KEY_SETTINGS_KEY, "custom-claim-key");
+        let mut manager = InstanceManager::new(
+            base_path,
+            Network::LocalNet,
+            HashMap::new(),
+            vec![vn_config.clone(), explicit_config.clone()],
+            47300,
+        );
+        manager
+            .create_instance(
+                &node_exec,
+                InstanceType::MinoTariNode,
+                Some("bn".to_string()),
+                HashMap::new(),
+            )
+            .await
+            .unwrap();
+        let file_vn_id = manager
+            .create_instance(
+                &vn_exec,
+                InstanceType::TariValidatorNode,
+                Some(vn_config.instance_name(0)),
+                HashMap::new(),
+            )
+            .await
+            .unwrap();
+        let explicit_vn_id = manager
+            .create_instance(
+                &vn_exec,
+                InstanceType::TariValidatorNode,
+                Some(explicit_config.instance_name(0)),
+                explicit_config.settings.clone(),
+            )
+            .await
+            .unwrap();
+
+        let claim_key = |manager: &InstanceManager, id: InstanceId| {
+            let instance = manager.instances().find(|i| i.id() == id).unwrap();
+            (
+                instance.settings().get(CLAIM_PUBLIC_KEY_SETTINGS_KEY).cloned(),
+                instance.is_config_dirty(),
+            )
+        };
+        let key = |key: &str| Some(key.to_string());
+        assert_eq!(claim_key(&manager, file_vn_id), (key("file-claim-key"), false));
+        assert_eq!(claim_key(&manager, explicit_vn_id), (key("custom-claim-key"), false));
+
+        // An unchanged config leaves both validators clean
+        manager.apply_config_update(HashMap::new(), &[vn_config.clone(), explicit_config.clone()]);
+        assert_eq!(claim_key(&manager, file_vn_id), (key("file-claim-key"), false));
+        assert_eq!(claim_key(&manager, explicit_vn_id), (key("custom-claim-key"), false));
+
+        // Removing the explicit key falls back to the claim key file
+        let mut without_explicit = explicit_config;
+        without_explicit.settings.remove(CLAIM_PUBLIC_KEY_SETTINGS_KEY);
+        manager.apply_config_update(HashMap::new(), &[vn_config.clone(), without_explicit.clone()]);
+        assert_eq!(claim_key(&manager, file_vn_id), (key("file-claim-key"), false));
+        assert_eq!(claim_key(&manager, explicit_vn_id), (key("file-claim-key"), true));
+
+        // A changed claim key file reaches the validators that take their key from it
+        fs::write(&claim_key_file, r#"{"account_public_key":"rotated-claim-key"}"#)
+            .await
+            .unwrap();
+        manager.apply_config_update(HashMap::new(), &[vn_config, without_explicit]);
+        assert_eq!(claim_key(&manager, file_vn_id), (key("rotated-claim-key"), true));
     }
 }

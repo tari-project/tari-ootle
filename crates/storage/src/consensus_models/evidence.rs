@@ -19,6 +19,7 @@ use tari_ootle_common_types::{
     SubstateRequirementRef,
     ToSubstateAddress,
     VersionedSubstateId,
+    VersionedSubstateIdRef,
     borsh::indexmap as indexmap_borsh,
     displayable::Displayable,
 };
@@ -560,6 +561,17 @@ impl ShardGroupEvidence {
         self.outputs.get(substate_id).is_some_and(|v| *v == version)
     }
 
+    /// The first substate in this evidence that `shard_group` does not hold: one that is not global and whose shard
+    /// is outside the shard group's range. [`Evidence`] files every substate under the shard group that holds it, so
+    /// the evidence a shard group records for itself names none.
+    pub fn first_substate_outside(&self, shard_group: ShardGroup, num_preshards: NumPreshards) -> Option<&SubstateId> {
+        self.inputs.keys().chain(self.outputs.keys()).find(|substate_id| {
+            // The version does not affect the shard
+            let shard = VersionedSubstateIdRef::new(substate_id, SubstateVersion::ZERO).to_shard(num_preshards);
+            !shard_group.contains_or_global(&shard)
+        })
+    }
+
     pub fn update(&mut self, other: &ShardGroupEvidence) -> &mut Self {
         for (substate_id, lock) in &other.inputs {
             if let Some(e) = lock {
@@ -691,6 +703,87 @@ mod tests {
 
     fn seed_lock_intent(seed: u8, ty: SubstateLockType) -> SubstateRequirementLockIntent {
         SubstateRequirementLockIntent::new(seed_substate_id(seed), SubstateVersion::ZERO, ty)
+    }
+
+    mod first_substate_outside {
+        use super::*;
+
+        const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
+
+        fn shard_group_of(substate_id: &SubstateId) -> ShardGroup {
+            VersionedSubstateIdRef::new(substate_id, SubstateVersion::ZERO)
+                .to_substate_address()
+                .to_shard_group(NUM_PRESHARDS, 2)
+        }
+
+        /// Two components held by different shard groups when there are two committees.
+        fn components_in_different_shard_groups() -> (SubstateId, SubstateId) {
+            let first = seed_substate_id(0);
+            let other = (1..=u8::MAX)
+                .map(seed_substate_id)
+                .find(|id| shard_group_of(id) != shard_group_of(&first))
+                .expect("some component falls in the other shard group");
+            (first, other)
+        }
+
+        #[test]
+        fn it_is_none_for_substates_the_shard_group_holds() {
+            let (held, _) = components_in_different_shard_groups();
+            let mut evidence = ShardGroupEvidence::default();
+            evidence.insert(held.clone(), SubstateVersion::ZERO, SubstateLockType::Write, None);
+            evidence.insert_output(held.clone(), SubstateVersion::new(1));
+
+            assert_eq!(
+                evidence.first_substate_outside(shard_group_of(&held), NUM_PRESHARDS),
+                None
+            );
+        }
+
+        #[test]
+        fn it_is_none_for_a_global_substate() {
+            let (held, _) = components_in_different_shard_groups();
+            let global =
+                SubstateId::Component(tari_template_lib_types::constants::BURN_RATE_GOVERNANCE_COMPONENT_ADDRESS);
+            assert!(global.is_global());
+            let mut evidence = ShardGroupEvidence::default();
+            evidence.insert(global, SubstateVersion::ZERO, SubstateLockType::Read, None);
+
+            assert_eq!(
+                evidence.first_substate_outside(shard_group_of(&held), NUM_PRESHARDS),
+                None
+            );
+        }
+
+        #[test]
+        fn it_finds_an_input_of_another_shard_group() {
+            let (held, foreign) = components_in_different_shard_groups();
+            let mut evidence = ShardGroupEvidence::default();
+            evidence.insert(held.clone(), SubstateVersion::ZERO, SubstateLockType::Write, None);
+            evidence.insert(foreign.clone(), SubstateVersion::ZERO, SubstateLockType::Write, None);
+
+            assert_eq!(
+                evidence.first_substate_outside(shard_group_of(&held), NUM_PRESHARDS),
+                Some(&foreign)
+            );
+        }
+
+        #[test]
+        fn it_finds_an_unpledged_input_and_an_output_of_another_shard_group() {
+            let (held, foreign) = components_in_different_shard_groups();
+            let mut unpledged = ShardGroupEvidence::default();
+            unpledged.insert_unpledged_input(foreign.clone());
+            let mut output = ShardGroupEvidence::default();
+            output.insert_output(foreign.clone(), SubstateVersion::ZERO);
+
+            assert_eq!(
+                unpledged.first_substate_outside(shard_group_of(&held), NUM_PRESHARDS),
+                Some(&foreign)
+            );
+            assert_eq!(
+                output.first_substate_outside(shard_group_of(&held), NUM_PRESHARDS),
+                Some(&foreign)
+            );
+        }
     }
 
     mod exhaust_burn_portion {

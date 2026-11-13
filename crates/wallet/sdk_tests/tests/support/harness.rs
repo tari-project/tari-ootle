@@ -97,6 +97,14 @@ impl Test {
     pub fn new() -> Self {
         Self::with_network(PanicNetworkInterface)
     }
+
+    /// A wallet with the test account that has not cached the stealth TARI resource. Any lookup of that resource
+    /// reaches the network and panics.
+    pub fn without_tari_resource() -> Self {
+        let test = Self::bare(PanicNetworkInterface, IndexerTrust::Trust);
+        test.add_test_account();
+        test
+    }
 }
 
 impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
@@ -107,7 +115,12 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
     /// A wallet with the test account, which trusts its indexer as far as `indexer_trust` says.
     pub fn with_network_trusting(network: TNetwork, indexer_trust: IndexerTrust) -> Self {
         let test = Self::without_accounts_trusting(network, indexer_trust);
-        let accounts_api = test.sdk.accounts_api();
+        test.add_test_account();
+        test
+    }
+
+    fn add_test_account(&self) {
+        let accounts_api = self.sdk.accounts_api();
         accounts_api
             .add_account(
                 Some("test"),
@@ -130,7 +143,6 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
                 6,
             )
             .unwrap();
-        test
     }
 
     /// A wallet with the stealth TARI resource and no accounts, which takes its indexer at its word.
@@ -141,6 +153,28 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
     /// A wallet with the stealth TARI resource and no accounts, which trusts its indexer as far as `indexer_trust`
     /// says.
     pub fn without_accounts_trusting(network: TNetwork, indexer_trust: IndexerTrust) -> Self {
+        let test = Self::bare(network, indexer_trust);
+        test.sdk
+            .resources_api()
+            .upsert_resource(
+                &STEALTH_TARI_RESOURCE_ADDRESS,
+                &Resource::new(
+                    ResourceType::Stealth,
+                    SubstateOwnerRule::None,
+                    ResourceAccessRules::new(),
+                    Metadata::from([(TOKEN_SYMBOL, "TEST".to_string())]),
+                    None,
+                    None,
+                    6,
+                    false,
+                ),
+            )
+            .unwrap();
+        test
+    }
+
+    /// A wallet with neither accounts nor cached resources.
+    fn bare(network: TNetwork, indexer_trust: IndexerTrust) -> Self {
         let temp = tempfile::tempdir().unwrap();
         let store = SqliteWalletStore::try_open(temp.path().join("data/wallet.sqlite")).unwrap();
         store.run_migrations().unwrap();
@@ -157,21 +191,6 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
         )
         .unwrap();
         sdk.initialize_cipher_seed(CipherSeedRestore::CreateNewIfRequired)
-            .unwrap();
-        sdk.resources_api()
-            .upsert_resource(
-                &STEALTH_TARI_RESOURCE_ADDRESS,
-                &Resource::new(
-                    ResourceType::Stealth,
-                    SubstateOwnerRule::None,
-                    ResourceAccessRules::new(),
-                    Metadata::from([(TOKEN_SYMBOL, "TEST".to_string())]),
-                    None,
-                    None,
-                    6,
-                    false,
-                ),
-            )
             .unwrap();
 
         Self {

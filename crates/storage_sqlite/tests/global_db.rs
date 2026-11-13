@@ -606,3 +606,201 @@ fn set_committee_shard_selects_latest_active_registration() {
         assert_eq!(vn.fee_claim_public_key, expected_claim_key);
     }
 }
+
+#[test]
+fn reassigning_a_committee_after_reregistration_replaces_previous_registration_row() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut validator_nodes = db.validator_nodes(&mut tx);
+
+    let pk = new_public_key();
+    let pk_bytes = pk.to_byte_type();
+    let shard_key = derived_substate_address(&pk);
+    let old_claim_key = new_public_key().to_byte_type();
+    let new_claim_key = new_public_key().to_byte_type();
+    let all_shards = ShardGroup::all_shards(NumPreshards::P256);
+    let first_half = ShardGroup::new(0, 127);
+
+    validator_nodes
+        .insert_validator_node(
+            pk.clone().into(),
+            pk_bytes,
+            shard_key,
+            Epoch(10),
+            old_claim_key,
+            VotePower::of(1),
+        )
+        .unwrap();
+
+    for epoch in [Epoch(15), Epoch(20)] {
+        validator_nodes
+            .set_committee_shard(shard_key, all_shards, epoch)
+            .unwrap();
+    }
+
+    // A later registration for Epoch(20) arrives (e.g. claim-key rotation) and committee assignment runs again for
+    // Epoch(20). The assignment for the older registration row at Epoch(20) must be replaced rather than left behind.
+    validator_nodes
+        .insert_validator_node(
+            pk.into(),
+            pk_bytes,
+            shard_key,
+            Epoch(20),
+            new_claim_key,
+            VotePower::of(3),
+        )
+        .unwrap();
+    validator_nodes
+        .set_committee_shard(shard_key, first_half, Epoch(20))
+        .unwrap();
+
+    assert_eq!(validator_nodes.count_in_shard_group(Epoch(20), all_shards).unwrap(), 0);
+    assert_eq!(validator_nodes.count_in_shard_group(Epoch(20), first_half).unwrap(), 1);
+    let size = validator_nodes.size_of_shard_group(Epoch(20), first_half).unwrap();
+    assert_eq!(size.num_members, 1);
+    assert_eq!(size.total_power, VotePower::of(3));
+
+    let committee = validator_nodes
+        .get_committee_for_shard_group(Epoch(20), first_half, 100)
+        .unwrap();
+    assert_eq!(committee.len(), 1);
+    assert_eq!(
+        validator_nodes
+            .get_by_public_key(Epoch(20), &pk_bytes)
+            .unwrap()
+            .fee_claim_public_key,
+        new_claim_key
+    );
+
+    // Earlier epochs before the rotation keep their original committee assignment and claim key.
+    assert_eq!(validator_nodes.count_in_shard_group(Epoch(15), all_shards).unwrap(), 1);
+    assert_eq!(
+        validator_nodes
+            .get_by_public_key(Epoch(15), &pk_bytes)
+            .unwrap()
+            .fee_claim_public_key,
+        old_claim_key
+    );
+}
+
+#[test]
+fn set_committee_shard_ignores_superseded_shard_key_registration() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut validator_nodes = db.validator_nodes(&mut tx);
+
+    let first_pk = new_public_key();
+    let second_pk = new_public_key();
+    let shared_old_shard_key = SubstateAddress::from_array([1u8; SubstateAddress::LENGTH]);
+    let rotated_shard_key = SubstateAddress::from_array([2u8; SubstateAddress::LENGTH]);
+    let first_claim_key = new_public_key().to_byte_type();
+    let second_old_claim_key = new_public_key().to_byte_type();
+    let second_new_claim_key = new_public_key().to_byte_type();
+    let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+
+    // `first_pk` registers at Epoch(10) with `shared_old_shard_key`.
+    // `second_pk` registers at Epoch(15) with `shared_old_shard_key`, then re-registers at Epoch(20) with
+    // `rotated_shard_key`. At Epoch(20), `second_pk`'s Epoch(15) row is superseded by its Epoch(20) row.
+    validator_nodes
+        .insert_validator_node(
+            first_pk.clone().into(),
+            first_pk.to_byte_type(),
+            shared_old_shard_key,
+            Epoch(10),
+            first_claim_key,
+            VotePower::of(1),
+        )
+        .unwrap();
+    validator_nodes
+        .insert_validator_node(
+            second_pk.clone().into(),
+            second_pk.to_byte_type(),
+            shared_old_shard_key,
+            Epoch(15),
+            second_old_claim_key,
+            VotePower::of(1),
+        )
+        .unwrap();
+    validator_nodes
+        .insert_validator_node(
+            second_pk.clone().into(),
+            second_pk.to_byte_type(),
+            rotated_shard_key,
+            Epoch(20),
+            second_new_claim_key,
+            VotePower::of(1),
+        )
+        .unwrap();
+
+    let registered = validator_nodes
+        .get_all_registered_within_start_epoch(Epoch(20))
+        .unwrap();
+    assert_eq!(registered.len(), 2);
+    for vn in &registered {
+        validator_nodes
+            .set_committee_shard(vn.shard_key, shard_group, Epoch(20))
+            .unwrap();
+    }
+
+    let committee = validator_nodes
+        .get_committee_for_shard_group(Epoch(20), shard_group, 100)
+        .unwrap();
+    assert_eq!(committee.len(), 2);
+    assert_eq!(
+        validator_nodes
+            .get_by_public_key(Epoch(20), &first_pk.to_byte_type())
+            .unwrap()
+            .fee_claim_public_key,
+        first_claim_key
+    );
+    assert_eq!(
+        validator_nodes
+            .get_by_public_key(Epoch(20), &second_pk.to_byte_type())
+            .unwrap()
+            .fee_claim_public_key,
+        second_new_claim_key
+    );
+}
+
+#[test]
+fn block_header_get_by_hash_resolves_latest_epoch_and_rejects_overflow_height() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut headers = db.block_headers(&mut tx);
+
+    let hash = FixedHash::from([9u8; 32]);
+    let hash32 = Hash32::from_array([9u8; 32]);
+    for (epoch, height, root_byte) in [(Epoch(1), 100, 1u8), (Epoch(2), 200, 2u8)] {
+        headers
+            .insert(BlockHeaderModel {
+                epoch,
+                height,
+                block_hash: hash,
+                block_output_merkle_root: FixedHash::from([root_byte; 32]),
+                validator_node_merkle_root: FixedHash::from([3u8; 32]),
+            })
+            .unwrap();
+    }
+
+    assert_eq!(
+        headers.get_by_hash(Epoch(1), &hash32).unwrap().block_output_merkle_root,
+        FixedHash::from([1u8; 32])
+    );
+    assert_eq!(
+        headers.get_by_hash(Epoch(2), &hash32).unwrap().block_output_merkle_root,
+        FixedHash::from([2u8; 32])
+    );
+
+    assert!(
+        headers
+            .insert(BlockHeaderModel {
+                epoch: Epoch(3),
+                height: i64::MAX as u64 + 1,
+                block_hash: FixedHash::from([8u8; 32]),
+                block_output_merkle_root: FixedHash::from([4u8; 32]),
+                validator_node_merkle_root: FixedHash::from([3u8; 32]),
+            })
+            .is_err(),
+        "height above i64::MAX must be rejected rather than wrapping negative"
+    );
+}

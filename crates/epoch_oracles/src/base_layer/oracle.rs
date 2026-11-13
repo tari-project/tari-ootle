@@ -19,12 +19,16 @@ use tari_base_node_client::{
     BaseNodeClientError,
     futures_util::{StreamExt, TryStreamExt, stream},
     grpc::GrpcBaseNodeClient,
-    types::{BaseLayerConsensusConstants, BaseLayerMetadata},
+    types::{BaseLayerConsensusConstants, BaseLayerMetadata, BlockInfo, SideChainUtxos},
 };
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle, ValidatorNodeChange};
+use tari_node_components::blocks::BlockHeader;
 use tari_ootle_common_types::{Epoch, displayable::Displayable, optional::Optional};
 use tari_ootle_storage::global::BlockHeaderModel;
 use tari_sidechain::FixedHash;
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+use tari_transaction_components::transaction_components::TransactionOutput;
+use tari_utilities::ByteArray;
 use tokio::time;
 
 use crate::{
@@ -39,9 +43,14 @@ const LOG_TARGET: &str = "tari::ootle::epoch_oracles::base_layer_scanner";
 /// rather than being awaited one at a time mid-stream (see `resolve_changes_and_commit`).
 const VALIDATOR_NODE_CHANGE_FETCH_CONCURRENCY: usize = 10;
 
-/// Maximum number of epoch-boundary headers fetched concurrently in the boundary-only scan path
-/// (see `scan_epoch_boundaries`).
-const BOUNDARY_HEADER_FETCH_CONCURRENCY: usize = 16;
+/// Maximum number of individual headers fetched concurrently by the boundary-only and retained-header
+/// scan paths (see `scan_epoch_boundaries` and `scan_retained_headers`).
+const HEADER_FETCH_CONCURRENCY: usize = 16;
+
+/// Maximum number of blocks requested per `get_sidechain_utxos` call in the retained-header path. The
+/// response carries only each block's hash and its sidechain outputs, so a batch this size is a few
+/// seconds of base node work; the remainder is picked up by the next scan round.
+const MAX_BLOCKS_PER_SIDECHAIN_BATCH: u64 = 10_000;
 
 /// Maximum number of epoch boundaries scanned per batch in the boundary-only path. Bounds memory and
 /// the number of concurrent header fetches for very long catch-ups; the remainder is picked up by
@@ -306,23 +315,18 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
         }
     }
 
-    /// Recovers from a detected base-layer reorg by rewinding the scanner to the fork point.
+    /// Recovers from a detected base-layer reorg by rewinding the scanner to a stored header that is still
+    /// canonical.
     ///
-    /// The fork point is the highest height whose canonical block we have already stored — everything
-    /// above it was built on the orphaned chain. We delete those stale headers and rewind our scan
-    /// position to the fork point, so the subsequent `sync_blockchain` re-fetches and stores the canonical
-    /// headers in their place. The epoch database therefore converges on the correct chain rather than
-    /// accumulating orphaned headers.
+    /// The store holds every epoch boundary in the scan range plus the other retained headers, so it is
+    /// walked back an epoch at a time from the scan position, testing each epoch's lowest stored header
+    /// against the base node. The first one still on the canonical chain is at or below the fork point:
+    /// everything above it is deleted and the scan resumes from it, so the subsequent `sync_blockchain`
+    /// re-fetches the canonical headers and re-emits the boundaries above it. The walk issues one lookup
+    /// per orphaned epoch, and the re-scan covers at most the fork's epoch and the one before it.
     ///
-    /// We only attempt surgical recovery for reorgs within the confirmation depth (`height_lag`); a reorg
-    /// deeper than that is treated as unrecoverable — we discard all stored headers and rescan from the
-    /// start height. This matches the confirmation-depth guarantee (boundaries are only emitted once
-    /// `height_lag`-buried) and bounds the candidate window to `height_lag` heights.
-    ///
-    /// The whole candidate window is fetched in a single `stream_headers` call (one round-trip rather than
-    /// one per height) and the fork point is then located locally. "Canonical block at height `h` is in
-    /// our store" is monotonic — true at and below the fork, false above it — so scanning the window from
-    /// the top down stops at the fork.
+    /// If no stored header is canonical, every header is discarded and the scan restarts from the start
+    /// height.
     async fn handle_reorg(&mut self, tip: &BaseLayerMetadata) -> Result<(), BaseLayerOracleError> {
         let floor = self.lag_start_height();
 
@@ -337,81 +341,61 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
             .base_node_client
             .get_consensus_constants(tip.height_of_longest_chain)
             .await?;
-        // Bound the lookup epoch by the tip epoch (never excludes a stored header, even if the L1
-        // epoch_length constant changed since the header was stored).
-        let max_epoch = constants.height_to_epoch(tip.height_of_longest_chain);
-
-        // Candidate window is (search_floor, top]: the fork cannot be above the new canonical tip nor above
-        // the deepest height we scanned, and we only recover within `height_lag` of our scan position.
-        let top = self.last_scanned_height.min(tip.height_of_longest_chain);
-        let search_floor = self
-            .last_scanned_height
-            .saturating_sub(self.config.height_lag)
-            .max(floor);
-        if top > search_floor {
-            // Fetch the whole candidate window in one streamed request (the base node returns up to its
-            // new tip, so a chain-shortening reorg simply yields fewer headers). `window_len` is bounded by
-            // `height_lag`. Scoped so the stream (which borrows the base node client) is dropped before the
-            // store lookups below.
-            let window_len = top - search_floor;
-            let canonical = {
-                let mut stream = self
-                    .base_node_client
-                    .stream_headers(search_floor + 1, window_len)
-                    .await?;
-                let mut headers = Vec::with_capacity(window_len as usize);
-                while let Some(header) = stream.try_next().await? {
-                    headers.push(header);
-                }
-                headers
+        let floor_epoch = constants.height_to_epoch(floor).as_u64();
+        let top_epoch = constants.height_to_epoch(self.last_scanned_height).as_u64();
+        for epoch in (floor_epoch..=top_epoch).rev().map(Epoch) {
+            let Some(header) = self
+                .store
+                .get_first_block_header_in_epoch(epoch)
+                .map_err(BaseLayerOracleError::StoreError)?
+            else {
+                continue;
             };
-
-            // Highest stored canonical block is the fork point (predicate is monotonic, so the first hit
-            // from the top is the answer).
-            for header in canonical.into_iter().rev() {
-                let canonical_hash = hash_header(self.network, &header);
-                if self
-                    .store
-                    .find_block_header_by_hash(max_epoch, &canonical_hash)
-                    .map_err(BaseLayerOracleError::StoreError)?
-                    .is_some()
-                {
-                    let fork_height = header.height;
-                    let num_deleted = self
-                        .store
-                        .delete_block_headers_above(fork_height)
-                        .map_err(BaseLayerOracleError::StoreError)?;
-                    info!(
-                        target: LOG_TARGET,
-                        "⚓ Base layer fork point at height {fork_height} ({canonical_hash}). Deleted \
-                         {num_deleted} stale header(s) above it; rewinding scanner."
-                    );
-                    self.last_scanned_height = fork_height;
-                    self.last_scanned_tip = None;
-                    self.last_scanned_hash = Some(canonical_hash);
-                    self.last_scanned_validator_node_mr = Some(header.validator_node_mr.into_array().into());
-                    self.reset_last_epoch_hash_to_boundary(constants.height_to_epoch(fork_height), &constants)?;
-                    self.unpersisted_position = Some(ScanPosition {
-                        tip: None,
-                        block_hash: canonical_hash,
-                        height: fork_height,
-                        epoch_hash: self.last_epoch_hash,
-                    });
-                    return Ok(());
-                }
+            if self
+                .base_node_client
+                .get_header_by_hash(&header.block_hash)
+                .await
+                .optional()?
+                .is_none()
+            {
+                continue;
             }
+
+            let num_deleted = self
+                .store
+                .delete_block_headers_above(header.height)
+                .map_err(BaseLayerOracleError::StoreError)?;
+            info!(
+                target: LOG_TARGET,
+                "⚓ Base layer reorg: block {} at height {} is canonical. Deleted {num_deleted} stale header(s) \
+                 above it; rewinding scanner.",
+                header.block_hash,
+                header.height
+            );
+            self.last_scanned_height = header.height;
+            self.last_scanned_tip = None;
+            self.last_scanned_hash = Some(header.block_hash);
+            self.last_scanned_validator_node_mr = Some(header.validator_node_merkle_root);
+            self.reset_last_epoch_hash_to_boundary(header.epoch, &constants)?;
+            self.unpersisted_position = Some(ScanPosition {
+                tip: None,
+                block_hash: header.block_hash,
+                height: header.height,
+                epoch_hash: self.last_epoch_hash,
+            });
+            return Ok(());
         }
 
-        // No common ancestor within the recoverable range: discard everything and rebuild from the start
-        // height. The re-scan re-crosses (and re-emits) every epoch boundary above the floor, so the epoch
-        // hashes self-correct.
+        // No stored header is canonical: discard everything and rebuild from the start height. The
+        // re-scan re-crosses (and re-emits) every epoch boundary above the floor, so the epoch hashes
+        // self-correct.
         let num_deleted = self
             .store
             .delete_block_headers_above(floor)
             .map_err(BaseLayerOracleError::StoreError)?;
         warn!(
             target: LOG_TARGET,
-            "⚠️ Base layer reorg deeper than the recoverable range (start height {floor}). Deleted {num_deleted} \
+            "⚠️ Base layer reorg below every stored header (start height {floor}). Deleted {num_deleted} \
              header(s); rescanning from the start."
         );
         self.rewind_to_floor();
@@ -493,6 +477,15 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
             return Ok(false);
         }
 
+        // A pruned base node fills the blocks below its pruned height by horizon sync, which carries no
+        // burned outputs, so scanning them would silently skip the headers those burns are claimed against.
+        if self.config.features.sync_headers && start_scan_height < tip.pruned_height {
+            return Err(BaseLayerOracleError::BaseNodePrunedAboveScanHeight {
+                pruned_height: tip.pruned_height,
+                scan_height: start_scan_height,
+            });
+        }
+
         let num_blocks = lag_tip_height - (start_scan_height - 1);
 
         // Recover the last scanned validator node MR if it is not set yet, i.e the node has scanned BL blocks
@@ -511,12 +504,11 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
             .await?;
         self.epoch_length.store(constants.epoch_length(), Ordering::Relaxed);
 
-        // Acquire and scan this batch's blocks. The validator node needs every header (e.g. for
-        // burn-proof validation), so it streams and stores the full contiguous range. The indexer
-        // only needs epoch boundaries (and the validator-node MR sampled at them), so it fetches
-        // just the boundary headers — skipping the bulk of the range and the per-header stream cost.
+        // Acquire and scan this batch's blocks. The validator node stores the headers burn claims are
+        // verified against, alongside the epoch boundaries. The indexer only needs epoch boundaries
+        // (and the validator-node MR sampled at them), so it fetches just the boundary headers.
         let batch = if self.config.features.sync_headers {
-            self.scan_full_headers(&constants, start_scan_height, num_blocks)
+            self.scan_retained_headers(&constants, start_scan_height, num_blocks)
                 .await?
         } else {
             self.scan_epoch_boundaries(&constants, start_scan_height, num_blocks)
@@ -587,120 +579,125 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
         }
     }
 
-    /// Scans a contiguous batch of up to 1000 headers, buffering every header for storage. Used when
-    /// `sync_headers` is enabled (validator node), which needs the full header set (e.g. for
-    /// burn-proof validation).
+    /// Scans the next batch window with `get_sidechain_utxos`, which reports every block's hash and
+    /// its sidechain outputs. Used when `sync_headers` is enabled (validator node).
     ///
-    /// The single network call this loop used to make — `get_validator_node_changes` — is deferred:
-    /// a `ValidatorNodeChanges` placeholder is recorded at the exact position its
-    /// `ActiveValidatorNodeSetChanged` event must occupy, and the fetch is resolved later in
-    /// [`resolve_changes_and_commit`] so it never stalls the header server-stream.
-    #[allow(clippy::too_many_lines)]
-    async fn scan_full_headers(
+    /// Only the headers the validator node needs are fetched and stored: every epoch boundary, every
+    /// block holding an output for this sidechain (see [`is_retained_output`]) and, when the
+    /// validator-node MR is not yet known, the window's first block. A burn claim is verified against
+    /// the header of the block its output was mined in, and that block holds an output for this
+    /// sidechain, so every claimable burn's header is stored. A stored header of any other block
+    /// cannot make a claim verify, because no output for this sidechain is committed to its
+    /// `block_output_mr`.
+    ///
+    /// The validator-node MR is sampled at each fetched header. It only changes at epoch boundaries,
+    /// so sampling the boundaries catches every validator-set change, as in `scan_epoch_boundaries`.
+    async fn scan_retained_headers(
         &mut self,
         constants: &BaseLayerConsensusConstants,
         start_scan_height: u64,
         num_blocks: u64,
     ) -> Result<BatchScan, BaseLayerOracleError> {
-        // We'll buffer 1000 headers at a time
-        // note: 10_000 is the maximum permitted by the base node gRPC service
-        let limit = 1_000.min(num_blocks);
+        let epoch_length = constants.epoch_length().max(1);
+        let limit = MAX_BLOCKS_PER_SIDECHAIN_BATCH.min(num_blocks);
 
-        let mut base_node_client = self.base_node_client.clone();
+        // get_sidechain_utxos starts at a block hash and includes that block. Resuming from the last
+        // scanned block reuses its hash and drops it from the response; a fresh start or a rewind to
+        // the floor looks the window's first block up by height.
+        let (start_hash, num_skipped) = match self.last_scanned_hash {
+            Some(hash) if self.last_scanned_height + 1 == start_scan_height => (hash, 1),
+            _ => {
+                let header = fetch_header_at_height(&mut self.base_node_client, start_scan_height).await?;
+                (hash_header(self.network, &header), 0)
+            },
+        };
+        let first_height = start_scan_height - num_skipped;
         info!(
             target: LOG_TARGET,
-            "⛓️Starting header stream from {}-{}", start_scan_height, start_scan_height + limit
+            "⛓️ Scanning sidechain outputs in {}-{}", start_scan_height, start_scan_height + limit - 1
         );
-        let mut header_stream = base_node_client.stream_headers(start_scan_height, limit).await?;
+        let blocks = self
+            .base_node_client
+            .get_sidechain_utxos(Some(start_hash), limit + num_skipped)
+            .await?;
+        check_block_window(&blocks, first_height, start_hash, limit + num_skipped)?;
+        let blocks = &blocks[usize::try_from(num_skipped).unwrap_or_default()..];
+        let window_end = blocks
+            .last()
+            .map(|block| block.block_info.clone())
+            .ok_or_else(|| BaseLayerOracleError::InvalidBaseNodeResponse("base node returned no blocks".to_string()))?;
 
-        if let Some(additional) = usize::try_from(limit)
-            .ok()
-            .and_then(|l| l.checked_sub(self.header_buf.capacity()))
-        {
-            self.header_buf.reserve(additional);
-        }
+        let sidechain_id = self.config.sidechain_id.as_ref();
+        let fetch_targets: Vec<(u64, FixedHash)> = blocks
+            .iter()
+            .filter(|block| {
+                let height = block.block_info.height;
+                height % epoch_length == 0 ||
+                    (height == start_scan_height && self.last_scanned_validator_node_mr.is_none()) ||
+                    block
+                        .outputs
+                        .iter()
+                        .any(|output| is_retained_output(output, sidechain_id))
+            })
+            .map(|block| (block.block_info.height, block.block_info.hash))
+            .collect();
+
+        info!(
+            target: LOG_TARGET,
+            "⛓️ Fetching {} retained header(s) in {}-{}", fetch_targets.len(), start_scan_height, window_end.height
+        );
+        let mut headers = fetch_headers_by_hash(&self.base_node_client, self.network, constants, fetch_targets).await?;
+        headers.sort_unstable_by_key(|header| header.height);
 
         // Scan state evolves in locals here and is only committed to `self`/the store once the
-        // deferred fetches succeed. This makes the batch atomic: a failed fetch leaves the persisted
-        // scan position untouched, so the whole batch is safely re-scanned next round (header inserts
-        // are idempotent). `header_buf` is cleared so a re-scan after such a failure does not
-        // accumulate the previous attempt's (unflushed) headers.
+        // deferred fetches succeed, so a failed fetch leaves the batch to be re-scanned whole next
+        // round (header inserts are idempotent).
         self.header_buf.clear();
         let mut scan_events: Vec<PendingScanEvent> = Vec::new();
         let mut last_validator_node_mr = self.last_scanned_validator_node_mr;
         let mut last_epoch_hash = self.last_epoch_hash;
-        let mut last_scanned_hash = self.last_scanned_hash;
-        let mut last_scanned_height = self.last_scanned_height;
         let mut scan_epoch = constants.height_to_epoch(start_scan_height);
-        while let Some(header) = header_stream.try_next().await? {
-            let current_epoch = constants.height_to_epoch(header.height);
-            let header_height = header.height;
-            // Note: Cant use header.hash() because it uses CURRENT_NETWORK global
-            let header_hash = hash_header(self.network, &header);
-            let current_validator_node_mr = FixedHash::from(header.validator_node_mr.into_array());
-            // Keep only the fields the store persists; the full `header` (incl. its pow_data blob)
-            // is dropped at the end of this iteration.
-            self.header_buf.push(BlockHeaderModel {
-                epoch: current_epoch,
-                height: header_height,
-                block_hash: header_hash,
-                block_output_merkle_root: header.block_output_mr.into_array().into(),
-                validator_node_merkle_root: current_validator_node_mr,
-            });
-
+        for header in headers {
             // Record validator node MR changes BEFORE epoch changes so that new registrations are
-            // ordered ahead of the boundary's EpochChanged — committee assignment must see
-            // them first. This matters when the base layer updates the validator_node_mr at epoch
-            // boundary blocks.
-            if last_validator_node_mr != Some(current_validator_node_mr) {
+            // ordered ahead of the boundary's EpochChanged — committee assignment must see them first.
+            if last_validator_node_mr != Some(header.validator_node_merkle_root) {
                 debug!(
                     target: LOG_TARGET,
-                    "⛓️ last_scanned_validator_node_mr = {} current = {}", last_validator_node_mr.display(), current_validator_node_mr
+                    "⛓️ last_scanned_validator_node_mr = {} current = {}", last_validator_node_mr.display(), header.validator_node_merkle_root
                 );
-
                 if self.config.features.sync_validator_node_changes {
                     // Deferred: the actual fetch happens in resolve_changes_and_commit. Here we only
                     // mark where the resulting event belongs in the emitted order.
-                    scan_events.push(PendingScanEvent::ValidatorNodeChanges { epoch: current_epoch });
+                    scan_events.push(PendingScanEvent::ValidatorNodeChanges { epoch: header.epoch });
                 }
-                last_validator_node_mr = Some(current_validator_node_mr);
+                last_validator_node_mr = Some(header.validator_node_merkle_root);
             }
 
-            if header_height % constants.epoch_length().max(1) == 0 {
+            if header.height % epoch_length == 0 {
                 info!(
                     target: LOG_TARGET,
-                    "🟩 New epoch block {} {} {}", current_epoch, header_height, header_hash
+                    "🟩 epoch change {}->{} (height({}) hash({}))", scan_epoch, header.epoch, header.height, header.block_hash
                 );
-                last_epoch_hash = Some(header_hash);
-
+                last_epoch_hash = Some(header.block_hash);
                 // Emit EpochChanged for every boundary so every (epoch, epoch_hash) pair is persisted
                 // by the epoch manager. Consensus's get_epoch_hash(epoch) lookup depends on that
                 // row being present for any epoch it may transition into — including epochs
                 // crossed during a long catch-up.
-                info!(
-                    target: LOG_TARGET,
-                    "🟩 epoch change {}->{} (height({}) hash({}))", scan_epoch, current_epoch, header_height, header_hash
-                );
                 scan_events.push(PendingScanEvent::Ready(EpochEvent::EpochChanged {
-                    epoch: current_epoch,
-                    // Set above
-                    epoch_hash: last_epoch_hash.unwrap_or_default(),
+                    epoch: header.epoch,
+                    epoch_hash: header.block_hash,
                 }));
-                scan_epoch = current_epoch;
+                scan_epoch = header.epoch;
             }
-
-            last_scanned_hash = Some(header_hash);
-            last_scanned_height = header_height;
+            self.header_buf.push(header);
         }
-        // End the header server-stream before the deferred fetches issue their own requests.
-        drop(header_stream);
 
         Ok(BatchScan {
             scan_events,
             last_validator_node_mr,
             last_epoch_hash,
-            last_scanned_hash,
-            last_scanned_height,
+            last_scanned_hash: Some(window_end.hash),
+            last_scanned_height: window_end.height,
             scan_epoch,
         })
     }
@@ -749,12 +746,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
             .map(move |height| {
                 let mut client = base_client.clone();
                 async move {
-                    let mut header_stream = client.stream_headers(height, 1).await?;
-                    let header = header_stream.try_next().await?.ok_or_else(|| {
-                        BaseLayerOracleError::InvalidBaseNodeResponse(format!(
-                            "base node returned no header at height {height}"
-                        ))
-                    })?;
+                    let header = fetch_header_at_height(&mut client, height).await?;
                     let header_hash = hash_header(network, &header);
                     Ok::<_, BaseLayerOracleError>((
                         height,
@@ -763,7 +755,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
                     ))
                 }
             })
-            .buffer_unordered(BOUNDARY_HEADER_FETCH_CONCURRENCY)
+            .buffer_unordered(HEADER_FETCH_CONCURRENCY)
             .try_collect()
             .await?;
         samples.sort_unstable_by_key(|(height, _, _)| *height);
@@ -1071,6 +1063,91 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static, TCli
     }
 }
 
+/// Whether `output` makes its block's header worth retaining: it carries a sidechain feature for this
+/// sidechain. `None` is the default Ootle sidechain, which matches outputs that name no sidechain, the
+/// same comparison the burn claim verifier makes. Burns claimable here are a subset of these outputs.
+fn is_retained_output(output: &TransactionOutput, sidechain_id: Option<&RistrettoPublicKeyBytes>) -> bool {
+    output.features.sidechain_feature.as_ref().is_some_and(|feature| {
+        feature.sidechain_id.as_ref().map(|id| id.public_key().as_bytes()) == sidechain_id.map(|id| id.as_bytes())
+    })
+}
+
+/// Fetches the header of each `(height, hash)` target concurrently, checking each is the block named.
+async fn fetch_headers_by_hash<TClient: BaseNodeClient>(
+    client: &TClient,
+    network: Network,
+    constants: &BaseLayerConsensusConstants,
+    targets: Vec<(u64, FixedHash)>,
+) -> Result<Vec<BlockHeaderModel>, BaseLayerOracleError> {
+    stream::iter(targets)
+        .map(move |(height, hash)| {
+            let mut client = client.clone();
+            async move {
+                let header = client.get_header_by_hash(&hash).await?;
+                let header_hash = hash_header(network, &header);
+                if header.height != height || header_hash != hash {
+                    return Err(BaseLayerOracleError::InvalidBaseNodeResponse(format!(
+                        "base node returned header {header_hash} at height {} when asked for block {hash} at height \
+                         {height}",
+                        header.height
+                    )));
+                }
+                Ok::<_, BaseLayerOracleError>(BlockHeaderModel {
+                    epoch: constants.height_to_epoch(height),
+                    height,
+                    block_hash: hash,
+                    block_output_merkle_root: header.block_output_mr.into_array().into(),
+                    validator_node_merkle_root: header.validator_node_mr.into_array().into(),
+                })
+            }
+        })
+        .buffer_unordered(HEADER_FETCH_CONCURRENCY)
+        .try_collect()
+        .await
+}
+
+async fn fetch_header_at_height<TClient: BaseNodeClient>(
+    client: &mut TClient,
+    height: u64,
+) -> Result<BlockHeader, BaseLayerOracleError> {
+    let mut header_stream = client.stream_headers(height, 1).await?;
+    header_stream.try_next().await?.ok_or_else(|| {
+        BaseLayerOracleError::InvalidBaseNodeResponse(format!("base node returned no header at height {height}"))
+    })
+}
+
+/// Checks that a `get_sidechain_utxos` response is the `count` consecutive blocks starting at block
+/// `start_hash` at `start_height`, each linked to the next by `next_block_hash`.
+fn check_block_window(
+    blocks: &[SideChainUtxos],
+    start_height: u64,
+    start_hash: FixedHash,
+    count: u64,
+) -> Result<(), BaseLayerOracleError> {
+    if u64::try_from(blocks.len()).ok() != Some(count) {
+        return Err(BaseLayerOracleError::InvalidBaseNodeResponse(format!(
+            "base node returned {} of the {count} blocks requested from height {start_height}",
+            blocks.len()
+        )));
+    }
+    let mut expected_hash = Some(start_hash);
+    for (expected_height, block) in (start_height..).zip(blocks) {
+        let BlockInfo {
+            hash,
+            height,
+            next_block_hash,
+        } = &block.block_info;
+        if *height != expected_height || expected_hash != Some(*hash) {
+            return Err(BaseLayerOracleError::InvalidBaseNodeResponse(format!(
+                "base node returned block {hash} at height {height} where it should continue the chain from block \
+                 {start_hash} at height {start_height}"
+            )));
+        }
+        expected_hash = *next_block_hash;
+    }
+    Ok(())
+}
+
 /// Returns the boundary block hash stored for `epoch`, or `None` if it has not been scanned.
 ///
 /// A stored header only counts as the boundary when its height is exactly the epoch's first height:
@@ -1110,6 +1187,12 @@ pub enum BaseLayerOracleError {
     InvalidBaseNodeResponse(String),
     #[error("Epoch {epoch} overflows the base layer height space at epoch length {epoch_length}")]
     EpochHeightOverflow { epoch: Epoch, epoch_length: u64 },
+    #[error(
+        "The base node is pruned to height {pruned_height}, above the next scan height {scan_height}. It holds no \
+         burned outputs below its pruned height, so burn claims made against those blocks could not be verified. \
+         Point the validator node at an archival base node (pruning_horizon = 0)."
+    )]
+    BaseNodePrunedAboveScanHeight { pruned_height: u64, scan_height: u64 },
 }
 
 enum BlockchainProgression {
@@ -1141,17 +1224,22 @@ mod tests {
         ValidatorNodeChange,
         futures_util::stream::{self, Stream},
         tonic,
-        types::{BaseLayerConsensusConstants, BaseLayerMetadata, BaseLayerValidatorNode, SideChainUtxos},
+        types::{BaseLayerConsensusConstants, BaseLayerMetadata, BaseLayerValidatorNode, BlockInfo, SideChainUtxos},
     };
+    use tari_common_types::types::CompressedPublicKey;
     use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle};
     use tari_node_components::blocks::BlockHeader;
     use tari_ootle_common_types::Epoch;
     use tari_ootle_storage::global::BlockHeaderModel;
     use tari_sidechain::FixedHash;
     use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
-    use tari_transaction_components::tari_amount::MicroMinotari;
+    use tari_transaction_components::{
+        tari_amount::MicroMinotari,
+        transaction_components::{OutputFeatures, SideChainId, TransactionOutput},
+    };
+    use tari_utilities::ByteArray;
 
-    use super::{BaseLayerOracle, BaseLayerOracleInner, hash_header, lookup_epoch_boundary_hash};
+    use super::{BaseLayerOracle, BaseLayerOracleError, BaseLayerOracleInner, hash_header, lookup_epoch_boundary_hash};
     use crate::{
         base_layer::{
             BaseLayerBlockHeaderStore,
@@ -1265,6 +1353,10 @@ mod tests {
     #[derive(Clone)]
     struct MockBaseNode {
         chain: Arc<Mutex<Vec<BlockHeader>>>,
+        /// Index into `chain` by block hash, rebuilt whenever the chain is set.
+        heights_by_hash: Arc<Mutex<HashMap<FixedHash, usize>>>,
+        /// Sidechain outputs served by `get_sidechain_utxos`, keyed by the hash of the block holding them.
+        outputs: Arc<Mutex<HashMap<FixedHash, Vec<TransactionOutput>>>>,
         /// Validator-node changes served per epoch by `get_validator_node_changes`. Empty by default.
         vn_changes: Arc<Mutex<HashMap<u64, Vec<ValidatorNodeChange>>>>,
         /// Epochs `get_validator_node_changes` was called with. The deferred fetches run concurrently,
@@ -1272,20 +1364,41 @@ mod tests {
         vn_calls: Arc<Mutex<Vec<u64>>>,
         /// When true, `get_validator_node_changes` returns an error instead of data.
         vn_fail: Arc<Mutex<bool>>,
+        /// The pruned height reported by `get_tip_info`. Zero (archival) by default.
+        pruned_height: Arc<Mutex<u64>>,
     }
 
     impl MockBaseNode {
         fn new(chain: Vec<BlockHeader>) -> Self {
-            Self {
-                chain: Arc::new(Mutex::new(chain)),
+            let client = Self {
+                chain: Arc::new(Mutex::new(Vec::new())),
+                heights_by_hash: Arc::new(Mutex::new(HashMap::new())),
+                outputs: Arc::new(Mutex::new(HashMap::new())),
                 vn_changes: Arc::new(Mutex::new(HashMap::new())),
                 vn_calls: Arc::new(Mutex::new(Vec::new())),
                 vn_fail: Arc::new(Mutex::new(false)),
-            }
+                pruned_height: Arc::new(Mutex::new(0)),
+            };
+            client.set_chain(chain);
+            client
         }
 
         fn set_chain(&self, chain: Vec<BlockHeader>) {
+            *self.heights_by_hash.lock().unwrap() = chain
+                .iter()
+                .enumerate()
+                .map(|(idx, header)| (hash_header(NETWORK, header), idx))
+                .collect();
             *self.chain.lock().unwrap() = chain;
+        }
+
+        fn add_output(&self, block: &BlockHeader, output: TransactionOutput) {
+            self.outputs
+                .lock()
+                .unwrap()
+                .entry(hash_header(NETWORK, block))
+                .or_default()
+                .push(output);
         }
 
         fn set_vn_changes(&self, changes: HashMap<u64, Vec<ValidatorNodeChange>>) {
@@ -1318,6 +1431,7 @@ mod tests {
             Ok(BaseLayerMetadata {
                 height_of_longest_chain: tip.height,
                 tip_hash: hash_header(NETWORK, tip),
+                pruned_height: *self.pruned_height.lock().unwrap(),
             })
         }
 
@@ -1353,12 +1467,8 @@ mod tests {
         }
 
         async fn get_header_by_hash(&mut self, block_hash: &FixedHash) -> Result<BlockHeader, BaseNodeClientError> {
-            self.chain
-                .lock()
-                .unwrap()
-                .iter()
-                .find(|h| hash_header(NETWORK, h) == *block_hash)
-                .cloned()
+            let idx = self.heights_by_hash.lock().unwrap().get(block_hash).copied();
+            idx.and_then(|idx| self.chain.lock().unwrap().get(idx).cloned())
                 .ok_or(BaseNodeClientError::GrpcStatus {
                     code: tonic::Code::NotFound,
                     message: "header not found".to_string(),
@@ -1393,10 +1503,33 @@ mod tests {
 
         async fn get_sidechain_utxos(
             &mut self,
-            _start_hash: Option<FixedHash>,
-            _count: u64,
+            start_hash: Option<FixedHash>,
+            count: u64,
         ) -> Result<Vec<SideChainUtxos>, BaseNodeClientError> {
-            unimplemented!("not used by the reorg tests")
+            let start_hash = start_hash.expect("the scanner always names a start block");
+            let start = self.heights_by_hash.lock().unwrap().get(&start_hash).copied().ok_or(
+                BaseNodeClientError::GrpcStatus {
+                    code: tonic::Code::NotFound,
+                    message: "Start hash not found".to_string(),
+                },
+            )?;
+            let chain = self.chain.lock().unwrap();
+            let outputs = self.outputs.lock().unwrap();
+            let hashes: Vec<FixedHash> = chain.iter().map(|header| hash_header(NETWORK, header)).collect();
+            Ok(chain
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(usize::try_from(count).unwrap())
+                .map(|(idx, header)| SideChainUtxos {
+                    block_info: BlockInfo {
+                        hash: hashes[idx],
+                        height: header.height,
+                        next_block_hash: hashes.get(idx + 1).copied(),
+                    },
+                    outputs: outputs.get(&hashes[idx]).cloned().unwrap_or_default(),
+                })
+                .collect())
         }
     }
 
@@ -1461,6 +1594,31 @@ mod tests {
         heights.map(|h| make_header(h, h)).collect()
     }
 
+    /// The compressed Ristretto basepoint: a valid public key to name a sidechain other than Ootle.
+    const OTHER_SIDECHAIN_KEY: [u8; 32] = [
+        0xe2, 0xf2, 0xae, 0x0a, 0x6a, 0xbc, 0x4e, 0x71, 0xa8, 0x84, 0xa9, 0x61, 0xc5, 0x00, 0x51, 0x5f, 0x58, 0xe3,
+        0x0b, 0x6a, 0xa5, 0x82, 0xdd, 0x8d, 0xb6, 0xa6, 0x59, 0x45, 0xe0, 0x8d, 0x2d, 0x76,
+    ];
+
+    /// A burn to the sidechain named by `sidechain_key`, or to Ootle when it is `None`.
+    fn burn_output(sidechain_key: Option<[u8; 32]>) -> TransactionOutput {
+        let mut features = OutputFeatures::create_burn_confidential_output(CompressedPublicKey::default(), None);
+        if let Some(key) = sidechain_key {
+            let feature = features
+                .sidechain_feature
+                .as_mut()
+                .expect("burn has a sidechain feature");
+            feature.sidechain_id = Some(SideChainId::new(
+                CompressedPublicKey::from_canonical_bytes(&key).unwrap(),
+                Default::default(),
+            ));
+        }
+        TransactionOutput {
+            features,
+            ..Default::default()
+        }
+    }
+
     /// Pins the ordering the deferred end-of-epoch bug depended on: during a multi-batch catch-up the
     /// scanner emits an `EpochChanged` for every boundary it crosses *as it crosses it*, while
     /// `DoneForNow` waits for the lagged tip.
@@ -1480,12 +1638,16 @@ mod tests {
     #[tokio::test]
     async fn catch_up_emits_epoch_changed_per_batch_but_done_for_now_only_at_the_tip() {
         let store = InMemoryStore::default();
-        // Well past the 1000-header batch limit, so the catch-up needs several batches.
-        let client = MockBaseNode::new(linear_chain(0..=3000));
-        let mut inner = make_inner(store, client, 5);
+        // Well past the 10_000-block batch limit, so the catch-up needs several batches.
+        let chain = linear_chain(0..=25_000);
+        let client = MockBaseNode::new(chain.clone());
+        // Burns either side of the first batch's last block, which the second batch resumes after.
+        client.add_output(&chain[9_999], burn_output(None));
+        client.add_output(&chain[10_001], burn_output(None));
+        let mut inner = make_inner(store.clone(), client, 5);
 
         let mut has_more = inner.scan_blockchain(false).await.unwrap();
-        assert!(has_more, "a 3000-header chain cannot be caught up in one batch");
+        assert!(has_more, "a 25_000-block chain cannot be caught up in one batch");
 
         let epochs_activated: Vec<u64> = inner
             .pending_events
@@ -1524,6 +1686,8 @@ mod tests {
                 .any(|e| matches!(e, EpochEvent::DoneForNow { .. })),
             "DoneForNow must be emitted once the scan reaches the lagged tip"
         );
+        assert_eq!(store.hash_at(9_999), Some(hash_header(NETWORK, &chain[9_999])));
+        assert_eq!(store.hash_at(10_001), Some(hash_header(NETWORK, &chain[10_001])));
     }
 
     #[tokio::test]
@@ -1683,76 +1847,160 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reorg_rewinds_to_fork_point_and_prunes_orphans() {
+    async fn retains_boundaries_and_blocks_with_outputs_for_this_sidechain() {
         // height_lag = 5, tip = 20 -> lagged tip = 15. Scans heights 1..=15.
+        let chain = linear_chain(0..=20);
+        let client = MockBaseNode::new(chain.clone());
+        client.add_output(&chain[3], burn_output(None));
+        client.add_output(&chain[7], burn_output(Some(OTHER_SIDECHAIN_KEY)));
+        // Above the lagged tip, so not yet scanned.
+        client.add_output(&chain[18], burn_output(None));
         let store = InMemoryStore::default();
-        let chain_a = linear_chain(0..=20);
-        let client = MockBaseNode::new(chain_a.clone());
-        let mut inner = make_inner(store.clone(), client.clone(), 5);
+        let mut inner = make_inner(store.clone(), client, 5);
 
         sync_to_tip(&mut inner).await;
-        assert_eq!(inner.last_scanned_height, 15);
-        assert_eq!(store.heights(), (1..=15).collect::<Vec<_>>());
 
-        // Reorg diverging at height 13 (fork point 12), within the recoverable depth (15 - 5 = 10).
-        let mut chain_b = chain_a[..=12].to_vec();
-        chain_b.extend((13..=20).map(|h| make_header(h, h + 10_000)));
-        client.set_chain(chain_b.clone());
+        // 1 samples the validator-node MR at the start of a fresh scan, 5, 10 and 15 are the epoch
+        // boundaries and 3 holds an Ootle burn. 7 holds a burn to another sidechain.
+        assert_eq!(store.heights(), vec![1, 3, 5, 10, 15]);
+        assert_eq!(store.hash_at(3), Some(hash_header(NETWORK, &chain[3])));
+        assert_eq!(inner.last_scanned_height, 15);
+        assert_eq!(inner.last_scanned_hash, Some(hash_header(NETWORK, &chain[15])));
+    }
+
+    #[tokio::test]
+    async fn a_named_sidechain_retains_only_blocks_with_its_own_outputs() {
+        let chain = linear_chain(0..=20);
+        let client = MockBaseNode::new(chain.clone());
+        client.add_output(&chain[3], burn_output(None));
+        client.add_output(&chain[7], burn_output(Some(OTHER_SIDECHAIN_KEY)));
+        let store = InMemoryStore::default();
+        let mut inner = make_inner(store.clone(), client, 5);
+        inner.config.sidechain_id = Some(RistrettoPublicKeyBytes::from_bytes(&OTHER_SIDECHAIN_KEY).unwrap());
+
+        sync_to_tip(&mut inner).await;
+
+        assert_eq!(store.heights(), vec![1, 5, 7, 10, 15]);
+    }
+
+    #[tokio::test]
+    async fn retained_scan_refuses_heights_below_the_base_node_pruned_height() {
+        let chain = linear_chain(0..=20);
+        let client = MockBaseNode::new(chain.clone());
+        // A base node pruned to height 10 holds no burned outputs below it, so it would not report this one.
+        client.add_output(&chain[3], burn_output(None));
+        *client.pruned_height.lock().unwrap() = 10;
+        let store = InMemoryStore::default();
+        let mut inner = make_inner(store.clone(), client.clone(), 5);
+
+        let err = inner.scan_blockchain(false).await.unwrap_err();
+        assert!(
+            matches!(err, BaseLayerOracleError::BaseNodePrunedAboveScanHeight {
+                pruned_height: 10,
+                scan_height: 1
+            }),
+            "{err}"
+        );
+        assert!(store.heights().is_empty());
+        assert_eq!(inner.last_scanned_height, 0);
+
+        // The indexer's boundary path stores no burn headers, so a pruned base node serves it.
+        let mut boundary = make_inner_boundary_mode(InMemoryStore::default(), client.clone(), 5);
+        sync_to_tip(&mut boundary).await;
+        assert_eq!(boundary.last_scanned_height, 15);
+
+        // A scan that starts at or above the pruned height proceeds.
+        *client.pruned_height.lock().unwrap() = 1;
+        sync_to_tip(&mut inner).await;
+        assert_eq!(store.heights(), vec![1, 3, 5, 10, 15]);
+    }
+
+    /// Chain A with burns at 11 and 13, scanned to height 15, and chain B, which diverges from it at
+    /// height `diverge_at`.
+    fn reorged_chains(diverge_at: u64) -> (Vec<BlockHeader>, Vec<BlockHeader>) {
+        let chain_a = linear_chain(0..=20);
+        let mut chain_b = chain_a[..usize::try_from(diverge_at).unwrap()].to_vec();
+        chain_b.extend((diverge_at..=20).map(|h| make_header(h, h + 10_000)));
+        (chain_a, chain_b)
+    }
+
+    async fn sync_chain_a(
+        chain_a: &[BlockHeader],
+    ) -> (
+        InMemoryStore,
+        MockBaseNode,
+        BaseLayerOracleInner<InMemoryStore, MockBaseNode>,
+    ) {
+        let store = InMemoryStore::default();
+        let client = MockBaseNode::new(chain_a.to_vec());
+        client.add_output(&chain_a[11], burn_output(None));
+        client.add_output(&chain_a[13], burn_output(None));
+        let mut inner = make_inner(store.clone(), client.clone(), 5);
+        sync_to_tip(&mut inner).await;
+        assert_eq!(inner.last_scanned_height, 15);
+        assert_eq!(store.heights(), vec![1, 5, 10, 11, 13, 15]);
+        (store, client, inner)
+    }
+
+    #[tokio::test]
+    async fn reorg_rewinds_to_a_canonical_retained_header_and_prunes_orphans() {
+        let (chain_a, chain_b) = reorged_chains(13);
+        let (store, client, mut inner) = sync_chain_a(&chain_a).await;
+        client.set_chain(chain_b);
 
         let tip_b = inner.base_node_client.get_tip_info().await.unwrap();
         inner.handle_reorg(&tip_b).await.unwrap();
 
-        // Orphaned headers 13..=15 pruned; scan rewound to the fork point.
-        assert_eq!(inner.last_scanned_height, 12);
-        assert_eq!(store.heights(), (1..=12).collect::<Vec<_>>());
-        assert_eq!(inner.last_scanned_hash, Some(hash_header(NETWORK, &chain_b[12])));
-        // last_epoch_hash reset to the boundary that opened the fork epoch (epoch 2 -> height 10),
+        // Epoch 3's lowest stored header (15) is orphaned; epoch 2's (10) is canonical. Everything
+        // above it is pruned, including the canonical burn at 11, which the re-scan restores.
+        assert_eq!(inner.last_scanned_height, 10);
+        assert_eq!(store.heights(), vec![1, 5, 10]);
+        assert_eq!(inner.last_scanned_hash, Some(hash_header(NETWORK, &chain_a[10])));
+        // last_epoch_hash reset to the boundary that opened the rewound epoch (epoch 2 -> height 10),
         // not left at the orphaned epoch-3 boundary (height 15).
         assert_eq!(inner.last_epoch_hash, Some(hash_header(NETWORK, &chain_a[10])));
     }
 
     #[tokio::test]
     async fn reorg_scan_converges_on_new_chain() {
-        let store = InMemoryStore::default();
-        let chain_a = linear_chain(0..=20);
-        let client = MockBaseNode::new(chain_a.clone());
-        let mut inner = make_inner(store.clone(), client.clone(), 5);
-
-        sync_to_tip(&mut inner).await;
-
-        let mut chain_b = chain_a[..=12].to_vec();
-        chain_b.extend((13..=20).map(|h| make_header(h, h + 10_000)));
+        let (chain_a, chain_b) = reorged_chains(13);
+        let (store, client, mut inner) = sync_chain_a(&chain_a).await;
         client.set_chain(chain_b.clone());
+        client.add_output(&chain_b[14], burn_output(None));
 
         // A full scan round detects the reorg, repairs the store, and re-scans the new chain.
         sync_to_tip(&mut inner).await;
 
         assert_eq!(inner.last_scanned_height, 15);
-        assert_eq!(store.heights(), (1..=15).collect::<Vec<_>>());
-        // Heights above the fork now carry chain B's hashes; the orphaned chain A headers are gone.
-        for h in 13..=15u64 {
+        // The orphaned burn at 13 is gone and chain B's burn at 14 is retained.
+        assert_eq!(store.heights(), vec![1, 5, 10, 11, 14, 15]);
+        for h in [14, 15] {
             assert_eq!(store.hash_at(h), Some(hash_header(NETWORK, &chain_b[h as usize])));
         }
-        // Heights at and below the fork are untouched.
-        for h in 1..=12u64 {
+        for h in [1, 5, 10, 11] {
             assert_eq!(store.hash_at(h), Some(hash_header(NETWORK, &chain_a[h as usize])));
         }
     }
 
     #[tokio::test]
-    async fn reorg_deeper_than_lag_triggers_full_rescan() {
-        let store = InMemoryStore::default();
-        let chain_a = linear_chain(0..=20);
-        let client = MockBaseNode::new(chain_a.clone());
-        let mut inner = make_inner(store.clone(), client.clone(), 5);
+    async fn deep_reorg_rewinds_to_the_last_canonical_boundary() {
+        // Diverges at 8, more than height_lag below the scan position.
+        let (chain_a, chain_b) = reorged_chains(8);
+        let (store, client, mut inner) = sync_chain_a(&chain_a).await;
+        client.set_chain(chain_b);
 
-        sync_to_tip(&mut inner).await;
-        assert_eq!(inner.last_scanned_height, 15);
+        let tip_b = inner.base_node_client.get_tip_info().await.unwrap();
+        inner.handle_reorg(&tip_b).await.unwrap();
 
-        // Diverge at height 8 (fork point 7), below the recoverable range (15 - 5 = 10): the scanner
-        // cannot find a common ancestor in [11, 15] and rebuilds from the start height.
-        let mut chain_b = chain_a[..=7].to_vec();
-        chain_b.extend((8..=20).map(|h| make_header(h, h + 10_000)));
+        assert_eq!(inner.last_scanned_height, 5);
+        assert_eq!(store.heights(), vec![1, 5]);
+        assert_eq!(inner.last_scanned_hash, Some(hash_header(NETWORK, &chain_a[5])));
+    }
+
+    #[tokio::test]
+    async fn reorg_below_every_stored_header_rescans_from_the_start() {
+        let (chain_a, chain_b) = reorged_chains(1);
+        let (store, client, mut inner) = sync_chain_a(&chain_a).await;
         client.set_chain(chain_b);
 
         let tip_b = inner.base_node_client.get_tip_info().await.unwrap();
@@ -1816,7 +2064,7 @@ mod tests {
 
         let mut inner = make_inner_syncing_vn_changes(store, client.clone(), 5);
 
-        // The whole range fits in a single batch (15 < the 1000-header batch limit).
+        // The whole range fits in a single batch (15 < the 10_000-block batch limit).
         inner.scan_blockchain(false).await.unwrap();
 
         let ordered: Vec<(&str, u64)> = inner
@@ -1935,10 +2183,10 @@ mod tests {
     }
 
     /// The boundary-only path (indexer) must emit exactly the same `EpochChanged` events — same
-    /// epochs and same boundary hashes — as the full streaming path (validator node), while storing
+    /// epochs and same boundary hashes — as the retained-header path (validator node), while storing
     /// no headers.
     #[tokio::test]
-    async fn boundary_scan_emits_same_epoch_changes_as_full_scan() {
+    async fn boundary_scan_emits_same_epoch_changes_as_retained_scan() {
         // height_lag = 5, tip = 20 -> scans heights 1..=15, crossing boundaries at 5, 10, 15.
         let chain = linear_chain(0..=20);
 
@@ -1957,8 +2205,8 @@ mod tests {
         );
         assert_eq!(epoch_changes(&full_events), epoch_changes(&boundary_events));
 
-        // Full mode stored every header; boundary mode stored none.
-        assert_eq!(full_store.heights(), (1..=15).collect::<Vec<_>>());
+        // Retained mode stored the boundaries and the fresh scan's first block; boundary mode stored none.
+        assert_eq!(full_store.heights(), vec![1, 5, 10, 15]);
         assert!(boundary_store.heights().is_empty());
 
         // Both reached the lagged tip (no runaway has_more loop).
@@ -2002,7 +2250,7 @@ mod tests {
             ("epoch", 3),
         ]);
         // Boundary mode samples the MR only at boundaries, so it queries the epochs it crosses
-        // (1, 2, 3) — not the pre-start epoch 0 that the full path samples at its mid-epoch start.
+        // (1, 2, 3) — not the pre-start epoch 0 that the retained path samples at its mid-epoch start.
         assert_eq!(client.vn_call_epochs_sorted(), vec![1, 2, 3]);
         assert!(store.heights().is_empty());
     }
@@ -2014,13 +2262,14 @@ mod tests {
     #[tokio::test]
     async fn restart_between_catch_up_batches_resumes_and_emits_remaining_epoch_changes() {
         let store = InMemoryStore::default();
-        // height_lag = 5, tip = 2500 -> lagged tip = 2495 (epochs 1..=499 across 3 batches).
-        let chain = linear_chain(0..=2500);
+        // height_lag = 5, tip = 25_000 -> lagged tip = 24_995 (epochs 1..=4999 across 3 batches).
+        let chain = linear_chain(0..=25_000);
         let mut oracle = BaseLayerOracle::new(store.clone(), MockBaseNode::new(chain.clone()), make_config(5), NETWORK);
 
-        // Drain the first 1000-header batch (heights 1..=1000, last boundary at height 1000 = Epoch(200)).
+        // Drain the first 10_000-block batch (heights 1..=10_000, last boundary at height 10_000 =
+        // Epoch(2000)).
         let first_batch_events = next_events_until(&mut oracle, |e| {
-            matches!(e, EpochEvent::EpochChanged { epoch: Epoch(200), .. })
+            matches!(e, EpochEvent::EpochChanged { epoch: Epoch(2000), .. })
         })
         .await;
         assert_eq!(
@@ -2028,21 +2277,21 @@ mod tests {
                 .into_iter()
                 .map(|(e, _)| e)
                 .collect::<Vec<_>>(),
-            (1..=200).collect::<Vec<_>>()
+            (1..=2000).collect::<Vec<_>>()
         );
 
-        // Poll once more so `persist_scan_position` writes Batch 1's position (height 1000) before
+        // Poll once more so `persist_scan_position` writes Batch 1's position (height 10_000) before
         // dropping the oracle to simulate a restart between batches.
         let next_event = oracle.next_epoch_event().await.expect("oracle stopped");
         assert!(
-            matches!(next_event, EpochEvent::EpochChanged { epoch: Epoch(201), .. }),
-            "expected Batch 2 to start at Epoch(201); got {next_event:?}"
+            matches!(next_event, EpochEvent::EpochChanged { epoch: Epoch(2001), .. }),
+            "expected Batch 2 to start at Epoch(2001); got {next_event:?}"
         );
         assert_eq!(
             store
                 .get::<u64>(StoreKey::BaseLayerLastScannedBlockHeight.as_key_bytes())
                 .unwrap(),
-            Some(1000)
+            Some(10_000)
         );
         drop(oracle);
 
@@ -2052,19 +2301,23 @@ mod tests {
         let remaining_epochs: Vec<u64> = epoch_changes(&remaining_events).into_iter().map(|(e, _)| e).collect();
         assert_eq!(
             remaining_epochs,
-            (201..=499).collect::<Vec<_>>(),
-            "restarted oracle must scan the remaining batches from height 1001 to 2495"
+            (2001..=4999).collect::<Vec<_>>(),
+            "restarted oracle must scan the remaining batches from height 10_001 to 24_995"
         );
-        let expected_epoch_hash = hash_header(NETWORK, &chain[2495]);
+        let expected_epoch_hash = hash_header(NETWORK, &chain[24_995]);
         assert!(
             matches!(
                 remaining_events.last(),
-                Some(EpochEvent::DoneForNow { epoch: Epoch(499), epoch_hash }) if *epoch_hash == expected_epoch_hash
+                Some(EpochEvent::DoneForNow { epoch: Epoch(4999), epoch_hash }) if *epoch_hash == expected_epoch_hash
             ),
-            "expected DoneForNow at Epoch(499); got {:?}",
+            "expected DoneForNow at Epoch(4999); got {:?}",
             remaining_events.last()
         );
-        assert_eq!(store.heights(), (1..=2495).collect::<Vec<_>>());
+        // The fresh scan's first block, then every boundary through the lagged tip.
+        let expected_heights: Vec<u64> = std::iter::once(1)
+            .chain((EPOCH_LENGTH..=24_995).step_by(EPOCH_LENGTH as usize))
+            .collect();
+        assert_eq!(store.heights(), expected_heights);
     }
 
     /// When the base layer is above `lag_start_height` but has not yet progressed `height_lag`
@@ -2129,16 +2382,16 @@ mod tests {
     #[tokio::test]
     async fn error_during_multi_batch_catch_up_resets_has_more_and_sleeps_before_retrying() {
         let store = InMemoryStore::default();
-        let chain = chain_with_epoch_mr(0..=2500);
+        let chain = chain_with_epoch_mr(0..=25_000);
         let client = MockBaseNode::new(chain);
         let mut config = make_config(5);
         config.features.sync_validator_node_changes = true;
         config.scanning_interval = Duration::from_secs(60);
         let mut oracle = BaseLayerOracle::new(store.clone(), client.clone(), config, NETWORK);
 
-        // Drain Batch 1 (epochs 1..=200).
+        // Drain Batch 1 (epochs 1..=2000).
         next_events_until(&mut oracle, |e| {
-            matches!(e, EpochEvent::EpochChanged { epoch: Epoch(200), .. })
+            matches!(e, EpochEvent::EpochChanged { epoch: Epoch(2000), .. })
         })
         .await;
 
@@ -2155,7 +2408,7 @@ mod tests {
             store
                 .get::<u64>(StoreKey::BaseLayerLastScannedBlockHeight.as_key_bytes())
                 .unwrap(),
-            Some(1000),
+            Some(10_000),
             "Batch 1 position must be committed before Batch 2 runs"
         );
 
@@ -2167,15 +2420,15 @@ mod tests {
             "oracle must sleep for scanning_interval after an error in a multi-batch scan"
         );
 
-        // Once the sleep elapses and the base node recovers, the retry round must resume from height 1001.
+        // Once the sleep elapses and the base node recovers, the retry round must resume from height 10_001.
         *client.vn_fail.lock().unwrap() = false;
         oracle.sleep_task = None;
         oracle.sleep_or_shutdown = false;
         let resumed = next_events_until(&mut oracle, |e| matches!(e, EpochEvent::DoneForNow { .. })).await;
         assert_eq!(
             epoch_changes(&resumed).into_iter().map(|(e, _)| e).collect::<Vec<_>>(),
-            (201..=499).collect::<Vec<_>>(),
-            "retry round must resume from Batch 1's committed height (1000) and emit epochs 201..=499"
+            (2001..=4999).collect::<Vec<_>>(),
+            "retry round must resume from Batch 1's committed height (10_000) and emit epochs 2001..=4999"
         );
     }
 

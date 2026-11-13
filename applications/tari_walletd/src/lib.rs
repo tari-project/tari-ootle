@@ -78,6 +78,17 @@ impl WalletSdkSpec for OotleWalletDaemonSpec {
 
 pub type WalletSdk = Sdk<OotleWalletDaemonSpec>;
 
+/// Installs aws-lc-rs as the process-wide rustls `CryptoProvider`.
+///
+/// reqwest enables rustls/aws-lc-rs and webrtc's dtls enables rustls/ring, so rustls cannot choose a process default
+/// by itself and DTLS panics when it builds its certificate verifier. Call this once at startup, before any TLS or DTLS
+/// is used. A provider that is already installed stays in place.
+pub fn install_default_crypto_provider() {
+    if rustls::crypto::aws_lc_rs::default_provider().install_default().is_err() {
+        debug!(target: LOG_TARGET, "A rustls CryptoProvider is already installed; keeping it");
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 pub async fn run_tari_ootle_walletd(
     config: ApplicationConfig,
@@ -431,6 +442,13 @@ mod tests {
 
     fn wal_len(dir: &Path) -> u64 {
         fs::metadata(dir.join("wallet.sqlite-wal")).unwrap().len()
+    }
+
+    #[test]
+    fn installing_the_crypto_provider_twice_keeps_a_process_default() {
+        install_default_crypto_provider();
+        install_default_crypto_provider();
+        assert!(rustls::crypto::CryptoProvider::get_default().is_some());
     }
 
     #[tokio::test(start_paused = true)]

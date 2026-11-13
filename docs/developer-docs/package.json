@@ -3,9 +3,9 @@
   "type": "module",
   "version": "0.0.2",
   "scripts": {
-    "dev": "astro dev",
-    "start": "astro dev",
-    "build": "astro build",
+    "dev": "node init && astro dev",
+    "start": "node init && astro dev",
+    "build": "node init && astro build",
     "preview": "astro preview",
     "deploy": "astro build && wrangler deploy",
     "astro": "astro"

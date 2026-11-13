@@ -12,8 +12,8 @@
     "url": "git+https://github.com/tari-project/tari-ootle.git"
   },
   "scripts": {
-    "build": "tsc && vite build",
-    "build:dev": "vite build"
+    "build": "node init && tsc && vite build",
+    "build:dev": "node init && vite build"
   },
   "devDependencies": {
     "@mui/material": "^7.3.9",

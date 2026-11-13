@@ -478,10 +478,15 @@ fn build_manifest_transaction(
         }
     });
 
-    let last_instruction_is_put = instructions.instructions.last().and_then(|i| match i {
-        Instruction::PutLastInstructionOutputOnWorkspace { key } => Some(*key),
-        _ => None,
-    });
+    let last_instruction_is_put = instructions
+        .instructions
+        .iter()
+        .rev()
+        .find(|i| !matches!(i, Instruction::DropAllProofsInWorkspace | Instruction::Assert { .. }))
+        .and_then(|i| match i {
+            Instruction::PutLastInstructionOutputOnWorkspace { key } => Some(*key),
+            _ => None,
+        });
 
     builder = builder.with_instructions(instructions.instructions);
 
@@ -1169,8 +1174,7 @@ mod tests {
 
         // Hand-off of workspace keys:
         // 0: PutLastInstructionOutputOnWorkspace { key: 0 } (from `let comp = ...`)
-        // Because the manifest ends in a `let` binding, the output is already placed in workspace key 0.
-        // `--dump-outputs-into` reuses key 0 directly and avoids emitting a second PutLastInstructionOutputOnWorkspace.
+        // The deposit reads the manifest's trailing workspace key.
         assert_eq!(transaction.instructions(), &[
             Instruction::CallFunction {
                 address: template_addr,
@@ -1203,6 +1207,43 @@ mod tests {
         assert_eq!(transaction.instructions(), &[
             manifest_instruction,
             Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
+            Instruction::CallMethod {
+                call: dump_account.into(),
+                method: "deposit".try_into().unwrap(),
+                args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(0))],
+            },
+        ]);
+    }
+
+    #[test]
+    fn submit_manifest_reuses_workspace_key_across_trailing_drop_all_proofs() {
+        use tari_template_lib::types::TemplateAddress;
+
+        let template_addr =
+            TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap();
+        let dump_account = ComponentAddress::from_array([3; 32]);
+
+        let call = Instruction::CallFunction {
+            address: template_addr,
+            function: "new".try_into().unwrap(),
+            args: vec![],
+        };
+        let put = Instruction::PutLastInstructionOutputOnWorkspace { key: 0 };
+        let drop_proofs = Instruction::DropAllProofsInWorkspace;
+
+        let transaction = build(
+            ManifestInstructions {
+                instructions: vec![call.clone(), put.clone(), drop_proofs.clone()],
+                fee_instructions: vec![],
+                blobs: Blobs::empty(),
+            },
+            Some(dump_account),
+        );
+
+        assert_eq!(transaction.instructions(), &[
+            call,
+            put,
+            drop_proofs,
             Instruction::CallMethod {
                 call: dump_account.into(),
                 method: "deposit".try_into().unwrap(),

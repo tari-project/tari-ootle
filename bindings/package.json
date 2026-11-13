@@ -17,10 +17,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build-dist": "tsc --project tsconfig.prod.json",
-    "build-dev": "tsc",
-    "build-full": "pnpm run gen && pnpm run build",
-    "build": "pnpm run fmt && tsc --project tsconfig.prod.json && echo '✅ Build complete!'",
+    "build-dist": "node init && tsc --project tsconfig.prod.json",
+    "build-dev": "node init && tsc",
+    "build-full": "node init && pnpm run gen && pnpm run build",
+    "build": "node init && pnpm run fmt && tsc --project tsconfig.prod.json && echo '\u2705 Build complete!'",
     "gen": "sh build.sh",
     "fmt": "pnpm npx prettier --write \"./**/*.{ts,tsx,css,json}\" --log-level=warn",
     "test": "vitest run"

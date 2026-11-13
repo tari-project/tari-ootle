@@ -267,6 +267,12 @@ pub struct IndexerConfig {
     /// to mint.
     #[serde(default = "default_index_gossiped_transactions")]
     pub index_gossiped_transactions: bool,
+    /// Follow changes to the configured epoch oracle's validator set by fetching the config validators run, so
+    /// that a validator added or removed after this release does not need an indexer upgrade. An update is only
+    /// adopted if it schedules changes for epochs this indexer has not yet processed. Only used with the Configured
+    /// and Hybrid oracles.
+    #[serde(default = "default_follow_validator_oracle_config")]
+    pub follow_validator_oracle_config: bool,
     /// Maximum total size of inbound transaction gossip awaiting storage. The gossip service drains
     /// this queue serially, so it absorbs bursts that arrive faster than validation and batched
     /// writes; once it is full, further messages are dropped rather than queued without limit. Sized
@@ -475,6 +481,10 @@ fn default_index_gossiped_transactions() -> bool {
     true
 }
 
+fn default_follow_validator_oracle_config() -> bool {
+    true
+}
+
 fn default_max_transaction_gossip_queue_bytes() -> usize {
     128 * 1024 * 1024
 }
@@ -514,6 +524,7 @@ impl Default for IndexerConfig {
             event_retention_epochs: default_event_retention_epochs(),
             utxo_tombstone_retention_epochs: default_utxo_tombstone_retention_epochs(),
             index_gossiped_transactions: default_index_gossiped_transactions(),
+            follow_validator_oracle_config: default_follow_validator_oracle_config(),
             max_transaction_gossip_queue_bytes: default_max_transaction_gossip_queue_bytes(),
             prune_interval: default_prune_interval(),
             event_filters: vec![],

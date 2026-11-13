@@ -201,9 +201,9 @@ pub fn validate_covenant_claims(transfer: &StealthTransferStatement) -> Result<(
 /// - no output commitment duplicates an input commitment, and
 /// - no output commitment appears more than once.
 ///
-/// Balance and covenant partition proofs fold inputs and outputs positionally while the engine downs and creates each
-/// UTXO substate once, and spend-time authorization runs once per entry in `inputs_statement.inputs`. Running this on
-/// admission rejects duplicate-commitment statements before auth hooks, substate lookups, or spend scripts execute.
+/// Balance proofs fold inputs and outputs positionally while the engine downs and creates each UTXO substate once.
+/// Running this check on admission rejects non-executable duplicate-commitment statements upfront, before native
+/// execution charging, resource auth hooks, or spend-script predicates run.
 pub fn validate_transfer_commitments(transfer: &StealthTransferStatement) -> Result<(), ResourceError> {
     let mut seen_inputs = BTreeSet::new();
     for input in &transfer.inputs_statement.inputs {

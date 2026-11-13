@@ -539,6 +539,67 @@ fn it_does_not_leak_a_callees_vaults_into_the_callers_scope() {
 }
 
 #[test]
+fn it_disallows_reads_from_vaults_outside_of_owning_component() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
+    let (victim, _, _) = test.create_funded_account();
+
+    let vault_id = {
+        let store = test.read_only_state_store();
+        let component = store.get_component(victim).unwrap();
+        let values = IndexedWellKnownTypes::from_value(component.state()).unwrap();
+        values.vault_ids()[0]
+    };
+
+    test.execute_expect_success(
+        test.transaction()
+            .call_function(template_addr, "new", args![])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    let attacker_component = test.return_values()[0].decoded::<ComponentAddress>().unwrap();
+
+    // Static function reading an out-of-scope vault must fail even when the vault is in the transaction inputs.
+    let reason = test.execute_expect_failure(
+        test.transaction()
+            .call_function(template_addr, "read_vault_balance", args![vault_id])
+            .add_input(vault_id)
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(reason, RuntimeError::NotInComponentContext {
+        action: VaultAction::GetBalance.into(),
+    });
+
+    // Calling a method on the victim first must not leak its vault into the caller's scope for reads either.
+    let reason = test.execute_expect_failure(
+        test.transaction()
+            .call_function(template_addr, "call_then_read_vault_balance", args![victim, vault_id])
+            .add_input(vault_id)
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(reason, RuntimeError::NotInComponentContext {
+        action: VaultAction::GetBalance.into(),
+    });
+
+    // Another component reading the victim's vault must fail with SubstateNotOwned.
+    let reason = test.execute_expect_failure(
+        test.transaction()
+            .call_method(attacker_component, "read_vault_balance_in_component_context", args![
+                vault_id
+            ])
+            .add_input(vault_id)
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()],
+    );
+    assert_reject_reason(reason, RuntimeError::SubstateNotOwned {
+        id: vault_id.into(),
+        requested_owner: Box::new(attacker_component.into()),
+    });
+}
+
+#[test]
 fn it_rejects_a_bucket_that_is_neither_consumed_nor_returned_by_a_call() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let template_addr = test.get_template_address(TEMPLATE_NAME);

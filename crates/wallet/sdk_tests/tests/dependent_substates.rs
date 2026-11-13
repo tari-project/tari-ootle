@@ -117,7 +117,7 @@ fn load_dependent_substates_includes_unstored_references_nft_resources_and_handl
     let by_id = dependencies
         .iter()
         .map(|req| (req.substate_id().clone(), req.version()))
-        .collect::< std::collections::HashMap<_, _>>();
+        .collect::<std::collections::HashMap<_, _>>();
 
     assert_eq!(by_id.get(&component_a), Some(&Some(SubstateVersion::new(1))));
     assert_eq!(by_id.get(&component_b), Some(&Some(SubstateVersion::new(2))));
@@ -202,10 +202,11 @@ async fn locate_dependent_substates_resolves_versions_for_local_references_and_s
     let substates = test.sdk().substate_api();
 
     substates
-        .save_root(
-            VersionedSubstateIdRef::new(&vault_id, SubstateVersion::new(5)),
-            vec![resx_id.clone(), receipt_id.clone(), missing_ref_id],
-        )
+        .save_root(VersionedSubstateIdRef::new(&vault_id, SubstateVersion::new(5)), vec![
+            resx_id.clone(),
+            receipt_id.clone(),
+            missing_ref_id,
+        ])
         .unwrap();
 
     // Non-declarable top-level inputs (receipt, tombstone, virtual identity badge) must be skipped without

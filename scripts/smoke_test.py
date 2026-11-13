@@ -613,8 +613,8 @@ class SmokeTest:
             if first < n:
                 info(f"🚰 claiming from the faucet into {bold(n - first)} new flood account(s)…")
                 self.submit_flood("faucet", n, skip=first)
-                # A deposit creates a missing account with create_account!, which fails on one that exists, so the
-                # claimed accounts must be visible before the remaining ones are listed for a deposit.
+                # The transfers flood resolves each account's vault through the indexer, which the listing above has
+                # just told that the claimed accounts do not exist.
                 self.wait_flood_accounts_funded(n, range(first, n))
                 missing = [a for a in missing if a[0] < first]
         to_fund = missing + low

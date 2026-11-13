@@ -70,12 +70,14 @@ where
     U: std::str::FromStr,
     U::Err: Error + Send + Sync + 'static,
 {
-    let mut parts = s.split('=').map(|s| s.trim());
-    let k = parts.next().ok_or("invalid override: string empty`")?;
-    let v = parts
-        .next()
+    let (k, v) = s
+        .split_once('=')
         .ok_or_else(|| format!("invalid override: expected key=value: no `=` found in `{s}`"))?;
-    Ok((k.parse()?, v.parse()?))
+    let k = k.trim();
+    if k.is_empty() {
+        return Err(format!("invalid override: empty key in `{s}`").into());
+    }
+    Ok((k.parse()?, v.trim().parse()?))
 }
 
 impl CommonCliArgs {
@@ -140,5 +142,24 @@ mod defaults {
 
     pub(super) fn config() -> String {
         DEFAULT_CONFIG.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_key_val_preserves_equals_signs_in_value() {
+        let (k, v): (String, String) = parse_key_val("foo.bar = a=b=c==").unwrap();
+        assert_eq!(k, "foo.bar");
+        assert_eq!(v, "a=b=c==");
+    }
+
+    #[test]
+    fn parse_key_val_rejects_missing_equals_or_empty_key() {
+        assert!(parse_key_val::<String, String>("no_equals").is_err());
+        assert!(parse_key_val::<String, String>("=value").is_err());
+        assert!(parse_key_val::<String, String>("   =value").is_err());
     }
 }

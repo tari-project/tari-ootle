@@ -124,16 +124,16 @@ impl AuthSubcommand {
         match self {
             Request(args) => {
                 if args.permissions.is_empty() {
-                    println!("You forgot add permissions");
-                } else {
-                    let _resp = client
-                        .auth_request(AuthLoginRequest {
-                            permissions: args.permissions,
-                            credentials: AuthCredentials::None,
-                        })
-                        .await?;
-                    println!("Access granted");
+                    anyhow::bail!("You forgot to add permissions");
                 }
+                let resp = client
+                    .auth_request(AuthLoginRequest {
+                        permissions: args.permissions,
+                        credentials: AuthCredentials::None,
+                    })
+                    .await?;
+                println!("Access granted");
+                println!("{}", resp.token.as_str());
             },
             Revoke(args) => {
                 client
@@ -172,6 +172,9 @@ impl ApiKeySubcommand {
                 let expires_at = args
                     .expires_in
                     .map(|d| -> anyhow::Result<i64> {
+                        if d.is_zero() {
+                            anyhow::bail!("--expires-in must be greater than zero");
+                        }
                         let when = SystemTime::now()
                             .checked_add(d)
                             .ok_or_else(|| anyhow::anyhow!("expires_in is too far in the future"))?;
@@ -179,7 +182,7 @@ impl ApiKeySubcommand {
                             .duration_since(UNIX_EPOCH)
                             .map_err(|e| anyhow::anyhow!("expires_in produced a pre-epoch timestamp: {e}"))?
                             .as_secs();
-                        Ok(secs as i64)
+                        i64::try_from(secs).map_err(|_| anyhow::anyhow!("expires_in is too far in the future"))
                     })
                     .transpose()?;
                 let resp = client

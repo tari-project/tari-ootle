@@ -30,9 +30,16 @@ impl<'b, C> minicbor::Decode<'b, C> for Amount {
                     .map_err(|e| minicbor::decode::Error::message(format!("Amount: invalid string '{}': {}", s, e)))
             },
             Type::StringIndef => {
+                const MAX_STR_LEN: usize = 128;
                 let mut s = String::new();
                 for chunk in d.str_iter()? {
-                    s.push_str(chunk?);
+                    let chunk = chunk?;
+                    if s.len().saturating_add(chunk.len()) > MAX_STR_LEN {
+                        return Err(minicbor::decode::Error::message(
+                            "Amount: indefinite string exceeds maximum length",
+                        ));
+                    }
+                    s.push_str(chunk);
                 }
                 s.parse::<Amount>()
                     .map_err(|e| minicbor::decode::Error::message(format!("Amount: invalid string '{}': {}", s, e)))

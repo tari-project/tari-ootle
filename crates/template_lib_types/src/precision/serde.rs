@@ -209,5 +209,10 @@ mod tests {
         let cbor = encode(&amount).unwrap();
         let decoded: Amount = decode_exact(&cbor).unwrap();
         assert_eq!(decoded, amount);
+
+        let mut overlong_indef = vec![0x7f, 0x78, 0x81];
+        overlong_indef.extend_from_slice(&[b'9'; 129]);
+        overlong_indef.push(0xff);
+        assert!(decode_exact::<PrecisionAmount>(&overlong_indef).is_err());
     }
 }

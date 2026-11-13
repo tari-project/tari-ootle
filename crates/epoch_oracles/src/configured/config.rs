@@ -90,8 +90,8 @@ impl Config {
                 );
             }
         }
-        // Each validator activated in `self` was activated in `prior` and matched above, whether or not `prior`
-        // lists it.
+        // Every validator `self` activates by `processed_epoch` must also have activated by then in `prior`, where the
+        // loop above matched it.
         for vn in self.validators_activated_by(processed_epoch) {
             if !prior
                 .validators_activated_by(processed_epoch)

@@ -1,6 +1,6 @@
 # Wallet Daemon JSON-RPC API Reference
 
-The wallet daemon exposes a JSON-RPC 2.0 API. All requests are POST to the endpoint (e.g. `http://localhost:12008/json_rpc`).
+The wallet daemon exposes a JSON-RPC 2.0 API. All requests are POST to the endpoint (e.g. `http://127.0.0.1:5100/json_rpc`).
 
 ## Authentication
 
@@ -39,22 +39,30 @@ WebAuthn requires a browser-based passkey interaction (biometric, hardware key, 
 
 ### Permissions
 
+`auth.request` `permissions` is the serde form of the `Permission` enum. `"Admin"` grants every permission. The other values:
+
 ```
-Admin              - Full access (includes all other permissions)
-AccountInfo        - View wallet info
-AccountList        - List accounts (optionally scoped to a component address)
-AccountBalance     - View balances (scoped to a substate ID)
-KeyList            - List derived keys
-TransactionGet     - View transactions
-TransactionSend    - Submit transactions (optionally scoped to a substate ID)
-SubstatesRead      - Fetch substates
-TemplatesRead      - Fetch templates
-GetNft             - View NFTs
-NftGetOwnershipProof - Generate NFT ownership proofs
-StartWebrtc        - Initiate WebRTC sessions (UI internal use)
+"Webrtc"
+{"Accounts":["Read", null]}           - action is Read, Create, Update, or Delete; the second element is a component address or null
+{"Keys":"Read"}                       - Read, Create, Update, or Delete
+{"Transactions":"Create"}             - Read, Create, Update, or Delete. transactions.submit_manifest requires Create
+{"TransactionRequests":"Approve"}     - Read, Create, or Approve
+{"SigningRequests":"Read"}            - Read, Create, or Approve
+{"Transfer":["Create", null]}         - same shape as Accounts
+{"Templates":"Read"}                  - Read, Create, Update, or Delete
+{"Nfts":["Read", null]}               - action as Accounts; the scope is a resource address or null
+{"Confidential":["Read", null]}       - same shape as Accounts
+{"StealthUtxos":["Read", null]}       - same shape as Accounts
+{"Validators":"Read"}                 - Read, Create, Update, or Delete
+{"Settings":"Read"}                   - Read, Create, Update, or Delete
+{"AddressBook":"Read"}                - Read, Create, Update, or Delete
+{"Substates":"Read"}
+{"BurnProofs":"Read"}
+{"SwapPools":"Read"}
+{"Resources":"Read"}
 ```
 
-Use `Admin` for full access. For least-privilege, use `TransactionSend` + `AccountList` + `AccountInfo`.
+Names such as `AccountInfo` and `TransactionSend` are not accepted. API keys use a separate grammar, `admin` or `<resource>:<action>[:<entity>]` (for example `accounts:read`, `transactions:create`). Those strings are not the `auth.request` form.
 
 ## Auth Endpoints
 
@@ -125,6 +133,7 @@ Submit a transaction defined by a manifest.
       "account": "component_<64-char-hex>",
       "resource": "resource_<64-char-hex>"
     },
+    "seal_signer_key_id": null,
     "max_fee": 1000,
     "dry_run": false
   }
@@ -134,7 +143,8 @@ Submit a transaction defined by a manifest.
 **Fields:**
 - `manifest` (string, required): Manifest source code. Escape inner quotes, use `\n` for newlines.
 - `variables` (object, required): Variable name to value string mapping. Values are parsed as `ManifestValue` (tries SubstateId, then NonFungibleId, then literal).
-- `signing_key_id` (object, optional): `{"Derived":{"index":0,"key_branch":"account"}}` to override signing key.
+- `seal_signer_key_id` (object or null, required): Key that seals the transaction. `null` uses the default account's owner key. Example: `{"Derived":{"key_branch":"account","index":0}}`.
+- `signing_key_ids` (array, optional): Additional signing keys. Defaults to `[]`.
 - `max_fee` (number, required): Maximum fee in microtari.
 - `dry_run` (boolean, required): If true, simulate without submitting.
 
@@ -160,9 +170,11 @@ Submit a pre-built transaction with raw instructions.
   "jsonrpc":"2.0","id":11,"method":"transactions.submit",
   "params":{
     "transaction": { ... },
-    "signing_key_id": null,
+    "seal_signer": {"Derived":{"key_branch":"account","index":0}},
+    "other_signers": [],
     "detect_inputs": true,
-    "detect_inputs_use_unversioned": true
+    "detect_inputs_use_unversioned": true,
+    "lock_ids": []
   }
 }
 ```
@@ -216,7 +228,7 @@ Can use account name or component address.
 
 ### accounts.create_free_test_coins
 
-Create free test coins (test networks only).
+Create free test coins (test networks only). The claim amount is fixed at 1,000 TARI; the request has no amount field.
 
 **Request:**
 ```json
@@ -224,7 +236,6 @@ Create free test coins (test networks only).
   "jsonrpc":"2.0","id":24,"method":"accounts.create_free_test_coins",
   "params":{
     "account": {"Name":"my-account"},
-    "amount": 1000000,
     "max_fee": 1000
   }
 }

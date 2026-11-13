@@ -3,7 +3,7 @@
 [![crates.io](https://img.shields.io/crates/v/tari_ootle_walletd_client)](https://crates.io/crates/tari_ootle_walletd_client)
 [![docs.rs](https://docs.rs/tari_ootle_walletd_client/badge.svg)](https://docs.rs/tari_ootle_walletd_client)
 
-A JSON-RPC 2.0 client for the Tari wallet daemon (`tari_walletd`). Provides strongly-typed async methods for account
+A JSON-RPC 2.0 client for the Tari wallet daemon (`tari_ootle_walletd`). Provides strongly-typed async methods for account
 management, transactions, stealth/confidential transfers, NFTs, and more.
 
 ## Usage
@@ -14,7 +14,7 @@ use tari_ootle_walletd_client::permissions::Permission;
 use tari_ootle_walletd_client::types::*;
 
 // Connect to a running wallet daemon
-let mut client = WalletDaemonClient::connect("http://localhost:18000", None)?;
+let mut client = WalletDaemonClient::connect("http://127.0.0.1:5100", None)?;
 
 // Authenticate and set the JWT token
 let auth_resp = client.auth_request(AuthLoginRequest {
@@ -42,6 +42,7 @@ let resp = client.submit_transaction(TransactionSubmitRequest {
     transaction,
     seal_signer: owner_key_id,
     other_signers: vec![],
+    signatures: vec![],
     detect_inputs: true,
     detect_inputs_use_unversioned: true,
     lock_ids: vec![],

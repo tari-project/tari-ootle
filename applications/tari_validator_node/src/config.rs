@@ -191,6 +191,19 @@ pub struct ValidatorNodeConfig {
     /// raised to it.
     #[serde(default = "default_pinned_checkpoint_epochs")]
     pub pinned_checkpoint_epochs: u64,
+    /// The number of epochs before the current one whose blocks, certificates, foreign proposals and finalized
+    /// transaction records the state store keeps. Peers more than this many epochs behind cannot sync these from
+    /// this node, and bounded state sync is refused once its range is older than this window. Disk use grows
+    /// linearly with it. A value below [`MIN_EPOCH_HISTORY_LENGTH`] is raised to it.
+    #[serde(default = "default_epoch_history_length")]
+    pub epoch_history_length: u64,
+    /// The number of epochs, counted from the destruction each proves, that the state store keeps substate down proofs
+    /// and state version proofs for. An older destruction is served unproven.
+    #[serde(default = "default_down_proof_history_length")]
+    pub down_proof_history_length: u64,
+    /// The number of state tree versions behind the latest that each shard keeps stale nodes for.
+    #[serde(default = "default_state_history_length")]
+    pub state_history_length: u64,
     /// Local diagnostic event log
     #[serde(default)]
     pub diagnostics: DiagnosticsConfig,
@@ -221,6 +234,22 @@ pub const MIN_PINNED_CHECKPOINT_EPOCHS: u64 = 2;
 
 fn default_pinned_checkpoint_epochs() -> u64 {
     DatabaseOptions::default().pinned_checkpoint_epochs
+}
+
+/// The fewest epochs before the current one a validator keeps blocks for. The previous epoch's blocks are still read
+/// while the current one starts.
+pub const MIN_EPOCH_HISTORY_LENGTH: u64 = 1;
+
+fn default_epoch_history_length() -> u64 {
+    DatabaseOptions::default().epoch_history_length
+}
+
+fn default_down_proof_history_length() -> u64 {
+    DatabaseOptions::default().down_proof_history_length
+}
+
+fn default_state_history_length() -> u64 {
+    DatabaseOptions::default().state_history_length
 }
 
 /// The validator's local record of abnormal events (leader failures, consensus errors, sync and
@@ -298,6 +327,9 @@ impl ValidatorNodeConfig {
             .with_memory_budget_bytes(self.state_store_memory_budget_bytes)
             .with_memtable_budget_bytes(self.state_store_memory_budget_bytes / 2)
             .with_pinned_checkpoint_epochs(self.pinned_checkpoint_epochs.max(MIN_PINNED_CHECKPOINT_EPOCHS))
+            .with_epoch_history_length(self.epoch_history_length.max(MIN_EPOCH_HISTORY_LENGTH))
+            .with_down_proof_history_length(self.down_proof_history_length)
+            .with_state_history_length(self.state_history_length)
     }
 
     pub fn set_base_path<P: AsRef<Path>>(&mut self, base_path: P) {
@@ -380,6 +412,9 @@ impl Default for ValidatorNodeConfig {
             max_consensus_messaging_queue_bytes: default_max_consensus_messaging_queue_bytes(),
             state_store_memory_budget_bytes: default_state_store_memory_budget_bytes(),
             pinned_checkpoint_epochs: default_pinned_checkpoint_epochs(),
+            epoch_history_length: default_epoch_history_length(),
+            down_proof_history_length: default_down_proof_history_length(),
+            state_history_length: default_state_history_length(),
             diagnostics: DiagnosticsConfig::default(),
             logging: crate::logging::default_logging_config(),
         }

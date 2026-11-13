@@ -42,8 +42,8 @@ pub struct DatabaseOptions {
     pub pinned_checkpoint_epochs: u64,
     /// The number of epochs back from the current epoch to keep in the database.
     /// This includes blocks, foreign proposals etc.
-    /// The default is 1, which means we keep the previous epoch's data until this epoch has passed. It is not
-    /// recommended to set this to 0.
+    /// The default is 6, which keeps the data of the six epochs before the current one. It is not recommended to set
+    /// this to 0.
     pub epoch_history_length: u64,
     /// The number of epochs back from the current epoch to keep substate down proofs for, counted from the epoch of
     /// the destruction each proves. A destruction older than this is served unproven.
@@ -95,8 +95,8 @@ impl DatabaseOptions {
 
     /// The number of epochs back from the current epoch to keep in the database.
     /// This includes blocks, foreign proposals etc.
-    /// The default is 1, which means we keep the previous epoch's data until this epoch has passed. It is not
-    /// recommended to set this to 0.
+    /// The default is 6, which keeps the data of the six epochs before the current one. It is not recommended to set
+    /// this to 0.
     pub fn with_epoch_history_length(mut self, epoch_history_length: u64) -> Self {
         self.epoch_history_length = epoch_history_length;
         self
@@ -141,7 +141,7 @@ impl Default for DatabaseOptions {
         Self {
             state_history_length: 100,
             pinned_checkpoint_epochs: 2,
-            epoch_history_length: 1,
+            epoch_history_length: 6,
             down_proof_history_length: 72,
             debugging_data: false,
             prune_transaction_history: true,

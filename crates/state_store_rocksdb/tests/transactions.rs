@@ -834,7 +834,7 @@ mod finalized_transaction_gc {
         assert!(tx.transactions_exists(tx1.id()).unwrap());
         assert!(TransactionRecord::is_record_finalized(&*tx, tx1.id()).unwrap());
 
-        // epoch_history_length is 1 (default options): cleaning at epoch 1 prunes ..=0, which keeps
+        // epoch_history_length is 1: cleaning at epoch 1 prunes ..=0, which keeps
         // bookkeeping finalized in epoch 1.
         tx.epoch_cleanup(Epoch(1)).unwrap();
         assert!(tx.transactions_exists(tx1.id()).unwrap());
@@ -1195,6 +1195,29 @@ mod get_batch_for_next_block {
         assert!(tx.transaction_pool_any(true, |rec| *rec.id() != conflicted).unwrap());
         assert!(!tx.transaction_pool_any(true, |rec| *rec.id() == conflicted).unwrap());
         assert!(tx.transaction_pool_any(false, |rec| *rec.id() == conflicted).unwrap());
+        drop(tx);
+
+        // Removing conflicts by the lock-holding transaction ID unblocks the waiting transaction.
+        let mut tx = db.create_write_tx().unwrap();
+        tx.lock_conflicts_remove_by_transaction_ids([&conflict.transaction_id])
+            .unwrap();
+        tx.commit().unwrap();
+
+        let tx = db.create_read_tx().unwrap();
+        assert_eq!(get_batch(&tx, u64::MAX, 10, false, &block_id).len(), 3);
+        assert_eq!(tx.transaction_pool_count(None, Some(true), true).unwrap(), 3);
+        assert!(tx.transaction_pool_any(true, |rec| *rec.id() == conflicted).unwrap());
+        drop(tx);
+
+        // Removing conflicts by the waiting transaction ID also clears the conflict.
+        let mut tx = db.create_write_tx().unwrap();
+        tx.lock_conflicts_insert_all(&block_id, [(&conflicted, &vec![conflict])])
+            .unwrap();
+        tx.lock_conflicts_remove_by_transaction_ids([&conflicted]).unwrap();
+        tx.commit().unwrap();
+
+        let tx = db.create_read_tx().unwrap();
+        assert!(tx.transaction_pool_any(true, |rec| *rec.id() == conflicted).unwrap());
     }
 
     fn id_of(byte: u8) -> TransactionId {

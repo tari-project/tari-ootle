@@ -160,6 +160,7 @@ where
         let UnsealedTransaction::V1(unsealed) = message;
         let segments = TransactionSealSignature::signing_preimage_v1(unsealed);
         let (public_key, signature) = self.stream(SignMode::Seal, None, segments).await?;
+        verified_account_key(&public_key, self.address.account_public_key())?;
         verified_seal(TransactionSealSignature::new(public_key, signature), unsealed)
     }
 
@@ -171,6 +172,7 @@ where
         let UnsignedTransaction::V1(unsigned) = tx;
         let segments = TransactionSignature::signing_preimage_v1(seal_signer, unsigned);
         let (public_key, signature) = self.stream(SignMode::AddSigner, None, segments).await?;
+        verified_account_key(&public_key, self.address.account_public_key())?;
         verified_authorization(TransactionSignature::new(public_key, signature), seal_signer, unsigned)
     }
 }
@@ -236,6 +238,19 @@ where
         let signature = self.sign_transaction(&tx).await?;
         Ok(<UnsealedTransaction as IntoSigned<()>>::into_signed(tx, signature))
     }
+}
+
+fn verified_account_key(
+    returned_key: &RistrettoPublicKeyBytes,
+    expected_key: &RistrettoPublicKeyBytes,
+) -> signer::Result<()> {
+    if returned_key != expected_key {
+        return Err(SignerError::other(format!(
+            "the Ledger device signed with public key {returned_key}, which does not match this signer's account key \
+             {expected_key}"
+        )));
+    }
+    Ok(())
 }
 
 /// The device computes the signing message from the streamed preimage itself, so its signature is
@@ -394,5 +409,20 @@ mod tests {
         assert!(check_app_version("0.2.0").is_err());
         assert!(check_app_version("0.3").is_err());
         assert!(check_app_version("not-a-version").is_err());
+    }
+
+    #[test]
+    fn mismatched_device_account_key_is_rejected() {
+        let mut rng = rand::rng();
+        let pk_a = RistrettoPublicKeyBytes::from_bytes(
+            RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut rng)).as_bytes(),
+        )
+        .unwrap();
+        let pk_b = RistrettoPublicKeyBytes::from_bytes(
+            RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut rng)).as_bytes(),
+        )
+        .unwrap();
+        assert!(verified_account_key(&pk_a, &pk_a).is_ok());
+        assert!(verified_account_key(&pk_b, &pk_a).is_err());
     }
 }

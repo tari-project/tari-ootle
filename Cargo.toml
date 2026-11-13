@@ -150,7 +150,6 @@ tari_ootle_transaction = { path = "crates/transaction", version = "0.53.3" }
 tari_ootle_transaction_validation = { path = "crates/transaction_validation" }
 
 # Template lib
-tari_ootle_template_build = { path = "crates/template_build", version = "0.20.0" }
 tari_ootle_template_metadata = { path = "crates/template_metadata", version = "0.20" }
 tari_ootle_template_provider = { path = "crates/template_provider" }
 tari_template_lib = { version = "0.40.0", path = "crates/template_lib" }
@@ -271,7 +270,6 @@ proc-macro2 = "1.0"
 prometheus-client = { version = "0.25", default-features = false }
 prost = "0.14"
 prost-build = "0.14"
-prost-types = "0.14"
 quick-protobuf = "0.8"
 quick-protobuf-codec = "0.3.1"
 quote = "1.0.7"

@@ -114,9 +114,13 @@ pub fn complete(pre: &RistrettoAdaptorSignature, t: &RistrettoSecretKey) -> Sr25
 ///
 /// This is the swap-reveal primitive: a watcher who holds the pre-signature and observes the
 /// completed signature on-chain recovers the secret that unlocks the other leg. Returns `None` when
-/// `completed` is not a well-formed signature.
+/// `completed` is not a well-formed completion of `pre` (including when its public nonce does not
+/// match `pre.public_nonce()`).
 pub fn extract(pre: &RistrettoAdaptorSignature, completed: &Sr25519SignatureBytes) -> Option<RistrettoSecretKey> {
-    let (_, s) = components(completed)?;
+    let (public_nonce, s) = components(completed)?;
+    if is_identity(&public_nonce) || public_nonce.as_bytes() != pre.public_nonce.as_bytes() {
+        return None;
+    }
     Some(&s - &pre.signature)
 }
 
@@ -161,6 +165,27 @@ mod tests {
         let sig = complete(&pre, &t);
 
         assert_eq!(extract(&pre, &sig), Some(t));
+    }
+
+    #[test]
+    fn extract_rejects_unrelated_or_identity_nonce_signature() {
+        let (x, _p) = keypair();
+        let (t, big_t) = keypair();
+        let pre = sign(&x, &big_t, &message(1));
+        let other_pre = sign(&x, &big_t, &message(2));
+        let other_sig = complete(&other_pre, &t);
+
+        // Signature from a different pre-signature has a different public nonce and must not yield a bogus scalar.
+        assert_eq!(extract(&pre, &other_sig), None);
+
+        // Degenerate pre-signature / signature with identity nonce must also be rejected.
+        let identity = RistrettoPublicKey::default();
+        let degenerate_pre = RistrettoAdaptorSignature {
+            public_nonce: identity.clone(),
+            signature: pre.signature.clone(),
+        };
+        let degenerate_sig = from_components(&identity, &t);
+        assert_eq!(extract(&degenerate_pre, &degenerate_sig), None);
     }
 
     #[test]

@@ -2230,7 +2230,9 @@ mod tests {
         let store = InMemoryStore::default();
         let chain_a = linear_chain(0..=20);
         let mut config = make_config(5);
-        config.start_height = 11;
+        // Scanning starts at 11 (start height minus the lag), above the epoch-2 boundary at 10, so the
+        // first boundary crossed is 15 and the fork at 12 orphans it.
+        config.start_height = 15;
         let mut oracle = BaseLayerOracle::new(
             store.clone(),
             MockBaseNode::new(chain_a.clone()),

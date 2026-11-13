@@ -213,6 +213,7 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
   private id: number;
   private reauthEnabled: boolean = true;
   private hasWarnedApiKeyReauth: boolean = false;
+  private refreshPromise: Promise<string> | null = null;
 
   constructor(transport: T) {
     this.token = null;
@@ -774,34 +775,46 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
       if (this.token && isApiKey(this.token)) {
         throw origError;
       }
-      const id = this.id++;
-      // `auth.refresh` is authorised by the HttpOnly refresh cookie set at
-      // login, never by the bearer token, so this call deliberately carries no
-      // token. It only succeeds for a same-origin browser caller whose
-      // transport sends cookies.
-      const refreshResp = (await this.transport.sendRequest<any>({
-        method: "auth.refresh",
-        jsonrpc: "2.0",
-        id,
-        params: {},
-      })) as RpcResponse<AuthLoginResponse>;
 
-      if (refreshResp.error) {
-        console.debug("Refresh resp", refreshResp);
-        this.clearToken();
-        // Throw the original 401 error instead of the refresh error
-        throw origError;
+      // Deduplicate concurrent refresh calls so multiple in-flight 401s share a single
+      // auth.refresh request instead of racing and invalidating credentials.
+      if (!this.refreshPromise) {
+        this.refreshPromise = (async () => {
+          const id = this.id++;
+          // `auth.refresh` is authorised by the HttpOnly refresh cookie set at
+          // login, never by the bearer token, so this call deliberately carries no
+          // token. It only succeeds for a same-origin browser caller whose
+          // transport sends cookies.
+          const refreshResp = (await this.transport.sendRequest<any>({
+            method: "auth.refresh",
+            jsonrpc: "2.0",
+            id,
+            params: {},
+          })) as RpcResponse<AuthLoginResponse>;
+
+          if (refreshResp.error) {
+            console.debug("Refresh resp", refreshResp);
+            this.clearToken();
+            throw origError;
+          }
+
+          console.debug("Token refreshed successfully. Retrying original request.");
+          this.token = refreshResp.result.token;
+          return this.token;
+        })().finally(() => {
+          this.refreshPromise = null;
+        });
       }
 
-      console.debug("Token refreshed successfully. Retrying original request.");
-      this.token = refreshResp.result.token;
+      await this.refreshPromise;
 
       // Retry the original request with the new token
+      const retryId = this.id++;
       response = (await this.transport.sendRequest<any>(
         {
           method,
           jsonrpc: "2.0",
-          id,
+          id: retryId,
           params: params || {},
         },
         { token: this.token, timeout_millis: null },

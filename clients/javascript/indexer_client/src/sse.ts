@@ -50,11 +50,13 @@ export function connectSse(url: string, options: SseStreamOptions): SseStream {
   const controller = new AbortController();
 
   // Link external signal if provided
+  let onExternalAbort: (() => void) | null = null;
   if (options.signal) {
     if (options.signal.aborted) {
       controller.abort();
     } else {
-      options.signal.addEventListener("abort", () => controller.abort(), { once: true });
+      onExternalAbort = () => controller.abort();
+      options.signal.addEventListener("abort", onExternalAbort, { once: true });
     }
   }
 
@@ -219,6 +221,9 @@ export function connectSse(url: string, options: SseStreamOptions): SseStream {
       await reader.cancel().catch(() => {});
       throw err;
     } finally {
+      if (options.signal && onExternalAbort) {
+        options.signal.removeEventListener("abort", onExternalAbort);
+      }
       reader.releaseLock();
     }
   };

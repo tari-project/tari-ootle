@@ -172,6 +172,15 @@ impl InstructionArg {
 /// usage.
 #[macro_export]
 macro_rules! __call_args_inner {
+    (@ { $this:ident } Workspace($id:expr, $offset:expr), $($tail:tt)*) => {
+        $crate::args::__push(&mut $this, $crate::call_arg!(Workspace($id, $offset)));
+        $crate::__call_args_inner!(@ { $this } $($tail)*);
+    };
+
+    (@ { $this:ident } Workspace($id:expr, $offset:expr) $(,)?) => {
+        $crate::args::__push(&mut $this, $crate::call_arg!(Workspace($id, $offset)));
+    };
+
     (@ { $this:ident } Workspace($e:expr), $($tail:tt)*) => {
         $crate::args::__push(&mut $this, $crate::call_arg!(Workspace($e)));
         $crate::__call_args_inner!(@ { $this } $($tail)*);
@@ -188,6 +197,24 @@ macro_rules! __call_args_inner {
 
     (@ { $this:ident } WorkspaceOffset($e:expr) $(,)?) => {
         $crate::args::__push(&mut $this, $crate::call_arg!(WorkspaceOffset($e)));
+    };
+
+    (@ { $this:ident } Blob($e:expr), $($tail:tt)*) => {
+        $crate::args::__push(&mut $this, $crate::call_arg!(Blob($e)));
+        $crate::__call_args_inner!(@ { $this } $($tail)*);
+    };
+
+    (@ { $this:ident } Blob($e:expr) $(,)?) => {
+        $crate::args::__push(&mut $this, $crate::call_arg!(Blob($e)));
+    };
+
+    (@ { $this:ident } Amount($e:expr), $($tail:tt)*) => {
+        $crate::args::__push(&mut $this, $crate::call_arg!(Amount($e)));
+        $crate::__call_args_inner!(@ { $this } $($tail)*);
+    };
+
+    (@ { $this:ident } Amount($e:expr) $(,)?) => {
+        $crate::args::__push(&mut $this, $crate::call_arg!(Amount($e)));
     };
 
     (@ { $this:ident } Literal($e:expr), $($tail:tt)*) => {
@@ -231,11 +258,15 @@ macro_rules! call_arg {
     (Workspace($id:expr)) => {
         $crate::args::InstructionArg::workspace($id, None)
     };
+    (Blob($idx:expr)) => {
+        $crate::args::InstructionArg::blob($idx)
+    };
     (Literal($arg:expr)) => {
         $crate::args::InstructionArg::from_type(&$arg).unwrap()
     };
     (Amount($arg:expr)) => {
-        $crate::args::InstructionArg::from_type(&$crate::types::Amount::from($arg)).unwrap()
+        $crate::args::InstructionArg::from_type(&$crate::builder::named_args::__macro_exports::Amount::from($arg))
+            .unwrap()
     };
 
     ($arg:expr) => {
@@ -257,15 +288,15 @@ macro_rules! call_arg {
 macro_rules! call_args {
     () => (Vec::new());
 
-    ($token:ident($args:expr), $($tail:tt)*) => {{
+    ($token:ident($($args:expr),+), $($tail:tt)*) => {{
         let mut args = Vec::with_capacity(1 + $crate::__expr_counter!($($tail)*));
-        $crate::__call_args_inner!(@ { args } $token($args), $($tail)*);
+        $crate::__call_args_inner!(@ { args } $token($($args),+), $($tail)*);
         args
     }};
 
-    ($token:ident($args:expr) $(,)?) => {{
+    ($token:ident($($args:expr),+) $(,)?) => {{
         let mut args = Vec::new();
-        $crate::__call_args_inner!(@ { args } $token($args),);
+        $crate::__call_args_inner!(@ { args } $token($($args),+),);
         args
     }};
 
@@ -292,6 +323,18 @@ mod tests {
         let args = call_args![Workspace(1)];
         assert_eq!(args[0], InstructionArg::workspace(1, None));
 
+        let args = call_args![Workspace(1, Some(2))];
+        assert_eq!(args[0], InstructionArg::workspace(1, Some(2)));
+
+        let args = call_args![Blob(4)];
+        assert_eq!(args[0], InstructionArg::blob(4));
+
+        let args = call_args![Amount(500u64)];
+        assert_eq!(
+            args[0],
+            InstructionArg::from_type(&tari_template_lib_types::Amount::from(500u64)).unwrap()
+        );
+
         let args = call_args!["foo".to_string()];
         assert!(matches!(args[0], InstructionArg::Literal(_)));
 
@@ -306,14 +349,27 @@ mod tests {
             InstructionArg::literal(tari_bor::to_value(&"bar".to_string()).unwrap()).unwrap()
         );
 
-        let args = call_args!["foo".to_string(), Workspace(3), 123u64];
+        let args = call_args![
+            "foo".to_string(),
+            Workspace(3),
+            Workspace(4, Some(1)),
+            Blob(2),
+            Amount(100u64),
+            123u64,
+        ];
         assert_eq!(
             args[0],
             InstructionArg::literal(tari_bor::to_value(&"foo".to_string()).unwrap()).unwrap()
         );
         assert_eq!(args[1], InstructionArg::workspace(3, None));
+        assert_eq!(args[2], InstructionArg::workspace(4, Some(1)));
+        assert_eq!(args[3], InstructionArg::blob(2));
         assert_eq!(
-            args[2],
+            args[4],
+            InstructionArg::from_type(&tari_template_lib_types::Amount::from(100u64)).unwrap()
+        );
+        assert_eq!(
+            args[5],
             InstructionArg::literal(tari_bor::to_value(&123u64).unwrap()).unwrap()
         );
     }

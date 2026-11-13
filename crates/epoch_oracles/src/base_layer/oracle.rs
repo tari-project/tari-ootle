@@ -78,7 +78,7 @@ struct ScanPosition {
     /// The L1 tip of the round this position completed, or `None` when this position is from an
     /// intermediate batch or a reorg rewind that has not yet reached the round's lagged tip.
     tip: Option<FixedHash>,
-    block_hash: FixedHash,
+    block_hash: Option<FixedHash>,
     height: u64,
     /// The last boundary crossed at or below `height`, in this batch or an earlier one.
     epoch_hash: Option<FixedHash>,
@@ -188,16 +188,19 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
     fn load_initial_state(&mut self) -> Result<(), BaseLayerOracleError> {
         self.last_scanned_tip = self
             .store
-            .get(StoreKey::BaseLayerLastScannedTip.as_key_bytes())
-            .map_err(BaseLayerOracleError::StoreError)?;
+            .get::<Option<FixedHash>>(StoreKey::BaseLayerLastScannedTip.as_key_bytes())
+            .map_err(BaseLayerOracleError::StoreError)?
+            .flatten();
         self.last_scanned_hash = self
             .store
-            .get(StoreKey::BaseLayerLastScannedBlockHash.as_key_bytes())
-            .map_err(BaseLayerOracleError::StoreError)?;
+            .get::<Option<FixedHash>>(StoreKey::BaseLayerLastScannedBlockHash.as_key_bytes())
+            .map_err(BaseLayerOracleError::StoreError)?
+            .flatten();
         self.last_epoch_hash = self
             .store
-            .get(StoreKey::BaseLayerLastEpochHash.as_key_bytes())
-            .map_err(BaseLayerOracleError::StoreError)?;
+            .get::<Option<FixedHash>>(StoreKey::BaseLayerLastEpochHash.as_key_bytes())
+            .map_err(BaseLayerOracleError::StoreError)?
+            .flatten();
         self.last_scanned_height = self
             .store
             .get(StoreKey::BaseLayerLastScannedBlockHeight.as_key_bytes())
@@ -393,7 +396,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
                     self.reset_last_epoch_hash_to_boundary(constants.height_to_epoch(fork_height), &constants)?;
                     self.unpersisted_position = Some(ScanPosition {
                         tip: None,
-                        block_hash: canonical_hash,
+                        block_hash: Some(canonical_hash),
                         height: fork_height,
                         epoch_hash: self.last_epoch_hash,
                     });
@@ -465,7 +468,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
         self.last_epoch_hash = None;
         self.unpersisted_position = Some(ScanPosition {
             tip: None,
-            block_hash: FixedHash::zero(),
+            block_hash: None,
             height: self.last_scanned_height,
             epoch_hash: None,
         });
@@ -897,19 +900,18 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
                 .add_block_headers(self.header_buf.drain(..))
                 .map_err(BaseLayerOracleError::StoreError)?;
         }
-        let block_hash = last_scanned_hash.unwrap_or_else(FixedHash::zero);
         self.last_scanned_validator_node_mr = last_validator_node_mr;
         self.last_scanned_tip = reached_lag_tip;
-        self.last_scanned_hash = Some(block_hash);
+        self.last_scanned_hash = last_scanned_hash;
         self.last_scanned_height = last_scanned_height;
         if last_epoch_hash.is_some() {
             self.last_epoch_hash = last_epoch_hash;
         }
         self.unpersisted_position = Some(ScanPosition {
             tip: reached_lag_tip,
-            block_hash,
+            block_hash: self.last_scanned_hash,
             height: last_scanned_height,
-            epoch_hash: last_epoch_hash,
+            epoch_hash: self.last_epoch_hash,
         });
 
         Ok(())
@@ -930,22 +932,18 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore, TClient: BaseNodeClie
         else {
             return Ok(());
         };
-        if let Some(tip) = tip {
-            self.store
-                .set(StoreKey::BaseLayerLastScannedTip.as_key_bytes(), &tip)
-                .map_err(BaseLayerOracleError::StoreError)?;
-        }
+        self.store
+            .set(StoreKey::BaseLayerLastScannedTip.as_key_bytes(), &tip)
+            .map_err(BaseLayerOracleError::StoreError)?;
         self.store
             .set(StoreKey::BaseLayerLastScannedBlockHash.as_key_bytes(), &block_hash)
             .map_err(BaseLayerOracleError::StoreError)?;
         self.store
             .set(StoreKey::BaseLayerLastScannedBlockHeight.as_key_bytes(), &height)
             .map_err(BaseLayerOracleError::StoreError)?;
-        if let Some(hash) = epoch_hash {
-            self.store
-                .set(StoreKey::BaseLayerLastEpochHash.as_key_bytes(), &hash)
-                .map_err(BaseLayerOracleError::StoreError)?;
-        }
+        self.store
+            .set(StoreKey::BaseLayerLastEpochHash.as_key_bytes(), &epoch_hash)
+            .map_err(BaseLayerOracleError::StoreError)?;
         Ok(())
     }
 
@@ -2224,6 +2222,72 @@ mod tests {
                 .get::<FixedHash>(StoreKey::BaseLayerLastEpochHash.as_key_bytes())
                 .unwrap(),
             Some(expected_epoch_2_hash)
+        );
+    }
+
+    #[tokio::test]
+    async fn reorg_below_first_scanned_boundary_clears_persisted_orphaned_epoch_hash() {
+        let store = InMemoryStore::default();
+        let chain_a = linear_chain(0..=20);
+        let mut config = make_config(5);
+        // Scanning starts at 11 (start height minus the lag), above the epoch-2 boundary at 10, so the
+        // first boundary crossed is 15 and the fork at 12 orphans it.
+        config.start_height = 15;
+        let mut oracle = BaseLayerOracle::new(
+            store.clone(),
+            MockBaseNode::new(chain_a.clone()),
+            config.clone(),
+            NETWORK,
+        );
+
+        next_events_until(&mut oracle, |e| matches!(e, EpochEvent::DoneForNow { .. })).await;
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(oracle.poll_next_event(&mut cx).is_pending());
+        assert_eq!(
+            store
+                .get::<Option<FixedHash>>(StoreKey::BaseLayerLastEpochHash.as_key_bytes())
+                .unwrap()
+                .flatten(),
+            Some(hash_header(NETWORK, &chain_a[15]))
+        );
+        drop(oracle);
+
+        let mut chain_b = chain_a[..=12].to_vec();
+        chain_b.extend((13..=19).map(|h| make_header(h, h + 10_000)));
+
+        let mut reorged = BaseLayerOracle::new(
+            store.clone(),
+            MockBaseNode::new(chain_b.clone()),
+            config.clone(),
+            NETWORK,
+        );
+        let events = next_events_until(&mut reorged, |e| matches!(e, EpochEvent::DoneForNow { .. })).await;
+        assert!(
+            matches!(
+                events.as_slice(),
+                [EpochEvent::DoneForNow { epoch: Epoch(2), epoch_hash }] if *epoch_hash == FixedHash::zero()
+            ),
+            "expected DoneForNow(Epoch(2), zero); got {events:?}"
+        );
+        assert!(reorged.poll_next_event(&mut cx).is_pending());
+        drop(reorged);
+
+        assert_eq!(
+            store
+                .get::<Option<FixedHash>>(StoreKey::BaseLayerLastEpochHash.as_key_bytes())
+                .unwrap()
+                .flatten(),
+            None,
+            "orphaned epoch hash must be cleared in persistent storage"
+        );
+        let mut restarted = BaseLayerOracle::new(store, MockBaseNode::new(chain_b), config, NETWORK);
+        let restart_events = next_events_until(&mut restarted, |e| matches!(e, EpochEvent::DoneForNow { .. })).await;
+        assert!(
+            matches!(
+                restart_events.as_slice(),
+                [EpochEvent::DoneForNow { epoch: Epoch(2), epoch_hash }] if *epoch_hash == FixedHash::zero()
+            ),
+            "restarted oracle must not emit the orphaned epoch-3 boundary hash; got {restart_events:?}"
         );
     }
 }

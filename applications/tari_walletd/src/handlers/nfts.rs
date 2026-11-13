@@ -273,6 +273,18 @@ pub async fn handle_transfer(
         Crud::Create,
         Some(*fee_payer_account.component_address()),
     )])?;
+    // An empty list would submit a fee-paying transaction that transfers nothing, and a repeated ID fails the
+    // second withdrawal on-chain after the fee is charged. Both are rejected before any network lookup.
+    if req.nfts.is_empty() {
+        return Err(invalid_params("nfts", Some("At least one NFT must be specified")));
+    }
+    let mut seen_nfts = HashSet::with_capacity(req.nfts.len());
+    if let Some(nft_id) = req.nfts.iter().find(|nft_id| !seen_nfts.insert(*nft_id)) {
+        return Err(invalid_params(
+            "nfts",
+            Some(format!("Duplicate NFT ID {nft_id} in transfer request")),
+        ));
+    }
     let fee_payer_account = fee_payer_account.account;
     let fee_payer_key_id = fee_payer_account.owner_key_id.ok_or_else(|| {
         invalid_params(
@@ -296,18 +308,6 @@ pub async fn handle_transfer(
     );
 
     let nfts = req.nfts;
-    if nfts.is_empty() {
-        return Err(invalid_params("nfts", Some("nfts cannot be empty")));
-    }
-    let mut seen_nfts = HashSet::with_capacity(nfts.len());
-    for nft_id in &nfts {
-        if !seen_nfts.insert(nft_id) {
-            return Err(invalid_params(
-                "nfts",
-                Some(format!("Duplicate NFT ID {nft_id} in transfer request")),
-            ));
-        }
-    }
 
     // add the input for the source account vault substate
     let src_vault = sdk
@@ -510,6 +510,7 @@ mod tests {
     use std::str::FromStr;
 
     use axum_extra::headers::Authorization;
+    use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
     use tari_ootle_address::Network;
     use tari_ootle_common_types::Epoch;
     use tari_ootle_wallet_sdk::{
@@ -528,6 +529,7 @@ mod tests {
     use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
     use tari_ootle_walletd_client::{ComponentAddressOrName, permissions::Permissions};
     use tari_shutdown::Shutdown;
+    use tari_template_lib_types::NonFungibleId;
     use tari_utilities::SafePassword;
 
     use super::*;
@@ -564,7 +566,7 @@ mod tests {
                 .clone();
             TransferNftRequest {
                 resource_address: NFT_FAUCET_RESOURCE_ADDRESS,
-                nfts: vec![],
+                nfts: vec![NonFungibleId::from_u64(1)],
                 fee_payer_account: ComponentAddressOrName::ComponentAddress(fee_payer),
                 source_account: ComponentAddressOrName::ComponentAddress(source),
                 target_account_address: target,
@@ -693,6 +695,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn transfer_rejects_an_empty_or_repeated_nft_list() {
+        let test = setup().await;
+        let bearer = test.bearer(&format!("transfer:create:{}", test.account_a));
+
+        for nfts in [vec![], vec![
+            NonFungibleId::from_u64(1),
+            NonFungibleId::from_u64(2),
+            NonFungibleId::from_u64(1),
+        ]] {
+            let req = TransferNftRequest {
+                nfts: nfts.clone(),
+                ..test.request(test.account_a, test.account_a)
+            };
+            let err = handle_transfer(&test.context, Some(&bearer), req)
+                .await
+                .expect_err("the NFT list must be rejected");
+            let rpc = err
+                .downcast_ref::<JsonRpcError>()
+                .unwrap_or_else(|| panic!("expected a JsonRpcError for {nfts:?}, got: {err}"));
+            assert!(
+                matches!(rpc.error_reason(), JsonRpcErrorReason::InvalidParams),
+                "expected InvalidParams for {nfts:?}, got: {rpc}"
+            );
+            assert!(
+                rpc.to_string().contains("'nfts'"),
+                "expected the `nfts` param to be named for {nfts:?}, got: {rpc}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn list_requires_account_read_scope_for_target_account() {
         let test = setup().await;
         let bearer_only_a = test.bearer(&format!("nfts:read,accounts:read:{}", test.account_a));
@@ -758,7 +791,10 @@ mod tests {
         let sdk = test.context.wallet_sdk();
 
         // Empty `nfts` is rejected upfront with InvalidParams.
-        let empty_err = handle_transfer(&test.context, Some(&bearer), test.request(test.account_a, test.account_a))
+        let empty_err = handle_transfer(&test.context, Some(&bearer), TransferNftRequest {
+            nfts: vec![],
+            ..test.request(test.account_a, test.account_a)
+        })
             .await
             .unwrap_err();
         let jrpc_err = empty_err.downcast_ref::<axum_jrpc::error::JsonRpcError>().unwrap();

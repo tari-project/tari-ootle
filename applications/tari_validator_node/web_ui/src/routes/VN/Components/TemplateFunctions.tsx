@@ -39,6 +39,7 @@ function formatType(type: Type): string {
   if ("Vec" in type) return `Vec<${formatType(type.Vec)}>`;
   if ("Option" in type) return `Option<${formatType(type.Option)}>`;
   if ("Tuple" in type) return `(${type.Tuple.map(formatType).join(", ")})`;
+  if ("WellKnown" in type) return type.WellKnown;
   return type.Other.name;
 }
 

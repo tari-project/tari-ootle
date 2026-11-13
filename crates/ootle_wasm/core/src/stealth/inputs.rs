@@ -44,8 +44,9 @@ pub fn build_stealth_inputs_statement(
         });
     }
 
-    let inputs = input_commitments
-        .chunks_exact(PedersenCommitmentBytes::length())
+    let (commitments, _) = input_commitments.as_chunks::<{ PedersenCommitmentBytes::length() }>();
+    let inputs = commitments
+        .iter()
         .map(|chunk| commitment_bytes_from_bytes(chunk).map(StealthInput::new))
         .collect::<Result<Vec<_>, _>>()?;
     ensure_unique_input_commitments(&inputs)?;
@@ -138,7 +139,8 @@ pub fn aggregate_input_masks(masks_concat: &[u8]) -> Result<Vec<u8>, OotleWasmEr
     }
 
     let mut acc = RistrettoSecretKey::default();
-    for chunk in masks_concat.chunks_exact(SCALAR_LEN) {
+    let (masks, _) = masks_concat.as_chunks::<SCALAR_LEN>();
+    for chunk in masks {
         acc = acc + secret_key_from_bytes(chunk)?;
     }
     Ok(acc.as_bytes().to_vec())

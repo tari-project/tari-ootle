@@ -121,10 +121,9 @@ pub async fn on_message(
 ) -> anyhow::Result<()> {
     let request = serde_json::from_reader::<_, Request>(&mut msg.data.as_ref())?;
 
-    let response;
-    if request.method == "get.token" {
+    let response = if request.method == "get.token" {
         let token = json::to_value(permissions_token)?;
-        response = Response {
+        Response {
             payload: token,
             id: request.id,
         }
@@ -132,11 +131,11 @@ pub async fn on_message(
         let result = make_request(&wallet_jrpc_url(address), request.token, request.method, request.params)
             .await
             .unwrap_or_else(|e| json!({"error": e.to_string()}));
-        response = Response {
+        Response {
             payload: result,
             id: request.id,
-        };
-    }
+        }
+    };
     let text = serde_json::to_string(&response)?;
     d_on_message.send_text(text).await?;
     Ok(())

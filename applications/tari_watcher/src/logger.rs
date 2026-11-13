@@ -6,11 +6,7 @@ use fern::FormatCallback;
 pub fn init_logger() -> Result<(), log::SetLoggerError> {
     fn should_skip(target: &str) -> bool {
         const SKIP: [&str; 3] = ["hyper::", "h2::", "tower::"];
-        if SKIP.iter().any(|s| target.starts_with(s)) {
-            return true;
-        }
-
-        false
+        SKIP.iter().any(|s| target.starts_with(s))
     }
 
     let colors = fern::colors::ColoredLevelConfig::new()

@@ -148,9 +148,10 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         lock_id: WalletLockId,
         specs: &[TransferStatementSpec],
     ) -> Result<TransferStatements, StealthTransferApiError> {
+        let network = self.config_api.get_network()?;
         let mut checked = Vec::with_capacity(specs.len());
         for spec in specs {
-            checked.push(self.check_statement_spec(spec).await?);
+            checked.push(self.check_statement_spec(spec, network).await?);
         }
 
         let mut statements = Vec::with_capacity(specs.len());
@@ -209,6 +210,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
     async fn check_statement_spec(
         &self,
         spec: &TransferStatementSpec,
+        network: Network,
     ) -> Result<CheckedStatementSpec, StealthTransferApiError> {
         let Some(sender_key_id) = spec.sender.owner_key_id() else {
             return Err(StealthTransferApiError::InvalidParameter {
@@ -217,28 +219,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             });
         };
 
-        for output in &spec.outputs {
-            output
-                .validate_pay_to()
-                .map_err(|reason| StealthTransferApiError::InvalidParameter {
-                    param: "pay_to",
-                    reason,
-                })?;
-        }
-
-        let total_amount = spec
-            .total_output_amount()
-            .ok_or_else(|| StealthTransferApiError::InvalidParameter {
-                param: "outputs",
-                reason: "total output amount exceeds the maximum amount".to_string(),
-            })?;
-        let revealed_amount =
-            Amount::sum_from_positive(spec.outputs.iter().map(|o| o.revealed_amount)).ok_or_else(|| {
-                StealthTransferApiError::InvalidParameter {
-                    param: "outputs",
-                    reason: "total revealed output amount exceeds the maximum amount".to_string(),
-                }
-            })?;
+        let (total_amount, revealed_amount) = spec.validate(network)?;
 
         let resource = self.substate_api.fetch_resource(spec.resource_address).await?;
         if !resource.resource_type().is_stealth() {
@@ -711,6 +692,15 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
 
         // We need to fetch the resource substate to check if there is a view key present.
         let resource = self.substate_api.fetch_resource(params.resource_address).await?;
+        if !resource.resource_type().is_stealth() {
+            return Err(StealthTransferApiError::InvalidParameter {
+                param: "resource_address",
+                reason: format!(
+                    "Resource is not a stealth resource (type: {})",
+                    resource.resource_type()
+                ),
+            });
+        }
 
         // Resolve the swap pool's dependent substates (e.g. its vaults) before entering the critical section
         let swap_pool_deps = if let Some(swap) = params.fee_params.pay_fee_with_swap.as_ref() {

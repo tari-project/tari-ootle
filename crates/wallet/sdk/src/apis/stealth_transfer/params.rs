@@ -48,15 +48,18 @@ pub struct StealthTransferParams {
 }
 
 impl StealthTransferParams {
-    pub fn validate(&self, network: Network) -> Result<(), StealthTransferApiError> {
-        if self.outputs.is_empty() {
+    pub(super) fn validate_outputs(
+        outputs: &[TransferOutput],
+        network: Network,
+    ) -> Result<(), StealthTransferApiError> {
+        if outputs.is_empty() {
             return Err(StealthTransferApiError::InvalidParameter {
                 param: "outputs",
                 reason: "At least one output must be specified".to_string(),
             });
         }
 
-        let blinded_count = self.outputs.iter().filter(|o| o.blinded_amount > 0).count();
+        let blinded_count = outputs.iter().filter(|o| o.blinded_amount > 0).count();
         if blinded_count > MAX_LAZY_BP_AGG_FACTORS {
             return Err(StealthTransferApiError::InvalidParameter {
                 param: "outputs",
@@ -67,7 +70,7 @@ impl StealthTransferParams {
             });
         }
 
-        for output in &self.outputs {
+        for output in outputs {
             if output.blinded_amount == 0 && output.revealed_amount.is_zero() {
                 return Err(StealthTransferApiError::InvalidParameter {
                     param: "blinded_output_amount and revealed_output_amount",
@@ -101,6 +104,12 @@ impl StealthTransferParams {
                     reason,
                 })?;
         }
+
+        Ok(())
+    }
+
+    pub fn validate(&self, network: Network) -> Result<(), StealthTransferApiError> {
+        Self::validate_outputs(&self.outputs, network)?;
 
         // A TARI transfer may select inputs covering the outputs and the fee together.
         self.total_output_amount_with_fee(Amount::from(self.max_fee))?;
@@ -287,6 +296,49 @@ impl TransferStatementSpec {
         self.outputs
             .iter()
             .try_fold(Amount::zero(), |sum, o| sum.checked_add(o.total_output_amount()?))
+    }
+
+    /// Validates this statement's outputs and input-selection invariants before any inputs are locked, returning
+    /// `(total_output_amount, total_revealed_output_amount)`.
+    pub fn validate(&self, network: Network) -> Result<(Amount, Amount), StealthTransferApiError> {
+        StealthTransferParams::validate_outputs(&self.outputs, network)?;
+
+        let total_amount = self
+            .total_output_amount()
+            .ok_or_else(|| StealthTransferApiError::InvalidParameter {
+                param: "outputs",
+                reason: "total output amount exceeds the maximum amount".to_string(),
+            })?;
+        let revealed_amount =
+            Amount::sum_from_positive(self.outputs.iter().map(|o| o.revealed_amount)).ok_or_else(|| {
+                StealthTransferApiError::InvalidParameter {
+                    param: "outputs",
+                    reason: "total revealed output amount exceeds the maximum amount".to_string(),
+                }
+            })?;
+
+        if let InputSelection::FromBucket {
+            revealed_amount: bucket_amount,
+        } = &self.input_selection
+        {
+            if !bucket_amount.is_positive() {
+                return Err(StealthTransferApiError::InvalidParameter {
+                    param: "input_selection",
+                    reason: "FromBucket revealed_amount must be positive".to_string(),
+                });
+            }
+            if *bucket_amount != total_amount {
+                return Err(StealthTransferApiError::InvalidParameter {
+                    param: "input_selection",
+                    reason: format!(
+                        "FromBucket revealed_amount ({bucket_amount}) does not match total output amount \
+                         ({total_amount})"
+                    ),
+                });
+            }
+        }
+
+        Ok((total_amount, revealed_amount))
     }
 }
 
@@ -607,5 +659,122 @@ mod tests {
             args: vec![Bytes::from_vec(vec![0xff])],
         };
         assert_rejects_pay_to(PayTo::TemplateFunction(invalid_cbor_tf));
+    }
+
+    fn create_test_output(address: OotleAddress, revealed_amount: u64, blinded_amount: u64) -> TransferOutput {
+        TransferOutput {
+            address,
+            revealed_amount: Amount::from(revealed_amount),
+            blinded_amount,
+            memo: None,
+            pay_to: PayTo::StealthPublicKey,
+        }
+    }
+
+    fn create_test_spec(outputs: Vec<TransferOutput>, input_selection: InputSelection) -> TransferStatementSpec {
+        use crate::models::{Account, KeyBranch, KeyId};
+
+        let addr = address();
+        TransferStatementSpec {
+            sender: AccountWithAddress {
+                account: Account {
+                    name: None,
+                    component_address: ComponentAddress::from_array([9u8; 32]),
+                    view_only_key_id: KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+                    owner_key_id: Some(KeyId::derived(KeyBranch::Account, 0)),
+                    owner_public_key: *addr.account_public_key(),
+                    birthday_epoch: Epoch(0),
+                    is_confirmed_on_chain: true,
+                    is_default: true,
+                },
+                address: addr,
+            },
+            resource_address: STEALTH_TARI_RESOURCE_ADDRESS,
+            input_selection,
+            outputs,
+        }
+    }
+
+    #[test]
+    fn transfer_statement_spec_rejects_empty_excessive_and_zero_outputs() {
+        let default_sel = InputSelection::Selection(UtxoInputSelection::PreferConfidential);
+        assert!(matches!(
+            create_test_spec(vec![], default_sel.clone()).validate(NETWORK),
+            Err(StealthTransferApiError::InvalidParameter { param: "outputs", .. })
+        ));
+        assert!(matches!(
+            create_test_spec(vec![create_test_output(address(), 0, 0)], default_sel.clone()).validate(NETWORK),
+            Err(StealthTransferApiError::InvalidParameter {
+                param: "blinded_output_amount and revealed_output_amount",
+                ..
+            })
+        ));
+        let too_many = (0..=MAX_LAZY_BP_AGG_FACTORS)
+            .map(|_| create_test_output(address(), 0, 10))
+            .collect();
+        assert!(matches!(
+            create_test_spec(too_many, default_sel).validate(NETWORK),
+            Err(StealthTransferApiError::InvalidParameter { param: "outputs", .. })
+        ));
+    }
+
+    #[test]
+    fn transfer_statement_spec_rejects_wrong_network_and_non_canonical_address() {
+        use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+
+        let default_sel = InputSelection::Selection(UtxoInputSelection::PreferConfidential);
+        let wrong_net_addr = OotleAddress::new(
+            Network::MainNet,
+            *address().view_only_key(),
+            *address().account_public_key(),
+        );
+        assert!(matches!(
+            create_test_spec(vec![create_test_output(wrong_net_addr, 0, 100)], default_sel.clone()).validate(NETWORK),
+            Err(StealthTransferApiError::InvalidParameter {
+                param: "destination_address",
+                ..
+            })
+        ));
+
+        let non_canonical_addr = OotleAddress::new(
+            NETWORK,
+            RistrettoPublicKeyBytes::from([0xff; 32]),
+            *address().account_public_key(),
+        );
+        assert!(matches!(
+            create_test_spec(vec![create_test_output(non_canonical_addr, 0, 100)], default_sel).validate(NETWORK),
+            Err(StealthTransferApiError::InvalidParameter {
+                param: "destination_address",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn transfer_statement_spec_validates_from_bucket_amount_matches_outputs() {
+        let outputs = vec![create_test_output(address(), 50, 100)];
+        let spec_with_bucket = |amount: u64| {
+            create_test_spec(outputs.clone(), InputSelection::FromBucket {
+                revealed_amount: Amount::from(amount),
+            })
+        };
+        assert!(matches!(
+            spec_with_bucket(0).validate(NETWORK),
+            Err(StealthTransferApiError::InvalidParameter {
+                param: "input_selection",
+                ..
+            })
+        ));
+        assert!(matches!(
+            spec_with_bucket(100).validate(NETWORK),
+            Err(StealthTransferApiError::InvalidParameter {
+                param: "input_selection",
+                ..
+            })
+        ));
+        assert_eq!(
+            spec_with_bucket(150).validate(NETWORK).unwrap(),
+            (Amount::from(150u64), Amount::from(50u64))
+        );
     }
 }

@@ -70,8 +70,11 @@ pub struct PoolReserves {
 impl PoolReserves {
     /// Identifies the TARI side of the pool and returns `(non_tari_resource, reserve_in, reserve_out)` where
     /// `reserve_in` is the non-TARI (input) reserve and `reserve_out` is the TARI (output) reserve. Returns `None` if
-    /// neither resource is TARI.
+    /// neither resource is TARI or if both sides hold the same resource.
     pub fn tari_swap_reserves(&self) -> Option<(ResourceAddress, Amount, Amount)> {
+        if self.resource_a == self.resource_b {
+            return None;
+        }
         if self.resource_a == TARI_TOKEN {
             Some((self.resource_b, self.balance_b, self.balance_a))
         } else if self.resource_b == TARI_TOKEN {
@@ -83,11 +86,12 @@ impl PoolReserves {
 }
 
 /// Calculate the input amount of a non-TARI token needed for a constant-product swap to yield at least
-/// `desired_output` of the output token. Returns `None` if the pool lacks enough output liquidity.
+/// `desired_output` of the output token. Returns `None` if `desired_output` or `reserve_in` is non-positive, or if
+/// the pool lacks enough output liquidity.
 ///
 /// Includes a [`SLIPPAGE_MARGIN_PERCENT`] slippage margin and uses ceiling division to avoid integer truncation.
 pub fn calculate_swap_input(desired_output: Amount, reserve_in: Amount, reserve_out: Amount) -> Option<Amount> {
-    if reserve_out <= desired_output {
+    if !desired_output.is_positive() || !reserve_in.is_positive() || reserve_out <= desired_output {
         return None;
     }
     // ceil(desired_output * reserve_in * (100 + margin) / ((reserve_out - desired_output) * 100))
@@ -284,6 +288,23 @@ mod tests {
             resource_a: a,
             balance_a: amt(300),
             resource_b: b,
+            balance_b: amt(500),
+        };
+        assert_eq!(reserves.tari_swap_reserves(), None);
+    }
+
+    #[test]
+    fn returns_none_when_input_reserve_or_desired_output_is_zero() {
+        assert!(calculate_swap_input(amt(100), amt(0), amt(1000)).is_none());
+        assert!(calculate_swap_input(amt(0), amt(1000), amt(1000)).is_none());
+    }
+
+    #[test]
+    fn tari_swap_reserves_none_when_both_sides_are_tari() {
+        let reserves = PoolReserves {
+            resource_a: TARI_TOKEN,
+            balance_a: amt(500),
+            resource_b: TARI_TOKEN,
             balance_b: amt(500),
         };
         assert_eq!(reserves.tari_swap_reserves(), None);

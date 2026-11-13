@@ -46,6 +46,10 @@ impl VaultId {
         Self(BorTag::new(key))
     }
 
+    pub const fn from_array(arr: [u8; ObjectKey::LENGTH]) -> Self {
+        Self::new(ObjectKey::from_array(arr))
+    }
+
     pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {
         let key = ObjectKey::from_hex(hex)?;
         Ok(Self::new(key))

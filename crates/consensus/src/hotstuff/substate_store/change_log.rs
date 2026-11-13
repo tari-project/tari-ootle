@@ -253,12 +253,20 @@ impl ChangeLog {
         }
     }
 
-    /// Records `change` once the version it replaces is DOWN (an UP) or the version it spends is UP (a DOWN).
+    /// Records `change` once the version it creates has never existed and the version it replaces is DOWN (an UP), or
+    /// the version it spends is UP (a DOWN).
     pub fn put<B: SubstateLayer>(&mut self, base: &B, change: SubstateChange) -> Result<(), SubstateStoreError> {
         match &change {
             SubstateChange::Up { id, substate, .. } => {
                 if let Some(v) = substate.previous_version() {
                     self.assert_is_down(base, VersionedSubstateIdRef::new(id, v))?;
+                }
+                let versioned_id = VersionedSubstateIdRef::new(id, substate.version());
+                if self.is_version_up(base, versioned_id)?.is_some() {
+                    return Err(LockFailedError::SubstateExists {
+                        id: versioned_id.to_owned(),
+                    }
+                    .into());
                 }
             },
             SubstateChange::Down { id, .. } => {
@@ -639,5 +647,90 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(err, SubstateStoreError::InvariantError { .. }));
+    }
+
+    #[test]
+    fn put_up_rejects_already_existing_up_or_down_version_with_substate_exists() {
+        let pool_addr = ValidatorFeePoolAddress::from_array([11; 32]);
+        let pool_id = SubstateId::ValidatorFeePool(pool_addr);
+        let value = || SubstateValue::ValidatorFeePool(ValidatorFeePool::new([11; 32].into(), 100));
+        let v0 = SubstateVersion::ZERO;
+        let v1 = SubstateVersion::new(1);
+        let vid0 = VersionedSubstateId::new(pool_id.clone(), v0);
+        let vid1 = VersionedSubstateId::new(pool_id.clone(), v1);
+        let shard0 = vid0.to_shard(NumPreshards::P256);
+        let shard1 = vid1.to_shard(NumPreshards::P256);
+        let base = SingleUpLayer {
+            id: pool_id.clone(),
+            substate: Substate::new(v0, value()),
+        };
+        let mut log = ChangeLog::new();
+
+        let err = log
+            .put(&base, SubstateChange::Up {
+                id: pool_id.clone(),
+                shard: shard0,
+                substate: Box::new(Substate::new(v0, value())),
+            })
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            SubstateStoreError::LockFailed(LockFailedError::SubstateExists { id }) if id == vid0
+        ));
+
+        log.put(&base, SubstateChange::Down {
+            id: vid0.clone(),
+            shard: shard0,
+        })
+        .unwrap();
+
+        let err = log
+            .put(&base, SubstateChange::Up {
+                id: pool_id.clone(),
+                shard: shard0,
+                substate: Box::new(Substate::new(v0, value())),
+            })
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            SubstateStoreError::LockFailed(LockFailedError::SubstateExists { id }) if id == vid0
+        ));
+
+        log.put(&base, SubstateChange::Up {
+            id: pool_id.clone(),
+            shard: shard1,
+            substate: Box::new(Substate::new(v1, value())),
+        })
+        .unwrap();
+
+        let err = log
+            .put(&base, SubstateChange::Up {
+                id: pool_id.clone(),
+                shard: shard1,
+                substate: Box::new(Substate::new(v1, value())),
+            })
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            SubstateStoreError::LockFailed(LockFailedError::SubstateExists { id }) if id == vid1
+        ));
+
+        log.put(&base, SubstateChange::Down {
+            id: vid1.clone(),
+            shard: shard1,
+        })
+        .unwrap();
+
+        let err = log
+            .put(&base, SubstateChange::Up {
+                id: pool_id,
+                shard: shard1,
+                substate: Box::new(Substate::new(v1, value())),
+            })
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            SubstateStoreError::LockFailed(LockFailedError::SubstateExists { id }) if id == vid1
+        ));
     }
 }

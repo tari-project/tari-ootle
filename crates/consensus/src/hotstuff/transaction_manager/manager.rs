@@ -1599,8 +1599,11 @@ mod tests {
         }
     }
 
+    /// A component address whose object key never collides with [`STEALTH_TARI_RESOURCE_ADDRESS`].
     fn component_id(n: u8) -> SubstateId {
-        SubstateId::Component(ComponentAddress::new(ObjectKey::from_array([n; 32])))
+        let mut key = [n; 32];
+        key[31] ^= 0x80;
+        SubstateId::Component(ComponentAddress::new(ObjectKey::from_array(key)))
     }
 
     fn input_pledge(id: &SubstateId, version: u64) -> SubstatePledge {

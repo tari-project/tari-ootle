@@ -24,6 +24,10 @@ impl ClaimedOutputTombstoneAddress {
         Self(BorTag::new(key))
     }
 
+    pub const fn from_array(arr: [u8; ObjectKey::LENGTH]) -> Self {
+        Self::new(ObjectKey::from_array(arr))
+    }
+
     pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {
         Ok(Self(BorTag::new(ObjectKey::from_hex(hex)?)))
     }

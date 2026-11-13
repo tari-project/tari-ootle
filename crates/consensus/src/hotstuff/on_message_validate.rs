@@ -32,7 +32,6 @@ use tokio::sync::broadcast;
 use super::config::HotstuffConfig;
 use crate::{
     hotstuff::{
-        CurrentView,
         HotstuffEvent,
         ProposalValidationError,
         epoch_state::EpochState,
@@ -66,7 +65,6 @@ pub struct OnMessageValidate<TConsensusSpec: ConsensusSpec> {
     config: HotstuffConfig,
     store: TConsensusSpec::StateStore,
     epoch_manager: TConsensusSpec::EpochManager,
-    current_view: CurrentView,
     vote_signing_service: TConsensusSpec::SignerService,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     tx_events: broadcast::WeakSender<HotstuffEvent>,
@@ -80,7 +78,6 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         config: HotstuffConfig,
         store: TConsensusSpec::StateStore,
         epoch_manager: TConsensusSpec::EpochManager,
-        current_view: CurrentView,
         vote_signing_service: TConsensusSpec::SignerService,
         outbound_messaging: TConsensusSpec::OutboundMessaging,
         tx_events: broadcast::WeakSender<HotstuffEvent>,
@@ -89,7 +86,6 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             config,
             store,
             epoch_manager,
-            current_view,
             vote_signing_service,
             outbound_messaging,
             tx_events,
@@ -100,6 +96,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
 
     pub async fn handle(
         &mut self,
+        current_epoch: Epoch,
         current_height: NodeHeight,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         from: TConsensusSpec::Addr,
@@ -118,7 +115,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                     );
                     return Ok(MessageValidationResult::Discard);
                 }
-                self.process_local_proposal(current_height, from, epoch_state, *msg, new_transactions)
+                self.process_local_proposal(current_epoch, current_height, from, epoch_state, *msg, new_transactions)
                     .await
             },
             HotstuffMessage::CatchUpSyncResponse(msg) => {
@@ -130,7 +127,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                     );
                     return Ok(MessageValidationResult::Discard);
                 }
-                self.process_catch_up_response(from, epoch_state, *msg, new_transactions)
+                self.process_catch_up_response(current_epoch, from, epoch_state, *msg, new_transactions)
                     .await
             },
             HotstuffMessage::ForeignProposal(msg) => {
@@ -344,6 +341,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
 
     async fn process_local_proposal(
         &mut self,
+        current_epoch: Epoch,
         current_height: NodeHeight,
         from: TConsensusSpec::Addr,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
@@ -369,7 +367,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             return Ok(MessageValidationResult::Discard);
         }
 
-        if let Err(err) = self.check_local_proposal(&proposal.block, epoch_state) {
+        if let Err(err) = self.check_local_proposal(current_epoch, &proposal.block, epoch_state) {
             return Ok(MessageValidationResult::Invalid {
                 from,
                 message: HotstuffMessage::new_proposal(proposal),
@@ -393,6 +391,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
     /// validation and missing-transaction parking are identical to the live-proposal path.
     async fn process_catch_up_response(
         &mut self,
+        current_epoch: Epoch,
         from: TConsensusSpec::Addr,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         proposal: ProposalMessage,
@@ -405,7 +404,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             from,
         );
 
-        if let Err(err) = self.check_local_proposal(&proposal.block, epoch_state) {
+        if let Err(err) = self.check_local_proposal(current_epoch, &proposal.block, epoch_state) {
             return Ok(MessageValidationResult::Invalid {
                 from,
                 message: HotstuffMessage::new_catch_up_sync_response(proposal),
@@ -474,11 +473,12 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
 
     fn check_local_proposal(
         &self,
+        current_epoch: Epoch,
         block: &Block,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
     ) -> Result<(), HotStuffError> {
         validations::check_local_proposal::<TConsensusSpec>(
-            self.current_view.get_epoch(),
+            current_epoch,
             block,
             epoch_state.local_committee(),
             epoch_state.local_committee_info(),
@@ -1661,7 +1661,6 @@ mod tests {
                 },
                 store.clone(),
                 NoopStub,
-                CurrentView::new(),
                 NoopStub,
                 NoopStub,
                 tx_events.downgrade(),

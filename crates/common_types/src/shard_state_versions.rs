@@ -120,15 +120,15 @@ impl ShardStateVersions {
     }
 
     pub fn shard_to_index(shard_group: ShardGroup, shard: Shard) -> Option<usize> {
+        shard_group.checked_len()?;
+        if shard_group.end().as_u32() as usize > MAX_SHARDS {
+            return None;
+        }
         if shard.is_global() {
             return Some(0);
         }
 
-        if !shard_group.contains_or_global(&shard) {
-            return None;
-        }
-        shard_group.checked_len()?;
-        if shard_group.end().as_u32() as usize > MAX_SHARDS {
+        if !shard_group.contains(&shard) {
             return None;
         }
         let index = shard.as_u32().checked_sub(shard_group.start().as_u32())? as usize;
@@ -217,6 +217,17 @@ mod tests {
         }
         let v = versions.get_by_shard_checked(shard_group, Shard::from(13));
         assert!(v.is_none());
+
+        assert!(ShardStateVersions::shard_to_index(ShardGroup::new_unchecked(10, 5), Shard::global()).is_none());
+        assert!(ShardStateVersions::shard_to_index(ShardGroup::new_unchecked(10, 5), Shard::from(7)).is_none());
+        assert!(
+            ShardStateVersions::shard_to_index(ShardGroup::new_unchecked(1, (MAX_SHARDS + 1) as u32), Shard::global())
+                .is_none()
+        );
+        assert!(
+            ShardStateVersions::shard_to_index(ShardGroup::new_unchecked(1, (MAX_SHARDS + 1) as u32), Shard::from(1))
+                .is_none()
+        );
     }
 
     #[test]

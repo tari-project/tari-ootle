@@ -202,7 +202,7 @@ impl ShardGroup {
         // Bounds outside `1..=num_shards` are clamped so an untrusted group cannot push the range past the
         // address space; `checked_len` is the place to reject such a group outright.
         let start_shard = self.start.as_u32().clamp(1, num_shards);
-        let end_shard = self.end_inclusive.as_u32().clamp(1, num_shards);
+        let end_shard = self.end_inclusive.as_u32().clamp(start_shard, num_shards);
         let start = U256::from(start_shard - 1) * shard_size;
         let end = if end_shard == num_shards {
             SubstateAddress::max()
@@ -318,6 +318,9 @@ mod tests {
         let range = sg.to_substate_address_range(NumPreshards::P64);
         assert_eq!(*range.start(), SubstateAddress::zero());
         assert_eq!(*range.end(), SubstateAddress::max());
+
+        let inverted = ShardGroup::new_unchecked(5, 2).to_substate_address_range(NumPreshards::P64);
+        assert!(inverted.start() <= inverted.end());
     }
 
     #[test]

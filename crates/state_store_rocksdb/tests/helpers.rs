@@ -341,18 +341,26 @@ pub fn create_block(parent: Option<&Block>) -> Block {
 }
 
 pub fn create_block_with_qc(parent: &LeafBlock) -> Block {
-    create_block_at(parent, parent.height() + NodeHeight(1), parent.epoch())
+    create_block_at(
+        parent,
+        parent.height() + NodeHeight(1),
+        parent.epoch(),
+        Command::LocalPrepare(create_tx_atom()),
+    )
 }
 
 /// The first block of the epoch after `parent`'s. Heights restart at zero each epoch.
 pub fn create_first_block_of_next_epoch(parent: &LeafBlock) -> Block {
-    create_block_at(parent, NodeHeight::zero(), parent.epoch().saturating_add(1u64))
+    create_first_block_of_next_epoch_with_command(parent, Command::LocalPrepare(create_tx_atom()))
 }
 
-fn create_block_at(parent: &LeafBlock, height: NodeHeight, epoch: Epoch) -> Block {
-    let network = Network::LocalNet;
+/// [`create_first_block_of_next_epoch`] carrying `command` as its only command.
+pub fn create_first_block_of_next_epoch_with_command(parent: &LeafBlock, command: Command) -> Block {
+    create_block_at(parent, NodeHeight::zero(), parent.epoch().saturating_add(1u64), command)
+}
 
-    let atom1 = create_tx_atom();
+fn create_block_at(parent: &LeafBlock, height: NodeHeight, epoch: Epoch, command: Command) -> Block {
+    let network = Network::LocalNet;
 
     // This prevents all blocks to have the same hash/id
     let random_merkle_root = create_random_hash();
@@ -372,7 +380,7 @@ fn create_block_at(parent: &LeafBlock, height: NodeHeight, epoch: Epoch) -> Bloc
         Default::default(),
         // Need to have a command in, otherwise this block will not be included internally in the query because it
         // cannot cause a state change without any commands
-        BlockCommands::init([Command::LocalPrepare(atom1.clone())]).unwrap(),
+        BlockCommands::init([command]).unwrap(),
         random_merkle_root,
         Default::default(),
         SchnorrSignatureBytes::zero(),

@@ -16,7 +16,7 @@ pub fn write_transactions<W: Write>(
 ) -> anyhow::Result<()> {
     let (sender, receiver) = mpsc::sync_channel(1000);
 
-    thread::spawn(move || {
+    let handle = thread::spawn(move || {
         (0..num_transactions).par_bridge().for_each_with(sender, |sender, i| {
             let transaction = builder(i);
             let buf = tari_bor::encode(&transaction).unwrap();
@@ -26,7 +26,7 @@ pub fn write_transactions<W: Write>(
             let mut writer = output.writer();
             writer.write_all(&len).unwrap();
             writer.write_all(&buf).unwrap();
-            sender.send(writer.into_inner().freeze()).unwrap();
+            let _ = sender.send(writer.into_inner().freeze());
         });
     });
 
@@ -40,6 +40,14 @@ pub fn write_transactions<W: Write>(
             on_progress(count);
         }
     }
+
+    if let Err(panic_payload) = handle.join() {
+        std::panic::resume_unwind(panic_payload);
+    }
+    anyhow::ensure!(
+        count == usize::try_from(num_transactions)?,
+        "Expected to write {num_transactions} transactions, but only {count} were produced"
+    );
 
     Ok(())
 }

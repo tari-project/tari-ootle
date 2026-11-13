@@ -1262,7 +1262,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                             resx
                         ])
                         .put_last_instruction_output_on_workspace("proof")
-                        .add_input(*resx),
+                        .add_input(InputDeclaration::read(*resx)),
                     BadgeUsage::NonFungible(nft) => builder
                         .call_method(
                             *owner_account.component_address(),
@@ -1270,14 +1270,14 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                             args![nft],
                         )
                         .put_last_instruction_output_on_workspace("proof")
-                        .add_input(*nft.resource_address())
-                        .add_input(nft.clone()),
+                        .add_input(InputDeclaration::read(*nft.resource_address()))
+                        .add_input(InputDeclaration::read(nft.clone())),
                     BadgeUsage::AmountOfResource { amount, resource } => builder
                         .call_method(*owner_account.component_address(), "create_proof_by_amount", args![
                             resource, amount
                         ])
                         .put_last_instruction_output_on_workspace("proof")
-                        .add_input(*resource),
+                        .add_input(InputDeclaration::read(*resource)),
                 }
             })
             .then(|builder| {
@@ -1458,9 +1458,11 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             })
             .then(|builder| match &params.badge_usage {
                 BadgeUsage::None => builder,
-                BadgeUsage::Resource(resx) => builder.add_input(*resx),
-                BadgeUsage::NonFungible(nft) => builder.add_input(*nft.resource_address()).add_input(nft.clone()),
-                BadgeUsage::AmountOfResource { resource, .. } => builder.add_input(*resource),
+                BadgeUsage::Resource(resx) => builder.add_input(InputDeclaration::read(*resx)),
+                BadgeUsage::NonFungible(nft) => builder
+                    .add_input(InputDeclaration::read(*nft.resource_address()))
+                    .add_input(InputDeclaration::read(nft.clone())),
+                BadgeUsage::AmountOfResource { resource, .. } => builder.add_input(InputDeclaration::read(*resource)),
             })
             .with_inputs(inputs)
             .build_unsigned();

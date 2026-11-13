@@ -46,7 +46,7 @@ impl BaseLayerConsensusConstants {
     }
 
     pub fn epoch_to_height(&self, epoch: Epoch) -> u64 {
-        epoch.0.saturating_mul(self.epoch_length)
+        epoch.0.saturating_mul(self.epoch_length.max(1))
     }
 
     pub fn validator_node_registration_min_deposit_amount(&self) -> MicroMinotari {
@@ -55,5 +55,39 @@ impl BaseLayerConsensusConstants {
 
     pub fn epoch_length(&self) -> u64 {
         self.epoch_length
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn epoch_and_height_conversions_are_consistent_when_epoch_length_is_zero() {
+        let constants = BaseLayerConsensusConstants {
+            epoch_length: 0,
+            validator_node_registration_min_deposit_amount: MicroMinotari(0),
+        };
+
+        for epoch_num in [0u64, 1, 7, 42] {
+            let epoch = Epoch(epoch_num);
+            let height = constants.epoch_to_height(epoch);
+            assert_eq!(height, epoch_num);
+            assert_eq!(constants.height_to_epoch(height), epoch);
+        }
+    }
+
+    #[test]
+    fn epoch_and_height_conversions_with_non_zero_epoch_length() {
+        let constants = BaseLayerConsensusConstants {
+            epoch_length: 10,
+            validator_node_registration_min_deposit_amount: MicroMinotari(100),
+        };
+
+        assert_eq!(constants.epoch_to_height(Epoch(0)), 0);
+        assert_eq!(constants.epoch_to_height(Epoch(3)), 30);
+        assert_eq!(constants.height_to_epoch(29), Epoch(2));
+        assert_eq!(constants.height_to_epoch(30), Epoch(3));
+        assert_eq!(constants.epoch_to_height(Epoch(u64::MAX)), u64::MAX);
     }
 }

@@ -6,6 +6,6 @@ mod helpers;
 mod proposal_collector;
 mod timeout_collector;
 
-pub use collector::exceeds_vote_lookahead;
+pub use collector::{exceeds_vote_lookahead, is_before_vote_window};
 pub use proposal_collector::*;
 pub use timeout_collector::*;

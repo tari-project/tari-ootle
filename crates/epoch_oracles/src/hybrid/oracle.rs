@@ -21,6 +21,7 @@ pub struct HybridEpochOracle<TStore> {
     base_layer: BaseLayerOracle<TStore>,
     trigger: mpsc::UnboundedSender<EpochTickerData>,
     has_initial_sync_completed: bool,
+    last_triggered_epoch: Option<Epoch>,
 }
 
 impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> HybridEpochOracle<TStore> {
@@ -34,6 +35,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> Hybr
             base_layer,
             trigger,
             has_initial_sync_completed: false,
+            last_triggered_epoch: None,
         }
     }
 }
@@ -58,6 +60,7 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> Epoc
                         EpochEvent::Error(err) => return Some(EpochEvent::Error(err)),
                         // Trigger the watch sender for epoch changes
                         EpochEvent::EpochChanged { epoch, epoch_hash } => {
+                            self.last_triggered_epoch = Some(epoch);
                             let _ignore = self.trigger.send(EpochTickerData {
                                 epoch,
                                 epoch_hash,
@@ -65,12 +68,16 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> Epoc
                             });
                         },
                         EpochEvent::DoneForNow {epoch, epoch_hash} if !self.has_initial_sync_completed => {
+                            self.has_initial_sync_completed = true;
+                            if self.last_triggered_epoch == Some(epoch) {
+                                return Some(EpochEvent::DoneForNow { epoch, epoch_hash });
+                            }
+                            self.last_triggered_epoch = Some(epoch);
                             let _ignore = self.trigger.send(EpochTickerData{
                                 epoch,
                                 epoch_hash,
                                 done_for_now: true,
                             });
-                            self.has_initial_sync_completed = true;
                         },
                         // Ignore other events that are not epoch changes
                         _ => {},

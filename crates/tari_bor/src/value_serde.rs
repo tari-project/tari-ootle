@@ -144,6 +144,7 @@ impl<'de> Deserialize<'de> for Value {
 
 /// Depth-bounded seed for [`Value`], enforcing [`MAX_DECODE_DEPTH`] identically to
 /// `minicbor::Decode for Value` and [`crate::check_value_form`].
+#[derive(Clone, Copy)]
 struct ValueSeed {
     depth: usize,
 }
@@ -238,36 +239,39 @@ impl<'de> Visitor<'de> for ValueVisitor {
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
-        // Pull the first key. If it's the sentinel, decode the special form. Otherwise it's a
-        // plain string-keyed map and we continue collecting entries.
-        let Some(first_key) = map.next_key::<String>()? else {
+        // Pull the first key. If it's a reserved text sentinel, decode the special form; otherwise
+        // collect entries directly (supporting both text-keyed JSON objects and arbitrary-keyed CBOR
+        // maps via `serde_codec`).
+        let entry_seed = ValueSeed { depth: self.depth + 1 };
+        let Some(first_key) = map.next_key_seed(entry_seed)? else {
             return Ok(Value::Map(Vec::new()));
         };
 
-        if first_key == SENTINEL_KEY {
-            let kind: String = map.next_value()?;
-            return decode_sentinel(&kind, &mut map, self.depth);
-        }
-
-        if first_key == JSON_NUMBER_SENTINEL {
-            let raw: String = map.next_value()?;
-            if map
-                .next_key_seed(BoundedIgnoredAny { depth: self.depth + 1 })?
-                .is_some()
-            {
-                return Err(de::Error::custom(
-                    "unexpected extra key in $serde_json::private::Number sentinel",
-                ));
+        if let Value::Text(ref key_str) = first_key {
+            if key_str == SENTINEL_KEY {
+                let kind: String = map.next_value()?;
+                return decode_sentinel(&kind, &mut map, self.depth);
             }
-            return parse_json_arbitrary_number(&raw).map_err(de::Error::custom);
+
+            if key_str == JSON_NUMBER_SENTINEL {
+                let raw: String = map.next_value()?;
+                if map
+                    .next_key_seed(BoundedIgnoredAny { depth: self.depth + 1 })?
+                    .is_some()
+                {
+                    return Err(de::Error::custom(
+                        "unexpected extra key in $serde_json::private::Number sentinel",
+                    ));
+                }
+                return parse_json_arbitrary_number(&raw).map_err(de::Error::custom);
+            }
         }
 
-        let first_value = map.next_value_seed(ValueSeed { depth: self.depth + 1 })?;
+        let first_value = map.next_value_seed(entry_seed)?;
         let mut entries: Vec<(Value, Value)> = Vec::with_capacity(cautious_capacity(map.size_hint()) + 1);
-        entries.push((Value::Text(first_key), first_value));
-        while let Some(k) = map.next_key::<String>()? {
-            let v = map.next_value_seed(ValueSeed { depth: self.depth + 1 })?;
-            entries.push((Value::Text(k), v));
+        entries.push((first_key, first_value));
+        while let Some((k, v)) = map.next_entry_seed(entry_seed, entry_seed)? {
+            entries.push((k, v));
         }
         Ok(Value::Map(entries))
     }
@@ -508,15 +512,75 @@ impl<'de> Visitor<'de> for BoundedIgnoredAny {
     }
 }
 
-/// Decode the string payload of a `$serde_json::private::Number` map. Integers prefer
-/// `Value::Integer` (lossless for the i128 range); anything else falls back to `Value::Float`.
-fn parse_json_arbitrary_number(raw: &str) -> Result<Value, String> {
-    if let Ok(i) = raw.parse::<i128>() {
-        return Value::integer(i).ok_or_else(|| format!("integer out of CBOR range: {raw}"));
+enum JsonNumberKind {
+    Integer,
+    Float,
+}
+
+/// Validates RFC 8259 JSON number syntax (`-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`) and
+/// classifies the token as an integer or float.
+fn classify_json_number(raw: &str) -> Option<JsonNumberKind> {
+    let bytes = raw.as_bytes();
+    let rest = bytes.strip_prefix(b"-").unwrap_or(bytes);
+    let after_int = match rest.first()? {
+        b'0' => &rest[1..],
+        b'1'..=b'9' => {
+            let digits = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+            &rest[digits..]
+        },
+        _ => return None,
+    };
+    if after_int.is_empty() {
+        return Some(JsonNumberKind::Integer);
     }
-    raw.parse::<f64>()
-        .map(Value::Float)
-        .map_err(|_| format!("invalid arbitrary_precision number: {raw}"))
+    let after_frac = if let Some(frac) = after_int.strip_prefix(b".") {
+        let digits = frac.iter().take_while(|b| b.is_ascii_digit()).count();
+        if digits == 0 {
+            return None;
+        }
+        &frac[digits..]
+    } else {
+        after_int
+    };
+    let after_exp = if let Some(exp) = after_frac.strip_prefix(b"e").or_else(|| after_frac.strip_prefix(b"E")) {
+        let exp = exp.strip_prefix(b"+").or_else(|| exp.strip_prefix(b"-")).unwrap_or(exp);
+        let digits = exp.iter().take_while(|b| b.is_ascii_digit()).count();
+        if digits == 0 {
+            return None;
+        }
+        &exp[digits..]
+    } else {
+        after_frac
+    };
+    if after_exp.is_empty() {
+        Some(JsonNumberKind::Float)
+    } else {
+        None
+    }
+}
+
+/// Decode the string payload of a `$serde_json::private::Number` map. Integer tokens must fit in
+/// the CBOR integer range (never coercing to `f64`), and float tokens must be finite JSON numbers.
+fn parse_json_arbitrary_number(raw: &str) -> Result<Value, String> {
+    match classify_json_number(raw) {
+        Some(JsonNumberKind::Integer) => {
+            let i = raw
+                .parse::<i128>()
+                .map_err(|_| format!("integer out of CBOR range: {raw}"))?;
+            Value::integer(i).ok_or_else(|| format!("integer out of CBOR range: {raw}"))
+        },
+        Some(JsonNumberKind::Float) => {
+            let f = raw
+                .parse::<f64>()
+                .map_err(|_| format!("invalid arbitrary_precision number: {raw}"))?;
+            if f.is_finite() {
+                Ok(Value::Float(f))
+            } else {
+                Err(format!("float out of finite f64 range: {raw}"))
+            }
+        },
+        None => Err(format!("invalid arbitrary_precision number: {raw}")),
+    }
 }
 
 fn encode_hex(bytes: &[u8]) -> String {
@@ -864,5 +928,58 @@ mod tests {
         smuggled.push(0x18);
         smuggled.push(99);
         assert!(crate::serde_codec::from_slice::<Value>(&smuggled).is_err());
+    }
+
+    #[test]
+    fn json_arbitrary_precision_rejects_out_of_range_integers_and_non_finite_floats() {
+        for bad in [
+            "18446744073709551616",
+            "170141183460469231731687303715884105728",
+            "-170141183460469231731687303715884105729",
+            "1e400",
+            "-1e400",
+            "NaN",
+            "inf",
+            "-Infinity",
+            "+42",
+            "+1.5",
+            "01",
+            "1.",
+            ".5",
+            "",
+        ] {
+            let payload = serde_json::json!({ JSON_NUMBER_SENTINEL: bad });
+            assert!(
+                serde_json::from_value::<Value>(payload).is_err(),
+                "expected error for {bad:?}"
+            );
+        }
+
+        // Valid scientific-notation and zero numbers continue to decode cleanly.
+        assert_eq!(
+            serde_json::from_value::<Value>(serde_json::json!({ JSON_NUMBER_SENTINEL: "0" })).unwrap(),
+            Value::Integer(0)
+        );
+        assert_eq!(
+            serde_json::from_value::<Value>(serde_json::json!({ JSON_NUMBER_SENTINEL: "1.25e2" })).unwrap(),
+            Value::Float(125.0)
+        );
+    }
+
+    #[test]
+    fn native_non_text_cbor_maps_decode_into_value_via_serde_codec() {
+        let native_cbor = crate::encode(&Value::Map(vec![
+            (Value::Integer(0), Value::Text("zero".into())),
+            (Value::Bytes(vec![1, 2]), Value::Bool(true)),
+        ]))
+        .unwrap();
+        let decoded = crate::serde_codec::from_slice::<Value>(&native_cbor).unwrap();
+        assert_eq!(
+            decoded,
+            Value::Map(vec![
+                (Value::Integer(0), Value::Text("zero".into())),
+                (Value::Bytes(vec![1, 2]), Value::Bool(true)),
+            ])
+        );
     }
 }

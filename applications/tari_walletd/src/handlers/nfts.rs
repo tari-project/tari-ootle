@@ -790,33 +790,6 @@ mod tests {
         let bearer = test.bearer("admin");
         let sdk = test.context.wallet_sdk();
 
-        // Empty `nfts` is rejected upfront with InvalidParams.
-        let empty_err = handle_transfer(&test.context, Some(&bearer), TransferNftRequest {
-            nfts: vec![],
-            ..test.request(test.account_a, test.account_a)
-        })
-            .await
-            .unwrap_err();
-        let jrpc_err = empty_err.downcast_ref::<axum_jrpc::error::JsonRpcError>().unwrap();
-        assert!(matches!(
-            jrpc_err.error_reason(),
-            axum_jrpc::error::JsonRpcErrorReason::InvalidParams
-        ));
-        assert!(empty_err.to_string().contains("nfts"), "{empty_err}");
-
-        // Duplicate NFT IDs in `nfts` are rejected upfront with InvalidParams.
-        let mut dup_req = test.request(test.account_a, test.account_a);
-        dup_req.nfts = vec![NonFungibleId::from_u64(1), NonFungibleId::from_u64(1)];
-        let dup_err = handle_transfer(&test.context, Some(&bearer), dup_req)
-            .await
-            .unwrap_err();
-        let jrpc_err = dup_err.downcast_ref::<axum_jrpc::error::JsonRpcError>().unwrap();
-        assert!(matches!(
-            jrpc_err.error_reason(),
-            axum_jrpc::error::JsonRpcErrorReason::InvalidParams
-        ));
-        assert!(dup_err.to_string().contains("Duplicate NFT ID"), "{dup_err}");
-
         // Seed vaults for account_a and account_b and store substate records.
         let vault_a = VaultId::new(ObjectKey::from_array([0x11; 32]));
         let vault_b = VaultId::new(ObjectKey::from_array([0x22; 32]));

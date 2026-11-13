@@ -186,7 +186,7 @@ mod template {
                 .metadata("description", "A token that you (yes, you) can burn")
                 .with_divisibility(6) // 6 decimal places
                 // Burnable by anyone (for demonstration purposes)
-                .burnable(rule![allow_all])
+                .burnable(rule![allow_all], LOCKED)
                 .initial_supply(initial_supply.unwrap_or(INITIAL_SUPPLY));
 
             Component::new(Self {

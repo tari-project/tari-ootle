@@ -59,7 +59,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const INITIAL_VALUES: SendMoneyFormState = {
     address: "",
     outputToRevealed: false,
-    inputSelection: "PreferRevealed",
+    inputSelection: "PreferConfidential",
     amount: "",
     fee: "",
     badge: null,

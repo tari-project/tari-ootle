@@ -5,7 +5,11 @@ use std::{collections::HashMap, convert::Infallible, future::Future, marker::Pha
 
 use futures::StreamExt;
 use ootle_byte_type::ToByteType;
-use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey, tari_utilities::SafePassword};
+use tari_crypto::{
+    keys::PublicKey,
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    tari_utilities::SafePassword,
+};
 use tari_engine_types::{
     Utxo,
     UtxoOutput,
@@ -77,7 +81,7 @@ use tari_template_lib::types::{
     stealth::SpendAuthorization,
 };
 
-use super::{random_key, random_keypair};
+use super::random_key;
 
 pub struct TestSdkSpec<TNetwork = PanicNetworkInterface>(PhantomData<TNetwork>);
 
@@ -223,6 +227,17 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
 
     /// A stealth TARI UTXO of `amount` that `account` can read and spend.
     pub fn owned_utxo(&self, account: &AccountWithAddress, amount: u64) -> (UtxoId, Utxo) {
+        self.owned_utxo_with_nonce(account, amount, &random_key())
+    }
+
+    /// An output paying `amount` to `account`, with the public nonce of `nonce_secret`. Outputs made with one nonce
+    /// secret for one account share their tag and nonce.
+    pub fn owned_utxo_with_nonce(
+        &self,
+        account: &AccountWithAddress,
+        amount: u64,
+        nonce_secret: &RistrettoSecretKey,
+    ) -> (UtxoId, Utxo) {
         let sdk = &self.sdk;
         let view_key = sdk.key_manager_api().get_key(account.view_only_key_id()).unwrap();
         let owner_key = sdk
@@ -231,7 +246,7 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
             .unwrap();
         let owner_public_key = RistrettoPublicKey::from_secret_key(&owner_key.secret);
         let view_public_key = RistrettoPublicKey::from_secret_key(&view_key.secret);
-        let (nonce_secret, public_nonce) = random_keypair();
+        let public_nonce = RistrettoPublicKey::from_secret_key(nonce_secret);
 
         let tag = sdk.stealth_crypto_api().derive_stealth_output_tag(
             sdk.network(),
@@ -243,11 +258,11 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
         let commitment = commit_amount(&mask, amount.into()).unwrap().to_byte_type();
         let encrypted_data = sdk
             .stealth_crypto_api()
-            .encrypt_value_and_mask(amount, &mask, &view_public_key, &nonce_secret, None)
+            .encrypt_value_and_mask(amount, &mask, &view_public_key, nonce_secret, None)
             .unwrap();
         let stealth_owner_public_key = sdk
             .stealth_crypto_api()
-            .derive_stealth_owner_public_key(sdk.network(), &owner_public_key, &view_public_key, &nonce_secret)
+            .derive_stealth_owner_public_key(sdk.network(), &owner_public_key, &view_public_key, nonce_secret)
             .to_byte_type();
 
         let utxo = Utxo::new(UtxoOutput {

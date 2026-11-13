@@ -66,7 +66,7 @@ pub async fn create(
 ) -> Result<WalletDaemonCreateResponse, anyhow::Error> {
     let instance_id = context
         .process_manager()
-        .create_instance(req.name, InstanceType::TariWalletDaemon, HashMap::new())
+        .create_instance(Some(req.name), InstanceType::TariWalletDaemon, HashMap::new())
         .await?;
 
     Ok(WalletDaemonCreateResponse { instance_id })

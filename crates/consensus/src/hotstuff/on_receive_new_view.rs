@@ -19,7 +19,7 @@ use crate::{
         ProposalValidationError,
         epoch_state::EpochState,
         error::HotStuffError,
-        pacemaker_handle::PaceMakerHandle,
+        pacemaker_action::PacemakerActions,
     },
     messages::NewViewMessage,
     tracing::TraceTimer,
@@ -34,7 +34,6 @@ pub struct OnReceiveNewViewHandler<TConsensusSpec: ConsensusSpec> {
     local_validator_addr: TConsensusSpec::Addr,
     store: TConsensusSpec::StateStore,
     leader_strategy: TConsensusSpec::LeaderStrategy,
-    pacemaker: PaceMakerHandle,
     proposal_vote_collector: ProposalVoteCollector<TConsensusSpec>,
     timeout_vote_collector: TimeoutVoteCollector<TConsensusSpec>,
 }
@@ -47,7 +46,6 @@ where TConsensusSpec: ConsensusSpec
         local_validator_addr: TConsensusSpec::Addr,
         store: TConsensusSpec::StateStore,
         leader_strategy: TConsensusSpec::LeaderStrategy,
-        pacemaker: PaceMakerHandle,
         proposal_vote_collector: ProposalVoteCollector<TConsensusSpec>,
         timeout_vote_collector: TimeoutVoteCollector<TConsensusSpec>,
     ) -> Self {
@@ -56,7 +54,6 @@ where TConsensusSpec: ConsensusSpec
             local_validator_addr,
             store,
             leader_strategy,
-            pacemaker,
             proposal_vote_collector,
             timeout_vote_collector,
         }
@@ -65,6 +62,7 @@ where TConsensusSpec: ConsensusSpec
     #[allow(clippy::too_many_lines)]
     pub async fn handle(
         &mut self,
+        pacemaker_actions: &mut PacemakerActions,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         current_height: NodeHeight,
         from: TConsensusSpec::Addr,
@@ -228,7 +226,7 @@ where TConsensusSpec: ConsensusSpec
             info!(target: LOG_TARGET, "🕒️ New HIGH TC {}", timeout_certificate);
             // Clear the last sent new view since we have a new certificate
             self.store.with_write_tx(|tx| tx.last_sent_new_view_clear())?;
-            self.pacemaker.force_beat(high_tc.height());
+            pacemaker_actions.force_beat(high_tc.height());
         } else {
             info!(target: LOG_TARGET, "❓️ New TC from votes {} but it is not the highest TC {}", timeout_certificate, high_tc);
         }

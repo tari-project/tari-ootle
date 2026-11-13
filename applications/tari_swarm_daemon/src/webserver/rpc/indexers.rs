@@ -63,7 +63,7 @@ pub async fn create(
 ) -> Result<IndexerCreateResponse, anyhow::Error> {
     let instance_id = context
         .process_manager()
-        .create_instance(req.name, InstanceType::TariIndexer, HashMap::new())
+        .create_instance(Some(req.name), InstanceType::TariIndexer, HashMap::new())
         .await?;
 
     Ok(IndexerCreateResponse { instance_id })

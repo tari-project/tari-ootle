@@ -2,53 +2,62 @@
 
 **Features**:
 
-* Registers the validator node on L2 by sending a transaction on L1
-* Monitors the chain and warns when registration is near expiration
-* Automatically re-registers the node
-* Alerts on Mattermost and Telegram
+* When `auto_register` is true, submits a base-layer registration the first time the local validator public key is missing from the active set, then leaves that check
+* Submits layer-1 registration and exit files the validator writes under `<validator-dir>/<network>/data/layer_one_transactions`
+* Restarts the validator process while `auto_start` is `always`
+* Alerts on Mattermost and Telegram when those channels are enabled
 
 ### Quickstart
 
-Initialize the project with `tari_watcher init` and start it with `tari_watcher start`. Edit the newly generated
-`config.toml` to enable notifications on Mattermost and Telegram. Make sure to have started up `tari_validator_node`
-once previously to have a node directory set up, default is `tari_validator_node -- -b data/vn1`.
+Initialize with `tari_watcher init` and start with `tari_watcher start`.
+
+`init` writes `data/watcher/config.toml`: `-b` defaults to `data/watcher/` and `-c` defaults to `config.toml`, and a relative config path is joined onto the base directory. Both paths are relative to the current working directory. Edit that file to turn on Mattermost or Telegram. `channel_config.mattermost.enabled` and `channel_config.telegram.enabled` are `false` in the generated file.
+
+The watcher creates the validator directory and starts `tari_validator_node` itself. The default directory is `validator` in the current working directory (`-v`, `DEFAULT_VALIDATOR_DIR`). The process it spawns is:
+
+```
+tari_validator_node --network=<network> -b<validator-dir> --node-grpc=<base_node_grpc_url>
+```
+
+The default network is `esmeralda`. On first start the validator writes `<validator-dir>/<network>/config/config.toml` and then exits until `validator_node.fee_claim_public_key` in that file is a wallet account public key. The watcher does not pass a fee-claim key.
 
 ### Config and Setup
 
-The default values used (see `constants.rs`) when running the project without any flags:
+Defaults with no flags (`cli.rs` and `constants.rs`):
 
 ```
-- DEFAULT_MAIN_PROJECT_PATH: base directory, the same level as the repository `tari-ootle`
-- DEFAULT_WATCHER_CONFIG_PATH: relative to the base directory, main configuration file
-- DEFAULT_VALIDATOR_KEY_PATH: relative to the base directory, validator node registration file
-- DEFAULT_VALIDATOR_NODE_BINARY_PATH: relative to the base directory, default is Rust build directory `target/release`
-- DEFAULT_VALIDATOR_DIR: relative to the project base directory, home directory for everything validator node
-- DEFAULT_MINOTARI_MINER_BINARY_PATH: relative to the base directory, default is Rust build directory `target/release`
-- DEFAULT_BASE_NODE_GRPC_ADDRESS: default is Tari swarm localhost and port
-- DEFAULT_BASE_WALLET_GRPC_ADDRESS: default is Tari swarm localhost and port
+- base directory (-b): data/watcher/  (relative to the current directory)
+- config file (-c): config.toml, under the base directory
+- validator directory (-v): validator  (DEFAULT_VALIDATOR_DIR, relative to the current directory)
+- validator binary: target/release/tari_validator_node  (DEFAULT_VALIDATOR_NODE_BINARY_PATH)
+- base node gRPC: http://127.0.0.1:12001  (DEFAULT_BASE_NODE_GRPC_URL)
+- base wallet gRPC: http://127.0.0.1:12003  (DEFAULT_BASE_WALLET_GRPC_URL)
+- registration file: <validator-dir>/<network>/registration.json
 ```
 
-The two main configuration settings for the watcher (default `true`):
+The two process settings in the generated config:
 
 ```
-- auto_register: automatically re-register the node
-- auto_restart: automatically restart the node if it goes down
+- auto_register: bool, default true. Submit a registration when the node is not active.
+- auto_start: "always" (default), "just-once", or "never". "always" starts the validator and restarts it after it exits.
 ```
+
+There is no `auto_restart` key. `tari_watcher init --no-auto-restart` writes `auto_start = "just-once"`. `tari_watcher init --unmanaged` writes `auto_start = "never"`. `tari_watcher init --no-auto-register` leaves `auto_register` true unless `--unmanaged` is also set.
 
 ### Project
 
 ```
-├── alerting.rs     # channel notifier implementations
-├── cli.rs          # cli and flags passed during bootup
-├── config.rs       # main config file creation
-├── constants.rs    # various constants used as default values
-├── helpers.rs      # common helper functions
+├── alerting.rs            # Mattermost and Telegram notifiers
+├── cli.rs                 # init and start
+├── config.rs              # config written by init
+├── constants.rs           # default paths and gRPC URLs
+├── helpers.rs
 ├── logger.rs
 ├── main.rs
-├── manager.rs      # manages the spawn validator node process and receives requests
-├── minotari.rs     # communicates with the base node (L1)
-├── monitoring.rs   # outputs logs and sends the alerts
-├── process.rs      # spawns the validator node process and sets up the channels
-├── registration.rs # handles the logic for sending a node registration transaction
-└── shutdown.rs
+├── manager.rs             # validator process supervisor
+├── minotari.rs            # base-layer gRPC
+├── monitoring.rs
+├── process.rs             # spawns tari_validator_node
+├── shutdown.rs
+└── transaction_worker.rs  # registration and layer-1 transaction submission
 ```

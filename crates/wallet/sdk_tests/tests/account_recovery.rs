@@ -113,7 +113,7 @@ impl WalletNetworkInterface for OneUtxoNetwork {
     ) -> Result<SubstateQueryResult, Self::Error> {
         let failed = self
             .failing_substate_queries
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
             .is_ok();
         if failed {
             return Err(FakeError::Unavailable);

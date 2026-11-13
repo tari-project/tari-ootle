@@ -762,9 +762,9 @@ impl WasmModuleCache {
 
         let mut code_size = 0usize;
         let mut shape = ModuleShape::default();
-        for (slot, field) in mmap[..HEADER_FIELD_BYTES].chunks_exact(8).zip(HEADER_FIELDS) {
-            let value = u64::from_le_bytes(slot.try_into().expect("chunks_exact(8) yields 8 bytes"));
-            field.write_into(value, &mut code_size, &mut shape);
+        let (slots, _) = mmap[..HEADER_FIELD_BYTES].as_chunks::<8>();
+        for (slot, field) in slots.iter().zip(HEADER_FIELDS) {
+            field.write_into(u64::from_le_bytes(*slot), &mut code_size, &mut shape);
         }
 
         // Wrap the mmap as a Bytes that owns it, then slice past the
@@ -907,8 +907,9 @@ impl WasmModuleCache {
 
         let shape = wasm.shape();
         let mut header = [0u8; HEADER_BYTES];
-        for (slot, field) in header.chunks_exact_mut(8).zip(HEADER_FIELDS) {
-            slot.copy_from_slice(&field.read_from(wasm.code_size(), &shape).to_le_bytes());
+        let (slots, _) = header.as_chunks_mut::<8>();
+        for (slot, field) in slots.iter_mut().zip(HEADER_FIELDS) {
+            *slot = field.read_from(wasm.code_size(), &shape).to_le_bytes();
         }
         let tag = integrity_tag(addr, &header[..TAG_OFFSET], &serialized);
         header[TAG_OFFSET..].copy_from_slice(&tag.to_le_bytes());

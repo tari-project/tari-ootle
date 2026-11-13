@@ -329,10 +329,7 @@ pub fn build_stealth_outputs_statement(
 
 #[cfg(test)]
 mod tests {
-    use tari_crypto::{
-        keys::PublicKey as _,
-        ristretto::{RistrettoPublicKey, RistrettoSecretKey},
-    };
+    use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
     use tari_engine_types::stealth::validate_stealth_outputs_statement;
 
     use super::*;

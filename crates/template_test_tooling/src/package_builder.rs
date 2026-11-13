@@ -134,7 +134,7 @@ impl PackageBuilder {
 
     pub fn build(&mut self) -> Package {
         Package {
-            templates: Arc::new(self.templates.drain().collect()),
+            templates: Arc::new(std::mem::take(&mut self.templates)),
         }
     }
 }

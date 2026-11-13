@@ -12,8 +12,9 @@ pub fn fixed_bytes_from_hex<const L: usize>(s: &str) -> Result<[u8; L], KeyParse
     }
 
     let mut bytes = [0u8; L];
-    for (byte, chunk) in bytes.iter_mut().zip(s.chunks_exact(2)) {
-        *byte = (hex_digit(chunk[0])? << 4) | hex_digit(chunk[1])?;
+    let (pairs, _) = s.as_chunks::<2>();
+    for (byte, &[hi, lo]) in bytes.iter_mut().zip(pairs) {
+        *byte = (hex_digit(hi)? << 4) | hex_digit(lo)?;
     }
     Ok(bytes)
 }
@@ -25,8 +26,9 @@ pub fn bytes_from_hex(s: &str) -> Result<Vec<u8>, KeyParseError> {
     }
 
     let mut bytes = Vec::with_capacity(s.len() / 2);
-    for chunk in s.chunks_exact(2) {
-        bytes.push((hex_digit(chunk[0])? << 4) | hex_digit(chunk[1])?);
+    let (pairs, _) = s.as_chunks::<2>();
+    for &[hi, lo] in pairs {
+        bytes.push((hex_digit(hi)? << 4) | hex_digit(lo)?);
     }
     Ok(bytes)
 }

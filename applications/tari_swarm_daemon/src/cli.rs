@@ -8,7 +8,7 @@ use clap::{Parser, ValueEnum};
 use tari_ootle_wallet_sdk::Network;
 
 use crate::{
-    config::{Config, InstanceType},
+    config::{Config, InstanceType, add_ext},
     process_definitions::{WALLET_DAEMON_AUTH_SETTINGS_KEY, WALLET_DAEMON_SEED_WORDS_SETTINGS_KEY},
 };
 
@@ -90,11 +90,11 @@ impl Overrides {
                     .as_ref()
                     .map(|c| c.package_name.clone())
                     .unwrap_or_else(|| instance_type_to_package_name(exec_mut.instance_type));
-                exec_mut.execuable_path = Some(
+                exec_mut.execuable_path = Some(add_ext(
                     root.canonicalize()
                         .context("Root override path does not exist")?
                         .join(package),
-                );
+                ));
             }
             if self.no_compile {
                 exec_mut.compile = None;
@@ -111,6 +111,10 @@ impl Overrides {
 
         if let Some(port) = self.start_port {
             config.start_port = port;
+        }
+
+        if self.skip_registration {
+            config.skip_registration = true;
         }
 
         if let Some(auth) = self.wallet_daemon_auth {

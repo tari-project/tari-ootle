@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use anyhow::bail;
 use log::warn;
 use serde::{Deserialize, Serialize};
 use tari_shutdown::Shutdown;
@@ -35,6 +36,9 @@ pub async fn start_mining(
     context: &HandlerContext,
     req: StartMiningRequest,
 ) -> Result<StartMiningResponse, anyhow::Error> {
+    if req.interval_seconds == 0 {
+        bail!("interval_seconds must be greater than 0");
+    }
     let shutdown = Shutdown::new();
     context.start_mining(shutdown.clone()).await?;
 

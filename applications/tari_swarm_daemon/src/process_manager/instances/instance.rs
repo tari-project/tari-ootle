@@ -80,6 +80,10 @@ impl Instance {
         &self.base_path
     }
 
+    pub fn process_dir(&self) -> &PathBuf {
+        &self.process_dir
+    }
+
     pub fn stdout_log_path(&self) -> PathBuf {
         self.process_dir.join("stdout.log")
     }
@@ -127,8 +131,18 @@ impl Instance {
         Ok(status)
     }
 
+    pub async fn wait(&mut self) -> anyhow::Result<ExitStatus> {
+        if let Some(status) = self.exit_status {
+            return Ok(status);
+        }
+
+        let status = self.child_mut().wait().await?;
+        self.exit_status = Some(status);
+        Ok(status)
+    }
+
     pub async fn terminate(&mut self) -> anyhow::Result<()> {
-        if !self.is_running() {
+        if self.check_running()?.is_some() {
             return Ok(());
         }
 

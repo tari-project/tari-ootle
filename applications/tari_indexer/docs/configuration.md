@@ -107,8 +107,8 @@ Main indexer application settings.
 
 # Follow changes to the validator set of the Configured and Hybrid epoch oracles by fetching the config
 # validators run (default: true). A validator added or removed after this release then needs no indexer
-# upgrade. An update is adopted only if it schedules its changes for epochs this indexer has not yet
-# processed, and it is kept across restarts; resyncing the indexer from scratch replays it.
+# upgrade. A config is adopted once two validators serve it, and only if it agrees with the epochs this
+# indexer has already processed. It is kept across restarts; resyncing the indexer from scratch replays it.
 #follow_validator_oracle_config = true
 
 # How long each pruner idles between passes once it has nothing left to prune, in seconds. While a

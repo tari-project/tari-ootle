@@ -61,11 +61,11 @@ impl Config {
         Ok(())
     }
 
-    /// Checks that `self` only schedules changes after `processed_epoch` on top of `prior`: new validators, claim key
-    /// changes and exits, each taking effect after `processed_epoch`. Everything `prior` holds is kept unchanged, so
-    /// a node that has processed `prior` up to `processed_epoch` reaches the same validator set as one that replays
-    /// `self` from a fresh store.
-    pub fn check_extends(&self, prior: &Config, processed_epoch: Epoch) -> anyhow::Result<()> {
+    /// Checks that `self` agrees with `prior` on everything that takes effect at or before `processed_epoch`: the
+    /// epoch schedule, and each validator activated by then with its registration, claim key changes and exit up to
+    /// that epoch. A node that has processed `prior` up to `processed_epoch` can then switch to `self` and reach the
+    /// validator set a node replaying `self` from a fresh store reaches. Anything after `processed_epoch` may differ.
+    pub fn check_agrees_up_to(&self, prior: &Config, processed_epoch: Epoch) -> anyhow::Result<()> {
         self.validate()?;
         if self.epoch_time != prior.epoch_time ||
             self.initial_epoch != prior.initial_epoch ||
@@ -74,67 +74,28 @@ impl Config {
             bail!("The config changes the epoch schedule (epoch_time, initial_epoch or base_time)");
         }
 
-        for prior_vn in &prior.validators {
+        for prior_vn in prior.validators_activated_by(processed_epoch) {
             let Some(vn) = self.validators.iter().find(|vn| vn.public_key == prior_vn.public_key) else {
                 bail!(
-                    "The config drops validator {}; remove a validator by setting its `exit_epoch`",
-                    prior_vn.public_key
+                    "The config drops validator {}, which activated at epoch {}",
+                    prior_vn.public_key,
+                    prior_vn.activation_epoch()
                 );
             };
-            if vn.claim_key != prior_vn.claim_key ||
-                vn.shard_group != prior_vn.shard_group ||
-                vn.registration_epoch != prior_vn.registration_epoch ||
-                vn.power != prior_vn.power
-            {
+            if vn.applied_by(processed_epoch) != prior_vn.applied_by(processed_epoch) {
                 bail!(
-                    "The config changes the registration of validator {}, which is fixed once listed",
+                    "The config changes validator {}'s registration, claim key changes or exit at or before epoch \
+                     {processed_epoch}",
                     vn.public_key
                 );
             }
-            if let Some(change) = prior_vn
-                .claim_key_changes
-                .iter()
-                .find(|change| !vn.claim_key_changes.contains(change))
-            {
-                bail!(
-                    "The config drops or edits validator {}'s claim key change at epoch {}",
-                    vn.public_key,
-                    change.effective_epoch
-                );
-            }
-            if let Some(change) = vn.claim_key_changes.iter().find(|change| {
-                !prior_vn.claim_key_changes.contains(change) && change.effective_epoch <= processed_epoch
-            }) {
-                bail!(
-                    "The config adds a claim key change for validator {} at epoch {}, which this node has already \
-                     processed",
-                    vn.public_key,
-                    change.effective_epoch
-                );
-            }
-            match (prior_vn.exit_epoch, vn.exit_epoch) {
-                (Some(prior_exit), exit) if exit != Some(prior_exit) => {
-                    bail!(
-                        "The config changes validator {}'s exit epoch {prior_exit}",
-                        vn.public_key
-                    );
-                },
-                (None, Some(exit)) if exit <= processed_epoch => {
-                    bail!(
-                        "The config sets validator {}'s exit epoch to {exit}, which this node has already processed",
-                        vn.public_key
-                    );
-                },
-                _ => {},
-            }
         }
-
-        for vn in &self.validators {
-            let is_new = !prior
+        for vn in self.validators_activated_by(processed_epoch) {
+            if !prior
                 .validators
                 .iter()
-                .any(|prior_vn| prior_vn.public_key == vn.public_key);
-            if is_new && vn.activation_epoch() <= processed_epoch {
+                .any(|prior_vn| prior_vn.public_key == vn.public_key)
+            {
                 bail!(
                     "The config adds validator {} activating at epoch {}, which this node has already processed",
                     vn.public_key,
@@ -144,6 +105,10 @@ impl Config {
         }
 
         Ok(())
+    }
+
+    fn validators_activated_by(&self, epoch: Epoch) -> impl Iterator<Item = &Validator> {
+        self.validators.iter().filter(move |vn| vn.activation_epoch() <= epoch)
     }
 }
 
@@ -199,6 +164,16 @@ pub struct Validator {
     pub exit_epoch: Option<Epoch>,
 }
 
+#[derive(PartialEq)]
+struct AppliedValidator<'a> {
+    claim_key: &'a RistrettoPublicKeyBytes,
+    shard_group: ShardGroup,
+    registration_epoch: Epoch,
+    power: NonZeroU64,
+    claim_key_changes: Vec<&'a ClaimKeyChange>,
+    exit_epoch: Option<Epoch>,
+}
+
 /// A scheduled claim key rotation for a [`Validator`].
 ///
 /// Leader fees earned from `effective_epoch` onwards accrue to the fee pool derived from `claim_key`. Pools filled
@@ -221,6 +196,24 @@ impl Validator {
 
     pub fn vote_power(&self) -> VotePower {
         VotePower::of(self.power.get())
+    }
+
+    /// What of this validator takes effect at or before `epoch`.
+    fn applied_by(&self, epoch: Epoch) -> AppliedValidator<'_> {
+        let mut claim_key_changes = self
+            .claim_key_changes
+            .iter()
+            .filter(|change| change.effective_epoch <= epoch)
+            .collect::<Vec<_>>();
+        claim_key_changes.sort_by_key(|change| change.effective_epoch);
+        AppliedValidator {
+            claim_key: &self.claim_key,
+            shard_group: self.shard_group,
+            registration_epoch: self.registration_epoch,
+            power: self.power,
+            claim_key_changes,
+            exit_epoch: self.exit_epoch.filter(|exit_epoch| *exit_epoch <= epoch),
+        }
     }
 
     fn validate(&self) -> anyhow::Result<()> {
@@ -632,57 +625,101 @@ mod tests {
         }
     }
 
-    fn extends(prior: &Config, updated: &Config) -> Result<(), String> {
-        updated.check_extends(prior, Epoch(15)).map_err(|err| err.to_string())
+    fn agrees(prior: &Config, updated: &Config) -> Result<(), String> {
+        updated
+            .check_agrees_up_to(prior, Epoch(15))
+            .map_err(|err| err.to_string())
+    }
+
+    fn exiting_at(exit_epoch: Epoch, claim_key_changes: Vec<ClaimKeyChange>) -> Validator {
+        Validator {
+            exit_epoch: Some(exit_epoch),
+            ..mk_validator(claim_key_changes)
+        }
+    }
+
+    fn rotation(effective_epoch: Epoch, seed: u8) -> ClaimKeyChange {
+        ClaimKeyChange {
+            effective_epoch,
+            claim_key: mk_key(seed),
+        }
     }
 
     #[test]
-    fn an_update_scheduling_changes_after_the_processed_epoch_extends_the_config() {
+    fn an_update_scheduling_changes_after_the_processed_epoch_agrees() {
         let prior = mk_config(vec![mk_validator(vec![])]);
         let updated = mk_config(vec![
-            Validator {
-                exit_epoch: Some(Epoch(30)),
-                ..mk_validator(vec![ClaimKeyChange {
-                    effective_epoch: Epoch(20),
-                    claim_key: mk_key(3),
-                }])
-            },
+            exiting_at(Epoch(30), vec![rotation(Epoch(20), 3)]),
             other_validator(Epoch(15)),
         ]);
-        extends(&prior, &updated).unwrap();
-        extends(&prior, &prior).unwrap();
+        agrees(&prior, &updated).unwrap();
+        agrees(&prior, &prior).unwrap();
+    }
+
+    #[test]
+    fn an_update_may_change_what_has_not_taken_effect() {
+        let prior = mk_config(vec![
+            exiting_at(Epoch(30), vec![rotation(Epoch(20), 3)]),
+            other_validator(Epoch(20)),
+        ]);
+        let cases = [
+            // A rescheduled exit and rotation.
+            mk_config(vec![
+                exiting_at(Epoch(40), vec![rotation(Epoch(25), 4)]),
+                other_validator(Epoch(20)),
+            ]),
+            // A cancelled exit and rotation, and a validator dropped before it activates.
+            mk_config(vec![mk_validator(vec![])]),
+            // A not-yet-active validator re-registered.
+            mk_config(vec![exiting_at(Epoch(30), vec![rotation(Epoch(20), 3)]), Validator {
+                claim_key: mk_key(7),
+                ..other_validator(Epoch(25))
+            }]),
+        ];
+        for updated in cases {
+            agrees(&prior, &updated).unwrap();
+        }
     }
 
     #[test]
     fn an_update_changing_what_was_already_processed_is_rejected() {
-        let prior = mk_config(vec![mk_validator(vec![])]);
+        let prior = mk_config(vec![exiting_at(Epoch(14), vec![rotation(Epoch(12), 3)])]);
         let cases = [
             (
+                mk_config(vec![mk_validator(vec![rotation(Epoch(12), 3)])]),
+                "changes validator",
+            ),
+            (
+                mk_config(vec![exiting_at(Epoch(15), vec![rotation(Epoch(12), 3)])]),
+                "changes validator",
+            ),
+            (mk_config(vec![exiting_at(Epoch(14), vec![])]), "changes validator"),
+            (
+                mk_config(vec![exiting_at(Epoch(14), vec![rotation(Epoch(12), 4)])]),
+                "changes validator",
+            ),
+            (
+                mk_config(vec![exiting_at(Epoch(14), vec![
+                    rotation(Epoch(12), 3),
+                    rotation(Epoch(13), 4),
+                ])]),
+                "changes validator",
+            ),
+            (
                 mk_config(vec![Validator {
-                    exit_epoch: Some(Epoch(15)),
-                    ..mk_validator(vec![])
+                    power: NonZeroU64::new(2).unwrap(),
+                    ..exiting_at(Epoch(14), vec![rotation(Epoch(12), 3)])
                 }]),
-                "already processed",
+                "changes validator",
             ),
             (
-                mk_config(vec![mk_validator(vec![ClaimKeyChange {
-                    effective_epoch: Epoch(15),
-                    claim_key: mk_key(3),
-                }])]),
-                "already processed",
-            ),
-            (
-                mk_config(vec![mk_validator(vec![]), other_validator(Epoch(14))]),
+                mk_config(vec![
+                    exiting_at(Epoch(14), vec![rotation(Epoch(12), 3)]),
+                    other_validator(Epoch(14)),
+                ]),
                 "already processed",
             ),
             (mk_config(vec![other_validator(Epoch(20))]), "drops validator"),
-            (
-                mk_config(vec![Validator {
-                    claim_key: mk_key(3),
-                    ..mk_validator(vec![])
-                }]),
-                "changes the registration",
-            ),
             (
                 Config {
                     initial_epoch: Epoch(1),
@@ -692,37 +729,9 @@ mod tests {
             ),
         ];
         for (updated, expected) in cases {
-            let err = extends(&prior, &updated).unwrap_err();
+            let err = agrees(&prior, &updated).unwrap_err();
             assert!(err.contains(expected), "expected {expected:?}: {err}");
         }
-    }
-
-    #[test]
-    fn an_update_editing_a_scheduled_exit_or_rotation_is_rejected() {
-        let rotation = ClaimKeyChange {
-            effective_epoch: Epoch(20),
-            claim_key: mk_key(3),
-        };
-        let prior = mk_config(vec![Validator {
-            exit_epoch: Some(Epoch(30)),
-            ..mk_validator(vec![rotation.clone()])
-        }]);
-
-        let moved_exit = mk_config(vec![Validator {
-            exit_epoch: Some(Epoch(40)),
-            ..mk_validator(vec![rotation])
-        }]);
-        assert!(extends(&prior, &moved_exit).unwrap_err().contains("exit epoch"));
-
-        let dropped_rotation = mk_config(vec![Validator {
-            exit_epoch: Some(Epoch(30)),
-            ..mk_validator(vec![])
-        }]);
-        assert!(
-            extends(&prior, &dropped_rotation)
-                .unwrap_err()
-                .contains("drops or edits")
-        );
     }
 
     #[test]

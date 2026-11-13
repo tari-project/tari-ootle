@@ -268,9 +268,9 @@ pub struct IndexerConfig {
     #[serde(default = "default_index_gossiped_transactions")]
     pub index_gossiped_transactions: bool,
     /// Follow changes to the configured epoch oracle's validator set by fetching the config validators run, so
-    /// that a validator added or removed after this release does not need an indexer upgrade. An update is only
-    /// adopted if it schedules changes for epochs this indexer has not yet processed. Only used with the Configured
-    /// and Hybrid oracles.
+    /// that a validator added or removed after this release does not need an indexer upgrade. A config is adopted
+    /// once two validators serve it, and only if it agrees with the epochs this indexer has already processed. Only
+    /// used with the Configured and Hybrid oracles.
     #[serde(default = "default_follow_validator_oracle_config")]
     pub follow_validator_oracle_config: bool,
     /// Maximum total size of inbound transaction gossip awaiting storage. The gossip service drains

@@ -1,7 +1,11 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::BTreeSet, time::Duration};
+use std::{
+    collections::BTreeSet,
+    hash::{BuildHasher, RandomState},
+    time::Duration,
+};
 
 use anyhow::Context;
 use log::*;
@@ -23,11 +27,14 @@ const LOG_TARGET: &str = "tari::indexer::validator_oracle_config";
 /// How long startup waits for a validator's config before the epoch oracle goes ahead with the config it holds.
 const STARTUP_FETCH_TIMEOUT: Duration = Duration::from_secs(60);
 const STARTUP_RETRY_INTERVAL: Duration = Duration::from_secs(5);
-/// The validators asked for their config in one attempt, one after another until one answers.
-const MAX_VALIDATORS_PER_ATTEMPT: usize = 3;
+/// The validators asked for their config in one attempt, one after another until enough of them agree.
+const MAX_VALIDATORS_PER_ATTEMPT: usize = 5;
+/// How many validators must serve the same config before it is sent to the oracle, so that a single misconfigured
+/// validator cannot move every indexer that asks it. Networks with fewer validators need all of them.
+const REQUIRED_AGREEMENT: usize = 2;
 
 /// Fetches the configured epoch oracle's config from validators and sends it to this indexer's oracle, which adopts
-/// it if it only schedules changes for epochs the oracle has not processed.
+/// it if it agrees with what the oracle has already processed.
 ///
 /// It fetches once at startup, while the oracle holds back epoch changes, so that an indexer that was offline when a
 /// validator joined or exited still applies the change in order; and then once per epoch.
@@ -40,8 +47,9 @@ pub struct ValidatorOracleConfigFollower {
     /// validators.
     bootstrap_validators: Vec<PeerAddress>,
     last_sent: Option<Config>,
-    /// Advanced on each attempt so that successive attempts start with different validators.
-    attempts: usize,
+    /// Where the next attempt starts in the candidate list. It starts at a random offset so that indexers spread
+    /// their first requests over the validators, and advances so that successive attempts ask different ones.
+    next_offset: usize,
 }
 
 impl ValidatorOracleConfigFollower {
@@ -64,7 +72,7 @@ impl ValidatorOracleConfigFollower {
             updates,
             bootstrap_validators,
             last_sent: None,
-            attempts: 0,
+            next_offset: usize::try_from(RandomState::new().hash_one(0u8) % u64::from(u32::MAX)).unwrap_or_default(),
         }
     }
 
@@ -82,12 +90,17 @@ impl ValidatorOracleConfigFollower {
         }
 
         let started = time::Instant::now();
-        while !self.fetch_and_send().await {
+        loop {
+            match self.fetch_and_send().await {
+                FetchOutcome::Sent => break,
+                FetchOutcome::OracleGone => return,
+                FetchOutcome::NoAgreement => {},
+            }
             if started.elapsed() >= STARTUP_FETCH_TIMEOUT {
                 warn!(
                     target: LOG_TARGET,
-                    "No validator served its epoch oracle config within {STARTUP_FETCH_TIMEOUT:.0?}; continuing with \
-                     the config this indexer holds and retrying each epoch"
+                    "Validators did not agree on an epoch oracle config within {STARTUP_FETCH_TIMEOUT:.0?}; \
+                     continuing with the config this indexer holds and retrying each epoch"
                 );
                 if self.updates.send(None).is_err() {
                     return;
@@ -104,7 +117,9 @@ impl ValidatorOracleConfigFollower {
             tokio::select! {
                 event = events.recv() => match event {
                     Ok(EpochManagerEvent::EpochChanged { .. }) | Err(RecvError::Lagged(_)) => {
-                        self.fetch_and_send().await;
+                        if matches!(self.fetch_and_send().await, FetchOutcome::OracleGone) {
+                            return;
+                        }
                     },
                     Ok(_) => {},
                     Err(RecvError::Closed) => return,
@@ -114,31 +129,54 @@ impl ValidatorOracleConfigFollower {
         }
     }
 
-    /// Fetches the config from a few validators, sending the first one served if it differs from the last sent.
-    /// Returns true once a validator has served a config.
-    async fn fetch_and_send(&mut self) -> bool {
+    /// Fetches the config from a few validators and sends the first one enough of them agree on, unless it was the
+    /// last one sent.
+    async fn fetch_and_send(&mut self) -> FetchOutcome {
         let candidates = self.candidates().await;
+        let required = REQUIRED_AGREEMENT.min(candidates.len()).max(1);
+        let mut served = Vec::<(Config, usize)>::new();
         for validator in candidates.iter().take(MAX_VALIDATORS_PER_ATTEMPT) {
-            match self.fetch_from(validator).await {
-                Ok(Some(config)) => {
-                    if self.last_sent.as_ref() != Some(&config) {
-                        debug!(target: LOG_TARGET, "Validator {validator} served an epoch oracle config update");
-                        if self.updates.send(Some(config.clone())).is_err() {
-                            return true;
-                        }
-                        self.last_sent = Some(config);
-                    }
-                    return true;
-                },
+            let config = match self.fetch_from(validator).await {
+                Ok(Some(config)) => config,
                 Ok(None) => {
                     debug!(target: LOG_TARGET, "Validator {validator} runs no configured epoch oracle");
+                    continue;
                 },
                 Err(err) => {
                     debug!(target: LOG_TARGET, "Failed to fetch the epoch oracle config from {validator}: {err:#}");
+                    continue;
                 },
+            };
+            let count = match served.iter_mut().find(|(seen, _)| *seen == config) {
+                Some((_, count)) => {
+                    *count += 1;
+                    *count
+                },
+                None => {
+                    served.push((config.clone(), 1));
+                    1
+                },
+            };
+            if count < required {
+                continue;
             }
+            if self.last_sent.as_ref() != Some(&config) {
+                debug!(target: LOG_TARGET, "{count} validator(s) served the same epoch oracle config update");
+                if self.updates.send(Some(config.clone())).is_err() {
+                    return FetchOutcome::OracleGone;
+                }
+                self.last_sent = Some(config);
+            }
+            return FetchOutcome::Sent;
         }
-        false
+        if served.len() > 1 {
+            warn!(
+                target: LOG_TARGET,
+                "Validators served {} different epoch oracle configs; none was adopted",
+                served.len()
+            );
+        }
+        FetchOutcome::NoAgreement
     }
 
     /// The current epoch's validators, falling back to the bootstrap validators, starting from a different one on
@@ -156,9 +194,9 @@ impl ValidatorOracleConfigFollower {
         let mut candidates = candidates.into_iter().collect::<Vec<_>>();
         if !candidates.is_empty() {
             let len = candidates.len();
-            candidates.rotate_left(self.attempts % len);
+            candidates.rotate_left(self.next_offset % len);
         }
-        self.attempts = self.attempts.wrapping_add(MAX_VALIDATORS_PER_ATTEMPT);
+        self.next_offset = self.next_offset.wrapping_add(MAX_VALIDATORS_PER_ATTEMPT);
         candidates
     }
 
@@ -173,4 +211,13 @@ impl ValidatorOracleConfigFollower {
         config.validate()?;
         Ok(Some(config))
     }
+}
+
+enum FetchOutcome {
+    /// Enough validators agreed on a config, which the oracle has, or was just sent.
+    Sent,
+    /// Too few validators answered, or they disagreed.
+    NoAgreement,
+    /// The oracle has stopped and takes no more updates.
+    OracleGone,
 }

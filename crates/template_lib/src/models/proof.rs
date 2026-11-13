@@ -179,7 +179,8 @@ fn drop_proof(id: ProofId) {
 }
 
 /// An open authorization window over a proof. The window closes when this is dropped; the proof itself stays held.
-#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[must_use = "the authorization window closes as soon as ProofAccess is dropped"]
+#[derive(Debug, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ProofAccess {
     #[n(0)]

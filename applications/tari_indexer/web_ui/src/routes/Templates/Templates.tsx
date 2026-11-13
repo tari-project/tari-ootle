@@ -74,6 +74,9 @@ function formatType(type: Type): string {
   if ("Other" in type) {
     return (type as { Other: { name: string } }).Other.name;
   }
+  if ("WellKnown" in type) {
+    return (type as { WellKnown: string }).WellKnown;
+  }
   return JSON.stringify(type);
 }
 

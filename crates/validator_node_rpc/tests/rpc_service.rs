@@ -106,8 +106,15 @@ impl ValidatorNodeRpcService for UnservedService {
     }
 }
 
-/// Serves `UnservedService` and returns a client session to it.
-async fn connect() -> (RpcClient, task::JoinHandle<()>) {
+/// A client session to a served `UnservedService`. The server aborts its sessions once the notification stream
+/// ends, so the sender lives as long as the session.
+struct Session {
+    client: RpcClient,
+    server: task::JoinHandle<()>,
+    _notif_tx: mpsc::UnboundedSender<ProtocolNotification<tokio_util::compat::Compat<tokio::io::DuplexStream>>>,
+}
+
+async fn connect() -> Session {
     type Server = ValidatorNodeRpcServer<UnservedService>;
 
     let (notif_tx, notif_rx) = mpsc::unbounded_channel();
@@ -135,13 +142,21 @@ async fn connect() -> (RpcClient, task::JoinHandle<()>) {
     let client = RpcClient::connect(RpcClientConfig::default(), PeerId::random(), framed, protocol)
         .await
         .unwrap();
-    (client, server)
+    Session {
+        client,
+        server,
+        _notif_tx: notif_tx,
+    }
 }
 
 /// A peer that calls a method past the end of the table gets an unsupported-method status.
 #[tokio::test]
 async fn a_method_past_the_table_is_not_served() {
-    let (mut client, server) = connect().await;
+    let Session {
+        mut client,
+        server,
+        _notif_tx,
+    } = connect().await;
 
     let result = client
         .server_streaming::<_, _, proto::SyncStateResponse>(proto::SyncStateRequest::default(), 11u32)

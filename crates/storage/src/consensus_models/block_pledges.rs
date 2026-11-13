@@ -59,6 +59,9 @@ impl BlockPledge {
         protocol_version: ProtocolVersion,
         evidence: &ShardGroupEvidence,
     ) -> Option<SubstatePledges> {
+        if !evidence.is_all_inputs_pledged() {
+            return None;
+        }
         let mut pledges = SubstatePledges::with_capacity(evidence.inputs().len());
         for (substate_id, ev) in evidence.all_pledged_inputs_iter() {
             let substate = self.get_committed_pledge(protocol_version, substate_id, ev)?;
@@ -77,6 +80,13 @@ impl BlockPledge {
         protocol_version: ProtocolVersion,
         evidence: &ShardGroupEvidence,
     ) -> bool {
+        if !evidence.is_all_inputs_pledged() {
+            warn!(
+                target: LOG_TARGET,
+                "Substate evidence contains unpledged input(s)",
+            );
+            return false;
+        }
         if let Some((id, ev)) = evidence
             .all_pledged_inputs_iter()
             .find(|(substate_id, ev)| self.get_committed_pledge(protocol_version, substate_id, ev).is_none())
@@ -508,5 +518,28 @@ mod tests {
         };
         assert!(input_pledge.satisfies_requirement(versioned_req));
         assert!(input_pledge.satisfies_requirement(unversioned_req));
+    }
+
+    #[test]
+    fn unpledged_input_in_evidence_is_rejected() {
+        let (id1, id2) = (create_substate_id(1), create_substate_id(2));
+        let (value1, value2) = (substate_value(1), substate_value(2));
+        let mut evidence = ShardGroupEvidence::default();
+        let lock1 = VersionedSubstateIdLockIntent::write(id1.clone(), true).with_pledged_value(&value1);
+        evidence.insert_from_lock_intent(lock1);
+        evidence.insert_unpledged_input(id2.substate_id().clone());
+
+        let mut pledge = BlockPledge::new();
+        pledge.add_substate_pledge(id1.substate_id().clone(), id1.version(), value1);
+        pledge.add_substate_pledge(id2.substate_id().clone(), id2.version(), value2.clone());
+
+        let v0 = ProtocolVersion::V0;
+        assert!(!pledge.has_all_input_substate_values_for(v0, &evidence));
+        assert!(pledge.get_all_pledges_for_evidence(v0, &evidence).is_none());
+
+        let lock2 = VersionedSubstateIdLockIntent::read(id2, true).with_pledged_value(&value2);
+        evidence.insert_from_lock_intent(lock2);
+        assert!(pledge.has_all_input_substate_values_for(v0, &evidence));
+        assert_eq!(pledge.get_all_pledges_for_evidence(v0, &evidence).unwrap().len(), 2);
     }
 }

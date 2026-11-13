@@ -98,3 +98,23 @@ async fn a_redirection_status_does_not_open_an_event_stream() {
         "{err}"
     );
 }
+
+#[tokio::test]
+async fn sse_content_type_with_charset_parameter_opens_stream() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        let Ok((mut sock, _)) = listener.accept() else {
+            return;
+        };
+        sock.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+        let read = sock.read(&mut [0u8; 8192]).unwrap();
+        assert_ne!(read, 0);
+        let response = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream; charset=utf-8\r\ncontent-length: \
+                        0\r\nconnection: close\r\n\r\n";
+        sock.write_all(response.as_bytes()).unwrap();
+        sock.flush().unwrap();
+    });
+    let client = IndexerRestApiClient::connect(format!("http://127.0.0.1:{port}")).unwrap();
+    assert!(client.sse_events().await.is_ok());
+}

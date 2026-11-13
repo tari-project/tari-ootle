@@ -60,7 +60,7 @@ const BENCH_TRANSACTION_VALIDITY_EPOCHS: u64 = 10;
 
 impl Runner {
     pub async fn init(cli: CommonArgs) -> anyhow::Result<Self> {
-        let sdk = initialize_wallet_sdk(&cli.db_path, cli.indexer_url.clone())?;
+        let sdk = initialize_wallet_sdk(&cli.db_path, cli.indexer_url.clone(), cli.network)?;
         let (faucet_template, tariswap_template) = get_templates(&cli).await?;
         let current_epoch = sdk.get_network_interface().get_current_epoch().await?;
         let max_epoch = Epoch(current_epoch.as_u64() + BENCH_TRANSACTION_VALIDITY_EPOCHS);
@@ -151,12 +151,16 @@ impl Runner {
     }
 }
 
-fn initialize_wallet_sdk<P: AsRef<Path>>(db_path: P, indexer_url: Url) -> Result<WalletSdk, anyhow::Error> {
+fn initialize_wallet_sdk<P: AsRef<Path>>(
+    db_path: P,
+    indexer_url: Url,
+    network: Network,
+) -> Result<WalletSdk, anyhow::Error> {
     let store = SqliteWalletStore::try_open(db_path)?;
     store.run_migrations()?;
 
     let sdk_config = WalletSdkConfig {
-        network: Network::LocalNet,
+        network,
         override_keyring_password: Some(SafePassword::from_str("N3Va g0nn4 gu355").unwrap()),
         indexer_trust: IndexerTrust::default(),
     };

@@ -38,15 +38,23 @@ fn extract_from_file(file: &syn::File) -> Vec<FunctionDoc> {
 }
 
 fn has_template_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs
-        .iter()
-        .any(|attr| attr.path().segments.last().is_some_and(|seg| seg.ident == "template"))
+    attrs.iter().any(|attr| {
+        attr.path()
+            .segments
+            .last()
+            .is_some_and(|seg| seg.ident == "template" || seg.ident == "template_non_wasm")
+    })
 }
 
 fn is_stateless_template(attrs: &[syn::Attribute]) -> bool {
     attrs
         .iter()
-        .filter(|attr| attr.path().segments.last().is_some_and(|seg| seg.ident == "template"))
+        .filter(|attr| {
+            attr.path()
+                .segments
+                .last()
+                .is_some_and(|seg| seg.ident == "template" || seg.ident == "template_non_wasm")
+        })
         .any(|attr| {
             attr.parse_args_with(Punctuated::<syn::Ident, Token![,]>::parse_terminated)
                 .is_ok_and(|flags| flags.iter().any(|flag| flag == "stateless"))
@@ -318,6 +326,21 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].name, "execute");
         assert_eq!(out[0].doc, "Stateless entry point.");
+    }
+
+    #[test]
+    fn extracts_template_non_wasm_and_stateless_functions() {
+        let src = r#"
+            #[tari_template_macros::template_non_wasm(stateless)]
+            mod stateless_tpl {
+                /// Non-wasm entry point.
+                pub fn run() {}
+            }
+        "#;
+        let out = parse(src);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "run");
+        assert_eq!(out[0].doc, "Non-wasm entry point.");
     }
 
     #[test]

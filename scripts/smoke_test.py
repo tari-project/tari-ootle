@@ -459,6 +459,8 @@ class SmokeTest:
             raise StageFailed(f"{SMOKE_ACCOUNT} holds {fmt_tari(bal)} revealed after funding, needs {fmt_tari(required)}")
         info(f"💰 balance  {fmt_tari(bal)}")
 
+    # ---- transaction plumbing
+
     def indexer_check(self, tx_id, op):
         """The indexer must report the transaction committed and serve the substates it wrote.
 
@@ -597,19 +599,24 @@ class SmokeTest:
         return accounts
 
     def fund_flood_accounts(self, n):
-        """Every flood account holds enough for a transfer. On the swarm the faucet creates missing accounts; on a
-        live network, and to top up an account that has run low, the smoketest account deposits into them."""
+        """Every flood account holds enough for a transfer. On the swarm the faucet creates the missing accounts at the
+        end of the range; the smoketest account deposits into every other missing account, into accounts that have run
+        low, and on a live network into all of them."""
         accounts = self.flood_accounts(n)
         missing = [a for a in accounts if a[3] is None]
         low = [a for a in accounts if a[3] is not None and a[3] < FLOOD_ACCOUNT_MIN]
         if missing and not self.args.live:
-            first = missing[0][0]
-            if len(missing) != n - first:
-                raise StageFailed(f"flood accounts {', '.join(str(a[0]) for a in missing[:5])}… are missing between "
-                                  f"existing ones; delete {FLOOD_SEED_FILE} to start from a new seed")
-            info(f"🚰 claiming from the faucet into {bold(len(missing))} new flood account(s)…")
-            self.submit_flood("faucet", n, skip=first)
-            missing = []
+            # The seeded faucet flood claims into accounts 0..n, and the submitter can skip only a prefix of them.
+            first = n
+            while first > 0 and accounts[first - 1][3] is None:
+                first -= 1
+            if first < n:
+                info(f"🚰 claiming from the faucet into {bold(n - first)} new flood account(s)…")
+                self.submit_flood("faucet", n, skip=first)
+                # A deposit creates a missing account with create_account!, which fails on one that exists, so the
+                # claimed accounts must be visible before the remaining ones are listed for a deposit.
+                self.wait_flood_accounts_funded(n, range(first, n))
+                missing = [a for a in missing if a[0] < first]
         to_fund = missing + low
         if not to_fund:
             return
@@ -618,11 +625,19 @@ class SmokeTest:
         info(f"💸 {SMOKE_ACCOUNT} funds {bold(len(missing))} new and tops up {bold(len(low))} flood account(s) "
              f"({fmt_tari(sum(t[2] for t in topups))})…")
         self.deposit(topups)
-        # The listing above cached each missing account's nonexistence on the indexer. A creation retracts that only
-        # once the indexer has synced the account's shard group, so funded accounts appear shard group by shard group.
+        self.wait_flood_accounts_funded(n, [a[0] for a in to_fund])
+
+    def wait_flood_accounts_funded(self, n, indices):
+        """Waits until the indexer serves each of the flood accounts `indices` as funded.
+
+        Listing the flood accounts caches each missing one's nonexistence on the indexer, and a committed creation is
+        served only once the indexer has synced the account's shard group, so funded accounts appear shard group by
+        shard group."""
+        indices = set(indices)
         deadline = time.monotonic() + FLOOD_FUNDING_VISIBLE_TIMEOUT
         while True:
-            pending = [a[0] for a in self.flood_accounts(n) if a[3] is None or a[3] < FLOOD_ACCOUNT_MIN]
+            pending = [a[0] for a in self.flood_accounts(n)
+                       if a[0] in indices and (a[3] is None or a[3] < FLOOD_ACCOUNT_MIN)]
             if not pending:
                 return
             if time.monotonic() > deadline:
@@ -1035,8 +1050,9 @@ fn main() {{
         return body["checkpoint"]["epoch"]
 
     def ensure_on_chain(self, name, account):
-        """The account's component address, after claiming faucet coins into the account if the network does not
-        hold its component yet. Receiving stealth transfers leaves an account without one."""
+        """The account's component address, after creating its component if the network does not hold one yet: by a
+        faucet claim on the swarm, by a deposit from the smoketest account with --live. Receiving stealth transfers
+        leaves an account without one."""
         address = account["account"]["component_address"]
         code, _ = http_get(f"{self.indexer_url}/substates/{address}")
         if code == 404 and self.args.live:
@@ -1282,12 +1298,13 @@ def main():
     p.add_argument("--wallet-url", help="walletd JSON-RPC URL, e.g. http://127.0.0.1:5100/json_rpc")
     p.add_argument("--peer-wallet-url", help="second walletd for the multi_wallet stage")
     p.add_argument("--indexer-url", help="indexer REST URL, e.g. http://127.0.0.1:12500")
-    p.add_argument("--flood", type=int, default=200, help="faucet claims per flood (default 200)")
+    p.add_argument("--flood", type=int, default=200, help="transfers per flood (default 200)")
     p.add_argument("--templates", type=int, default=3, help="templates to publish (default 3)")
     p.add_argument("--stealth", type=int, default=3, choices=[1, 2, 3], help="tTARI stealth transfers (default 3)")
     p.add_argument("--concurrent", type=int, default=3, help="concurrent stealth transfers (default 3)")
     p.add_argument("--nfts", type=int, default=3, help="faucet NFTs to mint (default 3)")
-    p.add_argument("--min-balance", type=int, default=100, help="claim faucet coins below this many tTARI")
+    p.add_argument("--min-balance", type=int, default=100, help="top up the smoketest account below this many tTARI, from the faucet or, with --live, the funder "
+                        "account")
     p.add_argument("--burn", type=int, default=10, help="tTARI to burn in the claim_burn stage (default 10)")
     p.add_argument("--burn-timeout", type=int, default=600, help="seconds to wait for a burn to be claimed")
     p.add_argument("--epoch", action="store_true", help="also run the epoch stage")

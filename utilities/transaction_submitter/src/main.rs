@@ -321,7 +321,7 @@ async fn fetch_result_summary(
 }
 
 /// Retries of one submission a rate-limited indexer answers with HTTP 429. The backoff grows by a second per attempt
-/// up to [`MAX_RATE_LIMITED_BACKOFF`], so the retries span about 1.5 minutes, enough for the submit bucket to refill.
+/// up to [`MAX_RATE_LIMITED_BACKOFF`], so the retries span about 75 seconds, enough for the submit bucket to refill.
 const MAX_RATE_LIMITED_RETRIES: u32 = 12;
 const MAX_RATE_LIMITED_BACKOFF: Duration = Duration::from_secs(10);
 

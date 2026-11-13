@@ -1104,12 +1104,13 @@ where
 }
 
 /// The OUTPUT locks on the validator fee pool versions that applying the withdrawals of `execution`, the local-only
-/// execution of `transaction_id`, creates.
+/// execution of `transaction_id`, creates or rewrites in place.
 ///
 /// A withdrawal updates its pool in place when the diff is applied, so the pool is a resolved input of `execution` and
-/// the version the withdrawal creates is locked here. That OUTPUT lock leaves the pool open to later local-only
-/// transactions on the same chain. A pool the block being built has already put UP is rewritten at that version, which
-/// the OUTPUT lock of the transaction that put it UP already covers, so the withdrawal locks only its input.
+/// the version the withdrawal leaves UP is locked as OUTPUT here. That OUTPUT lock leaves the pool open to later
+/// local-only transactions on the same chain. A pool the block being built has already put UP is rewritten at its
+/// input version rather than bumped to the next version, so its OUTPUT lock is re-recorded at that same version to
+/// keep OUTPUT as the pool's latest lock after the withdrawal's WRITE input lock.
 fn validator_fee_withdrawal_outputs<TTx: StateStoreReadTransaction>(
     store: &PendingSubstateStore<TTx>,
     transaction_id: &TransactionId,
@@ -1121,9 +1122,6 @@ fn validator_fee_withdrawal_outputs<TTx: StateStoreReadTransaction>(
     let mut locks = Vec::with_capacity(diff.validator_fee_withdrawals().len());
     for withdrawal in diff.validator_fee_withdrawals() {
         let id = SubstateId::ValidatorFeePool(withdrawal.address);
-        if store.block_change(&id).is_some_and(SubstateChange::is_up) {
-            continue;
-        }
         let input = execution
             .resolved_inputs()
             .iter()
@@ -1134,9 +1132,12 @@ fn validator_fee_withdrawal_outputs<TTx: StateStoreReadTransaction>(
                      resolved inputs"
                 ))
             })?;
-        locks.push(VersionedSubstateIdLockIntent::output(
-            input.versioned_substate_id().to_next_version(),
-        ));
+        let output_version = if store.block_change(&id).is_some_and(SubstateChange::is_up) {
+            input.versioned_substate_id().clone()
+        } else {
+            input.versioned_substate_id().to_next_version()
+        };
+        locks.push(VersionedSubstateIdLockIntent::output(output_version));
     }
     Ok(locks)
 }
@@ -3124,6 +3125,134 @@ mod tests {
             assert_eq!(pool.substate_value().as_validator_fee_pool().unwrap().amount(), 200);
             let locks = store.new_locks().get(&pool_id).unwrap();
             assert!(locks.iter().all(|lock| lock.version() <= latest.version()), "{locks:?}");
+            assert_eq!(
+                store.get_latest_lock_by_id(&pool_id)?.unwrap().lock_type(),
+                SubstateLockType::Output,
+            );
+            Ok::<_, BlockTransactionExecutorError>(())
+        });
+    }
+
+    #[test]
+    fn a_third_withdrawal_from_a_pool_in_one_block_succeeds_and_leaves_the_pool_open() {
+        with_fee_pool_in_parent(|store, pool_address| {
+            let pool_id = SubstateId::ValidatorFeePool(pool_address);
+            for (signer, pool_version) in [(1, 0), (2, 1), (3, 1)] {
+                let claim = multishard_transaction(signer);
+                let (execution, lock_status) = lock_local_only_execution(
+                    store,
+                    *claim.id(),
+                    withdrawing_from(&claim, pool_address, Some(pool_version), 250),
+                )?;
+                assert!(!lock_status.is_any_failed(), "{lock_status:?}");
+                store.put_diff(execution.result().finalize.any_accept().unwrap())?;
+            }
+
+            let pool = store.get_latest_change(&pool_id)?.into_up().unwrap();
+            assert_eq!(pool.substate_value().as_validator_fee_pool().unwrap().amount(), 250);
+            assert_eq!(
+                store.get_latest_lock_by_id(&pool_id)?.unwrap().lock_type(),
+                SubstateLockType::Output,
+            );
+
+            let fourth_claim = multishard_transaction(4);
+            let lock_status = store.check_input_locks(fourth_claim.id(), [VersionedSubstateIdLockIntent::write(
+                versioned(&pool_id, 1),
+                true,
+            )])?;
+            assert!(!lock_status.is_any_failed(), "{lock_status:?}");
+            Ok::<_, BlockTransactionExecutorError>(())
+        });
+    }
+
+    #[test]
+    fn versioned_inputs_behind_read_or_local_only_output_locks_are_deferrable_conflicts() {
+        with_fee_pool_in_parent(|store, pool_address| {
+            let pool_id = SubstateId::ValidatorFeePool(pool_address);
+
+            // 1. A Read lock at v0 makes a versioned Write(v0) conflict deferrable (not a hard conflict).
+            let reader = TransactionId::new([10; 32]);
+            store.try_lock(
+                reader,
+                &VersionedSubstateIdLockIntent::read(versioned(&pool_id, 0), true),
+                false,
+            )?;
+
+            let writer = TransactionId::new([11; 32]);
+            let write_v0 = VersionedSubstateIdLockIntent::write(versioned(&pool_id, 0), true);
+            // Execution may resolve the write-declared input to a READ, which the READ lock admits
+            let pre_check = store.check_input_locks(&writer, [write_v0.clone()])?;
+            assert!(!pre_check.is_any_failed(), "{pre_check:?}");
+
+            let lock_res = store.try_lock_all(writer, [write_v0], false)?;
+            assert!(lock_res.is_deferrable_conflict(), "{lock_res:?}");
+            assert!(!lock_res.is_hard_conflict(), "{lock_res:?}");
+
+            store.release_new_locks(&reader);
+
+            // 2. A local-only Output lock at v1 makes a multishard versioned Read(v1) / Write(v1) deferrable.
+            let local_creator = TransactionId::new([12; 32]);
+            store.try_lock(
+                local_creator,
+                &VersionedSubstateIdLockIntent::output(versioned(&pool_id, 1)),
+                true,
+            )?;
+
+            let multishard_tx = TransactionId::new([13; 32]);
+            for req in [
+                VersionedSubstateIdLockIntent::read(versioned(&pool_id, 1), true),
+                VersionedSubstateIdLockIntent::write(versioned(&pool_id, 1), true),
+            ] {
+                let lock_res = store.try_lock_all(multishard_tx, [req], false)?;
+                assert!(lock_res.is_deferrable_conflict(), "{lock_res:?}");
+                assert!(!lock_res.is_hard_conflict(), "{lock_res:?}");
+            }
+
+            // Requesting the superseded v0 or a future v2 behind Output(v1) IS a hard conflict.
+            for req in [
+                VersionedSubstateIdLockIntent::read(versioned(&pool_id, 0), true),
+                VersionedSubstateIdLockIntent::read(versioned(&pool_id, 2), true),
+                VersionedSubstateIdLockIntent::write(versioned(&pool_id, 2), true),
+            ] {
+                let stale_or_future = store.try_lock_all(multishard_tx, [req], false)?;
+                assert!(stale_or_future.is_hard_conflict(), "{stale_or_future:?}");
+            }
+            Ok::<_, BlockTransactionExecutorError>(())
+        });
+    }
+
+    #[test]
+    fn a_same_block_consumer_of_a_fresh_output_leaving_no_new_version_refuses_a_second_consumer() {
+        with_fee_pool_in_parent(|store, _| {
+            let fresh = component_id(77);
+            let tx_a = TransactionId::new([20; 32]);
+            let tx_b = TransactionId::new([21; 32]);
+            let tx_c = TransactionId::new([22; 32]);
+
+            // tx_a creates fresh@v0 (local-only Output lock).
+            store.try_lock(tx_a, &VersionedSubstateIdLockIntent::output(versioned(&fresh, 0)), true)?;
+
+            // tx_b consumes fresh@v0 under local-only rules without creating v1.
+            let b_locks = store.try_lock_all(
+                tx_b,
+                [VersionedSubstateIdLockIntent::write(versioned(&fresh, 0), true)],
+                true,
+            )?;
+            assert!(!b_locks.is_any_failed(), "{b_locks:?}");
+            assert_eq!(
+                store.get_latest_lock_by_id(&fresh)?.unwrap().lock_type(),
+                SubstateLockType::Write,
+            );
+
+            // A second consumer tx_c attempting Write(fresh@v0) or Read(fresh@v0) is refused by the lock layer.
+            for req in [
+                VersionedSubstateIdLockIntent::write(versioned(&fresh, 0), true),
+                VersionedSubstateIdLockIntent::read(versioned(&fresh, 0), true),
+            ] {
+                let c_locks = store.try_lock_all(tx_c, [req], true)?;
+                assert!(c_locks.is_any_failed(), "{c_locks:?}");
+                assert!(c_locks.is_hard_conflict(), "{c_locks:?}");
+            }
             Ok::<_, BlockTransactionExecutorError>(())
         });
     }

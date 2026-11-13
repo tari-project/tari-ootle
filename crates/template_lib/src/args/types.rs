@@ -499,21 +499,6 @@ pub enum VaultAction {
     GetNonFungibles,
 }
 
-impl VaultAction {
-    pub fn requires_write_access(&self) -> bool {
-        use VaultAction::*;
-        !matches!(
-            self,
-            GetBalance |
-                GetLockedBalance |
-                GetResourceAddress |
-                GetNonFungibleIds |
-                GetCommitmentCount |
-                GetNonFungibles
-        )
-    }
-}
-
 /// A vault withdraw operation argument
 #[derive(Clone, Debug, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

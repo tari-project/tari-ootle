@@ -80,10 +80,10 @@ HEIGHT_SPREAD_WARN = 5
 CHECKPOINT_LAG_GRACE = 150
 # The shard whose checkpoints wallets walk the validator set handover through.
 WALK_SHARD = 1
-# A stealth transfer's fee is not refunded, so this is what each one costs.
+# A stealth transfer's fee is not refunded, so this is what each one submitted without a dry run costs.
 STEALTH_MAX_FEE = 20_000
-# The recipient accumulates many small outputs across runs, and each input adds verification cost.
-SPEND_BACK_MAX_FEE = 100_000
+# The budget a dry run meters a transaction at; it pays nothing.
+DRY_RUN_MAX_FEE = TARI
 
 STAGES = [
     "flood", "templates", "stealth", "token", "component", "swap", "spend_back", "concurrent",
@@ -234,8 +234,10 @@ class Wallet(JsonRpc):
 
 
 def http_get(url, timeout=30):
+    # Public indexers sit behind a proxy that refuses Python's default User-Agent with HTTP 403.
+    req = urllib.request.Request(url, headers={"User-Agent": "ootle-smoke-test"})
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status, json.load(resp)
     except urllib.error.HTTPError as e:
         return e.code, None
@@ -432,23 +434,14 @@ class SmokeTest:
                 raise StageFailed(f"{account_label(self.funder)} holds {fmt_tari(held)}, but {SMOKE_ACCOUNT} needs "
                                   f"{fmt_tari(amount)} more plus fees")
             info(f"🏦 balance {fmt_tari(bal)} is low, {account_label(self.funder)} sends {fmt_tari(amount)}…")
-            res = self.wallet.call("accounts.stealth_transfer", {
-                "owner_account": {"ComponentAddress": funder},
-                "fee_params": {"input_selection": "PreferRevealed", "pay_fee_with_swap": None},
-                "input_selection": "PreferRevealed",
-                "resource_address": TARI_TOKEN,
-                "transfers": [{
-                    "destination_address": self.smoke["address"],
-                    "blinded_output_amount": 0,
-                    "revealed_output_amount": amount,
-                    "pay_to": "StealthPublicKey",
-                    "attach_sender_address": True,
-                }],
-                "max_fee": SPEND_BACK_MAX_FEE,
-                "dry_run": False,
+            tx_id = self.submit_stealth_transfer(funder, TARI_TOKEN, {
+                "destination_address": self.smoke["address"],
+                "blinded_output_amount": 0,
+                "revealed_output_amount": amount,
             })
-            self.wallet.wait(res["transaction_id"])
-            self.indexer_check(res["transaction_id"], "funder_transfer")
+            self.wallet.wait(tx_id)
+            paid, _ = self.indexer_check(tx_id, "funder_transfer")
+            detail(f"fee {paid} µT")
             bal = revealed(balances(self.wallet, SMOKE_ACCOUNT).get(TARI_TOKEN))
         elif bal < required:
             info(f"🚰 balance {fmt_tari(bal)} is low, claiming from the faucet…")
@@ -476,6 +469,8 @@ class SmokeTest:
             finalized = (body or {}).get("result", {}).get("Finalized") if status == 200 else None
             if finalized:
                 break
+            if status not in (200, 404, 429):
+                raise StageFailed(f"indexer refuses the result of {short(tx_id)} (HTTP {status})")
             if time.monotonic() > deadline:
                 raise StageFailed(f"indexer has no finalized result for {short(tx_id)} after 60s (HTTP {status})")
             time.sleep(1)
@@ -518,24 +513,38 @@ class SmokeTest:
             return res
         return self.wait(res["transaction_id"], op)
 
-    def stealth_transfer(self, resource, amount, dest, label, sender=SMOKE_ACCOUNT, wallet=None,
-                         selection="PreferRevealed", max_fee=STEALTH_MAX_FEE, timeout_secs=120):
-        res = (wallet or self.wallet).call("accounts.stealth_transfer", {
-            "owner_account": {"Name": sender},
+    def submit_stealth_transfer(self, owner, resource, transfer, selection="PreferRevealed", max_fee=None,
+                                wallet=None):
+        """Submits one stealth transfer from `owner` (an account name or component address) and returns its id.
+
+        A fee paid from stealth inputs is not refunded, so without an explicit `max_fee` the transfer is dry-run
+        first and submitted at the fee the dry run requires; the transfer committing shows that fee suffices."""
+        wallet = wallet or self.wallet
+        owner_ref = {"ComponentAddress": owner} if COMPONENT_ADDR_RE.match(owner) else {"Name": owner}
+        params = {
+            "owner_account": owner_ref,
             "fee_params": {"input_selection": selection, "pay_fee_with_swap": None},
             "input_selection": selection,
             "resource_address": resource,
-            "transfers": [{
-                "destination_address": dest,
-                "blinded_output_amount": amount,
-                "revealed_output_amount": 0,
-                "pay_to": "StealthPublicKey",
-                "attach_sender_address": True,
-            }],
+            "transfers": [{"pay_to": "StealthPublicKey", "attach_sender_address": True, **transfer}],
             "max_fee": max_fee,
             "dry_run": False,
-        })
-        _, paid, _ = self.wait(res["transaction_id"], "stealth_transfer", timeout_secs)
+        }
+        if max_fee is None:
+            dry = wallet.call("accounts.stealth_transfer", {**params, "max_fee": DRY_RUN_MAX_FEE, "dry_run": True})
+            params["max_fee"] = int(dry.get("required_fees") or 0)
+            if not params["max_fee"]:
+                raise StageFailed(f"stealth transfer dry run reported no required fee: {dry}")
+        return wallet.call("accounts.stealth_transfer", params)["transaction_id"]
+
+    def stealth_transfer(self, resource, amount, dest, label, sender=SMOKE_ACCOUNT, wallet=None,
+                         selection="PreferRevealed", max_fee=None, timeout_secs=120):
+        tx_id = self.submit_stealth_transfer(
+            sender, resource,
+            {"destination_address": dest, "blinded_output_amount": amount, "revealed_output_amount": 0},
+            selection=selection, max_fee=max_fee, wallet=wallet,
+        )
+        _, paid, _ = self.wait(tx_id, "stealth_transfer", timeout_secs)
         detail(f"🥷 {label} → {short(dest)} · fee {paid} µT")
 
     def ensure_template(self):
@@ -903,7 +912,7 @@ fn main() {{
             self.stealth_transfer(TARI_TOKEN, 3 * TARI, self.recv["address"], fmt_tari(3 * TARI))
         before = total(balances(self.wallet, SMOKE_ACCOUNT).get(TARI_TOKEN))
         self.stealth_transfer(TARI_TOKEN, TARI // 2, self.smoke["address"], fmt_tari(TARI // 2),
-                              sender=RECV_ACCOUNT, selection="PreferConfidential", max_fee=SPEND_BACK_MAX_FEE)
+                              sender=RECV_ACCOUNT, selection="PreferConfidential")
         after = total(balances(self.wallet, SMOKE_ACCOUNT).get(TARI_TOKEN))
         if after - before != TARI // 2:
             raise StageFailed(f"{SMOKE_ACCOUNT} moved by {fmt_tari(after - before)}, expected 0.5 tTARI")
@@ -912,7 +921,7 @@ fn main() {{
             token, symbol = self.token
             before = total(balances(self.wallet, SMOKE_ACCOUNT).get(token))
             self.stealth_transfer(token, 500, self.smoke["address"], f"500 {symbol}",
-                                  sender=RECV_ACCOUNT, selection="PreferConfidential", max_fee=SPEND_BACK_MAX_FEE)
+                                  sender=RECV_ACCOUNT, selection="PreferConfidential")
             gained = total(balances(self.wallet, SMOKE_ACCOUNT).get(token)) - before
             if gained != 500:
                 raise StageFailed(f"{SMOKE_ACCOUNT} gained {gained} {symbol}, expected 500")
@@ -929,7 +938,9 @@ fn main() {{
 
         def send(i):
             try:
-                self.stealth_transfer(TARI_TOKEN, TARI, dest, f"#{i + 1} {fmt_tari(TARI)}")
+                # Concurrent dry runs would price the same unlocked inputs, so these pay a fixed fee.
+                self.stealth_transfer(TARI_TOKEN, TARI, dest, f"#{i + 1} {fmt_tari(TARI)}",
+                                      max_fee=STEALTH_MAX_FEE)
             except StageFailed as e:
                 errors.append(f"#{i + 1}: {e}")
 

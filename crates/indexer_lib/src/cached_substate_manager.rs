@@ -45,7 +45,7 @@ use tari_ootle_common_types::{
     committee::Committee,
     displayable::Displayable,
     optional::Optional,
-    substate_type::SubstateType,
+    substate_type::check_substate_type,
 };
 use tari_ootle_storage::{
     DownProofAnchor,
@@ -1110,8 +1110,9 @@ where
         Ok((result, Some(proof)))
     }
 
-    /// The value of `result` decoded, or `None` when it is not up. A member whose value does not decode, or that serves
-    /// a non-template value or a template whose content derives another address than `substate_id`, is disqualified.
+    /// The value of `result` decoded, or `None` when it is not up. A member whose value does not decode, whose value is
+    /// another type of substate than `substate_id` addresses, or that serves a template whose content derives another
+    /// address than `substate_id`, is disqualified.
     fn validate_substate_result(
         result: &SubstateResult,
         substate_id: &SubstateId,
@@ -1121,14 +1122,11 @@ where
             return Ok(None);
         };
         let value = Self::decode_value(substate, substate_id, vn_addr)?;
-        if let Some(expected_addr) = substate_id.as_template() {
-            let Some(template) = value.published_template() else {
-                return Err(IndexerError::UnexpectedSubstateType {
-                    vn: vn_addr.to_string(),
-                    substate_id: substate_id.clone(),
-                    actual: SubstateType::from(&value),
-                });
-            };
+        check_substate_type(substate_id, &value).map_err(|mismatch| IndexerError::MistypedSubstateValue {
+            vn: vn_addr.to_string(),
+            mismatch,
+        })?;
+        if let (Some(expected_addr), Some(template)) = (substate_id.as_template(), value.published_template()) {
             let derived = template.to_template_address();
             if derived != expected_addr {
                 return Err(IndexerError::TemplateAddressMismatch {
@@ -1475,17 +1473,20 @@ mod tests {
         encoded::Encoded,
         non_fungible::NonFungibleContainer,
         published_template::PublishedTemplate,
+        resource_container::ResourceContainer,
         substate::{Substate, SubstateValue},
+        vault::Vault,
     };
     use tari_epoch_manager::{EpochManagerError, EpochManagerEvent};
     use tari_ootle_common_types::{
         ValidatorSetHash,
         VotePower,
         committee::{CommitteeInfo, CommitteeMember},
+        substate_type::{SubstateType, SubstateTypeMismatch},
     };
     use tari_ootle_storage::global::models::ValidatorNode;
     use tari_ootle_transaction::{Transaction, TransactionId};
-    use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+    use tari_template_lib_types::{constants::TARI_TOKEN, crypto::RistrettoPublicKeyBytes};
     use tari_validator_node_rpc::{ValidatorNodeRpcClientError, client::TransactionResultStatus};
     use tokio::sync::broadcast;
 
@@ -1882,8 +1883,12 @@ mod tests {
         }
     }
 
-    fn component_id(n: u8) -> SubstateId {
-        SubstateId::from_str(&format!("component_{}", hex(&[n; 32]))).unwrap()
+    fn vault_id(n: u8) -> SubstateId {
+        SubstateId::from_str(&format!("vault_{}", hex(&[n; 32]))).unwrap()
+    }
+
+    fn vault_value() -> SubstateValue {
+        SubstateValue::Vault(Vault::new(ResourceContainer::public_fungible(TARI_TOKEN, 1u64)))
     }
 
     fn hex(bytes: &[u8]) -> String {
@@ -1929,12 +1934,7 @@ mod tests {
 
     fn live(ids: &[SubstateId]) -> HashMap<SubstateId, Substate> {
         ids.iter()
-            .map(|id| {
-                (
-                    id.clone(),
-                    Substate::new(0, SubstateValue::NonFungible(NonFungibleContainer::no_data())),
-                )
-            })
+            .map(|id| (id.clone(), Substate::new(0, vault_value())))
             .collect()
     }
 
@@ -1954,7 +1954,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_down_without_a_down_proof_is_unproven_for_another_version() {
-        let id = component_id(1);
+        let id = vault_id(1);
         let (manager, _) = manager(FakeNetwork {
             down_with_proof: [(id.clone(), (SubstateVersion::new(3), down_proof_data(None)))].into(),
             ..Default::default()
@@ -1973,7 +1973,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_member_serving_an_invalid_down_proof_is_disqualified() {
-        let id = component_id(1);
+        let id = vault_id(1);
         let (manager, _) = manager(FakeNetwork {
             down_with_proof: [(id.clone(), (SubstateVersion::new(3), down_proof_data(Some(vec![0xff]))))].into(),
             ..Default::default()
@@ -2183,11 +2183,11 @@ mod tests {
 
         let num_preshards = NumPreshards::P256;
         let protocol_version = tari_engine_types::ProtocolVersion::at(Network::LocalNet, Epoch(1));
-        let id = component_id(1);
+        let id = vault_id(1);
         let live = VersionedSubstateId::new(id.clone(), SubstateVersion::ZERO);
         let shard = live.to_substate_address().to_shard(num_preshards);
         let shard_group = ShardGroup::new(shard, shard);
-        let other = VersionedSubstateId::new(component_id(2), SubstateVersion::ZERO);
+        let other = VersionedSubstateId::new(vault_id(2), SubstateVersion::ZERO);
 
         let mut store = MemoryTreeStore::<StateTreePayload>::new();
         let up = |id: &VersionedSubstateId, seed: u8| SubstateTreeChange::Up {
@@ -2684,7 +2684,7 @@ mod tests {
     /// Down, not grounds to disqualify the member. A read for the version it names checks it.
     #[tokio::test]
     async fn a_down_proof_is_checked_only_for_a_read_of_its_version() {
-        let id = component_id(1);
+        let id = vault_id(1);
         let (manager, _) = manager(FakeNetwork {
             down_with_proof: [(id.clone(), (SubstateVersion::new(3), down_proof_data(Some(vec![0xff]))))].into(),
             ..Default::default()
@@ -2757,7 +2757,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_fetches_live_inputs_in_one_batch() {
-        let ids = (0..10).map(component_id).collect::<Vec<_>>();
+        let ids = (0..10).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -2777,7 +2777,7 @@ mod tests {
     /// first such input and goes no further, however many more were declared.
     #[tokio::test]
     async fn it_stops_at_the_first_input_that_does_not_exist() {
-        let ids = (0..100).map(component_id).collect::<Vec<_>>();
+        let ids = (0..100).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork::default());
 
         let lookup = manager.get_input_substates(&requirements(&ids)).await.unwrap();
@@ -2797,7 +2797,7 @@ mod tests {
     /// live.
     #[tokio::test]
     async fn it_confirms_an_input_a_batch_omitted() {
-        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let ids = (0..3).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             omitted_from_batches: HashSet::from([ids[1].clone()]),
@@ -2817,7 +2817,7 @@ mod tests {
     /// on the committee is asked before the lookup stops at it.
     #[tokio::test]
     async fn it_confirms_an_input_a_batch_reported_down() {
-        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let ids = (0..3).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             down_in_batches: HashSet::from([ids[1].clone()]),
@@ -2836,8 +2836,8 @@ mod tests {
 
     #[tokio::test]
     async fn it_confirms_a_versioned_input_an_unproven_batch_implied_down() {
-        let ids = vec![component_id(0)];
-        let higher_up = Substate::new(1, SubstateValue::NonFungible(NonFungibleContainer::no_data()));
+        let ids = vec![vault_id(0)];
+        let higher_up = Substate::new(1, vault_value());
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             proven_batch: Some(SubstateBatch {
@@ -2870,7 +2870,7 @@ mod tests {
     /// reads, while one with them writes what it fetched without verification as before.
     #[tokio::test]
     async fn a_manager_without_cache_writes_leaves_the_cache_untouched() {
-        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let ids = (0..3).map(vault_id).collect::<Vec<_>>();
         for cache_writes in [false, true] {
             let (manager, _) = manager(FakeNetwork {
                 live: live(&ids),
@@ -2897,7 +2897,7 @@ mod tests {
     /// One member answering a batch with an unproven Down cannot hide a substate the committee holds up.
     #[tokio::test]
     async fn a_batch_reporting_a_live_substate_down_does_not_drop_it() {
-        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let ids = (0..3).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             down_in_batches: HashSet::from([ids[1].clone()]),
@@ -2915,7 +2915,7 @@ mod tests {
     /// A substate whose state the committee cannot confirm fails the call, rather than reading as not live.
     #[tokio::test]
     async fn a_batch_head_that_cannot_be_confirmed_fails_the_call() {
-        let ids = (0..4).map(component_id).collect::<Vec<_>>();
+        let ids = (0..4).map(vault_id).collect::<Vec<_>>();
         let (manager, _) = manager(FakeNetwork {
             live: live(&ids),
             down_in_batches: HashSet::from([ids[1].clone(), ids[2].clone()]),
@@ -2932,7 +2932,7 @@ mod tests {
     /// A member that leaves an id out of its batch cannot hide a substate the committee holds up.
     #[tokio::test]
     async fn an_id_a_batch_leaves_out_is_confirmed_with_the_committee() {
-        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let ids = (0..3).map(vault_id).collect::<Vec<_>>();
         for verify in [true, false] {
             let (manager, network) = manager(FakeNetwork {
                 live: live(&ids),
@@ -2999,7 +2999,7 @@ mod tests {
     /// Fresh proven heads are served from the cache with their proofs, and only the ids it cannot serve are batched.
     #[tokio::test]
     async fn fresh_proven_heads_are_served_from_the_cache() {
-        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let ids = (0..3).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3028,7 +3028,7 @@ mod tests {
     /// Fresh cached down and nonexistent heads settle their ids as not live, with no committee call.
     #[tokio::test]
     async fn cached_down_and_absent_heads_are_left_out_from_the_cache() {
-        let ids = (0..2).map(component_id).collect::<Vec<_>>();
+        let ids = (0..2).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3065,7 +3065,7 @@ mod tests {
     /// fetched from the committee again.
     #[tokio::test]
     async fn a_cached_head_without_its_proof_is_fetched_again() {
-        let ids = (0..2).map(component_id).collect::<Vec<_>>();
+        let ids = (0..2).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3082,7 +3082,7 @@ mod tests {
     /// An id the committee holds absent is left out.
     #[tokio::test]
     async fn an_id_the_committee_holds_absent_is_left_out() {
-        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let ids = (0..3).map(vault_id).collect::<Vec<_>>();
         let (manager, _) = manager(FakeNetwork {
             live: live(&ids[..2]),
             ..Default::default()
@@ -3098,7 +3098,7 @@ mod tests {
     /// A cached nonexistence ends the lookup before anything is asked of the network.
     #[tokio::test]
     async fn it_stops_at_a_cached_nonexistent_input_without_fetching() {
-        let ids = (0..5).map(component_id).collect::<Vec<_>>();
+        let ids = (0..5).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork::default());
         manager.get_substate(&ids[4], None).await.unwrap();
         network.single_requests.store(0, Ordering::Relaxed);
@@ -3119,7 +3119,7 @@ mod tests {
     /// no longer than its bound.
     #[tokio::test(start_paused = true)]
     async fn a_stalled_cache_write_holds_up_the_lookup_only_for_its_bound() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (manager, _) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3135,7 +3135,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_cache_write_still_answers_the_lookup() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (manager, _) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3150,7 +3150,7 @@ mod tests {
     /// A fresh head with no proof held for it cannot answer a read that has to return one.
     #[tokio::test]
     async fn a_cached_head_with_no_proof_held_is_fetched_again() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3167,7 +3167,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_cached_head_is_served_with_the_proof_held_for_it() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3205,7 +3205,7 @@ mod tests {
     /// as a fresh read anchored there would be.
     #[tokio::test]
     async fn a_cached_proof_anchored_before_the_previous_epoch_is_fetched_again() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (mut manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3230,7 +3230,7 @@ mod tests {
     /// shard group overlapping the anchor's.
     #[tokio::test]
     async fn a_cached_proof_anchored_in_the_previous_epoch_is_fetched_again_once_the_new_epoch_has_a_tip() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (mut manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3249,7 +3249,7 @@ mod tests {
     /// A cached proof whose anchor does not decode is not served, so the refetch overwrites it.
     #[tokio::test]
     async fn a_cached_proof_with_an_undecodable_anchor_is_fetched_again() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3272,7 +3272,7 @@ mod tests {
     /// A cached proof anchored in the previous epoch is still served.
     #[tokio::test]
     async fn a_cached_proof_anchored_in_the_previous_epoch_is_served() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (mut manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3456,7 +3456,7 @@ mod tests {
         );
         let signers = keys[..3].iter().map(|(secret, _)| secret.clone()).collect::<Vec<_>>();
 
-        let id = component_id(1);
+        let id = vault_id(1);
         let (substate, value_proof, root) = proven_up(&id);
         let commit_proof = signed_commit_proof(all_shards(), anchor_height, root, &committee, &signers);
         let proof = SubstateProofData {
@@ -3581,7 +3581,7 @@ mod tests {
     /// and in a batch, and the read settles on a member whose value does.
     #[tokio::test]
     async fn an_unverified_read_skips_a_member_whose_value_does_not_decode() {
-        let id = component_id(1);
+        let id = vault_id(1);
         let honest = encoded(live(std::slice::from_ref(&id)).remove(&id).unwrap());
         let undecodable = EncodedSubstate::new(honest.version(), Encoded::from_bytes(vec![0xff]));
         // Members are asked in random order, so repeat to put the undecodable one first.
@@ -3733,7 +3733,7 @@ mod tests {
         );
         let signers = keys[..3].iter().map(|(secret, _)| secret.clone()).collect::<Vec<_>>();
         for (latest_height, proven) in [(100, false), (10, true)] {
-            let id = component_id(1);
+            let id = vault_id(1);
             let (substate, value_proof, root) = proven_up(&id);
             let (mut manager, _) = manager(FakeNetwork {
                 proven_batch: Some(SubstateBatch {
@@ -3941,7 +3941,7 @@ mod tests {
     /// however many ids the batch caches, and a failing one still answers it.
     #[tokio::test(start_paused = true)]
     async fn stalled_or_failed_batch_cache_writes_still_answer_the_lookup() {
-        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let ids = (0..3).map(vault_id).collect::<Vec<_>>();
         let (manager, _) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3960,7 +3960,7 @@ mod tests {
 
     #[tokio::test]
     async fn unsettled_batch_item_with_expired_cached_proof_refetches_from_committee() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (mut manager, network) = manager(FakeNetwork {
             live: live(&ids),
             omitted_from_batches: ids.iter().cloned().collect(),
@@ -4000,11 +4000,15 @@ mod tests {
 
             let err = manager_single.get_substate(&template_id, None).await.unwrap_err();
             assert!(
-                matches!(err, IndexerError::UnexpectedSubstateType {
-                    actual: SubstateType::NonFungible,
+                matches!(err, IndexerError::MistypedSubstateValue {
+                    mismatch: SubstateTypeMismatch {
+                        expected: SubstateType::Template,
+                        found: SubstateType::NonFungible,
+                        ..
+                    },
                     ..
                 }),
-                "expected UnexpectedSubstateType when single member serves non-template value \
+                "expected MistypedSubstateValue when single member serves non-template value \
                  (verify_proofs={verify_proofs}), got {err:?}"
             );
 
@@ -4042,9 +4046,69 @@ mod tests {
         }
     }
 
+    /// A member serving a value of another type than its id addresses, such as a non-fungible for a vault, is
+    /// disqualified on an unproven read, single or batched, and the read falls back to an honest member.
+    #[tokio::test]
+    async fn a_value_of_another_type_than_its_id_disqualifies_its_member() {
+        let id = vault_id(1);
+        let mistyped = SubstateResult::Up {
+            substate: encoded(Substate::new(
+                0,
+                SubstateValue::NonFungible(NonFungibleContainer::no_data()),
+            )),
+        };
+        let honest_substate = encoded(Substate::new(0, vault_value()));
+        let honest = SubstateResult::Up {
+            substate: honest_substate.clone(),
+        };
+
+        let (manager, _) = manager_with_members(
+            FakeNetwork {
+                member_responses: HashMap::from([(("vn_bad".to_string(), id.clone()), mistyped.clone())]),
+                ..Default::default()
+            },
+            vec!["vn_bad".to_string()],
+        );
+        let err = manager.get_substate(&id, None).await.unwrap_err();
+        assert!(
+            matches!(&err, IndexerError::MistypedSubstateValue {
+                vn,
+                mismatch: SubstateTypeMismatch {
+                    expected: SubstateType::Vault,
+                    found: SubstateType::NonFungible,
+                    ..
+                },
+            } if vn == "vn_bad"),
+            "{err:?}"
+        );
+
+        // Members are raced in random order, so repeat to put the mistyped one first.
+        for _ in 0..8 {
+            let network = || FakeNetwork {
+                member_responses: HashMap::from([
+                    (("vn_bad".to_string(), id.clone()), mistyped.clone()),
+                    (("vn_honest".to_string(), id.clone()), honest.clone()),
+                ]),
+                ..Default::default()
+            };
+            let members = vec!["vn_bad".to_string(), "vn_honest".to_string()];
+
+            let (manager, _) = manager_with_members(network(), members.clone());
+            let single = manager.get_substate(&id, None).await.unwrap();
+            assert_eq!(single.result.into_up(), Some(honest_substate.clone()));
+
+            let (manager, _) = manager_with_members(network(), members);
+            let batched = manager
+                .fetch_and_cache_substates(std::slice::from_ref(&id))
+                .await
+                .unwrap();
+            assert_eq!(batched[&id].substate, honest_substate);
+        }
+    }
+
     #[tokio::test]
     async fn batch_with_does_not_exist_entry_is_rejected_in_all_proof_modes() {
-        let id = component_id(1);
+        let id = vault_id(1);
         let honest = encoded(live(std::slice::from_ref(&id)).remove(&id).unwrap());
 
         for verify_proofs in [false, true] {
@@ -4084,8 +4148,8 @@ mod tests {
 
     #[tokio::test]
     async fn batch_with_unrequested_or_duplicate_substate_is_rejected() {
-        let requested_id = component_id(1);
-        let unrequested_id = component_id(2);
+        let requested_id = vault_id(1);
+        let unrequested_id = vault_id(2);
         let honest = encoded(live(std::slice::from_ref(&requested_id)).remove(&requested_id).unwrap());
         let unrequested = encoded(
             live(std::slice::from_ref(&unrequested_id))

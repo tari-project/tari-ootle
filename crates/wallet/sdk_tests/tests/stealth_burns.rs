@@ -366,6 +366,23 @@ async fn a_verifying_wallet_records_a_reported_burn_spent_when_the_burnt_utxo_is
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_verifying_wallet_records_a_reported_burn_spent_when_the_burnt_utxo_proof_is_stale() {
+    let (sets, network, test, account) = wallet(IndexerTrust::Verify).await;
+    let (id, utxo) = test.owned_utxo(&account, VALUE);
+    hold(&test, &account, id, &utxo, Some(3), OutputStatus::Unspent);
+    serve_proven_down(&sets, &network, id);
+    let stale_value = SubstateValue::Utxo(burnt(&utxo));
+    let stale_proof = substate_proof(&sets[2], &substate_id(id), BURNT_VERSION, &stale_value);
+    network.serve_substate(substate_id(id), BURNT_VERSION, stale_value, Some(stale_proof));
+    report_burnt(&network, id);
+
+    let stats = scan(&test).await;
+    assert_eq!(stats.num_burnt, 0);
+    assert_eq!(stats.num_spent, 1);
+    assert_eq!(stored(&test, id).status, OutputStatus::Spent);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_verifying_wallet_keeps_an_output_reported_burnt_without_a_proof_that_it_went_down() {
     let (sets, network, test, account) = wallet(IndexerTrust::Verify).await;
     let (id, utxo) = test.owned_utxo(&account, VALUE);

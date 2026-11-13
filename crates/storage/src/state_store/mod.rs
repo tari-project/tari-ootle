@@ -64,6 +64,7 @@ use crate::{
         BlockTransactionExecution,
         EpochCheckpoint,
         Evidence,
+        FinalizedTransactionInclusion,
         ForeignParkedProposal,
         ForeignProposal,
         ForeignProposalRecord,
@@ -200,6 +201,13 @@ pub trait StateStoreReadTransaction: Sized {
         &self,
         tx_id: &TransactionId,
     ) -> Result<PrimitiveDateTime, StorageError>;
+    /// Where the decision this node finalized for `tx_id` is proven, or `None` if the transaction is not finalized or
+    /// was finalized without one. The commit proof of the inclusion's block is held by
+    /// [`StateStoreReadTransaction::block_commit_proofs_get`].
+    fn finalized_transaction_inclusion_get(
+        &self,
+        tx_id: &TransactionId,
+    ) -> Result<Option<FinalizedTransactionInclusion>, StorageError>;
 
     fn block_transaction_executions_get_pending_for_block(
         &self,
@@ -497,7 +505,8 @@ pub trait StateStoreReadTransaction: Sized {
         from: Version,
         to: Version,
     ) -> Result<Vec<StateVersionProof>, StorageError>;
-    /// The CBOR-encoded commit proof of `block_id`, a block this node committed that produced state versions.
+    /// The CBOR-encoded commit proof of `block_id`, a block this node committed that produced state versions or
+    /// finalized transactions.
     fn block_commit_proofs_get(&self, block_id: &BlockId) -> Result<Vec<u8>, StorageError>;
 
     /// The proof that `id` was committed before it went down in `shard`, if this node recorded one.
@@ -646,11 +655,12 @@ pub trait StateStoreWriteTransaction {
     /// Marks the given transactions as finalized in the epoch of the finalizing block. The epoch is
     /// recorded so that epoch GC can prune finalized transaction bookkeeping once it ages out of the
     /// retained window.
-    fn transactions_finalize_all<'a, I: IntoIterator<Item = &'a TransactionPoolRecord>>(
-        &mut self,
-        epoch: Epoch,
-        transactions: I,
-    ) -> Result<(), StorageError>;
+    ///
+    /// A transaction given with an inclusion keeps the commit proof of the inclusion's block from being deleted
+    /// until its bookkeeping is removed, so the commit proof must already be stored with
+    /// [`StateStoreWriteTransaction::block_commit_proofs_insert`].
+    fn transactions_finalize_all<'a, I>(&mut self, epoch: Epoch, transactions: I) -> Result<(), StorageError>
+    where I: IntoIterator<Item = (&'a TransactionPoolRecord, Option<FinalizedTransactionInclusion>)>;
 
     /// Forgets the node-local finalized bookkeeping for a transaction: the finalized marker and all
     /// recorded executions. This never reverts committed state — a commit's effects, fees and

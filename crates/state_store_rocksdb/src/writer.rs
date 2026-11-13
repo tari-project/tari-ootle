@@ -77,6 +77,7 @@ use tari_ootle_storage::{
         BlockTransactionExecution,
         EpochCheckpoint,
         Evidence,
+        FinalizedTransactionInclusion,
         ForeignParkedProposal,
         ForeignProposal,
         ForeignProposalRecord,
@@ -178,6 +179,8 @@ use crate::{
             BlockCommitProofCf,
             BlockCommitProofCitationByBlockQuery,
             BlockCommitProofCitationCf,
+            BlockCommitProofTransactionCitationByBlockQuery,
+            BlockCommitProofTransactionCitationCf,
             StateVersionProofByEpochQuery,
             StateVersionProofCf,
             StateVersionProofEpochIndex,
@@ -796,33 +799,37 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn transactions_finalize_all<'a, I: IntoIterator<Item = &'a TransactionPoolRecord>>(
-        &mut self,
-        epoch: Epoch,
-        transactions: I,
-    ) -> Result<(), StorageError> {
+    fn transactions_finalize_all<'a, I>(&mut self, epoch: Epoch, transactions: I) -> Result<(), StorageError>
+    where I: IntoIterator<Item = (&'a TransactionPoolRecord, Option<FinalizedTransactionInclusion>)> {
         const OPERATION: &str = "transactions_finalize_all";
 
-        let finalized_cf = self.db().cf(FinalizedTransactionLinkCf)?;
-        let epoch_index_cf = self.db().cf(finalized_transaction::EpochIndex)?;
+        let db = self.db();
+        let finalized_cf = db.cf(FinalizedTransactionLinkCf)?;
+        let epoch_index_cf = db.cf(finalized_transaction::EpochIndex)?;
+        let citations_cf = db.cf(BlockCommitProofTransactionCitationCf)?;
 
-        let iter = transactions.into_iter();
-        // Add transactions to finalized CF
-        let data = FinalizedTransactionLinkData {
-            finalized_at: now(),
-            epoch,
-        };
-        for transaction in iter {
-            // The epoch index holds exactly one entry per id: a re-finalized id (a previously
-            // aborted transaction sequenced again) moves to the epoch it last finalized in, so the
-            // GC horizon applies to the latest attempt.
-            if let Some(prev) = finalized_cf.get(transaction.id(), OPERATION).optional()? &&
-                prev.epoch != epoch
-            {
-                epoch_index_cf.delete(&(prev.epoch, *transaction.id()), OPERATION)?;
+        let finalized_at = now();
+        for (transaction, inclusion) in transactions {
+            let id = transaction.id();
+            if let Some(prev) = finalized_cf.get(id, OPERATION).optional()? {
+                // The epoch index holds exactly one entry per id: a re-finalized id (a previously
+                // aborted transaction sequenced again) moves to the epoch it last finalized in, so the
+                // GC horizon applies to the latest attempt.
+                if prev.epoch != epoch {
+                    epoch_index_cf.delete(&(prev.epoch, *id), OPERATION)?;
+                }
+                release_link(&db, id, &prev)?;
             }
-            finalized_cf.put(transaction.id(), &data, OPERATION)?;
-            epoch_index_cf.put(&(epoch, *transaction.id()), &(), OPERATION)?;
+            if let Some(inclusion) = &inclusion {
+                citations_cf.put(&(inclusion.block_id, *id), &(), OPERATION)?;
+            }
+            let data = FinalizedTransactionLinkData {
+                finalized_at,
+                epoch,
+                inclusion: inclusion.map(Into::into),
+            };
+            finalized_cf.put(id, &data, OPERATION)?;
+            epoch_index_cf.put(&(epoch, *id), &(), OPERATION)?;
         }
 
         Ok(())
@@ -838,6 +845,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             self.db()
                 .cf(finalized_transaction::EpochIndex)?
                 .delete(&(link.epoch, *tx_id), OPERATION)?;
+            release_link(&self.db(), tx_id, &link)?;
         }
         finalized_cf.delete(tx_id, OPERATION)?;
 
@@ -2414,14 +2422,49 @@ mod state_version_proofs {
             return Ok(());
         }
         citations.delete(&(*block_id, shard), OPERATION)?;
-        let remaining = db
-            .cf(BlockCommitProofCitationByBlockQuery)?
-            .query_prefix_range_keys(Ordering::Ascending, block_id)?;
-        if remaining.is_empty() {
+        delete_commit_proof_if_uncited(db, block_id)
+    }
+
+    /// Drops the citation of `block_id` by the finalized transaction link of `transaction_id`, and deletes the
+    /// block's commit proof once nothing cites it.
+    pub fn release_transaction_citation(
+        db: &DbWriteContext<'_>,
+        block_id: &BlockId,
+        transaction_id: &TransactionId,
+    ) -> Result<(), StorageError> {
+        const OPERATION: &str = "state_version_proofs::release_transaction_citation";
+        let citations = db.cf(BlockCommitProofTransactionCitationCf)?;
+        if !citations.exists(&(*block_id, *transaction_id), OPERATION)? {
+            return Ok(());
+        }
+        citations.delete(&(*block_id, *transaction_id), OPERATION)?;
+        delete_commit_proof_if_uncited(db, block_id)
+    }
+
+    fn delete_commit_proof_if_uncited(db: &DbWriteContext<'_>, block_id: &BlockId) -> Result<(), StorageError> {
+        const OPERATION: &str = "state_version_proofs::delete_commit_proof_if_uncited";
+        let cited_by_shard = db.cf(BlockCommitProofCitationByBlockQuery)?.exists_prefix(block_id)?;
+        let cited_by_transaction = db
+            .cf(BlockCommitProofTransactionCitationByBlockQuery)?
+            .exists_prefix(block_id)?;
+        if !cited_by_shard && !cited_by_transaction {
             db.cf(BlockCommitProofCf)?.delete(block_id, OPERATION)?;
         }
         Ok(())
     }
+}
+
+/// Drops what the finalized transaction link of `transaction_id` holds outside itself: the citation of its
+/// inclusion's block.
+fn release_link(
+    db: &DbWriteContext<'_>,
+    transaction_id: &TransactionId,
+    link: &FinalizedTransactionLinkData,
+) -> Result<(), StorageError> {
+    if let Some(inclusion) = &link.inclusion {
+        state_version_proofs::release_transaction_citation(db, &inclusion.block_id, transaction_id)?;
+    }
+    Ok(())
 }
 
 mod cleanup {
@@ -2515,6 +2558,9 @@ mod cleanup {
         let count = keys.len();
         for (epoch, tx_id) in keys {
             tx_cf.delete(&tx_id, OPERATION)?;
+            if let Some(link) = link_cf.get(&tx_id, OPERATION).optional()? {
+                release_link(db, &tx_id, &link)?;
+            }
             link_cf.delete(&tx_id, OPERATION)?;
             for (tx_id, block_id, epoch, height) in exec_query.query_prefix_range_keys(Ordering::default(), &tx_id)? {
                 exec_cf.delete(&(tx_id, block_id, epoch, height), OPERATION)?;

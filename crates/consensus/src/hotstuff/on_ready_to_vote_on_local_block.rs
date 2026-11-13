@@ -1,6 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::{collections::HashMap, ops::Deref};
+
 use log::*;
 use tari_consensus_types::{BlockId, LastVoted, PcId, ProposalCertificate};
 use tari_crypto::ristretto::RistrettoPublicKey;
@@ -22,6 +24,7 @@ use tari_ootle_storage::{
         BookkeepingModel,
         Command,
         CommittedBlockProof,
+        FinalizedTransactionInclusion,
         ForeignProposalAtom,
         ForeignProposalRecord,
         ForeignProposalStatus,
@@ -37,6 +40,7 @@ use tari_ootle_storage::{
         index_substate_down_proofs,
     },
 };
+use tari_ootle_transaction::TransactionId;
 use tari_sidechain::{FixedHash, QuorumDecision};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::broadcast;
@@ -853,22 +857,8 @@ where
         let mut state_tree = ShardedStateTree::new(tx);
         let version_updates = state_tree.commit_diffs(pending)?;
         let tx = state_tree.into_transaction();
-        // The state version proofs just indexed name this block, which is pruned with its epoch, so they are served
-        // with the commit proof stored here. A storage error fails the commit; a block that breaks a commit-proof
-        // invariant is logged, and the node keeps committing, as it does when it cannot index the proofs.
-        if index_committed_block_state_versions(tx, block, &version_updates)? {
-            match generate_block_commit_proof(&**tx, commit_qc, block) {
-                Ok(commit_proof) => {
-                    tx.block_commit_proofs_insert(block.id(), &CommittedBlockProof::new(commit_proof).to_bytes())?
-                },
-                Err(err @ HotStuffError::StorageError(_)) => return Err(err),
-                Err(err) => error!(
-                    target: LOG_TARGET,
-                    "BUG: cannot generate the commit proof of {block}, so its state versions cannot be proven to \
-                     syncing peers once it is pruned: {err}"
-                ),
-            }
-        }
+        let versions_indexed = index_committed_block_state_versions(tx, block, &version_updates)?;
+        let commit_proof_stored = store_block_commit_proof(tx, commit_qc, block, versions_indexed)?;
 
         {
             let _timer = TraceTimer::debug(LOG_TARGET, "commit_block");
@@ -895,7 +885,18 @@ where
         if !finalized_transactions.is_empty() {
             let _timer =
                 TraceTimer::debug(LOG_TARGET, "finalize transactions").with_iterations(finalized_transactions.len());
-            TransactionRecord::finalize_all(tx, block.epoch(), &finalized_transactions)?;
+            let mut inclusions = if commit_proof_stored {
+                finalized_transaction_inclusions(block)
+            } else {
+                HashMap::new()
+            };
+            TransactionRecord::finalize_all(
+                tx,
+                block.epoch(),
+                finalized_transactions
+                    .iter()
+                    .map(|transaction| (transaction, inclusions.remove(transaction.id()))),
+            )?;
 
             debug!(
                 target: LOG_TARGET,
@@ -927,6 +928,66 @@ where
         block.clear_leader_failure_count(tx, thresholds)?;
 
         Ok(finalized_transactions)
+    }
+}
+
+/// Stores the commit proof of `block` when anything names the block once it is pruned: the state version proofs just
+/// indexed for it (`versions_indexed`), or the inclusions of the transactions it finalizes. Returns whether the proof
+/// is stored.
+///
+/// A storage error fails the commit. A block that breaks a commit-proof invariant is logged, and the node keeps
+/// committing, as it does when it cannot index the proofs.
+fn store_block_commit_proof<TTx>(
+    tx: &mut TTx,
+    commit_qc: &ProposalCertificate,
+    block: &Block,
+    versions_indexed: bool,
+) -> Result<bool, HotStuffError>
+where
+    TTx: StateStoreWriteTransaction + Deref,
+    TTx::Target: StateStoreReadTransaction,
+{
+    let finalizes_transactions = block.all_finalising_transactions_ids().next().is_some();
+    if !versions_indexed && !finalizes_transactions {
+        return Ok(false);
+    }
+    match generate_block_commit_proof(&**tx, commit_qc, block) {
+        Ok(commit_proof) => {
+            tx.block_commit_proofs_insert(block.id(), &CommittedBlockProof::new(commit_proof).to_bytes())?;
+            Ok(true)
+        },
+        Err(err @ HotStuffError::StorageError(_)) => Err(err),
+        Err(err) => {
+            error!(
+                target: LOG_TARGET,
+                "BUG: cannot generate the commit proof of {block}, so neither its state versions nor the decisions it \
+                 finalized can be proven once it is pruned: {err}"
+            );
+            Ok(false)
+        },
+    }
+}
+
+/// The inclusion of each transaction `block` finalizes, for a block whose commit proof is stored. A block whose header
+/// disagrees with its commands is logged, and its transactions are recorded without one.
+fn finalized_transaction_inclusions(block: &Block) -> HashMap<TransactionId, FinalizedTransactionInclusion> {
+    match block.compute_transaction_proofs() {
+        Ok(proofs) => proofs
+            .into_iter()
+            .map(|(id, proof)| {
+                (id, FinalizedTransactionInclusion {
+                    block_id: *block.id(),
+                    proof,
+                })
+            })
+            .collect(),
+        Err(err) => {
+            error!(
+                target: LOG_TARGET,
+                "BUG: cannot prove the decisions {block} finalized, so they are recorded unproven: {err}"
+            );
+            HashMap::new()
+        },
     }
 }
 

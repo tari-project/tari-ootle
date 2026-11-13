@@ -777,6 +777,7 @@ pub(crate) mod tests {
             execution_time: Default::default(),
             finalized_time: PrimitiveDateTime::MIN,
             abort_details: None,
+            inclusion_proof: None,
         }))
     }
 

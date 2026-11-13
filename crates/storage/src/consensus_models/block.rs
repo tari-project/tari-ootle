@@ -43,7 +43,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_transaction::{Network, TransactionId};
 use tari_sidechain::FixedHash;
-use tari_state_tree::{SparseMerkleProofExt, StateTreeError, TreeHash, compute_proof_for_hashes};
+use tari_state_tree::{KeyedProofTree, SparseMerkleProofExt, StateTreeError, TreeHash, compute_proof_for_hashes};
 use tari_template_lib_types::{
     TransactionReceiptAddress,
     crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes},
@@ -519,16 +519,7 @@ impl Block {
         &self,
         transaction_id: &TransactionId,
     ) -> Result<(Option<FinalizedTransactionLeaf<'_>>, SparseMerkleProofExt), BlockError> {
-        let header_root = self.header.transaction_merkle_root();
-        let tree = build_finalized_transaction_tree(&self.commands)?;
-        let computed_root = FixedHash::from(tree.root().into_array());
-        if computed_root != *header_root {
-            return Err(BlockError::TransactionMerkleRootMismatch {
-                block_id: *self.id(),
-                header_root: *header_root,
-                computed_root,
-            });
-        }
+        let tree = self.verified_transaction_tree()?;
         let leaf = self
             .commands
             .iter()
@@ -540,6 +531,36 @@ impl Block {
             });
         let (_, proof) = tree.get_proof(&transaction_leaf_key(transaction_id))?;
         Ok((leaf, proof))
+    }
+
+    /// The inclusion proof of every transaction this block finalizes, against
+    /// [`BlockHeader::transaction_merkle_root`], building the tree once.
+    ///
+    /// Fails as [`Self::compute_transaction_proof`] does when the header's root disagrees with the commands.
+    pub fn compute_transaction_proofs(&self) -> Result<HashMap<TransactionId, SparseMerkleProofExt>, BlockError> {
+        let tree = self.verified_transaction_tree()?;
+        self.commands
+            .iter()
+            .filter_map(Command::finalising)
+            .map(|atom| {
+                let (_, proof) = tree.get_proof(&transaction_leaf_key(atom.id()))?;
+                Ok::<_, BlockError>((*atom.id(), proof))
+            })
+            .collect()
+    }
+
+    fn verified_transaction_tree(&self) -> Result<KeyedProofTree, BlockError> {
+        let header_root = self.header.transaction_merkle_root();
+        let tree = build_finalized_transaction_tree(&self.commands)?;
+        let computed_root = FixedHash::from(tree.root().into_array());
+        if computed_root != *header_root {
+            return Err(BlockError::TransactionMerkleRootMismatch {
+                block_id: *self.id(),
+                header_root: *header_root,
+                computed_root,
+            });
+        }
+        Ok(tree)
     }
 
     pub fn set_justify_qc(&mut self, justify_qc_id: PcId) {

@@ -214,8 +214,11 @@ impl Evidence {
             .filter_map(|(sg, e)| if e.inputs().is_empty() { Some(*sg) } else { None })
     }
 
+    /// Returns true if all substates in the given shard group are input locks.
+    /// This assumes the provided evidence is complete before this is called.
+    /// If no evidence is present for the shard group, false is returned.
     pub fn is_committee_input_only(&self, shard_group: ShardGroup) -> bool {
-        self.evidence.get(&shard_group).is_none_or(|e| e.outputs().is_empty())
+        self.evidence.get(&shard_group).is_some_and(|e| e.outputs().is_empty())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -845,5 +848,20 @@ mod tests {
             let sg_ev = evidence.get(&sg).expect("shard group present");
             assert!(sg_ev.inputs().contains_key(&global_id));
         }
+    }
+
+    #[test]
+    fn is_committee_input_only_returns_false_when_shard_group_is_absent() {
+        let sg_present = ShardGroup::new(0, 1);
+        let sg_absent = ShardGroup::new(2, 3);
+
+        let mut evidence = Evidence::empty();
+        assert!(!evidence.is_committee_input_only(sg_present));
+
+        evidence
+            .add_shard_group(sg_present)
+            .insert_from_lock_intent(seed_lock_intent(1, SubstateLockType::Read));
+        assert!(evidence.is_committee_input_only(sg_present));
+        assert!(!evidence.is_committee_input_only(sg_absent));
     }
 }

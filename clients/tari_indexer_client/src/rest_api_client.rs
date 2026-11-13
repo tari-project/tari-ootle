@@ -120,7 +120,7 @@ impl IndexerRestApiClient {
 
         let client = client_builder.build()?;
 
-        let (endpoint, _) = watch::channel(endpoint.into_url()?);
+        let (endpoint, _) = watch::channel(normalize_endpoint(endpoint)?);
         Ok(Self {
             client,
             endpoint: Arc::new(endpoint),
@@ -146,7 +146,7 @@ impl IndexerRestApiClient {
     /// [`subscribe_endpoint_changes`](Self::subscribe_endpoint_changes) are notified only when the URL actually
     /// changes.
     pub fn set_endpoint<T: IntoUrl>(&self, endpoint: T) -> Result<(), IndexerRestClientError> {
-        let endpoint = endpoint.into_url()?;
+        let endpoint = normalize_endpoint(endpoint)?;
         self.endpoint.send_if_modified(|current| {
             if *current == endpoint {
                 return false;
@@ -287,7 +287,7 @@ impl IndexerRestApiClient {
             .json(&req)
             .send()
             .await?;
-        let resp = require_success_status(resp)?;
+        let resp = check_response_status(resp).await?;
 
         let stream = resp.bytes_stream();
         let stream = ProtobufStream::<protobuf::UtxoUpdatePayload>::new(stream);
@@ -377,6 +377,7 @@ impl IndexerRestApiClient {
     /// Joins `path` onto the current endpoint. The endpoint is read once, so a request built from the result goes
     /// to a single indexer even if [`set_endpoint`](Self::set_endpoint) runs while it is in flight.
     fn url_for(&self, path: &str) -> String {
+        let path = path.strip_prefix('/').unwrap_or(path);
         format!("{}{}", *self.endpoint.borrow(), path)
     }
 
@@ -400,6 +401,7 @@ impl IndexerRestApiClient {
         }
 
         let resp = self.client.get(url).send().await?;
+        let resp = check_response_status(resp).await?;
         Ok(resp.into())
     }
 
@@ -440,6 +442,17 @@ impl IndexerRestApiClient {
     }
 }
 
+/// Normalizes an indexer base URL so that its path always ends with `/`.
+fn normalize_endpoint(endpoint: impl IntoUrl) -> Result<Url, IndexerRestClientError> {
+    let mut url = endpoint.into_url()?;
+    if !url.path().ends_with('/') {
+        let mut path = url.path().to_owned();
+        path.push('/');
+        url.set_path(&path);
+    }
+    Ok(url)
+}
+
 /// Notifies of endpoint changes on an [`IndexerRestApiClient`]. Created by
 /// [`IndexerRestApiClient::subscribe_endpoint_changes`].
 #[derive(Debug, Clone)]
@@ -477,18 +490,26 @@ pub(crate) fn require_success_status(resp: reqwest::Response) -> Result<reqwest:
     Ok(resp)
 }
 
-async fn handle_json_response<T: DeserializeOwned>(
+/// Checks `resp`'s status and, on 4xx/5xx, reads the server's JSON error details before returning
+/// [`IndexerRestClientError::ErrorResponse`].
+pub(crate) async fn check_response_status(
     resp: reqwest::Response,
-    path: String,
-    max_response_bytes: usize,
-) -> Result<T, IndexerRestClientError> {
+) -> Result<reqwest::Response, IndexerRestClientError> {
     if let Some(err) = resp.error_for_status_ref().err() {
         return Err(IndexerRestClientError::ErrorResponse {
             source: err,
             details: read_error_details(resp).await,
         });
     }
-    let resp = require_success_status(resp)?;
+    require_success_status(resp)
+}
+
+async fn handle_json_response<T: DeserializeOwned>(
+    resp: reqwest::Response,
+    path: String,
+    max_response_bytes: usize,
+) -> Result<T, IndexerRestClientError> {
+    let resp = check_response_status(resp).await?;
     let Some(body) = read_body_capped(resp, max_response_bytes).await? else {
         return Err(IndexerRestClientError::ResponseTooLarge {
             path,
@@ -498,15 +519,21 @@ async fn handle_json_response<T: DeserializeOwned>(
     serde_json::from_slice(&body).map_err(|e| IndexerRestClientError::DeserializeResponse { path, source: e.into() })
 }
 
+const MAX_INITIAL_BODY_CAPACITY: usize = 64 * 1024;
+
 /// Reads the body of `resp`, or returns `None` as soon as it is known to be longer than `limit` bytes.
 async fn read_body_capped(mut resp: reqwest::Response, limit: usize) -> Result<Option<Vec<u8>>, reqwest::Error> {
     let declared = resp.content_length();
     if declared.is_some_and(|len| len > limit as u64) {
         return Ok(None);
     }
-    let mut body = Vec::with_capacity(declared.unwrap_or(0) as usize);
+    let initial_capacity = declared
+        .and_then(|len| usize::try_from(len).ok())
+        .unwrap_or(0)
+        .min(MAX_INITIAL_BODY_CAPACITY);
+    let mut body = Vec::with_capacity(initial_capacity);
     while let Some(chunk) = resp.chunk().await? {
-        if body.len() + chunk.len() > limit {
+        if body.len().saturating_add(chunk.len()) > limit {
             return Ok(None);
         }
         body.extend_from_slice(&chunk);
@@ -734,5 +761,38 @@ mod tests {
         client.set_endpoint("not a url").unwrap_err();
 
         assert_eq!(client.endpoint().as_str(), "http://indexer-a.example:18300/");
+    }
+
+    #[test]
+    fn endpoint_with_path_prefix_without_trailing_slash_is_normalized() {
+        let client = IndexerRestApiClient::connect("http://indexer-a.example:18300/api/v1").unwrap();
+        assert_eq!(client.endpoint().as_str(), "http://indexer-a.example:18300/api/v1/");
+        assert_eq!(
+            client.url_for("substates/fetch"),
+            "http://indexer-a.example:18300/api/v1/substates/fetch"
+        );
+        assert_eq!(
+            client.url_for("/substates/fetch"),
+            "http://indexer-a.example:18300/api/v1/substates/fetch"
+        );
+
+        client.set_endpoint("http://indexer-b.example:18300/proxy").unwrap();
+        assert_eq!(client.endpoint().as_str(), "http://indexer-b.example:18300/proxy/");
+        assert_eq!(
+            client.url_for("substates/fetch"),
+            "http://indexer-b.example:18300/proxy/substates/fetch"
+        );
+    }
+
+    #[tokio::test]
+    async fn setting_path_prefixed_endpoint_with_trailing_slash_is_not_a_change() {
+        let client = IndexerRestApiClient::connect("http://indexer-a.example:18300/api").unwrap();
+        let mut changes = client.subscribe_endpoint_changes();
+
+        client.set_endpoint("http://indexer-a.example:18300/api/").unwrap();
+
+        tokio::time::timeout(Duration::from_millis(50), changes.changed())
+            .await
+            .unwrap_err();
     }
 }

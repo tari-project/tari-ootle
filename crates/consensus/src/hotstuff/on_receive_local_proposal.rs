@@ -19,6 +19,7 @@ use tari_consensus_types::{
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     Epoch,
+    NodeHeight,
     ProtocolVersion,
     ValidatorSetHash,
     committee::{Committee, CommitteeInfo},
@@ -97,10 +98,25 @@ pub struct OnReceiveLocalProposalHandler<TConsensusSpec: ConsensusSpec> {
 /// The most recent block processed from a catch-up delivery that this node would have voted on had it arrived as a
 /// proposal. Whether a block comes as a catch-up response is the sending peer's choice, so a proposal for the block
 /// that arrives afterwards still gets the vote.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct UnvotedCatchUpBlock {
     block_id: BlockId,
+    height: NodeHeight,
     decision: QuorumDecision,
+}
+
+impl UnvotedCatchUpBlock {
+    /// Records `block_id` as the pending unvoted catch-up block unless a strictly higher catch-up block is already
+    /// held, preventing an out-of-order or past catch-up delivery from clobbering the latest block's withheld vote.
+    fn record(slot: &mut Option<Self>, block_id: BlockId, height: NodeHeight, decision: QuorumDecision) {
+        if slot.is_none_or(|prev| height >= prev.height) {
+            *slot = Some(Self {
+                block_id,
+                height,
+                decision,
+            });
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -524,7 +540,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     can_propose_epoch_end,
                     local_next_epoch,
                     next_epoch_changes_layout,
-                    origin,
                     &mut change_set,
                 )?;
 
@@ -593,29 +608,38 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         let is_accept_decision = block_decision.is_accept();
 
         // End of epoch committed? No need to enter the view or send votes
-        if !block_decision.is_committed_epoch_end() &&
-            let Some(decision) = block_decision.local_decision
-        {
-            // Enter the highest view justified by this block
-            pacemaker_actions.enter_view(
-                valid_block.epoch(),
-                block_decision.highest_qc_view(),
-                block_decision.high_pc.height(),
-            );
-
-            if origin.is_catch_up() {
-                debug!(
-                    target: LOG_TARGET,
-                    "🌐 Not voting on {}: it arrived through catch-up. A proposal for it later gets the vote.",
-                    valid_block.block(),
+        if !block_decision.is_committed_epoch_end() {
+            // A catch-up block at or below `last_voted` reports `AlreadyVotedAtHeight` and enters the highest view its
+            // QC justifies.
+            if block_decision.local_decision.is_some() ||
+                (origin.is_catch_up() &&
+                    matches!(block_decision.no_vote_reason, Some(NoVoteReason::AlreadyVotedAtHeight)))
+            {
+                // Enter the highest view justified by this block
+                pacemaker_actions.enter_view(
+                    valid_block.epoch(),
+                    block_decision.highest_qc_view(),
+                    block_decision.high_pc.height(),
                 );
-                self.unvoted_catch_up_block = Some(UnvotedCatchUpBlock {
-                    block_id: *valid_block.id(),
-                    decision,
-                });
-            } else {
-                self.vote_on_block(local_committee, valid_block.block(), decision)
-                    .await?;
+            }
+
+            if let Some(decision) = block_decision.local_decision {
+                if origin.is_catch_up() {
+                    debug!(
+                        target: LOG_TARGET,
+                        "🌐 Not voting on {}: it arrived through catch-up. A proposal for it later gets the vote.",
+                        valid_block.block(),
+                    );
+                    UnvotedCatchUpBlock::record(
+                        &mut self.unvoted_catch_up_block,
+                        *valid_block.id(),
+                        valid_block.height(),
+                        decision,
+                    );
+                } else {
+                    self.vote_on_block(local_committee, valid_block.block(), decision)
+                        .await?;
+                }
             }
         }
 
@@ -1346,5 +1370,43 @@ mod tests {
         assert!(!reported.record(eoe_block, local));
         assert!(reported.record(eoe_block, corrected));
         assert!(reported.record(BlockId::from([4; 32]), corrected));
+    }
+
+    #[test]
+    fn a_lower_height_catch_up_block_does_not_overwrite_a_higher_unvoted_catch_up_block() {
+        let mut slot = None;
+        let block_10 = BlockId::from([10; 32]);
+        let block_4 = BlockId::from([4; 32]);
+        let block_11 = BlockId::from([11; 32]);
+
+        UnvotedCatchUpBlock::record(&mut slot, block_10, NodeHeight(10), QuorumDecision::Accept);
+        assert_eq!(
+            slot,
+            Some(UnvotedCatchUpBlock {
+                block_id: block_10,
+                height: NodeHeight(10),
+                decision: QuorumDecision::Accept,
+            })
+        );
+
+        UnvotedCatchUpBlock::record(&mut slot, block_4, NodeHeight(4), QuorumDecision::Accept);
+        assert_eq!(
+            slot,
+            Some(UnvotedCatchUpBlock {
+                block_id: block_10,
+                height: NodeHeight(10),
+                decision: QuorumDecision::Accept,
+            })
+        );
+
+        UnvotedCatchUpBlock::record(&mut slot, block_11, NodeHeight(11), QuorumDecision::Accept);
+        assert_eq!(
+            slot,
+            Some(UnvotedCatchUpBlock {
+                block_id: block_11,
+                height: NodeHeight(11),
+                decision: QuorumDecision::Accept,
+            })
+        );
     }
 }

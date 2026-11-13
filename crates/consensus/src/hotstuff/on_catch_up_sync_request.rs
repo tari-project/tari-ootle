@@ -249,14 +249,31 @@ impl<TStore: StateStore> Iterator for CatchUpBatches<'_, TStore> {
             return None;
         }
         let result = self.store.with_read_tx(|tx| {
-            Block::get_all_blocks_between(
+            let mut blocks = Block::get_all_blocks_between(
                 tx,
                 self.epoch,
                 self.next_height,
                 self.leaf_height,
                 false,
                 CATCH_UP_BATCH_SIZE,
-            )
+            )?;
+            // `Block::get_all_blocks_between` orders by `(epoch, height, block_id)`, so a full batch can stop partway
+            // through a height that holds competing forks. Each batch ends on a complete height so that `next_height`
+            // advances to `last_height + 1` with every non-dummy block at `last_height` included.
+            if blocks.len() == CATCH_UP_BATCH_SIZE &&
+                let Some(last) = blocks.last()
+            {
+                let last_height = last.height();
+                for id in Block::get_ids_by_epoch_and_height(tx, self.epoch, last_height)? {
+                    if blocks.iter().all(|b| b.id() != &id) {
+                        let block = Block::get(tx, &id)?;
+                        if !block.is_dummy() {
+                            blocks.push(block);
+                        }
+                    }
+                }
+            }
+            Ok(blocks)
         });
         // A failed or empty read ends the response, so the next call reads nothing
         self.next_height = match &result {
@@ -288,6 +305,10 @@ mod tests {
     /// A block extending `parent`. It carries a signature, since a catch-up response skips unsigned (dummy) blocks;
     /// the store does not check it.
     fn child(parent: &Block) -> Block {
+        child_with_fee(parent, 0)
+    }
+
+    fn child_with_fee(parent: &Block, total_leader_fee: u64) -> Block {
         let justify = ProposalCertificate::new(
             *parent.id().hash(),
             *parent.id(),
@@ -310,7 +331,7 @@ mod tests {
             RistrettoPublicKeyBytes::default(),
             FixedHash::zero(),
             &commands,
-            0,
+            total_leader_fee,
             EpochTime::now().as_u64(),
             FixedHash::zero(),
             ShardGroupAccumulatedData::default(),
@@ -364,5 +385,45 @@ mod tests {
         let (store, _tmp) = store_with_chain(5);
 
         assert_eq!(batch_heights(&store, 5, 5), [[5]]);
+    }
+
+    #[test]
+    fn sibling_blocks_at_a_batch_boundary_height_are_not_skipped() {
+        let boundary = CATCH_UP_BATCH_SIZE as u64;
+        let leaf_height = boundary + 1;
+        let tmp = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(tmp.path(), DatabaseOptions::default()).unwrap();
+        let mut block = Block::zero_block(NETWORK, NUM_PRESHARDS);
+        let (fork_a, fork_b, leaf) = store
+            .with_write_tx(|tx| {
+                block.justify().save(tx)?;
+                block.insert(tx)?;
+                for _ in 1..boundary {
+                    block = child(&block);
+                    block.justify().save(tx)?;
+                    block.insert(tx)?;
+                }
+                let fork_a = child_with_fee(&block, 0);
+                let fork_b = child_with_fee(&block, 1);
+                for fork in [&fork_a, &fork_b] {
+                    fork.justify().save(tx)?;
+                    fork.insert(tx)?;
+                }
+                // Extend whichever sibling sorts second by BlockId so it sits past the 100-block limit.
+                let canonical_parent = if fork_a.id() > fork_b.id() { &fork_a } else { &fork_b };
+                let leaf = child(canonical_parent);
+                leaf.justify().save(tx)?;
+                leaf.insert(tx)?;
+                Ok::<_, StorageError>((fork_a, fork_b, leaf))
+            })
+            .unwrap();
+
+        let ids: Vec<_> = CatchUpBatches::new(&store, Epoch::zero(), NodeHeight(1), NodeHeight(leaf_height))
+            .flat_map(|batch| batch.unwrap().into_iter().map(|b| *b.id()))
+            .collect();
+
+        assert!(ids.contains(fork_a.id()), "missing fork_a at boundary height");
+        assert!(ids.contains(fork_b.id()), "missing fork_b at boundary height");
+        assert_eq!(ids.last(), Some(leaf.id()));
     }
 }

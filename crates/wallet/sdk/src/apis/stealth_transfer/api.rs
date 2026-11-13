@@ -81,17 +81,6 @@ fn merged_statement_fits_credit(num_inputs: usize, num_outputs: usize, has_view_
     transfer_native_points_for_shape(num_inputs, num_outputs, has_view_key) <= budget
 }
 
-fn can_attempt_merged_statement(
-    has_fee_swap: bool,
-    resource_address: ResourceAddress,
-    num_blinded_outputs: usize,
-    has_view_key: bool,
-) -> bool {
-    !has_fee_swap &&
-        resource_address == TARI_TOKEN &&
-        merged_statement_fits_credit(0, num_blinded_outputs, has_view_key)
-}
-
 pub struct StealthTransferApi<'a, TSpec: WalletSdkSpec> {
     accounts_api: AccountsApi<'a, TSpec>,
     outputs_api: StealthOutputsApi<'a, TSpec>,
@@ -768,14 +757,9 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             // statement, doing in one statement what otherwise takes two. It requires the fee and the
             // transfer resource to coincide, and the merged statement's whole verification then runs in
             // the fee intent ahead of `pay_fee`, funded by FREE_COMPUTE_GRACE_POINTS alone.
-            // A merge is attempted only if the blinded outputs alone fit the fee-intent credit; the
-            // post-selection fallback locks the fee a second time.
-            let merge_candidate = can_attempt_merged_statement(
-                params.fee_params.pay_fee_with_swap.is_some(),
-                params.resource_address,
-                num_blinded_outputs,
-                resource_has_view_key,
-            );
+            let merge_candidate = params.fee_params.pay_fee_with_swap.is_none() &&
+                params.resource_address == TARI_TOKEN &&
+                merged_statement_fits_credit(0, num_blinded_outputs, resource_has_view_key);
 
             // On the separate-statement path the fee half must run before transfer input selection, so
             // that its change output reaches the store in time for the transfer to be able to spend it.
@@ -1514,13 +1498,8 @@ fn withdraw_from_account<D>(
 #[cfg(test)]
 mod merged_credit_tests {
     use tari_engine_types::limits::{FREE_COMPUTE_GRACE_POINTS, NativeExecutionPoints as P};
-    use tari_template_lib::types::{ObjectKey, ResourceAddress, constants::TARI_TOKEN};
 
-    use super::{
-        MERGED_STATEMENT_CREDIT_UTILISATION_PERCENT,
-        can_attempt_merged_statement,
-        merged_statement_fits_credit,
-    };
+    use super::{MERGED_STATEMENT_CREDIT_UTILISATION_PERCENT, merged_statement_fits_credit};
 
     fn budget() -> u64 {
         FREE_COMPUTE_GRACE_POINTS / 100 * MERGED_STATEMENT_CREDIT_UTILISATION_PERCENT
@@ -1555,15 +1534,5 @@ mod merged_credit_tests {
         // The per-output ElGamal surcharge lowers the output ceiling for view-key resources.
         assert!(merged_statement_fits_credit(0, 3, false));
         assert!(!merged_statement_fits_credit(0, 3, true));
-    }
-
-    #[test]
-    fn can_attempt_merged_statement_rejects_unmergeable_output_count_up_front() {
-        let non_tari = ResourceAddress::new(ObjectKey::from_array([9u8; ObjectKey::LENGTH]));
-        assert!(can_attempt_merged_statement(false, TARI_TOKEN, 3, false));
-        assert!(!can_attempt_merged_statement(false, TARI_TOKEN, 4, false));
-        assert!(!can_attempt_merged_statement(false, TARI_TOKEN, 3, true));
-        assert!(!can_attempt_merged_statement(true, TARI_TOKEN, 1, false));
-        assert!(!can_attempt_merged_statement(false, non_tari, 1, false));
     }
 }

@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 
 use proc_macro2::Ident;
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_transaction::{
     Blob,
     BlobIndex,
@@ -398,13 +399,13 @@ impl ManifestInstructionGenerator {
             ManifestLiteral::Special(SpecialLiteral::NonFungibleId(id)) => Ok(call_arg!(id)),
             ManifestLiteral::Special(SpecialLiteral::Cbor(value)) => Ok(InstructionArg::literal(value)?),
             ManifestLiteral::Special(SpecialLiteral::Metadata(metadata)) => Ok(call_arg!(metadata)),
-            ManifestLiteral::Special(SpecialLiteral::SubstateId(id_or_var)) => match id_or_var {
-                OrVar::Var(ident) => self.get_ident(&ident.to_string()),
-                OrVar::Value(id) => Ok(call_arg!(id)),
+            ManifestLiteral::Special(SpecialLiteral::SubstateId(id_or_var)) => {
+                self.resolve_id_or_var(id_or_var, "substate_id", |id| Ok(call_arg!(id)))
             },
-            ManifestLiteral::Special(SpecialLiteral::Address(var_or_id)) => match var_or_id {
-                OrVar::Var(ident) => self.get_ident(&ident.to_string()),
-                OrVar::Value(id) => Ok(InstructionArg::literal(address_value(&id)?)?),
+            ManifestLiteral::Special(SpecialLiteral::Address(var_or_id)) => {
+                self.resolve_id_or_var(var_or_id, "address", |id| {
+                    Ok(InstructionArg::literal(address_value(id)?)?)
+                })
             },
         }
     }
@@ -539,6 +540,30 @@ impl ManifestInstructionGenerator {
                 "'{name}' is an input value, but this position requires a workspace value"
             ))),
             Resolved::Blob => Err(Self::misplaced_blob(name)),
+        }
+    }
+
+    /// Resolves the argument of `substate_id!(..)` or `address!(..)`. An input variable must hold a substate ID and is
+    /// written with the macro's own encoding, so the variable and literal forms produce the same bytes.
+    fn resolve_id_or_var(
+        &self,
+        id_or_var: OrVar<SubstateId>,
+        macro_name: &str,
+        encode: impl FnOnce(&SubstateId) -> Result<InstructionArg, ManifestError>,
+    ) -> Result<InstructionArg, ManifestError> {
+        match id_or_var {
+            OrVar::Value(id) => encode(&id),
+            OrVar::Var(ident) => {
+                let name = ident.to_string();
+                match self.resolve(&name)? {
+                    Resolved::Value(ManifestValue::SubstateId(id)) => encode(id),
+                    Resolved::Value(other) => Err(ManifestError::InvalidVariableType(format!(
+                        "Expected a substate address in {macro_name}!({name}), got {other:?}"
+                    ))),
+                    Resolved::Workspace(id) => Ok(InstructionArg::Workspace(id)),
+                    Resolved::Blob => Err(Self::misplaced_blob(&name)),
+                }
+            },
         }
     }
 

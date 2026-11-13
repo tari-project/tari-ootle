@@ -70,6 +70,12 @@ impl ModuleMiddleware for ResettableState {
             return Err(refused("passive element segments are not allowed"));
         }
 
+        for export_name in module_info.exports.keys() {
+            if export_name.starts_with(GLOBAL_EXPORT_PREFIX) {
+                return Err(refused(format!("export name `{export_name}` is reserved")));
+            }
+        }
+
         let defined_globals = module_info
             .globals
             .iter()
@@ -83,9 +89,6 @@ impl ModuleMiddleware for ResettableState {
                 return Err(refused(format!("mutable global {} has type {ty}", index.as_u32())));
             }
             let name = format!("{GLOBAL_EXPORT_PREFIX}{}", index.as_u32());
-            if module_info.exports.contains_key(&name) {
-                return Err(refused(format!("export name `{name}` is reserved")));
-            }
             module_info.exports.insert(name, ExportIndex::Global(index));
         }
         Ok(())
@@ -443,5 +446,11 @@ mod tests {
         assert_eq!(runs[0].1.len(), 11);
         assert_eq!(runs[1].0, (21 + MIN_IMAGE_GAP) as u64);
         assert_eq!(&*runs[1].1, &[3]);
+    }
+
+    #[test]
+    fn exports_with_reserved_prefix_are_refused() {
+        assert!(refusal(r#"(module (global (export "__tari_global_z") i32 (i32.const 0)))"#).contains("is reserved"));
+        assert!(refusal(r#"(module (func (export "__tari_global_fn")))"#).contains("is reserved"));
     }
 }

@@ -56,24 +56,23 @@ pub async fn handle_get_validator_fees(
     let sdk = context.wallet_sdk().clone();
     let granted = context.authorize(token, &[Permission::Validators(Crud::Read)])?;
 
-    let claim_key = match req.account_or_key {
+    let claim_public_key = match req.account_or_key {
         AccountOrKeyId::Account(acc) => {
             let account = get_account_or_default(acc.as_ref(), &sdk.accounts_api())?;
             enforce_scopes(&granted, &[Permission::Accounts(
                 Crud::Read,
                 Some(*account.component_address()),
             )])?;
-            let account_key_id = account.owner_key_id().ok_or_else(|| {
-                anyhow!("The specified account does not have an associated owner key to derive the claim key from")
-            })?;
-            sdk.key_manager_api().get_public_key(account_key_id)?
+            *account.address.account_public_key()
         },
         AccountOrKeyId::KeyId(key_id) => {
             ensure_signing_key(&sdk, "account_or_key", &key_id)?;
-            sdk.key_manager_api().get_public_key(key_id)?
+            sdk.key_manager_api()
+                .get_public_key(key_id)?
+                .public_key()
+                .to_byte_type()
         },
     };
-    let claim_public_key = claim_key.public_key().to_byte_type();
 
     let shards = req
         .shard_group
@@ -130,6 +129,9 @@ pub async fn handle_claim_validator_fees(
     let sdk = context.wallet_sdk().clone();
     let granted = context.authorize(token, &[Permission::Validators(Crud::Update)])?;
     if !req.dry_run {
+        if req.max_fee == 0 {
+            return Err(invalid_params("max_fee", Some("max_fee must be greater than zero")));
+        }
         context.enforce_max_fee_limit(req.max_fee)?;
     }
 
@@ -144,7 +146,10 @@ pub async fn handle_claim_validator_fees(
         Some(account_component_address),
     )])?;
     let account_key_id = account.owner_key_id().ok_or_else(|| {
-        anyhow!("The specified account does not have an associated owner key to derive the claim key from")
+        invalid_params(
+            "account",
+            Some("The specified account does not have an associated owner key to derive the claim key from"),
+        )
     })?;
 
     let claim_public_key = match req.claim_key_index {
@@ -409,11 +414,24 @@ async fn build_self_stealth_statement(
 
 #[cfg(test)]
 mod tests {
+    use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
     use tari_ootle_common_types::{Epoch, ShardGroup, shard::Shard};
+    use tari_ootle_walletd_client::ComponentAddressOrName;
     use tari_template_lib_types::ComponentAddress;
 
     use super::*;
     use crate::handlers::{auth::jwt::AuthError, test_support::TestDaemon};
+
+    fn assert_invalid_param(err: &anyhow::Error, field: &str) {
+        let jrpc_err = err
+            .downcast_ref::<JsonRpcError>()
+            .unwrap_or_else(|| panic!("expected JsonRpcError, got: {err}"));
+        assert!(matches!(jrpc_err.error_reason(), JsonRpcErrorReason::InvalidParams));
+        assert!(
+            err.to_string().contains(field),
+            "expected invalid param for '{field}', got: {err}"
+        );
+    }
 
     #[tokio::test]
     async fn fees_are_looked_up_only_for_a_signing_key() {
@@ -432,8 +450,69 @@ mod tests {
             })
             .await
             .unwrap_err();
-            assert!(err.to_string().contains("account_or_key"), "{err}");
+            assert_invalid_param(&err, "account_or_key");
         }
+    }
+
+    #[tokio::test]
+    async fn fees_can_be_looked_up_for_a_view_only_account_while_claim_rejects_it_and_zero_max_fee() {
+        let daemon = TestDaemon::start().await;
+        let sdk = daemon.context.wallet_sdk();
+        let view_only_addr = ComponentAddress::from_array([0xcc; 32]);
+        let owner_pk = sdk
+            .key_manager_api()
+            .get_public_key(KeyId::derived(KeyBranch::Account, 0))
+            .unwrap()
+            .public_key
+            .to_byte_type();
+        sdk.accounts_api()
+            .add_account(
+                Some("view_only"),
+                &view_only_addr,
+                KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+                owner_pk,
+                Epoch::zero(),
+                false,
+                false,
+            )
+            .unwrap();
+
+        let get_err = handle_get_validator_fees(&daemon.context, Some(&daemon.session), GetValidatorFeesRequest {
+            account_or_key: AccountOrKeyId::Account(Some(ComponentAddressOrName::ComponentAddress(view_only_addr))),
+            shard_group: Some(ShardGroup::new(Shard::from(1u32), Shard::from(1u32))),
+        })
+        .await
+        .expect_err("offline indexer fails after resolving the view-only account public key");
+        assert!(
+            get_err.downcast_ref::<JsonRpcError>().is_none() && !get_err.to_string().contains("owner key"),
+            "view-only account lookup should reach the network instead of failing on owner key: {get_err}"
+        );
+
+        let zero_fee_err =
+            handle_claim_validator_fees(&daemon.context, Some(&daemon.session), ClaimValidatorFeesRequest {
+                account: Some(ComponentAddressOrName::ComponentAddress(view_only_addr)),
+                claim_key_index: None,
+                max_fee: 0,
+                shards: vec![Shard::from(1u32)],
+                dry_run: false,
+                output_to_revealed: true,
+            })
+            .await
+            .unwrap_err();
+        assert_invalid_param(&zero_fee_err, "max_fee");
+
+        let view_only_claim_err =
+            handle_claim_validator_fees(&daemon.context, Some(&daemon.session), ClaimValidatorFeesRequest {
+                account: Some(ComponentAddressOrName::ComponentAddress(view_only_addr)),
+                claim_key_index: None,
+                max_fee: 1000,
+                shards: vec![Shard::from(1u32)],
+                dry_run: true,
+                output_to_revealed: true,
+            })
+            .await
+            .unwrap_err();
+        assert_invalid_param(&view_only_claim_err, "account");
     }
 
     #[tokio::test]

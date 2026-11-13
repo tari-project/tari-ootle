@@ -40,6 +40,7 @@ use crate::{
     handlers::{
         auth::jwt::enforce_scopes,
         helpers::{
+            OrJrpcNotFound,
             application_error,
             get_account,
             get_account_with_inputs,
@@ -64,7 +65,7 @@ pub async fn handle_get(
 
     let non_fungible = non_fungible_api
         .get(req.resource_address, req.nft_id)
-        .map_err(|e| anyhow!("Failed to get non fungible token, with error: {}", e))?;
+        .or_jrpc_not_found()?;
 
     Ok(non_fungible)
 }
@@ -306,39 +307,61 @@ pub async fn handle_transfer(
         req.target_account_address.account_public_key(),
     );
 
-    // TODO: this can be simplified
-    let mut builder = context.transaction_builder().await?;
-    // collect all instructions
-    let non_fungible_api = sdk.non_fungible_api();
+    let nfts = req.nfts;
 
-    if !try_find_target_account(context, &mut inputs, target_account_address, req.resource_address).await? {
-        // We need to create the target account
-        builder = builder.create_account(*req.target_account_address.account_public_key())
-    }
     // add the input for the source account vault substate
     let src_vault = sdk
         .accounts_api()
-        .get_vault_by_resource(source_account.component_address(), &req.resource_address)?;
-    let src_vault_substate = sdk.substate_api().get_substate(&src_vault.id.into())?;
+        .get_vault_by_resource(source_account.component_address(), &req.resource_address)
+        .or_jrpc_not_found()?;
+    let src_vault_substate = sdk
+        .substate_api()
+        .get_substate(&src_vault.id.into())
+        .or_jrpc_not_found()?;
     inputs.insert(src_vault_substate.substate_id.into());
     inputs.insert(SubstateRequirement::unversioned(src_vault.resource_address));
 
-    let nfts = req.nfts;
-    // Validate every NFT exists on the source wallet before emitting any instructions.
+    // Validate every NFT exists on the source account's vault and is not burnt before making network calls.
+    let non_fungible_api = sdk.non_fungible_api();
     for nft_id in &nfts {
         let nft = non_fungible_api
             .get(req.resource_address, nft_id.clone())
             .optional()
-            .map_err(|e| anyhow!("Failed to get non-fungible token: {}", e))?;
-        if nft.is_none() {
+            .map_err(|e| anyhow!("Failed to get non-fungible token: {}", e))?
+            .ok_or_else(|| {
+                invalid_params(
+                    "nfts",
+                    Some(format!(
+                        "NFT with ID {} not found for resource {}",
+                        nft_id, req.resource_address
+                    )),
+                )
+            })?;
+        if nft.vault_id != src_vault.id {
             return Err(invalid_params(
-                "nft_id",
+                "nfts",
                 Some(format!(
-                    "NFT with ID {} not found for resource {}",
+                    "NFT with ID {} does not belong to source account {}",
+                    nft_id, source_account_address
+                )),
+            ));
+        }
+        if nft.is_burnt {
+            return Err(invalid_params(
+                "nfts",
+                Some(format!(
+                    "NFT with ID {} for resource {} is burnt",
                     nft_id, req.resource_address
                 )),
             ));
         }
+    }
+
+    // TODO: this can be simplified
+    let mut builder = context.transaction_builder().await?;
+    if !try_find_target_account(context, &mut inputs, target_account_address, req.resource_address).await? {
+        // We need to create the target account
+        builder = builder.create_account(*req.target_account_address.account_public_key())
     }
 
     // Withdraw each NFT into a workspace bucket, merge them all into "joined" via put_into_bucket,
@@ -366,8 +389,6 @@ pub async fn handle_transfer(
         builder = builder.call_method(target_account_address, "deposit", args![Workspace("joined")]);
     }
 
-    let fee_owner_key = sdk.key_manager_api().get_public_key(fee_payer_key_id)?;
-
     let transaction = builder
         .with_dry_run(req.dry_run)
         .pay_fee_from_component(fee_payer_account_address, req.max_fee)
@@ -378,12 +399,7 @@ pub async fn handle_transfer(
         )
         .finish();
 
-    let transaction = sdk
-        .signer_api()
-        .with_context(&fee_owner_key.public_key().to_byte_type())
-        .sign(account_owner_key_id, transaction)?;
-
-    let transaction = sdk.signer_api().sign(fee_payer_key_id, transaction)?;
+    let transaction = seal_transfer_transaction(sdk, account_owner_key_id, fee_payer_key_id, transaction)?;
 
     // if dry run, we can return the result immediately
     if req.dry_run {
@@ -468,6 +484,25 @@ pub async fn handle_transfer(
         fee_refunded: req.max_fee.saturating_sub(finalized.final_fee),
         result: finalized.finalize,
     })
+}
+
+fn seal_transfer_transaction(
+    sdk: &crate::WalletSdk,
+    account_owner_key_id: tari_ootle_wallet_sdk::models::KeyId,
+    fee_payer_key_id: tari_ootle_wallet_sdk::models::KeyId,
+    transaction: tari_ootle_transaction::UnsealedTransaction,
+) -> anyhow::Result<tari_ootle_transaction::Transaction> {
+    let transaction = if account_owner_key_id != fee_payer_key_id {
+        let fee_owner_key = sdk.key_manager_api().get_public_key(fee_payer_key_id)?;
+        sdk.signer_api()
+            .with_context(&fee_owner_key.public_key().to_byte_type())
+            .sign(account_owner_key_id, transaction)?
+    } else {
+        transaction
+    };
+
+    let transaction = sdk.signer_api().sign(fee_payer_key_id, transaction)?;
+    Ok(transaction)
 }
 
 #[cfg(test)]
@@ -722,5 +757,130 @@ mod tests {
             ),
             "unexpected auth error: {auth_err}"
         );
+    }
+
+    #[tokio::test]
+    async fn get_returns_not_found_for_unknown_nft() {
+        let test = setup().await;
+        let bearer = test.bearer("admin");
+
+        let err = handle_get(&test.context, Some(&bearer), GetNftRequest {
+            resource_address: NFT_FAUCET_RESOURCE_ADDRESS,
+            nft_id: tari_template_lib_types::NonFungibleId::from_u64(42),
+        })
+        .await
+        .unwrap_err();
+        let jrpc_err = err
+            .downcast_ref::<axum_jrpc::error::JsonRpcError>()
+            .unwrap_or_else(|| panic!("expected JsonRpcError, got: {err}"));
+        let code = ApplicationErrorCode::NotFound as i32;
+        assert!(matches!(
+            jrpc_err.error_reason(),
+            axum_jrpc::error::JsonRpcErrorReason::ApplicationError(c) if c == code
+        ));
+    }
+
+    #[tokio::test]
+    async fn transfer_validates_nfts_vault_ownership_and_burnt_status() {
+        use tari_ootle_common_types::SubstateVersion;
+        use tari_ootle_wallet_sdk::models::NonFungibleToken;
+        use tari_template_lib_types::{NonFungibleId, ObjectKey, ResourceType, VaultId};
+
+        let test = setup().await;
+        let bearer = test.bearer("admin");
+        let sdk = test.context.wallet_sdk();
+
+        // Seed vaults for account_a and account_b and store substate records.
+        let vault_a = VaultId::new(ObjectKey::from_array([0x11; 32]));
+        let vault_b = VaultId::new(ObjectKey::from_array([0x22; 32]));
+        for (account, vault_id) in [(test.account_a, vault_a), (test.account_b, vault_b)] {
+            sdk.accounts_api()
+                .add_vault(
+                    account,
+                    vault_id,
+                    SubstateVersion::new(0),
+                    NFT_FAUCET_RESOURCE_ADDRESS,
+                    ResourceType::NonFungible,
+                    Some("NFT".to_string()),
+                    0,
+                )
+                .unwrap();
+            sdk.substate_api()
+                .save_root(
+                    tari_ootle_common_types::VersionedSubstateIdRef::new(
+                        &SubstateId::Vault(vault_id),
+                        SubstateVersion::new(0),
+                    ),
+                    [],
+                )
+                .unwrap();
+        }
+
+        // Save one NFT in account_b's vault and one burnt NFT in account_a's vault.
+        let nft_in_b = NonFungibleId::from_u64(10);
+        let burnt_in_a = NonFungibleId::from_u64(20);
+        let null_cbor = convert_json_to_cbor(serde_json::Value::Null).unwrap();
+        for (vault_id, nft_id, is_burnt) in [(vault_b, nft_in_b.clone(), false), (vault_a, burnt_in_a.clone(), true)] {
+            sdk.non_fungible_api()
+                .save_nft(&NonFungibleToken {
+                    vault_id,
+                    nft_id,
+                    resource_address: NFT_FAUCET_RESOURCE_ADDRESS,
+                    data: null_cbor.clone(),
+                    mutable_data: null_cbor.clone(),
+                    is_burnt,
+                })
+                .unwrap();
+        }
+
+        let mut wrong_vault_req = test.request(test.account_a, test.account_a);
+        wrong_vault_req.nfts = vec![nft_in_b];
+        let wrong_vault_err = handle_transfer(&test.context, Some(&bearer), wrong_vault_req)
+            .await
+            .unwrap_err();
+        assert!(wrong_vault_err.to_string().contains("nfts"), "{wrong_vault_err}");
+        assert!(
+            wrong_vault_err
+                .to_string()
+                .contains("does not belong to source account"),
+            "{wrong_vault_err}"
+        );
+
+        let mut burnt_req = test.request(test.account_a, test.account_a);
+        burnt_req.nfts = vec![burnt_in_a];
+        let burnt_err = handle_transfer(&test.context, Some(&bearer), burnt_req)
+            .await
+            .unwrap_err();
+        assert!(burnt_err.to_string().contains("nfts"), "{burnt_err}");
+        assert!(burnt_err.to_string().contains("is burnt"), "{burnt_err}");
+    }
+
+    #[tokio::test]
+    async fn seal_transfer_transaction_uses_single_signature_when_source_pays_fee() {
+        let test = setup().await;
+        let sdk = test.context.wallet_sdk();
+        let key_a = KeyId::derived(KeyBranch::Account, 0);
+        let key_b = KeyId::derived(KeyBranch::Account, 1);
+
+        let unsealed_same = tari_ootle_transaction::Transaction::builder(Network::LocalNet.as_byte(), Epoch(10))
+            .pay_fee_from_component(test.account_a, 1000u64)
+            .finish();
+        let sealed_same = seal_transfer_transaction(sdk, key_a, key_a, unsealed_same).unwrap();
+        assert!(
+            sealed_same.signatures().is_empty(),
+            "when source account also pays the fee, only the seal signature should be present"
+        );
+        assert!(sealed_same.verify_all_signatures());
+
+        let unsealed_diff = tari_ootle_transaction::Transaction::builder(Network::LocalNet.as_byte(), Epoch(10))
+            .pay_fee_from_component(test.account_b, 1000u64)
+            .finish();
+        let sealed_diff = seal_transfer_transaction(sdk, key_a, key_b, unsealed_diff).unwrap();
+        assert_eq!(
+            sealed_diff.signatures().len(),
+            1,
+            "when a separate account pays the fee, the source owner signature must be attached"
+        );
+        assert!(sealed_diff.verify_all_signatures());
     }
 }

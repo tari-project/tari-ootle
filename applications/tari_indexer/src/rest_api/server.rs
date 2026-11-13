@@ -213,7 +213,8 @@ fn api_routes(rate_limits: &IndexerRateLimitsConfig, sse_metrics: &SseConnection
             .route("/wait-until-ready", get(handlers::misc::wait_until_ready))
             .route("/epoch-manager/stats", get(handlers::misc::get_epoch_manager_stats))
             .route("/network", get(handlers::network::get))
-            .route("/network/economics", get(handlers::network::get_economics))
+            .route("/network/economics", get(handlers::network::get_economics)
+                .route_layer(middleware::from_fn_with_state(reads_limiter.clone(), rate_limit_middleware)))
             .route("/network/stats", get(handlers::network::get_network_sync_stats))
             .route("/network/connections", get(handlers::network::get_connections))
             // GET /validators – per-IP rate limit (rate_limits.reads_rate)
@@ -367,6 +368,7 @@ mod tests {
             "/epoch-checkpoints?limit=100",
             "/epoch-checkpoints/latest",
             "/epoch-checkpoints/latest/shard-groups",
+            "/network/economics",
             "/resources/tari",
             "/templates/catalogue",
             "/validators",

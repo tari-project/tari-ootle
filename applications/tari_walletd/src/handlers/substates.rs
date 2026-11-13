@@ -99,13 +99,13 @@ mod tests {
     #[tokio::test]
     async fn handle_get_fetches_latest_remote_substate_when_local_record_has_older_version() {
         let daemon = TestDaemon::start().await;
-        let substate_id = SubstateId::Vault(VaultId::new([0x22; 32]));
+        let substate_id = SubstateId::Vault(VaultId::new([0x22; 32].into()));
 
         daemon
             .context
             .wallet_sdk()
             .substate_api()
-            .save_root(VersionedSubstateIdRef::new(&substate_id, 0), [])
+            .save_root(VersionedSubstateIdRef::new(&substate_id, SubstateVersion::new(0)), [])
             .unwrap();
 
         let remote_vault = Vault::new(ResourceContainer::public_fungible(TARI_TOKEN, 500u64));
@@ -113,7 +113,7 @@ mod tests {
         let response_json = serde_json::json!({
             "version": 1,
             "state": {
-                "Up": {
+                "up": {
                     "substate": encoded_substate,
                 }
             },
@@ -162,7 +162,7 @@ mod tests {
         assert_eq!(local.version, SubstateVersion::new(0));
 
         let remote = resp.substate_from_remote.expect("remote substate fetched");
-        assert_eq!(remote.version(), 1);
+        assert_eq!(remote.version(), SubstateVersion::new(1));
         assert_eq!(
             remote.substate_value().as_vault().unwrap().balance(),
             remote_vault.balance()

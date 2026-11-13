@@ -90,14 +90,15 @@ impl Config {
                 );
             }
         }
+        // Each validator activated in `self` was activated in `prior` and matched above, whether or not `prior`
+        // lists it.
         for vn in self.validators_activated_by(processed_epoch) {
             if !prior
-                .validators
-                .iter()
+                .validators_activated_by(processed_epoch)
                 .any(|prior_vn| prior_vn.public_key == vn.public_key)
             {
                 bail!(
-                    "The config adds validator {} activating at epoch {}, which this node has already processed",
+                    "The config activates validator {} at epoch {}, which this node has already processed",
                     vn.public_key,
                     vn.activation_epoch()
                 );
@@ -679,6 +680,15 @@ mod tests {
         for updated in cases {
             agrees(&prior, &updated).unwrap();
         }
+    }
+
+    #[test]
+    fn re_registering_a_pending_validator_into_a_processed_epoch_is_rejected() {
+        // V is pending in `prior`, activating at 21; the update moves its activation to 11, which has been processed.
+        let prior = mk_config(vec![mk_validator(vec![]), other_validator(Epoch(20))]);
+        let updated = mk_config(vec![mk_validator(vec![]), other_validator(Epoch(10))]);
+        let err = agrees(&prior, &updated).unwrap_err();
+        assert!(err.contains("already processed"), "{err}");
     }
 
     #[test]

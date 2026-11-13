@@ -9,7 +9,6 @@ use libp2p_identity::PeerId;
 use multiaddr::Multiaddr;
 use ootle_byte_type::ToByteType;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::hex::Hex};
-use tari_ootle_common_types::displayable::Displayable;
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 /// Parsed information from a peer seed string
@@ -69,16 +68,10 @@ impl FromStr for SeedPeer {
 
 impl Display for SeedPeer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}::{}",
-            self.public_key.display(),
-            self.address
-                .iter()
-                .map(|ma| ma.to_string())
-                .collect::<Vec<_>>()
-                .join("::")
-        )
+        match &self.public_key {
+            Some(pk) => write!(f, "{pk}::{}", self.address),
+            None => write!(f, "{}", self.address),
+        }
     }
 }
 
@@ -96,6 +89,14 @@ mod tests {
             "0000000000000000000000000000000000000000000000000000000000000000"
         );
         assert_eq!(seed_peer.address().to_string(), "/ip4/127.0.0.1/tcp/8080");
+        assert_eq!(
+            seed_peer.to_string(),
+            "0000000000000000000000000000000000000000000000000000000000000000::/ip4/127.0.0.1/tcp/8080"
+        );
+        assert_eq!(
+            SeedPeer::from_str(&seed_peer.to_string()).unwrap().address(),
+            seed_peer.address()
+        );
 
         assert!(seed_peer.to_peer_id().is_some());
     }
@@ -115,6 +116,7 @@ mod tests {
         let seed_peer = SeedPeer::from_str(s).expect("Failed to parse seed peer");
         assert!(seed_peer.public_key().is_none());
         assert_eq!(seed_peer.address().to_string(), s);
+        assert_eq!(seed_peer.to_string(), s);
     }
 
     #[test]

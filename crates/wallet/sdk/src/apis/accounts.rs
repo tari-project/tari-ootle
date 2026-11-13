@@ -300,6 +300,11 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         if is_default && owner_key_id.is_none() {
             return Err(AccountsApiError::ViewOnlyAccountCannotBeDefault);
         }
+        if tx.accounts_get(account_address).optional()?.is_some() {
+            return Err(AccountsApiError::AccountAlreadyExists {
+                address: *account_address,
+            });
+        }
         if let Some(name) = account_name &&
             tx.accounts_get_by_name(name).optional()?.is_some()
         {
@@ -329,6 +334,12 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         update: AccountUpdate<'_>,
     ) -> Result<(), AccountsApiError> {
         self.store.with_write_tx(|tx| {
+            if let Some(name) = update.name &&
+                let Some(existing) = tx.accounts_get_by_name(name).optional()? &&
+                existing.component_address != *account_address
+            {
+                return Err(AccountsApiError::AccountNameAlreadyExists { name: name.to_string() });
+            }
             tx.accounts_update(account_address, update)?;
             Ok(())
         })
@@ -673,13 +684,10 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
     }
 
     pub fn rename_account(&self, account_addr: &ComponentAddress, new_name: &str) -> Result<(), AccountsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        tx.accounts_update(account_addr, AccountUpdate {
+        self.update_account(account_addr, AccountUpdate {
             name: Some(new_name),
             ..Default::default()
-        })?;
-        tx.commit()?;
-        Ok(())
+        })
     }
 
     /// Makes the account the default account, which pays fees and signs, so it must have an owner key.

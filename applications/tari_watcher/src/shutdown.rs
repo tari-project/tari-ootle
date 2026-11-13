@@ -19,12 +19,16 @@ fn unix_exit_signal() -> anyhow::Result<BoxFuture<()>> {
 
     let mut sighup = tokio::signal::unix::signal(SignalKind::hangup())?;
     let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())?;
+    let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())?;
 
     let fut = async move {
         tokio::select! {
             biased;
             _ = sigint.recv() => {
                 log::info!("Received SIGINT, shutting down...");
+            },
+            _ = sigterm.recv() => {
+                log::info!("Received SIGTERM, shutting down...");
             },
             // This is typically used to signal to reload configuration. Right now we simply exit.
             _ = sighup.recv() => {

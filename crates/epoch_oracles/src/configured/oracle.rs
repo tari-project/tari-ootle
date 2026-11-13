@@ -44,6 +44,7 @@ enum ActivationKind {
 pub struct ConfiguredEpochOracle<TStore, TTicker> {
     config: Config,
     pending_events: VecDeque<EpochEvent>,
+    unpersisted_epoch: Option<Epoch>,
     store: TStore,
     ticker: TTicker,
     queued_validators: BTreeMap<Epoch, Vec<QueuedActivation>>,
@@ -67,6 +68,7 @@ impl<TStore: EpochOracleStore + Send> ConfiguredEpochOracle<TStore, RealTimeEpoc
             store,
             ticker,
             pending_events: VecDeque::new(),
+            unpersisted_epoch: None,
             queued_validators: BTreeMap::new(),
             is_initialized: false,
             is_done: false,
@@ -81,6 +83,7 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             store,
             ticker,
             pending_events: VecDeque::new(),
+            unpersisted_epoch: None,
             queued_validators: BTreeMap::new(),
             is_initialized: false,
             is_done: false,
@@ -227,8 +230,6 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
         }
 
         let current_epoch = next_epoch - Epoch(1);
-        self.store
-            .set(StoreKey::ConfiguredCurrentEpoch.as_key_bytes(), &next_epoch)?;
 
         debug!(
             target: LOG_TARGET,
@@ -236,7 +237,10 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
         );
         // Activate all validators queued at or before next_epoch (handles skipped epochs).
         // split_off returns everything > next_epoch, leaving everything <= next_epoch in place.
-        let remaining = self.queued_validators.split_off(&(next_epoch + Epoch(1)));
+        let remaining = match next_epoch.checked_add(Epoch(1)) {
+            Some(after_next) => self.queued_validators.split_off(&after_next),
+            None => BTreeMap::new(),
+        };
         let due = std::mem::replace(&mut self.queued_validators, remaining);
 
         for (epoch, vns) in due {
@@ -279,6 +283,8 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
             });
         }
 
+        self.unpersisted_epoch = Some(next_epoch);
+
         Ok(())
     }
 
@@ -298,6 +304,13 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
         loop {
             if let Some(event) = self.pending_events.pop_front() {
                 return Poll::Ready(Some(event));
+            }
+
+            if let Some(epoch) = self.unpersisted_epoch.take() &&
+                let Err(err) = self.store.set(StoreKey::ConfiguredCurrentEpoch.as_key_bytes(), &epoch)
+            {
+                self.is_done = true;
+                return Poll::Ready(Some(EpochEvent::error(err)));
             }
 
             match self.ticker.poll_tick(cx) {
@@ -897,5 +910,56 @@ mod tests {
         ];
         expected.sort();
         assert_eq!(powers, expected);
+    }
+
+    #[test]
+    fn current_epoch_is_persisted_only_after_epoch_events_are_drained() {
+        let config = mk_config(vec![mk_validator(1, Epoch(0))]);
+        let ticker = ScriptedTicker::new(vec![EpochTickerData {
+            epoch: Epoch(1),
+            epoch_hash: FixedHash::zero(),
+            done_for_now: true,
+        }]);
+        let mut oracle = ConfiguredEpochOracle::with_custom_ticker(config, TestStore::default(), ticker);
+        let waker = Waker::noop();
+        let mut cx = Context::from_waker(waker);
+
+        // First poll yields NewValidatorRegistered from initialize().
+        assert!(matches!(
+            oracle.poll(&mut cx),
+            Poll::Ready(Some(EpochEvent::NewValidatorRegistered { .. }))
+        ));
+        // Second poll triggers prepare_next_epoch(Epoch(1)) and yields ActiveValidatorNodeSetChanged.
+        assert!(matches!(
+            oracle.poll(&mut cx),
+            Poll::Ready(Some(EpochEvent::ActiveValidatorNodeSetChanged { .. }))
+        ));
+        // Third and fourth polls yield EpochChanged and DoneForNow.
+        assert!(matches!(
+            oracle.poll(&mut cx),
+            Poll::Ready(Some(EpochEvent::EpochChanged { epoch: Epoch(1), .. }))
+        ));
+        assert!(matches!(
+            oracle.poll(&mut cx),
+            Poll::Ready(Some(EpochEvent::DoneForNow { epoch: Epoch(1), .. }))
+        ));
+        assert_eq!(
+            oracle
+                .store
+                .get::<Epoch>(StoreKey::ConfiguredCurrentEpoch.as_key_bytes())
+                .unwrap(),
+            None,
+            "epoch must not be persisted until the caller polls again after consuming the last event"
+        );
+
+        // Next poll after consuming DoneForNow persists Epoch(1) before waiting on the ticker.
+        assert!(matches!(oracle.poll(&mut cx), Poll::Pending));
+        assert_eq!(
+            oracle
+                .store
+                .get::<Epoch>(StoreKey::ConfiguredCurrentEpoch.as_key_bytes())
+                .unwrap(),
+            Some(Epoch(1))
+        );
     }
 }

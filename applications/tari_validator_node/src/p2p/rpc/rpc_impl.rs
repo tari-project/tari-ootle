@@ -448,9 +448,9 @@ const MAX_STATE_TRANSFER_STREAMS: usize = 32;
 
 const STATE_TRANSFER_BUSY: &str = "This node is serving too many state transfers; retry later or ask another member";
 
-/// The most encoded bytes of large unary responses (substates, transaction results, checkpoints) the node holds at
-/// once, from the read until the server has finished sending them. A peer that does not read its response holds its
-/// share, so this bounds the memory those responses take however many sessions peers open.
+/// The most encoded bytes of large unary responses (substates, transaction results, checkpoints, committed block
+/// proofs) the node holds at once, from the read until the server has finished sending them. A peer that does not read
+/// its response holds its share, so this bounds the memory those responses take however many sessions peers open.
 const MAX_BUFFERED_RESPONSE_BYTES: usize = 128 * 1024 * 1024;
 
 /// The bytes one permit of [`MAX_BUFFERED_RESPONSE_BYTES`] stands for. A response takes one permit per unit of its
@@ -1147,6 +1147,12 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         let leaf_shards = req.leaf_shards.into_iter().map(Shard::from).collect::<BTreeSet<_>>();
 
         let epoch = self.consensus.current_epoch();
+        let _permit = self
+            .state_sync_reads
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
         let store = self.state_store.clone();
         let root_mismatch_log = self.root_mismatch_log.clone();
 
@@ -1173,10 +1179,10 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         let (proof, leaves) =
             maybe_proof.ok_or_else(|| RpcStatus::not_found("No committed block beyond genesis yet"))?;
 
-        Ok(Response::new(GetCommittedBlockProofResponse {
+        self.budgeted_response(GetCommittedBlockProofResponse {
             commit_proof: proof.to_bytes(),
             shard_leaves: leaves,
-        }))
+        })
     }
 
     async fn get_shard_snapshot(
@@ -1985,5 +1991,89 @@ mod tests {
             .shard_snapshot(snapshot_request())
             .await
             .expect("a sent response frees its permit");
+    }
+
+    #[tokio::test]
+    async fn a_committed_block_proof_response_holds_its_response_budget_until_sent() {
+        use tari_consensus_types::ShardGroupAccumulatedData;
+        use tari_ootle_common_types::{ExtraData, ProtocolVersion};
+        use tari_sidechain::QuorumDecision;
+        use tari_template_lib_types::crypto::SchnorrSignatureBytes;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        let zero = Block::zero_block(Network::LocalNet, NUM_PRESHARDS);
+        let committed = Block::create(
+            Network::LocalNet,
+            ProtocolVersion::V0,
+            *zero.id(),
+            zero.justify().clone(),
+            None,
+            NodeHeight(1),
+            Epoch::zero(),
+            zero.shard_group(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            0,
+            SchnorrSignatureBytes::zero(),
+            0,
+            FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
+            ExtraData::new(),
+        )
+        .unwrap();
+        let commit_qc = ProposalCertificate::new(
+            committed.header().calculate_hash(),
+            *committed.parent(),
+            committed.height(),
+            committed.epoch(),
+            committed.shard_group(),
+            ProposalCertificate::genesis_signatures(),
+            QuorumDecision::Accept,
+        );
+        let commit_qc_id = commit_qc.calculate_id();
+        store
+            .with_write_tx(|tx| {
+                zero.insert(tx)?;
+                committed.insert(tx)?;
+                tx.proposal_certificates_save(zero.justify())?;
+                tx.proposal_certificates_save(&commit_qc)?;
+                tx.blocks_set_qcs(committed.id(), Some(&commit_qc_id), None)?;
+                tx.last_executed_set(&LastExecuted {
+                    height: committed.height(),
+                    block_id: *committed.id(),
+                    epoch: committed.epoch(),
+                })
+            })
+            .unwrap();
+
+        let service = rpc_service(store);
+        let total_units = u32::try_from(MAX_BUFFERED_RESPONSE_BYTES / RESPONSE_BUDGET_UNIT_BYTES).unwrap();
+        let _most_of_budget = service
+            .response_bytes
+            .clone()
+            .try_acquire_many_owned(total_units - 1)
+            .unwrap();
+        let request = || {
+            Request::new(1.into(), GetCommittedBlockProofRequest {
+                leaf_shards: Vec::new(),
+            })
+        };
+
+        let held = service.get_committed_block_proof(request()).await.unwrap();
+        assert_eq!(service.response_bytes.available_permits(), 0);
+
+        let refused = service
+            .get_committed_block_proof(request())
+            .await
+            .expect_err("a node with no remaining response budget served a committed block proof");
+        assert_eq!(refused.as_status_code(), tari_rpc_framework::RpcStatusCode::Unavailable);
+
+        drop(held);
+        service
+            .get_committed_block_proof(request())
+            .await
+            .expect("dropping the response frees its share of the response budget");
     }
 }

@@ -1,0 +1,202 @@
+---
+title: Run a Validator Node
+description: Install the Tari Ootle validator node, create and back up its identity seed phrase, configure it, and start it on mainnet or esmeralda.
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+import { basePath } from '../../../helpers/path';
+
+### Covered in this guide
+
+- What a validator node needs alongside it.
+- Installing the `tari_validator_node` binary or Docker image.
+- Generating the node identity and backing up its 24-word seed phrase.
+- The configuration a validator must set, and starting the node.
+- How a node joins the validator set.
+
+Before you start, check the machine against
+<a href={basePath("/reference/validator-node-requirements/")}>Validator Node Requirements</a>. A node that cannot keep
+up with consensus is suspended.
+
+## What runs where
+
+A validator is one process, `tari_validator_node`. It needs:
+
+- **A Minotari base node's gRPC endpoint.** The node reads epochs, block headers and burns from the base layer.
+  The base node can be on the same host or elsewhere on a private network. It does not have to be public.
+- **An Ootle wallet, somewhere else.** Validator fees are claimed to an account in an Ootle wallet. The validator
+  holds only that account's *public* key. The wallet and its secret keys belong on a different machine.
+- **Peers.** The node connects to other validators over libp2p, on one public port. See
+  <a href={basePath("/validators/networking-and-ports/")}>Networking and Ports</a>.
+
+The node does not need a Minotari (L1) wallet.
+
+## Install
+
+Release binaries for Linux (x86_64, arm64) and macOS (arm64) are published on the
+[GitHub releases page](https://github.com/tari-project/tari-ootle/releases). Windows is not supported for the
+validator node.
+
+To build from source instead:
+
+```sh
+# Debian/Ubuntu build dependencies
+sudo apt-get install git curl build-essential cmake clang pkg-config libssl-dev libsqlite3-dev sqlite3 npm
+cargo install tari_validator_node
+```
+
+A Docker image, `ghcr.io/tari-project/ootle`, contains `tari_validator_node` and `tari_indexer`. It has no
+default command, so name the binary:
+
+```sh
+docker run --rm ghcr.io/tari-project/ootle tari_validator_node --help
+```
+
+<Aside type="caution" title="Leave virtual address space unlimited">
+Each executing template reserves about 8 GiB of *virtual* address space, and the node keeps a pool of these.
+This uses no physical memory, but it fails if `ulimit -v` (`RLIMIT_AS`) is limited. Leave it unlimited, which is
+the default on most distributions. Container memory limits are unaffected.
+</Aside>
+
+## Choose a network and base path
+
+Every command takes `--network` (or `TARI_NETWORK`): `mainnet` or `esmeralda` (the testnet). The default is
+`esmeralda`, so **always pass `--network mainnet` on mainnet.**
+
+The node keeps everything under a base path, by default `~/.tari/ootle/<network>/`. Change it with `-b` /
+`--base-path` (or `TARI_BASE_DIR`). The network name is always appended. The layout is:
+
+| Path (under the base path) | Contents |
+|---|---|
+| `config/config.toml` | Configuration, written from the network presets on first run |
+| `validator_node_id.json` | The node identity, including its **secret key** |
+| `validator_node_id.json.recovery-<public key>.txt` | The 24-word seed phrase, written once when the identity is generated |
+| `data/validator_node/` | State store (`rocksdb/`), `global_storage.sqlite`, compiled template cache, backups |
+| `log/validator-node/` | Log files |
+
+## Create the identity
+
+The node identity is a key pair derived from a **24-word seed phrase**. Its public key is the validator's
+public key: committees, votes and the validator set all refer to it. The libp2p peer ID is derived from the same
+secret.
+
+Generate it before the first start:
+
+```sh
+tari_validator_node --network mainnet generate-identity
+```
+
+This writes `validator_node_id.json` and, beside it, `validator_node_id.json.recovery-<public key>.txt`, both
+readable only by their owner. The seed words go only into that file, never into the logs.
+
+<Steps>
+
+1. Copy the recovery file somewhere safe **off the validator host**, for example a password manager or offline
+   storage.
+2. Delete the recovery file from the host once it is backed up.
+3. Back up `validator_node_id.json` as well. It holds the secret key, so treat it like the seed phrase.
+
+</Steps>
+
+To restore an identity from its seed phrase on a new host:
+
+```sh
+tari_validator_node --network mainnet generate-identity --seed-words-file /secure/path/recovery.txt
+```
+
+`--seed-words "<24 words>"` also works, but a file keeps the words out of your shell history and the process
+list. If the words were enciphered with a passphrase, add `--seed-passphrase` (or set `TARI_VN_SEED_PASSPHRASE`).
+An existing identity that matches is left untouched. Replacing a different one needs `--overwrite`.
+
+<Aside type="danger" title="One identity, one running node">
+Never run two nodes with the same identity, not even briefly during a migration. Both nodes vote with the same
+key, and other validators treat that as equivocation. Stop the old node before starting the restored one.
+</Aside>
+
+If `start` finds no identity, it creates one. A wrong base path would therefore silently give the node a new key.
+To prevent that, set `validator_node.dont_create_id = true`: the node then asks before creating an identity, and
+exits if the answer is no.
+
+## Configure
+
+Run the node once, or create `config/config.toml` yourself, then set at least the following:
+
+```toml
+[validator_node]
+# Public key of the Ootle wallet account that receives this validator's fees. Required: the node refuses to
+# start without a nonzero key.
+fee_claim_public_key = "<wallet account public key, hex>"
+
+[validator_node.p2p]
+# The public p2p port, TCP and UDP. The default of 0 picks a random port at every start, so set one.
+listener_port = 50123
+```
+
+Point the node at your base node's gRPC endpoint. The command-line flag sets it for every network section, so
+it is the simplest way:
+
+```sh
+tari_validator_node --network mainnet --node-grpc http://127.0.0.1:18102 start
+```
+
+`TARI_VN_MINOTARI_NODE_GRPC_URL` does the same. Without it, the node uses `http://localhost:<port>` with the
+network's default base node gRPC port: 18102 on mainnet and 18142 on esmeralda. The base node must have its gRPC
+server enabled.
+
+Other settings worth knowing:
+
+| Key | Default | Purpose |
+|---|---|---|
+| `validator_node.json_rpc_listener_address` | `127.0.0.1:18200` | JSON-RPC and web UI. Keep it on loopback. |
+| `validator_node.metrics_listener_address` | `127.0.0.1:18201` | Prometheus metrics. See <a href={basePath("/reference/metrics/")}>Metrics</a>. |
+| `validator_node.p2p.reachability_mode` | `auto` | Set `private` for a node that cannot accept inbound connections. A validator should be reachable. |
+| `validator_node.p2p.enable_mdns` | `true` | Local-network peer discovery. Turn off with `--disable-mdns` on hosts where LAN discovery is unwanted. |
+| `validator_node.keep_transaction_history` | `false` | Keep finalized transaction records after they age out of the retention window. Costs disk. |
+| `validator_node.logging.console_format` | `text` | `json` for log shippers. |
+
+Any key can also be set for one run with `-p section.key=value`. The peer seeds and epoch oracle settings for
+each network come from the presets, so leave them as they are.
+
+## Start
+
+```sh
+tari_validator_node --network mainnet --node-grpc http://127.0.0.1:18102 start
+```
+
+At startup the node logs its public key and peer address, a memory budget table (see
+<a href={basePath("/reference/validator-node-requirements/#memory")}>Memory</a>), and then the state sync from
+its peers. Check that it is up:
+
+```sh
+curl -fsS http://127.0.0.1:18200/health
+curl -s -X POST http://127.0.0.1:18200/json_rpc -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"get_identity","params":{}}'
+```
+
+`get_identity` returns the node's public key, peer ID, listen addresses and the configured fee claim key.
+
+Run the node under a supervisor that restarts it on failure, such as a systemd unit or Docker with
+`--restart unless-stopped`. Give it time to shut down cleanly on stop, so RocksDB closes properly. For Docker
+networking, see <a href={basePath("/validators/networking-and-ports/#docker")}>Networking and Ports</a>.
+
+## Joining the validator set
+
+On **mainnet and esmeralda** the validator set is part of the network's configuration. Mainnet's set ships
+inside the release, and esmeralda's is in the network preset. Every node must run the same set, because nodes
+derive committees and each other's fee claim keys from it. A node validates only once its public key is in that
+set. Base layer registrations are not used for this.
+
+To be added, the network needs two things from you:
+
+- the node's **public key**, from `get_identity` or the startup log;
+- the **fee claim public key** you configured.
+
+Once your key is in a release's set, upgrade to that release. The node then joins its committee at the epoch
+the set names.
+
+Keep your node's key the same once it is in the set. A new identity is a different validator.
+
+## Next
+
+- <a href={basePath("/validators/networking-and-ports/")}>Networking and Ports</a>: what to expose and what to keep private.
+- <a href={basePath("/validators/operating-a-validator/")}>Operating a Validator</a>: fees, backups, upgrades and logs.

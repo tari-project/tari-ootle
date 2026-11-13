@@ -151,7 +151,7 @@ posture" line is the honest summary of what leaks.
 
 | Pattern | Built from | Privacy posture |
 |---|---|---|
-| **Fungible token** | Public Fungible or Confidential, with a mint authority | Public type is fully transparent; confidential hides balances but not the accounts. |
+| **Fungible token** | Public Fungible or Confidential, with a mint authority. See <a href={basePath("/guides/fungible-tokens/")}>Fungible Tokens (ERC-20)</a>. | Public type is fully transparent; confidential hides balances but not the accounts. |
 | **NFT / collection** | Public Non-Fungible | Public by design — ownership is the point. |
 | **Stablecoin** | Stealth, with a revealed mint/burn boundary | Holder transfers private; supply events revealed so supply is auditable. See <a href={basePath("/concepts/stablecoin/")}>Stablecoins</a>. |
 | **Liquidity pool** | Two resources + a vault pair (see `TwoResourceLiquidityPool`) | Pool reserves are public to be swappable; LP tokens inherit the underlying resources' privacy. |

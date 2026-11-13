@@ -457,6 +457,15 @@ where
         }
     }
 
+    /// Whether this node has already seen `id`, in which case the mempool drops it.
+    ///
+    /// This is a local admission filter, and it treats an id this node holds any record of as seen,
+    /// aborted ids included. Consensus re-sequences a previously aborted id (see
+    /// `OnReceiveNewTransaction::validate_new_transaction`), so a node that kept the abort's records
+    /// still admits a resubmission when a leader proposes it: block validation rebuilds the pool record
+    /// from the stored transaction. The filter therefore decides only which nodes introduce and gossip
+    /// the resubmission, never how a proposal containing it is voted on, and it keeps the replay of an
+    /// aborted transaction from fanning out to every mempool.
     fn transaction_exists(&self, id: &TransactionId) -> Result<bool, MempoolError> {
         if self.transactions.contains(id) {
             debug!(

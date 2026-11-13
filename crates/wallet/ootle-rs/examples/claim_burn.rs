@@ -20,7 +20,7 @@
 //! Burn tTARI on the L1 (minotari) wallet to that claim key (e.g. `create_burn_transaction` with
 //! `claim_public_key = <printed key>`). Once mined, fetch the proof (`get_burn_claim_proof`) and
 //! save it as JSON in the wallet daemon's `ClaimBurnProofContents` shape:
-//! `{ "claim_proof": { ... }, "encrypted_data": "..." }`. Then re-run with the proof file (this
+//! `{ "claim_proof": { ... } }`. Then re-run with the proof file (this
 //! step requires a running indexer):
 //!
 //! ```bash
@@ -37,7 +37,6 @@ use ootle_rs::{
     key_provider::PrivateKeyProvider,
     keys::OotleSecretKey,
     provider::{Provider, ProviderBuilder},
-    template_types::EncryptedData,
     wallet::{NetworkWallet, OotleWallet},
 };
 use tari_crypto::{
@@ -55,7 +54,6 @@ const MAX_FEE: u64 = 2000;
 #[derive(serde::Deserialize)]
 struct BurnProofFile {
     claim_proof: MinotariBurnClaimProof,
-    encrypted_data: EncryptedData,
 }
 
 #[tokio::main]
@@ -82,17 +80,15 @@ async fn main() {
         println!("  1. Burn tTARI on the L1 (minotari) wallet to the claim public key above");
         println!("     (create_burn_transaction with claim_public_key = the key above).");
         println!("  2. Once mined, fetch the proof (get_burn_claim_proof) and save it as JSON:");
-        println!("       {{ \"claim_proof\": {{ ... }}, \"encrypted_data\": \"...\" }}");
+        println!("       {{ \"claim_proof\": {{ ... }} }}");
         println!("  3. Re-run with the proof file:");
         println!("       cargo run -p ootle-rs --example claim_burn -- ./burn_proof.json");
         return;
     };
 
-    let BurnProofFile {
-        claim_proof,
-        encrypted_data,
-    } = serde_json::from_str(&fs::read_to_string(&proof_path).expect("failed to read burn proof file"))
-        .expect("failed to parse burn proof JSON");
+    let BurnProofFile { claim_proof } =
+        serde_json::from_str(&fs::read_to_string(&proof_path).expect("failed to read burn proof file"))
+            .expect("failed to parse burn proof JSON");
 
     let mut provider = ProviderBuilder::new()
         .wallet(wallet)
@@ -107,7 +103,7 @@ async fn main() {
     assert_eq!(provider.network(), network);
 
     // Build the claim transaction and the sealer that signs it with the derived stealth claim key.
-    let (unsigned_tx, sealer) = ClaimBurn::new(&provider, claim_proof, encrypted_data, max_epoch)
+    let (unsigned_tx, sealer) = ClaimBurn::new(&provider, claim_proof, max_epoch)
         .with_max_fee(MAX_FEE)
         .with_memo_message("claimed via ootle-rs")
         .prepare()

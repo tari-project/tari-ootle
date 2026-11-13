@@ -28,6 +28,11 @@ the substates it wrote must be served by the indexer.
 Ports are discovered from the swarm daemon (default http://localhost:8080) unless --wallet-url /
 --indexer-url are given. The wallet daemon must use `None` auth.
 
+--live runs against a live network (e.g. esmeralda) through the given wallet daemon and indexer. The
+swarm daemon is never contacted, so the stages that need it (claim_burn, epoch, health) skip, and fees
+are compared with previous live runs only. A public indexer rate-limits submissions per IP; the flood
+retries rate-limited submissions, so it runs at the indexer's sustained rate.
+
     scripts/smoke_test.py
     scripts/smoke_test.py --only templates,token,swap
     scripts/smoke_test.py --flood 500 --templates 5 --epoch
@@ -52,7 +57,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 TEMPLATE_DIR = REPO / "scripts" / "smoke_test_template"
 TEMPLATE_WASM = TEMPLATE_DIR / "target" / "wasm32-unknown-unknown" / "release" / "smoke_test_template.wasm"
-FEES_FILE = REPO / "data" / "smoke_test" / "fees.json"
+FEES_DIR = REPO / "data" / "smoke_test"
 TARI_TOKEN = "resource_" + "01" * 32
 LIQUIDITY_POOL_TEMPLATE = "template_" + "00" * 31 + "02"
 TARI = 1_000_000
@@ -274,10 +279,12 @@ def find_strings(obj, pattern):
 
 
 class Swarm:
-    """What the swarm daemon reports is running. Empty when the daemon is unreachable."""
+    """What the swarm daemon reports is running. Empty when the daemon is unreachable or `url` is None."""
 
     def __init__(self, url):
         self.instances = []
+        if url is None:
+            return
         try:
             self.instances = JsonRpc(f"{url.rstrip('/')}/json_rpc", timeout=10).call("list_instances")["instances"]
         except StageFailed:
@@ -349,7 +356,9 @@ def fee_main(amount=TARI):
 class SmokeTest:
     def __init__(self, args):
         self.args = args
-        self.swarm = Swarm(args.swarm_url)
+        self.swarm = Swarm(None if args.live else args.swarm_url)
+        self.no_swarm = "--live does not use the swarm daemon" if args.live else "swarm daemon not reachable"
+        self.fees_file = FEES_DIR / ("fees-live.json" if args.live else "fees.json")
         self.wallet = None
         self.indexer_url = None
         self.smoke = None  # create_or_get response for the smoketest account
@@ -544,7 +553,7 @@ class SmokeTest:
         time after the base layer mines into it, so the epoch manager's view is not used."""
         validators = self.swarm.validators()
         if not validators:
-            raise StageSkipped("swarm daemon not reachable; cannot read the validators' consensus epoch")
+            raise StageSkipped(f"{self.no_swarm}; cannot read the validators' consensus epoch")
         return min(JsonRpc(url, timeout=10).call("get_consensus_status")["epoch"] for _, url in validators)
 
     def stage_epoch(self):
@@ -994,7 +1003,7 @@ fn main() {{
     def stage_fees(self):
         previous = {}
         try:
-            previous = json.loads(FEES_FILE.read_text())
+            previous = json.loads(self.fees_file.read_text())
         except (OSError, ValueError):
             pass
         current = {op: int(statistics.median(v)) for op, v in self.fees.items() if op != "negative"}
@@ -1017,8 +1026,8 @@ fn main() {{
             over = self.overcharges.get(op)
             over = dim(f"  (+{int(statistics.median(over)):,} µT overcharged)") if over else ""
             detail(f"{op:<18} {fee:>9,} µT  {delta}{over}")
-        FEES_FILE.parent.mkdir(parents=True, exist_ok=True)
-        FEES_FILE.write_text(json.dumps({**previous, **current}, indent=2, sort_keys=True))
+        self.fees_file.parent.mkdir(parents=True, exist_ok=True)
+        self.fees_file.write_text(json.dumps({**previous, **current}, indent=2, sort_keys=True))
         if drifted:
             warn(f"fees moved more than {FEE_DRIFT_WARN:.0%}: {', '.join(drifted)}")
             return f"{len(current)} operations; {len(drifted)} drifted ({', '.join(drifted)})"
@@ -1043,7 +1052,7 @@ fn main() {{
 
     def stage_health(self):
         if not self.swarm.validators():
-            raise StageSkipped("swarm daemon not reachable; cannot list validators")
+            raise StageSkipped(f"{self.no_swarm}; cannot list validators")
         now = self.validator_status()
         problems = []
         for name, s in now.items():
@@ -1096,6 +1105,8 @@ def main():
         epilog=__doc__,
     )
     p.add_argument("--swarm-url", default="http://localhost:8080")
+    p.add_argument("--live", action="store_true",
+                   help="run against a live network: never contact the swarm daemon; needs --wallet-url and --indexer-url")
     p.add_argument("--wallet-url", help="walletd JSON-RPC URL, e.g. http://127.0.0.1:5100/json_rpc")
     p.add_argument("--peer-wallet-url", help="second walletd for the multi_wallet stage")
     p.add_argument("--indexer-url", help="indexer REST URL, e.g. http://127.0.0.1:12500")
@@ -1118,6 +1129,8 @@ def main():
     p.add_argument("--no-build", action="store_true", help="use existing target/release generator/submitter")
     p.add_argument("--fail-fast", action="store_true", help="stop at the first failing stage")
     args = p.parse_args()
+    if args.live and not (args.wallet_url and args.indexer_url):
+        p.error("--live needs --wallet-url and --indexer-url")
 
     all_stages = STAGES
     if args.only:

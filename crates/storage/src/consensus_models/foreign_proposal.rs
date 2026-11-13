@@ -240,8 +240,6 @@ impl Display for ForeignProposalRecord {
     Hash,
     Serialize,
     Deserialize,
-    PartialOrd,
-    Ord,
     BorshSerialize,
     minicbor::Encode,
     minicbor::Decode,
@@ -254,6 +252,18 @@ pub struct ForeignProposalAtom {
     pub block_id: BlockId,
     #[n(1)]
     pub shard_group: ShardGroup,
+}
+
+impl Ord for ForeignProposalAtom {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.block_order_key().cmp(&other.block_order_key())
+    }
+}
+
+impl PartialOrd for ForeignProposalAtom {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl ForeignProposalAtom {
@@ -574,5 +584,21 @@ mod tests {
         assert!(!ForeignProposalStatus::Confirmed.is_unconfirmed());
         assert!(ForeignProposalStatus::New.is_unconfirmed());
         assert!(ForeignProposalStatus::Proposed.is_unconfirmed());
+    }
+
+    #[test]
+    fn foreign_proposal_atom_ord_matches_block_order_key() {
+        let lower_shard_higher_block = ForeignProposalAtom {
+            block_id: BlockId::from([0xff; 32]),
+            shard_group: ShardGroup::new(0, 31),
+        };
+        let higher_shard_lower_block = ForeignProposalAtom {
+            block_id: BlockId::from([0x01; 32]),
+            shard_group: ShardGroup::new(32, 63),
+        };
+        assert!(
+            lower_shard_higher_block.block_order_key() < higher_shard_lower_block.block_order_key()
+        );
+        assert!(lower_shard_higher_block < higher_shard_lower_block);
     }
 }

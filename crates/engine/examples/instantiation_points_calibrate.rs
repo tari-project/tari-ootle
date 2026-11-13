@@ -44,8 +44,8 @@ const LARGE_SEGMENT: usize = 1024 * 1024;
 /// See `tests/wasm_loader.rs` — the same encoded `TemplateDef` for a template named `Buggy` with a
 /// single `main`.
 const TEMPLATE_DEF: &[u8] = &[
-    28, 0, 0, 0, 130, 0, 129, 131, 101, 66, 117, 103, 103, 121, 0, 129, 133, 100, 109, 97, 105, 110, 128, 130, 0, 128,
-    244, 244,
+    29, 0, 0, 0, 130, 1, 129, 131, 101, 66, 117, 103, 103, 121, 0, 129, 132, 100, 109, 97, 105, 110, 130, 0, 128, 128,
+    130, 0, 128,
 ];
 
 fn wat_bytes(bytes: &[u8]) -> String {

@@ -9,13 +9,15 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, InputDeclaration, declare_input};
-use tari_template_lib_types::{ComponentAddress, UtxoAddress, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib_types::{ComponentAddress, UtxoAddress, constants::TARI_TOKEN, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
+    Assertion,
     Blobs,
     ComponentReference,
     Instruction,
     InstructionLimitTracker,
+    MAX_TRANSACTION_INPUTS,
     MAX_TRANSACTION_INSTRUCTIONS,
     MainSigner,
     ResourceAddressRef,
@@ -37,6 +39,13 @@ pub(crate) fn decode_instructions<'b, C>(
     })
 }
 
+pub(crate) fn decode_inputs<'b, C>(
+    d: &mut minicbor::Decoder<'b>,
+    ctx: &mut C,
+) -> Result<IndexSet<InputDeclaration>, minicbor::decode::Error> {
+    tari_bor::adapters::indexset_codec::decode_bounded(d, ctx, MAX_TRANSACTION_INPUTS)
+}
+
 #[derive(Debug, Clone, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -52,7 +61,11 @@ pub struct UnsignedTransactionV1 {
 
     /// Input objects that may be read/write
     #[n(3)]
-    #[cbor(with = "tari_bor::adapters::indexset_codec")]
+    #[cbor(
+        encode_with = "tari_bor::adapters::indexset_codec::encode",
+        decode_with = "decode_inputs",
+        cbor_len = "tari_bor::adapters::indexset_codec::cbor_len"
+    )]
     #[cfg_attr(
         feature = "serde",
         serde(deserialize_with = "tari_ootle_common_types::deserialize_input_declarations")
@@ -247,6 +260,16 @@ impl UnsignedTransactionV1 {
                 },
                 Instruction::ClaimValidatorFees { address, .. } => {
                     substates.insert(SubstateId::ValidatorFeePool(*address));
+                },
+                Instruction::Assert {
+                    assertion:
+                        Assertion::BucketAmount { resource_address, .. } |
+                        Assertion::BucketContainsNonFungibles { resource_address, .. },
+                    ..
+                } => {
+                    if *resource_address != TARI_TOKEN {
+                        substates.insert(SubstateId::Resource(*resource_address));
+                    }
                 },
                 Instruction::StealthTransfer {
                     resource_address_ref,

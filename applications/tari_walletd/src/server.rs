@@ -61,6 +61,8 @@ pub async fn spawn_listener(
     context: HandlerContext,
 ) -> anyhow::Result<(SocketAddr, task::JoinHandle<anyhow::Result<()>>)> {
     let shutdown_signal = context.shutdown_signal().clone();
+    #[cfg(feature = "web_ui")]
+    let web_ui_origin = context.config().web_ui_origin();
     let router = router(preferred_address, signaling_server_address, context);
 
     let listener = try_bind_with_fallback(preferred_address).await?;
@@ -68,7 +70,13 @@ pub async fn spawn_listener(
     let listen_addr = server.local_addr()?;
     info!(target: LOG_TARGET, "🌐 JSON-RPC listening on {listen_addr}");
     #[cfg(feature = "web_ui")]
-    info!(target: LOG_TARGET, "🕸️ Web interface available at http://{listen_addr}");
+    {
+        // WebAuthn only accepts the relying-party origin, so the link must be that origin rather than the bind address.
+        let web_ui_url = web_ui_origin.as_str().trim_end_matches('/').to_string();
+        info!(target: LOG_TARGET, "🕸️ Web interface available at {web_ui_url}");
+    }
+    #[cfg(not(feature = "web_ui"))]
+    info!(target: LOG_TARGET, "Web UI is not enabled. To enable it, build with the `web_ui` feature.");
     let server = server.with_graceful_shutdown(shutdown_signal);
     let task = tokio::spawn(async move {
         server.await?;

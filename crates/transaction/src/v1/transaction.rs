@@ -140,6 +140,21 @@ impl TransactionV1 {
         &self.body.unsigned_transaction().main_signer
     }
 
+    /// The public key of the transaction's main signer (`MainSigner::SealSigner` or a declared
+    /// `MainSigner::Authorizer` whose signature is present on the transaction), or `None` when the transaction has no
+    /// main signer (`MainSigner::None` or an unsigned `MainSigner::Authorizer`).
+    pub fn main_signer(&self) -> Option<RistrettoPublicKeyBytes> {
+        match self.declared_main_signer() {
+            MainSigner::None => None,
+            MainSigner::SealSigner => Some(*self.seal_signature.public_key()),
+            MainSigner::Authorizer(public_key) => self
+                .signatures()
+                .iter()
+                .any(|sig| sig.public_key() == public_key)
+                .then_some(*public_key),
+        }
+    }
+
     pub fn is_seal_signer_authorized(&self) -> bool {
         self.declared_main_signer().is_seal_signer_authorized()
     }
@@ -267,17 +282,18 @@ impl TransactionV1 {
     }
 
     pub fn all_published_templates_iter(&self) -> impl Iterator<Item = (PublishedTemplateAddress, &[u8])> + '_ {
-        let sealed_pk = self.seal_signature.public_key();
+        let author = self.main_signer();
         let blobs = self.body.unsigned_transaction().blobs();
         self.instructions()
             .iter()
             .chain(self.fee_instructions())
             .filter_map(move |instruction| {
+                let author = author?;
                 if let Instruction::PublishTemplate { binary, .. } = instruction {
                     let bytes = blobs.get(*binary)?.as_bytes();
                     let binary_hash = hash_template_code(bytes);
                     Some((
-                        PublishedTemplateAddress::from_author_and_binary_hash(sealed_pk, &binary_hash),
+                        PublishedTemplateAddress::from_author_and_binary_hash(&author, &binary_hash),
                         bytes,
                     ))
                 } else {
@@ -453,6 +469,9 @@ fn calc_stealth_statement_weight(statement: &StealthTransferStatement) -> u64 {
     const WEIGHT_PER_TRANSFER: u64 = 100;
     // An input contributes a commitment aggregation and a substate lookup.
     const WEIGHT_PER_INPUT: u64 = 1;
+    // Every script-path `TemplateFunction` atom instantiates and invokes a WASM template in
+    // `RuntimeInterfaceImpl::evaluate_spend_script` (`tari_engine`), so each carries `INVOCATION_FLOOR`.
+    let invocation_weight = statement.script_path_template_functions().count() as u64 * INVOCATION_FLOOR;
 
     // Outputs carry no weight term. Weight is a size/IO measure; an output's cost is its native verification, which
     // the engine charges directly in metering points and the per-block execution budget bounds, and its storage,
@@ -460,7 +479,8 @@ fn calc_stealth_statement_weight(statement: &StealthTransferStatement) -> u64 {
     // output a third time.
     WEIGHT_PER_TRANSFER +
         statement.inputs_statement.inputs.len() as u64 * WEIGHT_PER_INPUT +
-        witness_bytes / SPEND_WITNESS_BYTE_DIVISOR
+        witness_bytes / SPEND_WITNESS_BYTE_DIVISOR +
+        invocation_weight
 }
 
 /// Least weight a template invocation may carry, whatever its arguments come to.
@@ -832,6 +852,41 @@ mod transaction_id_tests {
 
         assert_ne!(a.calculate_id(), b.calculate_id());
     }
+
+    #[test]
+    fn published_templates_use_main_signer() {
+        let (sealer_sk, sealer_pk) = random_key();
+        let (author_sk, author_pk) = random_key();
+        let binary = vec![1u8, 2, 3, 4];
+        let binary_hash = hash_template_code(&binary);
+        let expected_address = PublishedTemplateAddress::from_author_and_binary_hash(&author_pk, &binary_hash);
+
+        let mut unsigned = sample_unsigned();
+        unsigned.main_signer = MainSigner::Authorizer(author_pk);
+        unsigned.blobs = Blobs::from_vec(vec![crate::Blob::from(binary.clone())]);
+        unsigned.instructions = vec![Instruction::PublishTemplate {
+            binary: 0,
+            metadata_hash: None,
+        }];
+        let sig = TransactionSignature::sign_v1(&author_sk, &sealer_pk, &unsigned);
+        let unsealed = UnsealedTransactionV1::new(unsigned.clone(), vec![sig]);
+        let tx = TransactionV1::new(
+            unsealed.clone(),
+            TransactionSealSignature::sign_v1(&sealer_sk, &unsealed),
+        );
+
+        let published: Vec<_> = tx.all_published_templates_iter().collect();
+        assert_eq!(published, vec![(expected_address, binary.as_slice())]);
+
+        let mut no_signer_unsigned = unsigned;
+        no_signer_unsigned.main_signer = MainSigner::None;
+        let no_signer_unsealed = UnsealedTransactionV1::new(no_signer_unsigned, vec![]);
+        let no_signer_tx = TransactionV1::new(
+            no_signer_unsealed.clone(),
+            TransactionSealSignature::sign_v1(&sealer_sk, &no_signer_unsealed),
+        );
+        assert!(no_signer_tx.all_published_templates_iter().next().is_none());
+    }
 }
 
 #[cfg(test)]
@@ -892,6 +947,63 @@ mod weight_tests {
         assert_eq!(calc_instruction_weight(&no_arg_call()), INVOCATION_FLOOR);
         assert_eq!(calc_instruction_weight(&bare_create_account()), INVOCATION_FLOOR);
         assert_eq!(calc_instruction_weight(&bare_template_update()), INVOCATION_FLOOR);
+    }
+
+    #[test]
+    fn stealth_script_path_template_functions_add_invocation_floor_weight() {
+        use tari_template_lib_types::{
+            Amount,
+            access_rules::AccessRule,
+            crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+            stealth::{
+                AtomicCondition,
+                MerkleProof,
+                SpendCondition,
+                SpendWitness,
+                StealthInput,
+                StealthInputsStatement,
+                StealthOutputsStatement,
+                StealthTransferStatement,
+                TemplateFunction,
+            },
+        };
+
+        let make_statement = |leaf: SpendCondition| StealthTransferStatement {
+            inputs_statement: StealthInputsStatement::new(
+                vec![StealthInput::with_witness(
+                    PedersenCommitmentBytes::zero(),
+                    SpendWitness::script_path(leaf, MerkleProof::empty()),
+                )],
+                Amount::ZERO,
+            ),
+            outputs_statement: StealthOutputsStatement::new_revealed_only(
+                Amount::from(10u64),
+                RistrettoPublicKeyBytes::zero(),
+            ),
+            balance_proof: None,
+            covenant_claims: vec![],
+        };
+
+        let func = TemplateFunction::new(TemplateAddress::default(), FunctionName::try_from("m").unwrap(), vec![]);
+        let access_only = make_statement(SpendCondition::access_rule(AccessRule::AllowAll));
+        let one_tf = make_statement(SpendCondition::template_function(func.clone()));
+        let two_tfs = make_statement(SpendCondition::all([
+            AtomicCondition::TemplateFunction(func.clone()),
+            AtomicCondition::TemplateFunction(func),
+        ]));
+
+        let w_access = calc_stealth_statement_weight(&access_only);
+        let w_one = calc_stealth_statement_weight(&one_tf);
+        let w_two = calc_stealth_statement_weight(&two_tfs);
+
+        assert!(
+            w_one >= w_access + INVOCATION_FLOOR,
+            "one script-path TemplateFunction must add at least INVOCATION_FLOOR ({w_one} vs {w_access})"
+        );
+        assert!(
+            w_two >= w_one + INVOCATION_FLOOR,
+            "each additional script-path TemplateFunction must add at least INVOCATION_FLOOR ({w_two} vs {w_one})"
+        );
     }
 
     /// `consensus_constants::the_weight_cap_bounds_the_instructions_the_size_cap_admits` reads this

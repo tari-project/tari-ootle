@@ -916,6 +916,46 @@ fn sandbox_denies_minting_into_a_bucket() {
     });
 }
 
+#[test]
+fn sandbox_denies_resource_auth_hook_invocation() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let hook_component: tari_template_lib::types::ComponentAddress =
+        test.call_function(SCRIPT_TEMPLATE, "new", args![], vec![]);
+    let (account, _proof, _key) = test.create_empty_account();
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(script_template, "create_hooked_mintable_resource", args![
+                hook_component
+            ])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    let hooked_resource = test
+        .get_previous_output_address(SubstateType::Resource)
+        .as_resource_address()
+        .unwrap();
+    let (resx, mint) = mint_utxo(
+        &mut test,
+        script_condition(script_template, "try_mint", vec![encode_arg(&hooked_resource)]),
+    );
+
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .stealth_transfer(resx, transfer.statement)
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, "Spend script rejected the spend");
+    assert_reject_reason(&reason, RuntimeError::ForbiddenInReadOnlyContext {
+        operation: "invoke_resource_access_hook",
+    });
+}
+
 // -------------------------------- Compute budget -------------------------------- //
 
 #[test]
@@ -1061,7 +1101,11 @@ fn spend_rejects_wrong_bound_arg_count() {
 #[test]
 fn spend_rejects_malformed_bound_arg() {
     // `timelock` expects one bound argument; provide one whose bytes are not well-formed CBOR (trailing data).
-    assert_spend_rejected("timelock", vec![Bytes::from_vec(vec![0x00, 0x00])], "well-formed CBOR");
+    assert_spend_rejected(
+        "timelock",
+        vec![Bytes::from_vec(vec![0x00, 0x00])],
+        "bytes remaining on input",
+    );
 }
 
 #[test]
@@ -1113,6 +1157,51 @@ fn validating_a_spend_script_charges_native_points_for_bound_args() {
         result_bound.native_execution_points - result_empty.native_execution_points,
         expected_arg_points - empty_arg_points
     );
+}
+
+#[test]
+fn spend_rejects_transient_handle_in_bound_arg() {
+    let proof_arg = encode_arg(&tari_template_lib::models::ProofId::from(0u32));
+    assert_spend_rejected("timelock", vec![proof_arg], "may not contain a proof");
+}
+
+#[test]
+fn programmatic_spend_brings_base_scope_bound_substates_into_frame_scope() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let faucet_template = test.get_template_address(FAUCET_TEMPLATE);
+    let (account, _proof, _key) = test.create_empty_account();
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(script_template, "create_untracked_mintable_resource", args![])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    let bound_resource = test
+        .get_previous_output_address(SubstateType::Resource)
+        .as_resource_address()
+        .unwrap();
+    let (resx, mint) = mint_utxo(
+        &mut test,
+        script_condition(script_template, "try_mint", vec![encode_arg(&bound_resource)]),
+    );
+
+    let transfer = spend_into(&mint, key_path(test.to_public_key_bytes()));
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(faucet_template, "static_programmatic_transfer", args![
+                resx,
+                transfer.statement
+            ])
+            .finish()
+            .seal(test.secret_key()),
+        vec![],
+    );
+    assert_reject_reason(&reason, RuntimeError::ForbiddenInReadOnlyContext {
+        operation: "new_bucket",
+    });
 }
 
 /// Mints a UTXO gated by a single no-argument `function` leaf, then spends it revealing that leaf with fees enabled,
@@ -1485,15 +1574,20 @@ fn hashlock_rejects_empty_data() {
 fn htlc_claim_requires_both_preimage_and_signer() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let preimage = b"htlc secret".to_vec();
-    // Claim path = reveal the preimage AND prove ownership of the claimant's badge (the test signer). The access rule
-    // consumes no witness data, so the hashlock remains the sole consumer of the `data` blob.
-    let leaf = all(vec![
-        builtin(BuiltinPredicate::HashLock {
-            hash: hashlock_digest(HashAlg::Sha256, &preimage),
-            alg: HashAlg::Sha256,
-        }),
-        SpendCondition::access_rule(AccessRule::AllowAll),
-    ]);
+    let claimant = test.to_public_key_bytes();
+    let leaf = htlc_claim_leaf(&preimage, claimant);
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf.clone()]));
+    let transfer = spend_leaf_with_data(&mint, leaf, Bytes::from_vec(preimage), key_path(claimant));
+    submit_expect_success(&mut test, resx, transfer);
+}
+
+#[test]
+fn htlc_claim_rejects_correct_preimage_without_claimant_signer() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let preimage = b"htlc secret".to_vec();
+    // The transaction is sealed by the test signer, which does not hold the claimant's key.
+    let (_secret, claimant) = create_key_pair_from_seed(42);
+    let leaf = htlc_claim_leaf(&preimage, claimant.to_byte_type());
     let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf.clone()]));
     let transfer = spend_leaf_with_data(
         &mint,
@@ -1501,7 +1595,19 @@ fn htlc_claim_requires_both_preimage_and_signer() {
         Bytes::from_vec(preimage),
         key_path(test.to_public_key_bytes()),
     );
-    submit_expect_success(&mut test, resx, transfer);
+    submit_expect_rejected(&mut test, resx, transfer, "Access Denied");
+}
+
+/// HTLC claim path: reveal the preimage AND hold the claimant's signer badge. The access rule consumes no witness
+/// data, so the hashlock is the sole consumer of the `data` blob.
+fn htlc_claim_leaf(preimage: &[u8], claimant: RistrettoPublicKeyBytes) -> SpendCondition {
+    all(vec![
+        builtin(BuiltinPredicate::HashLock {
+            hash: hashlock_digest(HashAlg::Sha256, preimage),
+            alg: HashAlg::Sha256,
+        }),
+        SpendCondition::access_rule(rule!(public_key(claimant))),
+    ])
 }
 
 // ---- TemplateFunction reading witness data ----

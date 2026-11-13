@@ -58,7 +58,7 @@ use std::{cell::RefCell, fmt::Debug, rc::Rc};
 pub use pay_fee::PayFee;
 use tari_engine_types::{
     commit_result::{FeeIntentFallback, FinalizeResult, RejectReason},
-    confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
+    confidential::MinotariBurnClaimProof,
     fees::FeeReceipt,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     limits::{CompileCounts, ModuleShape},
@@ -114,6 +114,7 @@ use tari_template_lib::{
 };
 pub use tracker::{ComputeAllowance, ComputeFunding, DeclaredInputLoad, FinalizedState, StateTracker};
 pub use working_state::ChargeableState;
+pub(crate) use working_state::reject_transient_values;
 
 use crate::{
     runtime::{
@@ -199,7 +200,8 @@ pub trait RuntimeInterface {
     /// `PutLastInstructionOutputOnWorkspace` names; `None` leaves the output of an earlier instruction in place.
     fn complete_instruction(&self, output: Option<IndexedValue>) -> Result<(), RuntimeError>;
 
-    fn claim_burn(&self, claim: MinotariBurnClaimProof, output_data: ClaimBurnOutputData) -> Result<(), RuntimeError>;
+    /// Claims an L1 burn into a bucket of its revealed value.
+    fn claim_burn(&self, claim: MinotariBurnClaimProof) -> Result<BucketId, RuntimeError>;
 
     fn claim_validator_fees(
         &self,
@@ -298,11 +300,11 @@ pub trait RuntimeInterface {
     /// the work.
     fn charge_template_instantiation(&self, shape: &ModuleShape) -> Result<(), RuntimeError>;
 
-    /// Charges the host-side handling of a value a template call returned, `bytes` long and holding
-    /// `items` CBOR data items, before it is decoded. Priced by
-    /// [`tari_engine_types::limits::return_value_points`] and charged against the same compute
-    /// allowance as native verification.
-    fn charge_return_value(&self, bytes: u64, items: u64) -> Result<(), RuntimeError>;
+    /// Charges the host-side handling of a value a template call returned, `raw`, before it is
+    /// decoded. Priced by [`tari_engine_types::limits::return_value_points`] and charged against
+    /// the same compute allowance as native verification; its items are counted as
+    /// [`Self::charge_engine_arg`] counts an argument's.
+    fn charge_return_value_read(&self, raw: &[u8]) -> Result<(), EngineArgChargeError>;
 
     /// Charges the host-side decode of CBOR a template wrote, `input`, before it is decoded: an
     /// engine call's argument, or a value nested in one. Priced by

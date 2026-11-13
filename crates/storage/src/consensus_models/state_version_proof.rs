@@ -342,6 +342,48 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn an_empty_shard_exclusion_proof_rejects_a_non_zero_transition_accumulator() {
+        let shard = Shard::from(3u32);
+        let network = Network::LocalNet;
+        let protocol_version = ProtocolVersion::genesis(network);
+        let root_tree = ShardGroupRootTree::build(protocol_version, [
+            (
+                Shard::global(),
+                SPARSE_MERKLE_PLACEHOLDER_HASH,
+                0,
+                TransitionAccumulator::zero(),
+            ),
+            (shard, TreeHash::new([7; 32]), 64, ACC),
+        ])
+        .unwrap();
+        let (_, empty_proof) = root_tree.get_proof(Shard::global()).unwrap();
+        let (commit_proof, _) = proof_of_leaf(network, protocol_version, shard, TreeHash::new([7; 32]), 64);
+
+        verify_state_version_leaf(
+            network,
+            &commit_proof,
+            Shard::global(),
+            0,
+            &SPARSE_MERKLE_PLACEHOLDER_HASH,
+            &TransitionAccumulator::zero(),
+            &empty_proof,
+        )
+        .unwrap();
+        assert!(matches!(
+            verify_state_version_leaf(
+                network,
+                &commit_proof,
+                Shard::global(),
+                0,
+                &SPARSE_MERKLE_PLACEHOLDER_HASH,
+                &ACC,
+                &empty_proof,
+            ),
+            Err(StateVersionProofError::LeafNotIncluded { .. })
+        ));
+    }
+
     /// A leaf proves the state of its own shard only, however equal another shard's state is.
     #[test]
     fn a_shard_keyed_leaf_proves_its_own_shard_only() {

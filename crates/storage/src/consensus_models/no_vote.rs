@@ -88,6 +88,14 @@ pub enum NoVoteReason {
     ForeignProposalAlreadyConfirmed,
     #[error("Foreign proposal processing failed")]
     ForeignProposalProcessingFailed,
+    #[error("The leader proposed foreign proposal {block_id}, which failed validation when this node received it")]
+    ForeignProposalInvalid { block_id: BlockId },
+    #[error("The leader named shard group {atom} for foreign proposal {block_id}, but the proposal is from {actual}")]
+    ForeignProposalShardGroupMismatch {
+        block_id: BlockId,
+        atom: ShardGroup,
+        actual: ShardGroup,
+    },
     #[error("The node is not at the end of the epoch")]
     NotEndOfEpoch,
     #[error("The node is not at the end of the epoch and other commands are present")]
@@ -148,6 +156,11 @@ pub enum NoVoteReason {
     )]
     BlockPledgeBytesExceeded { total_bytes: usize, max_bytes: usize },
     #[error(
+        "Block loads {total_bytes} bytes of input substates to execute its transactions, exceeding the maximum \
+         {max_bytes}"
+    )]
+    BlockInputLoadBytesExceeded { total_bytes: usize, max_bytes: usize },
+    #[error(
         "Block carries {num_proposals} foreign proposals totalling {total_bytes} bytes, exceeding the maximum \
          {max_bytes}"
     )]
@@ -176,6 +189,15 @@ pub enum NoVoteReason {
     LockedEpochAfterBlock {
         transaction_id: TransactionId,
         locked_epoch: Epoch,
+        block_epoch: Epoch,
+    },
+    #[error(
+        "The leader sequenced transaction {transaction_id}, whose minimum epoch is {min_epoch}, in a block of the \
+         earlier {block_epoch}"
+    )]
+    MinEpochAfterBlock {
+        transaction_id: TransactionId,
+        min_epoch: Epoch,
         block_epoch: Epoch,
     },
 }
@@ -214,6 +236,8 @@ impl NoVoteReason {
             Self::ForeignProposalNotReceived => "ForeignProposalNotReceived",
             Self::ForeignProposalAlreadyConfirmed => "ForeignProposalAlreadyConfirmed",
             Self::ForeignProposalProcessingFailed => "ForeignProposalProcessingFailed",
+            Self::ForeignProposalInvalid { .. } => "ForeignProposalInvalid",
+            Self::ForeignProposalShardGroupMismatch { .. } => "ForeignProposalShardGroupMismatch",
             Self::NotEndOfEpoch => "NotEndOfEpoch",
             Self::EndOfEpochWithOtherCommands => "EndOfEpochWithOtherCommands",
             Self::CommandsAfterEndOfEpoch => "CommandsAfterEndOfEpoch",
@@ -234,10 +258,12 @@ impl NoVoteReason {
             Self::BlockExecutionPointsExceeded { .. } => "BlockExecutionPointsExceeded",
             Self::BlockShardOutputBytesExceeded { .. } => "BlockShardOutputBytesExceeded",
             Self::BlockPledgeBytesExceeded { .. } => "BlockPledgeBytesExceeded",
+            Self::BlockInputLoadBytesExceeded { .. } => "BlockInputLoadBytesExceeded",
             Self::BlockForeignProposalBytesExceeded { .. } => "BlockForeignProposalBytesExceeded",
             Self::ConflictingTransactionProposed { .. } => "ConflictingTransactionProposed",
             Self::LockedEpochDisagreement { .. } => "LockedEpochDisagreement",
             Self::LockedEpochAfterBlock { .. } => "LockedEpochAfterBlock",
+            Self::MinEpochAfterBlock { .. } => "MinEpochAfterBlock",
         }
     }
 }

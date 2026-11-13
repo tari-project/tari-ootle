@@ -30,6 +30,7 @@ use log::*;
 use tari_ootle_common_types::{
     Epoch,
     SubstateAddress,
+    VotePower,
     committee::Committee,
     diag_event,
     diagnostics::DiagnosticSink,
@@ -219,8 +220,6 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                                 activation_epoch,
                                 vote_power.value(),
                             );
-                            self.record_pending_activation(validator_node_public_key, activation_epoch, shard_key);
-
                             self.inner.add_validator_node_registration(
                                 activation_epoch,
                                 validator_node_public_key,
@@ -228,6 +227,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                                 shard_key,
                                 vote_power,
                             )?;
+                            self.record_pending_activation(validator_node_public_key, activation_epoch, shard_key);
                             if activation_epoch <= self.current_epoch() {
                                 invalidate_committee_cache = true;
                             }
@@ -240,6 +240,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                             );
 
                             self.inner.deactivate_validator_node(public_key, epoch)?;
+                            self.clear_pending_activation(public_key);
                             if epoch <= self.current_epoch() {
                                 invalidate_committee_cache = true;
                             }
@@ -272,6 +273,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     target: LOG_TARGET,
                     "🖥️ validator exit in {epoch} with public key {validator_node_public_key}",
                 );
+                self.clear_pending_activation(validator_node_public_key);
             },
             EpochEvent::EpochChanged { epoch, epoch_hash } => {
                 info!(
@@ -330,6 +332,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     previous => self.inner.current_epoch_hash(),
                     corrected => epoch_hash
                 ));
+                self.has_epoch_changed = true;
                 self.inner.advance_to_epoch(epoch, epoch_hash)?;
                 self.committee_cache.clear().await;
                 Ok(())
@@ -376,11 +379,14 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
         if validator_public_key != *self.inner.node_public_key() || activation_epoch <= self.current_epoch() {
             return;
         }
-        if self
-            .pending_activation
-            .is_some_and(|pending| pending.activation_epoch <= activation_epoch)
-        {
-            return;
+        if let Some(pending) = &mut self.pending_activation {
+            if pending.activation_epoch < activation_epoch {
+                return;
+            }
+            if pending.activation_epoch == activation_epoch {
+                pending.shard_key = shard_key;
+                return;
+            }
         }
         info!(
             target: LOG_TARGET,
@@ -391,6 +397,49 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
             shard_key,
         });
         self.has_unpublished_pending_activation = true;
+    }
+
+    fn clear_pending_activation(&mut self, validator_public_key: RistrettoPublicKeyBytes) {
+        if validator_public_key == *self.inner.node_public_key() {
+            self.pending_activation = None;
+            self.has_unpublished_pending_activation = false;
+        }
+    }
+
+    async fn add_validator_node_registration(
+        &mut self,
+        activation_epoch: Epoch,
+        validator_public_key: RistrettoPublicKeyBytes,
+        claim_public_key: RistrettoPublicKeyBytes,
+        shard_key: SubstateAddress,
+        power: VotePower,
+    ) -> Result<(), EpochManagerError> {
+        self.inner.add_validator_node_registration(
+            activation_epoch,
+            validator_public_key,
+            claim_public_key,
+            shard_key,
+            power,
+        )?;
+        self.inner.set_birthday_epoch_if_unset(activation_epoch)?;
+        self.record_pending_activation(validator_public_key, activation_epoch, shard_key);
+        if activation_epoch <= self.current_epoch() {
+            self.committee_cache.clear().await;
+        }
+        Ok(())
+    }
+
+    async fn deactivate_validator_node(
+        &mut self,
+        public_key: RistrettoPublicKeyBytes,
+        deactivation_epoch: Epoch,
+    ) -> Result<(), EpochManagerError> {
+        self.inner.deactivate_validator_node(public_key, deactivation_epoch)?;
+        self.clear_pending_activation(public_key);
+        if deactivation_epoch <= self.current_epoch() {
+            self.committee_cache.clear().await;
+        }
+        Ok(())
     }
 
     fn get_pending_activation(&self) -> Result<Option<PendingActivation>, EpochManagerError> {
@@ -552,26 +601,26 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                 shard_key,
                 power,
                 reply,
-            } => handle(
-                reply,
-                self.inner.add_validator_node_registration(
-                    activation_epoch,
-                    validator_public_key,
-                    claim_public_key,
-                    shard_key,
-                    power,
-                ),
-                context,
-            ),
+            } => {
+                let res = self
+                    .add_validator_node_registration(
+                        activation_epoch,
+                        validator_public_key,
+                        claim_public_key,
+                        shard_key,
+                        power,
+                    )
+                    .await;
+                handle(reply, res, context);
+            },
             EpochManagerRequest::DeactivateValidatorNode {
                 public_key,
                 deactivation_epoch,
                 reply,
-            } => handle(
-                reply,
-                self.inner.deactivate_validator_node(public_key, deactivation_epoch),
-                context,
-            ),
+            } => {
+                let res = self.deactivate_validator_node(public_key, deactivation_epoch).await;
+                handle(reply, res, context);
+            },
             EpochManagerRequest::IsInitialScanningComplete { reply } => {
                 handle(reply, Ok(self.is_initial_epoch_sync_complete), context)
             },
@@ -690,7 +739,7 @@ mod tests {
     use std::num::NonZeroU32;
 
     use diesel::{Connection, SqliteConnection};
-    use tari_ootle_common_types::{NumPreshards, ShardGroup, VotePower, diagnostics::NoopSink};
+    use tari_ootle_common_types::{NumPreshards, ShardGroup, diagnostics::NoopSink};
     use tari_shutdown::Shutdown;
 
     use super::*;
@@ -742,7 +791,7 @@ mod tests {
             fee_claim_public_key: RistrettoPublicKeyBytes::zero(),
         };
         let (_, rx_request) = mpsc::channel(1);
-        let (tx_events, _) = broadcast::channel(1);
+        let (tx_events, _) = broadcast::channel(16);
         EpochManagerService {
             rx_request,
             inner: EpochManager::new(
@@ -1012,5 +1061,343 @@ mod tests {
         service.on_scanning_complete().unwrap();
 
         assert!(published_pending_activations(&mut rx).is_empty());
+    }
+
+    #[tokio::test]
+    async fn deactivate_validator_node_preserves_prior_deactivated_registration_epochs() {
+        let shutdown = Shutdown::new();
+        let global_db = GlobalDb::new(SqliteGlobalDbAdapter::new(
+            SqliteConnection::establish(":memory:").unwrap(),
+        ));
+        global_db.adapter().migrate().unwrap();
+        let mut service = create_service(global_db.clone(), &shutdown);
+
+        register(&global_db, 1, Epoch(1));
+        service
+            .inner
+            .deactivate_validator_node(public_key(1), Epoch(3))
+            .unwrap();
+
+        register(&global_db, 1, Epoch(5));
+        service
+            .inner
+            .deactivate_validator_node(public_key(1), Epoch(8))
+            .unwrap();
+
+        assert_eq!(service.inner.get_total_validator_count(Epoch(2)).unwrap(), 1);
+        assert_eq!(service.inner.get_total_validator_count(Epoch(4)).unwrap(), 0);
+        assert_eq!(service.inner.get_total_validator_count(Epoch(6)).unwrap(), 1);
+        assert_eq!(service.inner.get_total_validator_count(Epoch(8)).unwrap(), 0);
+
+        let mut tx = global_db.create_transaction().unwrap();
+        let mut vn_db = global_db.validator_nodes(&mut tx);
+        let vns_epoch_2 = vn_db.get_all_registered_within_start_epoch(Epoch(2)).unwrap();
+        assert_eq!(vns_epoch_2.len(), 1);
+        assert_eq!(vns_epoch_2[0].start_epoch, Epoch(1));
+        assert_eq!(vns_epoch_2[0].end_epoch, Some(Epoch(3)));
+
+        let vns_epoch_4 = vn_db.get_all_registered_within_start_epoch(Epoch(4)).unwrap();
+        assert!(vns_epoch_4.is_empty());
+
+        let vns_epoch_6 = vn_db.get_all_registered_within_start_epoch(Epoch(6)).unwrap();
+        assert_eq!(vns_epoch_6.len(), 1);
+        assert_eq!(vns_epoch_6[0].start_epoch, Epoch(5));
+        assert_eq!(vns_epoch_6[0].end_epoch, Some(Epoch(8)));
+    }
+
+    #[tokio::test]
+    async fn hash_correction_emits_epoch_changed_on_scanning_complete() {
+        let shutdown = Shutdown::new();
+        let global_db = GlobalDb::new(SqliteGlobalDbAdapter::new(
+            SqliteConnection::establish(":memory:").unwrap(),
+        ));
+        global_db.adapter().migrate().unwrap();
+        let mut service = create_service(global_db.clone(), &shutdown);
+        let mut rx = service.tx_events.subscribe();
+
+        register(&global_db, 1, Epoch(5));
+        service
+            .activate_epoch(Epoch(5), FixedHash::from([1; 32]))
+            .await
+            .unwrap();
+        service
+            .handle_epoch_event(EpochEvent::DoneForNow {
+                epoch: Epoch(5),
+                epoch_hash: FixedHash::from([1; 32]),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(rx.try_recv().unwrap(), EpochManagerEvent::EpochChanged {
+            epoch: Epoch(5),
+            ..
+        }));
+        assert!(rx.try_recv().is_err());
+
+        register(&global_db, 2, Epoch(5));
+        service
+            .activate_epoch(Epoch(5), FixedHash::from([2; 32]))
+            .await
+            .unwrap();
+        service
+            .handle_epoch_event(EpochEvent::DoneForNow {
+                epoch: Epoch(5),
+                epoch_hash: FixedHash::from([2; 32]),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(rx.try_recv().unwrap(), EpochManagerEvent::EpochChanged {
+            epoch: Epoch(5),
+            ..
+        }));
+    }
+
+    #[tokio::test]
+    async fn distinct_validators_keeps_latest_registration_within_same_start_epoch() {
+        let global_db: TestGlobalDb = GlobalDb::new(SqliteGlobalDbAdapter::new(
+            SqliteConnection::establish(":memory:").unwrap(),
+        ));
+        global_db.adapter().migrate().unwrap();
+
+        let shard_key_1 = SubstateAddress::from_array([10; SubstateAddress::LENGTH]);
+        let shard_key_2 = SubstateAddress::from_array([20; SubstateAddress::LENGTH]);
+        let mut tx = global_db.create_transaction().unwrap();
+        global_db
+            .validator_nodes(&mut tx)
+            .insert_validator_node(
+                public_key(1),
+                public_key(1),
+                shard_key_1,
+                Epoch(5),
+                public_key(1),
+                VotePower::of(1),
+            )
+            .unwrap();
+        global_db
+            .validator_nodes(&mut tx)
+            .insert_validator_node(
+                public_key(1),
+                public_key(1),
+                shard_key_2,
+                Epoch(5),
+                public_key(1),
+                VotePower::of(1),
+            )
+            .unwrap();
+        let vns = global_db
+            .validator_nodes(&mut tx)
+            .get_all_registered_within_start_epoch(Epoch(5))
+            .unwrap();
+        assert_eq!(vns.len(), 1);
+        assert_eq!(vns[0].shard_key, shard_key_2);
+    }
+
+    #[tokio::test]
+    async fn local_validator_exit_or_deactivation_clears_pending_activation() {
+        let shutdown = Shutdown::new();
+        let mut service = in_memory_service(&shutdown);
+        let mut rx = service.tx_events.subscribe();
+        service.activate_epoch(Epoch(1), FixedHash::zero()).await.unwrap();
+
+        service
+            .handle_epoch_event(announce(RistrettoPublicKeyBytes::zero(), Epoch(4)))
+            .await
+            .unwrap();
+        assert!(service.get_pending_activation().unwrap().is_some());
+
+        service
+            .handle_epoch_event(EpochEvent::NewValidatorNodeExit {
+                epoch: Epoch(1),
+                validator_node_public_key: RistrettoPublicKeyBytes::zero(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(service.get_pending_activation().unwrap(), None);
+        service.on_scanning_complete().unwrap();
+        assert!(published_pending_activations(&mut rx).is_empty());
+
+        service
+            .handle_epoch_event(announce(RistrettoPublicKeyBytes::zero(), Epoch(4)))
+            .await
+            .unwrap();
+        assert!(service.get_pending_activation().unwrap().is_some());
+
+        service
+            .handle_epoch_event(EpochEvent::ActiveValidatorNodeSetChanged {
+                epoch: Epoch(2),
+                node_changes: vec![ValidatorNodeChange::Remove {
+                    public_key: RistrettoPublicKeyBytes::zero(),
+                }],
+            })
+            .await
+            .unwrap();
+        assert_eq!(service.get_pending_activation().unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn same_epoch_pending_registration_updates_shard_key_without_republishing() {
+        let shutdown = Shutdown::new();
+        let global_db = GlobalDb::new(SqliteGlobalDbAdapter::new(
+            SqliteConnection::establish(":memory:").unwrap(),
+        ));
+        global_db.adapter().migrate().unwrap();
+        let mut service = create_service(global_db.clone(), &shutdown);
+        let mut rx = service.tx_events.subscribe();
+
+        for byte in 1..=20 {
+            register(&global_db, byte, Epoch(1));
+        }
+        service.activate_epoch(Epoch(1), FixedHash::zero()).await.unwrap();
+
+        let first_half_key = SubstateAddress::from_array([0x01; SubstateAddress::LENGTH]);
+        let second_half_key = SubstateAddress::from_array([0xff; SubstateAddress::LENGTH]);
+
+        service
+            .handle_epoch_event(EpochEvent::NewValidatorRegistered {
+                epoch: Epoch(1),
+                claim_public_key: public_key(9),
+                validator_node_public_key: RistrettoPublicKeyBytes::zero(),
+                activation_epoch: Epoch(4),
+                shard_key: first_half_key,
+            })
+            .await
+            .unwrap();
+        service.on_scanning_complete().unwrap();
+        assert_eq!(published_pending_activations(&mut rx), vec![Epoch(4)]);
+        assert_eq!(
+            service.get_pending_activation().unwrap(),
+            Some(PendingActivation {
+                activation_epoch: Epoch(4),
+                shard_group: first_half_key.to_shard_group(NumPreshards::P256, 2),
+            })
+        );
+
+        service
+            .handle_epoch_event(EpochEvent::NewValidatorRegistered {
+                epoch: Epoch(1),
+                claim_public_key: public_key(9),
+                validator_node_public_key: RistrettoPublicKeyBytes::zero(),
+                activation_epoch: Epoch(4),
+                shard_key: second_half_key,
+            })
+            .await
+            .unwrap();
+        service.on_scanning_complete().unwrap();
+        assert!(published_pending_activations(&mut rx).is_empty());
+        assert_eq!(
+            service.get_pending_activation().unwrap(),
+            Some(PendingActivation {
+                activation_epoch: Epoch(4),
+                shard_group: second_half_key.to_shard_group(NumPreshards::P256, 2),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn writer_requests_update_service_state_and_invalidate_committee_cache() {
+        let shutdown = Shutdown::new();
+        let all_shards = ShardGroup::all_shards(NumPreshards::P256);
+        let global_db = GlobalDb::new(SqliteGlobalDbAdapter::new(
+            SqliteConnection::establish(":memory:").unwrap(),
+        ));
+        global_db.adapter().migrate().unwrap();
+        let mut service = create_service(global_db.clone(), &shutdown);
+
+        register(&global_db, 1, Epoch(2));
+        service.activate_epoch(Epoch(2), FixedHash::zero()).await.unwrap();
+
+        let first_cached = service
+            .committee_cache
+            .get_or_try_init::<_, _, ()>((Epoch(2), all_shards), || async {
+                Ok(Arc::new(
+                    service
+                        .inner
+                        .get_committee_for_shard_group(Epoch(2), all_shards, None)
+                        .unwrap(),
+                ))
+            })
+            .await
+            .unwrap();
+
+        let valid_pk =
+            RistrettoPublicKeyBytes::from_hex("e2f2ae0a6abc4e71a884a961c500515f58e30b6aa582dd8db6a65945e08d2d76")
+                .unwrap();
+        let (tx, rx) = oneshot::channel();
+        service
+            .handle_request(EpochManagerRequest::AddValidatorNodeRegistration {
+                activation_epoch: Epoch(2),
+                validator_public_key: valid_pk,
+                claim_public_key: valid_pk,
+                shard_key: SubstateAddress::zero(),
+                power: VotePower::of(1),
+                reply: tx,
+            })
+            .await;
+        rx.await.unwrap().unwrap();
+        assert_eq!(service.inner.birthday_epoch(), Some(Epoch(2)));
+
+        let second_cached = service
+            .committee_cache
+            .get_or_try_init::<_, _, ()>((Epoch(2), all_shards), || async {
+                Ok(Arc::new(
+                    service
+                        .inner
+                        .get_committee_for_shard_group(Epoch(2), all_shards, None)
+                        .unwrap(),
+                ))
+            })
+            .await
+            .unwrap();
+        assert!(
+            !Arc::ptr_eq(&first_cached, &second_cached),
+            "AddValidatorNodeRegistration at or before current_epoch must clear committee_cache"
+        );
+
+        let (tx, rx) = oneshot::channel();
+        service
+            .handle_request(EpochManagerRequest::AddValidatorNodeRegistration {
+                activation_epoch: Epoch(5),
+                validator_public_key: RistrettoPublicKeyBytes::zero(),
+                claim_public_key: valid_pk,
+                shard_key: SubstateAddress::zero(),
+                power: VotePower::of(1),
+                reply: tx,
+            })
+            .await;
+        rx.await.unwrap().unwrap();
+        assert_eq!(
+            service.get_pending_activation().unwrap(),
+            Some(PendingActivation {
+                activation_epoch: Epoch(5),
+                shard_group: all_shards,
+            })
+        );
+
+        let (tx, rx) = oneshot::channel();
+        service
+            .handle_request(EpochManagerRequest::DeactivateValidatorNode {
+                public_key: RistrettoPublicKeyBytes::zero(),
+                deactivation_epoch: Epoch(2),
+                reply: tx,
+            })
+            .await;
+        rx.await.unwrap().unwrap();
+        assert_eq!(service.get_pending_activation().unwrap(), None);
+
+        let third_cached = service
+            .committee_cache
+            .get_or_try_init::<_, _, ()>((Epoch(2), all_shards), || async {
+                Ok(Arc::new(
+                    service
+                        .inner
+                        .get_committee_for_shard_group(Epoch(2), all_shards, None)
+                        .unwrap(),
+                ))
+            })
+            .await
+            .unwrap();
+        assert!(
+            !Arc::ptr_eq(&second_cached, &third_cached),
+            "DeactivateValidatorNode at or before current_epoch must clear committee_cache"
+        );
     }
 }

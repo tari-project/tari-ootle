@@ -23,16 +23,13 @@
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use log::{warn, *};
-use tari_bor::{MaybeTagged, check_value_form, decode_exact};
+use tari_bor::{MaybeTagged, decode_exact};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_engine_types::{
-    Utxo,
-    UtxoOutput,
     bucket::Bucket,
     commit_result::{FeeIntentFallback, FinalizeResult, RejectReason},
-    confidential::{ClaimBurnOutputData, ClaimedOutputTombstone, MinotariBurnClaimProof},
+    confidential::{ClaimedOutputTombstone, MinotariBurnClaimProof},
     crypto,
-    crypto::OutputBody,
     entity_id_provider::EntityIdProvider,
     events::Event,
     fees::FeeReceipt,
@@ -57,7 +54,7 @@ use tari_ootle_transaction::{
     ResourceAddressRef,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
 };
-use tari_template_abi::{FunctionDef, FunctionKind, TemplateDef, Type};
+use tari_template_abi::{FunctionDef, FunctionKind, TemplateDef, Type, WellKnownType};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, is_builtin_template_address};
 use tari_template_lib::{
     SpendContext,
@@ -130,6 +127,7 @@ use tari_template_lib::{
         TemplateMetadataHash,
         UtxoAddress,
         ValidatorFeePoolAddress,
+        VaultId,
         access_rules::{
             AccessRule,
             ComponentAccessRules,
@@ -142,7 +140,7 @@ use tari_template_lib::{
         },
         bytes::Bytes,
         constants::{TARI_TOKEN, TOKEN_SYMBOL},
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, ValueKnowledgeProof},
         engine_args::IntrinsicId,
         stealth::{
             AtomicCondition,
@@ -150,7 +148,6 @@ use tari_template_lib::{
             Covenant,
             CurrentInputView,
             MerkleProof,
-            SpendAuthorization,
             SpendCondition,
             SpendWitness,
             StealthInput,
@@ -292,15 +289,18 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     /// is discarded with the transaction if the frame fails, so it is neither a side effect on state nor a source of
     /// non-determinism.
     ///
-    /// The lists contain only WASM host ops (each backed by an `EngineOp`), because a restricted frame only exists
-    /// while template WASM is executing — instruction-level operations such as `pay_fee` and `publish_template` have
-    /// no `EngineOp`, run only at the top level, and so can never execute in a restricted context. `call_invoke` is
+    /// The lists contain WASM host ops (each backed by an `EngineOp`) as well as host-initiated re-entry into WASM
+    /// (`invoke_resource_access_hook` and `evaluate_spend_script`), which must be refused before it runs because it
+    /// happens before any write lock. Instruction-level operations such as `pay_fee` and `publish_template` have no
+    /// `EngineOp`, run only at the top level, and so can never execute in a restricted context. `call_invoke` is
     /// also blocked at the frame level (`allow_cross_template_calls == false`) and listed here for defence in depth.
     /// `allocate_address_invoke` is also refused by `WorkingState::new_address_allocation`; listing it here refuses
     /// the op before it draws an address from the id provider.
     fn enforce_frame_restrictions(&self, function: &'static str) -> Result<(), RuntimeError> {
         const FORBIDDEN_IN_READ_ONLY: &[&str] = &[
             "call_invoke",
+            "invoke_resource_access_hook",
+            "evaluate_spend_script",
             "generate_random_invoke",
             "generate_uuid",
             "proof_invoke",
@@ -309,6 +309,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         ];
         const FORBIDDEN_IN_OWN_COMPONENT: &[&str] = &[
             "call_invoke",
+            "invoke_resource_access_hook",
+            "evaluate_spend_script",
             "proof_invoke",
             "bucket_invoke",
             "allocate_address_invoke",
@@ -554,6 +556,17 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             return Ok(());
         }
 
+        // The hook frame's scope comes from the arguments as they stand before the acting component's state is
+        // attached, so the hook receives that state as data only. The acting component's frame validated the state
+        // when it wrote it, and the substates it names belong to the acting component: a root substate among them
+        // may be absent from this transaction, and none of them enter the hook frame's scope.
+        let hook_arg_scope = [
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&action)?)?,
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&auth_caller)?)?,
+        ]
+        .into_iter()
+        .collect();
+
         if let Some(component) = auth_caller.component().copied() {
             self.invoke_modules_on_runtime_call("load_component")?;
             self.charge_component_load(component)?;
@@ -586,7 +599,16 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             &auth_hook.method,
             args,
             Some(FrameWriteMode::OwnComponent),
+            Some(hook_arg_scope),
         );
+        if !resource_was_in_scope {
+            self.tracker.write_with(|state_mut| {
+                state_mut
+                    .current_call_scope_mut()?
+                    .remove_substate_from_referenced(&resource_id);
+                Ok::<_, RuntimeError>(())
+            })?;
+        }
         let ret = ret.map_err(|e| match e {
             RuntimeError::CrossTemplateCallMethodError { details, .. } => RuntimeError::AccessDeniedAuthHook {
                 action_ident: action.into(),
@@ -602,14 +624,6 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             return Err(RuntimeError::UnexpectedNonNullInAuthHookReturn);
         }
 
-        if !resource_was_in_scope {
-            self.tracker.write_with(|state_mut| {
-                state_mut
-                    .current_call_scope_mut()?
-                    .remove_substate_from_referenced(&resource_id);
-                Ok::<_, RuntimeError>(())
-            })?;
-        }
         Ok(())
     }
 
@@ -649,6 +663,31 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         Ok(())
     }
 
+    /// Authorizes `action` on a vault against its freeze flags and its resource's static access rule and auth hook.
+    /// Both the vault and resource are unlocked before the hook runs, so the hook may read either substate.
+    fn authorize_vault_action(
+        &self,
+        vault_id: VaultId,
+        action: ResourceAuthAction,
+        freeze_flag: VaultFreezeFlag,
+    ) -> Result<ResourceAddress, RuntimeError> {
+        let resource_address = self.tracker.write_with(|state_mut| {
+            let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
+            let vault = state_mut.get_vault(&vault_lock)?;
+            let freeze_flags = vault.freeze_flags();
+            let resource_address = *vault.resource_address();
+            state_mut.unlock_substate(vault_lock)?;
+
+            if freeze_flags.contains(freeze_flag) {
+                return Err(RuntimeError::VaultFrozen { vault_id, freeze_flag });
+            }
+            Ok::<_, RuntimeError>(resource_address)
+        })?;
+
+        self.authorize_resource_action(resource_address, action, |_| Ok(()))?;
+        Ok(resource_address)
+    }
+
     /// An interface over this transaction's state for a nested call to run against.
     ///
     /// The nested frame shares the state, not the handle: every frame gets its own interface, so no
@@ -657,12 +696,15 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         Runtime::new(Rc::new(self.clone()))
     }
 
+    /// Calls `method` on `component_address`. `arg_scope`, when given, is the callee frame's argument scope in
+    /// place of the one derived from `args`.
     fn invoke_component_method(
         &self,
         component_address: ComponentAddress,
         method: &str,
         args: Vec<Bytes>,
         restrict_frame_to: Option<FrameWriteMode>,
+        arg_scope: Option<IndexedWellKnownTypes>,
     ) -> Result<IndexedValue, RuntimeError> {
         let call_runtime = self.for_nested_call();
 
@@ -673,6 +715,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             method,
             args.into_iter().map(InstructionArg::Literal).collect(),
             restrict_frame_to,
+            arg_scope,
         )
         .map_err(|e| RuntimeError::CrossTemplateCallMethodError {
             component_address,
@@ -812,20 +855,26 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
 
-        if !matches!(
-            func.arguments.first().expect("length checked").arg_type.other(),
-            Some("ResourceAuthAction")
-        ) {
+        if !func
+            .arguments
+            .first()
+            .expect("length checked")
+            .arg_type
+            .is_well_known(WellKnownType::ResourceAuthAction)
+        {
             return Err(RuntimeError::InvalidArgument {
                 argument,
                 reason: format!("Authorize hook '{}' must take a ResourceAuthAction as argument 1", hook),
             });
         }
 
-        if !matches!(
-            func.arguments.get(1).expect("length checked").arg_type.other(),
-            Some("AuthHookCaller")
-        ) {
+        if !func
+            .arguments
+            .get(1)
+            .expect("length checked")
+            .arg_type
+            .is_well_known(WellKnownType::AuthHookCaller)
+        {
             return Err(RuntimeError::InvalidArgument {
                 argument,
                 reason: format!("Authorize hook '{}' must take an AuthHookCaller as argument 2", hook),
@@ -858,7 +907,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             });
         }
         match func.arguments.last() {
-            Some(arg) if arg.arg_type.other() == Some("SpendContext") => Ok(()),
+            Some(arg) if arg.arg_type.is_well_known(WellKnownType::SpendContext) => Ok(()),
             _ => Err(RuntimeError::InvalidArgument {
                 argument: "TemplateFunction",
                 reason: format!(
@@ -870,10 +919,12 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     }
 
     /// Resolves a `TemplateFunction` spend-condition leaf against its template and validates it end-to-end: the
-    /// referenced function exists, has the required signature, and `args` carries exactly one well-formed-CBOR element
-    /// per leading (non-`SpendContext`) parameter. Because a condition tree commits only an opaque root, leaves are
-    /// hidden at creation; this runs at spend time (T2) when the leaf is revealed. Templates are immutable substates,
-    /// so a referenced template must already resolve — there is no "not yet published" skip case.
+    /// referenced function exists, has the required signature, and `args` carries exactly one element per leading
+    /// (non-`SpendContext`) parameter. Each element is charged for and decoded once, when the script is invoked, and
+    /// its type is checked by the dispatcher's `decode_exact::<T>`. Because a condition tree commits only an opaque
+    /// root, leaves are hidden at creation; this runs at spend time (T2) when the leaf is revealed. Templates are
+    /// immutable substates, so a referenced template must already resolve — there is no "not yet published" skip
+    /// case.
     fn validate_template_function(&self, tf: &TemplateFunction) -> Result<(), RuntimeError> {
         let template_def = self.get_template_def(&tf.template)?;
         let func = template_def
@@ -901,28 +952,6 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
                 ),
             });
         }
-        // The host can verify each element is well-formed CBOR; full type conformance against the declared parameter
-        // type is enforced at the WASM deserialization boundary (the dispatcher's `decode_exact::<T>`).
-        for (i, arg) in tf.args.iter().enumerate() {
-            self.charge_engine_arg(arg).map_err(|e| match e {
-                EngineArgChargeError::Unreadable(e) => RuntimeError::InvalidArgument {
-                    argument: "TemplateFunction",
-                    reason: format!(
-                        "spend script '{}' bound argument {} is not well-formed CBOR: {}",
-                        tf.function, i, e
-                    ),
-                },
-                EngineArgChargeError::Runtime(e) => e,
-            })?;
-            check_value_form(arg).map_err(|e| RuntimeError::InvalidArgument {
-                argument: "TemplateFunction",
-                reason: format!(
-                    "spend script '{}' bound argument {} is not well-formed CBOR: {}",
-                    tf.function, i, e
-                ),
-            })?;
-        }
-
         Ok(())
     }
 
@@ -1201,8 +1230,9 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         view: &Rc<StatementSpendView>,
         witness_data: &[u8],
     ) -> Result<(), RuntimeError> {
+        self.invoke_modules_on_runtime_call("evaluate_spend_script")?;
         // (T2) Authoritative spend-time validation. A revealed leaf is untrusted spender data, so the function shape
-        // and bound-arg encoding are validated immediately before invoking.
+        // and bound-arg count are validated immediately before invoking.
         self.validate_template_function(tf)?;
 
         let exec = SpendScriptExecution {
@@ -1223,9 +1253,9 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
 
         // Make the introspection context reachable for the duration of the call, and restrict the predicate's frame
         // to a read-only, non-cross-template sandbox.
-        *self.spend_exec_context.borrow_mut() = Some(exec);
+        let prev_exec_context = self.spend_exec_context.replace(Some(exec));
         let result = self.invoke_template_function(&tf.template, &tf.function, args, Some(FrameWriteMode::ReadOnly));
-        *self.spend_exec_context.borrow_mut() = None;
+        *self.spend_exec_context.borrow_mut() = prev_exec_context;
 
         result
             .map(|_| ())
@@ -1266,7 +1296,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     ///
     /// Counting the items is itself host work, so the walk reads only as many items as the
     /// transaction can still pay `per_item` for, and checks their nesting against `max_depth` on the
-    /// way. Input holding more is charged what was read and fails out of compute.
+    /// way. Input holding more is charged what was read and fails out of compute. Input the walk
+    /// rejects, malformed or nested too deep, is charged the items read before the walk stopped.
     fn charge_cbor_read(
         &self,
         input: &[u8],
@@ -1276,8 +1307,13 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     ) -> Result<(), EngineArgChargeError> {
         self.tracker.charge_native_execution(points(input.len() as u64, 0))?;
         let affordable = self.tracker.native_execution_headroom() / per_item;
-        let counted = tari_bor::count_data_items_bounded(input, max_depth, affordable)
-            .map_err(|e| EngineArgChargeError::Unreadable(e.into()))?;
+        let counted = match tari_bor::count_data_items_bounded(input, max_depth, affordable) {
+            Ok(counted) => counted,
+            Err(tari_bor::ItemCountError { items_read, error }) => {
+                self.tracker.charge_native_execution(points(0, items_read))?;
+                return Err(EngineArgChargeError::Unreadable(error.into()));
+            },
+        };
         match counted {
             Some(items) => self.tracker.charge_native_execution(points(0, items))?,
             None => {
@@ -1557,13 +1593,23 @@ where
                             reason: "GetState component action requires a component address".to_string(),
                         })?;
                 args.assert_no_args("ComponentAction::GetState")?;
-                self.tracker.write_with(|state| {
+                let is_already_locked = self.tracker.read_with(|state| {
                     let is_already_locked = state
                         .current_call_scope()?
                         .get_current_component_lock()
-                        .map(|l| *l.substate_id() == component_address)
-                        .unwrap_or(false);
+                        .is_some_and(|l| *l.substate_id() == component_address);
+                    // Checked before charging the load so an out-of-scope read costs nothing
+                    if !is_already_locked {
+                        state.check_substate_in_scope(&SubstateId::Component(component_address))?;
+                    }
+                    Ok::<_, RuntimeError>(is_already_locked)
+                })?;
 
+                if !is_already_locked {
+                    self.charge_component_load(component_address)?;
+                }
+
+                self.tracker.write_with(|state| {
                     let component_lock = if is_already_locked {
                         state
                             .current_call_scope()?
@@ -1643,6 +1689,10 @@ where
                         })?;
 
                 let access_rules: ComponentAccessRules = args.assert_one_arg()?;
+
+                let template_addr = self.tracker.get_template_address()?;
+                let template_def = self.get_template_def(&template_addr)?;
+                validate_component_access_rule_methods(&access_rules, &template_def)?;
 
                 if access_rules.contains_scoped_to_component_or_template() {
                     return Err(RuntimeError::InvalidArgument {
@@ -1752,10 +1802,21 @@ where
                 args.assert_no_args("Component::GetTemplateAddress")?;
 
                 self.tracker.write_with(|state| {
-                    let locked = state.read_lock_substate(SubstateId::Component(component_address))?;
+                    let current_component_lock = state
+                        .current_call_scope()?
+                        .get_current_component_lock()
+                        .filter(|l| *l.substate_id() == component_address)
+                        .cloned();
+                    let is_already_locked = current_component_lock.is_some();
+                    let locked = match current_component_lock {
+                        Some(lock) => lock,
+                        None => state.read_lock_substate_in_scope(SubstateId::Component(component_address))?,
+                    };
                     let component = state.get_component(&locked)?;
                     let template_address = *component.template_address();
-                    state.unlock_substate(locked)?;
+                    if !is_already_locked {
+                        state.unlock_substate(locked)?;
+                    }
                     Ok(InvokeResult::encode(&template_address)?)
                 })
             },
@@ -2570,9 +2631,33 @@ where
                         }));
                     }
 
-                    // The value proof is the burner's proof that they hold the UTXO's opening (or the resource's
-                    // secret view key), so it is required whether or not the resource tracks its total supply.
                     let commitment = arg.utxo_id.into_commitment_bytes();
+
+                    // The output's creator chose its mask, so a mask-knowledge proof shows knowledge of the opening
+                    // but not ownership. It authorises a burn only together with the UTXO's key-path spend authority.
+                    // A view-key proof needs the resource's secret view key and stands on its own.
+                    if matches!(arg.value_proof.knowledge_proof, ValueKnowledgeProof::Commitment { .. }) {
+                        let Some(spend_key) = utxo_mut.output().and_then(|o| o.auth.spend_key()).copied() else {
+                            return Err(RuntimeError::ResourceError(ResourceError::UtxoBurnFailed {
+                                id: arg.utxo_id,
+                                details: "a mask-knowledge value proof can only burn a UTXO that has a spend key"
+                                    .to_string(),
+                            }));
+                        };
+                        let badge = NonFungibleAddress::from_public_key(spend_key);
+                        if !state_mut.base_call_scope().auth_scope().contains_badge(&badge) {
+                            return Err(RuntimeError::ResourceError(
+                                ResourceError::RequiredSignatureMissingForStealthUtxo {
+                                    commitment,
+                                    public_key: spend_key,
+                                },
+                            ));
+                        }
+                    }
+
+                    let utxo_mut = state_mut.get_utxo_mut(&utxo_lock)?;
+                    // The value proof is required whether or not the resource tracks its total supply, since it is
+                    // what limits burns to the UTXO owner or the view-key holder.
                     // Burning discards the output, so the proof is validated against the viewable balance first
                     let elgamal_proof = utxo_mut
                         .output
@@ -2681,38 +2766,10 @@ where
 
                 let bucket_id: BucketId = args.assert_one_arg()?;
 
-                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with_authorization(|state_mut| {
-                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
-
-                        let vault = state_mut.get_vault(&vault_lock)?;
-                        if vault.freeze_flags().contains(VaultFreezeFlag::Deposits) {
-                            return Err(RuntimeError::VaultFrozen {
-                                vault_id,
-                                freeze_flag: VaultFreezeFlag::Deposits,
-                            });
-                        }
-                        let resource_address = *vault.resource_address();
-
-                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
-
-                        let resource = state_mut.get_resource(&resource_lock)?;
-
-                        state_mut.authorization().check_resource_access_rules(
-                            ResourceAuthAction::Deposit,
-                            resource.as_ownership(),
-                            resource.access_rules(),
-                        )?;
-
-                        let auth_caller = state_mut.get_auth_caller(&resource_lock)?;
-                        Ok::<_, RuntimeError>((vault_lock, resource_lock, resource.auth_hook().cloned(), auth_caller))
-                    })?;
-
-                if let Some(auth_hook) = maybe_auth_hook {
-                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Deposit)?;
-                }
+                self.authorize_vault_action(vault_id, ResourceAuthAction::Deposit, VaultFreezeFlag::Deposits)?;
 
                 let moved = self.tracker.write_with(move |state_mut| {
+                    let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
                     let bucket = state_mut.take_bucket(bucket_id)?;
                     Self::check_bucket_is_unlocked("deposit", bucket_id, &bucket)?;
 
@@ -2726,7 +2783,6 @@ where
                     let moved = bucket.non_fungible_ids().len();
                     vault_mut.deposit(bucket)?;
 
-                    state_mut.unlock_substate(resource_lock)?;
                     state_mut.unlock_substate(vault_lock)?;
 
                     Ok::<_, RuntimeError>(moved)
@@ -2742,72 +2798,53 @@ where
                 })?;
                 let arg: VaultWithdrawArg = args.assert_one_arg()?;
 
-                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller, has_view_key) =
-                    self.tracker.write_with_authorization(|state_mut| {
-                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
-
-                        let vault = state_mut.get_vault(&vault_lock)?;
-                        if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
-                            return Err(RuntimeError::VaultFrozen {
-                                vault_id,
-                                freeze_flag: VaultFreezeFlag::Withdrawals,
-                            });
-                        }
-                        let resource_address = vault.resource_address();
-
-                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(*resource_address))?;
-
-                        let resource = state_mut.get_resource(&resource_lock)?;
-
-                        state_mut.authorization().check_resource_access_rules(
-                            ResourceAuthAction::Withdraw,
-                            resource.as_ownership(),
-                            resource.access_rules(),
-                        )?;
-
-                        let auth_caller = state_mut.get_auth_caller(&resource_lock)?;
-                        let has_view_key = resource.view_key().is_some();
-                        Ok::<_, RuntimeError>((
-                            vault_lock,
-                            resource_lock,
-                            resource.auth_hook().cloned(),
-                            auth_caller,
-                            has_view_key,
-                        ))
+                // Enforce confidential limits before substate reads, authorization hooks, or proof crypto run.
+                if let VaultWithdrawArg::Confidential { proof } = &arg {
+                    self.tracker.write_with(|state| {
+                        state.check_write_allowed(&SubstateId::Vault(vault_id))?;
+                        state.admit_confidential_withdraw(proof)
                     })?;
-
-                if let Some(auth_hook) = maybe_auth_hook {
-                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Withdraw)?;
                 }
+
+                let resource_address =
+                    self.authorize_vault_action(vault_id, ResourceAuthAction::Withdraw, VaultFreezeFlag::Withdrawals)?;
 
                 // Charge the withdraw's native verification cost against the payment-funded
-                // allowance before any of its proof crypto runs.
-                if let VaultWithdrawArg::Confidential { proof } = &arg {
-                    self.tracker
-                        .charge_native_execution(tari_engine_types::confidential::withdraw_native_points(
-                            proof,
-                            has_view_key,
-                        ))?;
-                }
+                // allowance before any of its proof crypto (including view-key decompression) runs.
+                let maybe_view_key =
+                    if let VaultWithdrawArg::Confidential { proof } = &arg {
+                        let view_key_bytes = self.tracker.write_with(|state_mut| {
+                            let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
+                            let view_key_bytes = state_mut.get_resource(&resource_lock)?.view_key().copied();
+                            state_mut.unlock_substate(resource_lock)?;
+                            Ok::<_, RuntimeError>(view_key_bytes)
+                        })?;
+                        self.tracker.charge_native_execution(
+                            tari_engine_types::confidential::withdraw_native_points(proof, view_key_bytes.is_some()),
+                        )?;
+                        // The key is read only to verify the confidential outputs' viewable-balance proofs, which
+                        // `PER_OUTPUT_VIEWABLE_SURCHARGE` in the charge above pays for.
+                        view_key_bytes
+                            .filter(|_| proof.output_proof.num_confidential_outputs() > 0)
+                            .map(|bytes| {
+                                RistrettoPublicKey::from_canonical_bytes(bytes.as_bytes()).map_err(|e| {
+                                    RuntimeError::InvariantError {
+                                        function: "VaultAction::Withdraw",
+                                        details: format!(
+                                            "Resource {} has a malformed view key: {}",
+                                            SubstateId::Resource(resource_address),
+                                            e
+                                        ),
+                                    }
+                                })
+                            })
+                            .transpose()?
+                    } else {
+                        None
+                    };
 
                 let (result, moved) = self.tracker.write_with(|state| {
-                    let resource = state.get_resource(&resource_lock)?;
-                    let maybe_view_key =
-                        resource
-                            .to_view_key_public_key()
-                            .map_err(|e| RuntimeError::InvariantError {
-                                function: "VaultAction::Withdraw",
-                                details: format!(
-                                    "Resource {} has a malformed view key: {}",
-                                    resource_lock.substate_id(),
-                                    e
-                                ),
-                            })?;
-
-                    // Enforce confidential limits before the withdraw's proof crypto runs.
-                    if let VaultWithdrawArg::Confidential { proof } = &arg {
-                        state.account_confidential_withdraw(proof)?;
-                    }
+                    let vault_lock = state.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
                     let (resource_container, public_amount, confidential_effects) = match arg {
@@ -2844,7 +2881,6 @@ where
                     state.new_bucket(bucket_id, resource_container)?;
 
                     state.unlock_substate(vault_lock)?;
-                    state.unlock_substate(resource_lock)?;
 
                     let bucket = tari_template_lib::models::Bucket::from_id(bucket_id);
                     Ok::<_, RuntimeError>((InvokeResult::encode(&bucket)?, moved))
@@ -2937,26 +2973,26 @@ where
                     return Err(RuntimeError::FeePaymentInMainIntent);
                 }
 
-                // Charge for the statement's verification cost, exactly like the
-                // `stealth_transfer` method does.
-                if let Some(ref statement) = arg.statement {
-                    self.tracker.account_fee_intent_stealth_transfer()?;
-                    let has_view_key = self.tracker.write_with(|state| {
-                        state.account_stealth_transfer(statement)?;
-                        let resource_lock = state.read_lock_substate(SubstateId::Resource(TARI_TOKEN))?;
-                        let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
-                        state.unlock_substate(resource_lock)?;
-                        Ok::<_, RuntimeError>(has_view_key)
-                    })?;
-                    self.tracker
-                        .charge_native_execution(stealth::transfer_native_points(statement, has_view_key))?;
-                }
+                self.tracker
+                    .read_with(|state| state.check_write_allowed(&SubstateId::Vault(vault_id)))?;
 
-                // Authorise the spent inputs before the fee transfer executes — the same mandatory pre-execute gate as
-                // `stealth_transfer`, so a rejection leaves the inputs unspent. Fees are always paid in TARI.
-                if let Some(ref statement) = arg.statement {
-                    self.verify_input_authorizations(TARI_TOKEN.into(), statement)?;
-                }
+                // Charge for the statement's verification cost and authorise the spent inputs before the fee transfer
+                // executes — the same mandatory pre-execute gate as `stealth_transfer`, so a rejection leaves the
+                // inputs unspent. Fees are always paid in TARI.
+                let admitted_transfer = match arg.statement {
+                    Some(statement) => {
+                        self.tracker.admit_fee_intent_stealth_transfer()?;
+                        let admitted = self
+                            .tracker
+                            .write_with(|state| state.admit_stealth_transfer(statement))?;
+                        // TARI has no view key, so the viewable-balance surcharge never applies to a fee payment.
+                        self.tracker
+                            .charge_native_execution(stealth::transfer_native_points(admitted.statement(), false))?;
+                        self.verify_input_authorizations(TARI_TOKEN.into(), admitted.statement())?;
+                        Some(admitted)
+                    },
+                    None => None,
+                };
 
                 self.tracker.write_with_authorization(|state_mut| {
                     let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
@@ -2994,9 +3030,8 @@ where
                         let withdrawn = vault_mut.withdraw(arg.amount)?;
                         container.deposit(withdrawn)?;
                     }
-                    if let Some(statement) = arg.statement &&
-                        let Some(revealed) =
-                            state_mut.execute_stealth_transfer(TARI_TOKEN.into(), statement, None)?
+                    if let Some(admitted) = admitted_transfer &&
+                        let Some(revealed) = state_mut.execute_stealth_transfer(TARI_TOKEN.into(), admitted, None)?
                     {
                         container.deposit(revealed)?;
                     }
@@ -3030,38 +3065,10 @@ where
                 })?;
                 args.assert_no_args("CreateProofByResource")?;
 
-                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with_authorization(|state_mut| {
-                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
-
-                        let vault = state_mut.get_vault(&vault_lock)?;
-                        if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
-                            return Err(RuntimeError::VaultFrozen {
-                                vault_id,
-                                freeze_flag: VaultFreezeFlag::Withdrawals,
-                            });
-                        }
-                        let resource_address = vault.resource_address();
-
-                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(*resource_address))?;
-
-                        let resource = state_mut.get_resource(&resource_lock)?;
-
-                        state_mut.authorization().check_resource_access_rules(
-                            ResourceAuthAction::Withdraw,
-                            resource.as_ownership(),
-                            resource.access_rules(),
-                        )?;
-
-                        let auth_caller = state_mut.get_auth_caller(&resource_lock)?;
-                        Ok::<_, RuntimeError>((vault_lock, resource_lock, resource.auth_hook().cloned(), auth_caller))
-                    })?;
-
-                if let Some(auth_hook) = maybe_auth_hook {
-                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Withdraw)?;
-                }
+                self.authorize_vault_action(vault_id, ResourceAuthAction::Withdraw, VaultFreezeFlag::Withdrawals)?;
 
                 let (result, locked) = self.tracker.write_with(|state| {
+                    let vault_lock = state.write_lock_substate(SubstateId::Vault(vault_id))?;
                     let proof_id = state.id_provider()?.new_proof_id()?;
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
                     let locked_funds = vault_mut.lock_all(vault_id)?;
@@ -3069,7 +3076,6 @@ where
                     state.new_proof(proof_id, locked_funds)?;
 
                     state.unlock_substate(vault_lock)?;
-                    state.unlock_substate(resource_lock)?;
 
                     Ok::<_, RuntimeError>((InvokeResult::encode(&proof_id)?, locked))
                 })?;
@@ -3084,38 +3090,10 @@ where
                 })?;
                 let arg: VaultCreateProofByFungibleAmountArg = args.assert_one_arg()?;
 
-                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with_authorization(|state_mut| {
-                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
-
-                        let vault = state_mut.get_vault(&vault_lock)?;
-                        if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
-                            return Err(RuntimeError::VaultFrozen {
-                                vault_id,
-                                freeze_flag: VaultFreezeFlag::Withdrawals,
-                            });
-                        }
-                        let resource_address = vault.resource_address();
-
-                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(*resource_address))?;
-
-                        let resource = state_mut.get_resource(&resource_lock)?;
-
-                        state_mut.authorization().check_resource_access_rules(
-                            ResourceAuthAction::Withdraw,
-                            resource.as_ownership(),
-                            resource.access_rules(),
-                        )?;
-
-                        let auth_caller = state_mut.get_auth_caller(&resource_lock)?;
-                        Ok::<_, RuntimeError>((vault_lock, resource_lock, resource.auth_hook().cloned(), auth_caller))
-                    })?;
-
-                if let Some(auth_hook) = maybe_auth_hook {
-                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Withdraw)?;
-                }
+                self.authorize_vault_action(vault_id, ResourceAuthAction::Withdraw, VaultFreezeFlag::Withdrawals)?;
 
                 let (result, locked) = self.tracker.write_with(|state| {
+                    let vault_lock = state.write_lock_substate(SubstateId::Vault(vault_id))?;
                     let proof_id = state.id_provider()?.new_proof_id()?;
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
                     let locked_funds = vault_mut.lock_by_amount(vault_id, arg.amount)?;
@@ -3123,7 +3101,6 @@ where
                     state.new_proof(proof_id, locked_funds)?;
 
                     state.unlock_substate(vault_lock)?;
-                    state.unlock_substate(resource_lock)?;
 
                     Ok::<_, RuntimeError>((InvokeResult::encode(&proof_id)?, locked))
                 })?;
@@ -3138,38 +3115,10 @@ where
                 })?;
                 let arg: VaultCreateProofByNonFungiblesArg = args.assert_one_arg()?;
 
-                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with_authorization(|state_mut| {
-                        let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
-
-                        let vault = state_mut.get_vault(&vault_lock)?;
-                        if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
-                            return Err(RuntimeError::VaultFrozen {
-                                vault_id,
-                                freeze_flag: VaultFreezeFlag::Withdrawals,
-                            });
-                        }
-                        let resource_address = vault.resource_address();
-
-                        let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(*resource_address))?;
-
-                        let resource = state_mut.get_resource(&resource_lock)?;
-
-                        state_mut.authorization().check_resource_access_rules(
-                            ResourceAuthAction::Withdraw,
-                            resource.as_ownership(),
-                            resource.access_rules(),
-                        )?;
-
-                        let auth_caller = state_mut.get_auth_caller(&resource_lock)?;
-                        Ok::<_, RuntimeError>((vault_lock, resource_lock, resource.auth_hook().cloned(), auth_caller))
-                    })?;
-
-                if let Some(auth_hook) = maybe_auth_hook {
-                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Withdraw)?;
-                }
+                self.authorize_vault_action(vault_id, ResourceAuthAction::Withdraw, VaultFreezeFlag::Withdrawals)?;
 
                 let (result, locked) = self.tracker.write_with(|state| {
+                    let vault_lock = state.write_lock_substate(SubstateId::Vault(vault_id))?;
                     let proof_id = state.id_provider()?.new_proof_id()?;
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
                     let locked_funds = vault_mut.lock_by_non_fungible_ids(vault_id, arg.ids)?;
@@ -3177,7 +3126,6 @@ where
                     state.new_proof(proof_id, locked_funds)?;
 
                     state.unlock_substate(vault_lock)?;
-                    state.unlock_substate(resource_lock)?;
 
                     Ok::<_, RuntimeError>((InvokeResult::encode(&proof_id)?, locked))
                 })?;
@@ -3313,10 +3261,12 @@ where
                 })?;
                 let proof = args.assert_one_arg()?;
 
-                // Charge the withdraw's native verification cost against the payment-funded
-                // allowance before any of its proof crypto runs. The resource peek is a cheap
-                // substate read that determines whether the viewable-balance surcharge applies.
+                // Enforce confidential limits and charge the withdraw's native verification cost
+                // against the payment-funded allowance before any of its proof crypto runs. The
+                // resource peek is a cheap substate read that determines whether the
+                // viewable-balance surcharge applies.
                 let has_view_key = self.tracker.write_with(|state| {
+                    state.admit_confidential_withdraw(&proof)?;
                     let bucket = state.get_bucket(bucket_id)?;
                     let resource_lock = state.read_lock_substate((*bucket.resource_address()).into())?;
                     let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
@@ -3332,18 +3282,23 @@ where
                 self.tracker.write_with(|state| {
                     let bucket = state.get_bucket(bucket_id)?;
                     let resource_lock = state.read_lock_substate((*bucket.resource_address()).into())?;
-                    let resource = state.get_resource(&resource_lock)?;
-                    let view_key = resource
-                        .to_view_key_public_key()
-                        .map_err(|e| RuntimeError::InvariantError {
-                            function: "BucketAction::TakeConfidential",
-                            details: format!(
-                                "Resource {} has a malformed view key: {}",
-                                resource_lock.substate_id(),
-                                e
-                            ),
-                        })?;
-                    state.account_confidential_withdraw(&proof)?;
+                    // The key is read only to verify the confidential outputs' viewable-balance proofs,
+                    // which `PER_OUTPUT_VIEWABLE_SURCHARGE` in the charge above pays for.
+                    let view_key = if proof.output_proof.num_confidential_outputs() > 0 {
+                        state
+                            .get_resource(&resource_lock)?
+                            .to_view_key_public_key()
+                            .map_err(|e| RuntimeError::InvariantError {
+                                function: "BucketAction::TakeConfidential",
+                                details: format!(
+                                    "Resource {} has a malformed view key: {}",
+                                    resource_lock.substate_id(),
+                                    e
+                                ),
+                            })?
+                    } else {
+                        None
+                    };
                     let bucket_mut = state.get_bucket_mut(bucket_id)?;
                     let (resource, effects) = bucket_mut.take_confidential(proof, view_key.as_ref())?;
                     let resource_address = *resource.resource_address();
@@ -3889,7 +3844,7 @@ where
         Ok(())
     }
 
-    fn claim_burn(&self, claim: MinotariBurnClaimProof, output_data: ClaimBurnOutputData) -> Result<(), RuntimeError> {
+    fn claim_burn(&self, claim: MinotariBurnClaimProof) -> Result<BucketId, RuntimeError> {
         let epoch = self.tracker.get_current_epoch()?;
         self.tracker
             .charge_native_execution(tari_engine_types::limits::NativeExecutionPoints::PER_CLAIM_BURN)?;
@@ -3920,33 +3875,26 @@ where
         })?;
 
         self.tracker.write_with(|state_mut| {
-            // 2. Create a tombstone
+            // The burner knows the burn commitment's opening, so a stealth transfer of theirs can create, and spend, a
+            // UTXO addressed by that commitment. The tombstone is therefore the only substate a claim addresses by the
+            // commitment: only a claim creates one, and a claim needs the claim key's signature.
             let address = ClaimedOutputTombstoneAddress::from_commitment(claim.commitment);
             state_mut.new_substate(address, ClaimedOutputTombstone { value: claim.value })?;
 
-            // 3. Create the stealth UTXO.
+            // The claimed value is revealed in a bucket that the claim transaction moves on. The ownership proof the
+            // verifier checked binds `claim.value` to the commitment.
+            //
             // This mints value with no `increase_total_supply` counterpart, which is sound only because the genesis
             // TARI resource both disables supply tracking and denies `Burn` (see `get_stealth_tari_resource`).
             // Enabling either would need an increase here to balance the decrease that
-            // `ResourceAction::StealthUtxoBurn` applies when the UTXO is burnt.
-            let address = UtxoAddress::new(TARI_TOKEN, claim.commitment.into());
-            let utxo = Utxo::new(UtxoOutput {
-                output: OutputBody {
-                    public_nonce: claim.output.sender_offset_public_key,
-                    encrypted_data: output_data.encrypted_data,
-                    minimum_value_promise: 0,
-                    viewable_balance: None,
-                },
-                auth: SpendAuthorization::Key(claim_public_key),
-                tag: UtxoTag::new(0),
-            });
-
-            state_mut.new_substate(address, utxo)?;
-
-            Ok::<_, RuntimeError>(())
-        })?;
-
-        Ok(())
+            // `ResourceAction::StealthUtxoBurn` applies when TARI is burnt.
+            let bucket_id = state_mut.new_bucket_id()?;
+            state_mut.new_bucket(
+                bucket_id,
+                ResourceContainer::stealth(TARI_TOKEN, Amount::from(claim.value)),
+            )?;
+            Ok(bucket_id)
+        })
     }
 
     fn claim_validator_fees(
@@ -4088,6 +4036,10 @@ where
                         .map(|public_key| id_provider.derive_new_component_address(&template, public_key))
                         .unwrap_or_else(|| id_provider.new_component_address())?;
 
+                    if state.substate_exists(&SubstateId::Component(address))? {
+                        return Err(RuntimeError::ComponentAlreadyExists { address });
+                    }
+
                     let id = state.new_address_allocation(address)?;
                     Ok(InvokeResult::encode(&ComponentAddressAllocation::new(id))?)
                 },
@@ -4139,7 +4091,7 @@ where
                     args,
                 } = args.assert_one_arg()?;
 
-                self.invoke_component_method(component_address, &method, args, None)?
+                self.invoke_component_method(component_address, &method, args, None, None)?
             },
         };
 
@@ -4204,6 +4156,24 @@ where
     }
 
     fn update_component_template(&self, new_template: TemplateAddress) -> Result<(), RuntimeError> {
+        let access_rules = self.tracker.read_with(|state| {
+            let locked = state
+                .current_call_scope()?
+                .get_current_component_lock()
+                .ok_or_else(|| RuntimeError::InvariantError {
+                    function: "update_component_template",
+                    details: "No current component lock in call scope".to_string(),
+                })?;
+            Ok::<_, RuntimeError>(state.get_component(locked)?.access_rules().clone())
+        })?;
+        // A method rule that the new template lacks would be lost silently, and a later template that re-adds the
+        // method would put it under the component's default rule. The developer keeps the rule by leaving a stub
+        // method in the new template, or by setting the access rules under the current template before upgrading.
+        if access_rules.num_access_rules() > 0 {
+            let template_def = self.get_template_def(&new_template)?;
+            validate_component_access_rule_methods(&access_rules, &template_def)?;
+        }
+
         self.tracker.write_with(|state_mut| {
             let locked = state_mut
                 .current_call_scope()?
@@ -4385,26 +4355,31 @@ where
         // only creation-time invariant is that an output is spendable by at least one path (`spend_key` or
         // `condition_root` is `Some`), enforced by `validate_stealth_outputs_statement` during execution.
 
-        // The fee intent runs on free-compute credit, so the transfers it may perform are capped. Checked first, so
-        // an over-cap fee intent is rejected before any substate read, charge or crypto. Both the `StealthTransfer`
+        let address = self.tracker.read_with(|state| {
+            let address = state.resolve_resource_address_ref(resource_address.clone())?;
+            state.check_write_allowed(&SubstateId::Resource(address))?;
+            Ok::<_, RuntimeError>(address)
+        })?;
+
+        // The fee intent runs on free-compute credit, so the transfers it may perform are capped. Checked before any
+        // resource read, charge or crypto so an over-cap fee intent is rejected up front. Both the `StealthTransfer`
         // instruction and a template's `ResourceManager::stealth_transfer` reach here, so neither route escapes it.
-        self.tracker.account_fee_intent_stealth_transfer()?;
+        self.tracker.admit_fee_intent_stealth_transfer()?;
 
         // The whole statement's native verification cost is charged against the payment-funded
         // allowance before any of it runs (the authorisation pass below included), so a transaction
         // that will not pay traps here without extracting the crypto work. The resource peek is a
         // cheap substate read that determines whether the viewable-balance surcharge applies.
-        let (address, has_view_key) = self.tracker.write_with(|state| {
-            state.account_stealth_transfer(&statement)?;
-            let address = state.resolve_resource_address_ref(resource_address.clone())?;
+        let (admitted, has_view_key) = self.tracker.write_with(|state| {
+            let admitted = state.admit_stealth_transfer(statement)?;
             let resource_lock = state.read_lock_substate(SubstateId::Resource(address))?;
             let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
             state.unlock_substate(resource_lock)?;
-            Ok::<_, RuntimeError>((address, has_view_key))
+            Ok::<_, RuntimeError>((admitted, has_view_key))
         })?;
         self.tracker
             .charge_native_execution(tari_engine_types::stealth::transfer_native_points(
-                &statement,
+                admitted.statement(),
                 has_view_key,
             ))?;
 
@@ -4418,11 +4393,11 @@ where
         // their values to be in range; `execute_stealth_transfer` below range-proofs those same `statement` outputs.
         // Both run pre-commit in this one atomic call, so the two MUST stay coupled — decoupling them would reopen a
         // wraparound forgery in the covenant check.
-        self.verify_input_authorizations(resource_address.clone(), &statement)?;
+        self.verify_input_authorizations(resource_address.clone(), admitted.statement())?;
 
         self.tracker.write_with_authorization(|state_mut| {
             let Some(container) =
-                state_mut.execute_stealth_transfer(resource_address, statement, revealed_funds_bucket_id)?
+                state_mut.execute_stealth_transfer(resource_address, admitted, revealed_funds_bucket_id)?
             else {
                 return Ok(None);
             };
@@ -4454,6 +4429,11 @@ where
                         })?;
                     let bucket = state_mut.take_bucket(input_bucket)?;
                     Self::check_bucket_is_unlocked("pay a fee from", input_bucket, &bucket)?;
+
+                    // An empty Tari bucket pays nothing: consume it and record no fee payment.
+                    if *bucket.resource_address() == TARI_TOKEN && bucket.unlocked_amount().is_zero() {
+                        return Ok(());
+                    }
 
                     // No refunds
                     state_mut.pay_fee(bucket.take_all(), None)?;
@@ -4497,9 +4477,15 @@ where
             .charge_native_execution(tari_engine_types::limits::instantiation_points(shape))
     }
 
-    fn charge_return_value(&self, bytes: u64, items: u64) -> Result<(), RuntimeError> {
-        self.tracker
-            .charge_native_execution(tari_engine_types::limits::return_value_points(bytes, items))
+    fn charge_return_value_read(&self, raw: &[u8]) -> Result<(), EngineArgChargeError> {
+        use tari_engine_types::limits::{self, NativeExecutionPoints, return_value_points};
+
+        self.charge_cbor_read(
+            raw,
+            limits::MAX_CBOR_NESTING_DEPTH,
+            NativeExecutionPoints::PER_RETURN_VALUE_ITEM,
+            return_value_points,
+        )
     }
 
     fn charge_engine_arg(&self, input: &[u8]) -> Result<(), EngineArgChargeError> {
@@ -4599,15 +4585,44 @@ where
     }
 
     fn resolve_workspace_id(&self, workspace_id: &WorkspaceOffsetId) -> Result<tari_bor::Value, RuntimeError> {
+        use tari_engine_types::limits::{NativeExecutionPoints, engine_arg_points};
+
+        let id = *workspace_id;
+        let affordable = self.tracker.native_execution_headroom() / NativeExecutionPoints::PER_ENGINE_ARG_ITEM;
+        let counted = self.tracker.with_workspace(|workspace| {
+            let value = workspace.get(id)?.ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
+                id,
+                existing_ids: workspace.all_ids_iter().collect(),
+            })?;
+            Ok::<_, RuntimeError>(
+                value
+                    .count_items_bounded(affordable, |_| false)
+                    .map(|count| (tari_bor::encoded_len(value) as u64, count.items)),
+            )
+        })?;
+        match counted {
+            Some((bytes, items)) => {
+                self.tracker.charge_native_execution(engine_arg_points(0, items))?;
+                self.tracker.charge_native_execution(engine_arg_points(bytes, 0))?;
+            },
+            None => {
+                self.tracker.charge_native_execution(engine_arg_points(0, affordable))?;
+                self.tracker.charge_native_execution(engine_arg_points(0, 1))?;
+                return Err(RuntimeError::InvariantError {
+                    function: "resolve_workspace_id",
+                    details: "an item beyond the native execution headroom was affordable".to_string(),
+                });
+            },
+        }
         self.tracker.with_workspace(|workspace| {
-            let id = *workspace_id;
-            workspace.get(id).map(|opt| opt.cloned()).map(|opt| {
-                opt.ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
+            workspace
+                .get(id)?
+                .cloned()
+                .ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
                     id,
                     existing_ids: workspace.all_ids_iter().collect(),
                 })
-            })
-        })?
+        })
     }
 }
 
@@ -4671,6 +4686,7 @@ mod tests {
     };
     use tari_ootle_common_types::Epoch;
     use tari_ootle_transaction::{Blob, Blobs, TransactionWeight};
+    use tari_template_lib::types::{access_rules::ResourceAccessRules, confidential::ConfidentialWithdrawProof};
 
     use super::*;
     use crate::{
@@ -4687,8 +4703,9 @@ mod tests {
         type Error = std::convert::Infallible;
         type Template = LoadedTemplate;
 
-        fn get_template(&self, _id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
-            Ok(None)
+        fn get_template(&self, id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
+            Ok(tari_template_builtin::try_get_template_builtin(id)
+                .map(|code| crate::wasm::WasmModule::load_template_from_code(code).unwrap()))
         }
     }
 
@@ -4810,6 +4827,150 @@ mod tests {
     }
 
     #[test]
+    fn resolving_a_workspace_arg_charges_native_points_per_reference() {
+        let payload: Vec<u64> = (0..128).collect();
+        let encoded = tari_bor::encode(&payload).unwrap();
+        let items = tari_bor::count_data_items_bounded(&encoded, limits::MAX_CBOR_NESTING_DEPTH, u64::MAX)
+            .unwrap()
+            .unwrap();
+        let expected_per_ref = engine_arg_points(encoded.len() as u64, items);
+        assert!(expected_per_ref > 0);
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        runtime
+            .put_on_workspace(0, IndexedValue::from_type(&payload).unwrap())
+            .unwrap();
+        assert_eq!(runtime.native_points_consumed(), 0);
+
+        let ws_arg = InstructionArg::Workspace(WorkspaceOffsetId::new(0));
+        let resolved = runtime.resolve_args(None, std::slice::from_ref(&ws_arg)).unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(runtime.native_points_consumed(), expected_per_ref);
+
+        let resolved_multi = runtime
+            .resolve_args(None, &[ws_arg.clone(), ws_arg.clone(), ws_arg])
+            .unwrap();
+        assert_eq!(resolved_multi.len(), 3);
+        assert_eq!(runtime.native_points_consumed(), expected_per_ref * 4);
+    }
+
+    #[test]
+    fn repeating_a_large_workspace_arg_across_instructions_exhausts_compute_allowance() {
+        let payload: Vec<u64> = (0..2_000).collect();
+        let runtime = runtime_with_blobs(Blobs::default());
+        runtime
+            .put_on_workspace(0, IndexedValue::from_type(&payload).unwrap())
+            .unwrap();
+
+        let ws_arg = InstructionArg::Workspace(WorkspaceOffsetId::new(0));
+        let mut exhausted = false;
+        for _ in 0..500 {
+            match runtime.resolve_args(None, std::slice::from_ref(&ws_arg)) {
+                Ok(_) => {},
+                Err(RuntimeError::FeeIntentComputeExceeded { .. }) => {
+                    exhausted = true;
+                    break;
+                },
+                Err(other) => panic!("expected FeeIntentComputeExceeded, got {other:?}"),
+            }
+        }
+        assert!(
+            exhausted,
+            "repeatedly referencing a large workspace item must exhaust the compute allowance"
+        );
+        assert!(
+            runtime.native_points_consumed() >
+                limits::FREE_COMPUTE_GRACE_POINTS - limits::NativeExecutionPoints::PER_ENGINE_ARG_ITEM,
+            "items counted before failing must be paid for"
+        );
+    }
+
+    #[test]
+    fn decode_return_value_bounds_item_scan_and_depth() {
+        use crate::wasm::{WasmExecutionError, WasmProcess};
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let over_item_limit: Vec<u8> = vec![
+            0u8;
+            usize::try_from(
+                limits::FREE_COMPUTE_GRACE_POINTS / limits::NativeExecutionPoints::PER_RETURN_VALUE_ITEM + 100
+            )
+            .unwrap()
+        ];
+        let mut raw = Vec::new();
+        {
+            let mut enc = tari_bor::minicbor::Encoder::new(&mut raw);
+            enc.array(over_item_limit.len() as u64).unwrap();
+            for &v in &over_item_limit {
+                enc.u8(v).unwrap();
+            }
+        }
+
+        let err = WasmProcess::decode_return_value_for(&runtime, &raw).unwrap_err();
+        assert!(matches!(
+            err,
+            WasmExecutionError::RuntimeError(RuntimeError::FeeIntentComputeExceeded { .. })
+        ));
+        assert!(
+            runtime.native_points_consumed() >
+                limits::FREE_COMPUTE_GRACE_POINTS - limits::NativeExecutionPoints::PER_RETURN_VALUE_ITEM,
+            "the bounded item scan must charge for the affordable items it read before failing"
+        );
+
+        let runtime_depth = runtime_with_blobs(Blobs::default());
+        let depth = limits::MAX_CBOR_NESTING_DEPTH + 1;
+        let mut deep_raw = vec![0x81; depth];
+        deep_raw.push(0xf6);
+        let depth_err = WasmProcess::decode_return_value_for(&runtime_depth, &deep_raw).unwrap_err();
+        assert!(matches!(depth_err, WasmExecutionError::EncodingError(_)));
+    }
+
+    #[test]
+    fn unreadable_cbor_is_charged_for_the_items_read_before_it() {
+        use crate::wasm::{WasmExecutionError, WasmProcess};
+
+        const READABLE: u64 = 200;
+        // An array claiming one more element than it holds, then a reserved head the scan cannot read.
+        let mut malformed = Vec::new();
+        {
+            let mut enc = tari_bor::minicbor::Encoder::new(&mut malformed);
+            enc.array(READABLE + 1).unwrap();
+            for _ in 0..READABLE {
+                enc.u8(0).unwrap();
+            }
+        }
+        malformed.push(0x1c);
+        // The array, its readable elements and the unreadable one.
+        let items_read = READABLE + 2;
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let err = WasmProcess::decode_return_value_for(&runtime, &malformed).unwrap_err();
+        assert!(matches!(err, WasmExecutionError::EncodingError(_)), "{err:?}");
+        assert_eq!(
+            runtime.native_points_consumed(),
+            limits::return_value_points(malformed.len() as u64, items_read)
+        );
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let err = runtime.charge_engine_arg(&malformed).unwrap_err();
+        assert!(matches!(err, EngineArgChargeError::Unreadable(_)), "{err:?}");
+        assert_eq!(
+            runtime.native_points_consumed(),
+            engine_arg_points(malformed.len() as u64, items_read)
+        );
+
+        // Nesting past the depth bound is charged for every container read up to it.
+        let mut too_deep = vec![0x81u8; limits::MAX_CBOR_NESTING_DEPTH + 1];
+        too_deep.push(0xf6);
+        let runtime = runtime_with_blobs(Blobs::default());
+        runtime.charge_engine_arg(&too_deep).unwrap_err();
+        assert_eq!(
+            runtime.native_points_consumed(),
+            engine_arg_points(too_deep.len() as u64, limits::MAX_CBOR_NESTING_DEPTH as u64 + 1)
+        );
+    }
+
+    #[test]
     fn stealth_transfer_and_pay_fee_enforce_limits_before_substate_reads_and_auth() {
         let valid =
             StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
@@ -4843,11 +5004,820 @@ mod tests {
             .unwrap()
             .into(),
         ]);
+        // The statement decoder bounds inputs at `MAX_STEALTH_INPUTS`, which is `STEALTH_LIMITS.max_inputs`, so an
+        // over-limit `PayFeeArg` is refused while decoding, before the vault is read.
         assert!(matches!(
             runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args),
+            Err(RuntimeError::InvalidArgument { argument, .. }) if argument.ends_with("PayFeeArg")
+        ));
+    }
+
+    #[test]
+    fn confidential_withdraw_and_take_confidential_enforce_limits_before_substate_reads_and_auth() {
+        let valid_proof = ConfidentialWithdrawProof::revealed_withdraw(Amount::new(1));
+        let mut too_many_inputs = valid_proof.clone();
+        too_many_inputs.inputs = (0..=limits::CONFIDENTIAL_LIMITS.max_inputs)
+            .map(|_| PedersenCommitmentBytes::zero())
+            .collect();
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let vault_id = tari_template_lib::types::VaultId::new([1u8; 32].into());
+        let bucket_id = BucketId::from(1u32);
+        runtime.tracker.write_with(|state| {
+            state
+                .current_call_scope_mut()
+                .unwrap()
+                .add_substate_to_scope(vault_id.into())
+                .unwrap();
+        });
+
+        // The proof decoder bounds inputs at `MAX_CONFIDENTIAL_INPUTS`, which is `CONFIDENTIAL_LIMITS.max_inputs`, so
+        // an over-limit proof is refused while decoding, before the vault or bucket is read.
+        let over_limit_withdraw_args = EngineArgs::from(vec![
+            tari_bor::encode(&VaultWithdrawArg::Confidential {
+                proof: Box::new(too_many_inputs.clone()),
+            })
+            .unwrap()
+            .into(),
+        ]);
+        assert!(matches!(
+            runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::Withdraw, over_limit_withdraw_args),
+            Err(RuntimeError::InvalidArgument { argument, .. }) if argument.ends_with("VaultWithdrawArg")
+        ));
+
+        let over_limit_take_args = EngineArgs::from(vec![tari_bor::encode(&too_many_inputs).unwrap().into()]);
+        assert!(matches!(
+            runtime.bucket_invoke(
+                BucketRef::Ref(bucket_id),
+                BucketAction::TakeConfidential,
+                over_limit_take_args
+            ),
+            Err(RuntimeError::InvalidArgument { argument, .. }) if argument.ends_with("ConfidentialWithdrawProof")
+        ));
+
+        // Exhaust the per-transaction confidential withdraw count and verify both `VaultAction::Withdraw` and
+        // `BucketAction::TakeConfidential` reject before reading the non-existent vault or bucket.
+        runtime.tracker.write_with(|state| {
+            for _ in 0..limits::CONFIDENTIAL_LIMITS.max_withdraws_per_transaction {
+                state.admit_confidential_withdraw(&valid_proof).unwrap();
+            }
+        });
+
+        let valid_withdraw_args = EngineArgs::from(vec![
+            tari_bor::encode(&VaultWithdrawArg::Confidential {
+                proof: Box::new(valid_proof.clone()),
+            })
+            .unwrap()
+            .into(),
+        ]);
+        assert!(matches!(
+            runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::Withdraw, valid_withdraw_args),
             Err(RuntimeError::ArgumentValidationError(
-                ArgumentValidationError::MaxStealthInputsExceeded { .. }
+                ArgumentValidationError::MaxConfidentialWithdrawsPerTransactionExceeded { .. }
             ))
         ));
+
+        let valid_take_args = EngineArgs::from(vec![tari_bor::encode(&valid_proof).unwrap().into()]);
+        assert!(matches!(
+            runtime.bucket_invoke(
+                BucketRef::Ref(bucket_id),
+                BucketAction::TakeConfidential,
+                valid_take_args
+            ),
+            Err(RuntimeError::ArgumentValidationError(
+                ArgumentValidationError::MaxConfidentialWithdrawsPerTransactionExceeded { .. }
+            ))
+        ));
+    }
+
+    /// A runtime holding a confidential resource whose view key is a non-canonical Ristretto point (`[0xff; 32]`),
+    /// plus a vault and a bucket of that resource with 10 revealed units each. Decompressing the view key returns
+    /// `InvariantError`, so a call that gets past it never decompressed the key.
+    fn runtime_with_malformed_view_key_resource() -> (
+        RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        tari_template_lib::types::VaultId,
+        BucketId,
+    ) {
+        use tari_engine_types::{resource::Resource, vault::Vault};
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let resource_address = ResourceAddress::new([2u8; 32].into());
+        let vault_id = tari_template_lib::types::VaultId::new([3u8; 32].into());
+
+        let malformed_view_key = RistrettoPublicKeyBytes::from_bytes(&[0xff; 32]).unwrap();
+        let resource = Resource::new(
+            ResourceType::Confidential,
+            SubstateOwnerRule::None,
+            ResourceAccessRules::new(),
+            Metadata::new(),
+            Some(malformed_view_key),
+            None,
+            0,
+            false,
+        );
+        let container = || ResourceContainer::Confidential {
+            address: resource_address,
+            commitments: Default::default(),
+            revealed_amount: Amount::new(10),
+            locked_commitments: Default::default(),
+            locked_revealed_amount: Amount::zero(),
+        };
+
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address: TemplateAddress::default(),
+                    module_name: "Test".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id: EntityId::default(),
+                },
+                None,
+            )
+            .unwrap();
+        let bucket_id = runtime.tracker.write_with(|state| {
+            state.new_substate(resource_address, resource).unwrap();
+            state.new_substate(vault_id, Vault::new(container())).unwrap();
+            let bucket_id = state.id_provider().unwrap().new_bucket_id().unwrap();
+            state.new_bucket(bucket_id, container()).unwrap();
+            bucket_id
+        });
+
+        (runtime, vault_id, bucket_id)
+    }
+
+    #[test]
+    fn confidential_vault_withdraw_charges_native_points_before_view_key_decompression() {
+        use tari_engine_types::{confidential::withdraw_native_points, limits::FREE_COMPUTE_GRACE_POINTS};
+        use tari_template_lib::types::{EncryptedData, stealth::UnspentOutput};
+
+        let (runtime, vault_id, _) = runtime_with_malformed_view_key_resource();
+
+        // A change output is checked against the view key, so this proof needs the key decompressed.
+        let mut proof = ConfidentialWithdrawProof::revealed_withdraw(Amount::new(1));
+        proof.output_proof.change_statement = Some(UnspentOutput {
+            commitment: PedersenCommitmentBytes::zero(),
+            sender_public_nonce: RistrettoPublicKeyBytes::zero(),
+            encrypted_data: EncryptedData::empty(),
+            minimum_value_promise: 0,
+            viewable_balance_proof: None,
+        });
+        assert_eq!(proof.output_proof.num_confidential_outputs(), 1);
+        let withdraw_cost = withdraw_native_points(&proof, true);
+        assert!(withdraw_cost > 0);
+
+        // Leave the tracker just 1 point short of `withdraw_cost`.
+        let pre_charge = FREE_COMPUTE_GRACE_POINTS - withdraw_cost + 1;
+        runtime.tracker.charge_native_execution(pre_charge).unwrap();
+
+        let withdraw_args = EngineArgs::from(vec![
+            tari_bor::encode(&VaultWithdrawArg::Confidential { proof: Box::new(proof) })
+                .unwrap()
+                .into(),
+        ]);
+        let err = runtime
+            .vault_invoke(VaultRef::Ref(vault_id), VaultAction::Withdraw, withdraw_args)
+            .unwrap_err();
+        assert!(
+            matches!(err, RuntimeError::FeeIntentComputeExceeded { .. }),
+            "expected FeeIntentComputeExceeded before view-key decompression, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn revealed_only_confidential_withdraw_and_take_skip_view_key_decompression() {
+        use tari_engine_types::confidential::withdraw_native_points;
+
+        let (runtime, vault_id, bucket_id) = runtime_with_malformed_view_key_resource();
+
+        // A revealed-only proof prices at zero native points and has no outputs to check against the view key, so
+        // both paths complete without decompressing the malformed key.
+        let proof = ConfidentialWithdrawProof::revealed_withdraw(Amount::new(1));
+        assert_eq!(withdraw_native_points(&proof, true), 0);
+        assert_eq!(proof.output_proof.num_confidential_outputs(), 0);
+
+        let withdraw_args = EngineArgs::from(vec![
+            tari_bor::encode(&VaultWithdrawArg::Confidential {
+                proof: Box::new(proof.clone()),
+            })
+            .unwrap()
+            .into(),
+        ]);
+        runtime
+            .vault_invoke(VaultRef::Ref(vault_id), VaultAction::Withdraw, withdraw_args)
+            .unwrap();
+
+        let take_args = EngineArgs::from(vec![tari_bor::encode(&proof).unwrap().into()]);
+        runtime
+            .bucket_invoke(BucketRef::Ref(bucket_id), BucketAction::TakeConfidential, take_args)
+            .unwrap();
+    }
+
+    #[test]
+    fn restricted_frames_forbid_auth_hooks_spend_scripts_and_stealth_transfers() {
+        let statement =
+            StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
+        let vault_id = tari_template_lib::types::VaultId::new([1u8; 32].into());
+        let pay_fee_args = EngineArgs::from(vec![
+            tari_bor::encode(&PayFeeArg {
+                amount: Amount::zero(),
+                statement: Some(statement.clone()),
+            })
+            .unwrap()
+            .into(),
+        ]);
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address: TemplateAddress::default(),
+                    module_name: "Test".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id: EntityId::default(),
+                },
+                Some(FrameWriteMode::ReadOnly),
+            )
+            .unwrap();
+        runtime.tracker.write_with(|state| {
+            state
+                .current_call_scope_mut()
+                .unwrap()
+                .add_substate_to_referenced(vault_id.into());
+        });
+
+        assert!(matches!(
+            runtime.enforce_frame_restrictions("invoke_resource_access_hook"),
+            Err(RuntimeError::ForbiddenInReadOnlyContext {
+                operation: "invoke_resource_access_hook"
+            })
+        ));
+        assert!(matches!(
+            runtime.enforce_frame_restrictions("evaluate_spend_script"),
+            Err(RuntimeError::ForbiddenInReadOnlyContext {
+                operation: "evaluate_spend_script"
+            })
+        ));
+        assert!(matches!(
+            runtime.stealth_transfer(TARI_TOKEN.into(), statement.clone(), None),
+            Err(RuntimeError::WriteInReadOnlyContext)
+        ));
+        assert!(matches!(
+            runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args.clone()),
+            Err(RuntimeError::WriteInReadOnlyContext)
+        ));
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address: TemplateAddress::default(),
+                    module_name: "Test".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id: EntityId::default(),
+                },
+                Some(FrameWriteMode::OwnComponent),
+            )
+            .unwrap();
+        runtime.tracker.write_with(|state| {
+            state
+                .current_call_scope_mut()
+                .unwrap()
+                .add_substate_to_referenced(vault_id.into());
+        });
+
+        assert!(matches!(
+            runtime.enforce_frame_restrictions("invoke_resource_access_hook"),
+            Err(RuntimeError::ForbiddenInRestrictedFrame {
+                operation: "invoke_resource_access_hook",
+                ..
+            })
+        ));
+        assert!(matches!(
+            runtime.enforce_frame_restrictions("evaluate_spend_script"),
+            Err(RuntimeError::ForbiddenInRestrictedFrame {
+                operation: "evaluate_spend_script",
+                ..
+            })
+        ));
+        assert!(matches!(
+            runtime.stealth_transfer(TARI_TOKEN.into(), statement, None),
+            Err(RuntimeError::WriteOutsideOwnComponent { .. })
+        ));
+        assert!(matches!(
+            runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args),
+            Err(RuntimeError::WriteOutsideOwnComponent { .. })
+        ));
+    }
+
+    fn pay_fee_from_new_bucket(
+        runtime: &RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        workspace_id: WorkspaceId,
+        container: ResourceContainer,
+    ) -> (BucketId, Result<(), RuntimeError>) {
+        let bucket_id = runtime.tracker.write_with(|state| {
+            let bucket_id = state.new_bucket_id().unwrap();
+            state.new_bucket(bucket_id, container).unwrap();
+            bucket_id
+        });
+        runtime
+            .put_on_workspace(workspace_id, IndexedValue::from_type(&bucket_id).unwrap())
+            .unwrap();
+        let result = runtime.pay_fee(PayFee::FromBucket {
+            bucket: WorkspaceOffsetId::new(workspace_id),
+        });
+        (bucket_id, result)
+    }
+
+    #[test]
+    fn pay_fee_from_an_empty_tari_bucket_consumes_it_and_records_no_payment() {
+        let runtime = runtime_with_blobs(Blobs::default());
+
+        let (bucket_id, result) =
+            pay_fee_from_new_bucket(&runtime, 0, ResourceContainer::stealth(TARI_TOKEN, Amount::zero()));
+        result.unwrap();
+        assert_eq!(runtime.tracker.total_fee_payments(), 0);
+        assert!(runtime.tracker.read_with(|state| state.get_bucket(bucket_id).is_err()));
+
+        let (_, result) = pay_fee_from_new_bucket(&runtime, 1, ResourceContainer::stealth(TARI_TOKEN, Amount::new(7)));
+        result.unwrap();
+        assert_eq!(runtime.tracker.total_fee_payments(), 7);
+    }
+
+    #[test]
+    fn pay_fee_from_an_empty_non_tari_bucket_is_rejected() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let other_resource = ResourceAddress::new([9u8; 32].into());
+
+        let (_, result) = pay_fee_from_new_bucket(
+            &runtime,
+            0,
+            ResourceContainer::public_fungible(other_resource, Amount::zero()),
+        );
+        assert!(matches!(result, Err(RuntimeError::InvalidArgument { .. })));
+        assert_eq!(runtime.tracker.total_fee_payments(), 0);
+    }
+
+    fn create_test_component(
+        runtime: &RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        template_address: TemplateAddress,
+        module_name: &str,
+        entity_id: EntityId,
+    ) -> ComponentAddress {
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address,
+                    module_name: module_name.to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+        let component_address = runtime
+            .tracker
+            .new_component(
+                tari_bor::Value::Null,
+                SubstateOwnerRule::None,
+                ComponentAccessRules::new(),
+                None,
+                UpdateRule::Locked,
+            )
+            .unwrap();
+        runtime
+            .pop_call_frame(
+                &IndexedWellKnownTypes::from_value(&tari_bor::to_value(&component_address).unwrap()).unwrap(),
+            )
+            .unwrap();
+        component_address
+    }
+
+    #[test]
+    fn get_template_address_succeeds_on_write_locked_current_component_and_migration() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let expected_template = TemplateAddress::from_array([7u8; 32]);
+        let other_template = TemplateAddress::from_array([8u8; 32]);
+        let migrated_template = TemplateAddress::from_array([9u8; 32]);
+        let entity_id = EntityId::default();
+
+        let component_address = create_test_component(&runtime, expected_template, "Test", entity_id);
+        let other_component_address = create_test_component(
+            &runtime,
+            other_template,
+            "Other",
+            EntityId::new([1u8; EntityId::LENGTH]),
+        );
+
+        // Simulate a `&mut self` component method holding a Write lock on `component_address`.
+        let component_lock = runtime.lock_component(component_address, LockFlag::Write).unwrap();
+        let arg_scope =
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&other_component_address).unwrap()).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address: expected_template,
+                    module_name: "Test".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock,
+                    arg_scope: Box::new(arg_scope),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+
+        let invoke_res = runtime
+            .component_invoke(
+                ComponentRef::Ref(component_address),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let actual_template: TemplateAddress = invoke_res.decode().unwrap();
+        assert_eq!(actual_template, expected_template);
+
+        // Querying a different component's template address still acquires and releases a temporary read lock.
+        let other_res = runtime
+            .component_invoke(
+                ComponentRef::Ref(other_component_address),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let actual_other_template: TemplateAddress = other_res.decode().unwrap();
+        assert_eq!(actual_other_template, other_template);
+
+        // Ensure the frame's write lock is still held so subsequent `SetState` and `pop_call_frame` succeed.
+        runtime
+            .component_invoke(
+                ComponentRef::Ref(component_address),
+                ComponentAction::SetState,
+                EngineArgs::from(vec![tari_bor::encode(&tari_bor::Value::Null).unwrap().into()]),
+            )
+            .unwrap();
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+
+        // Simulate a component migration holding a Write lock on `component_address`.
+        let migration_lock = runtime.lock_component(component_address, LockFlag::Write).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::MigrationContext {
+                    template_address: migrated_template,
+                    module_name: "TestV2".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: migration_lock,
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+        runtime.update_component_template(migrated_template).unwrap();
+
+        let migrated_res = runtime
+            .component_invoke(
+                ComponentRef::Ref(component_address),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let actual_migrated: TemplateAddress = migrated_res.decode().unwrap();
+        assert_eq!(actual_migrated, migrated_template);
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn component_get_state_enforces_call_scope_and_charges_component_load() {
+        use tari_engine_types::limits::component_load_points;
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let template_address = TemplateAddress::from_array([11u8; 32]);
+        let entity_id = EntityId::default();
+
+        let caller_component = create_test_component(&runtime, template_address, "Caller", entity_id);
+
+        // Create a target component with a non-trivial state payload.
+        let payload: Vec<u64> = (0..64).collect();
+        let target_state = tari_bor::to_value(&payload).unwrap();
+        let counted = target_state
+            .count_items_bounded(u64::MAX, IndexedWellKnownTypes::indexes_tag)
+            .unwrap();
+        let expected_load_points = component_load_points(counted.items, counted.counted_tags);
+        assert!(expected_load_points > 0);
+
+        let target_entity = EntityId::new([2u8; EntityId::LENGTH]);
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address,
+                    module_name: "Target".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id: target_entity,
+                },
+                None,
+            )
+            .unwrap();
+        let target_component = runtime
+            .tracker
+            .new_component(
+                target_state.clone(),
+                SubstateOwnerRule::None,
+                ComponentAccessRules::new(),
+                None,
+                UpdateRule::Locked,
+            )
+            .unwrap();
+        runtime
+            .pop_call_frame(
+                &IndexedWellKnownTypes::from_value(&tari_bor::to_value(&target_component).unwrap()).unwrap(),
+            )
+            .unwrap();
+
+        // Push a frame for `caller_component` WITHOUT `target_component` in scope.
+        let caller_lock = runtime.lock_component(caller_component, LockFlag::Write).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address,
+                    module_name: "Caller".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: caller_lock,
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+
+        let points_before = runtime.native_points_consumed();
+        let err = runtime
+            .component_invoke(
+                ComponentRef::Ref(target_component),
+                ComponentAction::GetState,
+                EngineArgs::default(),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            RuntimeError::SubstateOutOfScope { id } if id == SubstateId::Component(target_component)
+        ));
+        assert_eq!(runtime.native_points_consumed(), points_before);
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+
+        // Push a frame for `caller_component` WITH `target_component` in `arg_scope`.
+        let caller_lock = runtime.lock_component(caller_component, LockFlag::Write).unwrap();
+        let arg_scope = IndexedWellKnownTypes::from_value(&tari_bor::to_value(&target_component).unwrap()).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address,
+                    module_name: "Caller".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: caller_lock,
+                    arg_scope: Box::new(arg_scope),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+
+        let points_before = runtime.native_points_consumed();
+        let res = runtime
+            .component_invoke(
+                ComponentRef::Ref(target_component),
+                ComponentAction::GetState,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let decoded_state: tari_bor::Value = res.decode().unwrap();
+        assert_eq!(decoded_state, target_state);
+        assert_eq!(runtime.native_points_consumed() - points_before, expected_load_points);
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn component_get_template_address_enforces_call_scope() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let caller_template = TemplateAddress::from_array([12u8; 32]);
+        let target_template = TemplateAddress::from_array([13u8; 32]);
+        let entity_id = EntityId::default();
+
+        let caller_component = create_test_component(&runtime, caller_template, "Caller", entity_id);
+        let target_component = create_test_component(
+            &runtime,
+            target_template,
+            "Target",
+            EntityId::new([3u8; EntityId::LENGTH]),
+        );
+
+        // Push a frame for `caller_component` WITHOUT `target_component` in scope.
+        let caller_lock = runtime.lock_component(caller_component, LockFlag::Write).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address: caller_template,
+                    module_name: "Caller".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: caller_lock,
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+
+        // Reading the currently executing component's own template address still succeeds.
+        let own_res = runtime
+            .component_invoke(
+                ComponentRef::Ref(caller_component),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let actual_own: TemplateAddress = own_res.decode().unwrap();
+        assert_eq!(actual_own, caller_template);
+
+        // Reading an out-of-scope external component fails with `SubstateOutOfScope` and consumes no native points.
+        let points_before = runtime.native_points_consumed();
+        let err = runtime
+            .component_invoke(
+                ComponentRef::Ref(target_component),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            RuntimeError::SubstateOutOfScope { id } if id == SubstateId::Component(target_component)
+        ));
+        assert_eq!(runtime.native_points_consumed(), points_before);
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+
+        // Static frame without `target_component` in scope also rejects with `SubstateOutOfScope`.
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address: caller_template,
+                    module_name: "Caller".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+        let points_before = runtime.native_points_consumed();
+        let err = runtime
+            .component_invoke(
+                ComponentRef::Ref(target_component),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            RuntimeError::SubstateOutOfScope { id } if id == SubstateId::Component(target_component)
+        ));
+        assert_eq!(runtime.native_points_consumed(), points_before);
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+
+        // Push a frame for `caller_component` WITH `target_component` in `arg_scope`.
+        let caller_lock = runtime.lock_component(caller_component, LockFlag::Write).unwrap();
+        let arg_scope = IndexedWellKnownTypes::from_value(&tari_bor::to_value(&target_component).unwrap()).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address: caller_template,
+                    module_name: "Caller".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: caller_lock,
+                    arg_scope: Box::new(arg_scope),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+
+        let res = runtime
+            .component_invoke(
+                ComponentRef::Ref(target_component),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let actual_target: TemplateAddress = res.decode().unwrap();
+        assert_eq!(actual_target, target_template);
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    fn create_account_component_with_method_rules(
+        runtime: &RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        entity_id: EntityId,
+        access_rules: ComponentAccessRules,
+    ) -> ComponentAddress {
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address: ACCOUNT_TEMPLATE_ADDRESS,
+                    module_name: "Account".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+        let component_address = runtime
+            .tracker
+            .new_component(
+                tari_bor::Value::Null,
+                SubstateOwnerRule::None,
+                access_rules,
+                None,
+                UpdateRule::AccessRule(AccessRule::AllowAll),
+            )
+            .unwrap();
+        runtime
+            .pop_call_frame(
+                &IndexedWellKnownTypes::from_value(&tari_bor::to_value(&component_address).unwrap()).unwrap(),
+            )
+            .unwrap();
+        component_address
+    }
+
+    fn push_nft_faucet_migration_frame(
+        runtime: &RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        entity_id: EntityId,
+        component_address: ComponentAddress,
+    ) -> LockedSubstate {
+        let migration_lock = runtime.lock_component(component_address, LockFlag::Write).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::MigrationContext {
+                    template_address: NFT_FAUCET_TEMPLATE_ADDRESS,
+                    module_name: "NftFaucet".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: migration_lock.clone(),
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+        migration_lock
+    }
+
+    #[test]
+    fn update_component_template_rejects_method_rules_absent_from_new_template() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let entity_id = EntityId::default();
+
+        // `"balance"` exists on `Account` and is absent from `NftFaucet`; `"mint"` exists on `NftFaucet`.
+        let access_rules = ComponentAccessRules::new()
+            .add_method_rule("balance", AccessRule::DenyAll)
+            .add_method_rule("mint", AccessRule::AllowAll);
+        let component_address = create_account_component_with_method_rules(&runtime, entity_id, access_rules.clone());
+        let migration_lock = push_nft_faucet_migration_frame(&runtime, entity_id, component_address);
+
+        let err = runtime
+            .update_component_template(NFT_FAUCET_TEMPLATE_ADDRESS)
+            .unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                RuntimeError::InvalidMethodAccessRule { details, .. } if details.contains("'balance'")
+            ),
+            "unexpected error: {err:?}"
+        );
+        runtime
+            .tracker
+            .read_with(|state| {
+                let component = state.get_component(&migration_lock).unwrap();
+                assert_eq!(*component.template_address(), ACCOUNT_TEMPLATE_ADDRESS);
+                assert_eq!(*component.access_rules(), access_rules);
+                Ok::<_, RuntimeError>(())
+            })
+            .unwrap();
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn update_component_template_keeps_method_rules_present_on_new_template() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let entity_id = EntityId::default();
+
+        let access_rules = ComponentAccessRules::new().add_method_rule("mint", AccessRule::DenyAll);
+        let component_address = create_account_component_with_method_rules(&runtime, entity_id, access_rules.clone());
+        let migration_lock = push_nft_faucet_migration_frame(&runtime, entity_id, component_address);
+
+        runtime.update_component_template(NFT_FAUCET_TEMPLATE_ADDRESS).unwrap();
+        runtime
+            .tracker
+            .read_with(|state| {
+                let component = state.get_component(&migration_lock).unwrap();
+                assert_eq!(*component.template_address(), NFT_FAUCET_TEMPLATE_ADDRESS);
+                assert_eq!(*component.access_rules(), access_rules);
+                Ok::<_, RuntimeError>(())
+            })
+            .unwrap();
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
     }
 }

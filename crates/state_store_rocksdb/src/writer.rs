@@ -317,7 +317,7 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
         block: &Block,
         foreign_proposals: &[ForeignProposal],
         origin: ProposalOrigin,
-    ) -> Result<(), StorageError> {
+    ) -> Result<bool, StorageError> {
         const OPERATION: &str = "parked_blocks_insert";
         if self.blocks_exists(block.id())? {
             return Err(StorageError::QueryError {
@@ -340,7 +340,7 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
                     cf.put(block.id(), &data, OPERATION)?;
                 }
             }
-            return Ok(());
+            return Ok(false);
         }
 
         let codec = DefaultCodec::<ParkedBlockDataRef<'_>>::default();
@@ -359,7 +359,7 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
             OPERATION,
         )?;
 
-        Ok(())
+        Ok(true)
     }
 
     fn parked_blocks_remove(
@@ -469,6 +469,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         let index_cf = self.db().cf(block::EpochHeightIndex)?;
         index_cf.delete(&(block.epoch(), block.height(), *block.id()), OPERATION)?;
+        self.db().cf(block::ExecutedBlockIndex)?.delete(block_id, OPERATION)?;
 
         // TODO: could lead to orphan chains left in DB - need to recursively remove all children
         let chain_cf = self.db().cf(PendingChainIndex)?;
@@ -476,6 +477,13 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let parent_child_cf = self.db().cf(chain::PendingParentChildIndex)?;
         parent_child_cf.delete(&(*block.parent(), *block.id()), OPERATION)?;
 
+        Ok(())
+    }
+
+    fn blocks_set_executed(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
+        self.db()
+            .cf(block::ExecutedBlockIndex)?
+            .put(block_id, &(), "blocks_set_executed")?;
         Ok(())
     }
 
@@ -498,6 +506,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             block.set_commit_qc(*qc_id);
             // The block is committed, remove it from the pending chain
             self.db().cf(PendingChainIndex)?.delete(block_id, OPERATION)?;
+            self.db().cf(block::ExecutedBlockIndex)?.delete(block_id, OPERATION)?;
             self.db()
                 .cf(chain::PendingParentChildIndex)?
                 .delete(&(*block.parent(), *block_id), OPERATION)?;
@@ -741,11 +750,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         if let Some(proposed_in_block) = set_proposed_in_block {
             let index_cf = db.cf(foreign_proposal::ProposedInBlockIndex)?;
-            if let Some(prev_id) = fp.proposed_in_block() &&
-                prev_id != proposed_in_block
-            {
-                index_cf.delete(&(*prev_id, *fp.block_id()), OPERATION)?;
-            }
             index_cf.put(&(*proposed_in_block, *fp.block_id()), &(), OPERATION)?;
 
             // Update the epoch index
@@ -773,13 +777,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         for (proposed_in_block, fp_id) in proposed_keys {
             let mut fp = db.cf(ForeignProposalCf)?.get(&fp_id, OPERATION)?;
-            if fp.proposed_in_block() == Some(&proposed_in_block) {
-                // Setting the status to New in this case
-                if !fp.status().is_unconfirmed() {
-                    db.cf(foreign_proposal::UnconfirmedIndex)?
-                        .put(&(fp.epoch(), *fp.block_id()), &(), OPERATION)?;
-                }
-
+            if fp.status().is_proposed() && fp.proposed_in_block() == Some(&proposed_in_block) {
                 fp.reset_proposed();
                 db.cf(ForeignProposalCf)?.put(&fp_id, &fp, OPERATION)?;
             }
@@ -1152,7 +1150,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             });
         }
 
-        self.parked_blocks_insert(block, foreign_proposals, origin)?;
+        if !self.parked_blocks_insert(block, foreign_proposals, origin)? {
+            return Ok(());
+        }
 
         let cf = self.db().cf(MissingTransactionCf)?;
         let index_cf = self.db().cf(missing_transactions::MissingTransactionBlockIdIndex)?;
@@ -1169,44 +1169,34 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     fn parked_block_remove_missing_transaction(
         &mut self,
         transaction_id: &TransactionId,
-    ) -> Result<Option<(Block, Vec<ForeignProposal>, ProposalOrigin)>, StorageError> {
-        const OPERATION: &str = "missing_transactions_insert";
+    ) -> Result<Vec<(Block, Vec<ForeignProposal>, ProposalOrigin)>, StorageError> {
+        const OPERATION: &str = "parked_block_remove_missing_transaction";
 
         let query_cf = self.db().cf(missing_transactions::ByTransactionIdQuery)?;
-
-        // Safe to iterate lazily: the iterator is dropped before anything is written
-        #[allow(clippy::disallowed_methods)]
-        let mut iter = query_cf.query_prefix_range_key_iterator(Ordering::Ascending, transaction_id);
-
-        let Some(key) = iter.next().transpose()? else {
-            return Ok(None);
-        };
-        drop(iter);
+        let keys = query_cf.query_prefix_range_keys(Ordering::Ascending, transaction_id)?;
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
 
         let cf = self.db().cf(MissingTransactionCf)?;
-        cf.delete(&key, OPERATION)?;
+        let index_cf = self.db().cf(missing_transactions::MissingTransactionBlockIdIndex)?;
+        let by_block_query = self.db().cf(missing_transactions::ByBlockIdQuery)?;
 
-        let (_, block_id) = key;
-
-        self.db()
-            .cf(missing_transactions::MissingTransactionBlockIdIndex)?
-            .delete_or_not_found(&(block_id, *transaction_id), OPERATION)?;
-
-        {
-            let query = self.db().cf(missing_transactions::ByBlockIdQuery)?;
-            // Safe to iterate lazily: this scope only reads
-            #[allow(clippy::disallowed_methods)]
-            let mut iter = query.query_prefix_range_key_iterator(Ordering::default(), &block_id);
-
-            // Are there more missing transactions for this block?
-            if iter.next().transpose()?.is_some() {
-                return Ok(None);
+        let mut unparked_block_ids = Vec::new();
+        for (tx_id, block_id) in keys {
+            cf.delete(&(tx_id, block_id), OPERATION)?;
+            index_cf.delete_or_not_found(&(block_id, tx_id), OPERATION)?;
+            if !by_block_query.exists_prefix(&block_id)? {
+                unparked_block_ids.push(block_id);
             }
         }
 
-        // None left, remove and return the block
-        let parked = self.parked_blocks_remove(&block_id)?;
-        Ok(Some(parked))
+        let mut unparked = Vec::with_capacity(unparked_block_ids.len());
+        for block_id in unparked_block_ids {
+            unparked.push(self.parked_blocks_remove(&block_id)?);
+        }
+
+        Ok(unparked)
     }
 
     fn parked_blocks_remove_up_to(&mut self, epoch: Epoch, height: NodeHeight) -> Result<usize, StorageError> {
@@ -2066,25 +2056,26 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         transaction_ids: I,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "lock_conflicts_remove_by_transaction_ids";
-        let mut transaction_ids = transaction_ids.into_iter().peekable();
-        if transaction_ids.peek().is_none() {
+        let transaction_ids = transaction_ids.into_iter().collect::<HashSet<_>>();
+        if transaction_ids.is_empty() {
             return Ok(());
         }
 
         let db = self.db();
         let cf = db.cf(LockConflictCf)?;
         let index_cf = db.cf(lock_conflict::LockConflictBlockIdIndex)?;
-        let query = db.cf(lock_conflict::ByTransactionIdQuery)?;
 
-        for tx_id in transaction_ids {
-            for key in query.query_prefix_range_keys(Ordering::Ascending, tx_id)? {
-                cf.delete(&key, OPERATION)?;
-                // Delete if the dependent transaction and depending transaction are swapped
-                let (transaction_id, block_id, depends_on_tx_id) = key;
-                cf.delete(&(depends_on_tx_id, block_id, transaction_id), OPERATION)?;
-                index_cf.delete(&(block_id, transaction_id, depends_on_tx_id), OPERATION)?;
-                index_cf.delete(&(block_id, depends_on_tx_id, transaction_id), OPERATION)?;
+        let mut keys_to_remove = Vec::new();
+        for result in cf.key_iterator(Ordering::Ascending, OPERATION) {
+            let key @ (transaction_id, _, depends_on_tx_id) = result?;
+            if transaction_ids.contains(&transaction_id) || transaction_ids.contains(&depends_on_tx_id) {
+                keys_to_remove.push(key);
             }
+        }
+
+        for key @ (transaction_id, block_id, depends_on_tx_id) in keys_to_remove {
+            cf.delete(&key, OPERATION)?;
+            index_cf.delete(&(block_id, transaction_id, depends_on_tx_id), OPERATION)?;
         }
 
         Ok(())
@@ -2101,7 +2092,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             index_cf.delete(&key, OPERATION)?;
             let (block_id, transaction_id, depends_on_tx) = key;
             cf.delete(&(transaction_id, block_id, depends_on_tx), OPERATION)?;
-            cf.delete(&(depends_on_tx, block_id, transaction_id), OPERATION)?;
         }
 
         Ok(())
@@ -2478,6 +2468,7 @@ mod cleanup {
         let cf = db.cf(BlockCf)?;
         let committed_cf = db.cf(chain::CommittedParentChildChainIndex)?;
         let index_cf = db.cf(block::EpochHeightIndex)?;
+        let executed_cf = db.cf(block::ExecutedBlockIndex)?;
 
         // Don't delete epoch 0 blocks (i.e the zero block)
         let keys =
@@ -2489,6 +2480,7 @@ mod cleanup {
             cf.delete(&block_id, OPERATION)?;
             committed_cf.delete(&block_id, OPERATION)?;
             index_cf.delete(&(epoch, height, block_id), OPERATION)?;
+            executed_cf.delete(&block_id, OPERATION)?;
         }
         Ok(count)
     }

@@ -67,6 +67,7 @@ use super::{
 };
 use crate::{
     hotstuff::{
+        current_view::CurrentView,
         epoch_end_drain::EpochEndDrain,
         epoch_gc::EpochGc,
         epoch_state::EpochState,
@@ -76,7 +77,6 @@ use crate::{
         on_catch_up_sync::OnCatchUpSync,
         on_catch_up_sync_request::OnSyncRequest,
         on_inbound_message::{InboundMessage, OnInboundMessage},
-        on_leader_timeout::LeaderTimeout,
         on_message_validate::{MessageValidationResult, OnMessageValidate},
         on_next_sync_view::OnNextSyncViewHandler,
         on_propose::OnPropose,
@@ -85,8 +85,8 @@ use crate::{
         on_receive_new_view::OnReceiveNewViewHandler,
         on_receive_request_missing_transactions::OnReceiveRequestMissingTransactions,
         on_receive_vote::OnReceiveVoteHandler,
-        pacemaker::PaceMaker,
-        pacemaker_handle::PaceMakerHandle,
+        pacemaker::{PaceMaker, PacemakerEvent},
+        pacemaker_action::PacemakerActions,
         state_tree_gc::StateTreeGc,
         substate_store::ShardedStateTree,
         transaction_manager::{ConsensusTransactionManager, UncommittedTemplateStore},
@@ -152,8 +152,9 @@ pub struct HotstuffWorker<TConsensusSpec: ConsensusSpec> {
     /// Whether the end of the given epoch changes the number of committees. Cached for the epoch being ended.
     next_epoch_changes_layout: Option<(Epoch, bool)>,
     epoch_manager: TConsensusSpec::EpochManager,
-    pacemaker_worker: Option<PaceMaker>,
-    pacemaker: PaceMakerHandle,
+    pacemaker: PaceMaker,
+    /// Pacemaker actions requested by the handler call in progress, applied once it returns.
+    pacemaker_actions: PacemakerActions,
     shutdown: ShutdownSignal,
 }
 impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
@@ -195,6 +196,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             transaction_executor.clone(),
             config.consensus_constants.max_transaction_validity_epochs,
             config.consensus_constants.max_block_pledge_bytes,
+            config.consensus_constants.max_transaction_input_load_bytes,
         );
         let uncommitted_templates = transaction_manager.uncommitted_templates().clone();
 
@@ -216,7 +218,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 config.clone(),
                 state_store.clone(),
                 epoch_manager.clone(),
-                pacemaker.clone_handle().current_view().clone(),
                 signing_service.clone(),
                 outbound_messaging.clone(),
                 tx_events.downgrade(),
@@ -233,7 +234,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 state_store.clone(),
                 epoch_manager.clone(),
                 leader_strategy.clone(),
-                pacemaker.clone_handle(),
                 outbound_messaging.clone(),
                 signing_service.clone(),
                 transaction_pool.clone(),
@@ -245,13 +245,11 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             on_receive_foreign_proposal: OnReceiveForeignProposalHandler::new(
                 state_store.clone(),
                 epoch_manager.clone(),
-                pacemaker.clone_handle(),
                 outbound_messaging.clone(),
             ),
             on_receive_vote: OnReceiveVoteHandler::new(
                 config.clone(),
                 state_store.clone(),
-                pacemaker.clone_handle(),
                 proposal_vote_collector.clone(),
                 local_validator_addr.clone(),
                 leader_strategy.clone(),
@@ -261,7 +259,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 local_validator_addr,
                 state_store.clone(),
                 leader_strategy.clone(),
-                pacemaker.clone_handle(),
                 proposal_vote_collector,
                 timeout_vote_collector,
             ),
@@ -286,7 +283,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             ),
 
             on_sync_request: OnSyncRequest::new(state_store.clone(), outbound_messaging.clone()),
-            on_catch_up_sync: OnCatchUpSync::new(state_store.clone(), pacemaker.clone_handle(), outbound_messaging),
+            on_catch_up_sync: OnCatchUpSync::new(state_store.clone(), outbound_messaging),
             worker_state: WorkerState::default(),
 
             state_store,
@@ -297,16 +294,17 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
             next_epoch: None,
             next_epoch_changes_layout: None,
-            pacemaker: pacemaker.clone_handle(),
-            pacemaker_worker: Some(pacemaker),
+            pacemaker,
+            pacemaker_actions: PacemakerActions::new(),
             hooks,
             tx_events,
             shutdown,
         }
     }
 
-    pub fn pacemaker(&self) -> &PaceMakerHandle {
-        &self.pacemaker
+    /// A read-only view that follows the pacemaker's current view.
+    pub fn current_view(&self) -> CurrentView {
+        self.pacemaker.subscribe_view()
     }
 
     pub fn hooks_mut(&mut self) -> &mut TConsensusSpec::Hooks {
@@ -323,7 +321,14 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
         let current_epoch = match select_starting_epoch(last_finalised_epoch, leaf_epoch) {
             Some(epoch) => epoch,
-            None => self.epoch_manager.current_epoch().await?,
+            // No peer holds a checkpoint to sync from, so no epoch of this network has finalised. Every node in that
+            // position opens the birthday epoch, whatever epoch its oracle has reached, so they all build the same
+            // genesis block and then step forward to the oracle's epoch together.
+            None => self.epoch_manager.get_birthday_epoch().await?.ok_or_else(|| {
+                HotStuffError::InvariantError(
+                    "Consensus started with no committed state before the birthday epoch was determined".to_string(),
+                )
+            })?,
         };
 
         let epoch_hash = self.epoch_manager.get_epoch_hash(current_epoch).await?;
@@ -337,35 +342,35 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     /// resuming a stalled epoch would propose `EndEpoch` until the next base-layer epoch boundary publishes a fresh
     /// event, leaving the committee stuck one epoch behind for an entire base-layer epoch.
     ///
-    /// Seeds the epoch immediately following `starting_epoch` and lets consensus progress naturally from there. If
-    /// the oracle is more than one epoch ahead, the committee transitions one epoch and the next `EpochChanged` event
-    /// (or peer QCs at a higher epoch) drives the rest.
-    async fn seed_next_epoch_from_oracle(&mut self, starting_epoch: Epoch) -> Result<(), HotStuffError> {
+    /// Seeds the oracle's epoch as the target, so the committee proposes `EndEpoch` in each epoch from `starting_epoch`
+    /// until it reaches the oracle's, without waiting for further `EpochChanged` events. The target is seeded whether
+    /// or not this validator is registered for the following epoch; an unregistered validator exits once the current
+    /// epoch transitions.
+    async fn seed_epoch_target_from_oracle(&mut self, starting_epoch: Epoch) -> Result<(), HotStuffError> {
         let oracle_epoch = self.epoch_manager.current_epoch().await?;
         if oracle_epoch <= starting_epoch {
             return Ok(());
         }
 
         let next_epoch = starting_epoch + Epoch(1);
-        if !self
+        if self
             .epoch_manager
             .is_this_validator_registered_for_epoch(next_epoch)
             .await?
         {
             info!(
                 target: LOG_TARGET,
+                "🌟 Oracle is at epoch {oracle_epoch} but consensus is resuming at {starting_epoch}. Seeding epoch \
+                 {oracle_epoch} so that EndEpoch can be proposed.",
+            );
+        } else {
+            info!(
+                target: LOG_TARGET,
                 "💤 This validator is not registered for next epoch {next_epoch}. Will stop consensus once the \
                  current epoch {starting_epoch} has transitioned."
             );
-            return Ok(());
         }
-
-        info!(
-            target: LOG_TARGET,
-            "🌟 Oracle is at epoch {oracle_epoch} but consensus is resuming at {starting_epoch}. Seeding next epoch \
-             {next_epoch} so that EndEpoch can be proposed.",
-        );
-        self.next_epoch = Some((next_epoch, Instant::now()));
+        update_next_epoch_target(&mut self.next_epoch, starting_epoch, oracle_epoch, Instant::now());
         Ok(())
     }
 
@@ -391,9 +396,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
         self.worker_state.has_processed_first_block = !leaf_height.is_zero();
 
-        self.pacemaker
-            .start(current_epoch, current_height, current_height)
-            .await?;
+        self.pacemaker.start(current_epoch, current_height, current_height);
 
         info!(target: LOG_TARGET, "🚀 Pacemaker started at epoch {}, height: {}", current_epoch, current_height);
 
@@ -404,7 +407,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         self.recover_pending_end_of_epoch(current_epoch).await?;
 
         // Catch up on any epoch change the oracle observed before this worker subscribed to epoch events.
-        self.seed_next_epoch_from_oracle(current_epoch).await?;
+        self.seed_epoch_target_from_oracle(current_epoch).await?;
 
         self.publish_event(HotstuffEvent::EpochChanged {
             epoch: current_epoch,
@@ -439,18 +442,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         &mut self,
         mut epoch_state: EpochState<TConsensusSpec::Addr>,
     ) -> Result<WorkerExitReason, HotStuffError> {
-        // Spawn pacemaker if not spawned already
-        if let Some(pm) = self.pacemaker_worker.take() {
-            pm.spawn();
-        }
-
-        let mut on_force_beat = self.pacemaker.get_on_force_beat();
-        let mut on_leader_timeout = self.pacemaker.get_on_leader_timeout();
-
         let mut epoch_manager_events = self.epoch_manager.subscribe();
 
-        let mut prev_height = self.pacemaker.current_view().get_height();
-        let current_epoch = self.pacemaker.current_view().get_epoch();
+        let mut prev_height = self.pacemaker.current_height();
+        let current_epoch = self.pacemaker.current_epoch();
         let mut local_claim_public_key = self
             .epoch_manager
             .get_our_validator_node(current_epoch)
@@ -466,11 +461,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
         let exit_reason;
         loop {
-            let current_height = self.pacemaker.current_view().get_height();
-            let current_epoch = self.pacemaker.current_view().get_epoch();
+            let current_height = self.pacemaker.current_height();
+            let current_epoch = self.pacemaker.current_epoch();
 
             // Need to update epoch state if the epoch has changed
             if epoch_state.epoch != current_epoch {
+                self.worker_state.has_processed_first_block = false;
                 let exhaust_burn_rate = self.epoch_exhaust_burn_rate(current_epoch)?;
                 epoch_state
                     .update_from_epoch_manager(&self.epoch_manager, current_epoch, exhaust_burn_rate)
@@ -483,17 +479,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 // We only clear next_epoch if we've reached it, If more than one eopch has progressed (edge case
                 // expected only on testnets with low difficulties) then we need to keep the next epoch
                 // in place so that we can quickly progress to the actual current epoch.
-                if let Some((next_epoch, _)) = self.next_epoch.as_ref() {
-                    if *next_epoch == current_epoch {
-                        self.next_epoch = None;
-                    } else {
-                        warn!(
-                            target: LOG_TARGET,
-                            "⚠️ this node/shard group is more than one epoch behind! Current epoch: {}, worker epoch: {}",
-                            next_epoch,
-                            current_epoch,
-                        );
-                    }
+                if let Some(remaining_target) = clear_reached_next_epoch(&mut self.next_epoch, current_epoch) {
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️ this node/shard group is more than one epoch behind! Current epoch: {}, worker epoch: {}",
+                        remaining_target,
+                        current_epoch,
+                    );
                 }
             }
 
@@ -510,22 +502,39 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             );
 
             tokio::select! {
-                Ok(event) = epoch_manager_events.recv() => {
-                    self.on_epoch_manager_event(event).await?;
+                result = epoch_manager_events.recv() => match result {
+                    Ok(event) => {
+                        self.on_epoch_manager_event(event).await?;
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(target: LOG_TARGET, "Epoch manager event subscriber lagged by {} event(s)", n);
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        return Err(HotStuffError::InternalChannelClosed {
+                            context: "receiving epoch manager event",
+                        });
+                    },
                 },
 
-                forced_height = on_force_beat.wait() => {
-                    if let Err(e) = self.on_force_beat(&epoch_state, current_height, forced_height, &local_claim_public_key).await {
-                        self.on_failure("propose_if_leader", &e).await;
-                        return Err(e);
-                    }
-                },
-
-                _ = self.pacemaker.on_beat() => {
-                    if let Err(e) = self.on_beat(&epoch_state,  &local_claim_public_key).await {
-                        self.on_failure("on_beat", &e).await;
-                        return Err(e);
-                    }
+                event = self.pacemaker.next_event() => match event {
+                    PacemakerEvent::Beat => {
+                        if let Err(e) = self.on_beat(&epoch_state, &local_claim_public_key).await {
+                            self.on_failure("on_beat", &e).await;
+                            return Err(e);
+                        }
+                    },
+                    PacemakerEvent::ForceBeat { forced_height } => {
+                        if let Err(e) = self.on_force_beat(&epoch_state, current_height, forced_height, &local_claim_public_key).await {
+                            self.on_failure("propose_if_leader", &e).await;
+                            return Err(e);
+                        }
+                    },
+                    PacemakerEvent::LeaderTimeout { num_timeouts } => {
+                        if let Err(e) = self.on_leader_timeout(&epoch_state, current_height, Some(num_timeouts)).await {
+                            self.on_failure("on_leader_timeout", &e).await;
+                            return Err(e);
+                        }
+                    },
                 },
 
                 Some((tx_id, pending)) = self.rx_new_transactions.recv() => {
@@ -553,13 +562,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     }
                 },
 
-                timeout = on_leader_timeout.wait() => {
-                    if let Err(e) = self.on_leader_timeout(&epoch_state, current_height, Some(timeout)).await {
-                        self.on_failure("on_leader_timeout", &e).await;
-                        return Err(e);
-                    }
-                },
-
                 _ = periodic_tasks.tick() => {
                     if let Err(e) = self.on_task_tick(&epoch_state).await {
                         self.hooks.on_error(&e);
@@ -584,9 +586,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         }
 
         self.on_inbound_message.clear_buffer();
-        if let Err(err) = self.pacemaker.stop().await {
-            debug!(target: LOG_TARGET, "Pacemaker channel dropped: {}", err);
-        }
+        self.pacemaker.stop();
 
         Ok(exit_reason)
     }
@@ -609,6 +609,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         match self
             .on_message_validate
             .handle(
+                self.pacemaker.current_epoch(),
                 current_height,
                 epoch_state,
                 from.clone(),
@@ -710,7 +711,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let made_progress = !transactions.is_empty();
         self.on_receive_new_transaction
             .process_requested(
-                epoch_state.epoch(),
+                epoch,
                 from.clone(),
                 block_id,
                 transactions,
@@ -784,11 +785,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let is_any_block_unparked = !local_proposals.is_empty() || !foreign_proposals.is_empty();
 
         for msg in foreign_proposals {
-            if let Err(e) = self
+            let result = self
                 .on_receive_foreign_proposal
-                .handle_received(msg, epoch_state.local_committee_info())
-                .await
-            {
+                .handle_received(&mut self.pacemaker_actions, msg, epoch_state.local_committee_info())
+                .await;
+            self.pacemaker.apply(&mut self.pacemaker_actions);
+            if let Err(e) = result {
                 self.on_failure("check_if_block_can_be_unparked -> on_receive_foreign_proposal", &e)
                     .await;
                 return Err(e);
@@ -850,7 +852,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 .set_pending_end_of_epoch(eoe_block, commit_qc);
             // Attempt to complete immediately. If the oracle is still behind, this will re-defer
             // and a later EpochChanged event will retry.
-            let _ = self.on_receive_local_proposal.try_resume_pending_end_of_epoch().await?;
+            let result = self
+                .on_receive_local_proposal
+                .try_resume_pending_end_of_epoch(&mut self.pacemaker_actions)
+                .await;
+            self.pacemaker.apply(&mut self.pacemaker_actions);
+            result?;
         }
         Ok(())
     }
@@ -861,7 +868,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         if !self.on_receive_local_proposal.has_pending_end_of_epoch() {
             return Ok(());
         }
-        if let Err(err) = self.on_receive_local_proposal.try_resume_pending_end_of_epoch().await {
+        let result = self
+            .on_receive_local_proposal
+            .try_resume_pending_end_of_epoch(&mut self.pacemaker_actions)
+            .await;
+        self.pacemaker.apply(&mut self.pacemaker_actions);
+        if let Err(err) = result {
             error!(
                 target: LOG_TARGET,
                 "Failed to resume deferred end-of-epoch processing: {err}"
@@ -878,32 +890,40 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 registered_shard_group,
                 activated_at,
             } => {
-                if registered_shard_group.is_none() {
-                    let current_epoch = self.pacemaker.current_view().get_epoch();
-                    if current_epoch < epoch {
+                let current_epoch = self.pacemaker.current_epoch();
+                match apply_epoch_changed(
+                    &mut self.next_epoch,
+                    current_epoch,
+                    epoch,
+                    registered_shard_group.is_some(),
+                    activated_at,
+                ) {
+                    EpochChangedOutcome::IgnoredStale => {},
+                    EpochChangedOutcome::NotRegisteredForCurrentEpoch => {
+                        info!(
+                            target: LOG_TARGET,
+                            "💤 This validator is not registered for epoch {}. Going to sleep.", epoch
+                        );
+                        return Err(HotStuffError::NotRegisteredForCurrentEpoch { epoch });
+                    },
+                    EpochChangedOutcome::RotatingOutAfterCurrentEpoch => {
                         info!(
                             target: LOG_TARGET,
                             "💤 This validator is not registered for next epoch {epoch}. Will stop consensus once the current epoch {current_epoch} has transitioned."
                         );
-                        return Ok(());
-                    }
-                    info!(
-                        target: LOG_TARGET,
-                        "💤 This validator is not registered for epoch {}. Going to sleep.", epoch
-                    );
-
-                    return Err(HotStuffError::NotRegisteredForCurrentEpoch { epoch });
+                        self.try_resume_pending_end_of_epoch().await?;
+                    },
+                    EpochChangedOutcome::Registered => {
+                        info!(
+                            target: LOG_TARGET,
+                            "🌟 This validator is registered for epoch {}.", epoch
+                        );
+                        // Oracle just observed `epoch`. If we previously deferred end-of-epoch
+                        // processing because the oracle was lagging, retry now that the data is
+                        // available.
+                        self.try_resume_pending_end_of_epoch().await?;
+                    },
                 }
-                info!(
-                    target: LOG_TARGET,
-                    "🌟 This validator is registered for epoch {}.", epoch
-                );
-                self.next_epoch = Some((epoch, activated_at));
-
-                // Oracle just observed `epoch`. If we previously deferred end-of-epoch
-                // processing because the oracle was lagging, retry now that the data is
-                // available.
-                self.try_resume_pending_end_of_epoch().await?;
             },
             // A running node is already a committee member, so it has nothing to presync.
             EpochManagerEvent::PendingActivation { .. } => {},
@@ -941,7 +961,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             justify.height(),
         );
         self.on_catch_up_sync
-            .request_sync(epoch_state.epoch(), from.clone())
+            .request_sync(self.pacemaker.current_view(), epoch_state.epoch(), from.clone())
             .await?;
         self.worker_state.catch_up = Some(CatchUp::new(
             justify.height(),
@@ -964,7 +984,11 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 (committee_size <= 2 || Some(&member.address) != current_addr.as_ref())
             {
                 self.on_catch_up_sync
-                    .request_sync(epoch_state.epoch(), member.address.clone())
+                    .request_sync(
+                        self.pacemaker.current_view(),
+                        epoch_state.epoch(),
+                        member.address.clone(),
+                    )
                     .await?;
                 return Ok(Some(member.address.clone()));
             }
@@ -986,9 +1010,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             });
             error!(target: LOG_TARGET, "Error ({}): {}", context, err);
         }
-        if let Err(e) = self.pacemaker.stop().await {
-            error!(target: LOG_TARGET, "Error while stopping pacemaker: {}", e);
-        }
+        self.pacemaker.stop();
         self.on_inbound_message.clear_buffer();
     }
 
@@ -1014,7 +1036,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         &mut self,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         current_height: NodeHeight,
-        timeout: Option<LeaderTimeout>,
+        num_timeouts: Option<u32>,
     ) -> Result<(), HotStuffError> {
         self.hooks.on_leader_timeout(current_height);
         info!(
@@ -1023,7 +1045,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             self.local_validator_addr,
             epoch_state.epoch(),
             current_height,
-            timeout.as_ref().map(|t| t.num_timeouts).display(),
+            num_timeouts.display(),
         );
         self.on_next_sync_view
             .handle(epoch_state.epoch(), current_height, epoch_state.local_committee())
@@ -1032,12 +1054,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         self.publish_event(HotstuffEvent::LeaderTimeout { height: current_height });
 
         // If we've gone into 3 leader failures in a row, request a catch up sync
-        if !self.worker_state.is_active_catch_up() && timeout.is_some_and(|t| t.num_timeouts.is_multiple_of(3)) {
+        if !self.worker_state.is_active_catch_up() && num_timeouts.is_some_and(|n| n.is_multiple_of(3)) {
             warn!(
                 target: LOG_TARGET,
                 "⚠️ {} Leader timeout count is {}. Requesting catch up sync.",
                 self.local_validator_addr,
-                timeout.as_ref().map(|t| t.num_timeouts).display()
+                num_timeouts.display()
             );
             let Some(sync_req_from) = self.request_catch_up_sync(epoch_state).await? else {
                 warn!(
@@ -1597,23 +1619,27 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         msg: HotstuffMessage,
     ) -> Result<(), HotStuffError> {
         match msg {
-            HotstuffMessage::NewView(message) => log_err(
-                "on_receive_new_view",
-                self.on_receive_new_view
-                    .handle(epoch_state, current_height, from, *message)
-                    .await,
-            ),
+            HotstuffMessage::NewView(message) => {
+                let result = self
+                    .on_receive_new_view
+                    .handle(&mut self.pacemaker_actions, epoch_state, current_height, from, *message)
+                    .await;
+                self.pacemaker.apply(&mut self.pacemaker_actions);
+                log_err("on_receive_new_view", result)
+            },
             HotstuffMessage::Proposal(msg) => log_err(
                 "on_receive_local_proposal",
                 self.on_proposal_message(epoch_state, current_height, *msg, ProposalOrigin::Live)
                     .await,
             ),
-            HotstuffMessage::ForeignProposal(msg) => log_err(
-                "on_receive_foreign_proposal (received)",
-                self.on_receive_foreign_proposal
-                    .handle_received(msg, epoch_state.local_committee_info())
-                    .await,
-            ),
+            HotstuffMessage::ForeignProposal(msg) => {
+                let result = self
+                    .on_receive_foreign_proposal
+                    .handle_received(&mut self.pacemaker_actions, msg, epoch_state.local_committee_info())
+                    .await;
+                self.pacemaker.apply(&mut self.pacemaker_actions);
+                log_err("on_receive_foreign_proposal (received)", result)
+            },
             HotstuffMessage::ForeignProposalNotification(msg) => log_err(
                 "on_receive_foreign_proposal (notification)",
                 self.on_receive_foreign_proposal
@@ -1624,12 +1650,14 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 "on_receive_foreign_proposal (request)",
                 self.on_receive_foreign_proposal.handle_requested(from, msg).await,
             ),
-            HotstuffMessage::Vote(msg) => log_err(
-                "on_receive_vote",
-                self.on_receive_vote
-                    .handle(from, current_height, epoch_state, msg)
-                    .await,
-            ),
+            HotstuffMessage::Vote(msg) => {
+                let result = self
+                    .on_receive_vote
+                    .handle(&mut self.pacemaker_actions, from, current_height, epoch_state, msg)
+                    .await;
+                self.pacemaker.apply(&mut self.pacemaker_actions);
+                log_err("on_receive_vote", result)
+            },
             HotstuffMessage::MissingTransactionsRequest(msg) => {
                 self.on_receive_request_missing_txs.handle(from, msg);
                 Ok(())
@@ -1667,12 +1695,14 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         origin: ProposalOrigin,
     ) -> Result<(), HotStuffError> {
         let proposed_by = *msg.block.proposed_by();
-        match log_err(
-            "on_receive_local_proposal",
-            self.on_receive_local_proposal.handle(epoch_state, msg, origin).await,
-        ) {
+        let result = self
+            .on_receive_local_proposal
+            .handle(&mut self.pacemaker_actions, epoch_state, msg, origin)
+            .await;
+        self.pacemaker.apply(&mut self.pacemaker_actions);
+        match log_err("on_receive_local_proposal", result) {
             Ok(no_vote) => {
-                let current_height = self.pacemaker.current_view().get_height();
+                let current_height = self.pacemaker.current_height();
                 if let Some(mut catch_up) = self.worker_state.catch_up.take() {
                     if current_height >= catch_up.expected_batch_height {
                         if catch_up.set_next_batch(current_height, self.config.catch_up_request_timeout) {
@@ -1683,7 +1713,11 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                                 catch_up.expected_batch_height,
                             );
                             self.on_catch_up_sync
-                                .request_sync(epoch_state.epoch(), catch_up.from.clone())
+                                .request_sync(
+                                    self.pacemaker.current_view(),
+                                    epoch_state.epoch(),
+                                    catch_up.from.clone(),
+                                )
                                 .await?;
                             self.worker_state.catch_up = Some(catch_up);
                         } else {
@@ -1744,6 +1778,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         );
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn handle_hotstuff_error(
         &mut self,
         current_height: NodeHeight,
@@ -1854,7 +1889,11 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         );
 
         self.on_catch_up_sync
-            .request_sync(local_epoch_state.epoch(), vn.address.clone())
+            .request_sync(
+                self.pacemaker.current_view(),
+                local_epoch_state.epoch(),
+                vn.address.clone(),
+            )
             .await?;
 
         self.worker_state.catch_up = Some(CatchUp::new(
@@ -1946,8 +1985,7 @@ impl<TConsensusSpec: ConsensusSpec> Debug for HotstuffWorker<TConsensusSpec> {
         f.debug_struct("HotstuffWorker")
             .field("validator_addr", &self.local_validator_addr)
             .field("epoch_manager", &"EpochManager")
-            .field("pacemaker_handle", &self.pacemaker)
-            .field("pacemaker", &"Pacemaker")
+            .field("pacemaker", &self.pacemaker)
             .field("shutdown", &self.shutdown)
             .finish()
     }
@@ -2012,7 +2050,7 @@ impl<TAddr> CatchUp<TAddr> {
     pub fn set_next_batch(&mut self, current_height: NodeHeight, timeout: Duration) -> bool {
         self.expected_batch_height = (current_height + NodeHeight(99)).min(self.remote_height);
         self.reset_timeout(timeout);
-        self.expected_batch_height < self.remote_height
+        current_height < self.remote_height
     }
 
     pub fn reset_timeout(&mut self, timeout: Duration) {
@@ -2024,16 +2062,84 @@ impl<TAddr> CatchUp<TAddr> {
     }
 }
 
-/// The epoch consensus resumes in, or `None` for a node with no consensus state, which joins at the oracle's epoch.
+/// The epoch consensus resumes in, or `None` for a node with no consensus state, which opens the birthday epoch.
 ///
 /// A finalised checkpoint means its epoch ended, so consensus resumes in the next one. Without one, the persisted
 /// leaf's epoch has not ended: its committee either stalled there or moved on, and state sync has already decided
 /// which (a committee that moved on is synced from, leaving a checkpoint). Resuming at the leaf keeps this node on its
-/// committee's chain; `seed_next_epoch_from_oracle` then drives the transition to the next epoch. Starting at the
+/// committee's chain; `seed_epoch_target_from_oracle` then drives the transition to the next epoch. Starting at the
 /// oracle's epoch instead would create a genesis block the rest of the committee does not share.
 fn select_starting_epoch(last_finalised_epoch: Option<Epoch>, leaf_epoch: Option<Epoch>) -> Option<Epoch> {
     let after_checkpoint = last_finalised_epoch.map(|epoch| epoch + Epoch(1));
     after_checkpoint.max(leaf_epoch)
+}
+
+/// Advances the worker's target epoch for proposing `EndEpoch` when `candidate_epoch` is ahead of `current_epoch`.
+///
+/// Ignores candidates at or behind `current_epoch`, never regresses an already-recorded future target epoch, and
+/// preserves the activation timestamp of an active future target so duplicate or subsequent `EpochChanged` events do
+/// not restart the `epoch_end_grace_period` or `epoch_end_drain_period` timers for ending `current_epoch`.
+fn update_next_epoch_target(
+    next_epoch: &mut Option<(Epoch, Instant)>,
+    current_epoch: Epoch,
+    candidate_epoch: Epoch,
+    activated_at: Instant,
+) {
+    if candidate_epoch <= current_epoch {
+        return;
+    }
+    *next_epoch = match *next_epoch {
+        Some((existing_epoch, existing_at)) if existing_epoch > current_epoch => {
+            Some((existing_epoch.max(candidate_epoch), existing_at))
+        },
+        _ => Some((candidate_epoch, activated_at)),
+    };
+}
+
+/// Clears `next_epoch` once `current_epoch` reaches or passes it, returning any remaining future target epoch.
+fn clear_reached_next_epoch(next_epoch: &mut Option<(Epoch, Instant)>, current_epoch: Epoch) -> Option<Epoch> {
+    match next_epoch.as_ref() {
+        Some((target_epoch, _)) if *target_epoch <= current_epoch => {
+            *next_epoch = None;
+            None
+        },
+        Some((target_epoch, _)) => Some(*target_epoch),
+        None => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EpochChangedOutcome {
+    /// Event is for an epoch strictly older than `current_epoch`; ignored without side effects.
+    IgnoredStale,
+    /// Event is for `current_epoch` and this validator is not registered for it.
+    NotRegisteredForCurrentEpoch,
+    /// Event is for a future epoch (`epoch > current_epoch`) in which this validator is not registered; `next_epoch`
+    /// is updated so the worker can finish and checkpoint `current_epoch` before exiting.
+    RotatingOutAfterCurrentEpoch,
+    /// Event is for `current_epoch` or a future epoch in which this validator is registered.
+    Registered,
+}
+
+fn apply_epoch_changed(
+    next_epoch: &mut Option<(Epoch, Instant)>,
+    current_epoch: Epoch,
+    event_epoch: Epoch,
+    is_registered: bool,
+    activated_at: Instant,
+) -> EpochChangedOutcome {
+    if event_epoch < current_epoch {
+        return EpochChangedOutcome::IgnoredStale;
+    }
+    if !is_registered {
+        if current_epoch < event_epoch {
+            update_next_epoch_target(next_epoch, current_epoch, event_epoch, activated_at);
+            return EpochChangedOutcome::RotatingOutAfterCurrentEpoch;
+        }
+        return EpochChangedOutcome::NotRegisteredForCurrentEpoch;
+    }
+    update_next_epoch_target(next_epoch, current_epoch, event_epoch, activated_at);
+    EpochChangedOutcome::Registered
 }
 
 #[cfg(test)]
@@ -2063,6 +2169,140 @@ mod tests {
         #[test]
         fn a_checkpoint_synced_past_the_leaf_wins() {
             assert_eq!(select_starting_epoch(Some(Epoch(3)), Some(Epoch(1))), Some(Epoch(4)));
+        }
+    }
+
+    mod catch_up {
+        use super::*;
+
+        const TIMEOUT: Duration = Duration::from_secs(30);
+
+        #[test]
+        fn a_single_batch_catch_up_finishes_when_remote_height_is_reached() {
+            let mut catch_up = CatchUp::new(NodeHeight(50), NodeHeight(0), TIMEOUT, "peer");
+            assert_eq!(catch_up.expected_batch_height, NodeHeight(50));
+            assert!(!catch_up.set_next_batch(NodeHeight(50), TIMEOUT));
+        }
+
+        #[test]
+        fn a_multi_batch_catch_up_requests_the_final_batch_capped_at_remote_height() {
+            let mut catch_up = CatchUp::new(NodeHeight(150), NodeHeight(0), TIMEOUT, "peer");
+            assert_eq!(catch_up.expected_batch_height, NodeHeight(99));
+
+            // Reaching the end of the first batch schedules the final batch, capped at `remote_height`.
+            assert!(catch_up.set_next_batch(NodeHeight(99), TIMEOUT));
+            assert_eq!(catch_up.expected_batch_height, NodeHeight(150));
+
+            // Reaching `remote_height` completes catch-up.
+            assert!(!catch_up.set_next_batch(NodeHeight(150), TIMEOUT));
+        }
+    }
+
+    mod update_next_epoch_target {
+        use super::*;
+
+        #[test]
+        fn ignores_candidates_at_or_behind_current_epoch() {
+            let t0 = Instant::now();
+            let mut next_epoch = None;
+            update_next_epoch_target(&mut next_epoch, Epoch(2), Epoch(1), t0);
+            assert_eq!(next_epoch, None);
+            update_next_epoch_target(&mut next_epoch, Epoch(2), Epoch(2), t0);
+            assert_eq!(next_epoch, None);
+        }
+
+        #[test]
+        fn preserves_future_target_and_activation_timestamp_across_duplicate_or_older_events() {
+            let t0 = Instant::now();
+            let t1 = t0 + Duration::from_secs(5);
+            let mut next_epoch = None;
+
+            update_next_epoch_target(&mut next_epoch, Epoch(1), Epoch(3), t0);
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+
+            // An older or duplicate future event must not regress the target epoch or reset `t0`.
+            update_next_epoch_target(&mut next_epoch, Epoch(1), Epoch(2), t1);
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+            update_next_epoch_target(&mut next_epoch, Epoch(1), Epoch(3), t1);
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+
+            // A higher future target advances the target epoch while preserving `t0` for the current epoch.
+            update_next_epoch_target(&mut next_epoch, Epoch(1), Epoch(4), t1);
+            assert_eq!(next_epoch, Some((Epoch(4), t0)));
+        }
+
+        #[test]
+        fn replaces_stale_target_once_current_epoch_reaches_it() {
+            let t0 = Instant::now();
+            let t1 = t0 + Duration::from_secs(5);
+            let mut next_epoch = Some((Epoch(2), t0));
+
+            update_next_epoch_target(&mut next_epoch, Epoch(2), Epoch(3), t1);
+            assert_eq!(next_epoch, Some((Epoch(3), t1)));
+        }
+
+        #[test]
+        fn clears_reached_or_surpassed_target_epoch() {
+            let t0 = Instant::now();
+            let mut next_epoch = Some((Epoch(3), t0));
+
+            assert_eq!(clear_reached_next_epoch(&mut next_epoch, Epoch(2)), Some(Epoch(3)));
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+
+            assert_eq!(clear_reached_next_epoch(&mut next_epoch, Epoch(3)), None);
+            assert_eq!(next_epoch, None);
+
+            let mut stale_target = Some((Epoch(2), t0));
+            assert_eq!(clear_reached_next_epoch(&mut stale_target, Epoch(3)), None);
+            assert_eq!(stale_target, None);
+        }
+
+        #[test]
+        fn apply_epoch_changed_handles_rotating_out_and_stale_unregistered_events() {
+            let t0 = Instant::now();
+            let t1 = t0 + Duration::from_secs(5);
+            let mut next_epoch = None;
+
+            // A delayed unregistered event from an older epoch must not stop a validator running at Epoch(2).
+            assert_eq!(
+                apply_epoch_changed(&mut next_epoch, Epoch(2), Epoch(1), false, t0),
+                EpochChangedOutcome::IgnoredStale
+            );
+            assert_eq!(next_epoch, None);
+
+            // An unregistered event for the current epoch stops consensus immediately.
+            assert_eq!(
+                apply_epoch_changed(&mut next_epoch, Epoch(2), Epoch(2), false, t0),
+                EpochChangedOutcome::NotRegisteredForCurrentEpoch
+            );
+            assert_eq!(next_epoch, None);
+
+            // An unregistered event for a future epoch records `next_epoch` so the rotating-out validator can finish
+            // and checkpoint `current_epoch`, and preserves `t0` on duplicate delivery.
+            assert_eq!(
+                apply_epoch_changed(&mut next_epoch, Epoch(2), Epoch(3), false, t0),
+                EpochChangedOutcome::RotatingOutAfterCurrentEpoch
+            );
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+            assert_eq!(
+                apply_epoch_changed(&mut next_epoch, Epoch(2), Epoch(3), false, t1),
+                EpochChangedOutcome::RotatingOutAfterCurrentEpoch
+            );
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+
+            // A registered event at the current epoch does not pollute `next_epoch`, while a higher future registered
+            // event advances the target epoch and preserves `t0`.
+            let mut registered_next = None;
+            assert_eq!(
+                apply_epoch_changed(&mut registered_next, Epoch(2), Epoch(2), true, t0),
+                EpochChangedOutcome::Registered
+            );
+            assert_eq!(registered_next, None);
+            assert_eq!(
+                apply_epoch_changed(&mut next_epoch, Epoch(2), Epoch(4), true, t1),
+                EpochChangedOutcome::Registered
+            );
+            assert_eq!(next_epoch, Some((Epoch(4), t0)));
         }
     }
 }

@@ -133,9 +133,19 @@ where
                     self.handle_request(req).await;
                 }
 
-                Ok(event) = self.notify_subscription.recv() => {
-                    if let Err(e) = self.on_event(event).await {
-                        error!(target: LOG_TARGET, "Error handling event: {}", e);
+                result = self.notify_subscription.recv() => {
+                    match result {
+                        Ok(event) => {
+                            if let Err(e) = self.on_event(event).await {
+                                error!(target: LOG_TARGET, "Error handling event: {}", e);
+                            }
+                        },
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(target: LOG_TARGET, "Account monitor lagged behind by {} event(s)", n);
+                        },
+                        Err(broadcast::error::RecvError::Closed) => {
+                            break Ok(());
+                        },
                     }
                 },
             }

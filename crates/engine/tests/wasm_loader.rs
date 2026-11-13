@@ -19,11 +19,18 @@ use tari_template_abi::{ArgDef, FunctionDef, FunctionKind, TemplateDef, Template
 use tari_template_lib::types::TemplateAddress;
 use tari_template_test_tooling::{Package, TemplateTest};
 
-/// Bor-encoded `VersionedTemplateDef::V1(TemplateDefV1 { template_name: "Buggy", abi_version: 0, functions:
-/// [FunctionDefV1 { name: "main", arguments: [], output: Type::Unit, is_mut: false, is_migration:
-/// false }] })`, behind the 4-byte little-endian length prefix `encode_for_wasm_embedding` adds.
-/// Shared with `tests/templates/buggy`, which embeds the same blob.
+/// Bor-encoded `TemplateDef::V2(TemplateDefV2 { template_name: "Buggy", abi_version: 0, functions: [FunctionDef {
+/// name: "main", kind: FunctionKind::Function, arguments: [], output: Type::Unit }] })`, behind the 4-byte
+/// little-endian length prefix `encode_for_wasm_embedding` adds. Shared with `tests/templates/buggy`, which embeds the
+/// same blob.
 const TEMPLATE_DEF: &[u8] = &[
+    29, 0, 0, 0, 130, 1, 129, 131, 101, 66, 117, 103, 103, 121, 0, 129, 132, 100, 109, 97, 105, 110, 130, 0, 128, 128,
+    130, 0, 128,
+];
+
+/// [`TEMPLATE_DEF`] with the V1 layout's index and its `main` in the V1 function layout:
+/// `{ name, arguments, output, is_mut, is_migration }`.
+const V1_TEMPLATE_DEF: &[u8] = &[
     28, 0, 0, 0, 130, 0, 129, 131, 101, 66, 117, 103, 103, 121, 0, 129, 133, 100, 109, 97, 105, 110, 128, 130, 0, 128,
     244, 244,
 ];
@@ -173,6 +180,29 @@ fn rejects_a_memory_declaring_more_pages_than_the_limit() {
 
     let err = validation_error(&code);
     assert!(err.contains("memory limit"), "unexpected error: {err}");
+}
+
+#[test]
+fn the_template_def_fixture_is_the_encoded_buggy_definition() {
+    let def = TemplateDef::V2(TemplateDefV2 {
+        template_name: "Buggy".to_string(),
+        abi_version: 0,
+        functions: vec![FunctionDef {
+            name: "main".to_string(),
+            kind: FunctionKind::Function,
+            arguments: vec![],
+            output: Type::Unit,
+        }],
+    });
+    assert_eq!(def.encode_for_wasm_embedding().unwrap(), TEMPLATE_DEF);
+}
+
+#[test]
+fn rejects_a_v1_template_definition() {
+    let code = template_module_defining(V1_TEMPLATE_DEF, "", ABI_EXPORTS);
+
+    let err = validation_error(&code);
+    assert!(err.contains("V1 layout"), "unexpected error: {err}");
 }
 
 #[test]

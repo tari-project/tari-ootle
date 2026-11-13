@@ -264,6 +264,45 @@ mod component_access_rules {
     }
 
     #[test]
+    fn set_access_rules_rejects_unknown_method() {
+        let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
+
+        let (owner_proof, _, owner_key) = test.create_owner_proof();
+
+        let access_rules_template = test.get_template_address("AccessRulesTest");
+
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_function(access_rules_template, "with_configured_rules", args![
+                    OwnerRule::OwnedBySigner,
+                    ComponentAccessRules::new().default(AccessRule::AllowAll),
+                    ResourceAccessRules::new(),
+                    AccessRule::DenyAll,
+                ])
+                .build_and_seal(&owner_key),
+            vec![owner_proof.clone()],
+        );
+
+        let component_address = test.return_values()[0].decoded::<ComponentAddress>().unwrap();
+
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(component_address, "set_component_access_rules", args![
+                    ComponentAccessRules::new()
+                        .add_method_rule("nonexistent_method", AccessRule::DenyAll)
+                        .default(AccessRule::AllowAll)
+                ])
+                .build_and_seal(&owner_key),
+            vec![owner_proof],
+        );
+
+        assert_reject_reason(reason, RuntimeError::InvalidMethodAccessRule {
+            template_name: "AccessRulesTest".to_string(),
+            details: "No method 'nonexistent_method' found in template".to_string(),
+        });
+    }
+
+    #[test]
     fn create_component_rejects_scoped_owner_rule() {
         let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
 
@@ -2348,8 +2387,9 @@ mod resource_access_rules {
         });
     }
 
-    /// Mint takes the resource's write lock. The hook guards that resource and may legitimately read it, so the
-    /// lock must not be held across the hook call.
+    /// Mint takes the resource's write lock, and vault withdraw, deposit and proof creation take the vault's write
+    /// lock. The hook guards that resource and may legitimately read both the resource and its vault, so neither lock
+    /// must be held across the hook call.
     #[test]
     fn it_allows_a_hook_to_read_the_resource_it_guards() {
         let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/access_rules"]);
@@ -2380,7 +2420,8 @@ mod resource_access_rules {
             .unwrap();
 
         // `mint_resource` is a function rather than a method, so the mint acts on the resource from outside the
-        // hook's own component and the hook runs.
+        // hook's own component and the hook runs. This deposit creates the account's vault, so its hook reads stored
+        // account state that holds no vault for the resource yet.
         test.execute_expect_success(
             Transaction::builder_localnet(Epoch(1))
                 .call_function(access_rules_template, "mint_resource", args![token_resource])
@@ -2388,6 +2429,25 @@ mod resource_access_rules {
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&user_key),
             vec![user_proof.clone()],
+        );
+
+        // Once the account holds a vault for the resource, the hook also decodes `caller.component_state()` as an
+        // `Account` and reads `vault.balance()`, exercising vault lock release across withdraw, deposit and proof
+        // creation hooks.
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(user_account, "withdraw", args![token_resource, 1])
+                .put_last_instruction_output_on_workspace("withdrawn")
+                .call_method(user_account, "deposit", args![Workspace("withdrawn")])
+                .call_method(user_account, "create_proof_for_resource", args![token_resource])
+                .put_last_instruction_output_on_workspace("proof_all")
+                // The resource proof locks the whole balance, so it is dropped before an amount is locked.
+                .drop_all_proofs_in_workspace()
+                .call_method(user_account, "create_proof_by_amount", args![token_resource, 1])
+                .put_last_instruction_output_on_workspace("proof_amt")
+                .drop_all_proofs_in_workspace()
+                .build_and_seal(&user_key),
+            vec![user_proof],
         );
     }
 
@@ -3006,6 +3066,73 @@ mod resource_access_rules {
                 .build_and_seal(&user_key),
             vec![user_proof],
         );
+    }
+}
+
+mod auth_hook_caller_state {
+    use tari_engine_types::substate::SubstateId;
+
+    use super::*;
+
+    const TEMPLATE: &str = "tests/templates/auth_hook_state";
+
+    /// Creates the hooked resource with `hook` as its auth hook, and a holder of it whose state names `other`.
+    /// Returns the holder's address.
+    fn create_holder(test: &mut TemplateTest, hook: &str, other: Option<ComponentAddress>) -> ComponentAddress {
+        let template = test.get_template_address("AuthHookState");
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_function(template, "new", args![hook])
+                .put_last_instruction_output_on_workspace("hook")
+                .call_method("hook", "take_tokens", args![10])
+                .put_last_instruction_output_on_workspace("tokens")
+                .call_function(template, "holder", args![Workspace("tokens"), other])
+                .build_and_seal(test.secret_key()),
+            vec![],
+        );
+        test.return_values()[4].decoded::<ComponentAddress>().unwrap()
+    }
+
+    fn cycle(test: &TemplateTest, holder: ComponentAddress) -> Transaction {
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(holder, "cycle", args![])
+            .build_and_seal(test.secret_key())
+    }
+
+    /// The acting component's state was validated when its own frame wrote it. A root substate it names may since
+    /// have been downed, or be one the transaction did not declare, and the hook still runs.
+    #[test]
+    fn it_runs_the_hook_when_the_caller_state_names_an_absent_root_substate() {
+        let mut test = TemplateTest::new(CRATE_PATH, [TEMPLATE]);
+        let (referenced, _, _) = test.create_empty_account();
+
+        let holder = create_holder(&mut test, "accept_hook", Some(referenced));
+        let control = create_holder(&mut test, "accept_hook", None);
+        test.execute_expect_success(cycle(&test, holder), vec![]);
+
+        test.get_state_store_mut()
+            .delete_state(&SubstateId::Component(referenced));
+
+        test.execute_expect_success(cycle(&test, control), vec![]);
+        test.execute_expect_success(cycle(&test, holder), vec![]);
+    }
+
+    /// The acting component's state reaches the hook as data only: the substates it names stay out of the hook
+    /// frame's scope, so the hook cannot take a reference to them into its own state.
+    #[test]
+    fn it_keeps_the_caller_state_out_of_the_hook_scope() {
+        let mut test = TemplateTest::new(CRATE_PATH, [TEMPLATE]);
+
+        let holder = create_holder(&mut test, "hook_records_caller_resource", None);
+        let reason = test.execute_expect_failure(cycle(&test, holder), vec![]);
+
+        let own_resource = test.extract_component_value::<ResourceAddress>(holder, "$.1");
+        assert_reject_reason(reason, RuntimeError::AccessDeniedAuthHook {
+            action_ident: ResourceAuthAction::Withdraw.into(),
+            details: format!("Runtime error: {}", RuntimeError::SubstateOutOfScope {
+                id: own_resource.into()
+            }),
+        });
     }
 }
 

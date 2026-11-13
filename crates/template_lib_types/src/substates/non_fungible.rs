@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use minicbor::{CborLen, Decode, Encode};
-use tari_bor::BorTag;
+use tari_bor::{BorTag, Tagged};
 use tari_template_abi::{
     EngineOp,
     call_engine,
@@ -41,7 +41,10 @@ pub enum NonFungibleId {
     #[n(1)]
     String(
         #[cfg_attr(feature = "ts", ts(type = "string"))]
+        #[cfg_attr(feature = "serde", serde(deserialize_with = "deserialize_nft_id_str"))]
+        #[cfg_attr(feature = "borsh", borsh(deserialize_with = "borsh_deserialize_nft_id_str"))]
         #[n(0)]
+        #[cbor(decode_with = "decode_nft_id_str")]
         MaxString<NON_FUNGIBLE_ID_STR_MAX_LEN>,
     ),
     #[n(2)]
@@ -222,6 +225,38 @@ fn validate_nft_id_str(s: &str) -> Result<(), ParseNonFungibleIdError> {
     Ok(())
 }
 
+fn decode_nft_id_str<'b, C>(
+    d: &mut minicbor::Decoder<'b>,
+    ctx: &mut C,
+) -> Result<MaxString<NON_FUNGIBLE_ID_STR_MAX_LEN>, minicbor::decode::Error> {
+    let s = MaxString::<NON_FUNGIBLE_ID_STR_MAX_LEN>::decode(d, ctx)?;
+    validate_nft_id_str(&s).map_err(|_| minicbor::decode::Error::message("NonFungibleId::String cannot be empty"))?;
+    Ok(s)
+}
+
+#[cfg(feature = "serde")]
+fn deserialize_nft_id_str<'de, D>(deserializer: D) -> Result<MaxString<NON_FUNGIBLE_ID_STR_MAX_LEN>, D::Error>
+where D: serde::Deserializer<'de> {
+    use serde::Deserialize;
+    let s = MaxString::<NON_FUNGIBLE_ID_STR_MAX_LEN>::deserialize(deserializer)?;
+    validate_nft_id_str(&s).map_err(|_| serde::de::Error::custom("NonFungibleId::String cannot be empty"))?;
+    Ok(s)
+}
+
+#[cfg(feature = "borsh")]
+fn borsh_deserialize_nft_id_str<R: borsh::io::Read>(
+    reader: &mut R,
+) -> Result<MaxString<NON_FUNGIBLE_ID_STR_MAX_LEN>, borsh::io::Error> {
+    let s = <MaxString<NON_FUNGIBLE_ID_STR_MAX_LEN> as borsh::BorshDeserialize>::deserialize_reader(reader)?;
+    validate_nft_id_str(&s).map_err(|_| {
+        borsh::io::Error::new(
+            borsh::io::ErrorKind::InvalidData,
+            "NonFungibleId::String cannot be empty",
+        )
+    })?;
+    Ok(s)
+}
+
 impl Display for NonFungibleId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -245,6 +280,10 @@ const TAG: u64 = BinaryTag::NonFungibleAddress.as_u64();
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct NonFungibleAddress(BorTag<NonFungibleAddressContents, TAG>);
+
+impl Tagged for NonFungibleAddress {
+    const TAG: u64 = TAG;
+}
 
 /// A NonFungibleId namespaced by a ResourceAddress.
 #[derive(Debug, Clone, Encode, Decode, CborLen, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -319,10 +358,10 @@ impl FromStr for NonFungibleAddress {
             .split_once('_')
             .ok_or(ParseNonFungibleAddressError::InvalidFormat)?;
 
-        let resource_addr =
-            ResourceAddress::from_hex(resource).map_err(|_| ParseNonFungibleAddressError::InvalidFormat)?;
-        let nft_id = NonFungibleId::try_from_canonical_string(nft_rest)
-            .map_err(|_| ParseNonFungibleAddressError::InvalidFormat)?;
+        let resource_addr = ResourceAddress::from_hex(resource)
+            .map_err(|e| ParseNonFungibleAddressError::InvalidResource(e.to_string()))?;
+        let nft_id =
+            NonFungibleId::try_from_canonical_string(nft_rest).map_err(ParseNonFungibleAddressError::InvalidId)?;
 
         Ok(NonFungibleAddress::new(resource_addr, nft_id))
     }
@@ -527,6 +566,21 @@ mod tests {
             let r = tari_bor::decode::<NonFungibleAddress>(&cbor).unwrap();
             assert_eq!(r, v);
         }
+
+        #[test]
+        fn empty_string_nft_id_is_rejected_by_serde_and_cbor() {
+            assert!(serde_json::from_str::<NonFungibleId>(r#"{"String":""}"#).is_err());
+
+            let empty_cbor = tari_bor::encode(&NonFungibleId::String(MaxString::default())).unwrap();
+            assert!(tari_bor::decode::<NonFungibleId>(&empty_cbor).is_err());
+        }
+
+        #[cfg(feature = "borsh")]
+        #[test]
+        fn empty_string_nft_id_is_rejected_by_borsh() {
+            let bytes = borsh::to_vec(&NonFungibleId::String(MaxString::default())).unwrap();
+            assert!(borsh::from_slice::<NonFungibleId>(&bytes).is_err());
+        }
     }
 
     mod non_fungible_address_string {
@@ -534,6 +588,7 @@ mod tests {
 
         #[test]
         fn it_parses_valid_strings() {
+            assert_eq!(NonFungibleAddress::TAG, BinaryTag::NonFungibleAddress.as_u64());
             NonFungibleAddress::from_str(
                 "nft_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_str_SpecialNft",
             )
@@ -546,23 +601,40 @@ mod tests {
 
         #[test]
         fn it_rejects_invalid_strings() {
-            NonFungibleAddress::from_str(
-                "resource_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_nft_xxxxx_SpecialNft",
-            )
-            .unwrap_err();
-            NonFungibleAddress::from_str(
-                "nft_uuid_7f19c3fe5fa13ff66a0d379fe5f9e3508acbd338db6bedd7350d8d565b2c5d32ffffffff",
-            )
-            .unwrap_err();
-            NonFungibleAddress::from_str("resource_x nft_str:SpecialNft").unwrap_err();
-            NonFungibleAddress::from_str(
-                "resource_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_nft_str_",
-            )
-            .unwrap_err();
-            NonFungibleAddress::from_str(
-                "resource_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_nftx_str_SpecialNft",
-            )
-            .unwrap_err();
+            assert!(matches!(
+                NonFungibleAddress::from_str(
+                    "resource_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_nft_xxxxx_SpecialNft",
+                ),
+                Err(ParseNonFungibleAddressError::InvalidResource(_))
+            ));
+            assert!(matches!(
+                NonFungibleAddress::from_str(
+                    "nft_uuid_7f19c3fe5fa13ff66a0d379fe5f9e3508acbd338db6bedd7350d8d565b2c5d32ffffffff",
+                ),
+                Err(ParseNonFungibleAddressError::InvalidResource(_))
+            ));
+            assert_eq!(
+                NonFungibleAddress::from_str("nft_nounderscore"),
+                Err(ParseNonFungibleAddressError::InvalidFormat)
+            );
+            assert!(matches!(
+                NonFungibleAddress::from_str("resource_x nft_str:SpecialNft"),
+                Err(ParseNonFungibleAddressError::InvalidResource(_))
+            ));
+            assert_eq!(
+                NonFungibleAddress::from_str(
+                    "nft_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_str_",
+                ),
+                Err(ParseNonFungibleAddressError::InvalidId(
+                    ParseNonFungibleIdError::InvalidStringLength
+                ))
+            );
+            assert!(matches!(
+                NonFungibleAddress::from_str(
+                    "resource_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_nftx_str_SpecialNft",
+                ),
+                Err(ParseNonFungibleAddressError::InvalidResource(_))
+            ));
         }
     }
 }

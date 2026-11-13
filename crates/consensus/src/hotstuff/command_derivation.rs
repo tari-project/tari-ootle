@@ -20,7 +20,6 @@ use tari_ootle_storage::consensus_models::{
     NoVoteReason,
     TransactionExecution,
     TransactionPoolRecord,
-    TransactionPoolStage,
 };
 use tari_ootle_transaction::TransactionId;
 
@@ -31,8 +30,8 @@ use crate::hotstuff::{
 
 /// A transaction command derived for a block, with what including it changes.
 #[derive(Debug)]
-pub(super) struct DerivedCommand<TCommand = Command> {
-    pub command: TCommand,
+pub(super) struct DerivedCommand {
+    pub command: Command,
     /// The pool record as the command leaves it, before it moves to its next stage.
     pub pool_record: TransactionPoolRecord,
     /// The execution the command is derived from. A transaction that pledges its local inputs to foreign shard
@@ -44,7 +43,7 @@ pub(super) struct DerivedCommand<TCommand = Command> {
     pub exhaust_burn: u64,
 }
 
-impl DerivedCommand<Command> {
+impl DerivedCommand {
     /// The diff the block applies for this command: a committing LocalOnly command's execution diff. Every other
     /// command's diff is applied when the transaction finalizes.
     pub fn committed_diff(&self) -> Option<&SubstateDiff> {
@@ -70,41 +69,11 @@ impl MultiShardCommandKind {
             Self::LocalAccept => "LocalAccept",
         }
     }
-
-    /// The stage the command moves the transaction to.
-    pub const fn next_stage(self) -> TransactionPoolStage {
-        match self {
-            Self::LocalPrepare => TransactionPoolStage::LocalPrepared,
-            Self::LocalAccept => TransactionPoolStage::LocalAccepted,
-        }
-    }
 }
 
 impl Display for MultiShardCommandKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
-    }
-}
-
-/// A LocalPrepare or LocalAccept command for a transaction at the New stage.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct NewMultiShardCommand {
-    pub kind: MultiShardCommandKind,
-    pub atom: MultiShardAtom,
-}
-
-impl NewMultiShardCommand {
-    pub fn into_command(self) -> Command {
-        match self.kind {
-            MultiShardCommandKind::LocalPrepare => Command::LocalPrepare(self.atom),
-            MultiShardCommandKind::LocalAccept => Command::LocalAccept(self.atom),
-        }
-    }
-}
-
-impl Display for NewMultiShardCommand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}({})", self.kind, self.atom)
     }
 }
 
@@ -183,7 +152,7 @@ pub(super) fn derive_new_multishard_command(
     mut pool_record: TransactionPoolRecord,
     prepared: MultiShardPreparedTransaction,
     local_committee_info: &CommitteeInfo,
-) -> Result<DerivedCommand<NewMultiShardCommand>, HotStuffError> {
+) -> Result<DerivedCommand, HotStuffError> {
     let local_shard_group = local_committee_info.shard_group();
     let execution = match prepared.into_evidence_or_execution() {
         EvidenceOrExecution::Execution {
@@ -225,21 +194,19 @@ pub(super) fn derive_new_multishard_command(
         },
     };
 
-    let kind = if pool_record.current_decision().is_abort() ||
+    let atom = pool_record.get_current_multi_shard_atom()?;
+    let command = if pool_record.current_decision().is_abort() ||
         pool_record.evidence().is_committee_output_only(local_shard_group)
     {
         // Neither an aborting transaction nor one whose foreign shard groups have prepared every input needs a
         // prepare phase here
-        MultiShardCommandKind::LocalAccept
+        Command::LocalAccept(atom)
     } else {
-        MultiShardCommandKind::LocalPrepare
+        Command::LocalPrepare(atom)
     };
 
     Ok(DerivedCommand {
-        command: NewMultiShardCommand {
-            kind,
-            atom: pool_record.get_current_multi_shard_atom()?,
-        },
+        command,
         pool_record,
         execution,
         leader_fee: 0,
@@ -262,17 +229,24 @@ pub(super) fn local_only_disagreement(derived: &LocalOnlyAtom, proposed: &LocalO
     leader_fee_disagreement(derived.leader_fee.as_ref(), proposed.leader_fee.as_ref())
 }
 
+/// The LocalPrepare or LocalAccept command `command` is, as derived for a transaction at the New stage.
+pub(super) fn as_new_multishard_command(command: &Command) -> Option<(MultiShardCommandKind, &MultiShardAtom)> {
+    match command {
+        Command::LocalPrepare(atom) => Some((MultiShardCommandKind::LocalPrepare, atom)),
+        Command::LocalAccept(atom) => Some((MultiShardCommandKind::LocalAccept, atom)),
+        _ => None,
+    }
+}
+
 /// The reason a replica refuses a `proposed_kind` command for a transaction at the New stage when it derived
-/// `derived`. Fields are compared in a fixed order, so a proposal that differs in several is refused for the first.
+/// `derived_kind` with `derived`. Fields are compared in a fixed order, so a proposal that differs in several is
+/// refused for the first.
 pub(super) fn new_multishard_disagreement(
-    derived: &NewMultiShardCommand,
+    derived_kind: MultiShardCommandKind,
+    derived: &MultiShardAtom,
     proposed_kind: MultiShardCommandKind,
     proposed: &MultiShardAtom,
 ) -> Option<NoVoteReason> {
-    let NewMultiShardCommand {
-        kind: derived_kind,
-        atom: derived,
-    } = derived;
     if derived.decision != proposed.decision {
         return Some(NoVoteReason::DecisionDisagreement {
             local: derived.decision,
@@ -282,7 +256,7 @@ pub(super) fn new_multishard_disagreement(
     if let Some(reason) = fee_intent_only_disagreement(derived.fee_intent_only, proposed) {
         return Some(reason);
     }
-    if *derived_kind != proposed_kind {
+    if derived_kind != proposed_kind {
         return Some(NoVoteReason::CommandDisagreement {
             transaction_id: proposed.id,
             local: derived_kind.as_str(),
@@ -303,6 +277,51 @@ pub(super) fn new_multishard_disagreement(
     locked_epoch_disagreement(Some(&derived.locked_epoch), proposed)
 }
 
+/// How much of the evidence of a multi-shard atom a replica holds the proposer to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EvidenceMatch {
+    /// Every field, including the certificates each shard group's evidence carries.
+    Exact,
+    /// The pledges only. A LocalAccept is derived before this block's foreign proposals add their certificates on
+    /// some members, so only what the transaction pledges is agreed on at that point.
+    Pledges,
+}
+
+/// The reason a replica refuses the multi-shard `proposed` atom of a command for a transaction at the LocalPrepared or
+/// LocalAccepted stage when it derived `derived`. Fields are compared in a fixed order, so a proposal that differs in
+/// several is refused for the first.
+pub(super) fn multishard_disagreement(
+    derived: &MultiShardAtom,
+    proposed: &MultiShardAtom,
+    evidence_match: EvidenceMatch,
+) -> Option<NoVoteReason> {
+    if derived.decision != proposed.decision {
+        return Some(NoVoteReason::DecisionDisagreement {
+            local: derived.decision,
+            remote: proposed.decision,
+        });
+    }
+    if let Some(reason) = fee_intent_only_disagreement(derived.fee_intent_only, proposed) {
+        return Some(reason);
+    }
+    if derived.transaction_fee != proposed.transaction_fee {
+        return Some(NoVoteReason::FeeDisagreement);
+    }
+    if let Some(reason) = leader_fee_disagreement(derived.leader_fee.as_ref(), proposed.leader_fee.as_ref()) {
+        return Some(reason);
+    }
+    let evidence_matches = match evidence_match {
+        EvidenceMatch::Exact => derived.evidence == proposed.evidence,
+        EvidenceMatch::Pledges => derived.evidence.eq_pledges(&proposed.evidence),
+    };
+    if !evidence_matches {
+        return Some(NoVoteReason::InvalidEvidence {
+            reason: InvalidEvidenceReason::MismatchedEvidence,
+        });
+    }
+    locked_epoch_disagreement(Some(&derived.locked_epoch), proposed)
+}
+
 /// The reason a replica refuses `proposed` when the transaction is pinned to `local` here. Every shard group involved
 /// in the transaction adopts the pin the atom carries, so the atom must carry the pin the transaction executes under.
 pub(super) fn locked_epoch_disagreement(
@@ -316,19 +335,30 @@ pub(super) fn locked_epoch_disagreement(
     })
 }
 
-/// A transaction at the New stage that cannot be sequenced yet: it is pinned to a later epoch than the block.
+/// A transaction at the New stage that cannot be sequenced yet: either its signed minimum epoch has not been reached
+/// or it is already pinned to a later epoch than the block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct PinnedAfterBlock {
-    pub locked_epoch: Epoch,
-    pub block_epoch: Epoch,
+pub(super) enum EpochBeforeTransactionWindow {
+    PinnedAfterBlock { locked_epoch: Epoch, block_epoch: Epoch },
+    BeforeMinEpoch { min_epoch: Epoch, block_epoch: Epoch },
 }
 
-impl PinnedAfterBlock {
+impl EpochBeforeTransactionWindow {
     pub fn into_no_vote(self, transaction_id: TransactionId) -> NoVoteReason {
-        NoVoteReason::LockedEpochAfterBlock {
-            transaction_id,
-            locked_epoch: self.locked_epoch,
-            block_epoch: self.block_epoch,
+        match self {
+            Self::PinnedAfterBlock {
+                locked_epoch,
+                block_epoch,
+            } => NoVoteReason::LockedEpochAfterBlock {
+                transaction_id,
+                locked_epoch,
+                block_epoch,
+            },
+            Self::BeforeMinEpoch { min_epoch, block_epoch } => NoVoteReason::MinEpochAfterBlock {
+                transaction_id,
+                min_epoch,
+                block_epoch,
+            },
         }
     }
 }
@@ -342,13 +372,22 @@ impl PinnedAfterBlock {
 /// own epoch reaches the pin, so no block carries a transaction pinned to a later epoch than the block.
 pub(super) fn pin_new_transaction(
     pool_record: &mut TransactionPoolRecord,
+    min_epoch: Option<Epoch>,
     block_locked_epoch: &LockedEpoch,
     local_shard_group: ShardGroup,
-) -> Result<(), PinnedAfterBlock> {
+) -> Result<(), EpochBeforeTransactionWindow> {
+    if let Some(min_epoch) = min_epoch &&
+        min_epoch > block_locked_epoch.epoch()
+    {
+        return Err(EpochBeforeTransactionWindow::BeforeMinEpoch {
+            min_epoch,
+            block_epoch: block_locked_epoch.epoch(),
+        });
+    }
     match pool_record.locked_epoch() {
         Some(pin) if !pool_record.evidence().has_inputs(local_shard_group) => {
             if pin.epoch() > block_locked_epoch.epoch() {
-                return Err(PinnedAfterBlock {
+                return Err(EpochBeforeTransactionWindow::PinnedAfterBlock {
                     locked_epoch: pin.epoch(),
                     block_epoch: block_locked_epoch.epoch(),
                 });

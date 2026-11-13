@@ -208,16 +208,17 @@ fn basic_validations(transfer: &StealthTransferStatement) -> Result<(), Resource
         }
     }
 
+    for output in &transfer.outputs_statement.outputs {
+        let commitment = output.output.commitment;
+        if seen.contains(&commitment) {
+            return Err(ResourceError::InvalidSpend {
+                details: format!("Output commitment {commitment} duplicates an input commitment in transfer statement"),
+            });
+        }
+    }
+
     validate_covenant_claims(transfer)?;
 
-    if transfer.inputs_statement.revealed_amount.is_negative() {
-        return Err(ResourceError::InvalidBalanceProof {
-            details: format!(
-                "Revealed input amount must be non-negative: {}",
-                transfer.inputs_statement.revealed_amount
-            ),
-        });
-    }
     if let Some(revealed) = transfer.outputs_statement.revealed_output {
         // The presence of this field and the presence of a revealed bucket are the same fact, which holds only while
         // `None` is the sole encoding of "no revealed output".
@@ -297,5 +298,96 @@ mod tests {
         let no_vk = transfer_native_points_for_shape(1, 2, false);
         let with_vk = transfer_native_points_for_shape(1, 2, true);
         assert_eq!(with_vk - no_vk, 2 * P::PER_OUTPUT_VIEWABLE_SURCHARGE);
+    }
+
+    #[test]
+    fn validate_transfer_rejects_output_duplicating_input_or_sibling_output_commitment() {
+        use ootle_byte_type::ToByteType;
+        use tari_crypto::keys::PublicKey;
+        use tari_template_lib::types::{
+            Amount,
+            EncryptedData,
+            crypto::{BalanceProofSignature, RangeProofBytes, RistrettoPublicKeyBytes, Scalar32Bytes, UtxoTag},
+            stealth::{
+                SpendAuthorization,
+                StealthInput,
+                StealthInputsStatement,
+                StealthOutputsStatement,
+                StealthUnspentOutput,
+                UnspentOutput,
+            },
+        };
+
+        use crate::crypto::commit_u64_amount;
+
+        fn make_output(seed: u64, value: u64) -> StealthUnspentOutput {
+            let mask = RistrettoSecretKey::from(seed);
+            let commitment = commit_u64_amount(&mask, value).to_byte_type();
+            let pk = RistrettoPublicKey::from_secret_key(&mask).to_byte_type();
+            StealthUnspentOutput {
+                output: UnspentOutput {
+                    commitment,
+                    sender_public_nonce: pk,
+                    encrypted_data: EncryptedData::try_from(vec![0u8; EncryptedData::min_size()]).unwrap(),
+                    minimum_value_promise: 1,
+                    viewable_balance_proof: None,
+                },
+                auth: SpendAuthorization::Key(pk),
+                tag: UtxoTag::new(0),
+            }
+        }
+
+        let out1 = make_output(1, 100);
+        let out2 = make_output(2, 100);
+        let dummy_sig =
+            BalanceProofSignature::new(RistrettoPublicKeyBytes::from([1u8; 32]), Scalar32Bytes::from([1u8; 32]));
+
+        // 1. Output commitment duplicating an input commitment is rejected with InvalidSpend.
+        let input_output_collision = StealthTransferStatement {
+            inputs_statement: StealthInputsStatement::new(
+                vec![StealthInput::new(out1.output.commitment)],
+                Amount::ZERO,
+            ),
+            outputs_statement: StealthOutputsStatement {
+                outputs: vec![out1.clone()],
+                revealed_output: None,
+                agg_range_proof: RangeProofBytes::empty(),
+            },
+            balance_proof: Some(dummy_sig),
+            covenant_claims: vec![],
+        };
+        let err = validate_transfer(&input_output_collision, None).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                ResourceError::InvalidSpend { details }
+                    if details.contains("duplicates an input commitment")
+            ),
+            "unexpected error: {err:?}"
+        );
+
+        // 2. Duplicate output commitments in the same transfer statement are rejected.
+        let dup_outputs = StealthTransferStatement {
+            inputs_statement: StealthInputsStatement::new(
+                vec![StealthInput::new(out1.output.commitment)],
+                Amount::ZERO,
+            ),
+            outputs_statement: StealthOutputsStatement {
+                outputs: vec![out2.clone(), out2],
+                revealed_output: None,
+                agg_range_proof: RangeProofBytes::empty(),
+            },
+            balance_proof: Some(dummy_sig),
+            covenant_claims: vec![],
+        };
+        let err = validate_transfer(&dup_outputs, None).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                ResourceError::InvalidConfidentialProof { details }
+                    if details.contains("Duplicate output commitment")
+            ),
+            "unexpected error: {err:?}"
+        );
     }
 }

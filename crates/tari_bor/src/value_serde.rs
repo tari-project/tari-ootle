@@ -38,6 +38,13 @@
 //! form. Hex strings without the sentinel envelope are NOT decoded as bytes — only the
 //! sentinel form preserves byte semantics through a round-trip.
 
+#[cfg(not(feature = "std"))]
+use alloc::{
+    boxed::Box,
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::fmt;
 
 use serde::{
@@ -45,11 +52,11 @@ use serde::{
     Deserializer,
     Serialize,
     Serializer,
-    de::{self, MapAccess, SeqAccess, Visitor},
+    de::{self, DeserializeSeed, EnumAccess, MapAccess, SeqAccess, VariantAccess, Visitor},
     ser::{SerializeMap, SerializeSeq},
 };
 
-use crate::Value;
+use crate::{MAX_DECODE_DEPTH, Value};
 
 const SENTINEL_KEY: &str = "@cbor";
 const SENTINEL_BYTES: &str = "bytes";
@@ -131,11 +138,31 @@ fn is_native_object_key(key: &Value) -> bool {
 
 impl<'de> Deserialize<'de> for Value {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        d.deserialize_any(ValueVisitor)
+        ValueSeed { depth: 0 }.deserialize(d)
     }
 }
 
-struct ValueVisitor;
+/// Depth-bounded seed for [`Value`], enforcing [`MAX_DECODE_DEPTH`] identically to
+/// `minicbor::Decode for Value` and [`crate::check_value_form`].
+#[derive(Clone, Copy)]
+struct ValueSeed {
+    depth: usize,
+}
+
+impl<'de> DeserializeSeed<'de> for ValueSeed {
+    type Value = Value;
+
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
+        if self.depth >= MAX_DECODE_DEPTH {
+            return Err(de::Error::custom("maximum CBOR nesting depth exceeded"));
+        }
+        d.deserialize_any(ValueVisitor { depth: self.depth })
+    }
+}
+
+struct ValueVisitor {
+    depth: usize,
+}
 
 impl<'de> Visitor<'de> for ValueVisitor {
     type Value = Value;
@@ -153,7 +180,11 @@ impl<'de> Visitor<'de> for ValueVisitor {
     }
 
     fn visit_some<D: Deserializer<'de>>(self, d: D) -> Result<Value, D::Error> {
-        d.deserialize_any(ValueVisitor)
+        ValueSeed { depth: self.depth }.deserialize(d)
+    }
+
+    fn visit_newtype_struct<D: Deserializer<'de>>(self, d: D) -> Result<Value, D::Error> {
+        ValueSeed { depth: self.depth }.deserialize(d)
     }
 
     fn visit_bool<E: de::Error>(self, v: bool) -> Result<Value, E> {
@@ -201,34 +232,46 @@ impl<'de> Visitor<'de> for ValueVisitor {
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
         let mut out = Vec::with_capacity(cautious_capacity(seq.size_hint()));
-        while let Some(elem) = seq.next_element::<Value>()? {
+        while let Some(elem) = seq.next_element_seed(ValueSeed { depth: self.depth + 1 })? {
             out.push(elem);
         }
         Ok(Value::Array(out))
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
-        // Pull the first key. If it's the sentinel, decode the special form. Otherwise it's a
-        // plain string-keyed map and we continue collecting entries.
-        let Some(first_key) = map.next_key::<String>()? else {
+        // Pull the first key. If it's a reserved text sentinel, decode the special form; otherwise
+        // collect entries directly (supporting both text-keyed JSON objects and arbitrary-keyed CBOR
+        // maps via `serde_codec`).
+        let entry_seed = ValueSeed { depth: self.depth + 1 };
+        let Some(first_key) = map.next_key_seed(entry_seed)? else {
             return Ok(Value::Map(Vec::new()));
         };
 
-        if first_key == SENTINEL_KEY {
-            let kind: String = map.next_value()?;
-            return decode_sentinel(&kind, &mut map);
+        if let Value::Text(ref key_str) = first_key {
+            if key_str == SENTINEL_KEY {
+                let kind: String = map.next_value()?;
+                return decode_sentinel(&kind, &mut map, self.depth);
+            }
+
+            if key_str == JSON_NUMBER_SENTINEL {
+                let raw: String = map.next_value()?;
+                if map
+                    .next_key_seed(BoundedIgnoredAny { depth: self.depth + 1 })?
+                    .is_some()
+                {
+                    return Err(de::Error::custom(
+                        "unexpected extra key in $serde_json::private::Number sentinel",
+                    ));
+                }
+                return parse_json_arbitrary_number(&raw).map_err(de::Error::custom);
+            }
         }
 
-        if first_key == JSON_NUMBER_SENTINEL {
-            let raw: String = map.next_value()?;
-            return parse_json_arbitrary_number(&raw).map_err(de::Error::custom);
-        }
-
-        let first_value: Value = map.next_value()?;
+        let first_value = map.next_value_seed(entry_seed)?;
         let mut entries: Vec<(Value, Value)> = Vec::with_capacity(cautious_capacity(map.size_hint()) + 1);
-        entries.push((Value::Text(first_key), first_value));
-        while let Some((k, v)) = map.next_entry::<String, Value>()? {
-            entries.push((Value::Text(k), v));
+        entries.push((first_key, first_value));
+        while let Some((k, v)) = map.next_entry_seed(entry_seed, entry_seed)? {
+            entries.push((k, v));
         }
         Ok(Value::Map(entries))
     }
@@ -240,7 +283,7 @@ fn cautious_capacity(hint: Option<usize>) -> usize {
     hint.unwrap_or(0).min(crate::adapters::MAX_PREALLOC as usize)
 }
 
-fn decode_sentinel<'de, A: MapAccess<'de>>(kind: &str, map: &mut A) -> Result<Value, A::Error> {
+fn decode_sentinel<'de, A: MapAccess<'de>>(kind: &str, map: &mut A, depth: usize) -> Result<Value, A::Error> {
     match kind {
         SENTINEL_BYTES => {
             let mut hex_value: Option<String> = None;
@@ -248,7 +291,7 @@ fn decode_sentinel<'de, A: MapAccess<'de>>(kind: &str, map: &mut A) -> Result<Va
                 if k == "hex" {
                     hex_value = Some(map.next_value()?);
                 } else {
-                    let _: serde::de::IgnoredAny = map.next_value()?;
+                    map.next_value_seed(BoundedIgnoredAny { depth: depth + 1 })?;
                 }
             }
             let hex = hex_value.ok_or_else(|| de::Error::custom("missing 'hex' in @cbor:bytes"))?;
@@ -260,7 +303,7 @@ fn decode_sentinel<'de, A: MapAccess<'de>>(kind: &str, map: &mut A) -> Result<Va
                 if k == "value" {
                     value_str = Some(map.next_value()?);
                 } else {
-                    let _: serde::de::IgnoredAny = map.next_value()?;
+                    map.next_value_seed(BoundedIgnoredAny { depth: depth + 1 })?;
                 }
             }
             let s = value_str.ok_or_else(|| de::Error::custom("missing 'value' in @cbor:int"))?;
@@ -271,9 +314,9 @@ fn decode_sentinel<'de, A: MapAccess<'de>>(kind: &str, map: &mut A) -> Result<Va
             let mut entries: Option<Vec<(Value, Value)>> = None;
             while let Some(k) = map.next_key::<String>()? {
                 if k == "entries" {
-                    entries = Some(map.next_value()?);
+                    entries = Some(map.next_value_seed(MapEntriesSeed { entry_depth: depth + 1 })?);
                 } else {
-                    let _: serde::de::IgnoredAny = map.next_value()?;
+                    map.next_value_seed(BoundedIgnoredAny { depth: depth + 1 })?;
                 }
             }
             entries
@@ -286,9 +329,9 @@ fn decode_sentinel<'de, A: MapAccess<'de>>(kind: &str, map: &mut A) -> Result<Va
             while let Some(k) = map.next_key::<String>()? {
                 match k.as_str() {
                     "tag" => tag = Some(map.next_value()?),
-                    "value" => value = Some(map.next_value()?),
+                    "value" => value = Some(map.next_value_seed(ValueSeed { depth: depth + 1 })?),
                     _ => {
-                        let _: serde::de::IgnoredAny = map.next_value()?;
+                        map.next_value_seed(BoundedIgnoredAny { depth: depth + 1 })?;
                     },
                 }
             }
@@ -300,15 +343,244 @@ fn decode_sentinel<'de, A: MapAccess<'de>>(kind: &str, map: &mut A) -> Result<Va
     }
 }
 
-/// Decode the string payload of a `$serde_json::private::Number` map. Integers prefer
-/// `Value::Integer` (lossless for the i128 range); anything else falls back to `Value::Float`.
-fn parse_json_arbitrary_number(raw: &str) -> Result<Value, String> {
-    if let Ok(i) = raw.parse::<i128>() {
-        return Value::integer(i).ok_or_else(|| format!("integer out of CBOR range: {raw}"));
+/// Decodes the `"entries"` sequence of a `@cbor:map` envelope, charging each key and value at
+/// `entry_depth` (i.e. `map_depth + 1`) so that the envelope framing does not consume extra depth
+/// relative to the native CBOR map encoding.
+#[derive(Clone, Copy)]
+struct MapEntriesSeed {
+    entry_depth: usize,
+}
+
+impl<'de> DeserializeSeed<'de> for MapEntriesSeed {
+    type Value = Vec<(Value, Value)>;
+
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
+        d.deserialize_seq(self)
     }
-    raw.parse::<f64>()
-        .map(Value::Float)
-        .map_err(|_| format!("invalid arbitrary_precision number: {raw}"))
+}
+
+impl<'de> Visitor<'de> for MapEntriesSeed {
+    type Value = Vec<(Value, Value)>;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a sequence of [key, value] pairs")
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let mut out = Vec::with_capacity(cautious_capacity(seq.size_hint()));
+        let pair_seed = MapEntryPairSeed {
+            entry_depth: self.entry_depth,
+        };
+        while let Some(pair) = seq.next_element_seed(pair_seed)? {
+            out.push(pair);
+        }
+        Ok(out)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct MapEntryPairSeed {
+    entry_depth: usize,
+}
+
+impl<'de> DeserializeSeed<'de> for MapEntryPairSeed {
+    type Value = (Value, Value);
+
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
+        d.deserialize_tuple(2, self)
+    }
+}
+
+impl<'de> Visitor<'de> for MapEntryPairSeed {
+    type Value = (Value, Value);
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a [key, value] pair")
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let key = seq
+            .next_element_seed(ValueSeed {
+                depth: self.entry_depth,
+            })?
+            .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+        let val = seq
+            .next_element_seed(ValueSeed {
+                depth: self.entry_depth,
+            })?
+            .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+        if seq
+            .next_element_seed(BoundedIgnoredAny {
+                depth: self.entry_depth,
+            })?
+            .is_some()
+        {
+            return Err(de::Error::invalid_length(3, &self));
+        }
+        Ok((key, val))
+    }
+}
+
+/// Depth-bounded counterpart to [`serde::de::IgnoredAny`] for skipping unrecognized fields inside
+/// sentinel maps without allowing unbounded native stack recursion.
+#[derive(Clone, Copy)]
+struct BoundedIgnoredAny {
+    depth: usize,
+}
+
+impl<'de> DeserializeSeed<'de> for BoundedIgnoredAny {
+    type Value = ();
+
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
+        if self.depth >= MAX_DECODE_DEPTH {
+            return Err(de::Error::custom("maximum CBOR nesting depth exceeded"));
+        }
+        d.deserialize_ignored_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for BoundedIgnoredAny {
+    type Value = ();
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("any value")
+    }
+
+    fn visit_bool<E: de::Error>(self, _: bool) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_i64<E: de::Error>(self, _: i64) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_i128<E: de::Error>(self, _: i128) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_u64<E: de::Error>(self, _: u64) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_u128<E: de::Error>(self, _: u128) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_f64<E: de::Error>(self, _: f64) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_str<E: de::Error>(self, _: &str) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_bytes<E: de::Error>(self, _: &[u8]) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_none<E: de::Error>(self) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_some<D: Deserializer<'de>>(self, d: D) -> Result<(), D::Error> {
+        BoundedIgnoredAny { depth: self.depth }.deserialize(d)
+    }
+
+    fn visit_newtype_struct<D: Deserializer<'de>>(self, d: D) -> Result<(), D::Error> {
+        BoundedIgnoredAny { depth: self.depth }.deserialize(d)
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
+        let next = BoundedIgnoredAny { depth: self.depth + 1 };
+        while seq.next_element_seed(next)?.is_some() {}
+        Ok(())
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
+        let next = BoundedIgnoredAny { depth: self.depth + 1 };
+        while map.next_entry_seed(next, next)?.is_some() {}
+        Ok(())
+    }
+
+    fn visit_enum<A: EnumAccess<'de>>(self, data: A) -> Result<(), A::Error> {
+        let ((), variant) = data.variant_seed(BoundedIgnoredAny { depth: self.depth })?;
+        variant.newtype_variant_seed(BoundedIgnoredAny { depth: self.depth + 1 })
+    }
+}
+
+enum JsonNumberKind {
+    Integer,
+    Float,
+}
+
+/// Validates RFC 8259 JSON number syntax (`-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`) and
+/// classifies the token as an integer or float.
+fn classify_json_number(raw: &str) -> Option<JsonNumberKind> {
+    let bytes = raw.as_bytes();
+    let rest = bytes.strip_prefix(b"-").unwrap_or(bytes);
+    let after_int = match rest.first()? {
+        b'0' => &rest[1..],
+        b'1'..=b'9' => {
+            let digits = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+            &rest[digits..]
+        },
+        _ => return None,
+    };
+    if after_int.is_empty() {
+        return Some(JsonNumberKind::Integer);
+    }
+    let after_frac = if let Some(frac) = after_int.strip_prefix(b".") {
+        let digits = frac.iter().take_while(|b| b.is_ascii_digit()).count();
+        if digits == 0 {
+            return None;
+        }
+        &frac[digits..]
+    } else {
+        after_int
+    };
+    let after_exp = if let Some(exp) = after_frac.strip_prefix(b"e").or_else(|| after_frac.strip_prefix(b"E")) {
+        let exp = exp.strip_prefix(b"+").or_else(|| exp.strip_prefix(b"-")).unwrap_or(exp);
+        let digits = exp.iter().take_while(|b| b.is_ascii_digit()).count();
+        if digits == 0 {
+            return None;
+        }
+        &exp[digits..]
+    } else {
+        after_frac
+    };
+    if after_exp.is_empty() {
+        Some(JsonNumberKind::Float)
+    } else {
+        None
+    }
+}
+
+/// Decode the string payload of a `$serde_json::private::Number` map. Integer tokens must fit in
+/// the CBOR integer range (never coercing to `f64`), and float tokens must be finite JSON numbers.
+fn parse_json_arbitrary_number(raw: &str) -> Result<Value, String> {
+    match classify_json_number(raw) {
+        Some(JsonNumberKind::Integer) => {
+            let i = raw
+                .parse::<i128>()
+                .map_err(|_| format!("integer out of CBOR range: {raw}"))?;
+            Value::integer(i).ok_or_else(|| format!("integer out of CBOR range: {raw}"))
+        },
+        Some(JsonNumberKind::Float) => {
+            let f = raw
+                .parse::<f64>()
+                .map_err(|_| format!("invalid arbitrary_precision number: {raw}"))?;
+            if f.is_finite() {
+                Ok(Value::Float(f))
+            } else {
+                Err(format!("float out of finite f64 range: {raw}"))
+            }
+        },
+        None => Err(format!("invalid arbitrary_precision number: {raw}")),
+    }
 }
 
 fn encode_hex(bytes: &[u8]) -> String {
@@ -554,5 +826,160 @@ mod tests {
         });
         let bytes = crate::serde_codec::to_vec(&v).unwrap();
         assert_eq!(crate::serde_codec::from_slice::<Value>(&bytes).unwrap(), v);
+    }
+
+    #[test]
+    fn serde_decoder_enforces_max_decode_depth() {
+        fn build_nested(levels: usize, wrap: impl Fn(Value) -> Value) -> Value {
+            let mut v = Value::Integer(0);
+            for _ in 0..levels {
+                v = wrap(v);
+            }
+            v
+        }
+
+        let max = MAX_DECODE_DEPTH;
+        let json_wrappers: [&dyn Fn(Value) -> Value; 3] = [
+            &|inner| Value::Array(vec![inner]),
+            &|inner| Value::Map(vec![(Value::Text("k".into()), inner)]),
+            &|inner| Value::Tag(42, Box::new(inner)),
+        ];
+
+        for wrap in json_wrappers {
+            // One below MAX_DECODE_DEPTH must round-trip through JSON and RawCbor.
+            let valid = build_nested(max - 1, wrap);
+            let valid_json = serde_json::to_string(&valid).unwrap();
+            assert_eq!(serde_json::from_str::<Value>(&valid_json).unwrap(), valid);
+            let raw: crate::RawCbor = serde_json::from_str(&valid_json).unwrap();
+            assert_eq!(raw.to_value().unwrap(), valid);
+            assert_eq!(serde_json::to_string(&raw).unwrap(), valid_json);
+            assert!(crate::check_value_form(raw.as_bytes()).is_ok());
+
+            // At MAX_DECODE_DEPTH (still below serde_json's 128-level parser limit),
+            // serde deserialization must refuse to build a Value or RawCbor that cannot decode.
+            let too_deep = build_nested(max, wrap);
+            let too_deep_json = serde_json::to_string(&too_deep).unwrap();
+            assert!(serde_json::from_str::<Value>(&too_deep_json).is_err());
+            assert!(serde_json::from_str::<crate::RawCbor>(&too_deep_json).is_err());
+        }
+
+        // Across `serde_codec` (including `@cbor:map`, which uses 3 container frames per CBOR map
+        // level and therefore hits serde_json's 128-token parser cap before 63 levels in text JSON),
+        // every wrapper succeeds at `max - 1` and is rejected at `max`.
+        let all_wrappers: [&dyn Fn(Value) -> Value; 4] = [
+            &|inner| Value::Array(vec![inner]),
+            &|inner| Value::Map(vec![(Value::Text("k".into()), inner)]),
+            &|inner| Value::Map(vec![(Value::Integer(0), inner)]),
+            &|inner| Value::Tag(42, Box::new(inner)),
+        ];
+        for wrap in all_wrappers {
+            let valid = build_nested(max - 1, wrap);
+            let valid_cbor = crate::serde_codec::to_vec(&valid).unwrap();
+            assert_eq!(crate::serde_codec::from_slice::<Value>(&valid_cbor).unwrap(), valid);
+            let raw = crate::serde_codec::from_slice::<crate::RawCbor>(&valid_cbor).unwrap();
+            assert_eq!(raw.to_value().unwrap(), valid);
+
+            let too_deep = build_nested(max, wrap);
+            let too_deep_cbor = crate::serde_codec::to_vec(&too_deep).unwrap();
+            assert!(crate::serde_codec::from_slice::<Value>(&too_deep_cbor).is_err());
+            assert!(crate::serde_codec::from_slice::<crate::RawCbor>(&too_deep_cbor).is_err());
+        }
+
+        // A 100,000-level CBOR array bomb via `serde_codec::from_slice::<Value>` must fail
+        // cleanly at MAX_DECODE_DEPTH without overflowing a 2 MiB thread stack.
+        let rejected = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(|| {
+                let mut bomb = vec![0x81u8; 100_000];
+                bomb.push(0x00);
+                crate::serde_codec::from_slice::<Value>(&bomb).is_err()
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert!(rejected);
+    }
+
+    #[test]
+    fn json_number_sentinel_consumes_map_end_and_rejects_extra_entries() {
+        // Valid 1-entry indefinite-length CBOR map: {_ "$serde_json::private::Number": "42" }.
+        let mut indef_map = vec![0xbf];
+        indef_map.extend_from_slice(&crate::encode(&JSON_NUMBER_SENTINEL).unwrap());
+        indef_map.extend_from_slice(&crate::encode(&"42").unwrap());
+        indef_map.push(0xff);
+        assert_eq!(
+            crate::serde_codec::from_slice::<Value>(&indef_map).unwrap(),
+            Value::Integer(42)
+        );
+
+        // Multi-key JSON value starting with the sentinel must be rejected.
+        let extra_json = serde_json::json!({
+            JSON_NUMBER_SENTINEL: "42",
+            "extra": 1,
+        });
+        assert!(serde_json::from_value::<Value>(extra_json).is_err());
+
+        // Truncated 3-element CBOR array containing a 2-entry map whose second entry would
+        // otherwise leak out into the enclosing sequence.
+        let mut smuggled = vec![0x83, 0xa2];
+        smuggled.extend_from_slice(&crate::encode(&JSON_NUMBER_SENTINEL).unwrap());
+        smuggled.extend_from_slice(&crate::encode(&"42").unwrap());
+        smuggled.extend_from_slice(&crate::encode(&"injected").unwrap());
+        smuggled.push(0x18);
+        smuggled.push(99);
+        assert!(crate::serde_codec::from_slice::<Value>(&smuggled).is_err());
+    }
+
+    #[test]
+    fn json_arbitrary_precision_rejects_out_of_range_integers_and_non_finite_floats() {
+        for bad in [
+            "18446744073709551616",
+            "170141183460469231731687303715884105728",
+            "-170141183460469231731687303715884105729",
+            "1e400",
+            "-1e400",
+            "NaN",
+            "inf",
+            "-Infinity",
+            "+42",
+            "+1.5",
+            "01",
+            "1.",
+            ".5",
+            "",
+        ] {
+            let payload = serde_json::json!({ JSON_NUMBER_SENTINEL: bad });
+            assert!(
+                serde_json::from_value::<Value>(payload).is_err(),
+                "expected error for {bad:?}"
+            );
+        }
+
+        // Valid scientific-notation and zero numbers continue to decode cleanly.
+        assert_eq!(
+            serde_json::from_value::<Value>(serde_json::json!({ JSON_NUMBER_SENTINEL: "0" })).unwrap(),
+            Value::Integer(0)
+        );
+        assert_eq!(
+            serde_json::from_value::<Value>(serde_json::json!({ JSON_NUMBER_SENTINEL: "1.25e2" })).unwrap(),
+            Value::Float(125.0)
+        );
+    }
+
+    #[test]
+    fn native_non_text_cbor_maps_decode_into_value_via_serde_codec() {
+        let native_cbor = crate::encode(&Value::Map(vec![
+            (Value::Integer(0), Value::Text("zero".into())),
+            (Value::Bytes(vec![1, 2]), Value::Bool(true)),
+        ]))
+        .unwrap();
+        let decoded = crate::serde_codec::from_slice::<Value>(&native_cbor).unwrap();
+        assert_eq!(
+            decoded,
+            Value::Map(vec![
+                (Value::Integer(0), Value::Text("zero".into())),
+                (Value::Bytes(vec![1, 2]), Value::Bool(true)),
+            ])
+        );
     }
 }

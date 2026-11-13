@@ -47,9 +47,8 @@ impl Config {
                          `power` of one or more validators."
                     )
                 })?;
-            // A second entry for a validator would activate it twice. Listing it twice at one registration epoch
-            // produces two rows sharing a start_epoch, which `distinct_validators` and `set_committee_shard` resolve
-            // by different tiebreaks; listing it at two registration epochs moves its shard key.
+            // A second entry for a validator would activate it twice; listing it at two registration epochs also
+            // moves its shard key.
             if !seen.insert(validator.public_key) {
                 bail!(
                     "Validator {} is listed more than once. A validator has a single registration; rotate its claim \
@@ -136,6 +135,21 @@ impl Validator {
     }
 
     fn validate(&self) -> anyhow::Result<()> {
+        if self.shard_group.start().is_global() {
+            bail!(
+                "Validator {}: shard_group start ({}) cannot be the global shard (0)",
+                self.public_key,
+                self.shard_group.start().as_u32()
+            );
+        }
+        if self.registration_epoch == Epoch(u64::MAX) {
+            bail!(
+                "Validator {}: registration_epoch ({}) cannot activate in a subsequent epoch",
+                self.public_key,
+                self.registration_epoch
+            );
+        }
+
         let mut changes = self.claim_key_changes.iter().collect::<Vec<_>>();
         changes.sort_by_key(|change| change.effective_epoch);
 
@@ -427,5 +441,32 @@ mod tests {
             ..mk_validator(vec![])
         };
         assert_eq!(mk_validator(vec![]).calculate_shard_key(), heavy.calculate_shard_key());
+    }
+
+    #[test]
+    fn invalid_shard_group_or_max_registration_epoch_is_rejected() {
+        let global_start = Validator {
+            shard_group: ShardGroup::new(0, 64),
+            ..mk_validator(vec![])
+        };
+        assert!(
+            global_start
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("cannot be the global shard")
+        );
+
+        let max_epoch = Validator {
+            registration_epoch: Epoch(u64::MAX),
+            ..mk_validator(vec![])
+        };
+        assert!(
+            max_epoch
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("cannot activate in a subsequent epoch")
+        );
     }
 }

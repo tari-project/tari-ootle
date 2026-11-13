@@ -871,10 +871,10 @@ impl Display for ProposalBatch {
 /// returning `(selected, stale_foreign_proposals)` with `selected` in the order a replica applies them.
 ///
 /// Proposals naming `local_shard_group` (e.g. stored in an earlier epoch before this validator rotated into
-/// `local_shard_group`) are removed and their block ids returned in `stale_foreign_proposals` so the caller deletes them from
-/// storage — clearing `UnconfirmedIndex` without writing an `Invalid` status against the block id. The block travels
-/// with every foreign proposal it includes, so the remaining proposals are taken in stored order for as long as they
-/// fit `max_bytes`; the rest stay `New` for a later block.
+/// `local_shard_group`) are removed and their block ids returned in `stale_foreign_proposals` so the caller deletes
+/// them from storage — clearing `UnconfirmedIndex` without writing an `Invalid` status against the block id. The block
+/// travels with every foreign proposal it includes, so the remaining proposals are taken in stored order for as long as
+/// they fit `max_bytes`; the rest stay `New` for a later block.
 ///
 /// Applying foreign proposals is order-dependent (e.g. the first abort recorded for a transaction is the one it keeps),
 /// and the proposer derives the block's transaction commands from the state they leave behind. Replicas apply them in

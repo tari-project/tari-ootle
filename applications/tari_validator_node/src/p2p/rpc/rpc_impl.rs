@@ -54,6 +54,8 @@ use tari_ootle_p2p::{
         GetCommittedBlockProofResponse,
         GetConsensusStateRequest,
         GetConsensusStateResponse,
+        GetEpochOracleConfigRequest,
+        GetEpochOracleConfigResponse,
         GetHighQcRequest,
         GetHighQcResponse,
         GetShardSnapshotRequest,
@@ -145,6 +147,8 @@ pub struct ValidatorNodeRpcServiceImpl<TStateStore> {
     response_bytes: Arc<Semaphore>,
     state_sync_reads: Arc<Semaphore>,
     root_mismatch_log: Arc<RootMismatchLog>,
+    /// The JSON of the configured epoch oracle's config, served to indexers that follow it.
+    epoch_oracle_config_json: Option<Arc<str>>,
 }
 
 impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
@@ -168,7 +172,14 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
             response_bytes: Arc::new(Semaphore::new(MAX_BUFFERED_RESPONSE_BYTES / RESPONSE_BUDGET_UNIT_BYTES)),
             state_sync_reads: Arc::new(Semaphore::new(max_concurrent_state_sync_reads())),
             root_mismatch_log: Arc::default(),
+            epoch_oracle_config_json: None,
         }
+    }
+
+    /// Serves `config_json`, the configured epoch oracle's config this node runs, to peers that ask for it.
+    pub fn with_epoch_oracle_config_json(mut self, config_json: Option<Arc<str>>) -> Self {
+        self.epoch_oracle_config_json = config_json;
+        self
     }
 
     /// Resolves which shards' committed history through `epoch` this node holds.
@@ -1192,6 +1203,15 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         self.shard_snapshot(req.into_message()).await
     }
 
+    async fn get_epoch_oracle_config(
+        &self,
+        _req: Request<GetEpochOracleConfigRequest>,
+    ) -> Result<Response<GetEpochOracleConfigResponse>, RpcStatus> {
+        Ok(Response::new(GetEpochOracleConfigResponse {
+            config_json: self.epoch_oracle_config_json.as_deref().unwrap_or_default().to_string(),
+        }))
+    }
+
     async fn get_substate_batch(
         &self,
         req: Request<GetSubstatesBatchRequest>,
@@ -1904,6 +1924,21 @@ mod tests {
             1024,
             10,
         )
+    }
+
+    #[tokio::test]
+    async fn the_epoch_oracle_config_is_served_as_it_was_given() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        let request = || Request::new(1.into(), GetEpochOracleConfigRequest {});
+
+        let service = rpc_service(store);
+        let unserved = service.get_epoch_oracle_config(request()).await.unwrap().into_message();
+        assert!(unserved.config_json.is_empty());
+
+        let service = service.with_epoch_oracle_config_json(Some(Arc::from(r#"{"validators":[]}"#)));
+        let served = service.get_epoch_oracle_config(request()).await.unwrap().into_message();
+        assert_eq!(served.config_json, r#"{"validators":[]}"#);
     }
 
     /// Substate responses hold their share of the response byte budget until they are dropped, which the server does

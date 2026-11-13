@@ -66,4 +66,10 @@ pub trait ValidatorNodeRpcService: Send + Sync + 'static {
         &self,
         req: Request<proto::GetShardSnapshotRequest>,
     ) -> Result<Response<proto::GetShardSnapshotResponse>, RpcStatus>;
+
+    #[rpc(method = 11)]
+    async fn get_epoch_oracle_config(
+        &self,
+        req: Request<proto::GetEpochOracleConfigRequest>,
+    ) -> Result<Response<proto::GetEpochOracleConfigResponse>, RpcStatus>;
 }

@@ -46,7 +46,10 @@
 #    // Optional. Rotates the validator's claim key from the start of each `effective_epoch`.
 #    "claim_key_changes": [
 #      {"effective_epoch": 100, "claim_key": "9a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"}
-#    ]
+#    ],
+#    // Optional. The first epoch in which the validator is no longer active. An exit is permanent, and every claim
+#    // key change must come before it.
+#    "exit_epoch": 200
 #  }]
 #}
 #
@@ -54,6 +57,10 @@
 # stale claim key for a proposer computes a different state merkle root and refuses to vote for its blocks. A
 # rotation therefore names the epoch it applies from rather than taking effect on restart, and each node only has to
 # be given the new config at any point before that epoch.
+#
+# To remove a validator, set its `exit_epoch` to an epoch every node will reach after receiving the new config. A node
+# already past that epoch when it receives the config refuses to start, since it would disagree with the network on
+# the validator set; resync it from a fresh epoch oracle store.
 #
 # To rotate a claim key, add an entry to `claim_key_changes`; do not edit `claim_key`, which is fixed once the
 # validator has activated (it is an input to shard key derivation). Fees already earned under the previous key stay

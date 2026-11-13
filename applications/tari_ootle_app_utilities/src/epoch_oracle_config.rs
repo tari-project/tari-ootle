@@ -30,8 +30,8 @@ pub const MAINNET_START_HEIGHT: u64 = 380_400;
 
 /// The default MainNet validator set for the hybrid oracle, used when `epoch_oracle.configured` sets no source. A
 /// configured set replaces it, and every node must run the same set: nodes derive each other's claim keys from it, so
-/// a node that differs computes a different state root. Existing entries are fixed once MainNet runs. A claim key
-/// rotates through the validator's `claim_key_changes`.
+/// a node that differs computes a different state root. Existing entries are fixed once MainNet runs, apart from
+/// scheduling a future `exit_epoch`. A claim key rotates through the validator's `claim_key_changes`.
 const MAINNET_ORACLE_CONFIG_JSON: &str = include_str!("mainnet_epoch_oracle.json");
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

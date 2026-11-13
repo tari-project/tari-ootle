@@ -105,6 +105,12 @@ Main indexer application settings.
 # checks the outputs it holds in that shard and still learns of every spend.
 #utxo_tombstone_retention_epochs = 504
 
+# Follow changes to the validator set of the Configured and Hybrid epoch oracles by fetching the config
+# validators run (default: true). A validator added or removed after this release then needs no indexer
+# upgrade. A config is adopted once two validators serve it, and only if it agrees with the epochs this
+# indexer has already processed. It is kept across restarts; resyncing the indexer from scratch replays it.
+#follow_validator_oracle_config = true
+
 # How long each pruner idles between passes once it has nothing left to prune, in seconds. While a
 # backlog remains it drains in back-to-back batches rather than waiting out this interval. Only used
 # when a retention window is set. Also accepted as transaction_prune_interval.

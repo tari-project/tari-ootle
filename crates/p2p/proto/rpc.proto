@@ -428,6 +428,14 @@ message ShardStateLeaf {
   bytes shard_root_proof = 5;
 }
 
+message GetEpochOracleConfigRequest {}
+
+message GetEpochOracleConfigResponse {
+  // The JSON of the configured epoch oracle's validator set config this node runs. Empty when the node runs no
+  // configured oracle.
+  string config_json = 1;
+}
+
 message GetShardSnapshotRequest {
   uint32 shard = 1;
   // The state version of the shard whose tree is read. The responder holds a shard's tree only for its recent

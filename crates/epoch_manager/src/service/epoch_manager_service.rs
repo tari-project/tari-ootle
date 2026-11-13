@@ -1064,6 +1064,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_remove_ends_the_registration_at_the_epoch_its_event_names() {
+        let shutdown = Shutdown::new();
+        let all_shards = ShardGroup::all_shards(NumPreshards::P256);
+        let global_db = GlobalDb::new(SqliteGlobalDbAdapter::new(
+            SqliteConnection::establish(":memory:").unwrap(),
+        ));
+        global_db.adapter().migrate().unwrap();
+        let mut service = create_service(global_db.clone(), &shutdown);
+
+        register(&global_db, 1, Epoch(5));
+        register(&global_db, 2, Epoch(5));
+        service
+            .activate_epoch(Epoch(6), FixedHash::from([1; 32]))
+            .await
+            .unwrap();
+
+        service
+            .handle_epoch_event(EpochEvent::ActiveValidatorNodeSetChanged {
+                epoch: Epoch(7),
+                node_changes: vec![ValidatorNodeChange::Remove {
+                    public_key: public_key(1),
+                }],
+            })
+            .await
+            .unwrap();
+
+        let current = service.inner.get_committee_info(Epoch(6), all_shards).unwrap();
+        assert_eq!(
+            current.num_shard_group_members(),
+            2,
+            "the current epoch's committee must not change"
+        );
+        assert_eq!(
+            service.inner.get_total_validator_count(Epoch(6)).unwrap(),
+            2,
+            "the validator must stay registered for the current epoch"
+        );
+
+        service
+            .activate_epoch(Epoch(7), FixedHash::from([2; 32]))
+            .await
+            .unwrap();
+        let next = service.inner.get_committee_info(Epoch(7), all_shards).unwrap();
+        assert_eq!(next.num_shard_group_members(), 1);
+        assert!(
+            service
+                .inner
+                .get_validator_node_by_public_key(Epoch(7), &public_key(1))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
     async fn deactivate_validator_node_preserves_prior_deactivated_registration_epochs() {
         let shutdown = Shutdown::new();
         let global_db = GlobalDb::new(SqliteGlobalDbAdapter::new(

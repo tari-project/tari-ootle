@@ -388,15 +388,19 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             Ok::<_, HotStuffError>(())
         })?;
         // Resume pacemaker from the last epoch/height
-        let (current_height, leaf_height) = self.state_store.with_read_tx(|tx| {
+        let (current_height, high_pc_height, leaf_height) = self.state_store.with_read_tx(|tx| {
             let height = get_highest_seen_justified_view(tx, current_epoch)?;
+            let high_pc_height = HighPc::get(tx, current_epoch)
+                .optional()?
+                .map(|high_pc| high_pc.height())
+                .unwrap_or_default();
             let leaf_block = LeafBlock::get(tx, current_epoch)?;
-            Ok::<_, HotStuffError>((height, leaf_block.height()))
+            Ok::<_, HotStuffError>((height, high_pc_height, leaf_block.height()))
         })?;
 
         self.worker_state.has_processed_first_block = !leaf_height.is_zero();
 
-        self.pacemaker.start(current_epoch, current_height, current_height);
+        self.pacemaker.start(current_epoch, current_height, high_pc_height);
 
         info!(target: LOG_TARGET, "🚀 Pacemaker started at epoch {}, height: {}", current_epoch, current_height);
 

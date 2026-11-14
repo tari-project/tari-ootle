@@ -129,11 +129,15 @@ impl PaceMaker {
         }
     }
 
-    /// Starts the timers and beats, if not already started. The view is entered either way.
+    /// Starts the timers and beats, if not already started. The view is entered either way, and advancing to a later
+    /// view while already running resets the timers and high QC height for the new view.
     pub fn start(&mut self, epoch: Epoch, height: NodeHeight, high_pc_height: NodeHeight) {
-        self.enter(View::new(epoch, height));
+        let entered = self.enter(View::new(epoch, height));
         info!(target: LOG_TARGET, "🚀 Starting pacemaker at leaf height {} and high QC: {}", self.view, high_pc_height);
         if self.is_started {
+            if entered {
+                self.reset(high_pc_height, true);
+            }
             return;
         }
         self.num_timeouts = 0;
@@ -420,6 +424,27 @@ mod tests {
         assert!(pacemaker.enter(View::new(Epoch(2), NodeHeight(5))));
 
         assert!(!pacemaker.enter(View::new(Epoch(1), NodeHeight(100))));
-        assert_eq!(pacemaker.current_view(), View::new(Epoch(2), NodeHeight(5)));
+                assert_eq!(pacemaker.current_view(), View::new(Epoch(2), NodeHeight(5)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn start_preserves_exponential_backoff_when_view_exceeds_high_pc_height() {
+        let mut pacemaker = PaceMaker::new(Duration::from_secs(2));
+        pacemaker.start(Epoch(1), NodeHeight(5), NodeHeight(1));
+
+        assert_eq!(pacemaker.current_height(), NodeHeight(5));
+        assert_eq!(pacemaker.delta_time(), Duration::from_secs(16));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn start_on_running_pacemaker_at_later_view_resets_timers_and_high_pc_height() {
+        let mut pacemaker = started(Duration::from_secs(2)).await;
+        assert_eq!(next_leader_timeout(&mut pacemaker).await, 1);
+
+        pacemaker.start(Epoch(1), NodeHeight(4), NodeHeight(2));
+
+        assert_eq!(pacemaker.current_view(), View::new(Epoch(1), NodeHeight(4)));
+        assert_eq!(pacemaker.delta_time(), Duration::from_secs(4));
+        assert_eq!(next_leader_timeout(&mut pacemaker).await, 1);
     }
 }

@@ -424,7 +424,7 @@ mod tests {
         assert!(pacemaker.enter(View::new(Epoch(2), NodeHeight(5))));
 
         assert!(!pacemaker.enter(View::new(Epoch(1), NodeHeight(100))));
-                assert_eq!(pacemaker.current_view(), View::new(Epoch(2), NodeHeight(5)));
+        assert_eq!(pacemaker.current_view(), View::new(Epoch(2), NodeHeight(5)));
     }
 
     #[tokio::test(start_paused = true)]

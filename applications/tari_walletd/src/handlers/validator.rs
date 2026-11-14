@@ -13,7 +13,10 @@ use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{InputDeclaration, SubstateAddress, derive_fee_pool_address};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_crypto::{OutputWitness, StealthInputWitness, StealthOutputWitness, memo::Memo};
-use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId, TransactionContext};
+use tari_ootle_wallet_sdk::{
+    models::{KeyBranch, KeyId, TransactionContext},
+    storage::{ReadableWalletStore, WalletStoreReader},
+};
 use tari_ootle_walletd_client::{
     permissions::{Crud, Permission},
     types::{
@@ -26,8 +29,10 @@ use tari_ootle_walletd_client::{
     },
 };
 use tari_template_lib_types::{
+    ComponentAddress,
     ValidatorFeePoolAddress,
     constants::{STEALTH_TARI_RESOURCE_ADDRESS, TARI_TOKEN},
+    crypto::RistrettoPublicKeyBytes,
     stealth::{SpendAuthorization, StealthTransferStatement},
 };
 
@@ -70,7 +75,24 @@ pub async fn handle_get_validator_fees(
         },
         AccountOrKeyId::KeyId(key_id) => {
             ensure_signing_key(&sdk, "account_or_key", &key_id)?;
-            sdk.key_manager_api().get_public_key(key_id)?
+            let key = sdk.key_manager_api().get_public_key(key_id)?;
+            let public_key = key.public_key().to_byte_type();
+            let account_scopes = account_scopes_for_key(&sdk, key_id, &public_key)?;
+            if account_scopes.is_empty() {
+                if key_id.derived_branch() == Some(KeyBranch::Account) {
+                    if enforce_scopes(&granted, &[Permission::Keys(Crud::Read)]).is_err() {
+                        let derived = sdk.accounts_api().derive_account_address_from_public_key(&public_key);
+                        enforce_scopes(&granted, &[Permission::Accounts(Crud::Read, Some(derived))])?;
+                    }
+                } else {
+                    enforce_scopes(&granted, &[Permission::Keys(Crud::Read)])?;
+                }
+            } else {
+                for addr in account_scopes {
+                    enforce_scopes(&granted, &[Permission::Accounts(Crud::Read, Some(addr))])?;
+                }
+            }
+            key
         },
     };
     let claim_public_key = claim_key.public_key().to_byte_type();
@@ -148,11 +170,28 @@ pub async fn handle_claim_validator_fees(
     })?;
 
     let claim_public_key = match req.claim_key_index {
-        Some(index) => sdk
-            .key_manager_api()
-            .get_public_key(KeyId::derived(KeyBranch::Account, index))?
-            .public_key
-            .to_byte_type(),
+        Some(index) => {
+            let claim_key_id = KeyId::derived(KeyBranch::Account, index);
+            let claim_public_key = sdk
+                .key_manager_api()
+                .get_public_key(claim_key_id)?
+                .public_key
+                .to_byte_type();
+            if claim_public_key != *account.address.account_public_key() {
+                let claim_scopes = account_scopes_for_key(&sdk, claim_key_id, &claim_public_key)?;
+                if claim_scopes.is_empty() {
+                    let derived = sdk
+                        .accounts_api()
+                        .derive_account_address_from_public_key(&claim_public_key);
+                    enforce_scopes(&granted, &[Permission::Transfer(Crud::Create, Some(derived))])?;
+                } else {
+                    for addr in claim_scopes {
+                        enforce_scopes(&granted, &[Permission::Transfer(Crud::Create, Some(addr))])?;
+                    }
+                }
+            }
+            claim_public_key
+        },
         None => *account.address.account_public_key(),
     };
 
@@ -407,10 +446,31 @@ async fn build_self_stealth_statement(
     Ok((statement, pool_amounts))
 }
 
+/// Returns every stored wallet account component address associated with `key_id` or `public_key`.
+fn account_scopes_for_key(
+    sdk: &crate::WalletSdk,
+    key_id: KeyId,
+    public_key: &RistrettoPublicKeyBytes,
+) -> Result<Vec<ComponentAddress>, anyhow::Error> {
+    let accounts = sdk
+        .store()
+        .with_read_tx(|tx| tx.accounts_get_many(0, isize::MAX as usize))?;
+    let mut scopes = Vec::new();
+    for account in accounts {
+        if (account.owner_key_id() == Some(key_id) || account.owner_public_key() == public_key) &&
+            !scopes.contains(account.component_address())
+        {
+            scopes.push(*account.component_address());
+        }
+    }
+    Ok(scopes)
+}
+
 #[cfg(test)]
 mod tests {
+    use tari_crypto::ristretto::RistrettoSecretKey;
     use tari_ootle_common_types::{Epoch, ShardGroup, shard::Shard};
-    use tari_template_lib_types::ComponentAddress;
+    use tari_ootle_wallet_sdk::models::KeyType;
 
     use super::*;
     use crate::handlers::{auth::jwt::AuthError, test_support::TestDaemon};
@@ -495,5 +555,263 @@ mod tests {
             ),
             "expected transfer:create scope error for {account_b}, got: {err}"
         );
+    }
+
+    fn seed_two_accounts(daemon: &TestDaemon) -> (ComponentAddress, ComponentAddress) {
+        let account_a = ComponentAddress::from_array([0xaa; 32]);
+        let account_b = ComponentAddress::from_array([0xbb; 32]);
+        for (index, (name, address)) in [("a", account_a), ("b", account_b)].into_iter().enumerate() {
+            daemon
+                .context
+                .wallet_sdk()
+                .accounts_api()
+                .add_account(
+                    Some(name),
+                    &address,
+                    KeyId::derived(KeyBranch::ViewOnlyKey, index as u64),
+                    KeyId::derived(KeyBranch::Account, index as u64),
+                    Epoch::zero(),
+                    false,
+                    index == 0,
+                )
+                .unwrap();
+        }
+        (account_a, account_b)
+    }
+
+    #[tokio::test]
+    async fn get_validator_fees_by_key_id_enforces_account_scopes() {
+        let daemon = TestDaemon::start().await;
+        let sdk = daemon.context.wallet_sdk();
+        let (account_a, account_b) = seed_two_accounts(&daemon);
+
+        let imported_owner_key_id = sdk
+            .key_manager_api()
+            .import_key("imported_owner", &RistrettoSecretKey::from(42u64), KeyType::Owner)
+            .unwrap();
+        let imported_view_key_id = sdk
+            .key_manager_api()
+            .import_key("imported_view", &RistrettoSecretKey::from(43u64), KeyType::ViewOnly)
+            .unwrap();
+        let account_imported = ComponentAddress::from_array([0xcc; 32]);
+        sdk.accounts_api()
+            .add_account(
+                Some("imported"),
+                &account_imported,
+                imported_view_key_id,
+                imported_owner_key_id,
+                Epoch::zero(),
+                false,
+                false,
+            )
+            .unwrap();
+
+        let view_only_owner_pk = sdk
+            .key_manager_api()
+            .get_public_key(KeyId::derived(KeyBranch::Account, 7))
+            .unwrap()
+            .public_key()
+            .to_byte_type();
+        let view_only_account = *sdk
+            .accounts_api()
+            .add_view_only_account(
+                Some("watched"),
+                &view_only_owner_pk,
+                &RistrettoSecretKey::from(45u64),
+                Some(Epoch::zero()),
+            )
+            .unwrap()
+            .component_address();
+
+        let uncreated_pk = sdk
+            .key_manager_api()
+            .get_public_key(KeyId::derived(KeyBranch::Account, 99))
+            .unwrap()
+            .public_key()
+            .to_byte_type();
+        let derived_99 = sdk.accounts_api().derive_account_address_from_public_key(&uncreated_pk);
+
+        let one_shard = Some(ShardGroup::new(Shard::first(), Shard::first()));
+        let reader_a = daemon.api_key("reader_a", &format!("validators:read,accounts:read:{account_a}"));
+        let delegated_reader_a = daemon.delegated_session(&format!("validators:read,accounts:read:{account_a}"));
+
+        for bearer in [&reader_a, &delegated_reader_a] {
+            for (key_id, expected_addr) in [
+                (KeyId::derived(KeyBranch::Account, 1), account_b),
+                (imported_owner_key_id, account_imported),
+                (KeyId::derived(KeyBranch::Account, 7), view_only_account),
+                (KeyId::derived(KeyBranch::Account, 99), derived_99),
+            ] {
+                let err = handle_get_validator_fees(&daemon.context, Some(bearer), GetValidatorFeesRequest {
+                    account_or_key: AccountOrKeyId::KeyId(key_id),
+                    shard_group: one_shard,
+                })
+                .await
+                .unwrap_err();
+                assert!(
+                    matches!(
+                        err.downcast_ref::<AuthError>(),
+                        Some(AuthError::InsufficientPermissions {
+                            required: Permission::Accounts(Crud::Read, Some(addr)),
+                        }) if *addr == expected_addr
+                    ),
+                    "expected accounts:read scope error for {expected_addr} on {key_id}, got: {err}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn get_validator_fees_by_key_id_enforces_key_scopes_and_allows_authorized() {
+        let daemon = TestDaemon::start().await;
+        let sdk = daemon.context.wallet_sdk();
+        let (account_a, account_b) = seed_two_accounts(&daemon);
+
+        let unowned_imported_key_id = sdk
+            .key_manager_api()
+            .import_key("unowned_gp", &RistrettoSecretKey::from(44u64), KeyType::GeneralPurpose)
+            .unwrap();
+
+        let one_shard = Some(ShardGroup::new(Shard::first(), Shard::first()));
+        let reader_a = daemon.api_key("reader_a", &format!("validators:read,accounts:read:{account_a}"));
+        let delegated_reader_a = daemon.delegated_session(&format!("validators:read,accounts:read:{account_a}"));
+        let reader_keys = daemon.api_key("reader_keys", "validators:read,keys:read");
+        let reader_all_accounts = daemon.api_key("reader_all_accounts", "validators:read,accounts:read");
+
+        for bearer in [&reader_a, &delegated_reader_a] {
+            for key_id in [KeyId::derived(KeyBranch::Transaction, 0), unowned_imported_key_id] {
+                let err = handle_get_validator_fees(&daemon.context, Some(bearer), GetValidatorFeesRequest {
+                    account_or_key: AccountOrKeyId::KeyId(key_id),
+                    shard_group: one_shard,
+                })
+                .await
+                .unwrap_err();
+                assert!(
+                    matches!(
+                        err.downcast_ref::<AuthError>(),
+                        Some(AuthError::InsufficientPermissions {
+                            required: Permission::Keys(Crud::Read),
+                        })
+                    ),
+                    "expected keys:read error on {key_id}, got: {err}"
+                );
+            }
+        }
+
+        // `keys:read` must not bypass account-scoped restrictions on stored wallet accounts.
+        let err = handle_get_validator_fees(&daemon.context, Some(&reader_keys), GetValidatorFeesRequest {
+            account_or_key: AccountOrKeyId::KeyId(KeyId::derived(KeyBranch::Account, 1)),
+            shard_group: one_shard,
+        })
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(
+                err.downcast_ref::<AuthError>(),
+                Some(AuthError::InsufficientPermissions {
+                    required: Permission::Accounts(Crud::Read, Some(addr)),
+                }) if *addr == account_b
+            ),
+            "expected keys:read to still require accounts:read:{account_b}, got: {err}"
+        );
+
+        // Authorized callers pass scope checks and fail only on the closed test indexer port.
+        for (bearer, key_id) in [
+            (&reader_a, KeyId::derived(KeyBranch::Account, 0)),
+            (&reader_keys, KeyId::derived(KeyBranch::Account, 99)),
+            (&reader_keys, KeyId::derived(KeyBranch::Transaction, 0)),
+            (&reader_keys, unowned_imported_key_id),
+            (&reader_all_accounts, KeyId::derived(KeyBranch::Account, 99)),
+        ] {
+            let err = handle_get_validator_fees(&daemon.context, Some(bearer), GetValidatorFeesRequest {
+                account_or_key: AccountOrKeyId::KeyId(key_id),
+                shard_group: one_shard,
+            })
+            .await
+            .unwrap_err();
+            assert!(
+                err.downcast_ref::<AuthError>().is_none(),
+                "unexpected auth error for {key_id}: {err}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn claim_validator_fees_enforces_claim_key_index_scope() {
+        let daemon = TestDaemon::start().await;
+        let sdk = daemon.context.wallet_sdk();
+        let (account_a, account_b) = seed_two_accounts(&daemon);
+
+        let uncreated_pk = sdk
+            .key_manager_api()
+            .get_public_key(KeyId::derived(KeyBranch::Account, 99))
+            .unwrap()
+            .public_key()
+            .to_byte_type();
+        let derived_99 = sdk.accounts_api().derive_account_address_from_public_key(&uncreated_pk);
+
+        let claimer_a = daemon.api_key("claimer_a", &format!("validators:update,transfer:create:{account_a}"));
+        let delegated_claimer_a = daemon.delegated_session(&format!("validators:update,transfer:create:{account_a}"));
+
+        for bearer in [&claimer_a, &delegated_claimer_a] {
+            for (claim_key_index, expected_addr) in [(1u64, account_b), (99u64, derived_99)] {
+                for dry_run in [true, false] {
+                    for output_to_revealed in [true, false] {
+                        let err =
+                            handle_claim_validator_fees(&daemon.context, Some(bearer), ClaimValidatorFeesRequest {
+                                account: Some(account_a.into()),
+                                claim_key_index: Some(claim_key_index),
+                                max_fee: 1000,
+                                shards: vec![Shard::first()],
+                                dry_run,
+                                output_to_revealed,
+                            })
+                            .await
+                            .unwrap_err();
+                        assert!(
+                            matches!(
+                                err.downcast_ref::<AuthError>(),
+                                Some(AuthError::InsufficientPermissions {
+                                    required: Permission::Transfer(Crud::Create, Some(addr)),
+                                }) if *addr == expected_addr
+                            ),
+                            "expected transfer:create scope error for {expected_addr} (index={claim_key_index}, \
+                             dry_run={dry_run}, revealed={output_to_revealed}), got: {err}"
+                        );
+                    }
+                }
+            }
+        }
+
+        // Rejecting unauthorized stealth claims must not advance `KeyBranch::StealthMask`.
+        assert!(
+            sdk.key_manager_api()
+                .get_all_derived_keys(KeyBranch::StealthMask)
+                .unwrap()
+                .is_empty()
+        );
+
+        let claimer_ab = daemon.api_key(
+            "claimer_ab",
+            &format!("validators:update,transfer:create:{account_a},transfer:create:{account_b}"),
+        );
+        let claimer_all = daemon.api_key("claimer_all", "validators:update,transfer:create");
+
+        for (bearer, claim_key_index) in [(&claimer_a, 0u64), (&claimer_ab, 1u64), (&claimer_all, 99u64)] {
+            let err = handle_claim_validator_fees(&daemon.context, Some(bearer), ClaimValidatorFeesRequest {
+                account: Some(account_a.into()),
+                claim_key_index: Some(claim_key_index),
+                max_fee: 1000,
+                shards: vec![Shard::first()],
+                dry_run: true,
+                output_to_revealed: true,
+            })
+            .await
+            .unwrap_err();
+            assert!(
+                err.downcast_ref::<AuthError>().is_none(),
+                "unexpected auth error for claim_key_index={claim_key_index}: {err}"
+            );
+        }
     }
 }

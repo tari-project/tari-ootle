@@ -878,6 +878,40 @@ mod tests {
         ]);
     }
 
+    #[tokio::test]
+    async fn get_committee_info_rejects_unassigned_epoch_or_shard_group_instead_of_returning_zero_quorum() {
+        let shutdown = Shutdown::new();
+        let all_shards = ShardGroup::all_shards(NumPreshards::P256);
+        let global_db = GlobalDb::new(SqliteGlobalDbAdapter::new(
+            SqliteConnection::establish(":memory:").unwrap(),
+        ));
+        global_db.adapter().migrate().unwrap();
+        let mut service = create_service(global_db.clone(), &shutdown);
+
+        assert!(matches!(
+            service.inner.get_committee_info(Epoch(5), all_shards),
+            Err(EpochManagerError::NoEpochFound(Epoch(5)))
+        ));
+        assert!(matches!(
+            service
+                .inner
+                .get_committee_info_for_substate(Epoch(5), SubstateAddress::zero()),
+            Err(EpochManagerError::NoEpochFound(Epoch(5)))
+        ));
+
+        register(&global_db, 1, Epoch(5));
+        service
+            .activate_epoch(Epoch(5), FixedHash::from([1; 32]))
+            .await
+            .unwrap();
+        assert!(matches!(
+            service.inner.get_committee_info(Epoch(5), ShardGroup::new(1, 1)),
+            Err(EpochManagerError::NoEpochFound(Epoch(5)))
+        ));
+        let info = service.inner.get_committee_info(Epoch(5), all_shards).unwrap();
+        assert_eq!(info.num_shard_group_members(), 1);
+    }
+
     /// A locked epoch's committees are never reassigned, even if the oracle later reports a different hash.
     #[tokio::test]
     async fn hash_correction_leaves_a_locked_epochs_committees() {

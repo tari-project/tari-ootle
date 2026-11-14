@@ -484,6 +484,9 @@ where TSpec: EpochManagerSpec
             num_members,
             total_power,
         } = validator_node_db.size_of_shard_group(epoch, shard_group)?;
+        if num_members == 0 {
+            return Err(EpochManagerError::NoEpochFound(epoch));
+        }
         let num_validators = u32::try_from(num_members).map_err(|_| EpochManagerError::IntegerOverflow {
             func: "get_committee_info",
         })?;

@@ -857,8 +857,10 @@ where
         let mut state_tree = ShardedStateTree::new(tx);
         let version_updates = state_tree.commit_diffs(pending)?;
         let tx = state_tree.into_transaction();
-        let versions_indexed = index_committed_block_state_versions(tx, block, &version_updates)?;
-        let commit_proof_stored = store_block_commit_proof(tx, commit_qc, block, versions_indexed)?;
+        // The state version proofs just indexed name this block, which is pruned with its epoch, so they are served
+        // with the commit proof stored here.
+        let commit_proof_stored = index_committed_block_state_versions(tx, block, &version_updates)? &&
+            store_block_commit_proof(tx, commit_qc, block)?;
 
         {
             let _timer = TraceTimer::debug(LOG_TARGET, "commit_block");
@@ -885,11 +887,8 @@ where
         if !finalized_transactions.is_empty() {
             let _timer =
                 TraceTimer::debug(LOG_TARGET, "finalize transactions").with_iterations(finalized_transactions.len());
-            let mut inclusions = if commit_proof_stored {
-                finalized_transaction_inclusions(block)
-            } else {
-                HashMap::new()
-            };
+            let mut inclusions =
+                finalized_transaction_inclusions(tx, commit_qc, block, &finalized_transactions, commit_proof_stored)?;
             TransactionRecord::finalize_all(
                 tx,
                 block.epoch(),
@@ -931,9 +930,7 @@ where
     }
 }
 
-/// Stores the commit proof of `block` when anything names the block once it is pruned: the state version proofs just
-/// indexed for it (`versions_indexed`), or the inclusions of the transactions it finalizes. Returns whether the proof
-/// is stored.
+/// Stores the commit proof of `block`, returning whether it is stored.
 ///
 /// A storage error fails the commit. A block that breaks a commit-proof invariant is logged, and the node keeps
 /// committing, as it does when it cannot index the proofs.
@@ -941,16 +938,11 @@ fn store_block_commit_proof<TTx>(
     tx: &mut TTx,
     commit_qc: &ProposalCertificate,
     block: &Block,
-    versions_indexed: bool,
 ) -> Result<bool, HotStuffError>
 where
     TTx: StateStoreWriteTransaction + Deref,
     TTx::Target: StateStoreReadTransaction,
 {
-    let finalizes_transactions = block.all_finalising_transactions_ids().next().is_some();
-    if !versions_indexed && !finalizes_transactions {
-        return Ok(false);
-    }
     match generate_block_commit_proof(&**tx, commit_qc, block) {
         Ok(commit_proof) => {
             tx.block_commit_proofs_insert(block.id(), &CommittedBlockProof::new(commit_proof).to_bytes())?;
@@ -968,26 +960,47 @@ where
     }
 }
 
-/// The inclusion of each transaction `block` finalizes, for a block whose commit proof is stored. A block whose header
-/// disagrees with its commands is logged, and its transactions are recorded without one.
-fn finalized_transaction_inclusions(block: &Block) -> HashMap<TransactionId, FinalizedTransactionInclusion> {
-    match block.compute_transaction_proofs() {
-        Ok(proofs) => proofs
-            .into_iter()
-            .map(|(id, proof)| {
-                (id, FinalizedTransactionInclusion {
-                    block_id: *block.id(),
-                    proof,
-                })
-            })
-            .collect(),
+/// The inclusion of each of `finalized`, the transactions `block` finalizes, storing the block's commit proof for them
+/// unless `commit_proof_stored`. Each inclusion cites the block once recorded, so the commit proof is stored only when
+/// there is an inclusion to cite it.
+///
+/// A block whose header disagrees with its commands, or whose commit proof cannot be generated, is logged, and its
+/// transactions are recorded without inclusions.
+fn finalized_transaction_inclusions<TTx>(
+    tx: &mut TTx,
+    commit_qc: &ProposalCertificate,
+    block: &Block,
+    finalized: &[TransactionPoolRecord],
+    commit_proof_stored: bool,
+) -> Result<HashMap<TransactionId, FinalizedTransactionInclusion>, HotStuffError>
+where
+    TTx: StateStoreWriteTransaction + Deref,
+    TTx::Target: StateStoreReadTransaction,
+{
+    let mut proofs = match block.compute_transaction_proofs() {
+        Ok(proofs) => proofs,
         Err(err) => {
             error!(
                 target: LOG_TARGET,
                 "BUG: cannot prove the decisions {block} finalized, so they are recorded unproven: {err}"
             );
-            HashMap::new()
+            return Ok(HashMap::new());
         },
+    };
+    let inclusions = finalized
+        .iter()
+        .filter_map(|transaction| {
+            let proof = proofs.remove(transaction.id())?;
+            Some((*transaction.id(), FinalizedTransactionInclusion {
+                block_id: *block.id(),
+                proof,
+            }))
+        })
+        .collect::<HashMap<_, _>>();
+    if inclusions.is_empty() || commit_proof_stored || store_block_commit_proof(tx, commit_qc, block)? {
+        Ok(inclusions)
+    } else {
+        Ok(HashMap::new())
     }
 }
 

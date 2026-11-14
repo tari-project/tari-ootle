@@ -600,8 +600,17 @@ fn finalized_transaction_proof<TTx: StateStoreReadTransaction>(
     let Some(inclusion) = tx.finalized_transaction_inclusion_get(tx_id)? else {
         return Ok((Vec::new(), Vec::new()));
     };
-    // A stored inclusion cites its block, which keeps the block's commit proof stored.
-    let commit_proof = tx.block_commit_proofs_get(&inclusion.block_id)?;
+    // A stored inclusion cites its block, which keeps the block's commit proof stored by every binary that honours the
+    // citation. One that does not may have deleted it, and the result is then served unproven.
+    let Some(commit_proof) = tx.block_commit_proofs_get(&inclusion.block_id).optional()? else {
+        warn!(
+            target: LOG_TARGET,
+            "No commit proof is stored for block {}, which finalized transaction {tx_id}, so its result is served \
+             without a proof",
+            inclusion.block_id
+        );
+        return Ok((Vec::new(), Vec::new()));
+    };
     let transaction_proof = tari_bor::serde_codec::to_vec(&inclusion.proof).map_err(|e| StorageError::QueryError {
         reason: format!("encode the inclusion proof of transaction {tx_id}: {e}"),
     })?;

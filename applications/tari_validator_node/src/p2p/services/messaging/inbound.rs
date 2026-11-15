@@ -4,12 +4,15 @@
 use std::future::Future;
 
 use libp2p::PeerId;
-use prost::Message;
 use tari_consensus::{messages::HotstuffMessage, traits::InboundMessagingError};
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle};
 use tari_networking::InboundMessage;
 use tari_ootle_common_types::Epoch;
-use tari_ootle_p2p::{PeerAddress, proto};
+use tari_ootle_p2p::{
+    PeerAddress,
+    decode_budget::{HOTSTUFF_MAX_DECODE_ITEMS, decode_with_max_items},
+    proto,
+};
 use tokio::{
     sync::mpsc,
     task::{self, JoinHandle},
@@ -80,8 +83,9 @@ async fn decode_direct_message<TRegistry: ValidatorRegistry>(
     let invalid = |reason: String| InboundMessagingError::InvalidMessage {
         reason: format!("from peer {from}: {reason}"),
     };
-    let msg = proto::consensus::HotStuffMessage::decode(message)
+    let msg = decode_with_max_items::<proto::consensus::HotStuffMessage>(&message, HOTSTUFF_MAX_DECODE_ITEMS)
         .map_err(|err| invalid(format!("undecodable message: {err}")))?;
+    drop(message);
     check_sender(from, &msg, validators).await?;
     let msg = HotstuffMessage::try_from(msg).map_err(|err| invalid(err.to_string()))?;
     Ok((from, msg))
@@ -338,5 +342,36 @@ mod tests {
         let err = messaging.next_message().await.unwrap().unwrap_err();
         assert!(err.to_string().contains("undecodable"), "{err}");
         assert_eq!(queue.queued_bytes(), 0, "the refused message released its budget");
+    }
+
+    fn len_field(tag: u32, contents: &[u8]) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(contents.len().saturating_add(16));
+        prost::encoding::encode_key(tag, prost::encoding::WireType::LengthDelimited, &mut buf);
+        prost::encoding::encode_varint(contents.len() as u64, &mut buf);
+        buf.extend_from_slice(contents);
+        buf
+    }
+
+    #[tokio::test]
+    async fn an_over_budget_direct_message_is_refused_before_prost_decodes_it() {
+        let (mut messaging, mode, queue, _open) = direct_messaging(512 * 1024);
+
+        // ProposalMessage (tag 2) -> Block (tag 1) -> repeated empty Command (tag 3)
+        let empty_commands = len_field(3, &[]).repeat(HOTSTUFF_MAX_DECODE_ITEMS + 1);
+        let proposal_flood = Bytes::from(len_field(2, &len_field(1, &empty_commands)));
+        mode.send_message(PeerId::random(), proposal_flood).unwrap();
+
+        let err = messaging.next_message().await.unwrap().unwrap_err();
+        assert!(err.to_string().contains("exceeds the decode budget"), "{err}");
+        assert_eq!(queue.queued_bytes(), 0, "the refused message released its budget");
+
+        // MissingTransactionsRequest (tag 7) -> repeated empty transaction_ids (tag 4)
+        let empty_ids = len_field(4, &[]).repeat(HOTSTUFF_MAX_DECODE_ITEMS + 1);
+        let request_flood = Bytes::from(len_field(7, &empty_ids));
+        mode.send_message(PeerId::random(), request_flood).unwrap();
+
+        let err = messaging.next_message().await.unwrap().unwrap_err();
+        assert!(err.to_string().contains("exceeds the decode budget"), "{err}");
+        assert_eq!(queue.queued_bytes(), 0);
     }
 }

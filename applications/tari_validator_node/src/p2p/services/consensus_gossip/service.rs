@@ -25,8 +25,11 @@ use log::*;
 use tari_consensus::{hotstuff::HotstuffEvent, messages::HotstuffMessage};
 use tari_epoch_manager::EpochManagerEvent;
 use tari_networking::{GossipMessage, NetworkingHandle, NetworkingService};
-use tari_ootle_p2p::{TariMessagingSpec, proto};
-use tari_swarm::messaging::{Codec, prost::ProstCodec};
+use tari_ootle_p2p::{
+    TariMessagingSpec,
+    decode_budget::{CONSENSUS_GOSSIP_MAX_DECODE_ITEMS, decode_with_max_items},
+    proto,
+};
 use tokio::sync::{broadcast, mpsc};
 
 use super::ConsensusGossipError;
@@ -38,13 +41,20 @@ const LOG_TARGET: &str = "tari::validator_node::consensus_gossip::service";
 /// resubscribe when they are shuffled into a different shard group.
 pub const TOPIC_PREFIX: &str = "consensus";
 
+/// Maximum wire body accepted on the `"consensus"` gossip topic, excluding the 4-byte length prefix.
+///
+/// Gossipsub's global frame limit is sized for full transactions (`max_gossip_message_size`), whereas consensus only
+/// broadcasts `ForeignProposalNotification` (`32`-byte `block_id`, `u64` `epoch`, `u32` `shard_group`, and at most
+/// `256` `u32` `shard_groups` — under `1.6 KiB` encoded). Capping the frame body here rejects oversized gossip
+/// payloads before allocating or invoking `prost`.
+const MAX_CONSENSUS_GOSSIP_PAYLOAD_BYTES: usize = 4 * 1024;
+
 #[derive(Debug)]
 pub(super) struct ConsensusGossipService {
     epoch_manager_events: broadcast::Receiver<EpochManagerEvent>,
     consensus_events: broadcast::Receiver<HotstuffEvent>,
     is_subscribed: bool,
     networking: NetworkingHandle<TariMessagingSpec>,
-    codec: ProstCodec<proto::consensus::HotStuffMessage>,
     rx_gossip: mpsc::Receiver<GossipMessage>,
     tx_consensus_gossip: mpsc::Sender<(PeerId, HotstuffMessage)>,
 }
@@ -62,7 +72,6 @@ impl ConsensusGossipService {
             consensus_events,
             is_subscribed: false,
             networking,
-            codec: ProstCodec::default(),
             rx_gossip,
             tx_consensus_gossip,
         }
@@ -140,7 +149,7 @@ impl ConsensusGossipService {
         let (message_id, propagation_source) = gossip.validation_key();
         let from = gossip.source;
 
-        let decoded = decode_gossip_payload(&mut self.codec, &gossip.message.data).await;
+        let decoded = decode_gossip_payload(&gossip.message.data);
 
         // gossipsub withholds the message from the mesh until a verdict is reported. A message that
         // is not a well-formed broadcast is withheld and counted against the peer that sent it;
@@ -194,18 +203,36 @@ pub(super) fn topic() -> String {
     TOPIC_PREFIX.to_string()
 }
 
-async fn decode_gossip_payload(
-    codec: &mut ProstCodec<proto::consensus::HotStuffMessage>,
-    data: &[u8],
-) -> anyhow::Result<HotstuffMessage> {
-    let mut reader = data;
-    let (_, msg) = codec.decode_from(&mut reader).await?;
-    if !reader.is_empty() {
+fn decode_gossip_payload(data: &[u8]) -> anyhow::Result<HotstuffMessage> {
+    const FRAME_HEADER_LEN: usize = size_of::<u32>();
+    let Some((len_bytes, payload)) = data.split_first_chunk::<FRAME_HEADER_LEN>() else {
         return Err(anyhow::anyhow!(
-            "Consensus gossip payload has {} trailing byte(s)",
-            reader.len()
+            "Consensus gossip payload is shorter than the {FRAME_HEADER_LEN}-byte frame header ({} byte(s))",
+            data.len()
+        ));
+    };
+    let frame_len = u32::from_be_bytes(*len_bytes) as usize;
+    if frame_len > MAX_CONSENSUS_GOSSIP_PAYLOAD_BYTES {
+        return Err(anyhow::anyhow!(
+            "Consensus gossip frame of {frame_len} bytes exceeds maximum {MAX_CONSENSUS_GOSSIP_PAYLOAD_BYTES} bytes"
         ));
     }
+    if payload.len() < frame_len {
+        return Err(anyhow::anyhow!(
+            "Consensus gossip frame truncated: header declares {frame_len} bytes, {} available",
+            payload.len()
+        ));
+    }
+    let trailing = payload.len() - frame_len;
+    if trailing != 0 {
+        return Err(anyhow::anyhow!(
+            "Consensus gossip payload has {trailing} trailing byte(s)"
+        ));
+    }
+    let msg = decode_with_max_items::<proto::consensus::HotStuffMessage>(
+        &payload[..frame_len],
+        CONSENSUS_GOSSIP_MAX_DECODE_ITEMS,
+    )?;
     decode_gossiped_message(msg)
 }
 
@@ -225,6 +252,7 @@ fn decode_gossiped_message(msg: proto::consensus::HotStuffMessage) -> anyhow::Re
 
 #[cfg(test)]
 mod tests {
+    use tari_ootle_common_types::{ShardGroup, shard::Shard};
     use tari_ootle_p2p::proto::{
         consensus::{
             ForeignProposalNotification,
@@ -234,8 +262,24 @@ mod tests {
         },
         transaction::Transaction,
     };
+    use tari_swarm::messaging::{Codec, prost::ProstCodec};
 
     use super::*;
+
+    fn framed(body: &[u8]) -> Vec<u8> {
+        let mut frame = Vec::with_capacity(size_of::<u32>() + body.len());
+        frame.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        frame.extend_from_slice(body);
+        frame
+    }
+
+    fn len_field(tag: u32, contents: &[u8]) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(contents.len().saturating_add(16));
+        prost::encoding::encode_key(tag, prost::encoding::WireType::LengthDelimited, &mut buf);
+        prost::encoding::encode_varint(contents.len() as u64, &mut buf);
+        buf.extend_from_slice(contents);
+        buf
+    }
 
     #[test]
     fn a_foreign_proposal_notification_is_accepted() {
@@ -244,7 +288,7 @@ mod tests {
                 block_id: vec![1; 32],
                 epoch: 1,
                 shard_groups: vec![],
-                shard_group: 0,
+                shard_group: ShardGroup::new(1u32, 1u32).encode_as_u32(),
             })),
         };
         let decoded = decode_gossiped_message(msg).unwrap();
@@ -270,21 +314,56 @@ mod tests {
 
     #[tokio::test]
     async fn a_gossip_payload_with_trailing_bytes_is_refused() {
-        let mut codec = ProstCodec::<HotStuffMessage>::default();
+        let codec = ProstCodec::<HotStuffMessage>::default();
+        let max_shards = Shard::max().as_u32();
         let msg = HotStuffMessage {
             message: Some(Message::ForeignProposalNotification(ForeignProposalNotification {
                 block_id: vec![1; 32],
                 epoch: 1,
-                shard_groups: vec![],
-                shard_group: 0,
+                shard_groups: (1..=max_shards)
+                    .map(|s| ShardGroup::new(s, s).encode_as_u32())
+                    .collect(),
+                shard_group: ShardGroup::new(1u32, max_shards).encode_as_u32(),
             })),
         };
         let mut buf = Vec::new();
         codec.encode_to(&mut buf, msg).await.unwrap();
-        assert!(decode_gossip_payload(&mut codec, &buf).await.is_ok());
+        assert!(decode_gossip_payload(&buf).is_ok());
 
         buf.extend_from_slice(&[0xaa, 0xbb]);
-        let err = decode_gossip_payload(&mut codec, &buf).await.unwrap_err();
+        let err = decode_gossip_payload(&buf).unwrap_err();
         assert!(err.to_string().contains("trailing byte(s)"), "{err}");
+    }
+
+    #[test]
+    fn an_oversized_or_truncated_gossip_frame_is_refused_before_prost_decodes_it() {
+        let oversized = framed(&vec![0u8; MAX_CONSENSUS_GOSSIP_PAYLOAD_BYTES + 1]);
+        let err = decode_gossip_payload(&oversized).unwrap_err();
+        assert!(err.to_string().contains("exceeds maximum"), "{err}");
+
+        // A 5-byte payload claiming a 4 MiB frame length is rejected without allocating the declared frame.
+        let mut bogus_header = (4 * 1024 * 1024u32).to_be_bytes().to_vec();
+        bogus_header.push(0x00);
+        let err = decode_gossip_payload(&bogus_header).unwrap_err();
+        assert!(err.to_string().contains("exceeds maximum"), "{err}");
+
+        let mut truncated = (64u32).to_be_bytes().to_vec();
+        truncated.extend_from_slice(&[0x01, 0x02]);
+        let err = decode_gossip_payload(&truncated).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "{err}");
+
+        let err = decode_gossip_payload(&[0x00, 0x01]).unwrap_err();
+        assert!(err.to_string().contains("frame header"), "{err}");
+    }
+
+    #[test]
+    fn an_over_budget_gossip_frame_within_the_byte_cap_is_refused_before_prost_allocates() {
+        // ProposalMessage (tag 2) -> Block (tag 1) -> repeated empty Command (tag 3) fitting inside 4 KiB
+        let commands = len_field(3, &[]).repeat(CONSENSUS_GOSSIP_MAX_DECODE_ITEMS + 1);
+        let body = len_field(2, &len_field(1, &commands));
+        assert!(body.len() <= MAX_CONSENSUS_GOSSIP_PAYLOAD_BYTES);
+
+        let err = decode_gossip_payload(&framed(&body)).unwrap_err();
+        assert!(err.to_string().contains("exceeds the decode budget"), "{err}");
     }
 }

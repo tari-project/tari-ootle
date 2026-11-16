@@ -1,11 +1,11 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_consensus_types::Decision;
+use tari_consensus_types::{BlockId, Decision};
 use tari_ootle_common_types::hashing::finalized_transaction_hasher;
 use tari_ootle_transaction::TransactionId;
 use tari_sidechain::FixedHash;
-use tari_state_tree::{KeyedProofTree, LeafKey, TreeHash};
+use tari_state_tree::{KeyedProofTree, LeafKey, SparseMerkleProofExt, TreeHash};
 
 use super::{BlockCommands, BlockError, Command};
 
@@ -31,6 +31,15 @@ impl FinalizedTransactionLeaf<'_> {
             .into();
         TreeHash::from(hash.into_array())
     }
+}
+
+/// Where a finalized transaction's decision is proven: the block that finalized it, and the proof of its leaf in that
+/// block's transaction merkle root. The block's commit proof is held under the block id for as long as an inclusion
+/// names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FinalizedTransactionInclusion {
+    pub block_id: BlockId,
+    pub proof: SparseMerkleProofExt,
 }
 
 /// The key a transaction's leaf sits at. Transaction ids are hashes, so they spread evenly over the key space.

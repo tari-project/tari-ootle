@@ -591,6 +591,32 @@ fn proven_substate(substate: &SubstateRecord, value_proof: Vec<u8>) -> proto::rp
     }
 }
 
+/// The CBOR-encoded proof of the decision this node finalized for `tx_id` and the CBOR-encoded commit proof of the
+/// block it is against, or two empty buffers when the node holds no inclusion for it.
+fn finalized_transaction_proof<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    tx_id: &TransactionId,
+) -> Result<(Vec<u8>, Vec<u8>), StorageError> {
+    let Some(inclusion) = tx.finalized_transaction_inclusion_get(tx_id)? else {
+        return Ok((Vec::new(), Vec::new()));
+    };
+    // A stored inclusion cites its block, which keeps the block's commit proof stored by every binary that honours the
+    // citation. One that does not may have deleted it, and the result is then served unproven.
+    let Some(commit_proof) = tx.block_commit_proofs_get(&inclusion.block_id).optional()? else {
+        warn!(
+            target: LOG_TARGET,
+            "No commit proof is stored for block {}, which finalized transaction {tx_id}, so its result is served \
+             without a proof",
+            inclusion.block_id
+        );
+        return Ok((Vec::new(), Vec::new()));
+    };
+    let transaction_proof = tari_bor::serde_codec::to_vec(&inclusion.proof).map_err(|e| StorageError::QueryError {
+        reason: format!("encode the inclusion proof of transaction {tx_id}: {e}"),
+    })?;
+    Ok((transaction_proof, commit_proof))
+}
+
 /// The commit proof for the latest committed block: the quorum-signed anchor for the shard-group
 /// state merkle root that substate value proofs generated in the same read transaction verify
 /// against. `None` when nothing is committed beyond the epoch genesis yet, in which case results go
@@ -884,6 +910,9 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             .optional()
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
+        let (transaction_proof, commit_proof) =
+            finalized_transaction_proof(&tx, &tx_id).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+
         self.budgeted_response(GetTransactionResultResponse {
             status: PayloadResultStatus::Finalized.into(),
 
@@ -895,6 +924,8 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             abort_details: execution.abort_reason().map(|r| r.to_string()).unwrap_or_default(),
             // For simplicity, we simply encode the whole result as a CBOR blob.
             execution_result: encode(execution.result()).map_err(RpcStatus::log_internal_error(LOG_TARGET))?,
+            transaction_proof,
+            commit_proof,
         })
     }
 

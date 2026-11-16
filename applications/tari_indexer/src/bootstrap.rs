@@ -266,6 +266,7 @@ pub async fn spawn_services(
         epoch_manager.clone(),
         validator_node_client_factory.clone(),
         consensus_constants.num_preshards,
+        config.network,
     );
 
     let watched_templates: Arc<HashSet<TemplateAddress>> =

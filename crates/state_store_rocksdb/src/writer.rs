@@ -1399,7 +1399,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
                             let address = rec.to_substate_address();
                             cf.put(&address, &rec, OPERATION)?;
-                            head_cf.put(rec.substate_id(), &SubstateHeadData { version, is_up: true }, OPERATION)?;
+                            advance_head(&head_cf, rec.substate_id(), SubstateHeadData { version, is_up: true })?;
 
                             transitions.push(StateTransitionRecordData {
                                 substate_address: address,
@@ -1415,14 +1415,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                                 at_state_version: state_version,
                             });
                             cf.put(&address, &substate, OPERATION)?;
-                            head_cf.put(
-                                &substate.substate_id,
-                                &SubstateHeadData {
-                                    version: substate.version(),
-                                    is_up: false,
-                                },
-                                OPERATION,
-                            )?;
+                            advance_head(&head_cf, &substate.substate_id, SubstateHeadData {
+                                version: substate.version(),
+                                is_up: false,
+                            })?;
                             downed_substate_addresses.push(address);
 
                             transitions.push(StateTransitionRecordData {
@@ -2244,6 +2240,26 @@ impl<TAddr> Drop for RocksDbStateStoreWriteTransaction<'_, TAddr> {
             }
         }
     }
+}
+
+/// Moves `substate_id`'s head to `head` unless the head is already past it. A substate's versions only increase, and
+/// a version that is put down stays down, so the head is the highest version written and, for that version, DOWN
+/// once it has been put down. This holds whatever order a state version lists a substate's transitions in.
+fn advance_head(
+    head_cf: &CfContext<Transaction<TransactionDB>, substate::HeadIndex>,
+    substate_id: &SubstateId,
+    head: SubstateHeadData,
+) -> Result<(), StorageError> {
+    const OPERATION: &str = "substates_commit_batch";
+
+    let is_past = head_cf
+        .get(substate_id, OPERATION)
+        .optional()?
+        .is_some_and(|current| current.version > head.version || (current.version == head.version && !current.is_up));
+    if !is_past {
+        head_cf.put(substate_id, &head, OPERATION)?;
+    }
+    Ok(())
 }
 
 /// The keys of every node in `nodes`, a version's stale list, with each subtree expanded node by node, since a pinned

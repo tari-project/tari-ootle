@@ -585,3 +585,92 @@ fn state_sync_missing_values_get_earliest_includes_max_substate_address() {
         .unwrap();
     assert_eq!(earliest, Some((max_addr, 7)));
 }
+
+#[test]
+fn substate_head_is_the_highest_version_in_any_transition_order() {
+    use tari_engine_types::{
+        component::{Component, ComponentBody, ComponentHeader},
+        substate::{SubstateId, SubstateValue},
+    };
+    use tari_ootle_common_types::{NumPreshards, SubstateVersion, VersionedSubstateId, VersionedSubstateIdRef};
+    use tari_ootle_storage::{
+        StateStore,
+        StateStoreReadTransaction,
+        StateStoreWriteTransaction,
+        consensus_models::{SubstateTransition, SubstateUpdateBatch},
+    };
+    use tari_ootle_transaction::Network;
+    use tari_template_lib::types::{ComponentAddress, SubstateOwnerRule};
+
+    use crate::{DatabaseOptions, RocksDbStateStore};
+
+    fn component_id(n: u8) -> SubstateId {
+        SubstateId::Component(ComponentAddress::from_array([n; 32]))
+    }
+
+    fn up(id: &SubstateId, version: u64) -> SubstateTransition {
+        let address = id.as_component_address().unwrap();
+        SubstateTransition::Up {
+            id: id.clone(),
+            version: SubstateVersion::from(version),
+            substate_or_hash: SubstateValue::Component(Component {
+                header: ComponentHeader {
+                    template_address: Default::default(),
+                    owner_rule: SubstateOwnerRule::None,
+                    access_rules: Default::default(),
+                    entity_id: address.entity_id(),
+                    upgrade_rule: Default::default(),
+                },
+                body: ComponentBody {
+                    state: tari_bor::Value::Null,
+                },
+            })
+            .into(),
+        }
+    }
+
+    fn down(id: &SubstateId, version: u64) -> SubstateTransition {
+        SubstateTransition::Down {
+            id: VersionedSubstateId::new(id.clone(), SubstateVersion::from(version)),
+        }
+    }
+
+    let id = component_id(7);
+    let shard = VersionedSubstateIdRef::new(&id, SubstateVersion::ZERO).to_shard(NumPreshards::P256);
+    let commit = |store: &RocksDbStateStore<String>, state_version: u64, transitions: Vec<SubstateTransition>| {
+        store
+            .with_write_tx(|tx| {
+                let mut batch = SubstateUpdateBatch::new(Network::LocalNet, Epoch(1));
+                batch.with_transition(shard, state_version).extend(transitions);
+                tx.substates_commit_batch(batch)
+            })
+            .unwrap();
+    };
+    let head = |store: &RocksDbStateStore<String>, id: &SubstateId| {
+        store
+            .with_read_tx(|tx| tx.substates_get_max_version_for_substate(id))
+            .unwrap()
+    };
+
+    // One state version takes the substate from version 0 to version 2. Each order lists the same transitions, with
+    // every version put up before it is put down.
+    let orders = [
+        vec![down(&id, 0), up(&id, 1), down(&id, 1), up(&id, 2)],
+        vec![up(&id, 1), down(&id, 0), up(&id, 2), down(&id, 1)],
+        vec![up(&id, 1), up(&id, 2), down(&id, 1), down(&id, 0)],
+    ];
+    for transitions in orders {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(tmp.path().join("db"), DatabaseOptions::default()).unwrap();
+        commit(&store, 1, vec![up(&id, 0)]);
+        commit(&store, 2, transitions);
+
+        assert_eq!(head(&store, &id), (SubstateVersion::from(2), true));
+    }
+
+    // A version put up and down by one state version is left down
+    let tmp = tempfile::tempdir().unwrap();
+    let store = RocksDbStateStore::<String>::open(tmp.path().join("db"), DatabaseOptions::default()).unwrap();
+    commit(&store, 1, vec![up(&id, 0), down(&id, 0)]);
+    assert_eq!(head(&store, &id), (SubstateVersion::ZERO, false));
+}

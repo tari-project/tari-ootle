@@ -533,15 +533,24 @@ impl Block {
         Ok((leaf, proof))
     }
 
-    /// The inclusion proof of every transaction this block finalizes, against
-    /// [`BlockHeader::transaction_merkle_root`], building the tree once.
+    /// The inclusion proof of every transaction this block finalizes as an abort, against
+    /// [`BlockHeader::transaction_merkle_root`], building the tree once and only for a block that aborts a
+    /// transaction. A commit is proven by its receipt, which commits to its outcome.
     ///
-    /// Fails as [`Self::compute_transaction_proof`] does when the header's root disagrees with the commands.
-    pub fn compute_transaction_proofs(&self) -> Result<HashMap<TransactionId, SparseMerkleProofExt>, BlockError> {
-        let tree = self.verified_transaction_tree()?;
-        self.commands
+    /// Fails as [`Self::compute_transaction_proof`] does when the block aborts a transaction and the header's root
+    /// disagrees with the commands.
+    pub fn compute_abort_proofs(&self) -> Result<HashMap<TransactionId, SparseMerkleProofExt>, BlockError> {
+        let mut aborts = self
+            .commands
             .iter()
             .filter_map(Command::finalising)
+            .filter(|atom| atom.decision().is_abort())
+            .peekable();
+        if aborts.peek().is_none() {
+            return Ok(HashMap::new());
+        }
+        let tree = self.verified_transaction_tree()?;
+        aborts
             .map(|atom| {
                 let (_, proof) = tree.get_proof(&transaction_leaf_key(atom.id()))?;
                 Ok::<_, BlockError>((*atom.id(), proof))

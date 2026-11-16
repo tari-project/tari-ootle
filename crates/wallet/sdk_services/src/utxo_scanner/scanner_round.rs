@@ -859,7 +859,8 @@ fn is_refusal(err: &SubstateApiError) -> bool {
             SubstateApiError::SubstateNotDown { .. } |
             SubstateApiError::SubstateUnproven { .. } |
             SubstateApiError::SubstateUnverified { .. } |
-            SubstateApiError::SubstateProvenBeforeAnchor { .. }
+            SubstateApiError::SubstateProvenBeforeAnchor { .. } |
+            SubstateApiError::SubstateProofStale { .. }
     )
 }
 

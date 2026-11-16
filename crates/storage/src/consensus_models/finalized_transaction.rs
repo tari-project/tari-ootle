@@ -223,6 +223,40 @@ mod tests {
     }
 
     #[test]
+    fn abort_proofs_prove_each_abort_and_no_commit() {
+        let block = block(ProtocolVersion::V0, commands()).unwrap();
+        let root = root_of(&block);
+
+        let proofs = block.compute_abort_proofs().unwrap();
+        assert_eq!(proofs.len(), 2);
+        for seed in [1, 3] {
+            let leaf = FinalizedTransactionLeaf {
+                transaction_id: &tx(seed),
+                decision: abort(),
+            };
+            proofs[&tx(seed)]
+                .verify_inclusion(JmtHashScheme::V1, &root, &leaf.key(), &leaf.hash())
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_block_that_aborts_nothing_has_no_abort_proofs_to_build() {
+        let commits = BlockCommands::init([local_only(1, Decision::Commit), local_only(2, Decision::Commit)]).unwrap();
+        let honest = block(ProtocolVersion::V0, commits).unwrap();
+        let other = block(ProtocolVersion::V0, commands()).unwrap();
+        // The root is checked only when a tree is built, so a mismatched header shows that none is.
+        let mismatched = Block::new(
+            other.header().clone(),
+            honest.justify().clone(),
+            honest.commands().clone(),
+            None,
+        );
+
+        assert!(mismatched.compute_abort_proofs().unwrap().is_empty());
+    }
+
+    #[test]
     fn an_empty_block_commits_to_the_empty_tree() {
         let block = block(ProtocolVersion::V0, BlockCommands::empty()).unwrap();
         assert_eq!(root_of(&block), tari_state_tree::SPARSE_MERKLE_PLACEHOLDER_HASH);

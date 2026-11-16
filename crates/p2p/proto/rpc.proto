@@ -141,8 +141,8 @@ message GetTransactionResultResponse {
   int64 finalized_timestamp = 5;
   uint64 execution_time_us = 6;
   // CBOR-encoded SparseMerkleProofExt of the transaction's leaf, H(transaction id, final decision), in the
-  // transaction merkle root of the block that finalized it. Set for an abort only: a commit is proven by its receipt.
-  // Empty when the responder holds no inclusion for it.
+  // transaction merkle root of the block that finalized it. Set for an abort. A commit is proven by its receipt and is
+  // normally sent without one. Empty when the responder holds no inclusion for it.
   bytes transaction_proof = 7;
   // CBOR-encoded CommittedBlockProof of the block `transaction_proof` is against. Set exactly when
   // `transaction_proof` is.

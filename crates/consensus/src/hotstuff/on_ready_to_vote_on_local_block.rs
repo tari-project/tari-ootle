@@ -960,12 +960,12 @@ where
     }
 }
 
-/// The inclusion of each of `finalized`, the transactions `block` finalizes, that `block` aborts, storing the block's
-/// commit proof for them unless `commit_proof_stored`. Each inclusion cites the block once recorded, so the commit
-/// proof is stored only when there is an inclusion to cite it.
+/// The inclusion of each transaction in `finalized` that `block` aborts, storing the block's commit proof for them
+/// unless `commit_proof_stored`. Each inclusion cites the block once recorded, so the commit proof is stored only when
+/// there is an inclusion to cite it.
 ///
 /// A block whose header disagrees with its commands, or whose commit proof cannot be generated, is logged, and its
-/// transactions are recorded without inclusions.
+/// aborts are recorded without inclusions.
 fn finalized_transaction_inclusions<TTx>(
     tx: &mut TTx,
     commit_qc: &ProposalCertificate,
@@ -982,7 +982,7 @@ where
         Err(err) => {
             error!(
                 target: LOG_TARGET,
-                "BUG: cannot prove the decisions {block} finalized, so they are recorded unproven: {err}"
+                "BUG: cannot prove the aborts {block} finalized, so they are recorded unproven: {err}"
             );
             return Ok(HashMap::new());
         },

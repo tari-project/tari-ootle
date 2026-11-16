@@ -196,7 +196,9 @@ web_ui_address = "127.0.0.1:15000"
 # events follow event_retention_epochs. Both default to 1000 epochs.
 transaction_retention_epochs = 500
 
-# Wallets verify the proofs served by the indexer by default, so leave this enabled (default = true).
+# The indexer fetches a proof against the shard group committee with each substate it reads from validators and
+# serves it alongside (default = true). Keep this enabled: wallets with indexer_trust = "verify" need these proofs.
+# Wallets default to indexer_trust = "trust"; set indexer_trust = "verify" on the wallet side to make them check them.
 verify_substate_proofs = true
 
 [esmeralda.epoch_oracle.base_layer]

@@ -190,6 +190,7 @@ pub(super) fn derive_new_multishard_command(
             pool_record
                 .set_local_decision(Decision::Commit)
                 .merge_evidence(evidence);
+            pool_record.evidence_mut().add_shard_group(local_shard_group);
             None
         },
     };
@@ -335,19 +336,30 @@ pub(super) fn locked_epoch_disagreement(
     })
 }
 
-/// A transaction at the New stage that cannot be sequenced yet: it is pinned to a later epoch than the block.
+/// A transaction at the New stage that cannot be sequenced yet: either its signed minimum epoch has not been reached
+/// or it is already pinned to a later epoch than the block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct PinnedAfterBlock {
-    pub locked_epoch: Epoch,
-    pub block_epoch: Epoch,
+pub(super) enum EpochBeforeTransactionWindow {
+    PinnedAfterBlock { locked_epoch: Epoch, block_epoch: Epoch },
+    BeforeMinEpoch { min_epoch: Epoch, block_epoch: Epoch },
 }
 
-impl PinnedAfterBlock {
+impl EpochBeforeTransactionWindow {
     pub fn into_no_vote(self, transaction_id: TransactionId) -> NoVoteReason {
-        NoVoteReason::LockedEpochAfterBlock {
-            transaction_id,
-            locked_epoch: self.locked_epoch,
-            block_epoch: self.block_epoch,
+        match self {
+            Self::PinnedAfterBlock {
+                locked_epoch,
+                block_epoch,
+            } => NoVoteReason::LockedEpochAfterBlock {
+                transaction_id,
+                locked_epoch,
+                block_epoch,
+            },
+            Self::BeforeMinEpoch { min_epoch, block_epoch } => NoVoteReason::MinEpochAfterBlock {
+                transaction_id,
+                min_epoch,
+                block_epoch,
+            },
         }
     }
 }
@@ -361,13 +373,22 @@ impl PinnedAfterBlock {
 /// own epoch reaches the pin, so no block carries a transaction pinned to a later epoch than the block.
 pub(super) fn pin_new_transaction(
     pool_record: &mut TransactionPoolRecord,
+    min_epoch: Option<Epoch>,
     block_locked_epoch: &LockedEpoch,
     local_shard_group: ShardGroup,
-) -> Result<(), PinnedAfterBlock> {
+) -> Result<(), EpochBeforeTransactionWindow> {
+    if let Some(min_epoch) = min_epoch &&
+        min_epoch > block_locked_epoch.epoch()
+    {
+        return Err(EpochBeforeTransactionWindow::BeforeMinEpoch {
+            min_epoch,
+            block_epoch: block_locked_epoch.epoch(),
+        });
+    }
     match pool_record.locked_epoch() {
         Some(pin) if !pool_record.evidence().has_inputs(local_shard_group) => {
             if pin.epoch() > block_locked_epoch.epoch() {
-                return Err(PinnedAfterBlock {
+                return Err(EpochBeforeTransactionWindow::PinnedAfterBlock {
                     locked_epoch: pin.epoch(),
                     block_epoch: block_locked_epoch.epoch(),
                 });
@@ -397,5 +418,52 @@ fn leader_fee_disagreement(derived: Option<&LeaderFee>, proposed: Option<&Leader
         (Some(_), None) => Some(NoVoteReason::NoLeaderFee),
         (derived, proposed) if derived != proposed => Some(NoVoteReason::LeaderFeeDisagreement),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_common_types::types::PrivateKey;
+    use tari_consensus_types::Decision;
+    use tari_engine_types::{commit_result::AbortReason, fees::ExhaustBurnRate};
+    use tari_ootle_common_types::{Epoch, NumPreshards, VotePower, committee::CommitteeInfo};
+    use tari_ootle_storage::consensus_models::{Evidence, LockedEpoch, TransactionPoolRecord};
+    use tari_ootle_transaction::Transaction;
+
+    use super::*;
+    use crate::hotstuff::{substate_store::LockStatus, transaction_manager::PreparedTransaction};
+
+    #[test]
+    fn derive_new_multishard_command_includes_local_shard_group_in_evidence() {
+        let num_preshards = NumPreshards::P256;
+        let mut groups = num_preshards.all_shard_groups_iter(2);
+        let foreign_group = groups.next().unwrap();
+        let local_group = groups.next().unwrap();
+        let committee_info = CommitteeInfo::new(num_preshards, 4, 2, local_group, Epoch(1), VotePower::of(1));
+
+        let transaction = Transaction::builder_localnet(Epoch(10)).build_and_seal(&PrivateKey::from(1u64));
+        let mut foreign_only_evidence = Evidence::empty();
+        foreign_only_evidence.add_shard_group(foreign_group);
+
+        let mut pool_record = TransactionPoolRecord::new_from_transaction(&transaction, foreign_only_evidence.clone());
+        pool_record.update_locked_epoch(LockedEpoch::new(
+            Epoch(1),
+            Default::default(),
+            ExhaustBurnRate::try_new(0).unwrap(),
+        ));
+        pool_record.set_remote_decision(Decision::Abort(AbortReason::ExecutionFailure));
+
+        let PreparedTransaction::MultiShard(prepared) =
+            PreparedTransaction::new_multishard_evidence(foreign_only_evidence, LockStatus::new())
+        else {
+            unreachable!();
+        };
+
+        let derived = derive_new_multishard_command(pool_record, prepared, &committee_info).unwrap();
+        let Command::LocalAccept(atom) = derived.command else {
+            panic!("expected LocalAccept, got {:?}", derived.command);
+        };
+        assert!(atom.evidence.has(&local_group));
+        assert!(derived.pool_record.evidence().has(&local_group));
     }
 }

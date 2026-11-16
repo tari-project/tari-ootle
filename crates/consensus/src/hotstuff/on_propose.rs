@@ -456,7 +456,6 @@ where TConsensusSpec: ConsensusSpec
         // by at most MAX_WASM_POINTS_PER_TRANSACTION — `max_block_validation_execution_points` allows for
         // this, so honest proposals are never rejected.
         let max_block_execution_points = self.config.consensus_constants.max_block_execution_points;
-        let mut execution_points_total = 0u64;
         let sequencer = CommandSequencer::for_proposal(
             &self.transaction_manager,
             local_committee_info,
@@ -480,11 +479,11 @@ where TConsensusSpec: ConsensusSpec
                 );
                 break;
             }
-            if idx > 0 && execution_points_total >= max_block_execution_points {
+            if idx > 0 && totals.execution_points >= max_block_execution_points {
                 warn!(
                     target: LOG_TARGET,
                     "🔋 PROPOSE: wasm points budget ({}/{}) reached after {} of {} transaction(s); deferring {} to a later block",
-                    execution_points_total,
+                    totals.execution_points,
                     max_block_execution_points,
                     idx,
                     batch_size,
@@ -518,14 +517,10 @@ where TConsensusSpec: ConsensusSpec
             )?;
             match sequencing {
                 Ok(derived) => {
-                    // Points count only for transactions proposed in this block: the budget bounds replica
-                    // re-execution per block, mirroring the validation-side sum over block commands. A transaction
-                    // left out is counted in the later block that proposes it; its propose-time execution cost here
-                    // is bounded by the soft deadline above.
-                    if let Some(execution) = &derived.execution {
-                        execution_points_total =
-                            execution_points_total.saturating_add(execution.result().total_execution_points());
-                    }
+                    // Committing the command adds the points of its execution to the block totals, as each replica's
+                    // does. Points count only for transactions proposed in this block: the budget bounds replica
+                    // re-execution per block. A transaction left out is counted in the later block that proposes it;
+                    // its propose-time execution cost here is bounded by the soft deadline above.
                     commands.push(sequencer.commit(derived, &mut change_set, &mut totals)?);
                 },
                 Err(Refusal {

@@ -45,14 +45,16 @@ pub struct StealthOutputsResult {
 }
 
 /// Decrypted contents of an inbound stealth UTXO.
-#[wasm_bindgen(getter_with_clone)]
+#[wasm_bindgen]
 pub struct DecryptedOutputResult {
     /// The 32-byte commitment mask scalar.
+    #[wasm_bindgen(getter_with_clone)]
     pub mask: Vec<u8>,
     /// The plaintext value (u64).
     pub value: u64,
     /// JSON-encoded `Memo` (variants: `U256` / `Message` / `Bytes` / `DestinationTagAndBytes`), or `null` if
     /// the payload carried no memo or `skipMemo` was set.
+    #[wasm_bindgen(getter_with_clone)]
     pub memo_json: Option<String>,
 }
 
@@ -75,15 +77,18 @@ pub struct OotlePublicKey {
 }
 
 /// Parsed components of an Ootle address.
-#[wasm_bindgen(getter_with_clone)]
+#[wasm_bindgen]
 pub struct ParsedOotleAddress {
     /// The owner (spending) public key bytes.
+    #[wasm_bindgen(getter_with_clone)]
     pub owner_key: Vec<u8>,
     /// The view-only public key bytes.
+    #[wasm_bindgen(getter_with_clone)]
     pub view_key: Vec<u8>,
     /// The network byte.
     pub network: u8,
     /// Optional destination tag bytes.
+    #[wasm_bindgen(getter_with_clone)]
     pub destination_tag: Option<Vec<u8>>,
 }
 

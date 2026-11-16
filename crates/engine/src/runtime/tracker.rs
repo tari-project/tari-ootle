@@ -564,7 +564,10 @@ impl<TStore: StateReader> StateTracker<TStore> {
         let failure = match failure {
             Some(reason) => Some(reason),
             None => self
-                .write_with(|state| state.enforce_output_size_limit())
+                .write_with(|state| {
+                    state.enforce_substate_output_limit()?;
+                    state.enforce_output_size_limit()
+                })
                 .err()
                 .map(|err| err.to_reject_reason(None)),
         };
@@ -844,6 +847,7 @@ impl<TStore: StateReader + Clone> StateTracker<TStore> {
             // Check that the checkpoint is in a valid state. It is what commits if the main intent
             // fails, so it is held to every limit a full commit is.
             state.validate_finalized()?;
+            state.enforce_substate_output_limit()?;
             state.enforce_output_size_limit()?;
             let checkpoint_state = state.clone();
 

@@ -287,6 +287,7 @@ pub fn seal_and_encode_stealth_transfer(
 
     let (unsigned, sig_reqs) = partial.into_parts();
     let UnsignedTransaction::V1(mut unsigned_v1) = unsigned;
+    unsigned_v1.main_signer = tari_ootle_transaction::MainSigner::SealSigner;
 
     let plan = plan_seal(internal_network, &secrets, &sig_reqs, &unsigned_v1)?;
 
@@ -742,5 +743,16 @@ mod tests {
         let bad = StealthKeys::new(secret(11), SecretKeyBytes::from_array([0xff; 32]));
         let err = seal_and_encode_stealth_transfer(NETWORK, ephemeral_partial(), &bad).unwrap_err();
         assert_eq!(err.code(), "KEY");
+    }
+
+    #[test]
+    fn account_key_seal_settles_main_signer_before_signing_authorizations() {
+        let (mut unsigned, sig_reqs) = account_key_partial().into_parts();
+        unsigned.set_main_signer(tari_ootle_transaction::MainSigner::None);
+        let partial = StealthPartialTransaction { unsigned, sig_reqs };
+        let out = seal_and_encode_stealth_transfer(NETWORK, partial, &stealth_keys()).unwrap();
+        let tx = decode(&out);
+        assert!(verify_all_signatures(&tx));
+        assert!(tx.is_seal_signer_authorized());
     }
 }

@@ -29,6 +29,7 @@ use crate::{
     StorageError,
     consensus_models::{
         Evidence,
+        FinalizedTransactionInclusion,
         LockedSubstateValue,
         SubstatePledge,
         SubstatePledges,
@@ -265,7 +266,7 @@ impl TransactionRecord {
     where
         TTx: StateStoreWriteTransaction + Deref,
         TTx::Target: StateStoreReadTransaction,
-        I: IntoIterator<Item = &'a TransactionPoolRecord>,
+        I: IntoIterator<Item = (&'a TransactionPoolRecord, Option<FinalizedTransactionInclusion>)>,
     {
         tx.transactions_finalize_all(epoch, transactions)
     }

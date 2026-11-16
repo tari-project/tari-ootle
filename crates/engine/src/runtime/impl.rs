@@ -1594,15 +1594,13 @@ where
                         })?;
                 args.assert_no_args("ComponentAction::GetState")?;
                 let is_already_locked = self.tracker.read_with(|state| {
-                    let scope = state.current_call_scope()?;
-                    let is_already_locked = scope
+                    let is_already_locked = state
+                        .current_call_scope()?
                         .get_current_component_lock()
                         .is_some_and(|l| *l.substate_id() == component_address);
+                    // Checked before charging the load so an out-of-scope read costs nothing
                     if !is_already_locked {
-                        let substate_id = SubstateId::Component(component_address);
-                        if !scope.is_substate_in_scope(&substate_id) {
-                            return Err(RuntimeError::SubstateOutOfScope { id: substate_id });
-                        }
+                        state.check_substate_in_scope(&SubstateId::Component(component_address))?;
                     }
                     Ok::<_, RuntimeError>(is_already_locked)
                 })?;
@@ -1812,7 +1810,7 @@ where
                     let is_already_locked = current_component_lock.is_some();
                     let locked = match current_component_lock {
                         Some(lock) => lock,
-                        None => state.read_lock_substate(SubstateId::Component(component_address))?,
+                        None => state.read_lock_substate_in_scope(SubstateId::Component(component_address))?,
                     };
                     let component = state.get_component(&locked)?;
                     let template_address = *component.template_address();
@@ -5594,6 +5592,120 @@ mod tests {
         let decoded_state: tari_bor::Value = res.decode().unwrap();
         assert_eq!(decoded_state, target_state);
         assert_eq!(runtime.native_points_consumed() - points_before, expected_load_points);
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn component_get_template_address_enforces_call_scope() {
+        let runtime = runtime_with_blobs(Blobs::default());
+        let caller_template = TemplateAddress::from_array([12u8; 32]);
+        let target_template = TemplateAddress::from_array([13u8; 32]);
+        let entity_id = EntityId::default();
+
+        let caller_component = create_test_component(&runtime, caller_template, "Caller", entity_id);
+        let target_component = create_test_component(
+            &runtime,
+            target_template,
+            "Target",
+            EntityId::new([3u8; EntityId::LENGTH]),
+        );
+
+        // Push a frame for `caller_component` WITHOUT `target_component` in scope.
+        let caller_lock = runtime.lock_component(caller_component, LockFlag::Write).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address: caller_template,
+                    module_name: "Caller".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: caller_lock,
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+
+        // Reading the currently executing component's own template address still succeeds.
+        let own_res = runtime
+            .component_invoke(
+                ComponentRef::Ref(caller_component),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let actual_own: TemplateAddress = own_res.decode().unwrap();
+        assert_eq!(actual_own, caller_template);
+
+        // Reading an out-of-scope external component fails with `SubstateOutOfScope` and consumes no native points.
+        let points_before = runtime.native_points_consumed();
+        let err = runtime
+            .component_invoke(
+                ComponentRef::Ref(target_component),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            RuntimeError::SubstateOutOfScope { id } if id == SubstateId::Component(target_component)
+        ));
+        assert_eq!(runtime.native_points_consumed(), points_before);
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+
+        // Static frame without `target_component` in scope also rejects with `SubstateOutOfScope`.
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address: caller_template,
+                    module_name: "Caller".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+        let points_before = runtime.native_points_consumed();
+        let err = runtime
+            .component_invoke(
+                ComponentRef::Ref(target_component),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            RuntimeError::SubstateOutOfScope { id } if id == SubstateId::Component(target_component)
+        ));
+        assert_eq!(runtime.native_points_consumed(), points_before);
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+
+        // Push a frame for `caller_component` WITH `target_component` in `arg_scope`.
+        let caller_lock = runtime.lock_component(caller_component, LockFlag::Write).unwrap();
+        let arg_scope = IndexedWellKnownTypes::from_value(&tari_bor::to_value(&target_component).unwrap()).unwrap();
+        runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address: caller_template,
+                    module_name: "Caller".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: caller_lock,
+                    arg_scope: Box::new(arg_scope),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+
+        let res = runtime
+            .component_invoke(
+                ComponentRef::Ref(target_component),
+                ComponentAction::GetTemplateAddress,
+                EngineArgs::default(),
+            )
+            .unwrap();
+        let actual_target: TemplateAddress = res.decode().unwrap();
+        assert_eq!(actual_target, target_template);
         runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
     }
 

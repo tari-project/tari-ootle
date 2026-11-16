@@ -3,6 +3,8 @@ title: Authorization and Access
 description: Control who can interact with your Tari Ootle Components and Resources.
 ---
 
+import { Aside } from "@astrojs/starlight/components";
+
 ### Covered in this guide
 
 In this guide, you will:
@@ -77,8 +79,14 @@ Who may replace the method access rules and the owner rule is configured with
 - `RulesUpdater::AccessRule(rule)`: anyone satisfying `rule`, independent of the owner rule.
   `component(..)`/`template(..)` requirements are rejected here.
 
-A template that calls `set_access_rules` or `set_owner_rule` must choose one of the last three, or the call fails
-with `ComponentRulesLocked`. Components created before the setting existed behave as `TemplateManaged`.
+<Aside type="caution" title="Choose the rules updater when you create the component">
+A template that calls `set_access_rules` or `set_owner_rule`, or whose components are meant to be re-ruled by
+instruction, must set `.with_rules_updater(..)` to one of the last three. Under the default `Locked` those calls fail
+with `ComponentRulesLocked`. The setting is fixed at creation, so a component created `Locked` keeps its rules for
+good: it cannot be unlocked, only replaced by a new component.
+</Aside>
+
+Components created before the setting existed behave as `TemplateManaged`.
 
 The instructions take the whole replacement: `SetComponentAccessRules` replaces every method rule and the default,
 and `SetComponentOwnerRule` replaces the owner rule (`OwnerRule::OwnedBySigner` names the transaction's main signer).

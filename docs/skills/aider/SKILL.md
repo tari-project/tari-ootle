@@ -534,7 +534,7 @@ rule!(m_of_n(2, resource(a), resource(b), resource(c)))// M of N conditions met
 
 ```rust
 OwnerRule::OwnedBySigner           // Default: transaction signer is owner
-OwnerRule::None                    // No owner (nobody can update access rules)
+OwnerRule::None                    // No owner: owner-gated actions are refused
 OwnerRule::ByAccessRule(rule)      // Custom rule determines ownership
 OwnerRule::ByPublicKey(pk)         // Specific public key is owner
 ```
@@ -553,7 +553,7 @@ RulesUpdater::AccessRule(rule)     // Anyone satisfying `rule`, by instruction o
 ```
 
 A template that calls `set_access_rules` / `set_owner_rule` must not leave this `Locked`, or the call fails with
-`ComponentRulesLocked`. Prefer `Owner` or `AccessRule` over hand-rolled role-management methods: the transaction
+`ComponentRulesLocked`. The setting is fixed at creation: a component created `Locked` can never be unlocked. Prefer `Owner` or `AccessRule` over hand-rolled role-management methods: the transaction
 builder's `.set_component_access_rules(component, rules)` and `.set_component_owner_rule(component, rule)` rotate
 roles without template code.
 

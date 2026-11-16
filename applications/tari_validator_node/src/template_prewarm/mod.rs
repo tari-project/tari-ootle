@@ -44,7 +44,7 @@ use std::{
 use log::*;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::services::template_provider::TemplateProvider;
-use tari_ootle_storage::{StateStore, StateStoreReadTransaction};
+use tari_ootle_storage::{StateStore, StateStoreReadTransaction, StorageError};
 use tari_ootle_template_provider::ResidentTemplateProvider;
 use tari_ootle_transaction::{ComponentReference, Instruction, Transaction};
 use tari_template_builtin::is_builtin_template_address;
@@ -107,7 +107,14 @@ impl TemplatePrewarmer {
         // transaction calls into is resolved up front, over one snapshot. Doing it here rather than
         // on a worker is what makes the returned wait exact: the caller blocks on the compiles it
         // needs and on nothing else.
-        let called: Vec<_> = instructions().filter_map(called_component).collect();
+        //
+        // A transaction may call into one component from many instructions. Each component is looked
+        // up once, however often it is called.
+        let mut called_seen = HashSet::new();
+        let called: Vec<_> = instructions()
+            .filter_map(called_component)
+            .filter(|component| called_seen.insert(*component))
+            .collect();
         let instantiated = self.components.templates_of(&called);
 
         // Deduplicated before enqueueing, so that a template named twice by one transaction is one
@@ -305,23 +312,33 @@ impl<TStore: StateStore + Send + Sync + 'static> ComponentTemplateLookup for Sta
             return HashMap::new();
         }
 
-        let ids: Vec<_> = components.iter().copied().map(SubstateId::Component).collect();
-        let records = match self.0.with_read_tx(|tx| tx.substates_get_any_max_version(ids.iter())) {
-            Ok(records) => records,
+        // Only the template address is kept from each record. A component's state can be large, so
+        // the records are read one at a time and each is dropped before the next is read, rather
+        // than every component's state being held at once.
+        let templates = self.0.with_read_tx(|tx| {
+            let mut templates = HashMap::with_capacity(components.len());
+            for component in components {
+                let id = SubstateId::Component(*component);
+                let Some(record) = tx.substates_get_any_max_version(std::iter::once(&id))?.pop() else {
+                    continue;
+                };
+                let template = record
+                    .into_substate_value()
+                    .and_then(|value| value.component().map(|component| *component.template_address()));
+                if let Some(template) = template {
+                    templates.insert(*component, template);
+                }
+            }
+            Ok::<_, StorageError>(templates)
+        });
+
+        match templates {
+            Ok(templates) => templates,
             Err(e) => {
                 debug!(target: LOG_TARGET, "Prewarm could not read {} component(s): {e}", components.len());
-                return HashMap::new();
+                HashMap::new()
             },
-        };
-
-        records
-            .into_iter()
-            .filter_map(|record| {
-                let component = record.substate_id.as_component_address()?;
-                let template = *record.into_substate_value()?.component()?.template_address();
-                Some((component, template))
-            })
-            .collect()
+        }
     }
 }
 
@@ -466,9 +483,17 @@ mod tests {
     };
 
     use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
-    use tari_ootle_common_types::Epoch;
-    use tari_ootle_transaction::{TransactionBuilder, args};
+    use tari_engine_types::{
+        component::{Component, ComponentBody, ComponentHeader},
+        substate::SubstateValue,
+    };
+    use tari_ootle_common_types::{Epoch, NumPreshards, SubstateVersion, VersionedSubstateIdRef};
+    use tari_ootle_p2p::PeerAddress;
+    use tari_ootle_storage::consensus_models::{SubstateRecord, SubstateTransition, SubstateUpdateBatch};
+    use tari_ootle_transaction::{Network, TransactionBuilder, args};
+    use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
     use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
+    use tari_template_lib::types::SubstateOwnerRule;
 
     use super::*;
 
@@ -515,17 +540,25 @@ mod tests {
         }
     }
 
+    /// Every component a lookup was asked for, in the order it was asked.
+    type Asked = Arc<Mutex<Vec<ComponentAddress>>>;
+
     #[derive(Default)]
-    struct FakeComponents(HashMap<ComponentAddress, TemplateAddress>);
+    struct FakeComponents(HashMap<ComponentAddress, TemplateAddress>, Asked);
 
     impl FakeComponents {
         fn holding(component: ComponentAddress, template: TemplateAddress) -> Self {
-            Self([(component, template)].into_iter().collect())
+            Self([(component, template)].into_iter().collect(), Asked::default())
+        }
+
+        fn asked(&self) -> Asked {
+            self.1.clone()
         }
     }
 
     impl ComponentTemplateLookup for FakeComponents {
         fn templates_of(&self, components: &[ComponentAddress]) -> HashMap<ComponentAddress, TemplateAddress> {
+            self.1.lock().unwrap().extend_from_slice(components);
             components.iter().filter_map(|c| Some((*c, *self.0.get(c)?))).collect()
         }
     }
@@ -718,6 +751,62 @@ mod tests {
 
         assert!(!wait.is_empty());
         assert_eq!(queued_in(&rx), vec![template(2)]);
+    }
+
+    #[test]
+    fn a_component_called_many_times_is_looked_up_once() {
+        let components = FakeComponents::holding(component(7), template(2));
+        let asked = components.asked();
+        let (prewarmer, rx) = undrained_with(FakeProvider::default(), components);
+        let tx = transaction(|b| {
+            (0..50)
+                .fold(b, |b, _| b.call_method(component(7), "withdraw", args![]))
+                .call_method(component(8), "deposit", args![])
+        });
+
+        let wait = prewarmer.prewarm_transaction(&tx);
+
+        assert!(!wait.is_empty());
+        assert_eq!(*asked.lock().unwrap(), vec![component(7), component(8)]);
+        assert_eq!(queued_in(&rx), vec![template(2)]);
+    }
+
+    #[test]
+    fn the_state_store_lookup_resolves_each_component_it_holds() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<PeerAddress>::open(dir.path(), DatabaseOptions::default()).unwrap();
+        let held = [(component(7), template(2)), (component(8), template(3))];
+        store
+            .with_write_tx(|tx| {
+                let mut batch = SubstateUpdateBatch::new(Network::LocalNet, Epoch::zero());
+                for (address, template_address) in held {
+                    let id = SubstateId::Component(address);
+                    let shard = VersionedSubstateIdRef::new(&id, SubstateVersion::ZERO).to_shard(NumPreshards::P256);
+                    let value = SubstateValue::Component(Component {
+                        header: ComponentHeader {
+                            template_address,
+                            owner_rule: SubstateOwnerRule::None,
+                            access_rules: Default::default(),
+                            entity_id: address.entity_id(),
+                            upgrade_rule: Default::default(),
+                        },
+                        body: ComponentBody {
+                            state: tari_bor::Value::Null,
+                        },
+                    });
+                    batch.with_transition(shard, 0).push(SubstateTransition::Up {
+                        id,
+                        version: SubstateVersion::ZERO,
+                        substate_or_hash: value.into(),
+                    });
+                }
+                SubstateRecord::commit_batch(tx, batch)
+            })
+            .unwrap();
+
+        let templates = StateStoreComponentLookup(store).templates_of(&[component(7), component(9), component(8)]);
+
+        assert_eq!(templates, HashMap::from(held));
     }
 
     #[test]

@@ -299,6 +299,21 @@ pub fn block_commit_proof(
     CommittedBlockProof::new(sign(header, signers)).to_bytes()
 }
 
+/// A commit proof of a block of `shard_group` in `epoch` finalizing the transactions under `transaction_merkle_root`,
+/// signed by `signers`.
+pub fn transaction_block_commit_proof(
+    network: Network,
+    epoch: Epoch,
+    shard_group: ShardGroup,
+    height: u64,
+    transaction_merkle_root: TreeHash,
+    signers: &Signers,
+) -> Vec<u8> {
+    let mut header = header(network, epoch, shard_group, height);
+    header.transaction_merkle_root = FixedHash::new(transaction_merkle_root.into_array());
+    CommittedBlockProof::new(sign(header, signers)).to_bytes()
+}
+
 fn header(network: Network, epoch: Epoch, shard_group: ShardGroup, height: u64) -> SidechainBlockHeader {
     SidechainBlockHeader {
         network: network.as_byte(),

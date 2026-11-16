@@ -3,7 +3,7 @@
 
 use std::{collections::BTreeMap, sync::Weak};
 
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, pin_mut};
 use serde::{Deserialize, Serialize};
 use tari_indexer_client::{
     error::IndexerRestClientError,
@@ -65,7 +65,7 @@ impl StealthUtxoWatchRequest {
 /// updates, terminated by an `EndOfShard`. `EndOfShard::max_state_version` is the shard's resume
 /// point — every update at or below it has either been delivered or was excluded by the request's
 /// own filters — so advance the cursor from it via [`ShardCursor::observe`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StealthUtxoFrame {
     StartOfShard {
         shard: Shard,
@@ -153,7 +153,7 @@ impl StealthUtxoStream {
                 },
             };
 
-            let mut stream = match client.stream_utxo_updates_protobuf(self.request.into_request()).await {
+            let stream = match client.stream_utxo_updates_protobuf(self.request.into_request()).await {
                 Ok(stream) => stream,
                 Err(err) => {
                     error!(%err, "Failed to start stealth UTXO update stream");
@@ -162,56 +162,131 @@ impl StealthUtxoStream {
                 },
             };
 
-            // `EndOfShard` on the wire does not carry the shard number; stamp it from the preceding
-            // `StartOfShard` so each frame is self-describing.
-            let mut current_shard: Option<Shard> = None;
-            loop {
-                match stream.next().await {
-                    Some(Ok(payload)) => {
-                        let UtxoUpdatePayload { sos, update, eos } = payload;
-                        if let Some(sos) = sos {
-                            let shard = Shard::from(sos.shard);
-                            current_shard = Some(shard);
-                            yield Ok(StealthUtxoFrame::StartOfShard {
-                                shard,
-                                max_state_version: StateVersion::from(sos.max_state_version),
-                                num_updates: sos.num_updates,
-                                has_more: sos.has_more,
-                                spends_incomplete: sos.spends_incomplete,
-                            });
-                        }
-                        if let Some(update) = update {
-                            match convert_update(update) {
-                                Ok(frame) => yield Ok(frame),
-                                Err(err) => {
-                                    yield Err(err);
-                                    return;
-                                },
-                            }
-                        }
-                        if let Some(eos) = eos {
-                            // Take the shard so a following `EndOfShard` (or any frame) that is not
-                            // preceded by a fresh `StartOfShard` errors out rather than being
-                            // misattributed to this shard and corrupting its cursor.
-                            let Some(shard) = current_shard.take() else {
-                                yield Err(UtxoWatcherError::DecodeError(
-                                    "EndOfShard received before any StartOfShard".to_string(),
-                                ));
-                                return;
-                            };
-                            yield Ok(StealthUtxoFrame::EndOfShard {
-                                shard,
-                                max_state_version: StateVersion::from(eos.max_state_version),
-                            });
-                        }
-                    },
-                    Some(Err(err)) => {
-                        error!(%err, "Error receiving stealth UTXO update");
-                        yield Err(UtxoWatcherError::StreamError(err));
+            let frames = decode_utxo_payload_stream(stream);
+            pin_mut!(frames);
+            while let Some(frame) = frames.next().await {
+                yield frame;
+            }
+        }
+    }
+}
+
+struct OpenShard {
+    shard: Shard,
+    max_state_version: StateVersion,
+    expected_updates: u32,
+    received_updates: u32,
+}
+
+fn decode_utxo_payload_stream<S>(mut stream: S) -> impl Stream<Item = Result<StealthUtxoFrame, UtxoWatcherError>>
+where S: Stream<Item = Result<UtxoUpdatePayload, ProtobufStreamError>> + Unpin {
+    async_stream::stream! {
+        // `EndOfShard` on the wire does not carry the shard number; stamp it from the preceding
+        // `StartOfShard` so each frame is self-describing.
+        let mut current_shard: Option<OpenShard> = None;
+        loop {
+            match stream.next().await {
+                Some(Ok(payload)) => {
+                    let UtxoUpdatePayload { sos, update, eos } = payload;
+                    if sos.is_none() && update.is_none() && eos.is_none() {
+                        yield Err(UtxoWatcherError::DecodeError(
+                            "Empty UtxoUpdatePayload received".to_string(),
+                        ));
                         return;
-                    },
-                    None => return,
-                }
+                    }
+                    if let Some(sos) = sos {
+                        if let Some(open) = current_shard {
+                            yield Err(UtxoWatcherError::DecodeError(format!(
+                                "StartOfShard for {} received before EndOfShard for {}",
+                                Shard::from(sos.shard),
+                                open.shard,
+                            )));
+                            return;
+                        }
+                        let shard = Shard::from(sos.shard);
+                        let max_state_version = StateVersion::from(sos.max_state_version);
+                        current_shard = Some(OpenShard {
+                            shard,
+                            max_state_version,
+                            expected_updates: sos.num_updates,
+                            received_updates: 0,
+                        });
+                        yield Ok(StealthUtxoFrame::StartOfShard {
+                            shard,
+                            max_state_version,
+                            num_updates: sos.num_updates,
+                            has_more: sos.has_more,
+                            spends_incomplete: sos.spends_incomplete,
+                        });
+                    }
+                    if let Some(update) = update {
+                        let Some(open) = current_shard.as_mut() else {
+                            yield Err(UtxoWatcherError::DecodeError(
+                                "UTXO update received before StartOfShard".to_string(),
+                            ));
+                            return;
+                        };
+                        if open.received_updates >= open.expected_updates {
+                            yield Err(UtxoWatcherError::DecodeError(format!(
+                                "Shard {} received more UTXO updates than declared in StartOfShard ({})",
+                                open.shard, open.expected_updates,
+                            )));
+                            return;
+                        }
+                        open.received_updates += 1;
+                        match convert_update(update) {
+                            Ok(frame) => yield Ok(frame),
+                            Err(err) => {
+                                yield Err(err);
+                                return;
+                            },
+                        }
+                    }
+                    if let Some(eos) = eos {
+                        // Take the shard so a following `EndOfShard` (or any frame) that is not
+                        // preceded by a fresh `StartOfShard` errors out rather than being
+                        // misattributed to this shard and corrupting its cursor.
+                        let Some(open) = current_shard.take() else {
+                            yield Err(UtxoWatcherError::DecodeError(
+                                "EndOfShard received before any StartOfShard".to_string(),
+                            ));
+                            return;
+                        };
+                        let max_state_version = StateVersion::from(eos.max_state_version);
+                        if max_state_version != open.max_state_version {
+                            yield Err(UtxoWatcherError::DecodeError(format!(
+                                "EndOfShard max_state_version {} does not match StartOfShard {} for {}",
+                                max_state_version, open.max_state_version, open.shard,
+                            )));
+                            return;
+                        }
+                        if open.received_updates != open.expected_updates {
+                            yield Err(UtxoWatcherError::DecodeError(format!(
+                                "Shard {} ended after {} update(s), expected {}",
+                                open.shard, open.received_updates, open.expected_updates,
+                            )));
+                            return;
+                        }
+                        yield Ok(StealthUtxoFrame::EndOfShard {
+                            shard: open.shard,
+                            max_state_version,
+                        });
+                    }
+                },
+                Some(Err(err)) => {
+                    error!(%err, "Error receiving stealth UTXO update");
+                    yield Err(UtxoWatcherError::StreamError(err));
+                    return;
+                },
+                None => {
+                    if let Some(open) = current_shard {
+                        yield Err(UtxoWatcherError::DecodeError(format!(
+                            "UTXO update stream ended before EndOfShard for {}",
+                            open.shard,
+                        )));
+                    }
+                    return;
+                },
             }
         }
     }
@@ -708,5 +783,156 @@ mod tests {
         ]);
         let json = serde_json::to_string(&cursor).unwrap();
         assert_eq!(serde_json::from_str::<ShardCursor>(&json).unwrap(), cursor);
+    }
+
+    fn sos_payload(shard: u32, max_state_version: u64, num_updates: u32) -> protobuf::StartOfShard {
+        protobuf::StartOfShard {
+            shard,
+            max_state_version,
+            num_updates,
+            has_more: false,
+            spends_incomplete: false,
+        }
+    }
+
+    fn unspent_update(tag: u32, byte: u8) -> protobuf::WalletUtxoUpdate {
+        protobuf::WalletUtxoUpdate::Unspent(protobuf::UtxoUnspent {
+            tag,
+            public_nonce: vec![byte; 32],
+        })
+    }
+
+    async fn collect_frames(payloads: Vec<UtxoUpdatePayload>) -> Vec<Result<StealthUtxoFrame, UtxoWatcherError>> {
+        let stream = futures::stream::iter(payloads.into_iter().map(Ok));
+        decode_utxo_payload_stream(stream).collect().await
+    }
+
+    #[tokio::test]
+    async fn decode_utxo_stream_yields_frames_for_well_formed_shards() {
+        let payloads = vec![
+            UtxoUpdatePayload {
+                sos: Some(sos_payload(1, 10, 1)),
+                update: Some(unspent_update(7, 0x11)),
+                eos: Some(protobuf::EndOfShard { max_state_version: 10 }),
+            },
+            UtxoUpdatePayload {
+                sos: Some(sos_payload(2, 20, 0)),
+                update: None,
+                eos: Some(protobuf::EndOfShard { max_state_version: 20 }),
+            },
+        ];
+
+        let frames = collect_frames(payloads)
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(frames, vec![
+            StealthUtxoFrame::StartOfShard {
+                shard: Shard::from_u32(1),
+                max_state_version: v(10),
+                num_updates: 1,
+                has_more: false,
+                spends_incomplete: false,
+            },
+            StealthUtxoFrame::Unspent {
+                tag: UtxoTag::new(7),
+                public_nonce: RistrettoPublicKeyBytes::from_bytes(&[0x11; 32]).unwrap(),
+            },
+            StealthUtxoFrame::EndOfShard {
+                shard: Shard::from_u32(1),
+                max_state_version: v(10),
+            },
+            StealthUtxoFrame::StartOfShard {
+                shard: Shard::from_u32(2),
+                max_state_version: v(20),
+                num_updates: 0,
+                has_more: false,
+                spends_incomplete: false,
+            },
+            StealthUtxoFrame::EndOfShard {
+                shard: Shard::from_u32(2),
+                max_state_version: v(20),
+            },
+        ]);
+    }
+
+    #[tokio::test]
+    async fn decode_utxo_stream_rejects_update_outside_open_shard() {
+        let frames = collect_frames(vec![UtxoUpdatePayload {
+            sos: None,
+            update: Some(unspent_update(1, 0x22)),
+            eos: None,
+        }])
+        .await;
+        assert_eq!(frames.len(), 1);
+        assert!(matches!(frames[0], Err(UtxoWatcherError::DecodeError(_))));
+    }
+
+    #[tokio::test]
+    async fn decode_utxo_stream_rejects_overlapping_start_of_shard_and_truncated_stream() {
+        let overlapping = collect_frames(vec![
+            UtxoUpdatePayload {
+                sos: Some(sos_payload(1, 10, 1)),
+                update: Some(unspent_update(1, 0x11)),
+                eos: None,
+            },
+            UtxoUpdatePayload {
+                sos: Some(sos_payload(2, 20, 0)),
+                update: None,
+                eos: Some(protobuf::EndOfShard { max_state_version: 20 }),
+            },
+        ])
+        .await;
+        assert!(matches!(
+            overlapping.last(),
+            Some(Err(UtxoWatcherError::DecodeError(_)))
+        ));
+
+        let truncated = collect_frames(vec![UtxoUpdatePayload {
+            sos: Some(sos_payload(1, 10, 1)),
+            update: Some(unspent_update(1, 0x11)),
+            eos: None,
+        }])
+        .await;
+        assert!(matches!(truncated.last(), Some(Err(UtxoWatcherError::DecodeError(_)))));
+    }
+
+    #[tokio::test]
+    async fn decode_utxo_stream_rejects_mismatched_update_counts_version_and_empty_payload() {
+        let too_few = collect_frames(vec![UtxoUpdatePayload {
+            sos: Some(sos_payload(1, 10, 2)),
+            update: Some(unspent_update(1, 0x11)),
+            eos: Some(protobuf::EndOfShard { max_state_version: 10 }),
+        }])
+        .await;
+        assert!(matches!(too_few.last(), Some(Err(UtxoWatcherError::DecodeError(_)))));
+
+        let too_many = collect_frames(vec![UtxoUpdatePayload {
+            sos: Some(sos_payload(1, 10, 0)),
+            update: Some(unspent_update(1, 0x11)),
+            eos: Some(protobuf::EndOfShard { max_state_version: 10 }),
+        }])
+        .await;
+        assert!(matches!(too_many.last(), Some(Err(UtxoWatcherError::DecodeError(_)))));
+
+        let version_mismatch = collect_frames(vec![UtxoUpdatePayload {
+            sos: Some(sos_payload(1, 10, 0)),
+            update: None,
+            eos: Some(protobuf::EndOfShard { max_state_version: 11 }),
+        }])
+        .await;
+        assert!(matches!(
+            version_mismatch.last(),
+            Some(Err(UtxoWatcherError::DecodeError(_)))
+        ));
+
+        let empty = collect_frames(vec![UtxoUpdatePayload {
+            sos: None,
+            update: None,
+            eos: None,
+        }])
+        .await;
+        assert!(matches!(empty.as_slice(), [Err(UtxoWatcherError::DecodeError(_))]));
     }
 }

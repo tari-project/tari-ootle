@@ -106,6 +106,7 @@ where
         self.transaction_manager.uncommitted_templates()
     }
 
+    #[expect(clippy::too_many_lines)]
     pub fn handle(
         &mut self,
         tx: &mut TStateStore::WriteTransaction<'_>,
@@ -221,6 +222,12 @@ where
         }
 
         let (local_decision, no_vote_reason) = if !may_vote {
+            // The caller sees only `AlreadyVotedAtHeight`, so the block's own no-vote reason is kept in diagnostics.
+            if let Some(reason) = change_set.no_vote_reason() &&
+                let Err(err) = tx.diagnostics_add_no_vote(*valid_block.id(), reason.clone())
+            {
+                error!(target: LOG_TARGET, "Failed to save no vote reason: {err}");
+            }
             (None, Some(NoVoteReason::AlreadyVotedAtHeight))
         } else if let Some(reason) = change_set.no_vote_reason() {
             (None, Some(reason.clone()))

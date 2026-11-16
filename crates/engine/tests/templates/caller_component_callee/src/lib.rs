@@ -20,6 +20,7 @@ mod callee {
             Component::new(Callee)
                 .with_access_rules(access_rules)
                 .with_owner_rule(OwnerRule::None)
+                .with_rules_updater(RulesUpdater::TemplateManaged)
                 .create()
         }
 
@@ -36,6 +37,7 @@ mod callee {
                 .with_address_allocation(allocation)
                 .with_access_rules(access_rules)
                 .with_owner_rule(OwnerRule::None)
+                .with_rules_updater(RulesUpdater::TemplateManaged)
                 .create()
         }
 
@@ -50,6 +52,7 @@ mod callee {
             Component::new(Callee)
                 .with_access_rules(access_rules)
                 .with_owner_rule(OwnerRule::ByAccessRule(rule!(caller_component(gate))))
+                .with_rules_updater(RulesUpdater::TemplateManaged)
                 .create()
         }
 

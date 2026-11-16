@@ -283,6 +283,7 @@ fn replace_self_in_single_value(type_path: &TypePath) -> Option<Stmt> {
                 ::tari_template_lib::template_macro_deps::ComponentAccessRules::new(),
                 None,
                 ::tari_template_lib::template_macro_deps::UpdateRule::Locked,
+                ::tari_template_lib::template_macro_deps::RulesUpdater::Locked,
             );
         });
     }
@@ -328,6 +329,7 @@ fn replace_self_in_tuple_expr(base_expr: Expr, type_tuple: &TypeTuple) -> Expr {
                                 ::tari_template_lib::template_macro_deps::ComponentAccessRules::new(),
                                 None,
                                 ::tari_template_lib::template_macro_deps::UpdateRule::Locked,
+                                ::tari_template_lib::template_macro_deps::RulesUpdater::Locked,
                             )
                         }
                     } else {

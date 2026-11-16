@@ -181,6 +181,25 @@ impl TransactionBuilder<MainIntent> {
         self.with_fee_instructions_builder(|builder| builder.add_instruction(instruction))
     }
 
+    /// Replaces every method access rule of `component`. The transaction must satisfy the component's rules updater.
+    pub fn set_component_access_rules<C: Into<NamedComponentCall>>(
+        self,
+        component: C,
+        access_rules: ComponentAccessRules,
+    ) -> Self {
+        let component = self.resolve_call(component.into());
+        self.add_instruction(Instruction::SetComponentAccessRules {
+            component,
+            access_rules,
+        })
+    }
+
+    /// Replaces the owner rule of `component`. The transaction must satisfy the component's rules updater.
+    pub fn set_component_owner_rule<C: Into<NamedComponentCall>>(self, component: C, owner_rule: OwnerRule) -> Self {
+        let component = self.resolve_call(component.into());
+        self.add_instruction(Instruction::SetComponentOwnerRule { component, owner_rule })
+    }
+
     pub fn with_min_epoch(mut self, min_epoch: Option<Epoch>) -> Self {
         self.unsigned_transaction.set_min_epoch(min_epoch);
         self
@@ -1027,6 +1046,10 @@ impl<D> TransactionBuilder<D> {
                 if let Some(migrate) = migrate {
                     self.add_inputs_for_args(&migrate.args);
                 }
+            },
+            Instruction::SetComponentAccessRules { component, .. } |
+            Instruction::SetComponentOwnerRule { component, .. } => {
+                self.add_input_for_component_ref(component);
             },
             Instruction::Assert {
                 assertion: Assertion::IsNotNull,

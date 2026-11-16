@@ -6,7 +6,7 @@ use tari_template_abi::rust::marker::PhantomData;
 use tari_template_lib_types::{
     ComponentAddress,
     OwnerRule,
-    access_rules::{ComponentAccessRules, UpdateRule},
+    access_rules::{ComponentAccessRules, RulesUpdater, UpdateRule},
 };
 
 use crate::{
@@ -22,6 +22,7 @@ pub struct ComponentBuilder<T> {
     owner_rule: OwnerRule,
     access_rules: ComponentAccessRules,
     address_allocation: Option<ComponentAddressAllocation>,
+    rules_updater: RulesUpdater,
 }
 
 impl<T> ComponentBuilder<T> {
@@ -32,6 +33,7 @@ impl<T> ComponentBuilder<T> {
             owner_rule: OwnerRule::default(),
             access_rules: ComponentAccessRules::new(),
             address_allocation: None,
+            rules_updater: RulesUpdater::Locked,
         }
     }
 
@@ -60,8 +62,8 @@ impl<T> ComponentBuilder<T> {
         self.with_address_allocation(CallerContext::allocate_component_address(Some(public_key)))
     }
 
-    /// Sets up who will be the owner of the component.
-    /// Component owners are the only ones allowed to update the component's access rules after creation
+    /// Sets up who will be the owner of the component. The owner may call every method. Whether the owner may also
+    /// replace the access rules or the owner rule is set by [`Self::with_rules_updater`].
     pub fn with_owner_rule(mut self, owner_rule: OwnerRule) -> Self {
         self.owner_rule = owner_rule;
         self
@@ -70,6 +72,15 @@ impl<T> ComponentBuilder<T> {
     /// Sets up who can access each of the component's methods
     pub fn with_access_rules(mut self, access_rules: ComponentAccessRules) -> Self {
         self.access_rules = access_rules;
+        self
+    }
+
+    /// Sets up who may replace the component's access rules and owner rule, by transaction instruction or through
+    /// `ComponentManager::set_access_rules`/`set_owner_rule`. The setting is fixed at creation. Defaults to
+    /// `RulesUpdater::Locked`, under which the rules never change, so a template that changes them from its own code
+    /// must choose `RulesUpdater::TemplateManaged`, `RulesUpdater::Owner` or `RulesUpdater::AccessRule`.
+    pub fn with_rules_updater(mut self, rules_updater: RulesUpdater) -> Self {
+        self.rules_updater = rules_updater;
         self
     }
 }
@@ -83,6 +94,7 @@ impl<T: Encode<()>> ComponentBuilder<T> {
             self.access_rules,
             self.address_allocation,
             UpdateRule::Locked,
+            self.rules_updater,
         );
         Component::from_address(address)
     }

@@ -104,9 +104,11 @@ use tari_template_lib::{
         LogLevel,
         Metadata,
         NonFungibleAddress,
+        OwnerRule,
         TemplateAddress,
         TemplateMetadataHash,
         ValidatorFeePoolAddress,
+        access_rules::ComponentAccessRules,
         crypto::RistrettoPublicKeyBytes,
         engine_args::IntrinsicId,
         stealth::StealthTransferStatement,
@@ -123,6 +125,13 @@ use crate::{
     },
     wasm::WasmInstanceCache,
 };
+
+/// A rule a top-level instruction replaces on a component.
+#[derive(Debug, Clone)]
+pub enum ComponentRulesChange {
+    AccessRules(ComponentAccessRules),
+    OwnerRule(OwnerRule),
+}
 
 /// What a call on a component needs of it: the header fields its frame runs under, and the
 /// substates its state holds.
@@ -146,6 +155,7 @@ pub trait RuntimeInterface {
     fn load_component(&self, call: ComponentReference) -> Result<LoadedComponent, RuntimeError>;
 
     fn lock_component(&self, address: ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError>;
+    fn unlock_component(&self, lock: LockedSubstate) -> Result<(), RuntimeError>;
 
     fn component_invoke(
         &self,
@@ -244,6 +254,15 @@ pub trait RuntimeInterface {
     fn check_signer_badge_in_scope(&self, public_key: RistrettoPublicKeyBytes) -> Result<(), RuntimeError>;
 
     fn update_component_template(&self, new_template: TemplateAddress) -> Result<(), RuntimeError>;
+
+    /// Replaces a rule of the component behind `component_lock` for a top-level instruction. The component's rules
+    /// updater is checked against the current frame's scope, which for an instruction is the transaction's signer
+    /// badges and the proofs it has authorized.
+    fn set_component_rules(
+        &self,
+        component_lock: &LockedSubstate,
+        change: ComponentRulesChange,
+    ) -> Result<(), RuntimeError>;
 
     fn validate_return_value(&self, value: &IndexedValue) -> Result<(), RuntimeError>;
 

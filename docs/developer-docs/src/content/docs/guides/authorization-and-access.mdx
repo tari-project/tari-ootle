@@ -64,6 +64,33 @@ Ownership is configured separately with `.with_owner_rule(OwnerRule::...)`; the 
 call any method. `OwnerRule` defaults to `OwnedBySigner`, meaning the transaction signer that created the
 component owns it.
 
+Who may replace the method access rules and the owner rule is configured with
+`.with_rules_updater(RulesUpdater::...)`, fixed at creation. It governs every change, whether it comes from a
+`SetComponentAccessRules` / `SetComponentOwnerRule` transaction instruction or from the component's own code through
+`ComponentManager::set_access_rules` / `set_owner_rule`:
+
+- `RulesUpdater::Locked` (the default): nobody, the component's own code included. The rules never change.
+- `RulesUpdater::TemplateManaged`: only the component's own code, and only while the caller satisfies the owner rule.
+  The instructions are refused. Choose this when the template wraps rule changes in checks of its own, such as a
+  confirmed handover.
+- `RulesUpdater::Owner`: whoever satisfies the component's owner rule, by instruction or from the component's code.
+- `RulesUpdater::AccessRule(rule)`: anyone satisfying `rule`, independent of the owner rule.
+  `component(..)`/`template(..)` requirements are rejected here.
+
+A template that calls `set_access_rules` or `set_owner_rule` must choose one of the last three, or the call fails
+with `ComponentRulesLocked`. Components created before the setting existed behave as `TemplateManaged`.
+
+The instructions take the whole replacement: `SetComponentAccessRules` replaces every method rule and the default,
+and `SetComponentOwnerRule` replaces the owner rule (`OwnerRule::OwnedBySigner` names the transaction's main signer).
+They are checked in the transaction's own scope: its signer keys, plus any badge proofs it opened an `authorize!`
+window over.
+
+```rust
+let tx = Transaction::builder(network, max_epoch)
+    .set_component_access_rules(component, ComponentAccessRules::new().method("mint", rule!(non_fungible(new_minter))))
+    .build_and_seal(&owner_secret);
+```
+
 The `rule!` macro builds an `AccessRule`. The base rules are `rule!(allow_all)` and `rule!(deny_all)`; a
 restricted rule wraps one or more **requirements**:
 

@@ -1346,6 +1346,7 @@ mod tests {
                 access_rules: ComponentAccessRules::allow_all(),
                 entity_id: EntityId::default(),
                 upgrade_rule: Default::default(),
+                rules_updater: None,
             },
             body: ComponentBody::empty(),
         });
@@ -1755,6 +1756,7 @@ mod tests {
                 access_rules: ComponentAccessRules::allow_all(),
                 entity_id: EntityId::default(),
                 upgrade_rule: Default::default(),
+                rules_updater: None,
             },
             body: ComponentBody::empty(),
         });

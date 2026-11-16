@@ -51,7 +51,7 @@ use tari_template_lib::{
         Metadata,
         SubstateOwnerRule,
         TemplateAddress,
-        access_rules::{ComponentAccessRules, UpdateRule},
+        access_rules::{ComponentAccessRules, RulesUpdater, UpdateRule},
     },
 };
 
@@ -332,6 +332,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         access_rules: ComponentAccessRules,
         address_allocation: Option<ComponentAddressAllocation>,
         upgrade_rule: UpdateRule,
+        rules_updater: RulesUpdater,
     ) -> Result<ComponentAddress, RuntimeError> {
         self.write_with(|state| {
             let template_address = *state.current_template()?;
@@ -365,6 +366,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 owner_rule,
                 entity_id: component_address.entity_id(),
                 upgrade_rule,
+                rules_updater: Some(rules_updater),
             };
 
             let component = Component { header, body };

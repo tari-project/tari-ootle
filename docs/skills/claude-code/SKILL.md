@@ -537,6 +537,24 @@ OwnerRule::ByAccessRule(rule)      // Custom rule determines ownership
 OwnerRule::ByPublicKey(pk)         // Specific public key is owner
 ```
 
+### Rules Updater
+
+Who may replace the component's method access rules and owner rule. Set once at creation with
+`.with_rules_updater(..)`; it governs both the `SetComponentAccessRules` / `SetComponentOwnerRule` transaction
+instructions and `ComponentManager::set_access_rules` / `set_owner_rule` calls from the template's own code.
+
+```rust
+RulesUpdater::Locked               // Default: nobody, not even the template's own code
+RulesUpdater::TemplateManaged      // Only the template's own code, by the owner; instructions refused
+RulesUpdater::Owner                // The owner, by instruction or from template code
+RulesUpdater::AccessRule(rule)     // Anyone satisfying `rule`, by instruction or from template code
+```
+
+A template that calls `set_access_rules` / `set_owner_rule` must not leave this `Locked`, or the call fails with
+`ComponentRulesLocked`. Prefer `Owner` or `AccessRule` over hand-rolled role-management methods: the transaction
+builder's `.set_component_access_rules(component, rules)` and `.set_component_owner_rule(component, rule)` rotate
+roles without template code.
+
 ### Caller Context — Complete API
 
 ```rust

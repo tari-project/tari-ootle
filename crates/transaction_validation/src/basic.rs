@@ -93,7 +93,13 @@ mod tests {
     use tari_common_types::types::PrivateKey;
     use tari_ootle_common_types::Epoch;
     use tari_ootle_transaction::{ComponentReference, Instruction, args, args::WorkspaceOffsetId};
-    use tari_template_lib::types::{Amount, ComponentAddress, TemplateAddress};
+    use tari_template_lib::types::{
+        Amount,
+        ComponentAddress,
+        OwnerRule,
+        TemplateAddress,
+        access_rules::ComponentAccessRules,
+    };
 
     use super::*;
 
@@ -161,6 +167,32 @@ mod tests {
             TransactionValidationError::ComponentTemplateUpdateNotSupported { index: 1, .. }
         ));
         assert!(err.is_sender_fault());
+    }
+
+    #[test]
+    fn rejects_component_rule_changes_in_fee_instructions() {
+        for instruction in [
+            Instruction::SetComponentAccessRules {
+                component: ComponentReference::Address(account()),
+                access_rules: ComponentAccessRules::new(),
+            },
+            Instruction::SetComponentOwnerRule {
+                component: ComponentReference::Address(account()),
+                owner_rule: OwnerRule::None,
+            },
+        ] {
+            let tx = Transaction::builder_localnet(Epoch(10))
+                .with_fee_instructions([instruction, Instruction::PayFeeFromBucket {
+                    bucket: WorkspaceOffsetId::new(0),
+                }])
+                .build_and_seal(&PrivateKey::from(1u64));
+            let err = BasicValidations::new().validate(&(), &tx).unwrap_err();
+            assert!(matches!(err, TransactionValidationError::DisallowedFeeInstruction {
+                index: 0,
+                ..
+            }));
+            assert!(err.is_sender_fault());
+        }
     }
 
     #[test]

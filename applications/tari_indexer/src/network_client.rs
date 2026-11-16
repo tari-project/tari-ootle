@@ -141,12 +141,13 @@ where
     /// The status of a transaction as one member of its receipt committee reports it, or `None` when that member
     /// reports the transaction unknown.
     ///
-    /// A finalized result is believed once its decision verifies against the quorum-signed header of the block that
+    /// A finalized result is returned once its decision verifies against the quorum-signed header of the block that
     /// finalized it, so members are asked in turn until one serves a result that does. The rest of the result, its
     /// execution and abort details, is the serving member's account. Pending and unknown answers carry no proof, and
-    /// the first member to give one is believed: each query asks the members in a fresh random order, so a member that
-    /// misreports one only delays the result. A transaction whose finalized result no member can prove is reported as
-    /// pending.
+    /// the first member to give one is returned: each query asks the members in a fresh random order, so a member that
+    /// misreports one only delays the result. A transaction whose finalized result this indexer cannot verify from any
+    /// member, because no member holds a proof or this indexer knows no committee for the block a proof cites, is
+    /// reported as pending.
     pub async fn get_finalized_transaction_result(
         &self,
         transaction_id: TransactionId,
@@ -158,7 +159,7 @@ where
             .committee_for_substate(transaction_id.to_substate_address())
             .await?;
 
-        let mut unproven = false;
+        let mut unverifiable = false;
         let mut last_error = None;
         for member in committee.shuffled() {
             let mut client = self.client_provider.create_client(&member.address);
@@ -190,7 +191,14 @@ where
                         target: LOG_TARGET,
                         "Validator '{member}' holds no proof of its finalized result for transaction {transaction_id}"
                     );
-                    unproven = true;
+                    unverifiable = true;
+                },
+                Err(err @ ResultProofError::CommitteeUnknown { .. }) => {
+                    warn!(
+                        target: LOG_TARGET,
+                        "Cannot verify validator '{member}''s finalized result for transaction {transaction_id}: {err}"
+                    );
+                    unverifiable = true;
                 },
                 Err(err) => {
                     warn!(
@@ -202,10 +210,10 @@ where
             }
         }
 
-        if unproven {
+        if unverifiable {
             warn!(
                 target: LOG_TARGET,
-                "No validator proved its finalized result for transaction {transaction_id}. Reporting it as pending."
+                "No validator's finalized result for transaction {transaction_id} could be verified. Reporting it as pending."
             );
             return Ok(Some(TransactionResultStatus::Pending));
         }
@@ -248,10 +256,17 @@ where
         if let Some(root) = recall(&self.verified_blocks, &block_id) {
             return Ok(root);
         }
+        let epoch = commit_proof.epoch();
+        let shard_group = commit_proof.shard_group()?;
         let committee = self
             .epoch_manager
-            .get_committee_by_shard_group(commit_proof.epoch(), commit_proof.shard_group()?)
-            .await?;
+            .get_committee_by_shard_group(epoch, shard_group)
+            .await
+            .map_err(|source| ResultProofError::CommitteeUnknown {
+                epoch,
+                shard_group,
+                source,
+            })?;
         commit_proof.validate(self.network, committee.quorum_threshold(), &*committee)?;
         let root = TreeHash::from(commit_proof.proof().header.transaction_merkle_root.into_array());
         remember(&self.verified_blocks, block_id, root, VERIFIED_BLOCKS_CAPACITY);
@@ -417,8 +432,14 @@ enum ResultProofError {
     UndecodableTransactionProof(String),
     #[error("the commit proof of the finalizing block is invalid: {0}")]
     InvalidCommitProof(#[from] CommittedBlockProofError),
-    #[error("the committee of the finalizing block is unknown: {0}")]
-    CommitteeUnavailable(#[from] EpochManagerError),
+    #[error(
+        "this indexer knows no committee of {shard_group} at {epoch}, which committed the finalizing block: {source}"
+    )]
+    CommitteeUnknown {
+        epoch: Epoch,
+        shard_group: ShardGroup,
+        source: EpochManagerError,
+    },
     #[error("the finalizing block did not finalize this decision: {0}")]
     DecisionNotFinalized(#[from] JmtProofVerifyError),
 }
@@ -567,8 +588,8 @@ pub(crate) mod tests {
         }
     }
 
-    /// Answers with the polled committee for the current epoch and with the committee of [`signers`] for
-    /// [`PROOF_EPOCH`], counting the lookups of the latter.
+    /// Answers with the polled committee for the current epoch, with the committee of [`signers`] for [`PROOF_EPOCH`],
+    /// counting those lookups, and with no committee for [`UNKNOWN_EPOCH`].
     pub(crate) struct FakeEpochManager {
         polled: Arc<Committee<Addr>>,
         signing: Arc<Committee<Addr>>,
@@ -667,6 +688,9 @@ pub(crate) mod tests {
             epoch: Epoch,
             _: ShardGroup,
         ) -> Result<Arc<Committee<Addr>>, EpochManagerError> {
+            if epoch == UNKNOWN_EPOCH {
+                return Err(EpochManagerError::NoEpochFound(epoch));
+            }
             if epoch == PROOF_EPOCH {
                 self.signing_lookups.fetch_add(1, Ordering::SeqCst);
                 return Ok(self.signing.clone());
@@ -712,8 +736,11 @@ pub(crate) mod tests {
 
     const NETWORK: Network = Network::LocalNet;
 
-    /// The epoch of every block the fixtures prove a decision in.
+    /// The epoch of the blocks the fixtures prove a decision in.
     const PROOF_EPOCH: Epoch = Epoch(0);
+
+    /// An epoch whose committee the fake epoch manager does not know.
+    const UNKNOWN_EPOCH: Epoch = Epoch(9);
 
     fn transaction_id() -> TransactionId {
         TransactionId::from([7u8; 32])
@@ -751,6 +778,10 @@ pub(crate) mod tests {
 
     impl FinalizingBlock {
         fn new(decisions: &[(TransactionId, Decision)], signers: &Signers) -> Self {
+            Self::at(PROOF_EPOCH, decisions, signers)
+        }
+
+        fn at(epoch: Epoch, decisions: &[(TransactionId, Decision)], signers: &Signers) -> Self {
             let tree = KeyedProofTree::build(decisions.iter().map(|(transaction_id, decision)| {
                 let leaf = FinalizedTransactionLeaf {
                     transaction_id,
@@ -761,7 +792,7 @@ pub(crate) mod tests {
             .unwrap();
             let commit_proof = transaction_block_commit_proof(
                 NETWORK,
-                PROOF_EPOCH,
+                epoch,
                 ShardGroup::all_shards(NumPreshards::P1),
                 5,
                 tree.root(),
@@ -976,6 +1007,16 @@ pub(crate) mod tests {
                 .unwrap();
             assert!(is_pending(&status));
         }
+    }
+
+    #[tokio::test]
+    async fn a_proof_whose_committee_is_unknown_here_is_pending() {
+        let block = FinalizingBlock::at(UNKNOWN_EPOCH, &[(transaction_id(), Decision::Commit)], &signers());
+        let status = query(vec![block.prove(unproven_committed(1), transaction_id())])
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(is_pending(&status));
     }
 
     #[tokio::test]

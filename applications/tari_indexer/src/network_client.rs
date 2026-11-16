@@ -163,11 +163,11 @@ where
     /// - An abort's decision must be the leaf the serving member proves under the quorum-signed transaction merkle root
     ///   of the block that finalized it, leaving the reject reason and the abort details as the member's account.
     ///
-    /// Pending and unknown answers carry no proof, and
-    /// the first member to give one is returned: each query asks the members in a fresh random order, so a member that
-    /// misreports one only delays the result. A transaction whose finalized result this indexer cannot verify from any
-    /// member, because no member holds a proof or this indexer knows no committee for the block a proof cites, is
-    /// reported as pending.
+    /// Pending and unknown answers carry no proof: `Pending` is returned at once while the transaction may still be in
+    /// the pool, whereas `NotFound` tries the remaining members first so a lagging, pruned, or misbehaving member
+    /// cannot hide a finalized result that another member can prove. A transaction whose finalized result this indexer
+    /// cannot verify from any member, because no member holds a proof or this indexer knows no committee for the block
+    /// a proof cites, is reported as pending.
     pub async fn get_finalized_transaction_result(
         &self,
         transaction_id: TransactionId,
@@ -179,12 +179,16 @@ where
             .committee_for_substate(transaction_id.to_substate_address())
             .await?;
 
+        let mut saw_not_found = false;
         let mut unverifiable = false;
         let mut last_error = None;
         for member in committee.shuffled() {
             let mut client = self.client_provider.create_client(&member.address);
             let finalized = match client.get_finalized_transaction_result(transaction_id).await.optional() {
-                Ok(None) => return Ok(None),
+                Ok(None) => {
+                    saw_not_found = true;
+                    continue;
+                },
                 Ok(Some(TransactionResultStatus::Pending)) => return Ok(Some(TransactionResultStatus::Pending)),
                 Ok(Some(TransactionResultStatus::Finalized(finalized))) => finalized,
                 Err(err) => {
@@ -246,6 +250,9 @@ where
                 "No validator's finalized result for transaction {transaction_id} could be verified. Reporting it as pending."
             );
             return Ok(Some(TransactionResultStatus::Pending));
+        }
+        if saw_not_found {
+            return Ok(None);
         }
         Err(NetworkClientError::AllValidatorsFailed {
             committee_size: committee.len(),
@@ -1303,6 +1310,28 @@ pub(crate) mod tests {
         let status = query(vec![Answer::Pending]).await.unwrap().unwrap();
         assert!(is_pending(&status));
         assert!(query(vec![Answer::NotFound]).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_not_found_member_does_not_hide_a_proven_result() {
+        for _ in 0..ROUNDS {
+            let status = query(vec![
+                Answer::NotFound,
+                Answer::NotFound,
+                committed(7),
+                Answer::Unreachable,
+            ])
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(commit_tag(&status), Some(7));
+
+            let status = query(vec![Answer::NotFound, aborted(), Answer::Unreachable])
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(is_abort(&status));
+        }
     }
 
     #[tokio::test]

@@ -175,7 +175,10 @@ pub mod base64 {
 
 #[cfg(test)]
 mod tests {
-    use serde::{de::value::Error as ValueError, forward_to_deserialize_any};
+    use serde::{
+        de::value::{Error as ValueError, SeqDeserializer},
+        forward_to_deserialize_any,
+    };
 
     use super::*;
     use crate::FixedHash;
@@ -353,7 +356,7 @@ mod tests {
             match self {
                 Self::Borrowed(bytes) => visitor.visit_borrowed_bytes(bytes),
                 Self::Owned(bytes) => visitor.visit_byte_buf(bytes),
-                Self::Seq(bytes) => visitor.visit_seq(serde::de::value::SliceDeserializer::new(bytes)),
+                Self::Seq(bytes) => visitor.visit_seq(SeqDeserializer::<_, ValueError>::new(bytes.iter().copied())),
             }
         }
 

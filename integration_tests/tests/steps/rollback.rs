@@ -143,8 +143,8 @@ async fn validator_nodes_reconnect_peers(world: &mut TariWorld) {
     }
 }
 
-#[then(expr = "validator node {word} reports consensus state Running within {int} seconds")]
-async fn validator_reports_running(world: &mut TariWorld, vn_name: String, timeout_secs: u64) {
+#[then(expr = "validator node {word} reports consensus state {word} within {int} seconds")]
+async fn validator_reports_consensus_state(world: &mut TariWorld, vn_name: String, state: String, timeout_secs: u64) {
     let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
     loop {
         let status = {
@@ -152,12 +152,12 @@ async fn validator_reports_running(world: &mut TariWorld, vn_name: String, timeo
             let mut client = vn.get_client();
             client.get_consensus_status().await.unwrap()
         };
-        if status.state == "Running" {
-            integration_tests::cucumber_log!("{vn_name} consensus Running at epoch {}", status.epoch);
+        if status.state == state {
+            integration_tests::cucumber_log!("{vn_name} consensus {state} at epoch {}", status.epoch);
             return;
         }
         if std::time::Instant::now() > deadline {
-            panic!("{vn_name} did not reach consensus=Running within {timeout_secs}s (last: {status:?})");
+            panic!("{vn_name} did not reach consensus={state} within {timeout_secs}s (last: {status:?})");
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }

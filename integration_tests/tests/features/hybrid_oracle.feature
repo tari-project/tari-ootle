@@ -32,10 +32,12 @@ Feature: Hybrid epoch oracle
     When I wait for validator VN5 has leaf block height of at least 3 at epoch 4
     Then indexer INDEXER proves the committee of epoch 4 is VN1,VN2,VN3,VN4,VN5
 
-    # VN1 stays in its committee up to and including epoch 5
+    # VN1 stays in its committee up to and including epoch 5, and stands down in epoch 6
     When miner MINER mines to the next epoch
     Then indexer INDEXER proves the committee of epoch 5 is VN1,VN2,VN3,VN4,VN5
+    Then validator node VN1 reports consensus state Running within 60 seconds
     When miner MINER mines to the next epoch
+    Then validator node VN1 reports consensus state Idle within 120 seconds
     Then indexer INDEXER proves the committee of epoch 6 is VN2,VN3,VN4,VN5
     When I shut down validator node VN1
     When I create an account ACC3 via the wallet daemon WALLET_D with 10000 XTR

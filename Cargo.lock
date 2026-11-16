@@ -5379,6 +5379,7 @@ dependencies = [
  "tari_crypto",
  "tari_engine",
  "tari_engine_types",
+ "tari_epoch_oracles",
  "tari_indexer",
  "tari_indexer_client",
  "tari_ootle_address",

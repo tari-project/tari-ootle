@@ -122,13 +122,22 @@ impl UpgradeRuleCache {
     }
 }
 
-/// The component's upgrade rule, with an `Owner` rule on an ownerless component reported as [`UpdateRule::Locked`].
+/// The component's upgrade rule, with an `Owner` rule on a component whose owner rule satisfies no caller
+/// ([`SubstateOwnerRule::None`] or [`SubstateOwnerRule::ByAccessRule`]`(`[`AccessRule::DenyAll`]`)`) reported as
+/// [`UpdateRule::Locked`].
 ///
-/// [`SubstateOwnerRule::None`] satisfies no caller, and replacing an owner rule requires satisfying it, so an
-/// ownerless component stays ownerless and its `Owner` upgrade rule can never pass.
+/// Neither owner rule satisfies any caller, and replacing an owner rule requires satisfying it, so such a component's
+/// `Owner` upgrade rule can never pass.
 fn effective_upgrade_rule(component: &Component) -> UpdateRule {
     match component.upgrade_rule() {
-        UpdateRule::Owner if matches!(component.owner_rule(), SubstateOwnerRule::None) => UpdateRule::Locked,
+        UpdateRule::Owner
+            if matches!(
+                component.owner_rule(),
+                SubstateOwnerRule::None | SubstateOwnerRule::ByAccessRule(AccessRule::DenyAll)
+            ) =>
+        {
+            UpdateRule::Locked
+        },
         rule => rule.clone(),
     }
 }
@@ -382,9 +391,12 @@ mod tests {
     }
 
     #[test]
-    fn an_owner_upgrade_rule_on_an_ownerless_component_is_locked() {
+    fn an_owner_upgrade_rule_with_an_unsatisfiable_owner_rule_is_locked() {
         let ownerless = component_with_owner(UpdateRule::Owner, SubstateOwnerRule::None);
         assert!(matches!(effective_upgrade_rule(&ownerless), UpdateRule::Locked));
+
+        let deny_all = component_with_owner(UpdateRule::Owner, SubstateOwnerRule::ByAccessRule(AccessRule::DenyAll));
+        assert!(matches!(effective_upgrade_rule(&deny_all), UpdateRule::Locked));
 
         let owned = owned_component(UpdateRule::Owner);
         assert!(matches!(effective_upgrade_rule(&owned), UpdateRule::Owner));

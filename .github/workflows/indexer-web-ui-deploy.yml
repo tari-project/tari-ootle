@@ -12,7 +12,22 @@ permissions:
 
 jobs:
   deploy:
+    name: deploy (${{ matrix.network }})
     runs-on: ubuntu-latest
+    # The indexer address is baked into the bundle at build time, so each network is a separate
+    # Worker. Override an address with the network's repository variable.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - network: esmeralda
+            worker: tari-ootle-indexer-web-ui
+            indexer_api_address_var: ESMERALDA_INDEXER_API_ADDRESS
+            indexer_api_address: https://esme-indexer-a.ootle.tari.com
+          - network: mainnet
+            worker: tari-ootle-indexer-web-ui-mainnet
+            indexer_api_address_var: MAINNET_INDEXER_API_ADDRESS
+            indexer_api_address: https://indexer-b.ootle.tari.com
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -45,10 +60,9 @@ jobs:
       # `...` builds the web UI together with the bindings/clients it depends on.
       # Without VITE_INDEXER_API_ADDRESS the UI asks the indexer serving it for its API
       # address; there is no indexer behind this deployment, so bake the address in.
-      # Override it with the INDEXER_API_ADDRESS repository variable.
       - name: Build
         env:
-          VITE_INDEXER_API_ADDRESS: ${{ vars.INDEXER_API_ADDRESS || 'https://esme-indexer-a.ootle.tari.com' }}
+          VITE_INDEXER_API_ADDRESS: ${{ vars[matrix.indexer_api_address_var] || matrix.indexer_api_address }}
         run: pnpm --filter "tari_indexer_web_ui..." run build
 
       # wrangler-action is not used here: it installs wrangler into the working directory,
@@ -61,14 +75,16 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER_NAME: ${{ matrix.worker }}
+          NETWORK: ${{ matrix.network }}
         working-directory: applications/tari_indexer/web_ui
         run: |
           set -o pipefail
-          pnpm dlx wrangler@4.122.0 deploy 2>&1 | tee deploy.log
+          pnpm dlx wrangler@4.122.0 deploy --name "$WORKER_NAME" 2>&1 | tee deploy.log
           {
             if url=$(grep -oEm1 'https://[a-zA-Z0-9.-]+\.workers\.dev[^ ]*' deploy.log); then
-              echo "Deployed to $url"
+              echo "Deployed $NETWORK to $url"
             else
-              echo "Deployed. See the deploy step log for the URL."
+              echo "Deployed $NETWORK. See the deploy step log for the URL."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

@@ -42,7 +42,7 @@ prefixed!(BlockCommitProofPrefix, KeyPrefix::BlockCommitProofs);
 /// The CBOR-encoded commit proof of each committed block that produced state versions or finalized transactions, which
 /// the [`StateVersionProofCf`] entries and finalized transaction inclusions naming the block are served with once the
 /// block is pruned. Deleted with the last of those, through [`BlockCommitProofCitationCf`] and
-/// [`BlockCommitProofTransactionCitationCf`].
+/// [`BlockCommitProofTransactionCitationCf`](crate::column_families::finalized_transaction::BlockCommitProofTransactionCitationCf).
 pub struct BlockCommitProofCf;
 
 impl Cf for BlockCommitProofCf {

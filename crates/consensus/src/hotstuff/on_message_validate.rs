@@ -775,12 +775,31 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             });
         }
 
-        if msg.proposal.shard_group_checked() == Some(epoch_state.local_committee_info().shard_group()) {
+        let Some(foreign_shard_group) = msg.proposal.shard_group_checked() else {
+            let block_id = msg.proposal.calculate_block_id();
+            let shard_group = msg.proposal.shard_group_unchecked();
             warn!(
                 target: LOG_TARGET,
-                "⚠️ Foreign proposal block {} from {from} names the local shard group {}; discarding message",
+                "❌ Foreign proposal block {} from {from} names a shard group with invalid bounds {shard_group}",
                 msg.proposal,
-                epoch_state.local_committee_info().shard_group(),
+            );
+            return Ok(MessageValidationResult::Invalid {
+                from,
+                message: HotstuffMessage::ForeignProposal(msg),
+                err: ProposalValidationError::InvalidShardGroup {
+                    block_id,
+                    shard_group,
+                    details: "Foreign proposal header names a shard group with invalid bounds".to_string(),
+                }
+                .into(),
+            });
+        };
+
+        if foreign_shard_group == epoch_state.local_committee_info().shard_group() {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️ Foreign proposal block {} from {from} names the local shard group {foreign_shard_group}; discarding message",
+                msg.proposal,
             );
             return Ok(MessageValidationResult::Discard);
         }

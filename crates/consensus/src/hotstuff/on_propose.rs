@@ -886,7 +886,8 @@ fn select_foreign_proposals(
 ) -> (Vec<ForeignProposalRecord>, Vec<BlockId>) {
     let mut stale_foreign_proposals = Vec::new();
     foreign_proposals.retain(|fp| {
-        if fp.proposal().shard_group_checked() == Some(local_shard_group) {
+        // `local_shard_group` has valid bounds, so an unchecked shard group equal to it has valid bounds too.
+        if fp.proposal().shard_group_unchecked() == local_shard_group {
             stale_foreign_proposals.push(*fp.block_id());
             false
         } else {

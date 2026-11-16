@@ -10,7 +10,7 @@ use tari_ootle_transaction::TransactionId;
 use tari_state_tree::SparseMerkleProofExt;
 
 use crate::{
-    codecs::{DefaultCodec, EpochCodec, KeyPrefix, TransactionIdCodec, UnitCodec},
+    codecs::{BlockIdCodec, DefaultCodec, EpochCodec, KeyPrefix, TransactionIdCodec, UnitCodec},
     column_families::cf_names,
     prefixed,
     traits::{Cf, QueryCf},
@@ -27,7 +27,7 @@ pub struct FinalizedTransactionLinkData {
     #[n(1)]
     pub epoch: Epoch,
     /// Where the finalized decision is proven. Each one cites its block in
-    /// [`BlockCommitProofTransactionCitationCf`](crate::column_families::state_version_proof::BlockCommitProofTransactionCitationCf),
+    /// [`BlockCommitProofTransactionCitationCf`],
     /// so the block's commit proof outlives the link.
     #[n(2)]
     pub inclusion: Option<FinalizedTransactionInclusionData>,
@@ -105,4 +105,33 @@ impl QueryCf for ByEpochQuery {
     type Cf = EpochIndex;
     type Key = Epoch;
     type KeyCodec = EpochCodec;
+}
+
+prefixed!(
+    BlockCommitProofTransactionCitationPrefix,
+    KeyPrefix::BlockCommitProofTransactionCitations
+);
+
+/// Per committed block, each transaction whose finalized transaction link holds an inclusion in the block. A
+/// transaction holds at most one inclusion, in the block that last finalized it.
+pub struct BlockCommitProofTransactionCitationCf;
+
+impl Cf for BlockCommitProofTransactionCitationCf {
+    type Key = (BlockId, TransactionId);
+    type KeyCodec = (BlockIdCodec, TransactionIdCodec);
+    type Prefix = BlockCommitProofTransactionCitationPrefix;
+    type Value = ();
+    type ValueCodec = UnitCodec;
+
+    fn name() -> &'static str {
+        cf_names::TRANSACTIONS
+    }
+}
+
+pub struct BlockCommitProofTransactionCitationByBlockQuery;
+
+impl QueryCf for BlockCommitProofTransactionCitationByBlockQuery {
+    type Cf = BlockCommitProofTransactionCitationCf;
+    type Key = BlockId;
+    type KeyCodec = BlockIdCodec;
 }

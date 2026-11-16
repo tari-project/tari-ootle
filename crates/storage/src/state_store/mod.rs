@@ -202,8 +202,8 @@ pub trait StateStoreReadTransaction: Sized {
         tx_id: &TransactionId,
     ) -> Result<PrimitiveDateTime, StorageError>;
     /// Where the decision this node finalized for `tx_id` is proven, or `None` if the transaction is not finalized or
-    /// was finalized without one. The commit proof of the inclusion's block is held by
-    /// [`StateStoreReadTransaction::block_commit_proofs_get`].
+    /// was finalized without one, as a commit is: its receipt proves it. The commit proof of the inclusion's block is
+    /// held by [`StateStoreReadTransaction::block_commit_proofs_get`].
     fn finalized_transaction_inclusion_get(
         &self,
         tx_id: &TransactionId,

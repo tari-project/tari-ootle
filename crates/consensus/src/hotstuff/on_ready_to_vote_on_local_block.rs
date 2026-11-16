@@ -960,9 +960,9 @@ where
     }
 }
 
-/// The inclusion of each of `finalized`, the transactions `block` finalizes, storing the block's commit proof for them
-/// unless `commit_proof_stored`. Each inclusion cites the block once recorded, so the commit proof is stored only when
-/// there is an inclusion to cite it.
+/// The inclusion of each of `finalized`, the transactions `block` finalizes, that `block` aborts, storing the block's
+/// commit proof for them unless `commit_proof_stored`. Each inclusion cites the block once recorded, so the commit
+/// proof is stored only when there is an inclusion to cite it.
 ///
 /// A block whose header disagrees with its commands, or whose commit proof cannot be generated, is logged, and its
 /// transactions are recorded without inclusions.
@@ -977,7 +977,7 @@ where
     TTx: StateStoreWriteTransaction + Deref,
     TTx::Target: StateStoreReadTransaction,
 {
-    let mut proofs = match block.compute_transaction_proofs() {
+    let mut proofs = match block.compute_abort_proofs() {
         Ok(proofs) => proofs,
         Err(err) => {
             error!(

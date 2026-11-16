@@ -19,10 +19,11 @@ use tari_state_tree::{JmtHashScheme, TreeHash};
 
 use crate::support::{Test, TestAddress, TestVnDestination, logging::setup_logger};
 
-/// The decision a validator finalizes for a transaction stays provable against the header of the block that finalized
-/// it, from the inclusion and commit proof stored when the block committed, after the block itself is pruned.
+/// An abort a validator finalizes stays provable against the header of the block that finalized it, from the inclusion
+/// and commit proof stored when the block committed, after the block itself is pruned. A commit in the same block is
+/// recorded without an inclusion, since its receipt proves it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn every_finalized_decision_is_provable_after_its_block_is_pruned() {
+async fn every_finalized_abort_is_provable_after_its_block_is_pruned() {
     let mut test = start_test().await;
     let (commit, _, _) = test.send_transaction_to_all(Decision::Commit, 100, 1, 1).await;
     let (abort, _, _) = test.send_transaction_to_all(ABORT, 1, 1, 1).await;
@@ -55,7 +56,8 @@ async fn start_test() -> Test {
 }
 
 /// Runs epoch 1 until `transactions` are finalized, prunes their blocks, and checks that each finalized the expected
-/// decision and that the decision verifies against the stored commit proof of its block.
+/// decision, that each abort verifies against the stored commit proof of its block, and that each commit has no
+/// inclusion.
 async fn finalize_and_assert_provable(mut test: Test, transactions: &[(TransactionId, Decision)]) {
     test.start_epoch(Epoch(1)).await;
     loop {
@@ -85,6 +87,13 @@ async fn finalize_and_assert_provable(mut test: Test, transactions: &[(Transacti
                 let decision = tx.finalized_transaction_execution_get(transaction_id)?.decision();
                 assert_eq!(decision, *expected, "{transaction_id} finalized the wrong decision");
 
+                if decision.is_commit() {
+                    assert!(
+                        tx.finalized_transaction_inclusion_get(transaction_id)?.is_none(),
+                        "commit {transaction_id} was finalized with an inclusion"
+                    );
+                    continue;
+                }
                 let inclusion = tx
                     .finalized_transaction_inclusion_get(transaction_id)?
                     .unwrap_or_else(|| panic!("{transaction_id} was finalized without an inclusion"));

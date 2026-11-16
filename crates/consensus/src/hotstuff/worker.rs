@@ -501,6 +501,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 current_height.as_u64()
             );
 
+            let catch_up_stall_deadline = self
+                .worker_state
+                .catch_up
+                .as_ref()
+                .filter(|catch_up| !catch_up.has_timed_out())
+                .map(|catch_up| catch_up.stall_deadline(self.config.catch_up_request_timeout));
+
             tokio::select! {
                 result = epoch_manager_events.recv() => match result {
                     Ok(event) => {
@@ -559,6 +566,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     if let Err(err) = self.check_if_block_can_be_unparked(&epoch_state, current_height, batch.iter()).await {
                         self.hooks.on_error(&err);
                         error!(target: LOG_TARGET, "🚨Error handling missing transaction: {}", err);
+                    }
+                },
+
+                _ = sleep_until_deadline(catch_up_stall_deadline) => {
+                    if let Err(e) = self.on_catch_up_stalled(&epoch_state, current_height).await {
+                        self.hooks.on_error(&e);
+                        error!(target: LOG_TARGET, "🚨Error re-requesting a stalled catch-up: {}", e);
                     }
                 },
 
@@ -970,6 +984,28 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             from,
         ));
         Ok(())
+    }
+
+    async fn on_catch_up_stalled(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        current_height: NodeHeight,
+    ) -> Result<(), HotStuffError> {
+        let Some(catch_up) = self.worker_state.catch_up.as_mut() else {
+            return Ok(());
+        };
+        catch_up.restart_stall_window();
+        let from = catch_up.from.clone();
+        info!(
+            target: LOG_TARGET,
+            "⏳ Catch-up from {} has not advanced past height {} (expected up to {}). Requesting the rest of the range.",
+            from,
+            current_height,
+            catch_up.remote_height,
+        );
+        self.on_catch_up_sync
+            .request_sync(self.pacemaker.current_view(), epoch_state.epoch(), from)
+            .await
     }
 
     async fn request_catch_up_sync(
@@ -1982,9 +2018,9 @@ fn log_err<T>(context: &'static str, result: Result<T, HotStuffError>) -> Result
 
 #[derive(Debug)]
 struct WorkerState<TAddr> {
-    /// Keeps track of the active catch up. This can be None even if a catch-up request was sent. The main use of
-    /// this struct is to track timeouts and expected batch heights i.e. we've received a batch of blocks, and we need
-    /// to request more.
+    /// Keeps track of the active catch up. This can be None even if a catch-up request was sent. It tracks the
+    /// catch-up's progress towards the remote height, its timeout, and when a stalled catch-up requests the rest of
+    /// the range again.
     pub catch_up: Option<CatchUp<TAddr>>,
     pub has_processed_first_block: bool,
     /// Last (epoch, local_hash, remote_hash) we raised an epoch-hash divergence alarm for, used to
@@ -2015,15 +2051,19 @@ struct CatchUp<TAddr> {
     pub remote_height: NodeHeight,
     pub last_progress_height: NodeHeight,
     pub timeout_at: Instant,
+    /// Start of the window after which a catch-up that has not advanced requests the rest of the range again.
+    pub stall_window_start: Instant,
     pub from: TAddr,
 }
 
 impl<TAddr> CatchUp<TAddr> {
     pub fn new(remote_height: NodeHeight, current_height: NodeHeight, timeout: Duration, from: TAddr) -> Self {
+        let now = Instant::now();
         Self {
             remote_height,
             last_progress_height: current_height,
-            timeout_at: Instant::now() + timeout,
+            timeout_at: now + timeout,
+            stall_window_start: now,
             from,
         }
     }
@@ -2042,11 +2082,36 @@ impl<TAddr> CatchUp<TAddr> {
     }
 
     pub fn reset_timeout(&mut self, timeout: Duration) {
-        self.timeout_at = Instant::now() + timeout;
+        let now = Instant::now();
+        self.timeout_at = now + timeout;
+        self.stall_window_start = now;
+    }
+
+    /// When this catch-up, if it has not advanced, requests the rest of the range again. A responder stops streaming
+    /// when its task deadline passes or a send fails, so a re-request resumes the range well before `timeout` ends
+    /// the catch-up.
+    pub fn stall_deadline(&self, timeout: Duration) -> Instant {
+        self.stall_window_start + timeout / CATCH_UP_STALL_WINDOWS_PER_TIMEOUT
+    }
+
+    pub fn restart_stall_window(&mut self) {
+        self.stall_window_start = Instant::now();
     }
 
     pub fn has_timed_out(&self) -> bool {
         Instant::now() >= self.timeout_at
+    }
+}
+
+/// A catch-up that has not advanced requests the rest of its range again this many times within
+/// `catch_up_request_timeout` before the catch-up times out.
+const CATCH_UP_STALL_WINDOWS_PER_TIMEOUT: u32 = 4;
+
+/// Completes at `deadline`, or never when there is none.
+async fn sleep_until_deadline(deadline: Option<Instant>) {
+    match deadline {
+        Some(deadline) => time::sleep_until(deadline.into()).await,
+        None => std::future::pending().await,
     }
 }
 
@@ -2184,6 +2249,29 @@ mod tests {
             }
 
             assert!(!catch_up.record_progress(NodeHeight(250), timeout));
+        }
+
+        #[test]
+        fn a_stalled_catch_up_requests_the_rest_of_the_range_before_it_times_out() {
+            let timeout = Duration::from_secs(20);
+            let mut catch_up = CatchUp::new(NodeHeight(250), NodeHeight(0), timeout, "peer-a");
+            assert!(catch_up.stall_deadline(timeout) < catch_up.timeout_at);
+
+            let timeout_at = catch_up.timeout_at;
+            catch_up.restart_stall_window();
+            assert_eq!(
+                catch_up.timeout_at, timeout_at,
+                "a re-request must not extend the catch-up"
+            );
+            assert_eq!(
+                catch_up.stall_deadline(timeout),
+                catch_up.stall_window_start + timeout / CATCH_UP_STALL_WINDOWS_PER_TIMEOUT
+            );
+
+            let stall_window_start = catch_up.stall_window_start;
+            assert!(catch_up.record_progress(NodeHeight(10), timeout));
+            assert!(catch_up.stall_window_start >= stall_window_start);
+            assert!(catch_up.timeout_at >= timeout_at);
         }
 
         #[test]

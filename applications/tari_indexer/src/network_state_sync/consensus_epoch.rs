@@ -35,11 +35,15 @@ impl ConsensusEpoch {
     }
 
     /// Tracks the shard groups of a newly drawn sync plan. Each starts from the epoch the previous
-    /// plan's groups had all reached, since consensus never moves back an epoch.
+    /// plan's groups had all reached, or the higher epoch it was already observed at, since
+    /// consensus never moves back an epoch.
     pub fn track_groups<I: IntoIterator<Item = ShardGroup>>(&self, shard_groups: I) {
         let mut inner = self.inner.write().unwrap_or_else(|e| e.into_inner());
         let floor = inner.current();
-        inner.groups = shard_groups.into_iter().map(|sg| (sg, floor)).collect();
+        inner.groups = shard_groups
+            .into_iter()
+            .map(|sg| (sg, inner.groups.get(&sg).copied().flatten().max(floor)))
+            .collect();
     }
 
     /// Records that `shard_group` has committed a block in `epoch`. A group outside the current plan
@@ -145,5 +149,27 @@ mod tests {
         consensus_epoch.track_groups([sg(0, 255)]);
         consensus_epoch.observe(sg(0, 127), Epoch(6));
         assert_eq!(consensus_epoch.current(), None);
+    }
+
+    #[test]
+    fn replanning_preserves_observations_when_not_all_groups_were_observed() {
+        let consensus_epoch = ConsensusEpoch::new();
+        consensus_epoch.track_groups([sg(0, 127), sg(128, 255)]);
+        consensus_epoch.observe(sg(0, 127), Epoch(5));
+        consensus_epoch.track_groups([sg(0, 127), sg(128, 255)]);
+        consensus_epoch.observe(sg(128, 255), Epoch(5));
+        assert_eq!(consensus_epoch.current(), Some(Epoch(5)));
+    }
+
+    #[test]
+    fn replanning_does_not_regress_a_group_ahead_of_the_floor() {
+        let consensus_epoch = ConsensusEpoch::new();
+        consensus_epoch.track_groups([sg(0, 127), sg(128, 255)]);
+        consensus_epoch.observe(sg(0, 127), Epoch(7));
+        consensus_epoch.observe(sg(128, 255), Epoch(6));
+        consensus_epoch.track_groups([sg(0, 127), sg(128, 191), sg(192, 255)]);
+        consensus_epoch.observe(sg(128, 191), Epoch(7));
+        consensus_epoch.observe(sg(192, 255), Epoch(7));
+        assert_eq!(consensus_epoch.current(), Some(Epoch(7)));
     }
 }

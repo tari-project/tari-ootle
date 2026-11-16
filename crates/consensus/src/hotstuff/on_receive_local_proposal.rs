@@ -119,6 +119,18 @@ impl UnvotedCatchUpBlock {
     }
 }
 
+/// Whether processing a block moves the pacemaker to the highest view the block justifies. A block this node decided
+/// on does. A catch-up block at or below `last_voted` reports `AlreadyVotedAtHeight` and also does, since the committee
+/// has already certified it and a catching-up node must advance through the views it justifies.
+fn enters_justified_view(
+    local_decision: Option<QuorumDecision>,
+    no_vote_reason: Option<&NoVoteReason>,
+    origin: ProposalOrigin,
+) -> bool {
+    local_decision.is_some() ||
+        (origin.is_catch_up() && matches!(no_vote_reason, Some(NoVoteReason::AlreadyVotedAtHeight)))
+}
+
 #[derive(Debug, Clone)]
 struct PendingEndOfEpoch {
     eoe_block: Block,
@@ -609,12 +621,11 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         // End of epoch committed? No need to enter the view or send votes
         if !block_decision.is_committed_epoch_end() {
-            // A catch-up block at or below `last_voted` reports `AlreadyVotedAtHeight` and enters the highest view its
-            // QC justifies.
-            if block_decision.local_decision.is_some() ||
-                (origin.is_catch_up() &&
-                    matches!(block_decision.no_vote_reason, Some(NoVoteReason::AlreadyVotedAtHeight)))
-            {
+            if enters_justified_view(
+                block_decision.local_decision,
+                block_decision.no_vote_reason.as_ref(),
+                origin,
+            ) {
                 // Enter the highest view justified by this block
                 pacemaker_actions.enter_view(
                     valid_block.epoch(),
@@ -1370,6 +1381,29 @@ mod tests {
         assert!(!reported.record(eoe_block, local));
         assert!(reported.record(eoe_block, corrected));
         assert!(reported.record(BlockId::from([4; 32]), corrected));
+    }
+
+    #[test]
+    fn a_catch_up_block_at_or_below_last_voted_enters_the_view_it_justifies() {
+        let already_voted = Some(&NoVoteReason::AlreadyVotedAtHeight);
+
+        assert!(enters_justified_view(None, already_voted, ProposalOrigin::CatchUp));
+        assert!(!enters_justified_view(None, already_voted, ProposalOrigin::Live));
+        assert!(!enters_justified_view(
+            None,
+            Some(&NoVoteReason::StateMerkleRootMismatch),
+            ProposalOrigin::CatchUp
+        ));
+        assert!(enters_justified_view(
+            Some(QuorumDecision::Accept),
+            None,
+            ProposalOrigin::Live
+        ));
+        assert!(enters_justified_view(
+            Some(QuorumDecision::Accept),
+            None,
+            ProposalOrigin::CatchUp
+        ));
     }
 
     #[test]

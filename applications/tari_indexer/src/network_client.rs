@@ -216,6 +216,13 @@ where
                     );
                     unverifiable = true;
                 },
+                Err(ResultProofError::ReceiptUnavailable(err)) => {
+                    warn!(
+                        target: LOG_TARGET,
+                        "Validator '{member}' gave no usable receipt for transaction {transaction_id}: {err}"
+                    );
+                    last_error = Some(err);
+                },
                 Err(err @ ResultProofError::CommitteeUnknown { .. }) => {
                     warn!(
                         target: LOG_TARGET,
@@ -615,6 +622,8 @@ pub(crate) mod tests {
         Pending,
         /// A finalized result, and the receipt the member serves with its proof.
         Finalized(Box<FinalizedResult>, Option<(EncodedSubstate, SubstateProofData)>),
+        /// A finalized result, and a failure to serve its receipt.
+        ReceiptUnreachable(Box<FinalizedResult>),
         Unreachable,
     }
 
@@ -654,7 +663,9 @@ pub(crate) mod tests {
             match &self.committee.0.lock().unwrap()[&self.address] {
                 Answer::NotFound => Err(RpcStatus::not_found("unknown transaction").into()),
                 Answer::Pending => Ok(TransactionResultStatus::Pending),
-                Answer::Finalized(result, _) => Ok(TransactionResultStatus::Finalized(result.clone())),
+                Answer::Finalized(result, _) | Answer::ReceiptUnreachable(result) => {
+                    Ok(TransactionResultStatus::Finalized(result.clone()))
+                },
                 Answer::Unreachable => Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow::anyhow!(
                     "unreachable"
                 ))),
@@ -680,6 +691,9 @@ pub(crate) mod tests {
                     },
                     Some(proof.clone()),
                 )),
+                Answer::ReceiptUnreachable(_) => Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow::anyhow!(
+                    "unreachable"
+                ))),
                 _ => Ok((SubstateResult::DoesNotExist, None)),
             }
         }
@@ -1289,6 +1303,22 @@ pub(crate) mod tests {
         let status = query(vec![Answer::Pending]).await.unwrap().unwrap();
         assert!(is_pending(&status));
         assert!(query(vec![Answer::NotFound]).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_failed_receipt_fetch_is_reported_as_the_members_rpc_error() {
+        let Answer::Finalized(result, _) = unproven_committed(1) else {
+            unreachable!()
+        };
+        let result = query(vec![Answer::ReceiptUnreachable(result)]).await;
+        let Err(NetworkClientError::AllValidatorsFailed {
+            last_error: Some(ValidatorNodeRpcClientError::InvalidResponse(err)),
+            ..
+        }) = result
+        else {
+            panic!("expected the receipt fetch's error, got {result:?}");
+        };
+        assert_eq!(err.to_string(), "unreachable");
     }
 
     #[tokio::test]

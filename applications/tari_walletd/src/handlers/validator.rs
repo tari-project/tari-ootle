@@ -35,6 +35,7 @@ use crate::{
     NUM_PRESHARDS,
     handlers::{
         HandlerContext,
+        auth::jwt::enforce_scopes,
         helpers::{
             ensure_signing_key,
             get_account_or_default,
@@ -53,11 +54,15 @@ pub async fn handle_get_validator_fees(
     req: GetValidatorFeesRequest,
 ) -> Result<GetValidatorFeesResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    context.authorize(token, &[Permission::Validators(Crud::Read)])?;
+    let granted = context.authorize(token, &[Permission::Validators(Crud::Read)])?;
 
     let claim_key = match req.account_or_key {
         AccountOrKeyId::Account(acc) => {
             let account = get_account_or_default(acc.as_ref(), &sdk.accounts_api())?;
+            enforce_scopes(&granted, &[Permission::Accounts(
+                Crud::Read,
+                Some(*account.component_address()),
+            )])?;
             let account_key_id = account.owner_key_id().ok_or_else(|| {
                 anyhow!("The specified account does not have an associated owner key to derive the claim key from")
             })?;
@@ -123,7 +128,7 @@ pub async fn handle_claim_validator_fees(
     mut req: ClaimValidatorFeesRequest,
 ) -> Result<ClaimValidatorFeesResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    context.authorize(token, &[Permission::Validators(Crud::Update)])?;
+    let granted = context.authorize(token, &[Permission::Validators(Crud::Update)])?;
     if !req.dry_run {
         context.enforce_max_fee_limit(req.max_fee)?;
     }
@@ -133,10 +138,14 @@ pub async fn handle_claim_validator_fees(
     }
 
     let (account, inputs) = get_account_with_inputs(req.account.as_ref(), &sdk)?;
+    let account_component_address = *account.component_address();
+    enforce_scopes(&granted, &[Permission::Transfer(
+        Crud::Create,
+        Some(account_component_address),
+    )])?;
     let account_key_id = account.owner_key_id().ok_or_else(|| {
         anyhow!("The specified account does not have an associated owner key to derive the claim key from")
     })?;
-    let account_component_address = *account.component_address();
 
     let claim_public_key = match req.claim_key_index {
         Some(index) => sdk
@@ -400,8 +409,11 @@ async fn build_self_stealth_statement(
 
 #[cfg(test)]
 mod tests {
+    use tari_ootle_common_types::{Epoch, ShardGroup, shard::Shard};
+    use tari_template_lib_types::ComponentAddress;
+
     use super::*;
-    use crate::handlers::test_support::TestDaemon;
+    use crate::handlers::{auth::jwt::AuthError, test_support::TestDaemon};
 
     #[tokio::test]
     async fn fees_are_looked_up_only_for_a_signing_key() {
@@ -422,5 +434,66 @@ mod tests {
             .unwrap_err();
             assert!(err.to_string().contains("account_or_key"), "{err}");
         }
+    }
+
+    #[tokio::test]
+    async fn validator_fee_handlers_enforce_account_scopes() {
+        let daemon = TestDaemon::start().await;
+        let account_a = ComponentAddress::from_array([0xaa; 32]);
+        let account_b = ComponentAddress::from_array([0xbb; 32]);
+        for (index, (name, address)) in [("a", account_a), ("b", account_b)].into_iter().enumerate() {
+            daemon
+                .context
+                .wallet_sdk()
+                .accounts_api()
+                .add_account(
+                    Some(name),
+                    &address,
+                    KeyId::derived(KeyBranch::ViewOnlyKey, index as u64),
+                    KeyId::derived(KeyBranch::Account, index as u64),
+                    Epoch::zero(),
+                    false,
+                    index == 0,
+                )
+                .unwrap();
+        }
+
+        let reader_a = daemon.api_key("reader_a", &format!("validators:read,accounts:read:{account_a}"));
+        let err = handle_get_validator_fees(&daemon.context, Some(&reader_a), GetValidatorFeesRequest {
+            account_or_key: AccountOrKeyId::Account(Some(account_b.into())),
+            shard_group: Some(ShardGroup::new(Shard::first(), Shard::first())),
+        })
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(
+                err.downcast_ref::<AuthError>(),
+                Some(AuthError::InsufficientPermissions {
+                    required: Permission::Accounts(Crud::Read, Some(addr)),
+                }) if *addr == account_b
+            ),
+            "expected accounts:read scope error for {account_b}, got: {err}"
+        );
+
+        let claimer_a = daemon.api_key("claimer_a", &format!("validators:update,transfer:create:{account_a}"));
+        let err = handle_claim_validator_fees(&daemon.context, Some(&claimer_a), ClaimValidatorFeesRequest {
+            account: Some(account_b.into()),
+            claim_key_index: None,
+            max_fee: 1000,
+            shards: vec![Shard::first()],
+            dry_run: true,
+            output_to_revealed: true,
+        })
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(
+                err.downcast_ref::<AuthError>(),
+                Some(AuthError::InsufficientPermissions {
+                    required: Permission::Transfer(Crud::Create, Some(addr)),
+                }) if *addr == account_b
+            ),
+            "expected transfer:create scope error for {account_b}, got: {err}"
+        );
     }
 }

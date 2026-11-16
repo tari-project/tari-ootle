@@ -410,6 +410,10 @@ impl<D> TransactionBuilder<D> {
     /// builder's. Fee instructions from `other` are NOT merged — fees should be managed on the
     /// outer builder.
     ///
+    /// The merged inputs are the union of both builders' declared inputs. `other`'s instructions
+    /// keep the inputs `other` declared for them, so this builder's auto-fill setting applies only
+    /// to instructions added to it directly.
+    ///
     /// This is the low-level primitive behind the higher-level `chain` method on
     /// `OotleInvoke`.
     ///

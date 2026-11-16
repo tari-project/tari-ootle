@@ -191,7 +191,7 @@ impl WalletNetworkInterface for ScriptedNetwork {
         }
         if self
             .failing_submits
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
             .is_ok()
         {
             return Err(ScriptedError("the submission failed"));

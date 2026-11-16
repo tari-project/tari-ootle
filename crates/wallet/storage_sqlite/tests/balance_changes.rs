@@ -36,7 +36,14 @@ use tari_ootle_wallet_sdk::{
         VaultModel,
         WalletLockId,
     },
-    storage::{CommittableStore, ReadableWalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
+    storage::{
+        CommittableStore,
+        ReadableWalletStore,
+        WalletStorageError,
+        WalletStoreReader,
+        WalletStoreWriter,
+        WriteableWalletStore,
+    },
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_lib_types::{
@@ -152,7 +159,6 @@ fn setup_store_at(path: impl AsRef<Path>) -> (SqliteWalletStore, VaultId, VaultI
         .unwrap();
     }
     tx.commit().unwrap();
-    drop(tx);
 
     (store, first_vault, second_vault, first_resource, second_resource)
 }
@@ -216,7 +222,6 @@ fn records_signed_deltas_metadata_and_filters() {
     tx.transactions_insert(&transaction, None, &[account_address()], false)
         .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     record_change(
         &store,
@@ -293,7 +298,6 @@ fn rejects_zero_changes_deduplicates_transactions_and_paginates_deterministicall
     tx.transactions_insert(&transaction, None, &[account_address()], false)
         .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_write_tx().unwrap();
     let current = tx.vaults_get(&first_vault).unwrap();
@@ -310,7 +314,6 @@ fn rejects_zero_changes_deduplicates_transactions_and_paginates_deterministicall
         .unwrap()
     );
     tx.rollback().unwrap();
-    drop(tx);
 
     record_change(
         &store,
@@ -330,7 +333,6 @@ fn rejects_zero_changes_deduplicates_transactions_and_paginates_deterministicall
         .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     record_change(
         &store,
@@ -414,7 +416,6 @@ fn records_account_resource_change_without_vault() {
         .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -449,7 +450,6 @@ fn latest_account_resource_history_ignores_vault_backed_rows() {
         .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     record_change(
         &store,
@@ -507,7 +507,6 @@ fn attributes_only_the_exact_vault_version_across_round_trips_and_recovery() {
     tx.transactions_insert(&second_transaction, None, &[account_address()], false)
         .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     for (version, amount) in [(1, 10u64), (2, 20), (3, 10)] {
         record_change(
@@ -530,7 +529,6 @@ fn attributes_only_the_exact_vault_version_across_round_trips_and_recovery() {
             .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let first_transaction_page = tx
@@ -557,7 +555,6 @@ fn attributes_only_the_exact_vault_version_across_round_trips_and_recovery() {
             .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let transaction_page = tx
@@ -599,7 +596,6 @@ fn same_version_scan_updates_after_balance_and_deletes_net_zero_row() {
     )
     .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -626,7 +622,6 @@ fn same_version_scan_updates_after_balance_and_deletes_net_zero_row() {
     tx.vaults_update(first_vault, SubstateVersion::new(1), Amount::zero(), Amount::zero())
         .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -646,7 +641,6 @@ fn same_version_scan_does_not_clobber_transaction_row() {
     tx.transactions_insert(&transaction, None, &[account_address()], false)
         .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     record_change(
         &store,
@@ -674,7 +668,6 @@ fn same_version_scan_does_not_clobber_transaction_row() {
     )
     .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -705,7 +698,6 @@ fn same_transaction_merges_revealed_finalize_and_confidential_refresh() {
     tx.transactions_insert(&other, None, &[account_address()], false)
         .unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let snapshot = |revealed_before: u64, revealed_after: u64, confidential_before: u64, confidential_after: u64| {
         BalanceChangeSnapshot {
@@ -745,7 +737,6 @@ fn same_transaction_merges_revealed_finalize_and_confidential_refresh() {
         .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -813,6 +804,17 @@ fn upsert_stealth_resource(tx: &mut impl WalletStoreWriter, resource_address: &R
     .unwrap();
 }
 
+fn stealth_output_by_commitment(
+    tx: &mut impl WalletStoreReader,
+    commitment: PedersenCommitmentBytes,
+) -> StealthOutputModel {
+    tx.stealth_outputs_get_by_commitments(&[commitment])
+        .unwrap()
+        .into_iter()
+        .find(|o| o.commitment == commitment)
+        .unwrap()
+}
+
 // A confidential spend from a vault-less account must be recorded at lock-finalize as a
 // transaction-sourced change so the spend is attributed to its transaction; the scanner's later
 // pass over the same balance then has nothing new to record.
@@ -852,7 +854,7 @@ fn lock_finalize_records_confidential_spend_for_vaultless_account() {
     tx.stealth_outputs_insert(&spent).unwrap();
     let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
     tx.locks_link_transaction(lock_id, transaction_id).unwrap();
-    tx.stealth_outputs_lock_many(&stealth_resource, &[&spent.commitment], lock_id)
+    tx.stealth_outputs_lock_many_for_account(&account, &stealth_resource, &[&spent.commitment], lock_id)
         .unwrap();
     let change = stealth_output(
         account,
@@ -875,7 +877,6 @@ fn lock_finalize_records_confidential_spend_for_vaultless_account() {
     );
     tx.locks_unlock_finalized(lock_id, &diff).unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -947,7 +948,7 @@ fn lock_finalize_records_confidential_spend_for_vault_backed_resource() {
     tx.stealth_outputs_insert(&spent).unwrap();
     let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
     tx.locks_link_transaction(lock_id, transaction_id).unwrap();
-    tx.stealth_outputs_lock_many(&stealth_resource, &[&spent.commitment], lock_id)
+    tx.stealth_outputs_lock_many_for_account(&account, &stealth_resource, &[&spent.commitment], lock_id)
         .unwrap();
     let change = stealth_output(
         account,
@@ -970,7 +971,6 @@ fn lock_finalize_records_confidential_spend_for_vault_backed_resource() {
     );
     tx.locks_unlock_finalized(lock_id, &diff).unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -1029,7 +1029,7 @@ fn lock_finalize_records_on_vault_created_by_transaction() {
     tx.stealth_outputs_insert(&spent).unwrap();
     let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
     tx.locks_link_transaction(lock_id, transaction_id).unwrap();
-    tx.stealth_outputs_lock_many(&stealth_resource, &[&spent.commitment], lock_id)
+    tx.stealth_outputs_lock_many_for_account(&account, &stealth_resource, &[&spent.commitment], lock_id)
         .unwrap();
     let change = stealth_output(
         account,
@@ -1095,7 +1095,6 @@ fn lock_finalize_records_on_vault_created_by_transaction() {
         .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -1159,7 +1158,6 @@ fn lock_finalize_records_revealed_movement_from_diff_not_lock_amount() {
     );
     tx.locks_unlock_finalized(lock_id, &diff).unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -1252,7 +1250,6 @@ fn same_transaction_vault_record_fills_dimension_on_no_vault_row() {
         .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -1316,7 +1313,6 @@ fn same_transaction_no_vault_records_merge_into_net_effect() {
         .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -1339,7 +1335,6 @@ fn same_transaction_no_vault_records_merge_into_net_effect() {
         .unwrap()
     );
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let page = tx
@@ -1410,7 +1405,7 @@ fn a_stealth_spend_records_the_latest_version_it_took_down() {
     tx.stealth_outputs_insert(&spent).unwrap();
     let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
     tx.locks_link_transaction(lock_id, transaction.calculate_id()).unwrap();
-    tx.stealth_outputs_lock_many(&stealth_resource, &[&spent.commitment], lock_id)
+    tx.stealth_outputs_lock_many_for_account(&account, &stealth_resource, &[&spent.commitment], lock_id)
         .unwrap();
     let mut diff = SubstateDiff::new();
     diff.down(SubstateId::Utxo(spent.to_utxo_address()), SubstateVersion::new(2));
@@ -1494,7 +1489,6 @@ fn lock_finalize_records_revealed_spends_across_multiple_vaults() {
     );
     tx.locks_unlock_finalized(lock_id, &diff).unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let first_vault_after = tx.vaults_get(&first_vault).unwrap();
@@ -1535,7 +1529,6 @@ fn lock_finalize_records_revealed_spends_across_multiple_vaults() {
         .unwrap();
     tx.locks_unlock_finalized(unlinked_lock, &SubstateDiff::new()).unwrap();
     tx.commit().unwrap();
-    drop(tx);
 
     let mut tx = store.create_read_tx().unwrap();
     let first_vault_unlinked = tx.vaults_get(&first_vault).unwrap();
@@ -1545,4 +1538,174 @@ fn lock_finalize_records_revealed_spends_across_multiple_vaults() {
     let stealth_vault_unlinked = tx.vaults_get(&stealth_vault).unwrap();
     assert_eq!(stealth_vault_unlinked.revealed_balance, Amount::from(30_000u64));
     assert_eq!(stealth_vault_unlinked.locked_revealed_balance, Amount::zero());
+}
+
+#[test]
+fn stealth_outputs_lock_many_and_smallest_enforce_lock_existence_spendability_and_no_partial_mutation() {
+    let (store, _, _, _, _) = setup_store();
+    let stealth_resource = resource_address(3);
+    let account = account_address();
+
+    let mut tx = store.create_write_tx().unwrap();
+    upsert_stealth_resource(&mut tx, &stealth_resource);
+
+    let valid_on_chain = stealth_output(account, stealth_resource, 50, 10, OutputStatus::Unspent, None);
+    let mut unspent_off_chain = stealth_output(account, stealth_resource, 10, 11, OutputStatus::Unspent, None);
+    unspent_off_chain.is_on_chain = false;
+    let spent_output = stealth_output(account, stealth_resource, 20, 12, OutputStatus::Spent, None);
+    let mut frozen_output = stealth_output(account, stealth_resource, 30, 13, OutputStatus::Unspent, None);
+    frozen_output.is_frozen = true;
+    let mut view_only_output = stealth_output(account, stealth_resource, 40, 14, OutputStatus::Unspent, None);
+    view_only_output.owner_key_id = None;
+
+    let other_lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
+
+    let same_lock_unconfirmed = stealth_output(
+        account,
+        stealth_resource,
+        60,
+        15,
+        OutputStatus::LockedUnconfirmed,
+        Some(lock_id),
+    );
+    let other_lock_unconfirmed = stealth_output(
+        account,
+        stealth_resource,
+        70,
+        16,
+        OutputStatus::LockedUnconfirmed,
+        Some(other_lock_id),
+    );
+
+    for output in [
+        &valid_on_chain,
+        &unspent_off_chain,
+        &spent_output,
+        &frozen_output,
+        &view_only_output,
+        &same_lock_unconfirmed,
+        &other_lock_unconfirmed,
+    ] {
+        tx.stealth_outputs_insert(output).unwrap();
+    }
+
+    // Non-existent lock_id must fail with NotFound("lock")
+    let bogus_lock: WalletLockId = 999_999;
+    assert!(matches!(
+        tx.stealth_outputs_lock_many_for_account(&account, &stealth_resource, &[&valid_on_chain.commitment], bogus_lock),
+        Err(WalletStorageError::NotFound { entity, .. }) if entity == "lock"
+    ));
+
+    // Unspent off-chain outputs must be excluded from get_unspent_for_spending
+    let spendable = tx
+        .stealth_outputs_get_unspent_for_spending(&account, &stealth_resource, lock_id)
+        .unwrap();
+    let spendable_commitments: HashSet<_> = spendable.iter().map(|o| o.commitment).collect();
+    assert_eq!(
+        spendable_commitments,
+        HashSet::from([valid_on_chain.commitment, same_lock_unconfirmed.commitment])
+    );
+
+    // Rejecting a batch containing an ineligible output must not partially lock the valid output in the batch
+    for ineligible in [
+        &unspent_off_chain.commitment,
+        &spent_output.commitment,
+        &frozen_output.commitment,
+        &view_only_output.commitment,
+        &other_lock_unconfirmed.commitment,
+    ] {
+        assert!(matches!(
+            tx.stealth_outputs_lock_many_for_account(
+                &account,
+                &stealth_resource,
+                &[&valid_on_chain.commitment, ineligible],
+                lock_id,
+            ),
+            Err(WalletStorageError::NotFound { entity, .. }) if entity == "stealth_output"
+        ));
+    }
+
+    let valid_after = stealth_output_by_commitment(&mut *tx, valid_on_chain.commitment);
+    let spent_after = stealth_output_by_commitment(&mut *tx, spent_output.commitment);
+    assert_eq!(valid_after.status, OutputStatus::Unspent);
+    assert_eq!(valid_after.lock_id, None);
+    assert_eq!(spent_after.status, OutputStatus::Spent);
+
+    // stealth_outputs_lock_smallest_amount skips the smaller (value=10) off-chain Unspent output and locks value=50
+    let smallest = tx
+        .stealth_outputs_lock_smallest_amount(&account, &stealth_resource, other_lock_id)
+        .unwrap();
+    assert_eq!(smallest.commitment, valid_on_chain.commitment);
+    tx.locks_release(other_lock_id).unwrap();
+
+    // Locking both eligible outputs (on-chain Unspent + same-lock LockedUnconfirmed) succeeds
+    tx.stealth_outputs_lock_many_for_account(
+        &account,
+        &stealth_resource,
+        &[&valid_on_chain.commitment, &same_lock_unconfirmed.commitment],
+        lock_id,
+    )
+    .unwrap();
+    let locked = tx.stealth_outputs_get_locked_by_lock_id(lock_id).unwrap();
+    assert_eq!(locked.len(), 2);
+    assert!(locked.iter().all(|o| o.status == OutputStatus::LockedForSpend));
+    tx.commit().unwrap();
+}
+
+#[test]
+fn vaults_insert_update_and_get_round_trip_high_bit_substate_version_and_reject_negative_divisibility() {
+    let path = temporary_database_path();
+    let (store, _, _, first_resource, _) = setup_store_at(&path);
+    let account = account_address();
+    let high_vault = vault_address(99);
+    let high_version = SubstateVersion::new(u64::MAX - 1);
+
+    let mut tx = store.create_write_tx().unwrap();
+    tx.vaults_insert(VaultModel {
+        account_address: account,
+        id: high_vault,
+        vault_version: high_version,
+        resource_address: first_resource,
+        resource_type: ResourceType::Fungible,
+        revealed_balance: Amount::from(100u64),
+        locked_revealed_balance: Amount::ZERO,
+        confidential_balance: Amount::ZERO,
+        token_symbol: Some("COIN".to_string()),
+        divisibility: 6,
+    })
+    .unwrap();
+
+    let loaded = tx.vaults_get(&high_vault).unwrap();
+    assert_eq!(loaded.vault_version, high_version);
+    assert_eq!(loaded.divisibility, 6);
+
+    let max_version = SubstateVersion::new(u64::MAX);
+    tx.vaults_update(high_vault, max_version, Amount::from(250u64), Amount::ZERO)
+        .unwrap();
+    let updated = tx.vaults_get(&high_vault).unwrap();
+    assert_eq!(updated.vault_version, max_version);
+    assert_eq!(updated.revealed_balance, Amount::from(250u64));
+    tx.commit().unwrap();
+    drop(store);
+
+    // Negative divisibility in the database must fail decoding rather than wrapping via `as u32`
+    let mut connection = SqliteConnection::establish(path.to_str().unwrap()).unwrap();
+    sql_query("UPDATE vaults SET divisibility = -1")
+        .execute(&mut connection)
+        .unwrap();
+    drop(connection);
+
+    let store = SqliteWalletStore::try_open(&path).unwrap();
+    let mut tx = store.create_read_tx().unwrap();
+    assert!(matches!(
+        tx.vaults_get(&high_vault),
+        Err(WalletStorageError::DecodingError {
+            item: "vault.divisibility",
+            ..
+        })
+    ));
+    drop(tx);
+    drop(store);
+    std::fs::remove_file(path).unwrap();
 }

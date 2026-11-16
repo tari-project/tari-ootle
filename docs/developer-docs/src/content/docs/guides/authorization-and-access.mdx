@@ -271,6 +271,7 @@ use tari_template_lib::prelude::*;
 
 #[template]
 mod template {
+    use super::*;
 
     pub struct MyComponent {
         resource: ResourceManager,
@@ -279,11 +280,10 @@ mod template {
     impl MyComponent {
         pub fn create_with_restricted_resource(
             minter_badge: NonFungibleAddress,
-        ) -> ResourceAddress {
+        ) -> Component<Self> {
             let resource_address = ResourceBuilder::public_fungible()
                 .with_token_symbol("RTK")
                 .with_divisibility(10)
-                .initial_supply(amount!["1000000000000000000000"])
                 // Only the minter badge can mint, and only the owner may
                 // change who can mint later.
                 .mintable(rule!(non_fungible(minter_badge)), OWNER)
@@ -291,7 +291,10 @@ mod template {
                 .burnable(rule!(deny_all), LOCKED)
                 .build();
 
-            MyComponent { resource: resource_address.into() }.create()
+            Component::new(Self {
+                resource: resource_address.into(),
+            })
+            .create()
         }
     }
 }

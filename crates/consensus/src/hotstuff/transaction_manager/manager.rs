@@ -34,6 +34,7 @@ use tari_ootle_storage::{
         LockedEpoch,
         SubstateChange,
         SubstatePledge,
+        SubstatePledges,
         SubstateRequirementLockIntent,
         TransactionExecution,
         TransactionPoolRecord,
@@ -426,21 +427,8 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             ));
         }
 
-        let resolved_inputs = pledged_transaction
-            .local_pledges
-            .into_iter()
-            .chain(pledged_transaction.foreign_pledges)
-            // Exclude any output pledges
-            .filter_map(|pledge| pledge.into_input())
-            .map(|(id, substate)|
-                {
-                    let version = id.version();
-                    (
-                        id.into(),
-                        Substate::new(version, substate),
-                    )
-                })
-            .collect();
+        let resolved_inputs =
+            resolve_pledged_inputs(pledged_transaction.local_pledges, pledged_transaction.foreign_pledges);
         let transaction = pledged_transaction.transaction.transaction();
         self.executor.execute(
             transaction,
@@ -689,6 +677,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                         local_committee_info,
                         transaction_id,
                         locked.execution,
+                        locked.fee_intent_only,
                     );
                 }
                 self.finish_multishard_prepare(store, local_committee_info, transaction_id, locked)
@@ -837,12 +826,13 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         local_committee_info: &CommitteeInfo,
         transaction_id: TransactionId,
         execution: TransactionExecution,
+        fee_intent_only: bool,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         let lock_status = store.try_lock_all(transaction_id, execution.resolved_inputs(), false)?;
         self.finish_multishard_prepare(store, local_committee_info, transaction_id, LockedMultishardExecution {
             execution,
             lock_status,
-            fee_intent_only: false,
+            fee_intent_only,
         })
     }
 
@@ -1313,6 +1303,28 @@ fn take_multishard_fee_intent_commit(execution: &mut TransactionExecution) -> Op
         .then_some(fee_intent_commit)
 }
 
+/// Collects the input pledges of a transaction the local shard group has inputs in into the inputs it executes
+/// against, excluding output pledges. A substate the local shard group pledged resolves to the local pledge, whatever
+/// a foreign shard group pledged for it.
+fn resolve_pledged_inputs(
+    local_pledges: SubstatePledges,
+    foreign_pledges: SubstatePledges,
+) -> HashMap<SubstateRequirement, Substate> {
+    let mut resolved_inputs = HashMap::new();
+    for (id, substate) in local_pledges
+        .into_iter()
+        .chain(foreign_pledges)
+        // Exclude any output pledges
+        .filter_map(|pledge| pledge.into_input())
+    {
+        let version = id.version();
+        resolved_inputs
+            .entry(SubstateRequirement::from(id))
+            .or_insert_with(|| Substate::new(version, substate));
+    }
+    resolved_inputs
+}
+
 /// Collects the input pledges among `pledges` into the inputs a transaction executes against, excluding output
 /// pledges. Every pledge for a substate must be at the same version. A pledge's value is authenticated against its
 /// evidence's value hash when the foreign proposal is accepted (`BlockPledge::get_committed_pledge`), so only the
@@ -1408,6 +1420,7 @@ mod tests {
         SubstateVersion,
         VersionedSubstateId,
         VotePower,
+        hashing::hash_pledged_substate_value,
         shard::Shard,
     };
     use tari_ootle_storage::consensus_models::{
@@ -1609,6 +1622,38 @@ mod tests {
             is_write: true,
             substate: Box::new(SubstateValue::from(NonFungibleContainer::no_data())),
         }
+    }
+
+    #[test]
+    fn a_locally_pledged_input_resolves_to_the_local_pledge() {
+        let local = component_id(1);
+        let foreign = component_id(2);
+        let foreign_pledge_of_local = SubstatePledge::Input {
+            substate_id: VersionedSubstateId::new(local.clone(), SubstateVersion::new(3)),
+            is_write: true,
+            substate: Box::new(SubstateValue::from(NonFungibleContainer::new(
+                tari_bor::Value::Integer(1.into()),
+                tari_bor::Value::Null,
+            ))),
+        };
+        let local_pledge = input_pledge(&local, 3);
+        let local_value_hash = hash_pledged_substate_value(local_pledge.substate_value().unwrap());
+        assert_ne!(
+            hash_pledged_substate_value(foreign_pledge_of_local.substate_value().unwrap()),
+            local_value_hash
+        );
+
+        let resolved = resolve_pledged_inputs(vec![local_pledge], vec![
+            foreign_pledge_of_local,
+            input_pledge(&foreign, 0),
+        ]);
+
+        assert_eq!(resolved.len(), 2);
+        assert_eq!(
+            hash_pledged_substate_value(resolved[&local].substate_value()),
+            local_value_hash
+        );
+        assert!(resolved.contains_key(&foreign));
     }
 
     #[test]
@@ -3095,6 +3140,36 @@ mod tests {
                 matches!(err, BlockTransactionExecutorError::InvariantError(_)),
                 "{err:?}"
             );
+            Ok::<_, BlockTransactionExecutorError>(())
+        });
+    }
+
+    #[test]
+    fn prepare_local_inputs_only_preserves_fee_intent_only() {
+        with_fee_pool_in_parent(|store, pool_address| {
+            let claim = multishard_transaction(1);
+            let committee = CommitteeInfo::new(
+                NumPreshards::P256,
+                4,
+                1,
+                ShardGroup::all_shards(NumPreshards::P256),
+                Epoch(1),
+                VotePower::of(1),
+            );
+            let prepared = manager().prepare_local_inputs_only(
+                store,
+                &committee,
+                *claim.id(),
+                withdrawing_from(&claim, pool_address, Some(0), 400),
+                true,
+            )?;
+            let PreparedTransaction::MultiShard(prepared) = prepared else {
+                panic!("expected multishard preparation: {prepared:?}");
+            };
+            let EvidenceOrExecution::Execution { fee_intent_only, .. } = prepared.into_evidence_or_execution() else {
+                panic!("expected execution");
+            };
+            assert!(fee_intent_only);
             Ok::<_, BlockTransactionExecutorError>(())
         });
     }

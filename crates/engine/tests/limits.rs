@@ -320,6 +320,76 @@ fn max_transaction_output_bytes_limit_applies_to_the_fee_intent() {
     assert_reject_reason(result.expect_failure(), &expected_reason);
 }
 
+/// A ticket seller, whose `mint_more_tickets` mints one non-fungible substate per ticket.
+fn ticket_seller(test: &mut TemplateTest) -> ComponentAddress {
+    let template = test.get_template_address("TicketSeller");
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(template, "new", args![1u32, Amount::from(1u64), "event".to_string()])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    test.return_values()[0].decoded().unwrap()
+}
+
+/// A minted non-fungible is a substate that draws no id from the object counter, so the cap on the substates a
+/// transaction persists is applied to what it persists rather than to the ids it allocates.
+#[test]
+fn max_substate_outputs_limit_applies_to_minted_non_fungibles() {
+    let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/nft/tickets"]);
+    let seller = ticket_seller(&mut test);
+    let max = limits::ENGINE_LIMITS.max_substate_outputs as u32;
+    let key = test.secret_key().clone();
+    let mint = |tickets: [u32; 2]| {
+        tickets
+            .into_iter()
+            .fold(Transaction::builder_localnet(Epoch(1)), |builder, count| {
+                builder.call_method(seller, "mint_more_tickets", args![count])
+            })
+            .build_and_seal(&key)
+    };
+
+    // The seller and its vault are written too.
+    test.execute_expect_success(mint([max / 2, max / 2 - 2]), vec![]);
+
+    let reason = test.execute_expect_failure(mint([max / 2, max / 2 + 1]), vec![]);
+    assert_reject_reason(
+        reason,
+        format!(
+            "exceeding the maximum of {} per transaction",
+            limits::ENGINE_LIMITS.max_substate_outputs
+        ),
+    );
+}
+
+/// The fee checkpoint is what commits when the main intent fails, so it is held to the same substate count.
+#[test]
+fn max_substate_outputs_limit_applies_to_the_fee_intent() {
+    let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/nft/tickets"]);
+    let seller = ticket_seller(&mut test);
+    let max = limits::ENGINE_LIMITS.max_substate_outputs as u32;
+
+    let transaction = Transaction::builder_localnet(Epoch(1))
+        .with_fee_instructions_builder(|builder| {
+            builder
+                .call_method(seller, "mint_more_tickets", args![max / 2])
+                .call_method(seller, "mint_more_tickets", args![max / 2 + 1])
+        })
+        .build_and_seal(test.secret_key());
+    let result = test.try_execute(transaction, vec![]).unwrap();
+    assert!(
+        result.finalize.result.is_reject(),
+        "an over-cap fee intent must commit nothing"
+    );
+    assert_reject_reason(
+        result.expect_failure(),
+        format!(
+            "exceeding the maximum of {} per transaction",
+            limits::ENGINE_LIMITS.max_substate_outputs
+        ),
+    );
+}
+
 /// The bytes `PushItToTheLimit::return_items` returns for `len`, and the CBOR items they hold.
 fn returned_items(len: u32) -> (u64, u64) {
     let raw = tari_bor::encode(&vec![0u32; len as usize]).unwrap();
@@ -399,8 +469,9 @@ fn a_nested_return_value_is_charged_per_item() {
     );
 }
 
-/// A return value priced above what the transaction can cover fails it out of compute, with the
-/// return-value charge as the points it required. Run in the fee intent, whose flat credit is the
+/// A return value holding more items than the transaction can pay for fails it out of compute. The
+/// engine reads no more of it than the transaction can pay for, and is paid for what it read: the
+/// credit is spent to within an item's price. Run in the fee intent, whose flat credit is the
 /// allowance.
 #[test]
 fn an_unaffordable_return_value_fails_out_of_compute() {
@@ -412,9 +483,8 @@ fn an_unaffordable_return_value_fails_out_of_compute() {
     test.set_fee_table(fee_table);
     test.enable_fees();
 
-    let mut len =
-        u32::try_from(limits::FREE_COMPUTE_GRACE_POINTS / limits::NativeExecutionPoints::PER_RETURN_VALUE_ITEM)
-            .unwrap();
+    let per_item = limits::NativeExecutionPoints::PER_RETURN_VALUE_ITEM;
+    let mut len = u32::try_from(limits::FREE_COMPUTE_GRACE_POINTS / per_item).unwrap();
     while return_value_charge(len) <= limits::FREE_COMPUTE_GRACE_POINTS {
         len += 1;
     }
@@ -432,8 +502,23 @@ fn an_unaffordable_return_value_fails_out_of_compute() {
     );
 
     assert_reject_reason(
-        reason,
-        format!("requiring {} points exceeds the fee intent's", return_value_charge(len)),
+        reason.clone(),
+        format!(
+            "requiring {} points exceeds the fee intent's",
+            limits::return_value_points(0, 1)
+        ),
+    );
+    let message = reason.to_string();
+    let consumed: u64 = message
+        .split("compute credit: ")
+        .nth(1)
+        .and_then(|rest| rest.split(' ').next())
+        .and_then(|consumed| consumed.parse().ok())
+        .unwrap_or_else(|| panic!("no consumed points in {message}"));
+    assert!(
+        consumed > limits::FREE_COMPUTE_GRACE_POINTS - per_item,
+        "the items read must be paid for: {consumed} of {} consumed",
+        limits::FREE_COMPUTE_GRACE_POINTS
     );
 }
 

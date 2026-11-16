@@ -246,6 +246,7 @@ export * from "./types/ViewableBalanceProof";
 export * from "./types/VotePower";
 export * from "./types/WalletTransaction";
 export * from "./types/WalletUtxoUpdate";
+export * from "./types/WellKnownType";
 export * from "./types/WorkspaceOffsetId";
 export * from "./validator-node-client";
 export * from "./wallet-types";

@@ -72,6 +72,7 @@ use tari_ootle_storage::{
         BlockDiff,
         BlockTransactionExecution,
         EpochCheckpoint,
+        FinalizedTransactionInclusion,
         ForeignProposalRecord,
         LivenessCounters,
         LockedSubstateValue,
@@ -819,6 +820,19 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         let cf = self.db().cf(FinalizedTransactionLinkCf)?;
         let data = cf.get(tx_id, OPERATION)?;
         Ok(data.finalized_at)
+    }
+
+    fn finalized_transaction_inclusion_get(
+        &self,
+        tx_id: &TransactionId,
+    ) -> Result<Option<FinalizedTransactionInclusion>, StorageError> {
+        const OPERATION: &str = "finalized_transaction_inclusion_get";
+        let link = self
+            .db()
+            .cf(FinalizedTransactionLinkCf)?
+            .get(tx_id, OPERATION)
+            .optional()?;
+        Ok(link.and_then(|link| link.inclusion).map(Into::into))
     }
 
     fn block_transaction_executions_get_pending_for_block(

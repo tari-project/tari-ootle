@@ -652,10 +652,14 @@ async fn withheld_embedding_proposal_pruning_a_command() -> (Test, TestAddress, 
             if let Some(captured) = captured.lock().unwrap().take() {
                 return captured;
             }
-            if let Some(tx) = transactions.next() {
+            // One transaction per block committed in committee 0 keeps a transaction's LocalPrepare in the block
+            // that carries the LocalAccept of the one before it, whatever the block time.
+            let (address, ..) = test.on_block_committed().await;
+            if address == TestAddress::new("1") &&
+                let Some(tx) = transactions.next()
+            {
                 test.send_transaction_to_destination(TestVnDestination::All, tx).await;
             }
-            sleep(Duration::from_millis(100)).await;
         }
     })
     .await

@@ -618,10 +618,13 @@ fn decode_method_access<'b, C>(
             },
             _ => {},
         }
+        let method_pos = d.position();
         let method = String::decode(d, ctx)?;
         let rule = AccessRule::decode(d, ctx)?;
         count_nodes(num_nodes, 1 + rule.num_nodes())?;
-        method_access.insert(method, rule);
+        if method_access.insert(method, rule).is_some() {
+            return Err(decode::Error::message("duplicate method in ComponentAccessRules").at(method_pos));
+        }
         index += 1;
     }
     Ok(method_access)
@@ -1411,6 +1414,27 @@ mod tests {
         let mut e = minicbor::Encoder::new(Vec::new());
         e.array(1).unwrap().map(0).unwrap();
         assert!(tari_bor::decode::<ComponentAccessRules>(e.writer()).is_err());
+    }
+
+    #[test]
+    fn component_access_rules_decode_rejects_duplicate_methods() {
+        let mut e = minicbor::Encoder::new(Vec::new());
+        e.array(2)
+            .unwrap()
+            .map(2)
+            .unwrap()
+            .str("transfer")
+            .unwrap()
+            .encode(AccessRule::DenyAll)
+            .unwrap()
+            .str("transfer")
+            .unwrap()
+            .encode(AccessRule::AllowAll)
+            .unwrap()
+            .encode(AccessRule::DenyAll)
+            .unwrap();
+        let err = tari_bor::decode::<ComponentAccessRules>(e.writer()).unwrap_err();
+        assert!(err.to_string().contains("duplicate method in ComponentAccessRules"));
     }
 
     #[test]

@@ -29,15 +29,19 @@ use crate::limits;
 /// All arithmetic on offsets / lengths is checked. Adversarial inputs are
 /// rejected with an explicit error rather than panicking or wrapping.
 pub fn extract_template_def(code: &[u8]) -> Result<TemplateDef, ExtractTemplateDefError> {
+    let mut section = None;
     for payload in Parser::new(0).parse_all(code) {
         if let Payload::CustomSection(reader) = payload? &&
             reader.name() == TEMPLATE_DEF_CUSTOM_SECTION
         {
-            return decode_template_def_from_blob(reader.data());
+            // The engine refuses a module with more than one definition, so this reader refuses it too.
+            if section.replace(reader.data()).is_some() {
+                return Err(ExtractTemplateDefError::DuplicateSection);
+            }
         }
     }
 
-    Err(ExtractTemplateDefError::SectionMissing)
+    decode_template_def_from_blob(section.ok_or(ExtractTemplateDefError::SectionMissing)?)
 }
 
 /// Decode a `[u32 LE: full_len] || [bor bytes]` blob (the format produced by
@@ -68,6 +72,8 @@ pub enum ExtractTemplateDefError {
     Parse(#[from] BinaryReaderError),
     #[error("Module has no `{TEMPLATE_DEF_CUSTOM_SECTION}` custom section")]
     SectionMissing,
+    #[error("Module has more than one `{TEMPLATE_DEF_CUSTOM_SECTION}` custom section")]
+    DuplicateSection,
     #[error("`{TEMPLATE_DEF_CUSTOM_SECTION}` custom section is too short ({len} bytes) to hold a length prefix")]
     SectionTooShort { len: usize },
     #[error("`{TEMPLATE_DEF_CUSTOM_SECTION}` declares length {declared} but the section is {actual} bytes")]
@@ -196,6 +202,19 @@ mod tests {
         let wasm = make_wasm_with_custom_section(TEMPLATE_DEF_CUSTOM_SECTION, &blob);
         let def = extract_template_def(&wasm).expect("extract from custom section");
         assert_eq!(def.template_name(), "Synthetic");
+    }
+
+    #[test]
+    fn rejects_a_second_definition_section() {
+        let blob = synthetic_template_def().encode_for_wasm_embedding().expect("encode");
+        let mut wasm = make_wasm_with_custom_section(TEMPLATE_DEF_CUSTOM_SECTION, &blob);
+        let second = make_wasm_with_custom_section(TEMPLATE_DEF_CUSTOM_SECTION, &blob);
+        wasm.extend_from_slice(&second[8..]);
+
+        match extract_template_def(&wasm) {
+            Err(ExtractTemplateDefError::DuplicateSection) => {},
+            other => panic!("expected DuplicateSection, got {:?}", other),
+        }
     }
 
     #[test]

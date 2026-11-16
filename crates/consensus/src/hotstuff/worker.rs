@@ -501,6 +501,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 current_height.as_u64()
             );
 
+            let catch_up_stall_deadline = self
+                .worker_state
+                .catch_up
+                .as_ref()
+                .filter(|catch_up| !catch_up.has_timed_out())
+                .map(|catch_up| catch_up.stall_deadline(self.config.catch_up_request_timeout));
+
             tokio::select! {
                 result = epoch_manager_events.recv() => match result {
                     Ok(event) => {
@@ -559,6 +566,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     if let Err(err) = self.check_if_block_can_be_unparked(&epoch_state, current_height, batch.iter()).await {
                         self.hooks.on_error(&err);
                         error!(target: LOG_TARGET, "🚨Error handling missing transaction: {}", err);
+                    }
+                },
+
+                _ = sleep_until_deadline(catch_up_stall_deadline) => {
+                    if let Err(e) = self.on_catch_up_stalled(&epoch_state, current_height).await {
+                        self.hooks.on_error(&e);
+                        error!(target: LOG_TARGET, "🚨Error re-requesting a stalled catch-up: {}", e);
                     }
                 },
 
@@ -970,6 +984,28 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             from,
         ));
         Ok(())
+    }
+
+    async fn on_catch_up_stalled(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        current_height: NodeHeight,
+    ) -> Result<(), HotStuffError> {
+        let Some(catch_up) = self.worker_state.catch_up.as_mut() else {
+            return Ok(());
+        };
+        catch_up.restart_stall_window();
+        let from = catch_up.from.clone();
+        info!(
+            target: LOG_TARGET,
+            "⏳ Catch-up from {} has not advanced past height {} (expected up to {}). Requesting the rest of the range.",
+            from,
+            current_height,
+            catch_up.remote_height,
+        );
+        self.on_catch_up_sync
+            .request_sync(self.pacemaker.current_view(), epoch_state.epoch(), from)
+            .await
     }
 
     async fn request_catch_up_sync(
@@ -1704,49 +1740,31 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             Ok(no_vote) => {
                 let current_height = self.pacemaker.current_height();
                 if let Some(mut catch_up) = self.worker_state.catch_up.take() {
-                    if current_height >= catch_up.expected_batch_height {
-                        if catch_up.set_next_batch(current_height, self.config.catch_up_request_timeout) {
-                            info!(
-                                target: LOG_TARGET,
-                                "⏳ Still catching up... current height: {}, expected up to: {}",
-                                current_height,
-                                catch_up.expected_batch_height,
-                            );
-                            self.on_catch_up_sync
-                                .request_sync(
-                                    self.pacemaker.current_view(),
-                                    epoch_state.epoch(),
-                                    catch_up.from.clone(),
-                                )
-                                .await?;
-                            self.worker_state.catch_up = Some(catch_up);
-                        } else {
-                            info!(
-                                target: LOG_TARGET,
-                                "✅ Finished catch up at height {}. Resuming normal operation.",
-                                current_height,
-                            );
-                        }
-                    } else {
+                    if catch_up.record_progress(current_height, self.config.catch_up_request_timeout) {
                         debug!(
                             target: LOG_TARGET,
                             "⏳ Still catching up... current height: {}, expected up to: {}",
                             current_height,
-                            catch_up.expected_batch_height,
+                            catch_up.remote_height,
                         );
                         self.worker_state.catch_up = Some(catch_up);
+                    } else {
+                        info!(
+                            target: LOG_TARGET,
+                            "✅ Finished catch up at height {}. Resuming normal operation.",
+                            current_height,
+                        );
                     }
                 }
 
-                match no_vote {
-                    None | Some(NoVoteReason::AlreadyVotedAtHeight) => {
+                if should_trigger_leader_timeout_on_no_vote(no_vote.as_ref(), origin) {
+                    // We decided NOVOTE, so we immediately send a NEWVIEW
+                    self.on_leader_timeout(epoch_state, current_height, None).await
+                } else {
+                    if matches!(no_vote, None | Some(NoVoteReason::AlreadyVotedAtHeight)) {
                         self.worker_state.has_processed_first_block = true;
-                        Ok(())
-                    },
-                    Some(_) => {
-                        // We decided NOVOTE, so we immediately send a NEWVIEW
-                        self.on_leader_timeout(epoch_state, current_height, None).await
-                    },
+                    }
+                    Ok(())
                 }
             },
             Err(err) => {
@@ -2000,9 +2018,9 @@ fn log_err<T>(context: &'static str, result: Result<T, HotStuffError>) -> Result
 
 #[derive(Debug)]
 struct WorkerState<TAddr> {
-    /// Keeps track of the active catch up. This can be None even if a catch-up request was sent. The main use of
-    /// this struct is to track timeouts and expected batch heights i.e. we've received a batch of blocks, and we need
-    /// to request more.
+    /// Keeps track of the active catch up. This can be None even if a catch-up request was sent. It tracks the
+    /// catch-up's progress towards the remote height, its timeout, and when a stalled catch-up requests the rest of
+    /// the range again.
     pub catch_up: Option<CatchUp<TAddr>>,
     pub has_processed_first_block: bool,
     /// Last (epoch, local_hash, remote_hash) we raised an epoch-hash divergence alarm for, used to
@@ -2031,35 +2049,77 @@ impl<TAddr> Default for WorkerState<TAddr> {
 #[derive(Debug)]
 struct CatchUp<TAddr> {
     pub remote_height: NodeHeight,
-    pub expected_batch_height: NodeHeight,
+    pub last_progress_height: NodeHeight,
     pub timeout_at: Instant,
+    /// Start of the window after which a catch-up that has not advanced requests the rest of the range again.
+    pub stall_window_start: Instant,
     pub from: TAddr,
 }
 
 impl<TAddr> CatchUp<TAddr> {
     pub fn new(remote_height: NodeHeight, current_height: NodeHeight, timeout: Duration, from: TAddr) -> Self {
+        let now = Instant::now();
         Self {
             remote_height,
-            // we get batches of 100 blocks which can only justify up to view h + 99
-            expected_batch_height: (current_height + NodeHeight(99)).min(remote_height),
-            timeout_at: Instant::now() + timeout,
+            last_progress_height: current_height,
+            timeout_at: now + timeout,
+            stall_window_start: now,
             from,
         }
     }
 
-    pub fn set_next_batch(&mut self, current_height: NodeHeight, timeout: Duration) -> bool {
-        self.expected_batch_height = (current_height + NodeHeight(99)).min(self.remote_height);
-        self.reset_timeout(timeout);
-        current_height < self.remote_height
+    /// Updates catch-up progress to `current_height`, refreshing the timeout when the view advances, and returns
+    /// whether catch-up is still in progress (`current_height < self.remote_height`).
+    pub fn record_progress(&mut self, current_height: NodeHeight, timeout: Duration) -> bool {
+        if current_height >= self.remote_height {
+            return false;
+        }
+        if current_height > self.last_progress_height {
+            self.last_progress_height = current_height;
+            self.reset_timeout(timeout);
+        }
+        true
     }
 
     pub fn reset_timeout(&mut self, timeout: Duration) {
-        self.timeout_at = Instant::now() + timeout;
+        let now = Instant::now();
+        self.timeout_at = now + timeout;
+        self.stall_window_start = now;
+    }
+
+    /// When this catch-up, if it has not advanced, requests the rest of the range again. A responder stops streaming
+    /// when its task deadline passes or a send fails, so a re-request resumes the range well before `timeout` ends
+    /// the catch-up.
+    pub fn stall_deadline(&self, timeout: Duration) -> Instant {
+        self.stall_window_start + timeout / CATCH_UP_STALL_WINDOWS_PER_TIMEOUT
+    }
+
+    pub fn restart_stall_window(&mut self) {
+        self.stall_window_start = Instant::now();
     }
 
     pub fn has_timed_out(&self) -> bool {
         Instant::now() >= self.timeout_at
     }
+}
+
+/// A catch-up that has not advanced requests the rest of its range again this many times within
+/// `catch_up_request_timeout` before the catch-up times out.
+const CATCH_UP_STALL_WINDOWS_PER_TIMEOUT: u32 = 4;
+
+/// Completes at `deadline`, or never when there is none.
+async fn sleep_until_deadline(deadline: Option<Instant>) {
+    match deadline {
+        Some(deadline) => time::sleep_until(deadline.into()).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Whether a `NoVoteReason` returned from processing a proposal should trigger an immediate leader timeout (`NEWVIEW`)
+/// on the current view. Catch-up responses are historical or unsolicited block imports that bypass the view filter, so
+/// a non-voting catch-up block must never force a leader timeout on the current view.
+fn should_trigger_leader_timeout_on_no_vote(no_vote: Option<&NoVoteReason>, origin: ProposalOrigin) -> bool {
+    !origin.is_catch_up() && !matches!(no_vote, None | Some(NoVoteReason::AlreadyVotedAtHeight))
 }
 
 /// The epoch consensus resumes in, or `None` for a node with no consensus state, which opens the birthday epoch.
@@ -2175,26 +2235,66 @@ mod tests {
     mod catch_up {
         use super::*;
 
-        const TIMEOUT: Duration = Duration::from_secs(30);
-
         #[test]
-        fn a_single_batch_catch_up_finishes_when_remote_height_is_reached() {
-            let mut catch_up = CatchUp::new(NodeHeight(50), NodeHeight(0), TIMEOUT, "peer");
-            assert_eq!(catch_up.expected_batch_height, NodeHeight(50));
-            assert!(!catch_up.set_next_batch(NodeHeight(50), TIMEOUT));
+        fn catch_up_stays_active_across_batch_boundaries_until_remote_height_is_reached() {
+            let timeout = Duration::from_secs(15);
+            let mut catch_up = CatchUp::new(NodeHeight(250), NodeHeight(0), timeout, "peer-a");
+
+            for height in [1, 99, 100, 150, 198, 249] {
+                assert!(
+                    catch_up.record_progress(NodeHeight(height), timeout),
+                    "catch-up should stay active at height {height} < 250"
+                );
+                assert_eq!(catch_up.last_progress_height, NodeHeight(height));
+            }
+
+            assert!(!catch_up.record_progress(NodeHeight(250), timeout));
         }
 
         #[test]
-        fn a_multi_batch_catch_up_requests_the_final_batch_capped_at_remote_height() {
-            let mut catch_up = CatchUp::new(NodeHeight(150), NodeHeight(0), TIMEOUT, "peer");
-            assert_eq!(catch_up.expected_batch_height, NodeHeight(99));
+        fn a_stalled_catch_up_requests_the_rest_of_the_range_before_it_times_out() {
+            let timeout = Duration::from_secs(20);
+            let mut catch_up = CatchUp::new(NodeHeight(250), NodeHeight(0), timeout, "peer-a");
+            assert!(catch_up.stall_deadline(timeout) < catch_up.timeout_at);
 
-            // Reaching the end of the first batch schedules the final batch, capped at `remote_height`.
-            assert!(catch_up.set_next_batch(NodeHeight(99), TIMEOUT));
-            assert_eq!(catch_up.expected_batch_height, NodeHeight(150));
+            let timeout_at = catch_up.timeout_at;
+            catch_up.restart_stall_window();
+            assert_eq!(
+                catch_up.timeout_at, timeout_at,
+                "a re-request must not extend the catch-up"
+            );
+            assert_eq!(
+                catch_up.stall_deadline(timeout),
+                catch_up.stall_window_start + timeout / CATCH_UP_STALL_WINDOWS_PER_TIMEOUT
+            );
 
-            // Reaching `remote_height` completes catch-up.
-            assert!(!catch_up.set_next_batch(NodeHeight(150), TIMEOUT));
+            let stall_window_start = catch_up.stall_window_start;
+            assert!(catch_up.record_progress(NodeHeight(10), timeout));
+            assert!(catch_up.stall_window_start >= stall_window_start);
+            assert!(catch_up.timeout_at >= timeout_at);
+        }
+
+        #[test]
+        fn a_catch_up_no_vote_never_triggers_a_leader_timeout() {
+            assert!(!should_trigger_leader_timeout_on_no_vote(None, ProposalOrigin::CatchUp));
+            assert!(!should_trigger_leader_timeout_on_no_vote(
+                Some(&NoVoteReason::AlreadyVotedAtHeight),
+                ProposalOrigin::CatchUp
+            ));
+            assert!(!should_trigger_leader_timeout_on_no_vote(
+                Some(&NoVoteReason::StateMerkleRootMismatch),
+                ProposalOrigin::CatchUp
+            ));
+
+            assert!(!should_trigger_leader_timeout_on_no_vote(None, ProposalOrigin::Live));
+            assert!(!should_trigger_leader_timeout_on_no_vote(
+                Some(&NoVoteReason::AlreadyVotedAtHeight),
+                ProposalOrigin::Live
+            ));
+            assert!(should_trigger_leader_timeout_on_no_vote(
+                Some(&NoVoteReason::StateMerkleRootMismatch),
+                ProposalOrigin::Live
+            ));
         }
     }
 

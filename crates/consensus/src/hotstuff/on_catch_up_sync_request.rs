@@ -264,12 +264,17 @@ impl<TStore: StateStore> Iterator for CatchUpBatches<'_, TStore> {
                 let Some(last) = blocks.last()
             {
                 let last_height = last.height();
-                for id in Block::get_ids_by_epoch_and_height(tx, self.epoch, last_height)? {
-                    if blocks.iter().all(|b| b.id() != &id) {
-                        let block = Block::get(tx, &id)?;
-                        if !block.is_dummy() {
-                            blocks.push(block);
-                        }
+                let siblings = Block::get_all_blocks_between(
+                    tx,
+                    self.epoch,
+                    last_height,
+                    last_height,
+                    false,
+                    CATCH_UP_BATCH_SIZE,
+                )?;
+                for sibling in siblings {
+                    if blocks.iter().all(|b| b.id() != sibling.id()) {
+                        blocks.push(sibling);
                     }
                 }
             }

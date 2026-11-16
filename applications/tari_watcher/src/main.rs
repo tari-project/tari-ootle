@@ -52,8 +52,9 @@ async fn main() -> anyhow::Result<()> {
                 );
             }
             // set by default in CommonCli
-            let parent = config_path.parent().context("parent path")?;
-            fs::create_dir_all(parent).await?;
+            if let Some(parent) = config_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+                fs::create_dir_all(parent).await?;
+            }
 
             let mut config = get_base_config(&cli)?;
             // optionally disables auto register
@@ -88,6 +89,7 @@ async fn start(config: Config) -> anyhow::Result<()> {
     create_pid_file(config.base_dir.join("watcher.pid"), std::process::id()).await?;
     let Handlers { manager_handle, task } = spawn_manager(config.clone(), shutdown.to_signal()).await?;
 
+    let mut res = Ok(());
     tokio::select! {
         _ = signal => {
             log::info!("Shutting down");
@@ -96,14 +98,17 @@ async fn start(config: Config) -> anyhow::Result<()> {
             result?;
             log::info!("Process manager exited");
         },
-        Err(err) = worker_loop(config, manager_handle) => {
-            log::error!("Registration loop exited with error {err}");
+        result = worker_loop(config, manager_handle) => {
+            if let Err(err) = result {
+                log::error!("Registration loop exited with error {err}");
+                res = Err(err);
+            }
         },
     }
 
     shutdown.trigger();
 
-    Ok(())
+    res
 }
 
 struct Handlers {

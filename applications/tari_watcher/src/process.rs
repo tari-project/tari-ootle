@@ -9,6 +9,7 @@ use std::{
 use anyhow::bail;
 use log::*;
 use ootle_network::Network;
+use tari_shutdown::ShutdownSignal;
 use tokio::{
     fs::{self, OpenOptions},
     io::AsyncWriteExt,
@@ -49,13 +50,6 @@ pub async fn clean_stale_pid_file(pid_file_path: PathBuf) -> anyhow::Result<()> 
     Ok(())
 }
 
-pub struct ChildChannel {
-    pub rx_log: mpsc::Receiver<ProcessStatus>,
-    pub tx_log: mpsc::Sender<ProcessStatus>,
-    pub rx_alert: mpsc::Receiver<ProcessStatus>,
-    pub tx_alert: mpsc::Sender<ProcessStatus>,
-}
-
 async fn spawn_validator_node(
     binary_path: PathBuf,
     base_dir: PathBuf,
@@ -81,20 +75,18 @@ async fn spawn_validator_node(
     Ok(child)
 }
 
-pub async fn spawn_validator_node_os(
+pub fn spawn_validator_node_os(
     binary_path: PathBuf,
     vn_base_dir: PathBuf,
     auto_restart: bool,
     minotari_node_grpc_url: Url,
     network: Network,
-) -> anyhow::Result<ChildChannel> {
-    let (tx_log, rx_log) = mpsc::channel(16);
-    let (tx_alert, rx_alert) = mpsc::channel(16);
+    tx_log: mpsc::Sender<ProcessStatus>,
+    tx_alert: mpsc::Sender<ProcessStatus>,
+    mut shutdown_signal: ShutdownSignal,
+) {
     let (tx_restart, mut rx_restart) = mpsc::channel(1);
 
-    let tx_log_clone_main = tx_log.clone();
-    let tx_alert_clone_main = tx_alert.clone();
-    let tx_restart_clone_main = tx_restart.clone();
     tokio::spawn(async move {
         loop {
             let child_res = spawn_validator_node(
@@ -116,9 +108,9 @@ pub async fn spawn_validator_node_os(
                         error!("Failed to create VN PID file: {}", err);
                     }
 
-                    let tx_log_monitor = tx_log_clone_main.clone();
-                    let tx_alert_monitor = tx_alert_clone_main.clone();
-                    let tx_restart_monitor = tx_restart_clone_main.clone();
+                    let tx_log_monitor = tx_log.clone();
+                    let tx_alert_monitor = tx_alert.clone();
+                    let tx_restart_monitor = tx_restart.clone();
                     // spawn monitoring and handle logs and alerts
                     tokio::spawn(monitor_child(
                         child,
@@ -129,35 +121,40 @@ pub async fn spawn_validator_node_os(
                 },
                 Err(e) => {
                     error!("Failed to spawn child process: {}. Retrying in 5s", e);
-                    sleep(std::time::Duration::from_secs(5)).await;
-                    continue;
+                    tokio::select! {
+                        _ = shutdown_signal.wait() => break,
+                        _ = sleep(std::time::Duration::from_secs(5)) => continue,
+                    }
                 },
             }
 
-            // block channel until we receive a restart signal
-            match rx_restart.recv().await {
-                Some(_) => {
-                    if !auto_restart {
-                        info!("Received restart signal, but auto restart is disabled, exiting");
-                        break;
-                    }
-
-                    info!("Received signal, preparing to restart VN process");
-                },
-                None => {
-                    error!("Failed to receive restart signal, exiting");
+            // block channel until we receive a restart signal or shutdown
+            tokio::select! {
+                _ = shutdown_signal.wait() => {
+                    info!("Shutdown signal received, stopping validator node supervisor");
                     break;
+                },
+                restart = rx_restart.recv() => match restart {
+                    Some(_) => {
+                        if !auto_restart {
+                            info!("Received restart signal, but auto restart is disabled, exiting");
+                            break;
+                        }
+
+                        info!("Received signal, preparing to restart VN process in 5s");
+                        tokio::select! {
+                            _ = shutdown_signal.wait() => break,
+                            _ = sleep(std::time::Duration::from_secs(5)) => {},
+                        }
+                    },
+                    None => {
+                        error!("Failed to receive restart signal, exiting");
+                        break;
+                    },
                 },
             }
         }
     });
-
-    Ok(ChildChannel {
-        rx_log,
-        tx_log,
-        tx_alert,
-        rx_alert,
-    })
 }
 
 pub async fn create_pid_file<P: AsRef<Path>>(path: P, pid: u32) -> anyhow::Result<()> {
@@ -209,25 +206,26 @@ pub async fn start_validator(
     minotari_node_grpc_url: Url,
     auto_restart: bool,
     network: Network,
-) -> Option<ChildChannel> {
+    tx_log: mpsc::Sender<ProcessStatus>,
+    tx_alert: mpsc::Sender<ProcessStatus>,
+    shutdown_signal: ShutdownSignal,
+) {
     let opt = check_existing_node_os(vn_base_dir.clone()).await;
     if let Some(pid) = opt {
         info!("Picking up existing VN process with id: {}", pid);
-        // todo: create new process status channel for picked up process
-        return None;
+        return;
     } else {
         debug!("No existing VN process found, spawn new one");
     }
 
-    let cc = spawn_validator_node_os(
+    spawn_validator_node_os(
         validator_path,
         vn_base_dir,
         auto_restart,
         minotari_node_grpc_url,
         network,
-    )
-    .await
-    .ok()?;
-
-    Some(cc)
+        tx_log,
+        tx_alert,
+        shutdown_signal,
+    );
 }

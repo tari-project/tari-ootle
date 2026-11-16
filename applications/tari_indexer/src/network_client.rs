@@ -10,7 +10,8 @@ use std::{
 
 use indexmap::IndexMap;
 use log::{info, warn};
-use tari_engine_types::limits::MAX_CBOR_NESTING_DEPTH;
+use tari_bor::BorError;
+use tari_engine_types::{limits::MAX_CBOR_NESTING_DEPTH, substate::SubstateId};
 use tari_epoch_manager::{EpochManagerError, EpochManagerReader};
 use tari_ootle_common_types::{
     Epoch,
@@ -18,19 +19,32 @@ use tari_ootle_common_types::{
     NumPreshards,
     ShardGroup,
     SubstateAddress,
+    SubstateRequirementRef,
     ToSubstateAddress,
     committee::Committee,
     displayable::Displayable,
     optional::Optional,
 };
-use tari_ootle_storage::consensus_models::{CommittedBlockProof, CommittedBlockProofError, FinalizedTransactionLeaf};
+use tari_ootle_light_client::{LightClientError, check_result_matches_receipt};
+use tari_ootle_storage::{
+    SubstateProofVerifyError,
+    TrustedStateRoot,
+    consensus_models::{CommittedBlockProof, CommittedBlockProofError, FinalizedTransactionLeaf, VerifiedBlockTip},
+    verify_substate_value_proof_against_root,
+};
 use tari_ootle_transaction::{Network, Transaction, TransactionId};
 use tari_rpc_framework::RpcStatusCode;
 use tari_sidechain::FixedHash;
 use tari_state_tree::{JmtHashScheme, JmtProofVerifyError, SparseMerkleProofExt, TreeHash};
 use tari_validator_node_rpc::{
     ValidatorNodeRpcClientError,
-    client::{FinalizedResult, TransactionResultStatus, ValidatorNodeClientFactory, ValidatorNodeRpcClient},
+    client::{
+        FinalizedResult,
+        SubstateResult,
+        TransactionResultStatus,
+        ValidatorNodeClientFactory,
+        ValidatorNodeRpcClient,
+    },
 };
 
 const LOG_TARGET: &str = "tari::indexer::network_client";
@@ -39,8 +53,8 @@ const LOG_TARGET: &str = "tari::indexer::network_client";
 /// memory.
 const VERIFIED_RESULTS_CAPACITY: usize = 4096;
 
-/// How many verified block headers are remembered, so that the result of another transaction a remembered block
-/// finalized is verified by its Merkle path alone.
+/// How many verified block headers are remembered, so that another proof anchored at a remembered block is verified by
+/// its Merkle path alone.
 const VERIFIED_BLOCKS_CAPACITY: usize = 1024;
 
 #[derive(Debug, Clone)]
@@ -51,9 +65,9 @@ pub struct TariNetworkClient<TEpochManager, TClientFactory> {
     network: Network,
     /// Finalized results whose decision verified, most recent last, bounded at [`VERIFIED_RESULTS_CAPACITY`].
     verified_results: Arc<Mutex<IndexMap<TransactionId, Box<FinalizedResult>>>>,
-    /// The transaction merkle root of each block whose commit proof verified, by block id, most recent last, bounded
-    /// at [`VERIFIED_BLOCKS_CAPACITY`].
-    verified_blocks: Arc<Mutex<IndexMap<FixedHash, TreeHash>>>,
+    /// The quorum-signed header fields of each block whose commit proof verified, by block id, most recent last,
+    /// bounded at [`VERIFIED_BLOCKS_CAPACITY`].
+    verified_blocks: Arc<Mutex<IndexMap<FixedHash, VerifiedBlockTip>>>,
 }
 
 impl<TAddr, TEpochManager, TClientFactory> TariNetworkClient<TEpochManager, TClientFactory>
@@ -141,9 +155,15 @@ where
     /// The status of a transaction as one member of its receipt committee reports it, or `None` when that member
     /// reports the transaction unknown.
     ///
-    /// A finalized result is returned once its decision verifies against the quorum-signed header of the block that
-    /// finalized it, so members are asked in turn until one serves a result that does. The rest of the result, its
-    /// execution and abort details, is the serving member's account. Pending and unknown answers carry no proof, and
+    /// A finalized result is returned once it verifies, so members are asked in turn until one serves a result that
+    /// does:
+    /// - A commit's result must match its receipt, which the serving member proves against a quorum-signed state root.
+    ///   The receipt commits the outcome, diff, events and fee receipt, leaving the logs, the fees required and the
+    ///   execution timings and points as the member's account.
+    /// - An abort's decision must be the leaf the serving member proves under the quorum-signed transaction merkle root
+    ///   of the block that finalized it, leaving the reject reason and the abort details as the member's account.
+    ///
+    /// Pending and unknown answers carry no proof, and
     /// the first member to give one is returned: each query asks the members in a fresh random order, so a member that
     /// misreports one only delays the result. A transaction whose finalized result this indexer cannot verify from any
     /// member, because no member holds a proof or this indexer knows no committee for the block a proof cites, is
@@ -176,7 +196,10 @@ where
                     continue;
                 },
             };
-            match self.verify_finalized_result(&transaction_id, &finalized).await {
+            match self
+                .verify_finalized_result(&mut client, &transaction_id, &finalized)
+                .await
+            {
                 Ok(()) => {
                     remember(
                         &self.verified_results,
@@ -223,20 +246,79 @@ where
         })
     }
 
-    /// Verifies that the block `finalized`'s proof cites finalized its decision for `transaction_id`, and that the
-    /// committee of that block's epoch and shard group committed the block.
     async fn verify_finalized_result(
         &self,
+        client: &mut TClientFactory::Client,
         transaction_id: &TransactionId,
         finalized: &FinalizedResult,
     ) -> Result<(), ResultProofError> {
         check_decision_matches_execution(finalized)?;
+        if finalized.final_decision.is_commit() {
+            self.verify_commit(client, transaction_id, finalized).await
+        } else {
+            self.verify_abort(transaction_id, finalized).await
+        }
+    }
+
+    /// Verifies that `finalized`'s result is the one the receipt of `transaction_id` commits, fetching that receipt and
+    /// its proof from `client`'s member.
+    async fn verify_commit(
+        &self,
+        client: &mut TClientFactory::Client,
+        transaction_id: &TransactionId,
+        finalized: &FinalizedResult,
+    ) -> Result<(), ResultProofError> {
+        let receipt_id = SubstateId::TransactionReceipt(transaction_id.into_receipt_address());
+        let (SubstateResult::Up { substate }, Some(proof)) = client
+            .get_substate_with_proof(SubstateRequirementRef::unversioned(&receipt_id))
+            .await
+            .map_err(ResultProofError::ReceiptUnavailable)?
+        else {
+            return Err(ResultProofError::Unproven);
+        };
+        let commit_proof = CommittedBlockProof::from_bytes(&proof.commit_proof)?;
+        let tip = self.verified_tip(&commit_proof).await?;
+        let value = substate
+            .value()
+            .decode()
+            .map_err(ResultProofError::UndecodableReceipt)?;
+        verify_substate_value_proof_against_root(
+            &proof.substate_value_proof,
+            &receipt_id,
+            substate.version(),
+            Some(&value),
+            self.network,
+            self.num_preshards,
+            Epoch(proof.proof_epoch),
+            &TrustedStateRoot::from(tip),
+        )?;
+        let receipt = value
+            .into_transaction_receipt()
+            .ok_or(ResultProofError::ReceiptIsNotAReceipt)?;
+        let execute_result = finalized
+            .execute_result
+            .as_ref()
+            .ok_or(ResultProofError::CommitWithoutExecutionResult)?
+            .decode()
+            .map_err(|e| ResultProofError::UndecodableExecutionResult(e.to_string()))?;
+        check_result_matches_receipt(self.network, *transaction_id, &receipt, &execute_result.finalize)?;
+        Ok(())
+    }
+
+    /// Verifies that the block `finalized`'s inclusion proof cites finalized its abort of `transaction_id`.
+    async fn verify_abort(
+        &self,
+        transaction_id: &TransactionId,
+        finalized: &FinalizedResult,
+    ) -> Result<(), ResultProofError> {
         let proof = finalized.inclusion_proof.as_ref().ok_or(ResultProofError::Unproven)?;
         let commit_proof = CommittedBlockProof::from_bytes(&proof.commit_proof)?;
         let transaction_proof: SparseMerkleProofExt =
             tari_bor::serde_codec::from_slice_with_max_depth(&proof.transaction_proof, MAX_CBOR_NESTING_DEPTH)
                 .map_err(|e| ResultProofError::UndecodableTransactionProof(e.to_string()))?;
-        let root = self.verified_transaction_root(&commit_proof).await?;
+        self.verified_tip(&commit_proof).await?;
+        // The block id hashes the whole header, so a verified block id stands for the root its proof carries.
+        let root = TreeHash::from(commit_proof.proof().header.transaction_merkle_root.into_array());
         let leaf = FinalizedTransactionLeaf {
             transaction_id,
             decision: finalized.final_decision,
@@ -245,16 +327,13 @@ where
         Ok(())
     }
 
-    /// The transaction merkle root of the block `commit_proof` proves, once the committee of the block's epoch and
-    /// shard group is verified to have committed it. A block id is the hash of its header, root included, so a root
-    /// remembered by block id stands for any later proof of the same block.
-    async fn verified_transaction_root(
-        &self,
-        commit_proof: &CommittedBlockProof,
-    ) -> Result<TreeHash, ResultProofError> {
+    /// The quorum-signed header fields of the block `commit_proof` proves, once the committee of the block's epoch and
+    /// shard group is verified to have committed it. A block id is the hash of its header, so a block remembered by id
+    /// stands for any later proof of the same block.
+    async fn verified_tip(&self, commit_proof: &CommittedBlockProof) -> Result<VerifiedBlockTip, ResultProofError> {
         let block_id = commit_proof.block_id();
-        if let Some(root) = recall(&self.verified_blocks, &block_id) {
-            return Ok(root);
+        if let Some(tip) = recall(&self.verified_blocks, &block_id) {
+            return Ok(tip);
         }
         let epoch = commit_proof.epoch();
         let shard_group = commit_proof.shard_group()?;
@@ -267,10 +346,9 @@ where
                 shard_group,
                 source,
             })?;
-        commit_proof.validate(self.network, committee.quorum_threshold(), &*committee)?;
-        let root = TreeHash::from(commit_proof.proof().header.transaction_merkle_root.into_array());
-        remember(&self.verified_blocks, block_id, root, VERIFIED_BLOCKS_CAPACITY);
-        Ok(root)
+        let tip = commit_proof.validate(self.network, committee.quorum_threshold(), &*committee)?;
+        remember(&self.verified_blocks, block_id, tip, VERIFIED_BLOCKS_CAPACITY);
+        Ok(tip)
     }
 
     async fn committee_for_substate(
@@ -430,16 +508,24 @@ enum ResultProofError {
     CommitWithoutExecutionResult,
     #[error("the transaction proof does not decode: {0}")]
     UndecodableTransactionProof(String),
-    #[error("the commit proof of the finalizing block is invalid: {0}")]
+    #[error("the commit proof is invalid: {0}")]
     InvalidCommitProof(#[from] CommittedBlockProofError),
-    #[error(
-        "this indexer knows no committee of {shard_group} at {epoch}, which committed the finalizing block: {source}"
-    )]
+    #[error("this indexer knows no committee of {shard_group} at {epoch}, which committed the proof's block: {source}")]
     CommitteeUnknown {
         epoch: Epoch,
         shard_group: ShardGroup,
         source: EpochManagerError,
     },
+    #[error("the receipt could not be fetched: {0}")]
+    ReceiptUnavailable(ValidatorNodeRpcClientError),
+    #[error("the receipt does not decode: {0}")]
+    UndecodableReceipt(BorError),
+    #[error("the proven receipt substate holds no transaction receipt")]
+    ReceiptIsNotAReceipt,
+    #[error("the receipt proof does not verify: {0}")]
+    InvalidReceiptProof(#[from] SubstateProofVerifyError),
+    #[error("the result is not the one the receipt commits: {0}")]
+    ResultDoesNotMatchReceipt(#[from] LightClientError),
     #[error("the finalizing block did not finalize this decision: {0}")]
     DecisionNotFinalized(#[from] JmtProofVerifyError),
 }
@@ -486,9 +572,13 @@ pub(crate) mod tests {
 
     use tari_consensus_types::Decision;
     use tari_engine_types::{
-        commit_result::{ExecuteResult, RejectReason, TransactionResult},
+        SubstateVersion,
+        commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
+        confidential::ClaimedOutputTombstone,
         encoded::Encoded,
-        substate::SubstateId,
+        fees::FeeReceipt,
+        substate::{EncodedSubstate, Substate, SubstateDiff, SubstateValue},
+        transaction_receipt::{DiffSummary, FinalizeOutcome, TransactionReceipt},
     };
     use tari_epoch_manager::EpochManagerEvent;
     use tari_ootle_common_types::{
@@ -497,11 +587,16 @@ pub(crate) mod tests {
         VotePower,
         committee::{CommitteeInfo, CommitteeMember},
     };
-    use tari_ootle_light_client::test_fixtures::{Signers, transaction_block_commit_proof};
+    use tari_ootle_light_client::test_fixtures::{
+        ProofAnchor,
+        Signers,
+        anchored_substate_proof,
+        transaction_block_commit_proof,
+    };
     use tari_ootle_storage::{global::models::ValidatorNode, time::PrimitiveDateTime};
     use tari_rpc_framework::RpcStatus;
     use tari_state_tree::KeyedProofTree;
-    use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+    use tari_template_lib_types::{ClaimedOutputTombstoneAddress, Hash32, crypto::RistrettoPublicKeyBytes};
     use tari_validator_node_rpc::client::{
         SubstateBatch,
         SubstateProofData,
@@ -518,7 +613,8 @@ pub(crate) mod tests {
     pub(crate) enum Answer {
         NotFound,
         Pending,
-        Finalized(Box<FinalizedResult>),
+        /// A finalized result, and the receipt the member serves with its proof.
+        Finalized(Box<FinalizedResult>, Option<(EncodedSubstate, SubstateProofData)>),
         Unreachable,
     }
 
@@ -558,7 +654,7 @@ pub(crate) mod tests {
             match &self.committee.0.lock().unwrap()[&self.address] {
                 Answer::NotFound => Err(RpcStatus::not_found("unknown transaction").into()),
                 Answer::Pending => Ok(TransactionResultStatus::Pending),
-                Answer::Finalized(result) => Ok(TransactionResultStatus::Finalized(result.clone())),
+                Answer::Finalized(result, _) => Ok(TransactionResultStatus::Finalized(result.clone())),
                 Answer::Unreachable => Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow::anyhow!(
                     "unreachable"
                 ))),
@@ -576,7 +672,16 @@ pub(crate) mod tests {
             &mut self,
             _: SubstateRequirementRef<'_>,
         ) -> Result<(SubstateResult, Option<SubstateProofData>), ValidatorNodeRpcClientError> {
-            unimplemented!()
+            self.committee.1.fetch_add(1, Ordering::SeqCst);
+            match &self.committee.0.lock().unwrap()[&self.address] {
+                Answer::Finalized(_, Some((substate, proof))) => Ok((
+                    SubstateResult::Up {
+                        substate: substate.clone(),
+                    },
+                    Some(proof.clone()),
+                )),
+                _ => Ok((SubstateResult::DoesNotExist, None)),
+            }
         }
 
         async fn get_substates_batch(
@@ -736,7 +841,7 @@ pub(crate) mod tests {
 
     const NETWORK: Network = Network::LocalNet;
 
-    /// The epoch of the blocks the fixtures prove a decision in.
+    /// The epoch of the blocks the fixtures prove a result in.
     const PROOF_EPOCH: Epoch = Epoch(0);
 
     /// An epoch whose committee the fake epoch manager does not know.
@@ -750,9 +855,14 @@ pub(crate) mod tests {
         TransactionId::from([8u8; 32])
     }
 
-    /// The committee that commits every block the fixtures prove a decision in.
+    /// The committee that commits every block the fixtures prove a result in.
     fn signers() -> Signers {
         Signers::new(1, 4)
+    }
+
+    /// Signers other than the committee of the blocks the fixtures prove a result in.
+    fn other_signers() -> Signers {
+        Signers::new(2, 4)
     }
 
     fn committee_of(signers: &Signers) -> Committee<Addr> {
@@ -770,7 +880,15 @@ pub(crate) mod tests {
         )
     }
 
-    /// A block of [`PROOF_EPOCH`] finalizing `decisions`, committed by `signers`.
+    fn abort_decision() -> Decision {
+        Decision::from(&rejection())
+    }
+
+    fn rejection() -> TransactionResult {
+        TransactionResult::Reject(RejectReason::ForeignPledgeInputConflict)
+    }
+
+    /// A block of `epoch` finalizing `decisions`, committed by `signers`.
     struct FinalizingBlock {
         tree: KeyedProofTree,
         commit_proof: Vec<u8>,
@@ -803,7 +921,7 @@ pub(crate) mod tests {
 
         /// `answer` with this block's proof of `transaction_id`'s leaf.
         fn prove(&self, answer: Answer, transaction_id: TransactionId) -> Answer {
-            let Answer::Finalized(mut result) = answer else {
+            let Answer::Finalized(mut result, receipt) = answer else {
                 panic!("only a finalized answer carries a proof");
             };
             let key = FinalizedTransactionLeaf {
@@ -816,11 +934,12 @@ pub(crate) mod tests {
                 transaction_proof: tari_bor::serde_codec::to_vec(&proof).unwrap(),
                 commit_proof: self.commit_proof.clone(),
             });
-            Answer::Finalized(result)
+            Answer::Finalized(result, receipt)
         }
     }
 
-    /// `answer` proven by a block that `signers` commit, finalizing `decision` for the queried transaction.
+    /// `answer` with an inclusion proof of a block that `signers` commit, finalizing `decision` for the queried
+    /// transaction.
     fn proven_as(answer: Answer, decision: Decision, signers: &Signers) -> Answer {
         FinalizingBlock::new(
             &[(transaction_id(), decision), (other_transaction_id(), Decision::Commit)],
@@ -829,48 +948,38 @@ pub(crate) mod tests {
         .prove(answer, transaction_id())
     }
 
-    fn unproven_finalized(result: TransactionResult, total_fees_required: u64) -> Answer {
+    fn served(execute_result: &ExecuteResult) -> Box<FinalizedResult> {
+        Box::new(FinalizedResult {
+            final_decision: (&execute_result.finalize.result).into(),
+            execute_result: Some(Encoded::encode(execute_result).unwrap()),
+            execution_time: Default::default(),
+            finalized_time: PrimitiveDateTime::MIN,
+            abort_details: None,
+            inclusion_proof: None,
+        })
+    }
+
+    fn execute_result(finalize: FinalizeResult) -> ExecuteResult {
         let mut execute_result = ExecuteResult::new_rejected(
             transaction_id().as_hash(),
             RejectReason::ForeignPledgeInputConflict,
             Some(Epoch(1)),
         );
-        execute_result.finalize.result = result;
-        execute_result.finalize.total_fees_required = total_fees_required;
-        Answer::Finalized(Box::new(FinalizedResult {
-            final_decision: (&execute_result.finalize.result).into(),
-            execute_result: Some(Encoded::encode(&execute_result).unwrap()),
-            execution_time: Default::default(),
-            finalized_time: PrimitiveDateTime::MIN,
-            abort_details: None,
-            inclusion_proof: None,
-        }))
-    }
-
-    fn decision_of(answer: &Answer) -> Decision {
-        let Answer::Finalized(result) = answer else {
-            panic!("only a finalized answer has a decision");
-        };
-        result.final_decision
-    }
-
-    /// A finalized answer proven by a block [`signers`] commit.
-    fn proven(answer: Answer) -> Answer {
-        let decision = decision_of(&answer);
-        proven_as(answer, decision, &signers())
-    }
-
-    /// A proven commit, told apart from other commits of the same transaction by `tag`.
-    fn committed(tag: u64) -> Answer {
-        proven(unproven_committed(tag))
-    }
-
-    fn unproven_committed(tag: u64) -> Answer {
-        unproven_finalized(TransactionResult::Accept(Default::default()), tag)
+        execute_result.finalize = finalize;
+        execute_result
     }
 
     fn unproven_aborted() -> Answer {
-        unproven_finalized(TransactionResult::Reject(RejectReason::ForeignPledgeInputConflict), 0)
+        Answer::Finalized(
+            served(&execute_result(FinalizeResult::new(
+                Hash32::from_array(transaction_id().into_array()),
+                vec![],
+                vec![],
+                rejection(),
+                FeeReceipt::default(),
+            ))),
+            None,
+        )
     }
 
     /// A proven abort of the queried transaction.
@@ -880,18 +989,106 @@ pub(crate) mod tests {
 
     /// A proven abort of `transaction_id`.
     pub(crate) fn aborted_of(transaction_id: TransactionId) -> Answer {
-        let answer = unproven_aborted();
-        let decision = decision_of(&answer);
         FinalizingBlock::new(
-            &[(transaction_id, decision), (other_transaction_id(), Decision::Commit)],
+            &[
+                (transaction_id, abort_decision()),
+                (other_transaction_id(), Decision::Commit),
+            ],
             &signers(),
         )
-        .prove(answer, transaction_id)
+        .prove(unproven_aborted(), transaction_id)
     }
 
-    /// A commit whose proof is committed by a committee other than the one of its block's epoch and shard group.
+    /// A commit of the queried transaction committing `outcome`, and the receipt committed with it.
+    fn commit(outcome: FinalizeOutcome) -> (SubstateDiff, TransactionReceipt) {
+        let mut diff = SubstateDiff::new();
+        diff.up(
+            SubstateId::ClaimedOutputTombstone(ClaimedOutputTombstoneAddress::from_bytes(&[1; 32]).unwrap()),
+            Substate::new(
+                SubstateVersion::ZERO,
+                SubstateValue::ClaimedOutputTombstone(ClaimedOutputTombstone { value: 1 }),
+            ),
+        );
+        let receipt = TransactionReceipt {
+            outcome,
+            diff_summary: DiffSummary::from_diff(NETWORK, &diff, PROOF_EPOCH),
+            fee_withdrawals: Box::new([]),
+            events: Box::new([]),
+            fee_receipt: FeeReceipt::default(),
+            epoch: PROOF_EPOCH,
+            intent_commitment: Hash32::from_array([3; 32]),
+        };
+        diff.up(
+            SubstateId::TransactionReceipt(transaction_id().into_receipt_address()),
+            Substate::new(SubstateVersion::ZERO, receipt.clone()),
+        );
+        (diff, receipt)
+    }
+
+    /// The receipt of the queried transaction, with a proof anchored at a block that `signers` commit.
+    fn served_receipt(receipt: TransactionReceipt, signers: &Signers) -> (EncodedSubstate, SubstateProofData) {
+        let receipt_id = SubstateId::TransactionReceipt(transaction_id().into_receipt_address());
+        let value = SubstateValue::TransactionReceipt(receipt);
+        let anchor = ProofAnchor {
+            network: NETWORK,
+            num_preshards: NumPreshards::P1,
+            epoch: PROOF_EPOCH,
+            shard_group: ShardGroup::all_shards(NumPreshards::P1),
+        };
+        let proof = anchored_substate_proof(&anchor, signers, &receipt_id, SubstateVersion::ZERO, &value);
+        (
+            EncodedSubstate::new(SubstateVersion::ZERO, Encoded::encode(&value).unwrap()),
+            SubstateProofData {
+                substate_value_proof: proof.value_proof,
+                commit_proof: proof.commit_proof,
+                proof_epoch: proof.value_hash_epoch.as_u64(),
+                substate_down_proof: None,
+                destroyed_at_state_version: None,
+            },
+        )
+    }
+
+    /// A commit of `result`, told apart from other commits of the same transaction by `tag`.
+    fn commit_answer(
+        result: TransactionResult,
+        tag: u64,
+        receipt: Option<(EncodedSubstate, SubstateProofData)>,
+    ) -> Answer {
+        let mut finalize = FinalizeResult::new(
+            Hash32::from_array(transaction_id().into_array()),
+            vec![],
+            vec![],
+            result,
+            FeeReceipt::default(),
+        );
+        finalize.total_fees_required = tag;
+        Answer::Finalized(served(&execute_result(finalize)), receipt)
+    }
+
+    /// A commit served with its receipt, proven by [`signers`].
+    fn committed(tag: u64) -> Answer {
+        let (diff, receipt) = commit(FinalizeOutcome::Commit);
+        commit_answer(
+            TransactionResult::Accept(diff),
+            tag,
+            Some(served_receipt(receipt, &signers())),
+        )
+    }
+
+    /// A commit whose member serves no receipt.
+    fn unproven_committed(tag: u64) -> Answer {
+        let (diff, _) = commit(FinalizeOutcome::Commit);
+        commit_answer(TransactionResult::Accept(diff), tag, None)
+    }
+
+    /// A commit served with its receipt, proven by signers other than the committee of the receipt's block.
     fn forged_commit(tag: u64) -> Answer {
-        proven_as(unproven_committed(tag), Decision::Commit, &Signers::new(2, 4))
+        let (diff, receipt) = commit(FinalizeOutcome::Commit);
+        commit_answer(
+            TransactionResult::Accept(diff),
+            tag,
+            Some(served_receipt(receipt, &other_signers())),
+        )
     }
 
     async fn query(answers: Vec<Answer>) -> Result<Option<TransactionResultStatus>, NetworkClientError> {
@@ -956,6 +1153,10 @@ pub(crate) mod tests {
         matches!(status, TransactionResultStatus::Finalized(result) if result.final_decision.is_abort())
     }
 
+    fn is_rejected(result: Result<Option<TransactionResultStatus>, NetworkClientError>) -> bool {
+        matches!(result, Err(NetworkClientError::AllValidatorsFailed { .. }))
+    }
+
     // Members are asked in random order, so the tests that mix answers repeat to put each answer
     // in every position.
     const ROUNDS: usize = 20;
@@ -1011,8 +1212,8 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn a_proof_whose_committee_is_unknown_here_is_pending() {
-        let block = FinalizingBlock::at(UNKNOWN_EPOCH, &[(transaction_id(), Decision::Commit)], &signers());
-        let status = query(vec![block.prove(unproven_committed(1), transaction_id())])
+        let block = FinalizingBlock::at(UNKNOWN_EPOCH, &[(transaction_id(), abort_decision())], &signers());
+        let status = query(vec![block.prove(unproven_aborted(), transaction_id())])
             .await
             .unwrap()
             .unwrap();
@@ -1021,30 +1222,66 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn a_proof_committed_by_another_committee_is_discarded() {
-        let result = query(vec![forged_commit(1)]).await;
-        assert!(matches!(result, Err(NetworkClientError::AllValidatorsFailed { .. })));
+        assert!(is_rejected(query(vec![forged_commit(1)]).await));
+        assert!(is_rejected(
+            query(vec![proven_as(unproven_aborted(), abort_decision(), &other_signers())]).await
+        ));
     }
 
     #[tokio::test]
-    async fn a_proof_of_another_decision_is_discarded() {
-        let abort = Decision::from(&TransactionResult::Reject(RejectReason::ForeignPledgeInputConflict));
-        for answer in [
-            proven_as(unproven_committed(1), abort, &signers()),
-            proven_as(unproven_aborted(), Decision::Commit, &signers()),
-        ] {
-            let result = query(vec![answer]).await;
-            assert!(matches!(result, Err(NetworkClientError::AllValidatorsFailed { .. })));
-        }
+    async fn an_abort_proven_as_another_decision_is_discarded() {
+        assert!(is_rejected(
+            query(vec![proven_as(unproven_aborted(), Decision::Commit, &signers())]).await
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_fee_only_commit_served_as_a_full_accept_is_discarded() {
+        let (diff, receipt) = commit(FinalizeOutcome::FeeIntentCommit);
+        let answer = commit_answer(
+            TransactionResult::Accept(diff),
+            1,
+            Some(served_receipt(receipt, &signers())),
+        );
+        assert!(is_rejected(query(vec![answer]).await));
+    }
+
+    #[tokio::test]
+    async fn a_commit_whose_diff_differs_from_its_receipt_is_discarded() {
+        let (mut diff, receipt) = commit(FinalizeOutcome::Commit);
+        diff.up(
+            SubstateId::ClaimedOutputTombstone(ClaimedOutputTombstoneAddress::from_bytes(&[2; 32]).unwrap()),
+            Substate::new(
+                SubstateVersion::ZERO,
+                SubstateValue::ClaimedOutputTombstone(ClaimedOutputTombstone { value: 2 }),
+            ),
+        );
+        let answer = commit_answer(
+            TransactionResult::Accept(diff),
+            1,
+            Some(served_receipt(receipt, &signers())),
+        );
+        assert!(is_rejected(query(vec![answer]).await));
+    }
+
+    #[tokio::test]
+    async fn a_receipt_its_proof_does_not_commit_is_discarded() {
+        let (diff, receipt) = commit(FinalizeOutcome::Commit);
+        let (_, fee_only_receipt) = commit(FinalizeOutcome::FeeIntentCommit);
+        let (substate, _) = served_receipt(receipt, &signers());
+        let (_, proof_of_fee_only) = served_receipt(fee_only_receipt, &signers());
+        let answer = commit_answer(TransactionResult::Accept(diff), 1, Some((substate, proof_of_fee_only)));
+        assert!(is_rejected(query(vec![answer]).await));
     }
 
     #[tokio::test]
     async fn a_proven_decision_contradicting_its_own_result_is_discarded() {
-        let Answer::Finalized(mut forged) = unproven_committed(1) else {
+        let Answer::Finalized(mut forged, receipt) = unproven_committed(1) else {
             unreachable!()
         };
-        forged.final_decision = (&TransactionResult::Reject(RejectReason::ForeignPledgeInputConflict)).into();
-        let result = query(vec![proven(Answer::Finalized(forged))]).await;
-        assert!(matches!(result, Err(NetworkClientError::AllValidatorsFailed { .. })));
+        forged.final_decision = abort_decision();
+        let answer = proven_as(Answer::Finalized(forged, receipt), abort_decision(), &signers());
+        assert!(is_rejected(query(vec![answer]).await));
     }
 
     #[tokio::test]
@@ -1056,8 +1293,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn every_member_failing_is_an_error() {
-        let result = query(vec![Answer::Unreachable, Answer::Unreachable]).await;
-        assert!(matches!(result, Err(NetworkClientError::AllValidatorsFailed { .. })));
+        assert!(is_rejected(query(vec![Answer::Unreachable, Answer::Unreachable]).await));
     }
 
     #[tokio::test]
@@ -1069,7 +1305,8 @@ pub(crate) mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(commit_tag(&status), Some(2));
-        assert_eq!(requests.swap(0, Ordering::SeqCst), 1);
+        // The result, then its receipt.
+        assert_eq!(requests.swap(0, Ordering::SeqCst), 2);
 
         let status = client
             .get_finalized_transaction_result(transaction_id())
@@ -1081,19 +1318,21 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn a_verified_block_proves_the_other_decisions_it_finalized() {
-        let abort = Decision::from(&TransactionResult::Reject(RejectReason::ForeignPledgeInputConflict));
+    async fn a_verified_block_proves_the_other_aborts_it_finalized() {
         let block = FinalizingBlock::new(
-            &[(transaction_id(), Decision::Commit), (other_transaction_id(), abort)],
+            &[
+                (transaction_id(), abort_decision()),
+                (other_transaction_id(), abort_decision()),
+            ],
             &signers(),
         );
-        let (client, _) = network(vec![block.prove(unproven_committed(1), transaction_id())]);
+        let (client, _) = network(vec![block.prove(unproven_aborted(), transaction_id())]);
         let status = client
             .get_finalized_transaction_result(transaction_id())
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(commit_tag(&status), Some(1));
+        assert!(is_abort(&status));
         assert_eq!(client.epoch_manager.signing_lookups.load(Ordering::SeqCst), 1);
 
         client.client_provider.0.lock().unwrap().insert(

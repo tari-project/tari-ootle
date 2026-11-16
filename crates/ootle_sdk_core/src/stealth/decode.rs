@@ -120,7 +120,8 @@ pub(crate) fn extract_utxo_output(
 /// neutral carrier [`FetchedSubstate`](crate::FetchedSubstate) uses, so the facade stays a thin JSON marshal.
 ///
 /// Errors: a non-UTXO / frozen / burnt substate or a malformed nonce surface as `Invalid` / `Key`
-/// (via [`extract_utxo_output`]); a malformed `substate_id` or undecodable value JSON surface as
+/// (via [`extract_utxo_output`]), and a [`SpendAuthorization::Key`] spend public key that does not
+/// decompress surfaces as `Key`; a malformed `substate_id` or undecodable value JSON surface as
 /// `Parse` / `Encoding`.
 pub fn decode_stealth_utxo(
     substate_id: &str,
@@ -158,8 +159,11 @@ pub fn decode_stealth_utxo(
         .map_err(|e| OotleSdkError::Stealth(format!("compute allow-all condition root: {e}")))?;
     let (pay_to, spend_public_key) = match &output.auth {
         SpendAuthorization::Key(pk) => {
-            let spend_pk = PublicKeyBytes::from_bytes(pk.as_bytes())
+            let spend_pk: RistrettoPublicKey = pk
+                .try_from_byte_type()
                 .map_err(|e| OotleSdkError::Key(format!("malformed spend public key in '{substate_id}': {e}")))?;
+            let spend_pk = PublicKeyBytes::from_bytes(spend_pk.as_bytes())
+                .map_err(|e| OotleSdkError::Key(format!("spend public key is not 32 bytes: {e}")))?;
             (StealthPayTo::StealthPublicKey, Some(spend_pk))
         },
         SpendAuthorization::Script(root) if *root == allow_all_root => (StealthPayTo::AccessRuleAllowAll, None),
@@ -205,7 +209,13 @@ mod tests {
         substate::SubstateValue,
     };
     use tari_ootle_wallet_crypto::{StealthCryptoApi, encrypted_data::encrypt_data, kdfs};
-    use tari_template_lib_types::{ObjectKey, ResourceAddress, access_rules::AccessRule, stealth::SpendCondition};
+    use tari_template_lib_types::{
+        ObjectKey,
+        ResourceAddress,
+        access_rules::AccessRule,
+        crypto::RistrettoPublicKeyBytes,
+        stealth::SpendCondition,
+    };
 
     use super::*;
     use crate::{
@@ -362,5 +372,19 @@ mod tests {
         let component_id = "component_a8d8d883f5f50e5a8b4c8a8a8b8c8d8e8f808182838485868788898a8b8c8d8e";
         let err = decode_stealth_utxo(component_id, &b.value).unwrap_err();
         assert_eq!(err.code(), "PARSE");
+    }
+
+    // (f) a non-canonical spend public key in SpendAuthorization::Key ⇒ Key.
+    #[test]
+    fn non_canonical_spend_public_key_is_key_error() {
+        let net = Network::LocalNet;
+        let b = build(net, 1u64, true);
+        let mut substate = crate::encoded_decode::decode_served::<SubstateValue>(&b.value).unwrap();
+        if let SubstateValue::Utxo(utxo) = &mut substate {
+            utxo.output.as_mut().unwrap().auth = SpendAuthorization::Key(RistrettoPublicKeyBytes::from([0xff; 32]));
+        }
+        let bad_value = crate::substate_decode::indexer_substate_json(&substate);
+        let err = decode_stealth_utxo(&b.substate_id, &bad_value).unwrap_err();
+        assert_eq!(err.code(), "KEY");
     }
 }

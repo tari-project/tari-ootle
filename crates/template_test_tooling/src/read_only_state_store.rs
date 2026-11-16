@@ -78,6 +78,11 @@ impl<'a> ReadOnlyStateStore<'a> {
 
     pub fn get_account(&self, account_address: ComponentAddress) -> Result<Account, StateStoreError> {
         let account = self.get_component(account_address)?;
+        if *account.template_address() != ACCOUNT_TEMPLATE_ADDRESS {
+            return Err(StateStoreError::CustomStr(format!(
+                "Component at {account_address} is not an account component"
+            )));
+        }
         Account::from_value(account.state()).map_err(|e| StateStoreError::CustomStr(e.to_string()))
     }
 
@@ -114,7 +119,10 @@ impl<'a> ReadOnlyStateStore<'a> {
         address: ComponentAddress,
     ) -> Result<HashMap<VaultId, Vault>, StateStoreError> {
         let component = self.get_component(address)?;
-        let indexed = component.body().to_indexed_well_known_types().unwrap();
+        let indexed = component
+            .body()
+            .to_indexed_well_known_types()
+            .map_err(|e| StateStoreError::CustomStr(e.to_string()))?;
         let mut vaults = HashMap::with_capacity(indexed.vault_ids().len());
         for id in indexed.vault_ids() {
             let vault = self.get_vault(id)?;
@@ -198,7 +206,7 @@ impl<'a> ReadOnlyStateStore<'a> {
 
     pub fn inspect_component(&self, component_address: ComponentAddress) -> Result<IndexedValue, StateStoreError> {
         let component = self.get_component(component_address)?;
-        Ok(IndexedValue::from_value(component.into_state()).unwrap())
+        IndexedValue::from_value(component.into_state()).map_err(|e| StateStoreError::CustomStr(e.to_string()))
     }
 
     pub fn count(&self) -> Result<usize, StateStoreError> {

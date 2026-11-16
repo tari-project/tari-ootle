@@ -39,9 +39,10 @@ impl Cf for StateVersionProofCf {
 
 prefixed!(BlockCommitProofPrefix, KeyPrefix::BlockCommitProofs);
 
-/// The CBOR-encoded commit proof of each committed block that produced state versions, which the
-/// [`StateVersionProofCf`] entries naming the block are served with once the block is pruned. Deleted with the last
-/// of those entries, through [`BlockCommitProofCitationCf`].
+/// The CBOR-encoded commit proof of each committed block that produced state versions or finalized transactions, which
+/// the [`StateVersionProofCf`] entries and finalized transaction inclusions naming the block are served with once the
+/// block is pruned. Deleted with the last of those, through [`BlockCommitProofCitationCf`] and
+/// [`BlockCommitProofTransactionCitationCf`].
 pub struct BlockCommitProofCf;
 
 impl Cf for BlockCommitProofCf {

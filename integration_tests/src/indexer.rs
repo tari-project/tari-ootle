@@ -162,7 +162,7 @@ pub async fn respawn_indexer(world: &mut TariWorld, indexer_name: String) {
         .shift_remove(&indexer_name)
         .unwrap_or_else(|| panic!("Indexer {indexer_name} not found for respawn"));
     assert!(
-        old.handle.is_finished(),
+        old.shutdown.is_triggered(),
         "Indexer {indexer_name} must be stopped before it restarts"
     );
     spawn_indexer_process(world, indexer_name, old.base_node_grpc_port, old.epoch_oracle).await;

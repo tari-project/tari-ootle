@@ -2428,8 +2428,13 @@ impl<TAddr> CatchUp<TAddr> {
     }
 
     /// Records a page request to `from`. The timeout stays as it is, so a catch-up that makes no progress still times
-    /// out however often it asks again.
-    pub fn requested(&mut self, from: TAddr, request_id: u32) {
+    /// out however often it asks again. The forks to skip count positions in the last responder's forks at
+    /// `next_height`, so a request to another peer skips none; a fork received twice is imported once.
+    pub fn requested(&mut self, from: TAddr, request_id: u32)
+    where TAddr: PartialEq {
+        if self.from != from {
+            self.next_skip = 0;
+        }
         self.from = from;
         self.pending_request = Some(request_id);
         self.restart_stall_window();
@@ -2746,6 +2751,26 @@ mod tests {
                 catch_up.after_page(&"peer-a", Some(NodeHeight(30)), 0, Some(NodeHeight(29)), NodeHeight(20)),
                 AfterPage::RequestFrom("peer-a")
             );
+            assert_eq!(catch_up.next_height, Some(NodeHeight(30)));
+        }
+
+        #[test]
+        fn a_request_to_another_peer_skips_no_forks() {
+            let mut catch_up = CatchUp::new(
+                Epoch(1),
+                NodeHeight(50),
+                NodeHeight(10),
+                Duration::from_secs(15),
+                "peer-a",
+            );
+            assert_eq!(
+                catch_up.after_page(&"peer-a", Some(NodeHeight(30)), 2, Some(NodeHeight(30)), NodeHeight(20)),
+                AfterPage::RequestFrom("peer-a")
+            );
+            catch_up.requested("peer-a", 1);
+            assert_eq!(catch_up.next_skip, 2, "the same peer resumes past the forks it sent");
+            catch_up.requested("peer-b", 2);
+            assert_eq!(catch_up.next_skip, 0);
             assert_eq!(catch_up.next_height, Some(NodeHeight(30)));
         }
 

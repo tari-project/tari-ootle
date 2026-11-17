@@ -36,7 +36,8 @@ pub struct CatchUpPageMessage {
     pub transactions: Vec<EncodedTransaction>,
     /// The height the next page starts at, or `None` when this page reaches the responder's leaf.
     pub next_height: Option<NodeHeight>,
-    /// The number of blocks at `next_height` this page already carries, which the next page skips.
+    /// The number of blocks at `next_height` the requester holds after this page: those its request skipped and those
+    /// this page carries. The next request to this responder skips them.
     pub next_skip: u32,
 }
 

@@ -20,10 +20,18 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{fmt, fmt::Formatter, sync::Arc};
+use std::{collections::HashMap, fmt, fmt::Formatter, sync::Arc};
 
 use tari_engine_types::limits::{self, ModuleShape};
-use tari_template_abi::{FunctionDef, FunctionKind, TEMPLATE_DEF_CUSTOM_SECTION, TemplateDef, Type, WASM_PTR_SIZE};
+use tari_template_abi::{
+    FunctionDef,
+    FunctionKind,
+    TEMPLATE_DEF_CUSTOM_SECTION,
+    TemplateDef,
+    Type,
+    WASM_PTR_SIZE,
+    func_hasher::hash_function_name,
+};
 use wasmer::{
     Engine,
     ExternType,
@@ -442,11 +450,30 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                 }
                 .into());
             }
+            // Host-side lookup, receiver locking and method access rules key off `func.name`, whereas `CallInfo`
+            // dispatches into `{Template}_main` by `hash_function_name(&func.name)` alone, so every declared function
+            // must carry a distinct dispatch identifier (which also rules out duplicate function names).
+            let mut seen_idents = HashMap::with_capacity(function_count);
             for func in &def.functions {
                 if func.name.len() > limits::WASM_LIMITS.max_function_name_length {
                     return Err(WasmValidationError::FunctionNameTooLong {
                         name: func.name.clone(),
                         max_length: limits::WASM_LIMITS.max_function_name_length,
+                    }
+                    .into());
+                }
+                let ident = hash_function_name(&func.name);
+                if let Some(first) = seen_idents.insert(ident, func.name.as_str()) {
+                    if first == func.name {
+                        return Err(WasmValidationError::DuplicateFunctionName {
+                            name: func.name.clone(),
+                        }
+                        .into());
+                    }
+                    return Err(WasmValidationError::FunctionIdentCollision {
+                        first: first.to_string(),
+                        second: func.name.clone(),
+                        ident,
                     }
                     .into());
                 }
@@ -753,6 +780,77 @@ mod tests {
                 assert_eq!(max_length, max_len);
             },
             other => panic!("expected TemplateNameTooLong, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_duplicate_function_names() {
+        use tari_template_abi::Receiver;
+
+        let def = TemplateDef::V2(tari_template_abi::TemplateDefV2 {
+            template_name: "Test".to_string(),
+            abi_version: 0,
+            functions: vec![
+                FunctionDef {
+                    name: "transfer".to_string(),
+                    kind: FunctionKind::Method(Receiver::RefMut),
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+                FunctionDef {
+                    name: "transfer".to_string(),
+                    kind: FunctionKind::Function,
+                    arguments: vec![],
+                    output: Type::U64,
+                },
+            ],
+        });
+
+        match validate_functions(&def) {
+            Err(WasmExecutionError::WasmValidationError(WasmValidationError::DuplicateFunctionName { name })) => {
+                assert_eq!(name, "transfer");
+            },
+            other => panic!("expected DuplicateFunctionName, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_colliding_function_idents() {
+        use tari_template_abi::Receiver;
+
+        let expected_ident = hash_function_name("admin_90260");
+        assert_eq!(expected_ident, hash_function_name("public_13865"));
+
+        let def = TemplateDef::V2(tari_template_abi::TemplateDefV2 {
+            template_name: "Test".to_string(),
+            abi_version: 0,
+            functions: vec![
+                FunctionDef {
+                    name: "admin_90260".to_string(),
+                    kind: FunctionKind::Method(Receiver::RefMut),
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+                FunctionDef {
+                    name: "public_13865".to_string(),
+                    kind: FunctionKind::Method(Receiver::Ref),
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+            ],
+        });
+
+        match validate_functions(&def) {
+            Err(WasmExecutionError::WasmValidationError(WasmValidationError::FunctionIdentCollision {
+                first,
+                second,
+                ident,
+            })) => {
+                assert_eq!(first, "admin_90260");
+                assert_eq!(second, "public_13865");
+                assert_eq!(ident, expected_ident);
+            },
+            other => panic!("expected FunctionIdentCollision, got {other:?}"),
         }
     }
 }

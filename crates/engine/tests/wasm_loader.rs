@@ -1323,3 +1323,87 @@ fn a_failure_while_staging_a_response_stays_the_reject_reason() {
         "the reject reason is not the first failure: {reason}"
     );
 }
+
+#[test]
+fn rejects_duplicate_function_names_and_colliding_function_idents() {
+    use tari_template_abi::{Receiver, func_hasher::hash_function_name};
+
+    let expected_ident = hash_function_name("admin_90260");
+    assert_eq!(expected_ident, hash_function_name("public_13865"));
+
+    let duplicate_def = TemplateDef::V2(TemplateDefV2 {
+        template_name: "Buggy".to_string(),
+        abi_version: 0,
+        functions: vec![
+            FunctionDef {
+                name: "transfer".to_string(),
+                kind: FunctionKind::Method(Receiver::RefMut),
+                arguments: vec![],
+                output: Type::Unit,
+            },
+            FunctionDef {
+                name: "transfer".to_string(),
+                kind: FunctionKind::Function,
+                arguments: vec![],
+                output: Type::Unit,
+            },
+        ],
+    })
+    .encode_for_wasm_embedding()
+    .unwrap();
+
+    let duplicate_code = template_module_defining(&duplicate_def, "", ABI_EXPORTS);
+    for result in [
+        WasmModule::validate_code(&duplicate_code).map(|_| ()),
+        WasmModule::load_template_from_code(&duplicate_code).map(|_| ()),
+    ] {
+        let err = result.expect_err("module with duplicate function names was accepted");
+        assert!(
+            matches!(
+                &err,
+                tari_engine::template::TemplateLoaderError::WasmModuleError(WasmExecutionError::WasmValidationError(
+                    WasmValidationError::DuplicateFunctionName { name }
+                )) if name == "transfer"
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    let colliding_def = TemplateDef::V2(TemplateDefV2 {
+        template_name: "Buggy".to_string(),
+        abi_version: 0,
+        functions: vec![
+            FunctionDef {
+                name: "admin_90260".to_string(),
+                kind: FunctionKind::Method(Receiver::RefMut),
+                arguments: vec![],
+                output: Type::Unit,
+            },
+            FunctionDef {
+                name: "public_13865".to_string(),
+                kind: FunctionKind::Method(Receiver::Ref),
+                arguments: vec![],
+                output: Type::Unit,
+            },
+        ],
+    })
+    .encode_for_wasm_embedding()
+    .unwrap();
+
+    let colliding_code = template_module_defining(&colliding_def, "", ABI_EXPORTS);
+    for result in [
+        WasmModule::validate_code(&colliding_code).map(|_| ()),
+        WasmModule::load_template_from_code(&colliding_code).map(|_| ()),
+    ] {
+        let err = result.expect_err("module with colliding function identifiers was accepted");
+        assert!(
+            matches!(
+                &err,
+                tari_engine::template::TemplateLoaderError::WasmModuleError(WasmExecutionError::WasmValidationError(
+                    WasmValidationError::FunctionIdentCollision { first, second, ident }
+                )) if first == "admin_90260" && second == "public_13865" && *ident == expected_ident
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
+}

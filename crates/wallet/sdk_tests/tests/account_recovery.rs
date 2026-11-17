@@ -4,6 +4,7 @@
 mod support;
 
 use std::{
+    collections::HashMap,
     sync::{
         Arc,
         Mutex,
@@ -123,6 +124,13 @@ impl WalletNetworkInterface for OneUtxoNetwork {
 
     async fn get_substates(&self, _: &[SubstateId], _: bool) -> Result<FetchedSubstates, Self::Error> {
         panic!("OneUtxoNetwork::get_substates called")
+    }
+
+    async fn get_substate_versions(
+        &self,
+        _: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, SubstateVersion>, Self::Error> {
+        panic!("OneUtxoNetwork::get_substate_versions called")
     }
 
     async fn submit_transaction(&self, _: Transaction) -> Result<TransactionId, Self::Error> {

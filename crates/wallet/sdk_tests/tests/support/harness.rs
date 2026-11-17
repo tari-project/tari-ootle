@@ -370,6 +370,13 @@ impl WalletNetworkInterface for CannedTransactionResultInterface {
         panic!("CannedTransactionResultInterface called")
     }
 
+    async fn get_substate_versions(
+        &self,
+        _: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, SubstateVersion>, Self::Error> {
+        panic!("CannedTransactionResultInterface called")
+    }
+
     async fn submit_transaction(&self, _transaction: Transaction) -> Result<TransactionId, Self::Error> {
         assert!(self.rejects_submissions, "CannedTransactionResultInterface called");
         Err(PanicError::Rejected)
@@ -487,6 +494,13 @@ impl WalletNetworkInterface for PanicNetworkInterface {
     }
 
     async fn get_substates(&self, _: &[SubstateId], _: bool) -> Result<FetchedSubstates, Self::Error> {
+        panic!("PanicNetworkInterface called")
+    }
+
+    async fn get_substate_versions(
+        &self,
+        _: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, SubstateVersion>, Self::Error> {
         panic!("PanicNetworkInterface called")
     }
 

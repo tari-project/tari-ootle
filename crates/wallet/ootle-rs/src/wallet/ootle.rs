@@ -5,7 +5,15 @@ use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
-use tari_ootle_transaction::{IntoSigned, Transaction, TransactionSignature, UnsealedTransaction, UnsignedTransaction};
+use tari_ootle_transaction::{
+    AuthorizationContext,
+    AuthorizerSet,
+    IntoSigned,
+    Transaction,
+    TransactionSignature,
+    UnsealedTransaction,
+    UnsignedTransaction,
+};
 use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, stealth::StealthTransferStatement};
 
 use crate::{
@@ -87,9 +95,12 @@ impl OotleWallet {
         }
     }
 
+    /// Authorizes `unsigned` with `address`'s key, sealed by the default address. `authorizers` is the full set of
+    /// keys that will authorize the transaction and must hold `address`'s account key.
     pub async fn authorize_transaction(
         &self,
         address: &Address,
+        authorizers: &AuthorizerSet,
         unsigned: &UnsignedTransaction,
     ) -> WalletResult<TransactionAuthorization> {
         let default_address = self.default_address();
@@ -100,7 +111,10 @@ impl OotleWallet {
                 address: address.clone(),
             })?;
         let signature = signer
-            .sign_authorization(default_address.account_public_key(), unsigned)
+            .sign_authorization(
+                AuthorizationContext::new(default_address.account_public_key(), authorizers),
+                unsigned,
+            )
             .await?;
         Ok(signature)
     }
@@ -167,7 +181,7 @@ impl OotleWallet {
         &self,
         address: &Address,
         public_nonce: &RistrettoPublicKey,
-        seal_signer: &RistrettoPublicKeyBytes,
+        context: AuthorizationContext<'_>,
         unsigned: &UnsignedTransaction,
     ) -> signer::Result<TransactionAuthorization> {
         let signer = self.key_providers.get(address).ok_or_else(|| {
@@ -175,7 +189,7 @@ impl OotleWallet {
         })?;
 
         signer
-            .sign_authorization_with_stealth(public_nonce, seal_signer, unsigned)
+            .sign_authorization_with_stealth(public_nonce, context, unsigned)
             .await
     }
 
@@ -203,9 +217,13 @@ impl NetworkWallet for OotleWallet {
     }
 
     async fn sign_transaction(&self, unsigned: UnsignedTransaction) -> WalletResult<Transaction> {
+        let authorizers: AuthorizerSet = self
+            .additional_signers()
+            .map(|address| *address.account_public_key())
+            .collect();
         let mut signatures = vec![];
         for signer in self.additional_signers() {
-            let sig = self.authorize_transaction(signer, &unsigned).await?;
+            let sig = self.authorize_transaction(signer, &authorizers, &unsigned).await?;
             signatures.push(sig.into_signature());
         }
         let transaction = self.seal_transaction(unsigned.with_signatures(signatures)).await?;

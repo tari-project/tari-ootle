@@ -24,3 +24,4 @@ thiserror = { workspace = true }
 indexmap = { workspace = true }
 tari_common_types = { workspace = true }
 tari_crypto = { workspace = true }
+rand = { workspace = true }

@@ -30,6 +30,8 @@ use ootle_ledger_common::signing::{
 use rand::Rng;
 use tari_ootle_common_types::signature::Sr25519SignatureBytes;
 use tari_ootle_transaction::{
+    AuthorizationContext,
+    AuthorizerSet,
     Blob,
     Blobs,
     Epoch,
@@ -212,8 +214,8 @@ fn preimage_field_tags_match_protocol() {
     use ootle_ledger_common::arg_types::SigningField;
     use tari_ootle_transaction::PreimageField;
 
-    // The host maps PreimageField -> SigningField by numeric tag, and the device validates field
-    // order by the same tags. They must agree.
+    // The host maps PreimageField -> SigningField by numeric tag, and the device checks each
+    // segment's tag against its expected sequence. They must agree.
     let pairs = [
         (PreimageField::SchemaVersion, SigningField::SchemaVersion),
         (PreimageField::SealSigner, SigningField::SealSigner),
@@ -228,6 +230,7 @@ fn preimage_field_tags_match_protocol() {
         (PreimageField::Nonce, SigningField::TransactionNonce),
         (PreimageField::BlobHashes, SigningField::BlobHashes),
         (PreimageField::Signatures, SigningField::Signatures),
+        (PreimageField::Authorizers, SigningField::Authorizers),
     ];
     for (preimage, wire) in pairs {
         assert_eq!(preimage as u8, wire as u8, "tag mismatch for {preimage:?}");
@@ -240,7 +243,9 @@ fn expected_field_sequences_match_preimage_v1() {
 
     let seal_signer = pk_bytes(&random_scalar());
     let tx = sample_unsigned();
-    let add_signer_segments = TransactionSignature::signing_preimage_v1(&seal_signer, &tx);
+    let authorizers: AuthorizerSet = [pk_bytes(&random_scalar())].into_iter().collect();
+    let add_signer_segments =
+        TransactionSignature::signing_preimage_v1(AuthorizationContext::new(&seal_signer, &authorizers), &tx);
     let add_signer_fields: Vec<SigningField> = add_signer_segments
         .iter()
         .map(|s| SigningField::try_from(s.field as u8).unwrap())
@@ -261,15 +266,17 @@ fn add_signer_recipe_matches_and_verifies() {
     let seal_signer = pk_bytes(&random_scalar());
     let signer = random_scalar();
     let tx = sample_unsigned();
+    let authorizers: AuthorizerSet = [pk_bytes(&signer), pk_bytes(&random_scalar())].into_iter().collect();
+    let context = AuthorizationContext::new(&seal_signer, &authorizers);
 
     // (1) message recipe == create_message_v1
     let m = message(
         TX_LABEL_SIGNATURE,
-        &TransactionSignature::signing_preimage_v1(&seal_signer, &tx),
+        &TransactionSignature::signing_preimage_v1(context, &tx),
     );
     assert_eq!(
         &m,
-        TransactionSignature::create_message_v1(&seal_signer, &tx).as_bytes(),
+        TransactionSignature::create_message_v1(context, &tx).as_bytes(),
         "message mismatch"
     );
 
@@ -277,7 +284,7 @@ fn add_signer_recipe_matches_and_verifies() {
     let (pk, sig) = sign(&signer, &m);
     let signature = TransactionSignature::new(RistrettoPublicKeyBytes::from_bytes(&pk).unwrap(), sig_bytes(&sig));
     assert!(
-        signature.verify_v1(&seal_signer, &tx),
+        signature.verify_v1(context, &tx),
         "authorization signature failed to verify"
     );
 }
@@ -290,9 +297,10 @@ fn seal_recipe_matches_and_verifies() {
 
     // A prior authorization signature (its bytes are bound by the seal).
     let signer = random_scalar();
+    let authorizers: AuthorizerSet = [pk_bytes(&signer)].into_iter().collect();
     let auth_msg = message(
         TX_LABEL_SIGNATURE,
-        &TransactionSignature::signing_preimage_v1(&seal_signer_pk, &unsigned),
+        &TransactionSignature::signing_preimage_v1(AuthorizationContext::new(&seal_signer_pk, &authorizers), &unsigned),
     );
     let (auth_pk, auth_sig) = sign(&signer, &auth_msg);
     let prior = TransactionSignature::new(
@@ -358,14 +366,18 @@ fn stealth_recipe_matches_and_verifies() {
     // (3) an authorization signature produced with the stealth key verifies under tari_crypto
     let seal_signer = pk_bytes(&random_scalar());
     let tx = sample_unsigned();
+    let authorizers: AuthorizerSet = [RistrettoPublicKeyBytes::from_bytes(&public_key(&got)).unwrap()]
+        .into_iter()
+        .collect();
+    let context = AuthorizationContext::new(&seal_signer, &authorizers);
     let m = message(
         TX_LABEL_SIGNATURE,
-        &TransactionSignature::signing_preimage_v1(&seal_signer, &tx),
+        &TransactionSignature::signing_preimage_v1(context, &tx),
     );
     let (pk, sig) = sign(&got, &m);
     let signature = TransactionSignature::new(RistrettoPublicKeyBytes::from_bytes(&pk).unwrap(), sig_bytes(&sig));
     assert!(
-        signature.verify_v1(&seal_signer, &tx),
+        signature.verify_v1(context, &tx),
         "stealth authorization signature failed to verify"
     );
 
@@ -431,7 +443,11 @@ fn stealth_recipe_matches_and_verifies() {
 fn nonce_differs_from_the_tari_schnorr_app() {
     let secret = random_scalar();
     let pk = public_key(&secret);
-    let m = *TransactionSignature::create_message_v1(&pk_bytes(&random_scalar()), &sample_unsigned()).as_bytes();
+    let m = *TransactionSignature::create_message_v1(
+        AuthorizationContext::new(&pk_bytes(&random_scalar()), &AuthorizerSet::new()),
+        &sample_unsigned(),
+    )
+    .as_bytes();
 
     let mut h = Blake2b512::new();
     h.update(b"com.tari.ootle.ledger.schnorr_nonce.v1");

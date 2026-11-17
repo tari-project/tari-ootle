@@ -723,7 +723,15 @@ mod tests {
             .stealth_transfer(TARI_TOKEN, statement)
             .with_signatures(
                 (0..count)
-                    .map(|_| TransactionSignature::new(RistrettoPublicKeyBytes::zero(), Sr25519SignatureBytes::zero()))
+                    .map(|i| {
+                        // One distinct key per signature: the list keeps one signature per key.
+                        let mut key = [0u8; 32];
+                        key[..8].copy_from_slice(&(i as u64).to_le_bytes());
+                        TransactionSignature::new(
+                            RistrettoPublicKeyBytes::from_bytes(&key).unwrap(),
+                            Sr25519SignatureBytes::zero(),
+                        )
+                    })
                     .collect(),
             )
             .seal(&PrivateKey::from(1u64))

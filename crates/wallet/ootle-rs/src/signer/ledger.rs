@@ -23,9 +23,11 @@ use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::signature::Sr25519SignatureBytes;
 use tari_ootle_transaction::{
+    AuthorizationContext,
     IntoSigned,
     PreimageField,
     PreimageSegment,
+    SchemaVersion,
     Transaction,
     TransactionSealSignature,
     TransactionSignature,
@@ -157,7 +159,7 @@ where
     }
 
     async fn sign_transaction(&self, message: &UnsealedTransaction) -> signer::Result<TransactionSealSignature> {
-        let UnsealedTransaction::V1(unsealed) = message;
+        let unsealed = current_schema(message.schema(), message.body())?;
         let segments = TransactionSealSignature::signing_preimage_v1(unsealed);
         let (public_key, signature) = self.stream(SignMode::Seal, None, segments).await?;
         verified_account_key(&public_key, self.address.account_public_key())?;
@@ -166,14 +168,14 @@ where
 
     async fn sign_authorization(
         &self,
-        seal_signer: &RistrettoPublicKeyBytes,
+        context: AuthorizationContext<'_>,
         tx: &UnsignedTransaction,
     ) -> signer::Result<TransactionAuthorization> {
-        let UnsignedTransaction::V1(unsigned) = tx;
-        let segments = TransactionSignature::signing_preimage_v1(seal_signer, unsigned);
+        let unsigned = current_schema(tx.schema(), tx.body())?;
+        let segments = TransactionSignature::signing_preimage_v1(context, unsigned);
         let (public_key, signature) = self.stream(SignMode::AddSigner, None, segments).await?;
         verified_account_key(&public_key, self.address.account_public_key())?;
-        verified_authorization(TransactionSignature::new(public_key, signature), seal_signer, unsigned)
+        verified_authorization(TransactionSignature::new(public_key, signature), context, unsigned)
     }
 }
 
@@ -201,16 +203,16 @@ where
     async fn sign_authorization_with_stealth(
         &self,
         public_nonce: &RistrettoPublicKey,
-        seal_signer: &RistrettoPublicKeyBytes,
+        context: AuthorizationContext<'_>,
         tx: &UnsignedTransaction,
     ) -> signer::Result<TransactionAuthorization> {
-        let UnsignedTransaction::V1(unsigned) = tx;
+        let unsigned = current_schema(tx.schema(), tx.body())?;
         self.check_stealth_network(unsigned.network)?;
-        let segments = TransactionSignature::signing_preimage_v1(seal_signer, unsigned);
+        let segments = TransactionSignature::signing_preimage_v1(context, unsigned);
         let (public_key, signature) = self
             .stream(SignMode::AddSigner, Some(nonce_bytes(public_nonce)), segments)
             .await?;
-        verified_authorization(TransactionSignature::new(public_key, signature), seal_signer, unsigned)
+        verified_authorization(TransactionSignature::new(public_key, signature), context, unsigned)
     }
 
     async fn seal_transaction_with_stealth(
@@ -218,7 +220,7 @@ where
         public_nonce: &RistrettoPublicKey,
         message: &UnsealedTransaction,
     ) -> signer::Result<TransactionSealSignature> {
-        let UnsealedTransaction::V1(unsealed) = message;
+        let unsealed = current_schema(message.schema(), message.body())?;
         self.check_stealth_network(unsealed.unsigned_transaction().network)?;
         let segments = TransactionSealSignature::signing_preimage_v1(unsealed);
         let (public_key, signature) = self
@@ -238,6 +240,17 @@ where
         let signature = self.sign_transaction(&tx).await?;
         Ok(<UnsealedTransaction as IntoSigned<()>>::into_signed(tx, signature))
     }
+}
+
+/// The device streams and signs only [`SchemaVersion::CURRENT`] preimages.
+fn current_schema<T>(schema: SchemaVersion, body: &T) -> signer::Result<&T> {
+    if schema != SchemaVersion::CURRENT {
+        return Err(SignerError::other(format!(
+            "the Ledger device signs {:?} transactions only; this transaction is {schema:?}",
+            SchemaVersion::CURRENT
+        )));
+    }
+    Ok(body)
 }
 
 fn verified_account_key(
@@ -269,10 +282,10 @@ fn verified_seal(
 
 fn verified_authorization(
     signature: TransactionSignature,
-    seal_signer: &RistrettoPublicKeyBytes,
+    context: AuthorizationContext<'_>,
     unsigned: &UnsignedTransactionV1,
 ) -> signer::Result<TransactionAuthorization> {
-    if !signature.verify_v1(seal_signer, unsigned) {
+    if !signature.verify_v1(context, unsigned) {
         return Err(SignerError::other(
             "the Ledger device returned an authorization signature that does not verify for this transaction",
         ));
@@ -328,6 +341,7 @@ fn to_wire(field: PreimageField) -> SigningField {
         PreimageField::MainSigner => SigningField::MainSigner,
         PreimageField::DryRun => SigningField::DryRun,
         PreimageField::BlobHashes => SigningField::BlobHashes,
+        PreimageField::Authorizers => SigningField::Authorizers,
         PreimageField::Nonce => SigningField::TransactionNonce,
         PreimageField::Signatures => SigningField::Signatures,
     }
@@ -382,17 +396,19 @@ mod tests {
         let nonce = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut rand::rng()));
 
         let err = signer
-            .sign_authorization_with_stealth(&nonce, &RistrettoPublicKeyBytes::default(), &tx)
+            .sign_authorization_with_stealth(
+                &nonce,
+                AuthorizationContext::new(
+                    &RistrettoPublicKeyBytes::default(),
+                    &tari_ootle_transaction::AuthorizerSet::new(),
+                ),
+                &tx,
+            )
             .await
             .expect_err("a transaction from another network must not be signed");
         assert!(err.to_string().contains("network"), "unexpected error: {err}");
 
-        let unsealed = UnsealedTransaction::V1(UnsealedTransactionV1::new(
-            match tx {
-                UnsignedTransaction::V1(unsigned) => unsigned,
-            },
-            vec![],
-        ));
+        let unsealed = UnsealedTransaction::from(UnsealedTransactionV1::new(tx.into_body(), vec![]));
         signer
             .seal_transaction_with_stealth(&nonce, &unsealed)
             .await

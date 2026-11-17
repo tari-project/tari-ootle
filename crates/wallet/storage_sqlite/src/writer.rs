@@ -2523,6 +2523,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 requester: &serialize_json(request.requester)?,
                 status: SigningRequestStatus::Pending.as_key_str(),
                 expires_at: PrimitiveDateTime::new(expires_at.date(), expires_at.time()),
+                authorizers: &serialize_json(request.authorizers)?,
             })
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
@@ -3567,6 +3568,7 @@ pub(crate) fn signing_request_from_row(
         id: row.id,
         unsigned_transaction: deserialize_json(&row.unsigned_transaction)?,
         seal_public_key: deserialize_hex_try_from(&row.seal_public_key)?,
+        authorizers: deserialize_json(&row.authorizers)?,
         key_id: deserialize_json(&row.key_id)?,
         signer_public_key: deserialize_hex_try_from(&row.signer_public_key)?,
         message_hash: deserialize_hex_try_from(&row.message_hash)?,

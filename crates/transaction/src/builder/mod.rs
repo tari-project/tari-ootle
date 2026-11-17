@@ -31,12 +31,12 @@ use tari_template_lib_types::{
 use crate::{
     AllocatableAddressType,
     Assertion,
+    AuthorizationContext,
     Blob,
     BlobIndex,
     CheckOrd,
     ComponentReference,
     Instruction,
-    IntoSigned,
     MainSigner,
     NftAssertVec,
     NftCheck,
@@ -199,14 +199,11 @@ impl TransactionBuilder<MainIntent> {
         self
     }
 
-    pub fn add_signer(
-        self,
-        sealed_signer: &RistrettoPublicKeyBytes,
-        secret_key: &RistrettoSecretKey,
-    ) -> UnsealedTransaction {
-        let unsigned = self.build_unsigned();
-        let signature = TransactionSignature::sign(secret_key, sealed_signer, &unsigned);
-        unsigned.add_single_signature(signature)
+    /// Builds the transaction and signs it with every key in `secrets`, each under `seal_signer`
+    /// and the set of their public keys. See [`UnsignedTransaction::authorize`].
+    pub fn authorize<'a, I>(self, seal_signer: &RistrettoPublicKeyBytes, secrets: I) -> UnsealedTransaction
+    where I: IntoIterator<Item = &'a RistrettoSecretKey> {
+        self.build_unsigned().authorize(seal_signer, secrets)
     }
 
     pub fn with_signatures(self, signatures: Vec<TransactionSignature>) -> UnsealedTransaction {
@@ -1102,20 +1099,12 @@ impl<D> TransactionBuilder<D> {
     }
 }
 
-impl Signable<&RistrettoPublicKeyBytes> for TransactionBuilder<MainIntent> {
+impl Signable<AuthorizationContext<'_>> for TransactionBuilder<MainIntent> {
     type Signature = TransactionSignature;
 
-    /// The message covers the body [`IntoSigned::into_signed`] produces, so it is taken over a copy with the fee
-    /// instructions applied.
-    fn to_signing_message(&self, sealed_signer: &RistrettoPublicKeyBytes) -> crate::TransactionMessage {
-        self.clone().build_unsigned().to_signing_message(sealed_signer)
-    }
-}
-
-impl IntoSigned<&RistrettoPublicKeyBytes> for TransactionBuilder<MainIntent> {
-    type SignedOutput = UnsealedTransaction;
-
-    fn into_signed(self, sig: TransactionSignature) -> Self::SignedOutput {
-        self.finish().add_signature(sig)
+    /// The message covers the body [`TransactionBuilder::build_unsigned`] produces, so it is taken over a copy with
+    /// the fee instructions applied.
+    fn to_signing_message(&self, context: AuthorizationContext<'_>) -> crate::TransactionMessage {
+        self.clone().build_unsigned().to_signing_message(context)
     }
 }

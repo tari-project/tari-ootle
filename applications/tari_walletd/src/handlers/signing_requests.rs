@@ -23,7 +23,7 @@ use axum_extra::headers::authorization::Bearer;
 use log::*;
 use ootle_byte_type::ToByteType;
 use tari_ootle_common_types::optional::IsNotFoundError;
-use tari_ootle_transaction::TransactionSignature;
+use tari_ootle_transaction::{AuthorizationContext, TransactionSignature};
 use tari_ootle_wallet_sdk::{
     models::{
         KeyBranch,
@@ -95,6 +95,16 @@ pub async fn handle_create(
         },
         Err(e) => return Err(e.into()),
     };
+    if !req.authorizers.contains(&signer_public_key) {
+        return Err(invalid_params(
+            "authorizers",
+            Some(format!(
+                "must include {signer_public_key}, the public key of key {}: the signature commits to the set it is \
+                 one of",
+                req.key_id
+            )),
+        ));
+    }
 
     let current_epoch = context.current_epoch().await?;
     if transaction.max_epoch() < current_epoch {
@@ -107,7 +117,10 @@ pub async fn handle_create(
         ));
     }
 
-    let message_hash = TransactionSignature::create_message(&req.seal_public_key, &transaction);
+    let message_hash = TransactionSignature::create_message(
+        AuthorizationContext::new(&req.seal_public_key, &req.authorizers),
+        &transaction,
+    );
     let requester = requester_of(auth);
 
     let model = sdk.store().with_write_tx(|tx| {
@@ -120,6 +133,7 @@ pub async fn handle_create(
         let model = tx.signing_request_insert(NewSigningRequest {
             unsigned_transaction: &transaction,
             seal_public_key: &req.seal_public_key,
+            authorizers: &req.authorizers,
             key_id: req.key_id,
             signer_public_key: &signer_public_key,
             message_hash: message_hash.as_bytes(),
@@ -237,7 +251,8 @@ pub async fn handle_approve(
 
     // The approver was shown `message_hash`; sign only if the stored request
     // still produces exactly that message.
-    let message = TransactionSignature::create_message(&request.seal_public_key, &request.unsigned_transaction);
+    let context = AuthorizationContext::new(&request.seal_public_key, &request.authorizers);
+    let message = TransactionSignature::create_message(context, &request.unsigned_transaction);
     if *message.as_bytes() != request.message_hash {
         return Err(invalid_request(format!(
             "Signing request {} no longer produces the message it was created with; reject it and ask for a new one",
@@ -247,7 +262,7 @@ pub async fn handle_approve(
 
     let signature = sdk
         .signer_api()
-        .with_context(&request.seal_public_key)
+        .with_context(context)
         .generate_signature(request.key_id, &request.unsigned_transaction)?;
     if *signature.public_key() != request.signer_public_key {
         return Err(invalid_request(format!(
@@ -346,6 +361,7 @@ fn to_info(model: SigningRequestModel) -> SigningRequestInfo {
         transaction: model.unsigned_transaction,
         component_upgrades,
         seal_public_key: model.seal_public_key,
+        authorizers: model.authorizers,
         key_id: model.key_id,
         signer_public_key: model.signer_public_key,
         message_hash: model.message_hash,
@@ -363,7 +379,7 @@ mod tests {
     use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
     use tari_ootle_address::Network;
     use tari_ootle_common_types::Epoch;
-    use tari_ootle_transaction::{Transaction, UnsignedTransaction};
+    use tari_ootle_transaction::{AuthorizerSet, Transaction, UnsignedTransaction};
     use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId, SigningRequestStatus};
     use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
@@ -391,6 +407,23 @@ mod tests {
         UnsignedTransaction::new(Network::LocalNet.as_byte(), Epoch(100))
     }
 
+    /// A co-signer other than this wallet.
+    fn other_authorizer() -> RistrettoPublicKeyBytes {
+        RistrettoPublicKeyBytes::from_bytes(&[0x77; 32]).unwrap()
+    }
+
+    fn authorizers(test: &SigningTest) -> AuthorizerSet {
+        let signer_public_key = test
+            .context
+            .wallet_sdk()
+            .key_manager_api()
+            .get_public_key(signer_key())
+            .unwrap()
+            .public_key
+            .to_byte_type();
+        [signer_public_key, other_authorizer()].into_iter().collect()
+    }
+
     async fn setup() -> SigningTest {
         let daemon = TestDaemon::start().await;
         let api_key = daemon.api_key("governance-signer", "signing_requests:create,signing_requests:approve");
@@ -413,12 +446,17 @@ mod tests {
             .unwrap()
             .public_key
             .to_byte_type();
-        let message_hash = TransactionSignature::create_message(&seal_public_key(), &transaction);
+        let authorizers = authorizers(test);
+        let message_hash = TransactionSignature::create_message(
+            AuthorizationContext::new(&seal_public_key(), &authorizers),
+            &transaction,
+        );
         sdk.store()
             .with_write_tx(|tx| {
                 tx.signing_request_insert(NewSigningRequest {
                     unsigned_transaction: &transaction,
                     seal_public_key: &seal_public_key(),
+                    authorizers: &authorizers,
                     key_id: signer_key(),
                     signer_public_key: &signer_public_key,
                     message_hash: message_hash.as_bytes(),
@@ -437,6 +475,7 @@ mod tests {
         SigningRequestCreateRequest {
             transaction,
             seal_public_key: seal_public_key(),
+            authorizers: [other_authorizer()].into_iter().collect(),
             key_id,
             memo: String::new(),
             ttl_secs: None,
@@ -473,7 +512,11 @@ mod tests {
         let signature = info.signature.expect("a signed request carries its signature");
         assert_eq!(Some(&signature), response.signature.as_ref());
         assert_eq!(*signature.public_key(), info.signer_public_key);
-        let message = TransactionSignature::create_message(&seal_public_key(), &transaction());
+        assert_eq!(info.authorizers, authorizers(&test));
+        let message = TransactionSignature::create_message(
+            AuthorizationContext::new(&seal_public_key(), &authorizers(&test)),
+            &transaction(),
+        );
         assert_eq!(info.message_hash, *message.as_bytes());
         assert!(
             signature.verify_message(message),
@@ -605,6 +648,10 @@ mod tests {
         long_memo.memo = "x".repeat(MAX_MEMO_CHARS + 1);
         let err = create(long_memo).await.unwrap_err();
         assert!(err.to_string().contains("memo"), "{err}");
+
+        // The signer's own key is missing from the set its signature would commit to.
+        let err = create(create_request(transaction(), signer_key())).await.unwrap_err();
+        assert!(err.to_string().contains("authorizers"), "{err}");
 
         let none_created = test
             .context

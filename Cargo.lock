@@ -12548,6 +12548,7 @@ dependencies = [
  "anyhow",
  "indexmap 2.14.2",
  "log",
+ "rand 0.10.1",
  "tari_common_types",
  "tari_crypto",
  "tari_engine_types",

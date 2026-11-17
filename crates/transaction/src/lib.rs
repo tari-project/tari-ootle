@@ -25,6 +25,7 @@ mod blobs;
 pub mod builder;
 mod envelope;
 mod hashing;
+mod schema;
 mod signable;
 mod signing;
 mod transaction;
@@ -38,6 +39,7 @@ pub use blobs::*;
 pub use builder::TransactionBuilder;
 pub use envelope::*;
 pub use ootle_network::Network;
+pub use schema::*;
 pub use signable::*;
 pub use signing::*;
 // Re-exported because `max_epoch` is a mandatory public field of the unsigned transaction, so any

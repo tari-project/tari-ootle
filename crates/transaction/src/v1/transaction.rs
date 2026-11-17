@@ -26,14 +26,15 @@ use crate::{
     Blobs,
     Instruction,
     MainSigner,
+    SchemaVersion,
     TransactionId,
-    TransactionIntent,
     TransactionSealSignature,
     UnsealedTransactionV1,
     args::InstructionArg,
     v1::{
+        authorizers::SignatureKeys,
         intent::calculate_intent_commitment_v1,
-        signature::{TransactionSignature, TransactionSignatureFields, verify_sealed_batch},
+        signature::{AuthorizedProjection, TransactionSignature, TransactionSignatureFields, verify_sealed_batch},
     },
     weight::TransactionWeight,
 };
@@ -104,10 +105,6 @@ impl TransactionV1 {
         }
     }
 
-    pub const fn schema_version(&self) -> u16 {
-        self.body.schema_version()
-    }
-
     pub fn is_dry_run(&self) -> bool {
         self.body.is_dry_run()
     }
@@ -159,16 +156,28 @@ impl TransactionV1 {
         self.declared_main_signer().is_seal_signer_authorized()
     }
 
+    /// Verifies the seal and every authorization under `schema`.
     #[must_use]
-    pub fn verify_all_signatures(&self) -> bool {
+    pub fn verify_all_signatures(&self, schema: SchemaVersion) -> bool {
+        if schema.binds_authorizer_set() && !self.body.has_canonical_signatures() {
+            debug!(
+                target: LOG_TARGET,
+                "Transaction signatures are invalid: the {} authorizations are not strictly ascending by public key",
+                self.body.signatures().len(),
+            );
+            return false;
+        }
         // Derived once and shared between the seal and the authorization messages: deriving blob
         // commitments hashes every blob payload.
         let blob_hashes = self.body.unsigned_transaction().blobs.hashes();
-        let seal_message = TransactionSealSignature::create_message_v1_with_blob_hashes(&self.body, &blob_hashes);
-        let authorization_message = TransactionSignature::create_message_v1_with_blob_hashes(
+        let seal_message =
+            TransactionSealSignature::create_message_v1_with_blob_hashes(schema, &self.body, &blob_hashes);
+        let authorization_message = TransactionSignature::create_message_v1_for_list(
+            schema,
             self.seal_signature.public_key(),
             self.body.unsigned_transaction(),
             &blob_hashes,
+            self.body.signatures(),
         );
 
         if verify_sealed_batch(
@@ -195,11 +204,17 @@ impl TransactionV1 {
         &self.body
     }
 
-    /// Compute the deterministic transaction id. See [`calculate_id_v1`] for the projection
-    /// invariants.
-    pub fn calculate_id(&self) -> TransactionId {
+    /// Compute the deterministic transaction id under `schema`. See [`calculate_id_v1`] for the
+    /// projection invariants.
+    pub fn calculate_id(&self, schema: SchemaVersion) -> TransactionId {
         let blob_hashes = self.body.unsigned_transaction().blobs.hashes();
-        self.calculate_id_with_blob_hashes(&blob_hashes)
+        self.calculate_id_with_blob_hashes(schema, &blob_hashes)
+    }
+
+    /// The intent commitment under `schema`. See [`TransactionIntent`].
+    pub fn calculate_intent_commitment(&self, schema: SchemaVersion) -> Hash32 {
+        let blob_hashes = self.body.unsigned_transaction().blobs.hashes();
+        self.calculate_intent_commitment_with_blob_hashes(schema, &blob_hashes)
     }
 
     /// Id and intent commitment derived from a single pass over the blobs.
@@ -208,17 +223,17 @@ impl TransactionV1 {
     /// payload. A caller that needs both — every execution does — must use this rather than
     /// calling `calculate_id` and `calculate_intent_commitment` separately, which would hash the
     /// transaction's blobs twice.
-    pub fn calculate_id_and_intent_commitment(&self) -> (TransactionId, Hash32) {
+    pub fn calculate_id_and_intent_commitment(&self, schema: SchemaVersion) -> (TransactionId, Hash32) {
         let blob_hashes = self.body.unsigned_transaction().blobs.hashes();
         (
-            self.calculate_id_with_blob_hashes(&blob_hashes),
-            self.calculate_intent_commitment_with_blob_hashes(&blob_hashes),
+            self.calculate_id_with_blob_hashes(schema, &blob_hashes),
+            self.calculate_intent_commitment_with_blob_hashes(schema, &blob_hashes),
         )
     }
 
-    fn calculate_id_with_blob_hashes(&self, blob_hashes: &crate::BlobHashes) -> TransactionId {
+    fn calculate_id_with_blob_hashes(&self, schema: SchemaVersion, blob_hashes: &crate::BlobHashes) -> TransactionId {
         calculate_id_v1(
-            self.schema_version(),
+            schema,
             TransactionSignatureFields::from(self.body.unsigned_transaction()),
             blob_hashes,
             self.body.signatures(),
@@ -226,9 +241,13 @@ impl TransactionV1 {
         )
     }
 
-    fn calculate_intent_commitment_with_blob_hashes(&self, blob_hashes: &crate::BlobHashes) -> Hash32 {
+    fn calculate_intent_commitment_with_blob_hashes(
+        &self,
+        schema: SchemaVersion,
+        blob_hashes: &crate::BlobHashes,
+    ) -> Hash32 {
         calculate_intent_commitment_v1(
-            self.schema_version(),
+            schema,
             &TransactionSignatureFields::from(self.body.unsigned_transaction()),
             blob_hashes,
         )
@@ -355,41 +374,50 @@ impl TransactionV1 {
     }
 }
 
-/// The shared v1 transaction id projection — the full and pruned forms must produce the
-/// identical id, so both delegate here.
+/// The shared transaction id projection — the full and pruned forms must produce the identical
+/// id, so both delegate here.
 ///
 /// The projection deliberately excludes raw blob bytes — only their per-blob commitments
 /// (`BlobHashes`) participate, keeping the id stable across pruning.
 ///
-/// The seal *signature* is also excluded — only the seal signer's public key participates.
-/// The signature is witness data (a fresh Schnorr nonce per seal), so hashing it would give
-/// every re-seal of the same body, signatures and sealer a distinct id, defeating id-based
-/// dedup: a co-signature authorizes one id, and the network must be able to recognise a
-/// re-sealed copy as the same transaction. The public key must remain in the projection —
-/// with no co-signatures nothing else binds the sealer, and excluding it would let a
-/// different sealer produce a colliding id for a semantically different transaction.
+/// The seal *signature* is excluded under every schema: it is witness data (a fresh Schnorr nonce
+/// per seal), so hashing it would give every re-seal a distinct id and defeat id-based dedup. The
+/// seal signer's key participates: with no authorizations nothing else binds the sealer, and
+/// excluding it would let a different sealer produce a colliding id for a semantically different
+/// transaction.
+///
+/// Under [`SchemaVersion::V1`] the authorization signatures participate as listed, nonces, order
+/// and repeats included, and no authorization signs that list.
+///
+/// Under [`SchemaVersion::V2`] only the authorizers' keys participate. Each authorization signs over
+/// the same key list ([`AuthorizerSet`](crate::AuthorizerSet)) and verification requires the list to
+/// be strictly ascending, so a list that verifies has one encoding per key set and no sealer can vary
+/// it without invalidating every authorization. A re-sign by the same authorizer keeps the id.
 pub(crate) fn calculate_id_v1(
-    schema_version: u16,
+    schema: SchemaVersion,
     fields: TransactionSignatureFields<'_>,
     blob_hashes: &crate::BlobHashes,
     signatures: &[TransactionSignature],
     seal_signer: &RistrettoPublicKeyBytes,
 ) -> TransactionId {
-    hasher32(EngineHashDomainLabel::Transaction)
-        .chain(&schema_version)
-        .chain(&fields)
-        .chain(blob_hashes)
-        .chain(signatures)
-        .chain(seal_signer)
-        .result()
-        .into_array()
-        .into()
-}
-
-impl TransactionIntent for TransactionV1 {
-    fn calculate_intent_commitment(&self) -> Hash32 {
-        let blob_hashes = self.body.unsigned_transaction().blobs.hashes();
-        self.calculate_intent_commitment_with_blob_hashes(&blob_hashes)
+    match schema {
+        SchemaVersion::V1 => hasher32(EngineHashDomainLabel::Transaction)
+            .chain(&schema.as_u16())
+            .chain(&fields)
+            .chain(blob_hashes)
+            .chain(signatures)
+            .chain(seal_signer)
+            .result()
+            .into_array()
+            .into(),
+        SchemaVersion::V2 => AuthorizedProjection {
+            schema,
+            fields,
+            blob_hashes,
+            authorizers: &SignatureKeys(signatures),
+            seal_signer,
+        }
+        .transaction_id(),
     }
 }
 
@@ -738,7 +766,7 @@ mod transaction_id_tests {
     use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
     use super::*;
-    use crate::{TransactionSealSignature, UnsignedTransactionV1, v1::signature::TransactionSignature};
+    use crate::{TransactionSealSignature, TransactionSignature, UnsignedTransactionV1};
 
     fn sample_unsigned() -> UnsignedTransactionV1 {
         UnsignedTransactionV1 {
@@ -764,8 +792,7 @@ mod transaction_id_tests {
     fn cosigned(seal_signer: &RistrettoPublicKeyBytes) -> UnsealedTransactionV1 {
         let (cosigner, _) = random_key();
         let unsigned = sample_unsigned();
-        let sig = TransactionSignature::sign_v1(&cosigner, seal_signer, &unsigned);
-        UnsealedTransactionV1::new(unsigned, vec![sig])
+        UnsealedTransactionV1::authorize(unsigned, seal_signer, [&cosigner])
     }
 
     /// One authorization set = one id: re-sealing the identical body + signatures with the same
@@ -791,7 +818,10 @@ mod transaction_id_tests {
             b.seal_signature().signature(),
             "two seals must carry distinct nonces for this test to be meaningful",
         );
-        assert_eq!(a.calculate_id(), b.calculate_id());
+        assert_eq!(
+            a.calculate_id(SchemaVersion::CURRENT),
+            b.calculate_id(SchemaVersion::CURRENT)
+        );
     }
 
     /// With zero co-signatures the id is the only thing binding the sealer: the same body sealed
@@ -806,7 +836,10 @@ mod transaction_id_tests {
         let a = TransactionV1::new(unsealed.clone(), TransactionSealSignature::sign_v1(&sk_a, &unsealed));
         let b = TransactionV1::new(unsealed.clone(), TransactionSealSignature::sign_v1(&sk_b, &unsealed));
 
-        assert_ne!(a.calculate_id(), b.calculate_id());
+        assert_ne!(
+            a.calculate_id(SchemaVersion::CURRENT),
+            b.calculate_id(SchemaVersion::CURRENT)
+        );
     }
 
     /// The nonce is the intent-level distinguisher: identical bodies sealed by the same key
@@ -830,7 +863,10 @@ mod transaction_id_tests {
             TransactionSealSignature::sign_v1(&sealer_sk, &b_unsealed),
         );
 
-        assert_ne!(a.calculate_id(), b.calculate_id());
+        assert_ne!(
+            a.calculate_id(SchemaVersion::CURRENT),
+            b.calculate_id(SchemaVersion::CURRENT)
+        );
     }
 
     /// The co-signature set stays inside the id: a sealer that strips (or gains) a co-signature
@@ -850,7 +886,132 @@ mod transaction_id_tests {
             TransactionSealSignature::sign_v1(&sealer_sk, &without_sig),
         );
 
-        assert_ne!(a.calculate_id(), b.calculate_id());
+        assert_ne!(
+            a.calculate_id(SchemaVersion::CURRENT),
+            b.calculate_id(SchemaVersion::CURRENT)
+        );
+    }
+
+    /// An authorizer that signs again, with a fresh nonce, over the same body and set leaves the id
+    /// unchanged: the id hashes the authorizers' keys, not their signatures.
+    #[test]
+    fn id_is_stable_across_re_signs() {
+        let (sealer_sk, sealer_pk) = random_key();
+        let (cosigner, cosigner_pk) = random_key();
+        let unsigned = sample_unsigned();
+        let authorizers: crate::AuthorizerSet = [cosigner_pk].into_iter().collect();
+        let context = crate::AuthorizationContext::new(&sealer_pk, &authorizers);
+
+        let sealed_with = |sig: TransactionSignature| {
+            let unsealed = UnsealedTransactionV1::new(unsigned.clone(), vec![sig]);
+            TransactionV1::new(
+                unsealed.clone(),
+                TransactionSealSignature::sign_v1(&sealer_sk, &unsealed),
+            )
+        };
+        let a = sealed_with(TransactionSignature::sign_v1(&cosigner, context, &unsigned));
+        let b = sealed_with(TransactionSignature::sign_v1(&cosigner, context, &unsigned));
+
+        assert_ne!(
+            a.signatures()[0].signature(),
+            b.signatures()[0].signature(),
+            "the two signatures must carry distinct nonces for this test to be meaningful",
+        );
+        assert!(a.verify_all_signatures(SchemaVersion::CURRENT));
+        assert!(b.verify_all_signatures(SchemaVersion::CURRENT));
+        assert_eq!(
+            a.calculate_id(SchemaVersion::CURRENT),
+            b.calculate_id(SchemaVersion::CURRENT)
+        );
+    }
+
+    /// The id hashes exactly what every authorization signs. Each field of the shared projection
+    /// moves both digests, so no part of the id is left for a sealer to vary.
+    #[test]
+    fn id_and_authorization_message_share_one_projection() {
+        let (sealer_sk, sealer_pk) = random_key();
+        let (cosigner, _) = random_key();
+        let (_, other_pk) = random_key();
+        let unsealed = UnsealedTransactionV1::authorize(sample_unsigned(), &sealer_pk, [&cosigner]);
+        let tx = TransactionV1::new(
+            unsealed.clone(),
+            TransactionSealSignature::sign_v1(&sealer_sk, &unsealed),
+        );
+
+        let unsigned = unsealed.unsigned_transaction();
+        let blob_hashes = unsigned.blobs.hashes();
+        let authorizers = crate::AuthorizerSet::from_signatures(unsealed.signatures());
+        let mut other_body = unsigned.clone();
+        other_body.nonce += 1;
+        let mut with_blob = unsigned.clone();
+        with_blob.blobs.push(crate::Blob::from(vec![1])).unwrap();
+        let other_blob_hashes = with_blob.blobs.hashes();
+        let mut more_authorizers = authorizers.clone();
+        more_authorizers.insert(other_pk);
+
+        let projection = |schema, seal_signer, body, blob_hashes, authorizers| AuthorizedProjection {
+            schema,
+            fields: TransactionSignatureFields::from(body),
+            blob_hashes,
+            authorizers,
+            seal_signer,
+        };
+        let base = projection(SchemaVersion::V2, &sealer_pk, unsigned, &blob_hashes, &authorizers);
+        assert_eq!(tx.calculate_id(SchemaVersion::CURRENT), base.transaction_id());
+        assert!(tx.signatures()[0].verify_message(base.authorization_message()));
+
+        for (label, variant) in [
+            (
+                "schema version",
+                projection(SchemaVersion::V1, &sealer_pk, unsigned, &blob_hashes, &authorizers),
+            ),
+            (
+                "seal signer",
+                projection(SchemaVersion::V2, &other_pk, unsigned, &blob_hashes, &authorizers),
+            ),
+            (
+                "fields",
+                projection(SchemaVersion::V2, &sealer_pk, &other_body, &blob_hashes, &authorizers),
+            ),
+            (
+                "blob hashes",
+                projection(
+                    SchemaVersion::V2,
+                    &sealer_pk,
+                    unsigned,
+                    &other_blob_hashes,
+                    &authorizers,
+                ),
+            ),
+            (
+                "authorizers",
+                projection(SchemaVersion::V2, &sealer_pk, unsigned, &blob_hashes, &more_authorizers),
+            ),
+        ] {
+            assert_ne!(variant.transaction_id(), base.transaction_id(), "id ignores {label}");
+            assert_ne!(
+                variant.authorization_message(),
+                base.authorization_message(),
+                "authorization message ignores {label}"
+            );
+        }
+    }
+
+    /// The V1 id of a transaction with no authorizations, pinned.
+    #[test]
+    fn v1_id_without_authorizations_is_pinned() {
+        let sealer_sk =
+            <RistrettoSecretKey as tari_crypto::tari_utilities::ByteArray>::from_canonical_bytes(&[7; 32]).unwrap();
+        let unsealed = UnsealedTransactionV1::new(sample_unsigned(), vec![]);
+        let tx = TransactionV1::new(
+            unsealed.clone(),
+            TransactionSealSignature::sign_v1(&sealer_sk, &unsealed),
+        );
+
+        assert_eq!(
+            tx.calculate_id(SchemaVersion::V1).to_string(),
+            "77cbdb95c99b5075fbc495941b3dc2eb3fd5f20062e2730e5a8c75dbf229f5cb"
+        );
     }
 
     #[test]
@@ -868,8 +1029,7 @@ mod transaction_id_tests {
             binary: 0,
             metadata_hash: None,
         }];
-        let sig = TransactionSignature::sign_v1(&author_sk, &sealer_pk, &unsigned);
-        let unsealed = UnsealedTransactionV1::new(unsigned.clone(), vec![sig]);
+        let unsealed = UnsealedTransactionV1::authorize(unsigned.clone(), &sealer_pk, [&author_sk]);
         let tx = TransactionV1::new(
             unsealed.clone(),
             TransactionSealSignature::sign_v1(&sealer_sk, &unsealed),

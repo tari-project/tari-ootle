@@ -378,10 +378,12 @@ pub async fn handle_transfer(
         )
         .finish();
 
-    let transaction = sdk
-        .signer_api()
-        .with_context(&fee_owner_key.public_key().to_byte_type())
-        .sign(account_owner_key_id, transaction)?;
+    let transaction = sdk.signer_api().authorize(
+        &fee_owner_key.public_key().to_byte_type(),
+        &[account_owner_key_id],
+        &[],
+        transaction,
+    )?;
 
     let transaction = sdk.signer_api().sign(fee_payer_key_id, transaction)?;
 

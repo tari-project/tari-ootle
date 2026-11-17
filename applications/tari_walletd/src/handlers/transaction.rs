@@ -16,7 +16,14 @@ use tari_ootle_common_types::{
     optional::Optional,
     response_status::ResponseErrorStatus,
 };
-use tari_ootle_transaction::{Transaction, TransactionId, TransactionSignature, UnsignedTransaction, args};
+use tari_ootle_transaction::{
+    Transaction,
+    TransactionId,
+    TransactionSignature,
+    UnsealedTransaction,
+    UnsignedTransaction,
+    args,
+};
 use tari_ootle_wallet_sdk::{
     apis::transaction::TransactionApiError,
     models::{
@@ -240,7 +247,7 @@ async fn submit_inner(
 
     // Signatures collected out of band are attached first; walletd's own
     // signatures are added on top and the seal signature commits to all of them.
-    let mut transaction = context
+    let transaction = context
         .transaction_builder_from_unsigned(req.transaction)
         .with_inputs(detected_inputs)
         .with_signatures(req.signatures);
@@ -252,18 +259,8 @@ async fn submit_inner(
     // with a key of its choosing.
     let stealth_signers = derive_stealth_signers(sdk, &req.lock_ids)?;
 
-    if !req.other_signers.is_empty() || !stealth_signers.is_empty() {
-        let seal_signer = sdk.key_manager_api().get_public_key(req.seal_signer)?;
-        let seal_signer_pk = seal_signer.public_key.to_byte_type();
-        let local_signer = sdk.signer_api().with_context(&seal_signer_pk);
-        for key in req.other_signers {
-            transaction = local_signer.sign(key, transaction)?;
-        }
-        for key in &stealth_signers {
-            transaction = local_signer.sign_with_stealth_key(key, transaction)?;
-        }
-    }
-
+    let transaction =
+        authorize_with_wallet_keys(sdk, req.seal_signer, &req.other_signers, &stealth_signers, transaction)?;
     let transaction = sdk.signer_api().sign(req.seal_signer, transaction)?;
 
     // Linked locks are finalized or released when the transaction resolves. The claim check shares this write with the
@@ -556,7 +553,7 @@ async fn submit_dry_run_inner(
         vec![]
     };
 
-    let mut transaction = context
+    let transaction = context
         .transaction_builder_from_unsigned(req.transaction)
         .with_inputs(detected_inputs)
         .with_dry_run(true)
@@ -566,17 +563,8 @@ async fn submit_dry_run_inner(
     // spendable transaction: stealth inputs are signed with keys derived from
     // the locks, and the seal signature is added last.
     let stealth_signers = derive_stealth_signers(sdk, &req.lock_ids)?;
-    if !req.other_signers.is_empty() || !stealth_signers.is_empty() {
-        let seal_signer = sdk.key_manager_api().get_public_key(req.seal_signer)?;
-        let seal_signer_pk = seal_signer.public_key.to_byte_type();
-        let local_signer = sdk.signer_api().with_context(&seal_signer_pk);
-        for key in req.other_signers {
-            transaction = local_signer.sign(key, transaction)?;
-        }
-        for key in &stealth_signers {
-            transaction = local_signer.sign_with_stealth_key(key, transaction)?;
-        }
-    }
+    let transaction =
+        authorize_with_wallet_keys(sdk, req.seal_signer, &req.other_signers, &stealth_signers, transaction)?;
     let transaction = sdk.signer_api().sign(req.seal_signer, transaction)?;
     let called_components = transaction.as_referenced_components().copied().collect::<Vec<_>>();
     let component_upgrades = component_upgrades(transaction.fee_instructions(), transaction.instructions());
@@ -1044,18 +1032,36 @@ fn sign_manifest_transaction(
     seal_signer_key_id: KeyId,
     signing_key_ids: &[KeyId],
 ) -> Result<Transaction, anyhow::Error> {
-    let mut transaction = unsigned.finish();
-    if !signing_key_ids.is_empty() {
-        let seal_signer_pk = sdk.key_manager_api().get_public_key(seal_signer_key_id)?;
-        let seal_signer_pk_bytes = seal_signer_pk.public_key.to_byte_type();
-        let signer = sdk.signer_api().with_context(&seal_signer_pk_bytes);
-        for signing_key_id in signing_key_ids {
-            if *signing_key_id != seal_signer_key_id {
-                transaction = signer.sign(*signing_key_id, transaction)?;
-            }
-        }
-    }
+    let authorizing_key_ids: Vec<_> = signing_key_ids
+        .iter()
+        .copied()
+        .filter(|key_id| *key_id != seal_signer_key_id)
+        .collect();
+    let transaction =
+        authorize_with_wallet_keys(sdk, seal_signer_key_id, &authorizing_key_ids, &[], unsigned.finish())?;
     Ok(sdk.signer_api().sign(seal_signer_key_id, transaction)?)
+}
+
+/// Adds an authorization by each of `keys` and `stealth_keys`, all signed over one authorizer set that also holds the
+/// keys of the authorizations already on `transaction`.
+fn authorize_with_wallet_keys(
+    sdk: &WalletSdk,
+    seal_signer: KeyId,
+    keys: &[KeyId],
+    stealth_keys: &[StealthUtxoSpendKeyId],
+    transaction: UnsealedTransaction,
+) -> Result<UnsealedTransaction, anyhow::Error> {
+    if keys.is_empty() && stealth_keys.is_empty() {
+        return Ok(transaction);
+    }
+    let seal_signer_pk = sdk
+        .key_manager_api()
+        .get_public_key(seal_signer)?
+        .public_key
+        .to_byte_type();
+    Ok(sdk
+        .signer_api()
+        .authorize(&seal_signer_pk, keys, stealth_keys, transaction)?)
 }
 
 /// Turns a detected dependency into a declaration, deferring to what the transaction already said
@@ -1584,7 +1590,13 @@ mod tests {
         let sdk = daemon.context.wallet_sdk();
         let unsigned = UnsignedTransaction::new(Network::LocalNet.as_byte(), Epoch(100));
         let seal_pk = RistrettoPublicKeyBytes::zero();
-        let signer = sdk.signer_api().with_context(&seal_pk);
+        let authorizers = tari_ootle_transaction::AuthorizerSet::new();
+        let signer = sdk
+            .signer_api()
+            .with_context(tari_ootle_transaction::AuthorizationContext::new(
+                &seal_pk,
+                &authorizers,
+            ));
 
         for key in NON_SIGNING_KEYS {
             signer.generate_signature(key, &unsigned).unwrap_err();

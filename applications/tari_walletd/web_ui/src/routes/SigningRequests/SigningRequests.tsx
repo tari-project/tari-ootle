@@ -26,6 +26,7 @@ import type {
   SigningRequester,
   SigningRequestInfo,
 } from "@tari-project/ootle-ts-bindings";
+import { transactionBody } from "@tari-project/ootle-ts-bindings";
 import { useEffect, useState } from "react";
 import Inputs from "../Transactions/Inputs";
 import Instructions, { BlobContents } from "../Transactions/Instructions";
@@ -102,7 +103,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 /// What the signature authorises, in words, for the instructions this page
 /// knows how to read.
 function Summary({ request }: { request: SigningRequestInfo }) {
-  const v1 = request.transaction.V1;
+  const v1 = transactionBody(request.transaction);
   const instructions = v1?.instructions ?? [];
   const blobs = v1?.blobs ?? [];
   const governance = instructions.map((instruction) => describeGovernanceCall(instruction, blobs));
@@ -148,7 +149,7 @@ function RequestCard({ request }: { request: SigningRequestInfo }) {
   const error = isActionable ? (approve.error ?? reject.error) : null;
   const params = { request_id: request.request_id };
 
-  const v1 = request.transaction.V1;
+  const v1 = transactionBody(request.transaction);
   const instructions = v1?.instructions ?? [];
   const feeInstructions = v1?.fee_instructions ?? [];
   const inputs = v1?.inputs ?? [];

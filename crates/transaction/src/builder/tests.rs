@@ -13,7 +13,6 @@ use crate::{
     AllocatableAddressType,
     ComponentReference,
     Instruction,
-    IntoSigned,
     Signable,
     TRANSACTION_SIGNING_CONTEXT,
     Transaction,
@@ -287,12 +286,11 @@ fn a_signature_over_the_builder_message_verifies_once_fee_instructions_are_appli
         .pay_fee_from_component(ComponentAddress::from_array([2; 32]), 1000u64);
     assert!(!builder.clone().build_unsigned().fee_instructions().is_empty());
 
-    let message = builder.to_signing_message(&seal_signer);
-    let signature = TransactionSignature::new(
-        RistrettoPublicKey::from_secret_key(&signer_secret).to_byte_type(),
-        TRANSACTION_SIGNING_CONTEXT.sign(&signer_secret, &message),
-    );
-    let unsealed = builder.into_signed(signature);
+    let signer = RistrettoPublicKey::from_secret_key(&signer_secret).to_byte_type();
+    let authorizers: crate::AuthorizerSet = [signer].into_iter().collect();
+    let message = builder.to_signing_message(crate::AuthorizationContext::new(&seal_signer, &authorizers));
+    let signature = TransactionSignature::new(signer, TRANSACTION_SIGNING_CONTEXT.sign(&signer_secret, &message));
+    let unsealed = builder.with_signatures(vec![signature]);
 
     assert!(unsealed.verify_all_signatures(&seal_signer));
     assert!(unsealed.seal(&seal_secret).verify_all_signatures());
@@ -636,7 +634,10 @@ fn cbor_decode_rejects_oversized_inputs_signatures_and_blob_hashes() {
         tari_template_lib_types::crypto::RistrettoPublicKeyBytes::zero(),
         TRANSACTION_SIGNING_CONTEXT.sign(
             &RistrettoSecretKey::default(),
-            &base_unsigned.to_signing_message(&tari_template_lib_types::crypto::RistrettoPublicKeyBytes::zero()),
+            &base_unsigned.to_signing_message(crate::AuthorizationContext::new(
+                &tari_template_lib_types::crypto::RistrettoPublicKeyBytes::zero(),
+                &crate::AuthorizerSet::new(),
+            )),
         ),
     );
     let sigs = vec![dummy_sig; MAX_SIGNATURES_PER_TRANSACTION + 1];

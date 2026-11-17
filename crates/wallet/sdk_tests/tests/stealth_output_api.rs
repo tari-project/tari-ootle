@@ -1189,3 +1189,119 @@ async fn merged_fallback_with_prefer_revealed_locks_only_recipient_amount_for_tr
         .unwrap();
     assert_eq!(vault.locked_revealed_balance, Amount::from(300u64));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stealth_transfer_with_badge_authorizes_proof_around_stealth_transfer() {
+    let test = Test::new();
+    let sdk = test.sdk();
+    let owner_account = sdk
+        .accounts_api()
+        .get_account_by_address(&Test::test_account_address())
+        .unwrap();
+
+    add_owned_stealth_output(&test, &owner_account, STEALTH_TARI_RESOURCE_ADDRESS, 5_000);
+    let badge_resource = resource_address_from_seed(8);
+    let badge_vault_id: VaultId = "vault_0dc41b5cc74b36d696c7b140323a40a2f98b71df5d60e5a6bf4c1a07fffffffe"
+        .parse()
+        .unwrap();
+    sdk.accounts_api()
+        .add_vault(
+            Test::test_account_address(),
+            badge_vault_id,
+            SubstateVersion::ZERO,
+            badge_resource,
+            ResourceType::Fungible,
+            Some("BDG".to_string()),
+            0,
+        )
+        .unwrap();
+
+    let blinded_output = || TransferOutput {
+        address: owner_account.address().clone(),
+        revealed_amount: Amount::zero(),
+        blinded_amount: 100,
+        memo: None,
+        pay_to: PayTo::StealthPublicKey,
+    };
+
+    // Standard path (4 blinded outputs prevent merging into fee intent).
+    let (std_lock, std_tx) = sdk
+        .stealth_transfer_api()
+        .transfer(owner_account.clone(), StealthTransferParams {
+            fee_params: TransferFeeParams::new(UtxoInputSelection::ConfidentialOnly),
+            input_selection: UtxoInputSelection::ConfidentialOnly,
+            outputs: vec![blinded_output(), blinded_output(), blinded_output(), blinded_output()],
+            badge_usage: BadgeUsage::Resource(badge_resource),
+            resource_address: STEALTH_TARI_RESOURCE_ADDRESS,
+            max_fee: 100,
+            max_epoch: Epoch(10),
+            is_dry_run: true,
+        })
+        .await
+        .unwrap();
+
+    let instructions = std_tx.transaction.instructions();
+    let auth_idx = instructions
+        .iter()
+        .position(|i| matches!(i, Instruction::AuthorizeProof { .. }))
+        .expect("badge transfer must authorize proof");
+    let stealth_idx = instructions
+        .iter()
+        .position(|i| matches!(i, Instruction::StealthTransfer { .. }))
+        .expect("standard transfer must emit StealthTransfer");
+    let drop_auth_idx = instructions
+        .iter()
+        .position(|i| matches!(i, Instruction::DropProofAuthorization { .. }))
+        .expect("badge transfer must drop proof authorization");
+    assert!(
+        auth_idx < stealth_idx && stealth_idx < drop_auth_idx,
+        "proof authorization must wrap StealthTransfer on the standard path"
+    );
+    std_lock.release();
+
+    // Merged path (1 blinded output in TARI).
+    let (merged_lock, merged_tx) = sdk
+        .stealth_transfer_api()
+        .transfer(owner_account.clone(), StealthTransferParams {
+            fee_params: TransferFeeParams::new(UtxoInputSelection::ConfidentialOnly),
+            input_selection: UtxoInputSelection::ConfidentialOnly,
+            outputs: vec![blinded_output()],
+            badge_usage: BadgeUsage::Resource(badge_resource),
+            resource_address: STEALTH_TARI_RESOURCE_ADDRESS,
+            max_fee: 100,
+            max_epoch: Epoch(10),
+            is_dry_run: true,
+        })
+        .await
+        .unwrap();
+
+    let fee_instructions = merged_tx.transaction.fee_instructions();
+    let m_auth_idx = fee_instructions
+        .iter()
+        .position(|i| matches!(i, Instruction::AuthorizeProof { .. }))
+        .expect("merged badge transfer must authorize proof");
+    let m_stealth_idx = fee_instructions
+        .iter()
+        .position(|i| matches!(i, Instruction::StealthTransfer { .. }))
+        .expect("merged transfer must emit StealthTransfer");
+    let m_put_idx = fee_instructions
+        .iter()
+        .rposition(|i| matches!(i, Instruction::PutLastInstructionOutputOnWorkspace { .. }))
+        .expect("merged transfer must store revealed bucket on workspace");
+    let m_drop_auth_idx = fee_instructions
+        .iter()
+        .position(|i| matches!(i, Instruction::DropProofAuthorization { .. }))
+        .expect("merged badge transfer must drop proof authorization");
+    let m_pay_fee_idx = fee_instructions
+        .iter()
+        .position(|i| matches!(i, Instruction::PayFeeFromBucket { .. }))
+        .expect("merged transfer must pay fee from revealed bucket");
+    assert!(
+        m_auth_idx < m_stealth_idx &&
+            m_stealth_idx < m_put_idx &&
+            m_put_idx < m_drop_auth_idx &&
+            m_drop_auth_idx < m_pay_fee_idx,
+        "merged badge authorization must wrap StealthTransfer before DropProofAuthorization"
+    );
+    merged_lock.release();
+}

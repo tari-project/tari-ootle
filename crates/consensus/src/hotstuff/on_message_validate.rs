@@ -775,28 +775,40 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             });
         }
 
-        if msg.proposal.shard_group_checked() == Some(epoch_state.local_committee_info().shard_group()) {
-            warn!(
-                target: LOG_TARGET,
-                "⚠️ Foreign proposal block {} from {from} names the local shard group {}; discarding message",
-                msg.proposal,
-                epoch_state.local_committee_info().shard_group(),
-            );
-            return Ok(MessageValidationResult::Discard);
-        }
-
-        let committee = match validations::resolve_foreign_committee(&self.epoch_manager, &msg.proposal).await {
-            Ok(Some(committee)) => committee,
-            Ok(None) => return Ok(MessageValidationResult::Discard),
-            Err(HotStuffError::ProposalValidationError(err)) => {
+        let foreign_shard_group = match validations::validate_foreign_shard_group(&msg.proposal) {
+            Ok(shard_group) => shard_group,
+            Err(err) => {
                 return Ok(MessageValidationResult::Invalid {
                     from,
                     message: HotstuffMessage::ForeignProposal(msg),
                     err: err.into(),
                 });
             },
-            Err(err) => return Err(err),
         };
+
+        if foreign_shard_group == epoch_state.local_committee_info().shard_group() {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️ Foreign proposal block {} from {from} names the local shard group {foreign_shard_group}; discarding message",
+                msg.proposal,
+            );
+            return Ok(MessageValidationResult::Discard);
+        }
+
+        let committee =
+            match validations::resolve_foreign_committee(&self.epoch_manager, &msg.proposal, foreign_shard_group).await
+            {
+                Ok(Some(committee)) => committee,
+                Ok(None) => return Ok(MessageValidationResult::Discard),
+                Err(HotStuffError::ProposalValidationError(err)) => {
+                    return Ok(MessageValidationResult::Invalid {
+                        from,
+                        message: HotstuffMessage::ForeignProposal(msg),
+                        err: err.into(),
+                    });
+                },
+                Err(err) => return Err(err),
+            };
 
         if let Err(err) = self.check_foreign_proposal(&msg.proposal, &committee) {
             return Ok(MessageValidationResult::Invalid {

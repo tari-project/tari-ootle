@@ -75,8 +75,8 @@ impl<T> ComponentBuilder<T> {
         self
     }
 
-    /// Sets up who may swap the component's template (`UpdateComponentTemplate`). The rule is fixed at creation.
-    /// Defaults to `UpdateRule::Locked`, under which the component's code can never change.
+    /// Sets the upgrade rule recorded in the component's header. The network rejects every
+    /// `UpdateComponentTemplate`, so a component's template never changes whatever this rule allows.
     pub fn with_upgrade_rule(mut self, upgrade_rule: UpdateRule) -> Self {
         self.upgrade_rule = upgrade_rule;
         self

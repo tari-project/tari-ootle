@@ -284,6 +284,31 @@ impl GetSubstatesResponse {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetSubstateVersionsRequest {
+    /// The substates whose live versions to look up. At most [`MAX_SUBSTATES_PER_FETCH`] are served.
+    #[cfg_attr(feature = "ts", ts(as = "Vec<SubstateId>"))]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<String>))]
+    pub substate_ids: BoundedVec<SubstateId, 1, 50>,
+}
+
+/// The live version of each substate asked for in a [`GetSubstateVersionsRequest`].
+///
+/// The versions carry no proof, so a client cannot verify them. They are fit for pinning transaction inputs, where a
+/// wrong version makes the transaction fail rather than spend or read anything it should not, and for nothing that
+/// takes a version as evidence of what the chain holds.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetSubstateVersionsResponse {
+    /// The live version of each substate asked for. A substate that does not exist, or whose latest version is
+    /// down, has no entry.
+    #[cfg_attr(feature = "utoipa", schema(value_type = HashMap<String, u64>))]
+    pub versions: HashMap<SubstateId, SubstateVersion>,
+}
+
 /// A [`SubstateProof`] served in a [`GetSubstatesResponse`], whose commit proof the response serves once for every
 /// proof anchored at the same block.
 #[derive(Debug, Clone, Serialize, Deserialize)]

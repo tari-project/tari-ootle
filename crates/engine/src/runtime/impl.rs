@@ -136,6 +136,7 @@ use tari_template_lib::{
             ResourceAuthAction,
             RestrictedAccessRule,
             RuleRequirement,
+            RulesUpdater,
             UpdateRule,
         },
         bytes::Bytes,
@@ -169,6 +170,7 @@ use super::{
 use crate::{
     intrinsics,
     runtime::{
+        ComponentRulesChange,
         LoadedComponent,
         RuntimeError,
         RuntimeInterface,
@@ -257,6 +259,134 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
 
     fn main_signer(&self, needed_for: &'static str) -> Result<RistrettoPublicKeyBytes, RuntimeError> {
         self.main_signer.ok_or(RuntimeError::NoMainSigner { needed_for })
+    }
+
+    fn resolve_owner_rule(
+        &self,
+        owner_rule: OwnerRule,
+        needed_for: &'static str,
+    ) -> Result<SubstateOwnerRule, RuntimeError> {
+        Ok(match owner_rule {
+            OwnerRule::OwnedBySigner => SubstateOwnerRule::ByPublicKey(self.main_signer(needed_for)?),
+            OwnerRule::None => SubstateOwnerRule::None,
+            OwnerRule::ByAccessRule(rule) => SubstateOwnerRule::ByAccessRule(rule),
+            OwnerRule::ByPublicKey(key) => SubstateOwnerRule::ByPublicKey(key),
+        })
+    }
+
+    /// Returns the lock of the component whose frame is executing, which must be `component_address`: a component's
+    /// code changes only its own rules.
+    fn current_component_lock(
+        &self,
+        component_address: ComponentAddress,
+        action: ComponentAction,
+    ) -> Result<LockedSubstate, RuntimeError> {
+        self.tracker.read_with(|state| {
+            let component_lock = state
+                .current_call_scope()?
+                .get_current_component_lock()
+                .cloned()
+                .ok_or(RuntimeError::NotInComponentContext { action: action.into() })?;
+            // The component lock is created by the engine for the executing component, so this only checks that the
+            // engine call names it.
+            if *component_lock.substate_id() != component_address {
+                return Err(RuntimeError::LockError(LockError::SubstateNotLocked {
+                    address: SubstateId::Component(component_address),
+                }));
+            }
+            Ok(component_lock)
+        })
+    }
+
+    /// Validates `change` and applies it to the component behind `component_lock` once the current frame satisfies
+    /// the component's rules updater for `origin`. Method rules must name methods of `template_address`.
+    fn change_component_rules(
+        &self,
+        component_lock: &LockedSubstate,
+        template_address: &TemplateAddress,
+        change: RulesChange,
+        origin: RulesChangeOrigin,
+    ) -> Result<(), RuntimeError> {
+        match &change {
+            RulesChange::AccessRules(access_rules) => {
+                let template_def = self.get_template_def(template_address)?;
+                validate_component_access_rule_methods(access_rules, &template_def)?;
+                if access_rules.contains_scoped_to_component_or_template() {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "access_rules",
+                        reason: "component(..)/template(..) cannot be used on a component method access rule"
+                            .to_string(),
+                    });
+                }
+                reject_invalid_rule("access_rules", access_rules.find_invalid_rule())?;
+            },
+            RulesChange::OwnerRule(owner_rule) => {
+                if let SubstateOwnerRule::ByAccessRule(rule) = owner_rule {
+                    // A component owner rule is evaluated with the component's own frame on top, where
+                    // `component(..)`/`template(..)` are constant (true for the component's own address).
+                    if rule.contains_scoped_to_component_or_template() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "owner_rule",
+                            reason: "component(..)/template(..) cannot be used in a component owner rule".to_string(),
+                        });
+                    }
+                    reject_invalid_rule("owner_rule", rule.find_invalid_rule())?;
+                }
+            },
+        }
+
+        let action = change.action();
+        self.tracker.write_with_authorization(|state| {
+            let component = state.get_component(component_lock)?;
+            let component_address =
+                component_lock
+                    .substate_id()
+                    .as_component_address()
+                    .ok_or_else(|| RuntimeError::InvariantError {
+                        function: "change_component_rules",
+                        details: "Locked substate is not a component".to_string(),
+                    })?;
+            match (component.rules_updater(), origin) {
+                (RulesUpdater::Locked, _) => {
+                    return Err(RuntimeError::ComponentRulesLocked {
+                        component: component_address,
+                    });
+                },
+                (RulesUpdater::TemplateManaged, RulesChangeOrigin::Instruction) => {
+                    return Err(RuntimeError::ComponentRulesTemplateManaged {
+                        component: component_address,
+                    });
+                },
+                // Only the current owner rule gates a change; the new rule may name anyone, which is how ownership is
+                // handed over. `SubstateOwnerRule::None` is satisfied by no caller, so setting it is final here.
+                (RulesUpdater::TemplateManaged, RulesChangeOrigin::ComponentCode) | (RulesUpdater::Owner, _) => {
+                    state
+                        .authorization()
+                        .require_ownership(action, component.as_ownership())?;
+                },
+                (RulesUpdater::AccessRule(rule), _) => {
+                    if !state.authorization().check_access_rule(rule)? {
+                        return Err(RuntimeError::AccessDenied {
+                            action_ident: action.into(),
+                        });
+                    }
+                },
+            }
+
+            match change {
+                RulesChange::AccessRules(access_rules) => {
+                    if access_rules != *component.access_rules() {
+                        state.update_component_header(component_lock, |header| header.access_rules = access_rules)?;
+                    }
+                },
+                RulesChange::OwnerRule(owner_rule) => {
+                    if owner_rule != *component.owner_rule() {
+                        state.update_component_header(component_lock, |header| header.owner_rule = owner_rule)?;
+                    }
+                },
+            }
+            Ok(())
+        })
     }
 
     fn invoke_modules_on_initialize(&self) -> Result<(), RuntimeError> {
@@ -1433,6 +1563,20 @@ where
 
     fn load_component(&self, call: ComponentReference) -> Result<LoadedComponent, RuntimeError> {
         self.invoke_modules_on_runtime_call("load_component")?;
+        let address = self.resolve_component_address(call)?;
+        self.charge_component_load(address)?;
+        self.tracker.write_with(|state_mut| {
+            let component = state_mut.load_and_cache_component(address)?;
+            Ok(LoadedComponent {
+                address,
+                template_address: *component.template_address(),
+                entity_id: *component.entity_id(),
+                state_scope: IndexedWellKnownTypes::from_value(component.state())?,
+            })
+        })
+    }
+
+    fn resolve_component_address(&self, call: ComponentReference) -> Result<ComponentAddress, RuntimeError> {
         let address = match call {
             ComponentReference::Address(address) => address,
             ComponentReference::Workspace(id) => self.tracker.write_with(|state_mut| {
@@ -1488,20 +1632,15 @@ where
                 Ok::<_, RuntimeError>(address)
             })?,
         };
-        self.charge_component_load(address)?;
-        self.tracker.write_with(|state_mut| {
-            let component = state_mut.load_and_cache_component(address)?;
-            Ok(LoadedComponent {
-                address,
-                template_address: *component.template_address(),
-                entity_id: *component.entity_id(),
-                state_scope: IndexedWellKnownTypes::from_value(component.state())?,
-            })
-        })
+        Ok(address)
     }
 
     fn lock_component(&self, address: ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
         self.tracker.lock_substate(SubstateId::Component(address), lock_flag)
+    }
+
+    fn unlock_component(&self, lock: LockedSubstate) -> Result<(), RuntimeError> {
+        self.tracker.unlock_substate(lock)
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1528,6 +1667,7 @@ where
                     access_rules,
                     address_allocation,
                     upgrade_rule,
+                    rules_updater,
                 } = args.assert_one_arg()?;
 
                 let template_addr = self.tracker.get_template_address()?;
@@ -1565,15 +1705,23 @@ where
                     }
                     reject_invalid_rule("upgrade_rule", rule.find_invalid_rule())?;
                 }
+                // A template built before the rules updater existed sends none. Its components keep the rules
+                // behaviour that template was written against: changed only by its own code, by the owner.
+                let rules_updater = rules_updater.unwrap_or(RulesUpdater::TemplateManaged);
+                // The rules updater is evaluated both in the instruction's scope, where `component(..)`/`template(..)`
+                // name no frame, and with the component's own frame on top, where they are constant.
+                if let RulesUpdater::AccessRule(rule) = &rules_updater {
+                    if rule.contains_scoped_to_component_or_template() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "rules_updater",
+                            reason: "component(..)/template(..) cannot be used in a component rules updater"
+                                .to_string(),
+                        });
+                    }
+                    reject_invalid_rule("rules_updater", rule.find_invalid_rule())?;
+                }
 
-                let owner_rule = match owner_rule {
-                    OwnerRule::OwnedBySigner => {
-                        SubstateOwnerRule::ByPublicKey(self.main_signer("OwnerRule::OwnedBySigner")?)
-                    },
-                    OwnerRule::None => SubstateOwnerRule::None,
-                    OwnerRule::ByAccessRule(rule) => SubstateOwnerRule::ByAccessRule(rule),
-                    OwnerRule::ByPublicKey(key) => SubstateOwnerRule::ByPublicKey(key),
-                };
+                let owner_rule = self.resolve_owner_rule(owner_rule, "OwnerRule::OwnedBySigner")?;
 
                 let component_address = self.tracker.new_component(
                     encoded_state,
@@ -1581,6 +1729,7 @@ where
                     access_rules,
                     address_allocation,
                     upgrade_rule,
+                    rules_updater,
                 )?;
                 Ok(InvokeResult::encode(&component_address)?)
             },
@@ -1689,48 +1838,14 @@ where
                         })?;
 
                 let access_rules: ComponentAccessRules = args.assert_one_arg()?;
-
+                let component_lock = self.current_component_lock(component_address, ComponentAction::SetAccessRules)?;
                 let template_addr = self.tracker.get_template_address()?;
-                let template_def = self.get_template_def(&template_addr)?;
-                validate_component_access_rule_methods(&access_rules, &template_def)?;
-
-                if access_rules.contains_scoped_to_component_or_template() {
-                    return Err(RuntimeError::InvalidArgument {
-                        argument: "access_rules",
-                        reason: "component(..)/template(..) cannot be used on a component method access rule"
-                            .to_string(),
-                    });
-                }
-                reject_invalid_rule("access_rules", access_rules.find_invalid_rule())?;
-
-                self.tracker.write_with_authorization(|state| {
-                    let component_lock = state
-                        .current_call_scope()?
-                        .get_current_component_lock()
-                        .cloned()
-                        .ok_or(RuntimeError::NotInComponentContext {
-                            action: ComponentAction::SetAccessRules.into(),
-                        })?;
-                    // We only allow mutating of the current component. Note this check doesnt actually provide any
-                    // security itself, it's just checking the engine call is made correctly. The security comes from
-                    // the fact that the engine creates the lock on the currently executing component and that is the
-                    // lock we use to gain access.
-                    if *component_lock.substate_id() != component_address {
-                        return Err(RuntimeError::LockError(LockError::SubstateNotLocked {
-                            address: SubstateId::Component(component_address),
-                        }));
-                    }
-                    let component = state.get_component(&component_lock)?;
-                    state
-                        .authorization()
-                        .require_ownership(ComponentAction::SetAccessRules, component.as_ownership())?;
-
-                    if access_rules != *component.access_rules() {
-                        state.update_component_header(&component_lock, |header| header.access_rules = access_rules)?;
-                    }
-
-                    Ok::<_, RuntimeError>(())
-                })?;
+                self.change_component_rules(
+                    &component_lock,
+                    &template_addr,
+                    RulesChange::AccessRules(access_rules),
+                    RulesChangeOrigin::ComponentCode,
+                )?;
 
                 Ok(InvokeResult::unit())
             },
@@ -1744,49 +1859,14 @@ where
                         })?;
 
                 let owner_rule: SubstateOwnerRule = args.assert_one_arg()?;
-
-                // A component owner rule is only ever evaluated with the component's own frame on top, so
-                // `component(..)`/`template(..)` would be constant (true for the component's own address).
-                if let SubstateOwnerRule::ByAccessRule(rule) = &owner_rule &&
-                    rule.contains_scoped_to_component_or_template()
-                {
-                    return Err(RuntimeError::InvalidArgument {
-                        argument: "owner_rule",
-                        reason: "component(..)/template(..) cannot be used in a component owner rule".to_string(),
-                    });
-                }
-                if let SubstateOwnerRule::ByAccessRule(rule) = &owner_rule {
-                    reject_invalid_rule("owner_rule", rule.find_invalid_rule())?;
-                }
-
-                self.tracker.write_with_authorization(|state| {
-                    let component_lock = state
-                        .current_call_scope()?
-                        .get_current_component_lock()
-                        .cloned()
-                        .ok_or(RuntimeError::NotInComponentContext {
-                            action: ComponentAction::SetOwnerRule.into(),
-                        })?;
-                    // Only the current component may be mutated. The component lock is created by the engine for the
-                    // executing component, so this only checks that the engine call names it.
-                    if *component_lock.substate_id() != component_address {
-                        return Err(RuntimeError::LockError(LockError::SubstateNotLocked {
-                            address: SubstateId::Component(component_address),
-                        }));
-                    }
-                    let component = state.get_component(&component_lock)?;
-                    // Only the current owner rule gates this; the new rule may name anyone, which is how ownership
-                    // is handed over. `SubstateOwnerRule::None` is satisfied by no caller, so setting it is final.
-                    state
-                        .authorization()
-                        .require_ownership(ComponentAction::SetOwnerRule, component.as_ownership())?;
-
-                    if owner_rule != *component.owner_rule() {
-                        state.update_component_header(&component_lock, |header| header.owner_rule = owner_rule)?;
-                    }
-
-                    Ok::<_, RuntimeError>(())
-                })?;
+                let component_lock = self.current_component_lock(component_address, ComponentAction::SetOwnerRule)?;
+                let template_addr = self.tracker.get_template_address()?;
+                self.change_component_rules(
+                    &component_lock,
+                    &template_addr,
+                    RulesChange::OwnerRule(owner_rule),
+                    RulesChangeOrigin::ComponentCode,
+                )?;
 
                 Ok(InvokeResult::unit())
             },
@@ -4197,6 +4277,29 @@ where
         })
     }
 
+    fn set_component_rules(
+        &self,
+        component_lock: &LockedSubstate,
+        change: ComponentRulesChange,
+    ) -> Result<(), RuntimeError> {
+        self.invoke_modules_on_runtime_call("set_component_rules")?;
+        let template_address = self
+            .tracker
+            .read_with(|state| Ok::<_, RuntimeError>(*state.get_component(component_lock)?.template_address()))?;
+        let change = match change {
+            ComponentRulesChange::AccessRules(access_rules) => RulesChange::AccessRules(access_rules),
+            ComponentRulesChange::OwnerRule(owner_rule) => {
+                RulesChange::OwnerRule(self.resolve_owner_rule(owner_rule, "SetComponentOwnerRule")?)
+            },
+        };
+        self.change_component_rules(
+            component_lock,
+            &template_address,
+            change,
+            RulesChangeOrigin::Instruction,
+        )
+    }
+
     fn validate_return_value(&self, value: &IndexedValue) -> Result<(), RuntimeError> {
         self.tracker
             .read_with(|state| state.check_all_substates_known(value.well_known_types()))
@@ -4624,6 +4727,30 @@ where
                 })
         })
     }
+}
+
+/// A rule replacement on a component, with any signer-relative owner rule already resolved.
+enum RulesChange {
+    AccessRules(ComponentAccessRules),
+    OwnerRule(SubstateOwnerRule),
+}
+
+impl RulesChange {
+    fn action(&self) -> ComponentAction {
+        match self {
+            Self::AccessRules(_) => ComponentAction::SetAccessRules,
+            Self::OwnerRule(_) => ComponentAction::SetOwnerRule,
+        }
+    }
+}
+
+/// Where a change to a component's rules comes from. Only `RulesUpdater::TemplateManaged` tells the two apart.
+#[derive(Clone, Copy)]
+enum RulesChangeOrigin {
+    /// The component's own code, through `ComponentManager`.
+    ComponentCode,
+    /// A top-level transaction instruction.
+    Instruction,
 }
 
 fn reject_invalid_rule(argument: &'static str, invalid: Option<InvalidAccessRule>) -> Result<(), RuntimeError> {
@@ -5382,6 +5509,7 @@ mod tests {
                 ComponentAccessRules::new(),
                 None,
                 UpdateRule::Locked,
+                RulesUpdater::Locked,
             )
             .unwrap();
         runtime
@@ -5525,6 +5653,7 @@ mod tests {
                 ComponentAccessRules::new(),
                 None,
                 UpdateRule::Locked,
+                RulesUpdater::Locked,
             )
             .unwrap();
         runtime
@@ -5733,6 +5862,7 @@ mod tests {
                 access_rules,
                 None,
                 UpdateRule::AccessRule(AccessRule::AllowAll),
+                RulesUpdater::Locked,
             )
             .unwrap();
         runtime

@@ -230,6 +230,14 @@ impl UnsignedTransactionV1 {
                 Instruction::UpdateComponentTemplate {
                     component: ComponentReference::Address(address),
                     ..
+                } |
+                Instruction::SetComponentAccessRules {
+                    component: ComponentReference::Address(address),
+                    ..
+                } |
+                Instruction::SetComponentOwnerRule {
+                    component: ComponentReference::Address(address),
+                    ..
                 } => Some(address),
                 _ => None,
             })
@@ -304,6 +312,12 @@ impl UnsignedTransactionV1 {
                     {
                         let value = IndexedValue::from_raw(arg)?;
                         substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
+                    }
+                },
+                Instruction::SetComponentAccessRules { component, .. } |
+                Instruction::SetComponentOwnerRule { component, .. } => {
+                    if let Some(component_address) = component.address() {
+                        substates.insert(SubstateId::Component(*component_address));
                     }
                 },
                 _ => {},

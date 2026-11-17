@@ -446,6 +446,8 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::UpdateComponentTemplate { migrate, .. } => {
             (1 + migrate.as_ref().map(|m| calc_args_weight(&m.args)).unwrap_or(0)).max(INVOCATION_FLOOR)
         },
+        Instruction::SetComponentAccessRules { access_rules, .. } => 1 + access_rules.num_access_rules() as u64,
+        Instruction::SetComponentOwnerRule { .. } => 1,
     }
 }
 

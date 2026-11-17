@@ -5,6 +5,7 @@ use tari_engine::runtime::{ActionIdent, RuntimeError};
 use tari_engine_types::commit_result::ExecutionFailureCode;
 use tari_ootle_transaction::{Epoch, Transaction, args, args::WorkspaceOffsetId};
 use tari_template_lib::{
+    args::ComponentAction,
     invoke_args,
     models::ProofId,
     types::{
@@ -16,7 +17,7 @@ use tari_template_lib::{
         OwnerRule,
         ResourceAddress,
         VaultId,
-        access_rules::{ComponentAccessRules, ResourceAccessRules, ResourceAuthAction},
+        access_rules::{ComponentAccessRules, ResourceAccessRules, ResourceAuthAction, RulesUpdater},
         constants::TARI_TOKEN,
         rule,
     },
@@ -580,4 +581,48 @@ fn a_resource_auth_hook_is_lent_nothing() {
         vec![owner_proof],
     );
     assert_reject_reason(reason, "This call does not carry the badge");
+}
+
+#[test]
+fn a_rules_updater_badge_is_satisfied_inside_an_authorize_window_only() {
+    let mut test = TemplateTest::new(CRATE_PATH, [
+        "tests/templates/proof_window",
+        "tests/templates/rules_updater",
+    ]);
+    let (lender, badge) = proof_window_component(&mut test);
+    let template = test.get_template_address("RulesUpdaterTest");
+    test.execute_expect_success(
+        test.transaction()
+            .call_function(template, "new", args![
+                OwnerRule::None,
+                RulesUpdater::AccessRule(rule!(resource(*badge.resource_address())))
+            ])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    let component = test.return_values()[0].decoded::<ComponentAddress>().unwrap();
+    let open_rules = ComponentAccessRules::new().default(AccessRule::AllowAll);
+
+    let reason = test.execute_expect_failure(
+        test.transaction()
+            .call_method(lender, "create_badge_proof", args![])
+            .put_last_instruction_output_on_workspace("proof")
+            .set_component_access_rules(component, open_rules.clone())
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    assert_access_denied_for_action(reason, ComponentAction::SetAccessRules);
+
+    test.execute_expect_success(
+        test.transaction()
+            .call_method(lender, "create_badge_proof", args![])
+            .put_last_instruction_output_on_workspace("proof")
+            .with_authorized_proof("proof", |builder| {
+                builder.set_component_access_rules(component, open_rules)
+            })
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
 }

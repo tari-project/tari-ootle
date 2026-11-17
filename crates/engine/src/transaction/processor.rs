@@ -72,6 +72,7 @@ use crate::{
     runtime::{
         AuthParams,
         AuthorizationScope,
+        ComponentRulesChange,
         DeclaredInputLoad,
         LoadedComponent,
         PayFee,
@@ -551,7 +552,30 @@ where
             Instruction::UpdateComponentTemplate { .. } => {
                 Err(TransactionErrorKind::ComponentTemplateUpdateNotSupported)
             },
+            Instruction::SetComponentAccessRules {
+                component,
+                access_rules,
+            } => Self::set_component_rules(runtime, component, ComponentRulesChange::AccessRules(access_rules)),
+            Instruction::SetComponentOwnerRule { component, owner_rule } => {
+                Self::set_component_rules(runtime, component, ComponentRulesChange::OwnerRule(owner_rule))
+            },
         }
+    }
+
+    fn set_component_rules(
+        runtime: &Runtime,
+        component: ComponentReference,
+        change: ComponentRulesChange,
+    ) -> Result<Option<IndexedValue>, TransactionErrorKind> {
+        // A rule change touches only the header, so the state is neither indexed nor charged for.
+        let address = runtime.interface().resolve_component_address(component)?;
+        let component_lock = runtime.interface().lock_component(address, LockFlag::Write)?;
+        // Checked in the instruction's own scope: no frame is pushed, so the transaction's signer badges and
+        // authorized proofs are what satisfy the component's rules updater.
+        let result = runtime.interface().set_component_rules(&component_lock, change);
+        runtime.interface().unlock_component(component_lock)?;
+        result?;
+        Ok(None)
     }
 
     fn pay_fee_from_bucket(

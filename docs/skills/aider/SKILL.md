@@ -534,10 +534,31 @@ rule!(m_of_n(2, resource(a), resource(b), resource(c)))// M of N conditions met
 
 ```rust
 OwnerRule::OwnedBySigner           // Default: transaction signer is owner
-OwnerRule::None                    // No owner (nobody can update access rules)
+OwnerRule::None                    // No owner: owner-gated actions are refused
 OwnerRule::ByAccessRule(rule)      // Custom rule determines ownership
 OwnerRule::ByPublicKey(pk)         // Specific public key is owner
 ```
+
+### Rules Updater
+
+Who may replace the component's method access rules and owner rule. Set once at creation with
+`.with_rules_updater(..)`; it governs both the `SetComponentAccessRules` / `SetComponentOwnerRule` transaction
+instructions and `ComponentManager::set_access_rules` / `set_owner_rule` calls from the template's own code.
+
+```rust
+RulesUpdater::Locked               // Default: nobody, not even the template's own code
+RulesUpdater::Owner                // The owner, by instruction or from template code
+RulesUpdater::AccessRule(rule)     // Anyone satisfying `rule`, by instruction or from template code
+RulesUpdater::TemplateManaged      // Only the template's own code, by the owner; instructions refused
+```
+
+For rules that should change, choose `Owner` or `AccessRule` and change them with the transaction builder's
+`.set_component_access_rules(component, rules)` / `.set_component_owner_rule(component, rule)`, instead of writing
+role-management methods. Use `TemplateManaged` only when the template must run its own logic around every rule
+change (e.g. a confirmed handover); components created before the setting existed also behave this way.
+
+Under the default `Locked`, the instructions and `set_access_rules` / `set_owner_rule` all fail with
+`ComponentRulesLocked`. The setting is fixed at creation: a component created `Locked` can never be unlocked.
 
 ### Caller Context — Complete API
 

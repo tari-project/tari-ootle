@@ -248,10 +248,16 @@ fn build_unsigned_transaction(
         .with_dry_run(intent.dry_run);
 
     // Attach the resolved input substates (the from-account component + its vault, resolved via the
-    // account wants, plus any stealth-input UTXOs). Without these the engine rejects the tx for
-    // missing input substates. The resource input is auto-added by `stealth_transfer*` — do not
-    // re-add it.
-    builder = builder.with_inputs(resolved_utxo_inputs);
+    // account wants, plus any stealth-input UTXOs) and ensure non-TARI stealth resources are
+    // read-declared since `TransactionBuilder::new` does not auto-fill instruction inputs.
+    let mut inputs = resolved_utxo_inputs;
+    let resource_id = tari_engine_types::substate::SubstateId::Resource(resource);
+    if resource != tari_template_lib_types::constants::TARI_TOKEN &&
+        !inputs.iter().any(|decl| *decl.substate_id() == resource_id)
+    {
+        inputs.push(tari_ootle_common_types::InputDeclaration::read(resource));
+    }
+    builder = builder.with_inputs(inputs);
 
     Ok(builder.build_unsigned())
 }
@@ -1607,5 +1613,90 @@ mod tests {
         };
         let err = assemble_from_intent(&intent, &entropy).unwrap_err();
         assert_eq!(err.code(), "VALIDATION");
+    }
+
+    #[test]
+    fn non_tari_stealth_transfer_declares_read_resource_input_and_preserves_existing() {
+        use tari_engine_types::substate::SubstateId;
+        use tari_ootle_common_types::InputDeclaration;
+        use tari_template_lib_types::{ObjectKey, ResourceAddress};
+
+        let custom_res = ResourceAddress::new(ObjectKey::from_array([0x44; ObjectKey::LENGTH]));
+        let custom_res_str = ResourceAddressStr::from_internal(&custom_res);
+        let entropy = entropy_for(1, 150);
+
+        let mut custom_out = output_spec(1_000_000);
+        custom_out.resource_address = custom_res_str.clone();
+        let intent = StealthTransferIntent {
+            from_account: from_component(),
+            resource_address: custom_res_str,
+            fee: BoundaryAmount::new(2000),
+            inputs: Vec::<StealthInputSpec>::new(),
+            outputs: vec![custom_out],
+            revealed_input_amount: 1_000_000,
+            revealed_output_amount: 0,
+            min_epoch: None,
+            max_epoch: 1,
+            dry_run: false,
+            pay_fee_from_revealed: false,
+        };
+        let build_stmt = || {
+            build_stealth_outputs_statement_from_entropy(Network::LocalNet, &intent, &entropy, Some(test_account_pk()))
+                .unwrap()
+        };
+        let make_sig_reqs = || StealthSignatureRequirementsState {
+            must_sign_with_account_key: true,
+            seal_signer: None,
+            other_signers: Vec::new(),
+        };
+
+        // Missing non-TARI resource input is added as Read.
+        let (outputs_stmt, agg_mask) = build_stmt();
+        let partial = assemble_stealth_transfer_statement(
+            Network::LocalNet,
+            &intent,
+            outputs_stmt,
+            agg_mask,
+            RistrettoSecretKey::default(),
+            make_sig_reqs(),
+            Vec::new(),
+            &entropy,
+        )
+        .unwrap();
+        let decl = partial
+            .unsigned()
+            .inputs()
+            .get(&SubstateId::Resource(custom_res))
+            .expect("non-TARI resource must be declared as an input");
+        assert!(decl.is_read(), "auto-declared resource input must be Read");
+
+        // Pre-existing Write declaration is preserved and not downgraded/duplicated.
+        let (outputs_stmt, agg_mask) = build_stmt();
+        let partial_write = assemble_stealth_transfer_statement(
+            Network::LocalNet,
+            &intent,
+            outputs_stmt,
+            agg_mask,
+            RistrettoSecretKey::default(),
+            make_sig_reqs(),
+            vec![InputDeclaration::write(custom_res)],
+            &entropy,
+        )
+        .unwrap();
+        let decl_write = partial_write
+            .unsigned()
+            .inputs()
+            .get(&SubstateId::Resource(custom_res))
+            .expect("existing resource input must remain");
+        assert!(decl_write.is_write(), "existing Write declaration must be preserved");
+
+        // TARI_TOKEN stays implicit (not auto-declared as a resource input).
+        let tari_intent = balanced_intent(1_000_000, 1_000_000);
+        let tari_partial = assemble_from_intent(&tari_intent, &entropy_for(1, 151)).unwrap();
+        let tari_id = SubstateId::Resource(tari_template_lib_types::constants::TARI_TOKEN);
+        assert!(
+            tari_partial.unsigned().inputs().get(&tari_id).is_none(),
+            "TARI_TOKEN must remain implicit"
+        );
     }
 }

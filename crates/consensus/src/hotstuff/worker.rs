@@ -378,7 +378,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         // Blocks saved before a restart are still uncommitted, and their templates are in no durable state.
         self.state_store.with_read_tx(|tx| {
             if let Some(committed) = LastExecuted::get(tx, current_epoch).optional()? {
-                self.uncommitted_templates.prune_to(committed.epoch, committed.height);
                 self.uncommitted_templates.rebuild(tx, &committed.block_id)?;
             }
             Ok::<_, HotStuffError>(())

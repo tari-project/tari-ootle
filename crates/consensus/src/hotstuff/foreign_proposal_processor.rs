@@ -62,14 +62,27 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
     let _timer = TraceTimer::info(LOG_TARGET, "process_foreign_block");
     let local_leaf = &substate_store.parent_block();
 
-    let foreign_shard_group = proposal.shard_group_unchecked();
+    let foreign_block_id = proposal.calculate_block_id();
+    let foreign_shard_group =
+        proposal
+            .shard_group_checked()
+            .ok_or_else(|| ProposalValidationError::ForeignProposalInvalid {
+                block_id: foreign_block_id,
+                shard_group: proposal.shard_group_unchecked(),
+                details: anyhow::anyhow!("Invalid shard group bounds"),
+            })?;
+    if foreign_shard_group == local_committee_info.shard_group() {
+        return Err(ProposalValidationError::ForeignProposalFromLocalShardGroup {
+            block_id: foreign_block_id,
+            shard_group: foreign_shard_group,
+        }
+        .into());
+    }
     info!(
         target: LOG_TARGET,
         "🧩 Processing FOREIGN PROPOSAL {}",
         proposal,
     );
-    // Used for logging purposes
-    let foreign_block_id = proposal.calculate_block_id();
     let foreign_proposal_as_leaf = LeafBlock {
         block_id: foreign_block_id,
         height: proposal.height(),

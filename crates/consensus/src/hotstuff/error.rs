@@ -337,6 +337,9 @@ pub enum ProposalValidationError {
         details: anyhow::Error,
     },
 
+    #[error("Foreign proposal for block {block_id} names the local shard group {shard_group} as its source")]
+    ForeignProposalFromLocalShardGroup { block_id: BlockId, shard_group: ShardGroup },
+
     #[error(
         "Foreign proposal for block {block_id} from {shard_group} carries block metadata that does not hash to the \
          metadata hash its proven header commits to"
@@ -460,14 +463,16 @@ impl ProposalValidationError {
     /// part says nothing about the block, so nothing is recorded against its block id and another delivery of the
     /// block is still accepted.
     ///
-    /// `FutureEpoch` is the local node's own condition: it has not yet reached the epoch window of the signed header.
-    /// Recording that against the block id would refuse the proposal after this node catches up, so the message is
-    /// turned away and a later delivery is evaluated afresh.
+    /// `FutureEpoch` and `ForeignProposalFromLocalShardGroup` are conditions of the local node's current epoch or
+    /// shard-group assignment rather than defects in the proven block. Recording them against the block id would
+    /// refuse the proposal after this node catches up or rotates to another shard group, so the message is turned
+    /// away and a later delivery is evaluated afresh.
     pub fn rejects_message_not_block(&self) -> bool {
         matches!(
             self,
             Self::ForeignPledgesNotCommitted { .. } |
                 Self::ForeignProposalWithholdsCommand { .. } |
+                Self::ForeignProposalFromLocalShardGroup { .. } |
                 Self::FutureEpoch { .. }
         )
     }

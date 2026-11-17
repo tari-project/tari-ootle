@@ -3,6 +3,28 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.54.0](https://github.com/tari-project/tari-ootle/compare/v0.53.5...v0.54.0) (2026-11-17)
+
+Components can no longer change their template in place. To change a component's code, deploy the
+new template as a new component and move the state across.
+
+### ⚠️ Upgrade notes
+
+- **Validators and indexers upgrade together.** Validators reject any transaction containing
+  `UpdateComponentTemplate`, in mempool validation and in the engine, with no activation epoch.
+  (#3824)
+- **Template authors:** `ComponentBuilder::with_upgrade_rule` is removed from `tari_template_lib`
+  0.41.0, and a template that calls it no longer compiles; remove the call. Deployed templates run
+  unchanged. (#3824)
+- **App and wallet developers:** `TransactionBuilder::update_component_template` and
+  `update_component_template_address_with_migrate` are removed. A transaction carrying the
+  instruction is rejected with `ComponentTemplateUpdateNotSupported`. (#3824)
+
+### Features
+
+- **engine:** `UpdateComponentTemplate` is rejected, so a component's template never changes after
+  creation. (#3824)
+
 ## [0.53.5](https://github.com/tari-project/tari-ootle/compare/v0.53.4...v0.53.5) (2026-11-16)
 
 Indexers verify a transaction result from one validator with a proof instead of polling several,

@@ -119,7 +119,7 @@ pub async fn handle_create(
 
     let message_hash = TransactionSignature::create_message(
         AuthorizationContext::new(&req.seal_public_key, &req.authorizers),
-        &transaction,
+        transaction.body(),
     );
     let requester = requester_of(auth);
 
@@ -259,7 +259,7 @@ pub async fn handle_approve(
     // The approver was shown `message_hash`; sign only if the stored request
     // still produces exactly that message.
     let context = AuthorizationContext::new(&request.seal_public_key, &request.authorizers);
-    let message = TransactionSignature::create_message(context, &request.unsigned_transaction);
+    let message = TransactionSignature::create_message(context, request.unsigned_transaction.body());
     if *message.as_bytes() != request.message_hash {
         return Err(invalid_request(format!(
             "Signing request {} no longer produces the message it was created with; reject it and ask for a new one",
@@ -459,7 +459,7 @@ mod tests {
         let authorizers = authorizers(test);
         let message_hash = TransactionSignature::create_message(
             AuthorizationContext::new(&seal_public_key(), &authorizers),
-            &transaction,
+            transaction.body(),
         );
         sdk.store()
             .with_write_tx(|tx| {
@@ -525,7 +525,7 @@ mod tests {
         assert_eq!(info.authorizers, authorizers(&test));
         let message = TransactionSignature::create_message(
             AuthorizationContext::new(&seal_public_key(), &authorizers(&test)),
-            &transaction(),
+            transaction().body(),
         );
         assert_eq!(info.message_hash, *message.as_bytes());
         assert!(

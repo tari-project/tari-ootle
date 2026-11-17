@@ -253,14 +253,11 @@ impl UnsignedTransaction {
         UnsealedTransactionV1::authorize(self.into_body(), seal_signer, secrets).into()
     }
 
-    /// Attaches `signatures` as the authorization list, keeping the schema. Under
-    /// [`SchemaVersion::V2`] the list is ordered by public key keeping the first signature of a
-    /// repeated key, and each signature must have been made over the set of all their keys.
+    /// Attaches `signatures` as the authorization list of a [`SchemaVersion::CURRENT`] transaction,
+    /// whatever schema `self` had. The list is ordered by public key keeping the first signature of
+    /// a repeated key, and each signature must have been made over the set of all their keys.
     pub fn with_signatures(self, signatures: Vec<TransactionSignature>) -> UnsealedTransaction {
-        match self {
-            Self::V1(tx) => UnsealedTransaction::V1(UnsealedTransactionV1::new(tx, signatures)),
-            Self::V2(tx) => UnsealedTransaction::V2(UnsealedTransactionV1::with_canonical_signatures(tx, signatures)),
-        }
+        UnsealedTransactionV1::with_canonical_signatures(self.into_body(), signatures).into()
     }
 
     pub fn with_dry_run(mut self, dry_run: bool) -> Self {
@@ -320,6 +317,6 @@ impl Signable<AuthorizationContext<'_>> for UnsignedTransaction {
     type Signature = TransactionSignature;
 
     fn to_signing_message(&self, context: AuthorizationContext<'_>) -> crate::TransactionMessage {
-        TransactionSignature::create_message(context, self)
+        TransactionSignature::create_message(context, self.body())
     }
 }

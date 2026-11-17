@@ -653,6 +653,9 @@ mod tests {
             .await
             .expect("authorizing with a stealth key must succeed");
         assert_eq!(auth.signature().public_key(), &derived);
-        assert!(auth.signature().verify_v1(context, unsigned.body()));
+        assert!(
+            auth.signature()
+                .verify_message(TransactionSignature::create_message(context, unsigned.body()))
+        );
     }
 }

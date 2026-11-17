@@ -49,14 +49,15 @@ impl UnsealedTransaction {
         }
     }
 
+    /// Seals the transaction as a [`SchemaVersion::CURRENT`] transaction whatever schema `self` had.
     pub fn seal(self, secret: &RistrettoSecretKey) -> Transaction {
-        let signature =
-            TransactionSealSignature::sign_message(secret, &TransactionSealSignature::create_message(&self));
-        self.with_seal_signature(signature)
+        self.into_body().seal(secret)
     }
 
+    /// Seals the transaction as a [`SchemaVersion::CURRENT`] transaction with a seal signature made
+    /// elsewhere over [`TransactionSealSignature::create_message`].
     pub fn seal_with_signature(self, signature: TransactionSealSignature) -> Transaction {
-        self.with_seal_signature(signature)
+        self.into_body().seal_with_signature(signature)
     }
 
     /// Replaces the authorization list with one signature per key in `secrets`, each signed under
@@ -89,10 +90,6 @@ impl UnsealedTransaction {
             &body.unsigned_transaction().blobs.hashes(),
         )
     }
-
-    fn with_seal_signature(self, signature: TransactionSealSignature) -> Transaction {
-        Transaction::new(self, signature)
-    }
 }
 
 /// Wraps the body as a [`SchemaVersion::CURRENT`] transaction.
@@ -106,7 +103,7 @@ impl Signable for UnsealedTransaction {
     type Signature = TransactionSealSignature;
 
     fn to_signing_message(&self, _context: ()) -> crate::TransactionMessage {
-        TransactionSealSignature::create_message(self)
+        TransactionSealSignature::create_message(self.body())
     }
 }
 
@@ -114,7 +111,7 @@ impl Signable<AuthorizationContext<'_>> for UnsealedTransaction {
     type Signature = TransactionSignature;
 
     fn to_signing_message(&self, context: AuthorizationContext<'_>) -> crate::TransactionMessage {
-        TransactionSignature::create_message_with_schema(self.schema(), context, self.body().unsigned_transaction())
+        TransactionSignature::create_message(context, self.body().unsigned_transaction())
     }
 }
 
@@ -122,6 +119,6 @@ impl IntoSigned for UnsealedTransaction {
     type SignedOutput = Transaction;
 
     fn into_signed(self, sig: TransactionSealSignature) -> Self::SignedOutput {
-        self.with_seal_signature(sig)
+        self.seal_with_signature(sig)
     }
 }

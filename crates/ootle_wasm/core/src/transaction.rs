@@ -82,7 +82,7 @@ pub fn add_transaction_signer_json(
     let secret = secret_key_from_bytes(signer_secret_key)?;
     let seal_signer = public_key_bytes_from_bytes(seal_signer_public_key)?;
     let authorizers = authorizer_set_from_bytes(authorizer_public_keys)?;
-    let signature = TransactionSignature::sign_v1(
+    let signature = TransactionSignature::sign(
         &secret,
         AuthorizationContext::new(&seal_signer, &authorizers),
         unsealed.unsigned_transaction(),
@@ -115,7 +115,7 @@ pub fn attach_seal_signature_json(
     let unsealed = parse_unsealed_transaction_json(tx_json)?;
     let seal_signer = public_key_bytes_from_bytes(seal_signer_public_key)?;
     let seal_signature = TransactionSealSignature::new(seal_signer, signature_from_bytes(signature)?);
-    if !seal_signature.verify_v1(&unsealed) {
+    if !seal_signature.verify_message(TransactionSealSignature::create_message(&unsealed)) {
         return Err(OotleWasmError::SealSignatureInvalid);
     }
     if !unsealed.verify_all_signatures(SchemaVersion::CURRENT, &seal_signer) {
@@ -147,10 +147,10 @@ pub fn attach_transaction_signature_json(
         return Err(OotleWasmError::SignerNotAnAuthorizer);
     }
     let transaction_signature = TransactionSignature::new(signer, signature_from_bytes(signature)?);
-    if !transaction_signature.verify_v1(
+    if !transaction_signature.verify_message(TransactionSignature::create_message(
         AuthorizationContext::new(&seal_signer, &authorizers),
         unsealed.unsigned_transaction(),
-    ) {
+    )) {
         return Err(OotleWasmError::TransactionSignatureInvalid);
     }
     Ok(serde_json::to_string(&with_signature(unsealed, transaction_signature))?)

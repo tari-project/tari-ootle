@@ -117,7 +117,7 @@ impl WalletStealthAuthorizer<'_, OotleWallet> {
         let authorizers = self.authorizer_set(external_authorizers).await?;
         Ok(TransactionSignature::create_message(
             AuthorizationContext::new(&seal_signer, &authorizers),
-            unsigned,
+            unsigned.body(),
         ))
     }
 }

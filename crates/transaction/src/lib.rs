@@ -33,6 +33,8 @@ mod transaction_id;
 mod unsealed;
 mod unsigned_transaction;
 mod v1;
+#[cfg(any(test, feature = "test-v1-signing"))]
+pub mod v1_signing;
 mod weight;
 
 pub use blobs::*;

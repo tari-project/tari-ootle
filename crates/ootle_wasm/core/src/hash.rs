@@ -17,7 +17,7 @@ use crate::{error::OotleWasmError, transaction::parse_unsealed_transaction_json}
 
 /// Hash an UnsignedTransactionV1 for signing, producing the 64-byte message that signers commit to.
 ///
-/// This delegates to `TransactionSignature::create_message_v1` to ensure byte-identical hashing
+/// This delegates to `TransactionSignature::create_message` to ensure byte-identical hashing
 /// with the Rust tari transaction crate.
 ///
 /// `seal_signer_public_key` is the raw bytes of the seal signer's public key (the account owner).
@@ -30,8 +30,7 @@ pub fn hash_unsigned_transaction(
 ) -> Result<Vec<u8>, OotleWasmError> {
     let seal_signer = public_key_bytes_from_bytes(seal_signer_public_key)?;
     let authorizers = authorizer_set_from_bytes(authorizer_public_keys)?;
-    let hash =
-        TransactionSignature::create_message_v1(AuthorizationContext::new(&seal_signer, &authorizers), transaction);
+    let hash = TransactionSignature::create_message(AuthorizationContext::new(&seal_signer, &authorizers), transaction);
     Ok(hash.as_bytes().to_vec())
 }
 
@@ -66,7 +65,7 @@ pub(crate) fn authorizer_set_from_bytes(bytes: &[u8]) -> Result<AuthorizerSet, O
 /// The seal message covers every authorization signature, so all of them must be attached before this
 /// hash is taken.
 pub fn hash_unsealed_transaction(transaction: &UnsealedTransactionV1) -> Vec<u8> {
-    TransactionSealSignature::create_message_v1(transaction)
+    TransactionSealSignature::create_message(transaction)
         .as_bytes()
         .to_vec()
 }
@@ -114,7 +113,7 @@ mod tests {
 
         // Hash via the transaction crate directly
         let expected =
-            TransactionSignature::create_message_v1(AuthorizationContext::new(&seal_signer_bytes, &authorizers), &tx);
+            TransactionSignature::create_message(AuthorizationContext::new(&seal_signer_bytes, &authorizers), &tx);
 
         assert_eq!(our_hash, expected.as_bytes().to_vec());
     }
@@ -163,7 +162,7 @@ mod tests {
         );
         let json = serde_json::to_string(&tx).unwrap();
 
-        let expected = TransactionSealSignature::create_message_v1(&tx);
+        let expected = TransactionSealSignature::create_message(&tx);
         assert_eq!(hash_unsealed_transaction(&tx), expected.as_bytes().to_vec());
         assert_eq!(
             hash_unsealed_transaction_json(&json).unwrap(),

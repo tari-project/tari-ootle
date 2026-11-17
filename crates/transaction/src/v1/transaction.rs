@@ -170,9 +170,8 @@ impl TransactionV1 {
         // Derived once and shared between the seal and the authorization messages: deriving blob
         // commitments hashes every blob payload.
         let blob_hashes = self.body.unsigned_transaction().blobs.hashes();
-        let seal_message =
-            TransactionSealSignature::create_message_v1_with_blob_hashes(schema, &self.body, &blob_hashes);
-        let authorization_message = TransactionSignature::create_message_v1_for_list(
+        let seal_message = TransactionSealSignature::create_message_for_schema(schema, &self.body, &blob_hashes);
+        let authorization_message = TransactionSignature::create_message_for_list(
             schema,
             self.seal_signature.public_key(),
             self.body.unsigned_transaction(),
@@ -607,7 +606,7 @@ mod blob_validation_tests {
         };
         let sealer = RistrettoSecretKey::random(&mut rand::rng());
         let unsealed = UnsealedTransactionV1::new(unsigned, vec![]);
-        let seal = crate::TransactionSealSignature::sign_v1(&sealer, &unsealed);
+        let seal = crate::TransactionSealSignature::sign(&sealer, &unsealed);
         TransactionV1::new(unsealed, seal)
     }
 
@@ -804,14 +803,8 @@ mod transaction_id_tests {
         let (sealer_sk, sealer_pk) = random_key();
         let unsealed = cosigned(&sealer_pk);
 
-        let a = TransactionV1::new(
-            unsealed.clone(),
-            TransactionSealSignature::sign_v1(&sealer_sk, &unsealed),
-        );
-        let b = TransactionV1::new(
-            unsealed.clone(),
-            TransactionSealSignature::sign_v1(&sealer_sk, &unsealed),
-        );
+        let a = TransactionV1::new(unsealed.clone(), TransactionSealSignature::sign(&sealer_sk, &unsealed));
+        let b = TransactionV1::new(unsealed.clone(), TransactionSealSignature::sign(&sealer_sk, &unsealed));
 
         assert_ne!(
             a.seal_signature().signature(),
@@ -833,8 +826,8 @@ mod transaction_id_tests {
         let (sk_a, _) = random_key();
         let (sk_b, _) = random_key();
 
-        let a = TransactionV1::new(unsealed.clone(), TransactionSealSignature::sign_v1(&sk_a, &unsealed));
-        let b = TransactionV1::new(unsealed.clone(), TransactionSealSignature::sign_v1(&sk_b, &unsealed));
+        let a = TransactionV1::new(unsealed.clone(), TransactionSealSignature::sign(&sk_a, &unsealed));
+        let b = TransactionV1::new(unsealed.clone(), TransactionSealSignature::sign(&sk_b, &unsealed));
 
         assert_ne!(
             a.calculate_id(SchemaVersion::CURRENT),
@@ -856,11 +849,11 @@ mod transaction_id_tests {
         let b_unsealed = UnsealedTransactionV1::new(b_unsigned, vec![]);
         let a = TransactionV1::new(
             a_unsealed.clone(),
-            TransactionSealSignature::sign_v1(&sealer_sk, &a_unsealed),
+            TransactionSealSignature::sign(&sealer_sk, &a_unsealed),
         );
         let b = TransactionV1::new(
             b_unsealed.clone(),
-            TransactionSealSignature::sign_v1(&sealer_sk, &b_unsealed),
+            TransactionSealSignature::sign(&sealer_sk, &b_unsealed),
         );
 
         assert_ne!(
@@ -877,13 +870,10 @@ mod transaction_id_tests {
         let with_sig = cosigned(&sealer_pk);
         let without_sig = UnsealedTransactionV1::new(sample_unsigned(), vec![]);
 
-        let a = TransactionV1::new(
-            with_sig.clone(),
-            TransactionSealSignature::sign_v1(&sealer_sk, &with_sig),
-        );
+        let a = TransactionV1::new(with_sig.clone(), TransactionSealSignature::sign(&sealer_sk, &with_sig));
         let b = TransactionV1::new(
             without_sig.clone(),
-            TransactionSealSignature::sign_v1(&sealer_sk, &without_sig),
+            TransactionSealSignature::sign(&sealer_sk, &without_sig),
         );
 
         assert_ne!(
@@ -904,13 +894,10 @@ mod transaction_id_tests {
 
         let sealed_with = |sig: TransactionSignature| {
             let unsealed = UnsealedTransactionV1::new(unsigned.clone(), vec![sig]);
-            TransactionV1::new(
-                unsealed.clone(),
-                TransactionSealSignature::sign_v1(&sealer_sk, &unsealed),
-            )
+            TransactionV1::new(unsealed.clone(), TransactionSealSignature::sign(&sealer_sk, &unsealed))
         };
-        let a = sealed_with(TransactionSignature::sign_v1(&cosigner, context, &unsigned));
-        let b = sealed_with(TransactionSignature::sign_v1(&cosigner, context, &unsigned));
+        let a = sealed_with(TransactionSignature::sign(&cosigner, context, &unsigned));
+        let b = sealed_with(TransactionSignature::sign(&cosigner, context, &unsigned));
 
         assert_ne!(
             a.signatures()[0].signature(),
@@ -933,10 +920,7 @@ mod transaction_id_tests {
         let (cosigner, _) = random_key();
         let (_, other_pk) = random_key();
         let unsealed = UnsealedTransactionV1::authorize(sample_unsigned(), &sealer_pk, [&cosigner]);
-        let tx = TransactionV1::new(
-            unsealed.clone(),
-            TransactionSealSignature::sign_v1(&sealer_sk, &unsealed),
-        );
+        let tx = TransactionV1::new(unsealed.clone(), TransactionSealSignature::sign(&sealer_sk, &unsealed));
 
         let unsigned = unsealed.unsigned_transaction();
         let blob_hashes = unsigned.blobs.hashes();
@@ -1003,10 +987,7 @@ mod transaction_id_tests {
         let sealer_sk =
             <RistrettoSecretKey as tari_crypto::tari_utilities::ByteArray>::from_canonical_bytes(&[7; 32]).unwrap();
         let unsealed = UnsealedTransactionV1::new(sample_unsigned(), vec![]);
-        let tx = TransactionV1::new(
-            unsealed.clone(),
-            TransactionSealSignature::sign_v1(&sealer_sk, &unsealed),
-        );
+        let tx = TransactionV1::new(unsealed.clone(), TransactionSealSignature::sign(&sealer_sk, &unsealed));
 
         assert_eq!(
             tx.calculate_id(SchemaVersion::V1).to_string(),
@@ -1030,10 +1011,7 @@ mod transaction_id_tests {
             metadata_hash: None,
         }];
         let unsealed = UnsealedTransactionV1::authorize(unsigned.clone(), &sealer_pk, [&author_sk]);
-        let tx = TransactionV1::new(
-            unsealed.clone(),
-            TransactionSealSignature::sign_v1(&sealer_sk, &unsealed),
-        );
+        let tx = TransactionV1::new(unsealed.clone(), TransactionSealSignature::sign(&sealer_sk, &unsealed));
 
         let published: Vec<_> = tx.all_published_templates_iter().collect();
         assert_eq!(published, vec![(expected_address, binary.as_slice())]);
@@ -1043,7 +1021,7 @@ mod transaction_id_tests {
         let no_signer_unsealed = UnsealedTransactionV1::new(no_signer_unsigned, vec![]);
         let no_signer_tx = TransactionV1::new(
             no_signer_unsealed.clone(),
-            TransactionSealSignature::sign_v1(&sealer_sk, &no_signer_unsealed),
+            TransactionSealSignature::sign(&sealer_sk, &no_signer_unsealed),
         );
         assert!(no_signer_tx.all_published_templates_iter().next().is_none());
     }

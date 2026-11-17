@@ -142,7 +142,7 @@ mod tests {
             .map(|_| RistrettoSecretKey::random(&mut rand::rng()))
             .collect();
         let unsealed = UnsealedTransactionV1::authorize(unsigned, &seal_signer, &secrets);
-        let seal = TransactionSealSignature::sign_v1(&sealer, &unsealed);
+        let seal = TransactionSealSignature::sign(&sealer, &unsealed);
         TransactionV1::new(unsealed, seal)
     }
 

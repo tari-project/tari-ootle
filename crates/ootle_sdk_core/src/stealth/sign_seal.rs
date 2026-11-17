@@ -13,7 +13,7 @@
 //! 3. **Ephemeral seal** (`can_sign_with_ephemeral_key()`): seal with a fresh random one-time ephemeral key.
 //!
 //! Every signature (auth + seal) is signed with a **fresh random nonce** ([`sign_random`]) over
-//! the `create_message_v1` digests, and [`crate::tx::bor_encode`] encodes the result. The
+//! the `create_message` digests, and [`crate::tx::bor_encode`] encodes the result. The
 //! `main_signer` is set to `SealSigner` before building the unsealed tx in every seal case: all three
 //! seal with a key the spender controls, so the seal signer is always an authority here. (The public
 //! path in [`crate::tx`] assigns it from the authorization-signature count instead, because a public
@@ -270,7 +270,7 @@ fn finalize_seal(unsigned_v1: &mut UnsignedTransactionV1, plan: SealPlan) -> Res
     let seal_pk = public_key_bytes_from_secret(&plan.seal_secret);
     let unsealed = UnsealedTransactionV1::authorize(unsigned_v1.clone(), &seal_pk, &plan.auth_secrets);
 
-    let seal_message = TransactionSealSignature::create_message_v1(&unsealed);
+    let seal_message = TransactionSealSignature::create_message(&unsealed);
     let seal_sig_bytes = sign_random(&plan.seal_secret, &seal_message);
     let seal_sig = TransactionSealSignature::new(seal_pk, seal_sig_bytes);
 

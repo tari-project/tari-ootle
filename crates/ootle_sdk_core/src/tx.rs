@@ -4,7 +4,7 @@
 //! Sign → seal → BOR-encode an [`UnsignedTransaction`] into submit-ready bytes + transaction id.
 //!
 //! Signing always uses a fresh random nonce (`TRANSACTION_SIGNING_CONTEXT.sign` inside
-//! `TransactionSignature::sign_v1` / `TransactionSealSignature::sign_v1`),
+//! `TransactionSignature::sign` / `TransactionSealSignature::sign`),
 //! so the sealed bytes and id are unique per call — the safe default for real submission. Nothing here
 //! pins a signature nonce from a seed.
 //!
@@ -115,7 +115,7 @@ pub fn cosign_auth_message(
     authorizers: &AuthorizerSet,
     unsigned: &UnsignedTransaction,
 ) -> TransactionMessage {
-    TransactionSignature::create_message(AuthorizationContext::new(seal_signer_pk, authorizers), unsigned)
+    TransactionSignature::create_message(AuthorizationContext::new(seal_signer_pk, authorizers), unsigned.body())
 }
 
 /// BOR-encodes a sealed [`Transaction`] into the raw `TransactionEnvelope` wire bytes.

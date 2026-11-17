@@ -42,8 +42,8 @@ use crate::{
 /// The discriminants are the on-the-wire field tags used to stream a transaction to a hardware
 /// signer (e.g. the Ootle Ledger app). A tag names a field and says nothing about its position:
 /// the signer reconstructs the exact byte sequence chained into the message digest by concatenating
-/// each segment's bytes in the order [`TransactionSignature::signing_preimage_v1`] or
-/// [`TransactionSealSignature::signing_preimage_v1`] yields them. `SealSigner` and `Authorizers` are
+/// each segment's bytes in the order [`TransactionSignature::signing_preimage`] or
+/// [`TransactionSealSignature::signing_preimage`] yields them. `SealSigner` and `Authorizers` are
 /// present only for an authorization signature, `Signatures` only for a seal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -66,7 +66,7 @@ pub enum PreimageField {
 
 /// One ordered segment of the canonical signing preimage: the exact borsh bytes chained into the
 /// message digest for `field`. Concatenating every segment's `bytes` in order yields the precise
-/// byte sequence that `create_message_v1` feeds into the domain-separated hasher (after the
+/// byte sequence that `create_message` feeds into the domain-separated hasher (after the
 /// domain-separation preamble, which the signer prepends itself).
 #[derive(Debug, Clone)]
 pub struct PreimageSegment {
@@ -98,8 +98,8 @@ impl TransactionSealSignature {
     }
 
     /// Seals `transaction` under [`SchemaVersion::CURRENT`].
-    pub fn sign_v1(secret_key: &RistrettoSecretKey, transaction: &UnsealedTransactionV1) -> Self {
-        Self::sign_message(secret_key, &Self::create_message_v1(transaction))
+    pub fn sign(secret_key: &RistrettoSecretKey, transaction: &UnsealedTransactionV1) -> Self {
+        Self::sign_message(secret_key, &Self::create_message(transaction))
     }
 
     pub(crate) fn sign_message(secret_key: &RistrettoSecretKey, message: &TransactionMessage) -> Self {
@@ -110,32 +110,14 @@ impl TransactionSealSignature {
         }
     }
 
+    /// Verifies the seal over `transaction` under the transaction's schema.
     #[must_use]
     pub fn verify(&self, transaction: &UnsealedTransaction) -> bool {
-        self.verify_message(Self::create_message(transaction))
-    }
-
-    /// Verifies the seal over `transaction` under [`SchemaVersion::CURRENT`].
-    #[must_use]
-    pub fn verify_v1(&self, transaction: &UnsealedTransactionV1) -> bool {
-        self.verify_message(Self::create_message_v1(transaction))
-    }
-
-    /// Verifies the seal against a transaction whose blob commitments have already been derived.
-    ///
-    /// Deriving them hashes every blob payload, so a caller that also verifies the authorization
-    /// signatures should derive [`BlobHashes`] once and use this for both.
-    #[must_use]
-    pub fn verify_v1_with_blob_hashes(
-        &self,
-        schema: SchemaVersion,
-        transaction: &UnsealedTransactionV1,
-        blob_hashes: &BlobHashes,
-    ) -> bool {
-        self.verify_message(Self::create_message_v1_with_blob_hashes(
-            schema,
-            transaction,
-            blob_hashes,
+        let body = transaction.body();
+        self.verify_message(Self::create_message_for_schema(
+            transaction.schema(),
+            body,
+            &body.unsigned_transaction().blobs.hashes(),
         ))
     }
 
@@ -157,29 +139,20 @@ impl TransactionSealSignature {
         RistrettoPublicKey::from_canonical_bytes(self.public_key.as_bytes())
     }
 
-    pub fn create_message(transaction: &UnsealedTransaction) -> TransactionMessage {
-        let body = transaction.body();
-        Self::create_message_v1_with_blob_hashes(
-            transaction.schema(),
-            body,
-            &body.unsigned_transaction().blobs.hashes(),
-        )
-    }
-
-    /// Seal message for `transaction` under [`SchemaVersion::CURRENT`].
-    pub fn create_message_v1(transaction: &UnsealedTransactionV1) -> TransactionMessage {
+    /// The seal message for `transaction` under [`SchemaVersion::CURRENT`].
+    pub fn create_message(transaction: &UnsealedTransactionV1) -> TransactionMessage {
         let blob_hashes = transaction.unsigned_transaction().blobs.hashes();
-        Self::create_message_v1_with_blob_hashes(SchemaVersion::CURRENT, transaction, &blob_hashes)
+        Self::create_message_for_schema(SchemaVersion::CURRENT, transaction, &blob_hashes)
     }
 
-    /// Seal message under `schema` for a transaction whose blob commitments have already been
+    /// The seal message under `schema` for a transaction whose blob commitments have already been
     /// derived. Produces the same digest as deriving them inline.
-    pub fn create_message_v1_with_blob_hashes(
+    pub(crate) fn create_message_for_schema(
         schema: SchemaVersion,
         transaction: &UnsealedTransactionV1,
         blob_hashes: &BlobHashes,
     ) -> TransactionMessage {
-        Self::create_message_v1_inner(
+        Self::create_message_inner(
             schema,
             TransactionSignatureFields::from(transaction.unsigned_transaction()),
             blob_hashes,
@@ -191,10 +164,10 @@ impl TransactionSealSignature {
     ///
     /// Single source of truth for streaming a seal signing request to a hardware signer: the
     /// concatenation of the returned segment bytes is byte-identical to what
-    /// [`Self::create_message_v1`] feeds into the hasher (after the domain-separation preamble for
+    /// [`Self::create_message`] feeds into the hasher (after the domain-separation preamble for
     /// label `"SealSignature"`), under [`SchemaVersion::CURRENT`]. Keep this in lock-step with
-    /// `create_message_v1_inner`.
-    pub fn signing_preimage_v1(transaction: &UnsealedTransactionV1) -> Vec<PreimageSegment> {
+    /// `create_message_inner`.
+    pub fn signing_preimage(transaction: &UnsealedTransactionV1) -> Vec<PreimageSegment> {
         let unsigned = transaction.unsigned_transaction();
         let blob_hashes = unsigned.blobs.hashes();
         vec![
@@ -215,11 +188,11 @@ impl TransactionSealSignature {
 
     /// Pruned-form seal message under `schema`. Uses the stored `BlobHashes` and produces the same
     /// digest as the equivalent full form would.
-    pub fn create_message_v1_pruned(
+    pub(crate) fn create_pruned_message_for_schema(
         schema: SchemaVersion,
         transaction: &PrunedUnsealedTransactionV1,
     ) -> TransactionMessage {
-        Self::create_message_v1_inner(
+        Self::create_message_inner(
             schema,
             TransactionSignatureFields::from(transaction.unsigned_transaction()),
             transaction.blob_hashes(),
@@ -228,7 +201,7 @@ impl TransactionSealSignature {
     }
 
     /// Every schema seals the same projection; only the schema value chained first differs.
-    fn create_message_v1_inner(
+    fn create_message_inner(
         schema: SchemaVersion,
         fields: TransactionSignatureFields<'_>,
         blob_hashes: &BlobHashes,
@@ -243,11 +216,6 @@ impl TransactionSealSignature {
                 .chain(signatures)
                 .result(),
         )
-    }
-
-    #[must_use]
-    pub fn verify_v1_pruned(&self, schema: SchemaVersion, transaction: &PrunedUnsealedTransactionV1) -> bool {
-        self.verify_message(Self::create_message_v1_pruned(schema, transaction))
     }
 }
 
@@ -275,24 +243,15 @@ impl TransactionSignature {
         Self { public_key, signature }
     }
 
-    /// Signs `transaction` under `context` and the transaction's schema. Under
-    /// [`SchemaVersion::V2`] the signature verifies only on a transaction whose authorization list
-    /// holds exactly the keys of `context.authorizers()`, so the signer's own key must be one of them.
+    /// Signs `transaction` under `context` and [`SchemaVersion::CURRENT`]. The signature verifies
+    /// only on a transaction whose authorization list holds exactly the keys of
+    /// `context.authorizers()`, so the signer's own key must be one of them.
     pub fn sign(
-        secret_key: &RistrettoSecretKey,
-        context: AuthorizationContext<'_>,
-        transaction: &UnsignedTransaction,
-    ) -> Self {
-        Self::sign_message(secret_key, &Self::create_message(context, transaction))
-    }
-
-    /// Signs `transaction` under `context` and [`SchemaVersion::CURRENT`].
-    pub fn sign_v1(
         secret_key: &RistrettoSecretKey,
         context: AuthorizationContext<'_>,
         transaction: &UnsignedTransactionV1,
     ) -> Self {
-        Self::sign_message(secret_key, &Self::create_message_v1(context, transaction))
+        Self::sign_message(secret_key, &Self::create_message(context, transaction))
     }
 
     pub(crate) fn sign_message(secret_key: &RistrettoSecretKey, message: &TransactionMessage) -> Self {
@@ -303,10 +262,15 @@ impl TransactionSignature {
         }
     }
 
-    /// Verifies this signature over `transaction` under `context` and [`SchemaVersion::CURRENT`].
+    /// Verifies this signature over `transaction` under `context` and the transaction's schema.
+    /// Under [`SchemaVersion::V1`] the message does not commit to `context.authorizers()`.
     #[must_use]
-    pub fn verify_v1(&self, context: AuthorizationContext<'_>, transaction: &UnsignedTransactionV1) -> bool {
-        self.verify_message(Self::create_message_v1(context, transaction))
+    pub fn verify(&self, context: AuthorizationContext<'_>, transaction: &UnsignedTransaction) -> bool {
+        self.verify_message(Self::create_message_for_schema(
+            transaction.schema(),
+            context,
+            transaction.body(),
+        ))
     }
 
     /// Verifies this signature against an already-derived signing message.
@@ -329,44 +293,24 @@ impl TransactionSignature {
         &self.public_key
     }
 
-    /// The authorization message for `transaction` under `context` and the transaction's schema.
-    /// Under [`SchemaVersion::V1`] the message does not commit to `context.authorizers()`.
-    pub fn create_message(context: AuthorizationContext<'_>, transaction: &UnsignedTransaction) -> TransactionMessage {
-        Self::create_message_with_schema(transaction.schema(), context, transaction.body())
-    }
-
-    pub(crate) fn create_message_with_schema(
-        schema: SchemaVersion,
-        context: AuthorizationContext<'_>,
-        transaction: &UnsignedTransactionV1,
-    ) -> TransactionMessage {
-        Self::create_message_v1_inner(
-            schema,
-            context.seal_signer(),
-            TransactionSignatureFields::from(transaction),
-            &transaction.blobs.hashes(),
-            context.authorizers(),
-        )
-    }
-
     /// The authorization message for `transaction` under `context` and [`SchemaVersion::CURRENT`].
-    pub fn create_message_v1(
+    pub fn create_message(
         context: AuthorizationContext<'_>,
         transaction: &UnsignedTransactionV1,
     ) -> TransactionMessage {
         let blob_hashes = transaction.blobs.hashes();
-        Self::create_message_v1_with_blob_hashes(context, transaction, &blob_hashes)
+        Self::create_message_with_blob_hashes(context, transaction, &blob_hashes)
     }
 
-    /// Authorization message under [`SchemaVersion::CURRENT`] for a transaction whose blob
-    /// commitments have already been derived. Produces the same digest as
-    /// [`Self::create_message_v1`] given commitments over the same blobs.
-    pub fn create_message_v1_with_blob_hashes(
+    /// The authorization message under [`SchemaVersion::CURRENT`] for a transaction whose blob
+    /// commitments have already been derived. Produces the same digest as [`Self::create_message`]
+    /// given commitments over the same blobs.
+    pub fn create_message_with_blob_hashes(
         context: AuthorizationContext<'_>,
         transaction: &UnsignedTransactionV1,
         blob_hashes: &BlobHashes,
     ) -> TransactionMessage {
-        Self::create_message_v1_inner(
+        Self::create_message_inner(
             SchemaVersion::CURRENT,
             context.seal_signer(),
             TransactionSignatureFields::from(transaction),
@@ -375,17 +319,31 @@ impl TransactionSignature {
         )
     }
 
+    pub(crate) fn create_message_for_schema(
+        schema: SchemaVersion,
+        context: AuthorizationContext<'_>,
+        transaction: &UnsignedTransactionV1,
+    ) -> TransactionMessage {
+        Self::create_message_inner(
+            schema,
+            context.seal_signer(),
+            TransactionSignatureFields::from(transaction),
+            &transaction.blobs.hashes(),
+            context.authorizers(),
+        )
+    }
+
     /// The authorization message every signature in `signatures` must verify against under
     /// `schema`. Under [`SchemaVersion::V2`] the list must be canonical: the authorizer set is read
     /// off the list itself.
-    pub(crate) fn create_message_v1_for_list(
+    pub(crate) fn create_message_for_list(
         schema: SchemaVersion,
         seal_signer: &RistrettoPublicKeyBytes,
         transaction: &UnsignedTransactionV1,
         blob_hashes: &BlobHashes,
         signatures: &[TransactionSignature],
     ) -> TransactionMessage {
-        Self::create_message_v1_inner(
+        Self::create_message_inner(
             schema,
             seal_signer,
             TransactionSignatureFields::from(transaction),
@@ -398,10 +356,10 @@ impl TransactionSignature {
     ///
     /// This is the single source of truth for streaming an authorization signing request to a
     /// hardware signer: the concatenation of the returned segment bytes is byte-identical to what
-    /// [`Self::create_message_v1`] feeds into the hasher (after the domain-separation preamble for
+    /// [`Self::create_message`] feeds into the hasher (after the domain-separation preamble for
     /// label `"Signature"`), under [`SchemaVersion::CURRENT`]. Keep this in lock-step with
     /// `AuthorizedProjection::chain_into`.
-    pub fn signing_preimage_v1(
+    pub fn signing_preimage(
         context: AuthorizationContext<'_>,
         transaction: &UnsignedTransactionV1,
     ) -> Vec<PreimageSegment> {
@@ -423,15 +381,15 @@ impl TransactionSignature {
         ]
     }
 
-    /// Pruned-form counterpart of [`Self::create_message_v1_for_list`]. Uses the stored `BlobHashes`.
-    pub(crate) fn create_message_v1_pruned_for_list(
+    /// Pruned-form counterpart of [`Self::create_message_for_list`]. Uses the stored `BlobHashes`.
+    pub(crate) fn create_pruned_message_for_list(
         schema: SchemaVersion,
         seal_signer: &RistrettoPublicKeyBytes,
         transaction: &PrunedUnsignedTransactionV1,
         blob_hashes: &BlobHashes,
         signatures: &[TransactionSignature],
     ) -> TransactionMessage {
-        Self::create_message_v1_inner(
+        Self::create_message_inner(
             schema,
             seal_signer,
             TransactionSignatureFields::from(transaction),
@@ -440,7 +398,7 @@ impl TransactionSignature {
         )
     }
 
-    fn create_message_v1_inner<A: borsh::BorshSerialize + ?Sized>(
+    fn create_message_inner<A: borsh::BorshSerialize + ?Sized>(
         schema: SchemaVersion,
         seal_signer: &RistrettoPublicKeyBytes,
         fields: TransactionSignatureFields<'_>,
@@ -573,7 +531,7 @@ pub(crate) struct AuthorizedProjection<'a, A: ?Sized> {
 }
 
 impl<A: borsh::BorshSerialize + ?Sized> AuthorizedProjection<'_, A> {
-    /// Keep in lock-step with [`TransactionSignature::signing_preimage_v1`], which streams the same
+    /// Keep in lock-step with [`TransactionSignature::signing_preimage`], which streams the same
     /// sequence to a hardware signer.
     fn chain_into<H: ProjectionHasher>(&self, hasher: H) -> H {
         let Self {
@@ -726,11 +684,11 @@ mod tests {
     /// check signatures against an explicit message, so they need not form a valid list.
     fn random_signature(tx: &UnsignedTransactionV1, seal_signer: &RistrettoPublicKeyBytes) -> TransactionSignature {
         let sk = RistrettoSecretKey::random(&mut rand::rng());
-        TransactionSignature::sign_v1(&sk, context(seal_signer, NO_AUTHORIZERS), tx)
+        TransactionSignature::sign(&sk, context(seal_signer, NO_AUTHORIZERS), tx)
     }
 
     fn sig_msg(seal_signer: &RistrettoPublicKeyBytes, tx: &UnsignedTransactionV1) -> TransactionMessage {
-        TransactionSignature::create_message_v1(context(seal_signer, NO_AUTHORIZERS), tx)
+        TransactionSignature::create_message(context(seal_signer, NO_AUTHORIZERS), tx)
     }
 
     /// A valid authorization list of `n` fresh keys, each signing over all `n`.
@@ -744,7 +702,7 @@ mod tests {
     }
 
     fn seal_msg(t: &UnsealedTransactionV1) -> TransactionMessage {
-        TransactionSealSignature::create_message_v1(t)
+        TransactionSealSignature::create_message(t)
     }
 
     /// An authorization produced by an off-the-shelf sr25519 signer under the transaction signing
@@ -761,11 +719,14 @@ mod tests {
 
         let public_key = RistrettoPublicKeyBytes::from(keypair.public.to_bytes());
         let authorizers: AuthorizerSet = [public_key].into_iter().collect();
-        let message = TransactionSignature::create_message_v1(context(&seal_signer, &authorizers), &unsigned);
+        let message = TransactionSignature::create_message(context(&seal_signer, &authorizers), &unsigned);
         let signature = keypair.sign(signing_context(TRANSACTION_SIGNING_CONTEXT.as_bytes()).bytes(message.as_bytes()));
         let signature = TransactionSignature::new(public_key, Sr25519SignatureBytes::from_array(signature.to_bytes()));
 
-        assert!(signature.verify_v1(context(&seal_signer, &authorizers), &unsigned));
+        assert!(signature.verify_message(TransactionSignature::create_message(
+            context(&seal_signer, &authorizers),
+            &unsigned
+        )));
         assert!(
             UnsealedTransactionV1::new(unsigned.clone(), vec![signature.clone()])
                 .verify_all_signatures(SchemaVersion::CURRENT, &seal_signer)
@@ -801,15 +762,15 @@ mod tests {
         let other: AuthorizerSet = [sample_seal_signer()].into_iter().collect();
         let mut two = one.clone();
         two.insert(sample_seal_signer());
-        let one_msg = TransactionSignature::create_message_v1(context(&signer, &one), &base);
+        let one_msg = TransactionSignature::create_message(context(&signer, &one), &base);
         assert_ne!(one_msg, base_msg, "authorizers (added)");
         assert_ne!(
-            TransactionSignature::create_message_v1(context(&signer, &other), &base),
+            TransactionSignature::create_message(context(&signer, &other), &base),
             one_msg,
             "authorizers (other key)"
         );
         assert_ne!(
-            TransactionSignature::create_message_v1(context(&signer, &two), &base),
+            TransactionSignature::create_message(context(&signer, &two), &base),
             one_msg,
             "authorizers (extra key)"
         );
@@ -916,16 +877,25 @@ mod tests {
         let other_seal_signer_pk = sample_seal_signer();
         let tx = sample_unsigned();
 
-        let sig = TransactionSignature::sign_v1(&signer_sk, context(&seal_signer_pk, NO_AUTHORIZERS), &tx);
-        assert!(sig.verify_v1(context(&seal_signer_pk, NO_AUTHORIZERS), &tx));
+        let sig = TransactionSignature::sign(&signer_sk, context(&seal_signer_pk, NO_AUTHORIZERS), &tx);
+        assert!(sig.verify_message(TransactionSignature::create_message(
+            context(&seal_signer_pk, NO_AUTHORIZERS),
+            &tx
+        )));
         assert!(
-            !sig.verify_v1(context(&other_seal_signer_pk, NO_AUTHORIZERS), &tx),
+            !sig.verify_message(TransactionSignature::create_message(
+                context(&other_seal_signer_pk, NO_AUTHORIZERS),
+                &tx
+            )),
             "a signature made under one seal signer must not verify under another",
         );
 
         let mut mutated = tx.clone();
         mutated.dry_run = !mutated.dry_run;
-        assert!(!sig.verify_v1(context(&seal_signer_pk, NO_AUTHORIZERS), &mutated));
+        assert!(!sig.verify_message(TransactionSignature::create_message(
+            context(&seal_signer_pk, NO_AUTHORIZERS),
+            &mutated
+        )));
     }
 
     fn unsealed_with(unsigned: UnsignedTransactionV1, sigs: Vec<TransactionSignature>) -> UnsealedTransactionV1 {
@@ -1070,7 +1040,7 @@ mod tests {
         let tx = sample_unsigned();
         let authorizers: AuthorizerSet = [sample_seal_signer(), sample_seal_signer()].into_iter().collect();
 
-        let segments = TransactionSignature::signing_preimage_v1(context(&signer, &authorizers), &tx);
+        let segments = TransactionSignature::signing_preimage(context(&signer, &authorizers), &tx);
         let tags: Vec<_> = segments.iter().map(|s| s.field).collect();
         assert_eq!(tags, [
             PreimageField::SchemaVersion,
@@ -1109,7 +1079,7 @@ mod tests {
                     .chain(&signer)
                     .result()
             ),
-            TransactionSignature::create_message_v1(context(&signer, &authorizers), &tx),
+            TransactionSignature::create_message(context(&signer, &authorizers), &tx),
         );
     }
 
@@ -1122,7 +1092,7 @@ mod tests {
         let sig = random_signature(&unsigned, &seal_signer);
         let unsealed = unsealed_with(unsigned.clone(), vec![sig]);
 
-        let reconstructed: Vec<u8> = TransactionSealSignature::signing_preimage_v1(&unsealed)
+        let reconstructed: Vec<u8> = TransactionSealSignature::signing_preimage(&unsealed)
             .iter()
             .flat_map(|s| s.bytes.clone())
             .collect();
@@ -1150,8 +1120,8 @@ mod tests {
         let blob_hashes = unsigned.blobs.hashes();
 
         assert_eq!(
-            TransactionSignature::create_message_v1(context(&seal_signer, NO_AUTHORIZERS), &unsigned),
-            TransactionSignature::create_message_v1_with_blob_hashes(
+            TransactionSignature::create_message(context(&seal_signer, NO_AUTHORIZERS), &unsigned),
+            TransactionSignature::create_message_with_blob_hashes(
                 context(&seal_signer, NO_AUTHORIZERS),
                 &unsigned,
                 &blob_hashes
@@ -1159,12 +1129,8 @@ mod tests {
             "authorization message",
         );
         assert_eq!(
-            TransactionSealSignature::create_message_v1(&unsealed),
-            TransactionSealSignature::create_message_v1_with_blob_hashes(
-                SchemaVersion::CURRENT,
-                &unsealed,
-                &blob_hashes
-            ),
+            TransactionSealSignature::create_message(&unsealed),
+            TransactionSealSignature::create_message_for_schema(SchemaVersion::CURRENT, &unsealed, &blob_hashes),
             "seal message",
         );
     }
@@ -1187,7 +1153,7 @@ mod tests {
 
         for i in 0..sigs.len() {
             // Same key, so the list's key set is unchanged and only the signature is wrong.
-            let foreign = TransactionSignature::sign_v1(
+            let foreign = TransactionSignature::sign(
                 &RistrettoSecretKey::random(&mut rand::rng()),
                 context(&seal_signer, NO_AUTHORIZERS),
                 &other_body,
@@ -1404,7 +1370,7 @@ mod tests {
         for n in [0usize, 1, 4] {
             let sigs: Vec<_> = (0..n).map(|_| random_signature(&unsigned, &seal_signer)).collect();
             let unsealed = unsealed_with(unsigned.clone(), sigs.clone());
-            let seal = TransactionSealSignature::sign_v1(&sealer, &unsealed);
+            let seal = TransactionSealSignature::sign(&sealer, &unsealed);
             let seal_message = seal_msg(&unsealed);
             let authorization_message = sig_msg(&seal_signer, &unsigned);
 
@@ -1418,8 +1384,7 @@ mod tests {
             // transaction sealed by someone else.
             let mut other_body = unsigned.clone();
             other_body.dry_run = !other_body.dry_run;
-            let stale_seal =
-                TransactionSealSignature::sign_v1(&sealer, &unsealed_with(other_body.clone(), sigs.clone()));
+            let stale_seal = TransactionSealSignature::sign(&sealer, &unsealed_with(other_body.clone(), sigs.clone()));
             assert!(
                 !verify_sealed_batch(&stale_seal, seal_message, &sigs, authorization_message),
                 "a seal over a different body must be refused, with {n} authorizations present",
@@ -1447,7 +1412,7 @@ mod tests {
 
         let authorization = random_signature(&unsigned, &seal_signer);
         let unsealed = unsealed_with(unsigned.clone(), vec![authorization.clone()]);
-        let seal = TransactionSealSignature::sign_v1(&sealer, &unsealed);
+        let seal = TransactionSealSignature::sign(&sealer, &unsealed);
 
         // Exchange the scalars of the seal and the authorization, leaving each key and nonce in
         // place: equal and opposite error terms, one on each side of the seal boundary.
@@ -1477,20 +1442,20 @@ mod tests {
         let sig = random_signature(&unsigned, &seal_signer_pk);
         let t = unsealed_with(unsigned, vec![sig]);
 
-        let seal = TransactionSealSignature::sign_v1(&sealer_sk, &t);
-        assert!(seal.verify_v1(&t));
+        let seal = TransactionSealSignature::sign(&sealer_sk, &t);
+        assert!(seal.verify_message(TransactionSealSignature::create_message(&t)));
 
         // Mutating a body field breaks the seal.
         let mut mutated_inner = t.unsigned_transaction().clone();
         mutated_inner.dry_run = !mutated_inner.dry_run;
         let mutated = UnsealedTransactionV1::new(mutated_inner, t.signatures().to_vec());
-        assert!(!seal.verify_v1(&mutated));
+        assert!(!seal.verify_message(TransactionSealSignature::create_message(&mutated)));
 
         // Mutating signatures also breaks the seal.
         let extra_sig = random_signature(t.unsigned_transaction(), &seal_signer_pk);
         let mut sigs = t.signatures().to_vec();
         sigs.push(extra_sig);
         let mutated = UnsealedTransactionV1::new(t.unsigned_transaction().clone(), sigs);
-        assert!(!seal.verify_v1(&mutated));
+        assert!(!seal.verify_message(TransactionSealSignature::create_message(&mutated)));
     }
 }

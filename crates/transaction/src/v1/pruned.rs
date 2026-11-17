@@ -177,7 +177,7 @@ impl PrunedUnsealedTransactionV1 {
         }
         // Derived once and reused: every signature over this transaction signs the same message, and
         // deriving it hashes the whole body.
-        let message = TransactionSignature::create_message_v1_pruned_for_list(
+        let message = TransactionSignature::create_pruned_message_for_list(
             schema,
             seal_signer,
             &self.transaction,
@@ -307,8 +307,8 @@ impl PrunedTransactionV1 {
             );
             return false;
         }
-        let seal_message = TransactionSealSignature::create_message_v1_pruned(schema, &self.body);
-        let authorization_message = TransactionSignature::create_message_v1_pruned_for_list(
+        let seal_message = TransactionSealSignature::create_pruned_message_for_schema(schema, &self.body);
+        let authorization_message = TransactionSignature::create_pruned_message_for_list(
             schema,
             self.seal_signature.public_key(),
             &self.body.transaction,
@@ -432,7 +432,7 @@ mod tests {
         let seal_signer = RistrettoPublicKey::from_secret_key(sealer).to_byte_type();
         let authorizers: Vec<_> = (0..3).map(|_| RistrettoSecretKey::random(&mut rand::rng())).collect();
         let unsealed = UnsealedTransactionV1::authorize(unsigned, &seal_signer, &authorizers);
-        let seal = TransactionSealSignature::sign_v1(sealer, &unsealed);
+        let seal = TransactionSealSignature::sign(sealer, &unsealed);
         TransactionV1::new(unsealed, seal)
     }
 
@@ -479,7 +479,7 @@ mod tests {
         let (unsigned, mut signatures) = canonical.unsealed_transaction().clone().into_parts();
         signatures.reverse();
         let unsealed = UnsealedTransactionV1::new(unsigned, signatures);
-        let seal = TransactionSealSignature::sign_v1(&sealer, &unsealed);
+        let seal = TransactionSealSignature::sign(&sealer, &unsealed);
         let full = TransactionV1::new(unsealed, seal);
 
         assert!(!full.verify_all_signatures(SchemaVersion::CURRENT));

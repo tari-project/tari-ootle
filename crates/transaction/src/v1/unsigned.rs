@@ -318,6 +318,6 @@ impl Signable<AuthorizationContext<'_>> for UnsignedTransactionV1 {
     type Signature = TransactionSignature;
 
     fn to_signing_message(&self, context: AuthorizationContext<'_>) -> crate::TransactionMessage {
-        TransactionSignature::create_message_v1(context, self)
+        TransactionSignature::create_message(context, self)
     }
 }

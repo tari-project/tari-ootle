@@ -86,7 +86,7 @@ pub enum SignMode {
 }
 
 /// Canonical field order for an authorization signature. Matches
-/// `tari_ootle_transaction::TransactionSignature::signing_preimage_v1`.
+/// `tari_ootle_transaction::TransactionSignature::signing_preimage`.
 pub const ADD_SIGNER_SEQ: &[SigningField] = &[
     SigningField::SchemaVersion,
     SigningField::Network,
@@ -104,7 +104,7 @@ pub const ADD_SIGNER_SEQ: &[SigningField] = &[
 ];
 
 /// Canonical field order for a seal signature. Matches
-/// `tari_ootle_transaction::TransactionSealSignature::signing_preimage_v1`.
+/// `tari_ootle_transaction::TransactionSealSignature::signing_preimage`.
 pub const SEAL_SEQ: &[SigningField] = &[
     SigningField::SchemaVersion,
     SigningField::Network,

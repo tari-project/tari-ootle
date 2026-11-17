@@ -705,8 +705,8 @@ mod tests {
         let other_public = RistrettoPublicKey::from_secret_key(&other_secret).to_byte_type();
         let both: crate::AuthorizerSet = [main_public, other_public].into_iter().collect();
         let context = crate::AuthorizationContext::new(&seal_public, &both);
-        let main_sig = TransactionSignature::sign(&main_secret, context, &unsigned);
-        let other_sig = TransactionSignature::sign(&other_secret, context, &unsigned);
+        let main_sig = TransactionSignature::sign(&main_secret, context, unsigned.body());
+        let other_sig = TransactionSignature::sign(&other_secret, context, unsigned.body());
 
         for signatures in [vec![main_sig.clone(), other_sig.clone()], vec![
             other_sig.clone(),

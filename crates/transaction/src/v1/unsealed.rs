@@ -82,7 +82,7 @@ impl UnsealedTransactionV1 {
 
     /// Seals the transaction as a [`SchemaVersion::CURRENT`] transaction.
     pub fn seal(self, secret: &RistrettoSecretKey) -> Transaction {
-        let sig = TransactionSealSignature::sign_v1(secret, &self);
+        let sig = TransactionSealSignature::sign(secret, &self);
         self.set_seal_signature(sig)
     }
 
@@ -147,7 +147,7 @@ impl UnsealedTransactionV1 {
 
         // Derived once and reused: every signature over this transaction signs the same message, and
         // deriving it hashes the whole body including a commitment over every blob's bytes.
-        let message = TransactionSignature::create_message_v1_for_list(
+        let message = TransactionSignature::create_message_for_list(
             schema,
             seal_signer,
             &self.transaction,
@@ -202,7 +202,7 @@ impl Signable for UnsealedTransactionV1 {
     type Signature = TransactionSealSignature;
 
     fn to_signing_message(&self, _context: ()) -> crate::TransactionMessage {
-        TransactionSealSignature::create_message_v1(self)
+        TransactionSealSignature::create_message(self)
     }
 }
 
@@ -210,7 +210,7 @@ impl Signable<AuthorizationContext<'_>> for UnsealedTransactionV1 {
     type Signature = TransactionSignature;
 
     fn to_signing_message(&self, context: AuthorizationContext<'_>) -> crate::TransactionMessage {
-        TransactionSignature::create_message_v1(context, &self.transaction)
+        TransactionSignature::create_message(context, &self.transaction)
     }
 }
 
@@ -241,7 +241,7 @@ where
         .map(|secret| RistrettoPublicKey::from_secret_key(secret).to_byte_type())
         .collect();
     let message =
-        TransactionSignature::create_message_v1(AuthorizationContext::new(seal_signer, &authorizers), transaction);
+        TransactionSignature::create_message(AuthorizationContext::new(seal_signer, &authorizers), transaction);
     let mut signatures = secrets
         .into_iter()
         .map(|secret| TransactionSignature::sign_message(secret, &message))

@@ -19,11 +19,10 @@ use tari_ootle_transaction::{
     SchemaVersion,
     Transaction,
     TransactionSignature,
-    UnsealedTransaction,
     UnsealedTransactionV1,
-    UnsignedTransaction,
     UnsignedTransactionV1,
     args,
+    v1_signing,
 };
 use tari_ootle_transaction_validation::{
     TransactionValidationError,
@@ -70,7 +69,7 @@ impl Scenario {
     fn sign(&self, secret: &PrivateKey, keys: &[RistrettoPublicKeyBytes]) -> TransactionSignature {
         let seal_signer = self.seal_signer();
         let authorizers: AuthorizerSet = keys.iter().collect();
-        TransactionSignature::sign_v1(
+        TransactionSignature::sign(
             secret,
             AuthorizationContext::new(&seal_signer, &authorizers),
             &self.body,
@@ -185,17 +184,19 @@ fn re_sealing_and_re_signing_keep_the_id() {
 fn v1_transactions_keep_their_rules_during_the_transition() {
     let scenario = Scenario::new();
     let other = PrivateKey::from(4u64);
-    let v1_body = UnsignedTransaction::V1(scenario.body.clone());
     let seal_signer = scenario.seal_signer();
     let unbound = AuthorizerSet::new();
     let context = AuthorizationContext::new(&seal_signer, &unbound);
     let list = vec![
-        TransactionSignature::sign(&scenario.victim, context, &v1_body),
-        TransactionSignature::sign(&other, context, &v1_body),
+        v1_signing::sign_authorization(&scenario.victim, context, &scenario.body),
+        v1_signing::sign_authorization(&other, context, &scenario.body),
     ];
 
     let seal_v1 = |signatures: Vec<TransactionSignature>| {
-        UnsealedTransaction::V1(UnsealedTransactionV1::new(scenario.body.clone(), signatures)).seal(&scenario.sealer)
+        v1_signing::seal(
+            UnsealedTransactionV1::new(scenario.body.clone(), signatures),
+            &scenario.sealer,
+        )
     };
     let forward = seal_v1(list.clone());
     let reversed = seal_v1(list.into_iter().rev().collect());
@@ -213,8 +214,10 @@ fn v1_transactions_keep_their_rules_during_the_transition() {
 fn an_authorization_does_not_cross_schemas() {
     let scenario = Scenario::new();
     let v2_signature = scenario.victim_signature();
-    let as_v1 = UnsealedTransaction::V1(UnsealedTransactionV1::new(scenario.body.clone(), vec![v2_signature]))
-        .seal(&scenario.sealer);
+    let as_v1 = v1_signing::seal(
+        UnsealedTransactionV1::new(scenario.body.clone(), vec![v2_signature]),
+        &scenario.sealer,
+    );
     assert!(matches!(
         validate(&as_v1),
         Err(TransactionValidationError::InvalidSignature)
@@ -222,10 +225,10 @@ fn an_authorization_does_not_cross_schemas() {
 
     let seal_signer = scenario.seal_signer();
     let authorizers: AuthorizerSet = [public_key(&scenario.victim)].into_iter().collect();
-    let v1_signature = TransactionSignature::sign(
+    let v1_signature = v1_signing::sign_authorization(
         &scenario.victim,
         AuthorizationContext::new(&seal_signer, &authorizers),
-        &UnsignedTransaction::V1(scenario.body.clone()),
+        &scenario.body,
     );
     let as_v2 = scenario.seal(vec![v1_signature]);
     assert!(matches!(
@@ -286,7 +289,7 @@ fn every_sealer_variant_is_refused_or_keeps_the_id() {
                     }
                     let authorizers: AuthorizerSet = keys.iter().collect();
                     let seal_signer = scenario.seal_signer();
-                    let signature = TransactionSignature::sign_v1(
+                    let signature = TransactionSignature::sign(
                         &signer,
                         AuthorizationContext::new(&seal_signer, &authorizers),
                         &body,

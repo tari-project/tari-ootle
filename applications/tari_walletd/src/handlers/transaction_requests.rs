@@ -743,7 +743,7 @@ mod tests {
         req.signatures = vec![TransactionSignature::sign(
             &external_secret,
             tari_ootle_transaction::AuthorizationContext::new(&wallet_public_key, &external_only),
-            &req.transaction,
+            req.transaction.body(),
         )];
         let request_id = handle_create(&daemon.context, Some(&tool), req)
             .await

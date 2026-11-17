@@ -160,7 +160,7 @@ where
 
     async fn sign_transaction(&self, message: &UnsealedTransaction) -> signer::Result<TransactionSealSignature> {
         let unsealed = current_schema(message.schema(), message.body())?;
-        let segments = TransactionSealSignature::signing_preimage_v1(unsealed);
+        let segments = TransactionSealSignature::signing_preimage(unsealed);
         let (public_key, signature) = self.stream(SignMode::Seal, None, segments).await?;
         verified_account_key(&public_key, self.address.account_public_key())?;
         verified_seal(TransactionSealSignature::new(public_key, signature), unsealed)
@@ -172,7 +172,7 @@ where
         tx: &UnsignedTransaction,
     ) -> signer::Result<TransactionAuthorization> {
         let unsigned = current_schema(tx.schema(), tx.body())?;
-        let segments = TransactionSignature::signing_preimage_v1(context, unsigned);
+        let segments = TransactionSignature::signing_preimage(context, unsigned);
         let (public_key, signature) = self.stream(SignMode::AddSigner, None, segments).await?;
         verified_account_key(&public_key, self.address.account_public_key())?;
         verified_authorization(TransactionSignature::new(public_key, signature), context, unsigned)
@@ -208,7 +208,7 @@ where
     ) -> signer::Result<TransactionAuthorization> {
         let unsigned = current_schema(tx.schema(), tx.body())?;
         self.check_stealth_network(unsigned.network)?;
-        let segments = TransactionSignature::signing_preimage_v1(context, unsigned);
+        let segments = TransactionSignature::signing_preimage(context, unsigned);
         let (public_key, signature) = self
             .stream(SignMode::AddSigner, Some(nonce_bytes(public_nonce)), segments)
             .await?;
@@ -222,7 +222,7 @@ where
     ) -> signer::Result<TransactionSealSignature> {
         let unsealed = current_schema(message.schema(), message.body())?;
         self.check_stealth_network(unsealed.unsigned_transaction().network)?;
-        let segments = TransactionSealSignature::signing_preimage_v1(unsealed);
+        let segments = TransactionSealSignature::signing_preimage(unsealed);
         let (public_key, signature) = self
             .stream(SignMode::Seal, Some(nonce_bytes(public_nonce)), segments)
             .await?;
@@ -269,7 +269,7 @@ fn verified_seal(
     signature: TransactionSealSignature,
     unsealed: &UnsealedTransactionV1,
 ) -> signer::Result<TransactionSealSignature> {
-    if !signature.verify_v1(unsealed) {
+    if !signature.verify_message(TransactionSealSignature::create_message(unsealed)) {
         return Err(SignerError::other(
             "the Ledger device returned a seal signature that does not verify for this transaction",
         ));
@@ -282,7 +282,7 @@ fn verified_authorization(
     context: AuthorizationContext<'_>,
     unsigned: &UnsignedTransactionV1,
 ) -> signer::Result<TransactionAuthorization> {
-    if !signature.verify_v1(context, unsigned) {
+    if !signature.verify_message(TransactionSignature::create_message(context, unsigned)) {
         return Err(SignerError::other(
             "the Ledger device returned an authorization signature that does not verify for this transaction",
         ));

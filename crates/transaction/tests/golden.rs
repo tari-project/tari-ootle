@@ -16,13 +16,13 @@ use tari_ootle_transaction::{
     Sr25519SignatureBytes,
     Transaction,
     TransactionIntent,
+    TransactionMessage,
     TransactionSealSignature,
     TransactionSignature,
     TransactionV1,
-    UnsealedTransaction,
     UnsealedTransactionV1,
-    UnsignedTransaction,
     UnsignedTransactionV1,
+    v1_signing,
 };
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
@@ -62,12 +62,7 @@ struct Digests {
     intent: String,
 }
 
-fn digests(unsigned: UnsignedTransaction, unsealed: UnsealedTransaction) -> Digests {
-    let authorizers = AuthorizerSet::from_signatures(&signatures());
-    let authorization =
-        TransactionSignature::create_message(AuthorizationContext::new(&key(2), &authorizers), &unsigned);
-    let seal_message = TransactionSealSignature::create_message(&unsealed);
-    let tx = Transaction::new(unsealed, seal());
+fn digests(authorization: TransactionMessage, seal_message: TransactionMessage, tx: Transaction) -> Digests {
     assert_eq!(tx.calculate_id(), PrunedTransaction::from(tx.clone()).calculate_id());
     Digests {
         authorization: hex::encode(authorization.as_bytes()),
@@ -79,9 +74,12 @@ fn digests(unsigned: UnsignedTransaction, unsealed: UnsealedTransaction) -> Dige
 
 #[test]
 fn v1_digests_are_pinned() {
+    let authorizers = AuthorizerSet::from_signatures(&signatures());
+    let unsealed = UnsealedTransactionV1::new(body(), signatures());
     let d = digests(
-        UnsignedTransaction::V1(body()),
-        UnsealedTransaction::V1(UnsealedTransactionV1::new(body(), signatures())),
+        v1_signing::authorization_message(AuthorizationContext::new(&key(2), &authorizers), &body()),
+        v1_signing::seal_message(&unsealed),
+        Transaction::V1(TransactionV1::new(unsealed, seal())),
     );
     assert_eq!(
         d.authorization,
@@ -100,9 +98,12 @@ fn v1_digests_are_pinned() {
 
 #[test]
 fn v2_digests_are_pinned() {
+    let authorizers = AuthorizerSet::from_signatures(&signatures());
+    let unsealed = UnsealedTransactionV1::with_canonical_signatures(body(), signatures());
     let d = digests(
-        UnsignedTransaction::V2(body()),
-        UnsealedTransaction::V2(UnsealedTransactionV1::with_canonical_signatures(body(), signatures())),
+        TransactionSignature::create_message(AuthorizationContext::new(&key(2), &authorizers), &body()),
+        TransactionSealSignature::create_message(&unsealed),
+        Transaction::V2(TransactionV1::new(unsealed, seal())),
     );
     assert_eq!(
         d.authorization,

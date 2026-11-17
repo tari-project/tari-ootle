@@ -1364,7 +1364,6 @@ fn generate_transfer_transaction(
                     revealed_input_amount,
                     transfer_statement,
                     &params.badge_usage,
-                    revealed_output_amount.is_positive().then_some("output_bucket"),
                 )
             })
             .then(|builder| {
@@ -1374,21 +1373,26 @@ fn generate_transfer_transaction(
                 }
 
                 // If the transfer creates revealed outputs, deposit the bucket into the destination account.
-                params.outputs.iter().enumerate().fold(builder, |builder, (i, output)| {
-                    if !output.revealed_amount.is_positive() {
-                        return builder;
-                    }
-                    let needs_to_split = params.outputs.len() > 1;
+                builder
+                    .put_last_instruction_output_on_workspace("output_bucket")
+                    .then(|builder| {
+                        params.outputs.iter().enumerate().fold(builder, |builder, (i, output)| {
+                            if !output.revealed_amount.is_positive() {
+                                return builder;
+                            }
+                            let needs_to_split = params.outputs.len() > 1;
 
-                    if needs_to_split {
-                        let sub_bucket_name = format!("output-sub-bucket-{i}");
-                        builder
-                            .take_from_bucket("output_bucket", output.revealed_amount, &sub_bucket_name)
-                            .create_account_with_bucket(*output.address.account_public_key(), sub_bucket_name)
-                    } else {
-                        builder.create_account_with_bucket(*output.address.account_public_key(), "output_bucket")
-                    }
-                })
+                            if needs_to_split {
+                                let sub_bucket_name = format!("output-sub-bucket-{i}");
+                                builder
+                                    .take_from_bucket("output_bucket", output.revealed_amount, &sub_bucket_name)
+                                    .create_account_with_bucket(*output.address.account_public_key(), sub_bucket_name)
+                            } else {
+                                builder
+                                    .create_account_with_bucket(*output.address.account_public_key(), "output_bucket")
+                            }
+                        })
+                    })
             })
             .then(|builder| {
                 if params.badge_usage.is_none() {
@@ -1444,9 +1448,9 @@ fn generate_merged_transfer_transaction(
                             revealed_input_amount,
                             transfer_statement,
                             &params.badge_usage,
-                            Some("revealed_bucket"),
                         )
                     })
+                    .put_last_instruction_output_on_workspace("revealed_bucket")
                     .then(|b| {
                         // The revealed remainder covers the fee plus anything owed to recipients as
                         // revealed funds. With nothing owed, the whole bucket is the fee.
@@ -1507,20 +1511,9 @@ struct CheckedStatementSpec {
     resource_view_key: Option<RistrettoPublicKey>,
 }
 
-fn authorize_with_badge<D>(
-    builder: TransactionBuilder<D>,
-    badge_usage: &BadgeUsage,
-    f: impl FnOnce(TransactionBuilder<D>) -> TransactionBuilder<D>,
-) -> TransactionBuilder<D> {
-    if badge_usage.is_none() {
-        f(builder)
-    } else {
-        builder.with_authorized_proof("proof", f)
-    }
-}
-
-/// Executes the account withdraw and/or stealth transfer (capturing any revealed output bucket on the workspace)
-/// inside a single `"proof"` authorization window whenever a badge is in use.
+/// Executes the account withdraw and/or stealth transfer. When a badge is in use, the call runs inside an
+/// authorization window over the workspace proof `proof`, which lends the badge to the account's withdraw rule
+/// and the stealth transfer's resource/input access rules.
 fn execute_transfer_with_optional_badge<D>(
     builder: TransactionBuilder<D>,
     account: ComponentAddress,
@@ -1528,15 +1521,14 @@ fn execute_transfer_with_optional_badge<D>(
     revealed_input_amount: Amount,
     transfer_statement: StealthTransferStatement,
     badge_usage: &BadgeUsage,
-    output_workspace_key: Option<&'static str>,
 ) -> TransactionBuilder<D> {
     // When there are no stealth inputs or outputs, skip the stealth transfer instruction
     // and use a standard withdraw instead. A stealth transfer would still work correctly,
     // but a plain withdraw is more fee-efficient.
     let has_no_inputs_or_outputs = transfer_statement.outputs_statement.outputs.is_empty() &&
         transfer_statement.inputs_statement.inputs.is_empty();
-    authorize_with_badge(builder, badge_usage, |b| {
-        let b = if has_no_inputs_or_outputs {
+    let apply = |b: TransactionBuilder<D>| {
+        if has_no_inputs_or_outputs {
             b.call_method(account, "withdraw", args![resource, revealed_input_amount])
         } else if revealed_input_amount.is_positive() {
             b.call_method(account, "withdraw", args![resource, revealed_input_amount])
@@ -1544,14 +1536,13 @@ fn execute_transfer_with_optional_badge<D>(
                 .stealth_transfer_with_input_bucket(resource, transfer_statement, "input_bucket")
         } else {
             b.stealth_transfer(resource, transfer_statement)
-        };
-        if let Some(key) = output_workspace_key {
-            // Capture the transfer output bucket before DropProofAuthorization resets last_instruction_output.
-            b.put_last_instruction_output_on_workspace(key)
-        } else {
-            b
         }
-    })
+    };
+    if badge_usage.is_none() {
+        apply(builder)
+    } else {
+        builder.with_authorized_proof("proof", apply)
+    }
 }
 
 #[cfg(test)]

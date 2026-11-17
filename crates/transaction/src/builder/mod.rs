@@ -38,7 +38,6 @@ use crate::{
     Instruction,
     IntoSigned,
     MainSigner,
-    MigrateFunction,
     NftAssertVec,
     NftCheck,
     ResourceAddressRef,
@@ -182,43 +181,23 @@ impl TransactionBuilder<MainIntent> {
         self.with_fee_instructions_builder(|builder| builder.add_instruction(instruction))
     }
 
-    pub fn update_component_template_address_with_migrate<C, T>(
+    /// Replaces every method access rule of `component`. The transaction must satisfy the component's rules updater.
+    pub fn set_component_access_rules<C: Into<NamedComponentCall>>(
         self,
         component: C,
-        new_template: TemplateAddress,
-        migrate_name: T,
-        migrate_args: Vec<NamedArg>,
-    ) -> Self
-    where
-        C: Into<NamedComponentCall>,
-        T: TryInto<FunctionName>,
-        <T as TryInto<FunctionName>>::Error: std::fmt::Debug,
-    {
+        access_rules: ComponentAccessRules,
+    ) -> Self {
         let component = self.resolve_call(component.into());
-        let migrate_args = self.resolve_args(migrate_args).expect("Invalid named arguments");
-        self.add_instruction(Instruction::UpdateComponentTemplate {
+        self.add_instruction(Instruction::SetComponentAccessRules {
             component,
-            migrate: Some(MigrateFunction {
-                name: migrate_name
-                    .try_into()
-                    .expect("Oops! The provided migrate function name is longer than the limit"),
-                args: migrate_args,
-            }),
-            new_template,
+            access_rules,
         })
     }
 
-    pub fn update_component_template<C: Into<NamedComponentCall>>(
-        self,
-        component: C,
-        new_template: TemplateAddress,
-    ) -> Self {
+    /// Replaces the owner rule of `component`. The transaction must satisfy the component's rules updater.
+    pub fn set_component_owner_rule<C: Into<NamedComponentCall>>(self, component: C, owner_rule: OwnerRule) -> Self {
         let component = self.resolve_call(component.into());
-        self.add_instruction(Instruction::UpdateComponentTemplate {
-            component,
-            migrate: None,
-            new_template,
-        })
+        self.add_instruction(Instruction::SetComponentOwnerRule { component, owner_rule })
     }
 
     pub fn with_min_epoch(mut self, min_epoch: Option<Epoch>) -> Self {
@@ -1067,6 +1046,10 @@ impl<D> TransactionBuilder<D> {
                 if let Some(migrate) = migrate {
                     self.add_inputs_for_args(&migrate.args);
                 }
+            },
+            Instruction::SetComponentAccessRules { component, .. } |
+            Instruction::SetComponentOwnerRule { component, .. } => {
+                self.add_input_for_component_ref(component);
             },
             Instruction::Assert {
                 assertion: Assertion::IsNotNull,

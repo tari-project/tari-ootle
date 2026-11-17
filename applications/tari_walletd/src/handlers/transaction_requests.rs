@@ -60,13 +60,14 @@ use super::context::HandlerContext;
 use crate::handlers::{
     component_upgrades::component_upgrades,
     helpers::{
+        OrJrpcNotFound,
         ensure_transaction_signers,
         extract_stealth_statements,
         invalid_params,
         invalid_request,
         validate_transaction_for_approval,
     },
-    transaction::submit_inner_for_request,
+    transaction::{submit_inner_for_request, validate_epoch_bounds},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::transaction_requests";
@@ -93,6 +94,7 @@ pub async fn handle_create(
     let sdk = context.wallet_sdk();
 
     validate_transaction_for_approval(context.config().network, &req.transaction)?;
+    validate_epoch_bounds(&req.transaction)?;
     ensure_transaction_signers(sdk, &req.seal_signer, &req.other_signers)?;
     if let TransactionRequestMainSigner::External { public_key } =
         resolve_main_signer(context, &req.transaction, &req.other_signers)? &&
@@ -181,7 +183,8 @@ pub async fn handle_get(
     let model = context
         .wallet_sdk()
         .store()
-        .with_read_tx(|tx| tx.transaction_request_get(req.request_id))?;
+        .with_read_tx(|tx| tx.transaction_request_get(req.request_id))
+        .or_jrpc_not_found()?;
 
     Ok(TransactionRequestGetResponse {
         request: to_info(context, model)?,
@@ -242,7 +245,7 @@ pub async fn handle_reject(
     token: Option<&Bearer>,
     req: TransactionRequestDecisionRequest,
 ) -> Result<TransactionRequestDecisionResponse, anyhow::Error> {
-    context.authorize(token, &[Permission::TransactionRequests(TxRequestAction::Approve)])?;
+    context.authorize_user_only(token, &[Permission::TransactionRequests(TxRequestAction::Approve)])?;
 
     // An approved-but-unsubmitted request is still cancellable: approval is a
     // decision, not a commitment, and without this the only way out is letting
@@ -423,7 +426,10 @@ fn transition(
 ) -> Result<TransactionRequestModel, anyhow::Error> {
     let sdk = context.wallet_sdk();
 
-    let current = sdk.store().with_read_tx(|tx| tx.transaction_request_get(request_id))?;
+    let current = sdk
+        .store()
+        .with_read_tx(|tx| tx.transaction_request_get(request_id))
+        .or_jrpc_not_found()?;
 
     // A decision on a request that has already timed out is not a decision.
     if matches!(current.effective_status_now(), EffectiveStatus::Expired) {
@@ -688,6 +694,15 @@ mod tests {
         let delegated = daemon.delegated_session("admin");
         let err = approve(&delegated).await.unwrap_err();
         assert!(err.to_string().contains("interactive user session"), "{err}");
+
+        for bearer in [&api_key, &admin_key, &delegated, &daemon.cookie] {
+            let err = handle_reject(&daemon.context, Some(bearer), TransactionRequestDecisionRequest {
+                request_id,
+            })
+            .await
+            .unwrap_err();
+            assert!(err.to_string().contains("interactive user session"), "{err}");
+        }
 
         assert_eq!(status_of(&daemon, request_id), TransactionRequestStatus::Pending);
 
@@ -1805,6 +1820,56 @@ mod tests {
                 .await
                 .expect_err("dry-run transaction must be rejected");
             assert!(err.to_string().contains("transaction.dry_run"), "{err}");
+
+            let mut inverted_epochs = create_request(vec![], 60 * 60);
+            inverted_epochs.transaction = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
+                .with_min_epoch(Some(Epoch(200)))
+                .build_unsigned();
+            let err = handle_create(&wallet.daemon.context, Some(&wallet.tool), inverted_epochs)
+                .await
+                .expect_err("inverted epoch bounds must be rejected");
+            assert!(err.to_string().contains("transaction.min_epoch"), "{err}");
+
+            let missing_id = 999_999;
+            for err in [
+                handle_get(
+                    &wallet.daemon.context,
+                    Some(&wallet.daemon.session),
+                    TransactionRequestGetRequest { request_id: missing_id },
+                )
+                .await
+                .unwrap_err(),
+                handle_approve(
+                    &wallet.daemon.context,
+                    Some(&wallet.daemon.session),
+                    TransactionRequestDecisionRequest { request_id: missing_id },
+                )
+                .await
+                .unwrap_err(),
+                handle_reject(
+                    &wallet.daemon.context,
+                    Some(&wallet.daemon.session),
+                    TransactionRequestDecisionRequest { request_id: missing_id },
+                )
+                .await
+                .unwrap_err(),
+                handle_submit(
+                    &wallet.daemon.context,
+                    Some(&wallet.tool),
+                    TransactionRequestSubmitRequest { request_id: missing_id },
+                )
+                .await
+                .unwrap_err(),
+            ] {
+                let jrpc = err
+                    .downcast_ref::<axum_jrpc::error::JsonRpcError>()
+                    .expect("JsonRpcError");
+                assert!(matches!(
+                    jrpc.error_reason(),
+                    axum_jrpc::error::JsonRpcErrorReason::ApplicationError(code)
+                        if code == crate::server::ApplicationErrorCode::NotFound as i32
+                ));
+            }
         }
     }
 }

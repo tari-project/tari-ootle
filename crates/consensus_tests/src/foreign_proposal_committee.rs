@@ -20,6 +20,7 @@ use tari_consensus::{
     is_authenticated_commit_proof_stored,
     messages::{HotstuffMessage, ProposalMessage},
     resolve_foreign_committee,
+    validate_foreign_shard_group,
 };
 use tari_consensus_types::{BlockId, Decision};
 use tari_engine_types::substate::{Substate, SubstateValue};
@@ -162,7 +163,8 @@ async fn it_verifies_against_the_named_shard_groups_committee_not_the_proposers(
     // A member of shard group A proposes a block whose header names shard group B
     let proposal = proposal("a1", to_header_shard_group(group_b));
 
-    let committee = resolve_foreign_committee(&epoch_manager, &proposal)
+    let shard_group = validate_foreign_shard_group(&proposal).unwrap();
+    let committee = resolve_foreign_committee(&epoch_manager, &proposal, shard_group)
         .await
         .unwrap()
         .expect("shard group B has a committee");
@@ -183,7 +185,10 @@ async fn it_finds_no_committee_for_a_shard_group_that_is_not_assigned() {
     };
     let proposal = proposal("b1", sub_range);
 
-    let committee = resolve_foreign_committee(&epoch_manager, &proposal).await.unwrap();
+    let shard_group = validate_foreign_shard_group(&proposal).unwrap();
+    let committee = resolve_foreign_committee(&epoch_manager, &proposal, shard_group)
+        .await
+        .unwrap();
     assert!(committee.is_none());
 }
 
@@ -993,21 +998,16 @@ async fn a_foreign_proposal_is_not_stored_with_pledge_values_its_evidence_does_n
     );
 }
 
-#[tokio::test]
-async fn it_rejects_a_shard_group_with_invalid_bounds() {
-    let Setup { epoch_manager, .. } = setup().await;
-
+#[test]
+fn it_rejects_a_shard_group_with_invalid_bounds() {
     let proposal = proposal("b1", tari_sidechain::ShardGroup {
         start: 10,
         end_inclusive: 5,
     });
 
-    let err = resolve_foreign_committee(&epoch_manager, &proposal).await.unwrap_err();
+    let err = validate_foreign_shard_group(&proposal).unwrap_err();
     assert!(
-        matches!(
-            err,
-            HotStuffError::ProposalValidationError(ProposalValidationError::InvalidShardGroup { .. })
-        ),
+        matches!(err, ProposalValidationError::InvalidShardGroup { .. }),
         "unexpected error: {err}"
     );
 }

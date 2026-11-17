@@ -159,6 +159,7 @@ export * from "./types/RestrictedAccessRule";
 export * from "./types/RevealedOutput";
 export * from "./types/RistrettoPublicKeyBytes";
 export * from "./types/RuleRequirement";
+export * from "./types/RulesUpdater";
 export * from "./types/Scalar32Bytes";
 export * from "./types/SchnorrSignatureBytes";
 export * from "./types/Shard";

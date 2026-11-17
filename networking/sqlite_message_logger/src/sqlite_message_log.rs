@@ -8,11 +8,11 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
-use time::PrimitiveDateTime;
 use diesel::{prelude::*, sql_query};
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use log::error;
 use serde::{Deserialize, Serialize};
+use time::PrimitiveDateTime;
 
 use crate::schema::*;
 

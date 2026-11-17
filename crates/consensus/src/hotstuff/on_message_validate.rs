@@ -169,7 +169,8 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             },
             msg @ HotstuffMessage::NewView(_) |
             msg @ HotstuffMessage::Vote(_) |
-            msg @ HotstuffMessage::CatchUpSyncRequest(_) => {
+            msg @ HotstuffMessage::CatchUpSyncRequest(_) |
+            msg @ HotstuffMessage::CatchUpSyncDone(_) => {
                 if !epoch_state.local_committee().contains(&from) {
                     warn!(
                         target: LOG_TARGET,

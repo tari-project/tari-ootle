@@ -92,7 +92,7 @@ use crate::{
         transaction_manager::{ConsensusTransactionManager, UncommittedTemplateStore},
         vote_collector::{ProposalVoteCollector, TimeoutVoteCollector},
     },
-    messages::{HotstuffMessage, ProposalMessage},
+    messages::{CatchUpDoneMessage, HotstuffMessage, ProposalMessage},
     tracing::TraceTimer,
     traits::{CertificateStore, ConsensusSpec, PeriodicTask, hooks::ConsensusHooks},
 };
@@ -452,9 +452,18 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             .await?
             .fee_claim_public_key;
 
-        // Assume we need to catch up at startup. If we're already at the latest height, validators will not return
-        // blocks.
-        self.request_catch_up_sync(&epoch_state).await?;
+        // Assume we need to catch up at startup. A validator at the same height answers with no blocks, and the done
+        // message that follows ends the catch-up.
+        if let Some(from) = self.request_catch_up_sync(&epoch_state).await? {
+            let current_height = self.pacemaker.current_height();
+            self.worker_state.catch_up = Some(CatchUp::new(
+                epoch_state.epoch(),
+                current_height,
+                current_height,
+                self.config.catch_up_request_timeout,
+                from,
+            ));
+        }
 
         let mut periodic_tasks = time::interval(Duration::from_secs(10));
         periodic_tasks.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
@@ -467,6 +476,15 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             // Need to update epoch state if the epoch has changed
             if epoch_state.epoch != current_epoch {
                 self.worker_state.has_processed_first_block = false;
+                // Heights restart in each epoch, so a catch-up holds only for the epoch it started in.
+                if self
+                    .worker_state
+                    .catch_up
+                    .as_ref()
+                    .is_some_and(|catch_up| catch_up.epoch != current_epoch)
+                {
+                    self.worker_state.catch_up = None;
+                }
                 let exhaust_burn_rate = self.epoch_exhaust_burn_rate(current_epoch)?;
                 epoch_state
                     .update_from_epoch_manager(&self.epoch_manager, current_epoch, exhaust_burn_rate)
@@ -505,7 +523,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 .worker_state
                 .catch_up
                 .as_ref()
-                .filter(|catch_up| !catch_up.has_timed_out())
+                .filter(|catch_up| catch_up.is_behind_target())
                 .map(|catch_up| catch_up.stall_deadline(self.config.catch_up_request_timeout));
 
             tokio::select! {
@@ -958,8 +976,22 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         from: TConsensusSpec::Addr,
         justify: &ProposalCertificate,
     ) -> Result<(), HotStuffError> {
-        if self.worker_state.is_active_catch_up() || from == self.local_validator_addr {
+        if from == self.local_validator_addr {
             return Ok(());
+        }
+        if let Some(catch_up) = self.worker_state.active_catch_up_mut() {
+            if justify.epoch() != catch_up.epoch {
+                return Ok(());
+            }
+            // The blocks the request is streaming may reach the justified block, and the done message says where they
+            // ended, so the proposer is asked only for what that stream leaves out.
+            if catch_up.is_streaming() {
+                catch_up.raise_target(justify.height(), Some(from));
+                return Ok(());
+            }
+            if justify.height() <= catch_up.remote_height {
+                return Ok(());
+            }
         }
         // A certified block we already hold, e.g. one parked on missing transactions, is not fetched by catching
         // up.
@@ -981,12 +1013,75 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             .request_sync(self.pacemaker.current_view(), epoch_state.epoch(), from.clone())
             .await?;
         self.worker_state.catch_up = Some(CatchUp::new(
+            epoch_state.epoch(),
             justify.height(),
             current_height,
             self.config.catch_up_request_timeout,
             from,
         ));
         Ok(())
+    }
+
+    /// Ends the stream of the catch-up request `from` answered. The catch-up finishes when this node has reached its
+    /// target. When the stream ended below the target, the rest is requested at once: from the proposer that showed
+    /// the target, or again from `from` when its stream reached further than its last one.
+    async fn on_catch_up_done(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        from: TConsensusSpec::Addr,
+        msg: CatchUpDoneMessage,
+    ) -> Result<(), HotStuffError> {
+        let current_height = self.pacemaker.current_height();
+        let Some(catch_up) = self
+            .worker_state
+            .catch_up
+            .as_mut()
+            .filter(|catch_up| catch_up.from == from && catch_up.epoch == msg.epoch && catch_up.is_streaming())
+        else {
+            debug!(target: LOG_TARGET, "Ignoring catch-up done from {from} for a request this node is not streaming");
+            return Ok(());
+        };
+
+        match catch_up.on_done(&from, msg.end_height, current_height) {
+            CatchUpDone::Finished => {
+                info!(
+                    target: LOG_TARGET,
+                    "✅ Finished catch up at height {current_height}. Resuming normal operation.",
+                );
+                self.worker_state.catch_up = None;
+                Ok(())
+            },
+            CatchUpDone::Importing => {
+                debug!(
+                    target: LOG_TARGET,
+                    "⏳ Catch-up from {from} sent blocks up to {} (expected up to {}). Importing them.",
+                    msg.end_height.display(),
+                    catch_up.remote_height,
+                );
+                Ok(())
+            },
+            CatchUpDone::AwaitStall => {
+                debug!(
+                    target: LOG_TARGET,
+                    "⏳ Catch-up from {from} ended at {} below {}. Waiting for the stall re-request.",
+                    msg.end_height.display(),
+                    catch_up.remote_height,
+                );
+                Ok(())
+            },
+            CatchUpDone::RequestFrom(next) => {
+                info!(
+                    target: LOG_TARGET,
+                    "⏳ Catch-up from {from} ended at {} below {}. Requesting the rest from {next}.",
+                    msg.end_height.display(),
+                    catch_up.remote_height,
+                );
+                catch_up.requested(next.clone());
+                self.on_catch_up_sync
+                    .request_sync(self.pacemaker.current_view(), epoch_state.epoch(), next)
+                    .await
+            },
+        }
     }
 
     async fn on_catch_up_stalled(
@@ -997,8 +1092,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let Some(catch_up) = self.worker_state.catch_up.as_mut() else {
             return Ok(());
         };
-        catch_up.restart_stall_window();
-        let from = catch_up.from.clone();
+        let from = catch_up.target_from.clone().unwrap_or_else(|| catch_up.from.clone());
+        catch_up.requested(from.clone());
         info!(
             target: LOG_TARGET,
             "⏳ Catch-up from {} has not advanced past height {} (expected up to {}). Requesting the rest of the range.",
@@ -1108,9 +1203,20 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 );
                 return Ok(());
             };
-            if let Some(ref mut catch_up) = self.worker_state.catch_up {
-                catch_up.reset_timeout(self.config.catch_up_request_timeout);
-                catch_up.from = sync_req_from;
+            match self.worker_state.catch_up {
+                Some(ref mut catch_up) if catch_up.epoch == epoch_state.epoch() => {
+                    catch_up.requested(sync_req_from);
+                    catch_up.reset_timeout(self.config.catch_up_request_timeout);
+                },
+                _ => {
+                    self.worker_state.catch_up = Some(CatchUp::new(
+                        epoch_state.epoch(),
+                        current_height,
+                        current_height,
+                        self.config.catch_up_request_timeout,
+                        sync_req_from,
+                    ));
+                },
             }
         }
 
@@ -1723,6 +1829,9 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 self.on_proposal_message(epoch_state, current_height, *msg, ProposalOrigin::CatchUp)
                     .await,
             ),
+            HotstuffMessage::CatchUpSyncDone(msg) => {
+                log_err("on_catch_up_done", self.on_catch_up_done(epoch_state, from, msg).await)
+            },
         }
     }
 
@@ -1878,12 +1987,21 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             return Err(err);
         }
 
-        if self.worker_state.is_active_catch_up() {
-            debug!(
-                target: LOG_TARGET,
-                "⏳ Already catching up. Ignoring additional catch up to {remote_epoch}/{remote_height}."
-            );
-            return Ok(());
+        if let Some(catch_up) = self.worker_state.active_catch_up_mut() {
+            let same_epoch = remote_epoch == catch_up.epoch;
+            if same_epoch && catch_up.is_streaming() {
+                catch_up.raise_target(remote_height, None);
+            }
+            if !same_epoch || catch_up.is_streaming() || remote_height <= catch_up.remote_height {
+                debug!(
+                    target: LOG_TARGET,
+                    "⏳ Already catching up from {} (expected up to {}). Not requesting {remote_epoch}/{remote_height} \
+                     separately.",
+                    catch_up.from,
+                    catch_up.remote_height,
+                );
+                return Ok(());
+            }
         }
 
         // Otherwise, catch up
@@ -1918,6 +2036,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             .await?;
 
         self.worker_state.catch_up = Some(CatchUp::new(
+            local_epoch_state.epoch(),
             remote_height,
             current_height,
             self.config.catch_up_request_timeout,
@@ -2033,8 +2152,15 @@ struct WorkerState<TAddr> {
 }
 
 impl<TAddr> WorkerState<TAddr> {
+    /// Whether this node is importing blocks up to a catch-up target above its height. Proposing waits for the
+    /// catch-up to reach its target.
     pub fn is_active_catch_up(&self) -> bool {
-        self.catch_up.as_ref().is_some_and(|c| !c.has_timed_out())
+        self.catch_up.as_ref().is_some_and(|c| c.is_behind_target())
+    }
+
+    /// The catch-up whose request has not timed out.
+    pub fn active_catch_up_mut(&mut self) -> Option<&mut CatchUp<TAddr>> {
+        self.catch_up.as_mut().filter(|c| !c.has_timed_out())
     }
 }
 
@@ -2049,39 +2175,137 @@ impl<TAddr> Default for WorkerState<TAddr> {
     }
 }
 
+/// What a catch-up does once the peer serving it says its stream is over.
+#[derive(Debug, PartialEq, Eq)]
+enum CatchUpDone<TAddr> {
+    /// This node has reached the target.
+    Finished,
+    /// The stream reached the target. Its blocks are importing, or waiting on transactions.
+    Importing,
+    /// The stream ended below the target, and this peer holds the rest.
+    RequestFrom(TAddr),
+    /// The stream ended below the target and no peer is known to hold more. The stall re-request asks again.
+    AwaitStall,
+}
+
+/// What the peer serving a catch-up has done with the last request sent to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CatchUpRequest {
+    /// Blocks may still arrive.
+    Streaming,
+    /// The peer's done message arrived: it sent blocks up to `end_height`, or none.
+    Served { end_height: Option<NodeHeight> },
+}
+
 #[derive(Debug)]
 struct CatchUp<TAddr> {
+    /// Heights restart in each epoch, so the catch-up holds only for this one.
+    pub epoch: Epoch,
     pub remote_height: NodeHeight,
     pub last_progress_height: NodeHeight,
     pub timeout_at: Instant,
     /// Start of the window after which a catch-up that has not advanced requests the rest of the range again.
     pub stall_window_start: Instant,
+    /// The peer the last request went to.
     pub from: TAddr,
+    pub request: CatchUpRequest,
+    /// The proposer whose proposal set `remote_height`, which holds the blocks up to it.
+    pub target_from: Option<TAddr>,
+    /// The furthest any stream for this catch-up has reached.
+    pub served_up_to: Option<NodeHeight>,
 }
 
 impl<TAddr> CatchUp<TAddr> {
-    pub fn new(remote_height: NodeHeight, current_height: NodeHeight, timeout: Duration, from: TAddr) -> Self {
+    /// A catch-up whose request to `from` has just been sent.
+    pub fn new(
+        epoch: Epoch,
+        remote_height: NodeHeight,
+        current_height: NodeHeight,
+        timeout: Duration,
+        from: TAddr,
+    ) -> Self {
         let now = Instant::now();
         Self {
+            epoch,
             remote_height,
             last_progress_height: current_height,
             timeout_at: now + timeout,
             stall_window_start: now,
             from,
+            request: CatchUpRequest::Streaming,
+            target_from: None,
+            served_up_to: None,
         }
     }
 
-    /// Updates catch-up progress to `current_height`, refreshing the timeout when the view advances, and returns
-    /// whether catch-up is still in progress (`current_height < self.remote_height`).
-    pub fn record_progress(&mut self, current_height: NodeHeight, timeout: Duration) -> bool {
+    /// Records a new request to `from`. The timeout stays as it is, so a catch-up that makes no progress still times
+    /// out however often it asks again.
+    pub fn requested(&mut self, from: TAddr) {
+        self.from = from;
+        self.request = CatchUpRequest::Streaming;
+        self.restart_stall_window();
+    }
+
+    /// Records the done message `from` sent for the current request, whose stream ended at `end_height`, and decides
+    /// what follows at `current_height`.
+    pub fn on_done(
+        &mut self,
+        from: &TAddr,
+        end_height: Option<NodeHeight>,
+        current_height: NodeHeight,
+    ) -> CatchUpDone<TAddr>
+    where
+        TAddr: Clone + PartialEq,
+    {
+        let reached_further = end_height.is_some_and(|end| self.served_up_to.is_none_or(|furthest| end > furthest));
+        self.served_up_to = self.served_up_to.max(end_height);
+        self.request = CatchUpRequest::Served { end_height };
+
         if current_height >= self.remote_height {
-            return false;
+            return CatchUpDone::Finished;
         }
+        if end_height.is_some_and(|end| end >= self.remote_height) {
+            return CatchUpDone::Importing;
+        }
+        match &self.target_from {
+            Some(proposer) if proposer != from => CatchUpDone::RequestFrom(proposer.clone()),
+            // A stream that reached further than any before it may reach further still, since `from` has kept up with
+            // its committee. One that did not would only repeat itself.
+            _ if reached_further => CatchUpDone::RequestFrom(from.clone()),
+            _ => CatchUpDone::AwaitStall,
+        }
+    }
+
+    /// Whether blocks may still arrive for the current request.
+    pub fn is_streaming(&self) -> bool {
+        self.request == CatchUpRequest::Streaming && !self.has_timed_out()
+    }
+
+    /// Raises the target to `remote_height` when that is higher, remembering `proposer` as the peer that holds it.
+    pub fn raise_target(&mut self, remote_height: NodeHeight, proposer: Option<TAddr>) {
+        if remote_height > self.remote_height {
+            self.remote_height = remote_height;
+            if proposer.is_some() {
+                self.target_from = proposer;
+            }
+        }
+    }
+
+    pub fn is_behind_target(&self) -> bool {
+        !self.has_timed_out() && self.last_progress_height < self.remote_height
+    }
+
+    /// Updates catch-up progress to `current_height` and returns whether catch-up is still in progress: below its
+    /// target, or with its request still streaming. Only progress toward the target refreshes the timeout, so a
+    /// catch-up at its target whose done message never arrives still lapses.
+    pub fn record_progress(&mut self, current_height: NodeHeight, timeout: Duration) -> bool {
         if current_height > self.last_progress_height {
             self.last_progress_height = current_height;
-            self.reset_timeout(timeout);
+            if current_height < self.remote_height {
+                self.reset_timeout(timeout);
+            }
         }
-        true
+        current_height < self.remote_height || self.is_streaming()
     }
 
     pub fn reset_timeout(&mut self, timeout: Duration) {
@@ -2241,7 +2465,7 @@ mod tests {
         #[test]
         fn catch_up_stays_active_across_batch_boundaries_until_remote_height_is_reached() {
             let timeout = Duration::from_secs(15);
-            let mut catch_up = CatchUp::new(NodeHeight(250), NodeHeight(0), timeout, "peer-a");
+            let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(250), NodeHeight(0), timeout, "peer-a");
 
             for height in [1, 99, 100, 150, 198, 249] {
                 assert!(
@@ -2251,13 +2475,108 @@ mod tests {
                 assert_eq!(catch_up.last_progress_height, NodeHeight(height));
             }
 
+            assert_eq!(
+                catch_up.on_done(&"peer-a", Some(NodeHeight(250)), NodeHeight(249)),
+                CatchUpDone::Importing
+            );
             assert!(!catch_up.record_progress(NodeHeight(250), timeout));
+        }
+
+        #[test]
+        fn a_catch_up_at_its_target_stays_in_flight_until_its_done_message() {
+            let timeout = Duration::from_secs(15);
+            let mut state = WorkerState {
+                catch_up: Some(CatchUp::new(
+                    Epoch(1),
+                    NodeHeight(10),
+                    NodeHeight(10),
+                    timeout,
+                    "peer-a",
+                )),
+                ..WorkerState::default()
+            };
+            assert!(
+                !state.is_active_catch_up(),
+                "a catch-up at its target holds back no proposal"
+            );
+
+            let catch_up = state.active_catch_up_mut().unwrap();
+            assert!(
+                catch_up.record_progress(NodeHeight(11), timeout),
+                "an imported block past the target keeps a catch-up whose request is streaming"
+            );
+            assert!(catch_up.is_streaming());
+
+            catch_up.raise_target(NodeHeight(40), Some("peer-b"));
+            assert!(state.is_active_catch_up());
+            let catch_up = state.active_catch_up_mut().unwrap();
+            catch_up.raise_target(NodeHeight(20), Some("peer-c"));
+            assert_eq!(catch_up.remote_height, NodeHeight(40), "a target is never lowered");
+            assert_eq!(catch_up.target_from, Some("peer-b"));
+        }
+
+        #[test]
+        fn an_empty_startup_stream_finishes_unless_a_proposal_ahead_named_a_target() {
+            let timeout = Duration::from_secs(15);
+            let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(0), NodeHeight(0), timeout, "peer-a");
+            assert_eq!(catch_up.on_done(&"peer-a", None, NodeHeight(0)), CatchUpDone::Finished);
+
+            let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(0), NodeHeight(0), timeout, "peer-a");
+            catch_up.raise_target(NodeHeight(5), Some("peer-b"));
+            assert_eq!(
+                catch_up.on_done(&"peer-a", None, NodeHeight(0)),
+                CatchUpDone::RequestFrom("peer-b"),
+                "the proposer that showed the target is asked at once"
+            );
+        }
+
+        #[test]
+        fn a_stream_that_reached_the_target_imports_its_blocks() {
+            let timeout = Duration::from_secs(15);
+            let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(20), NodeHeight(10), timeout, "peer-a");
+            assert_eq!(
+                catch_up.on_done(&"peer-a", Some(NodeHeight(25)), NodeHeight(12)),
+                CatchUpDone::Importing
+            );
+            assert!(!catch_up.is_streaming());
+            assert!(
+                catch_up.is_behind_target(),
+                "proposing waits until the blocks are imported"
+            );
+        }
+
+        #[test]
+        fn a_stream_that_ended_below_the_target_asks_again_only_while_it_reaches_further() {
+            let timeout = Duration::from_secs(15);
+            let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(20), NodeHeight(10), timeout, "peer-a");
+            assert_eq!(
+                catch_up.on_done(&"peer-a", Some(NodeHeight(15)), NodeHeight(10)),
+                CatchUpDone::RequestFrom("peer-a")
+            );
+            catch_up.requested("peer-a");
+            assert_eq!(
+                catch_up.on_done(&"peer-a", Some(NodeHeight(15)), NodeHeight(15)),
+                CatchUpDone::AwaitStall,
+                "a stream that reached no further would only repeat itself"
+            );
+            catch_up.requested("peer-a");
+            assert_eq!(
+                catch_up.on_done(&"peer-a", None, NodeHeight(15)),
+                CatchUpDone::AwaitStall
+            );
+        }
+
+        #[test]
+        fn a_catch_up_at_its_target_lapses_with_its_request() {
+            let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(10), NodeHeight(10), Duration::ZERO, "peer-a");
+            assert!(!catch_up.is_streaming());
+            assert!(!catch_up.record_progress(NodeHeight(11), Duration::ZERO));
         }
 
         #[test]
         fn a_stalled_catch_up_requests_the_rest_of_the_range_before_it_times_out() {
             let timeout = Duration::from_secs(20);
-            let mut catch_up = CatchUp::new(NodeHeight(250), NodeHeight(0), timeout, "peer-a");
+            let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(250), NodeHeight(0), timeout, "peer-a");
             assert!(catch_up.stall_deadline(timeout) < catch_up.timeout_at);
 
             let timeout_at = catch_up.timeout_at;

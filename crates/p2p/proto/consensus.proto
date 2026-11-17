@@ -20,6 +20,7 @@ message HotStuffMessage {
     MissingTransactionsResponse requested_transaction = 8;
     SyncRequest sync_request = 9;
     ProposalMessage catch_up_sync_response = 10;
+    SyncDone sync_done = 11;
   }
 }
 
@@ -309,6 +310,11 @@ message SubstateDestroyedMetadata {
 message SyncRequest {
   uint64 epoch = 1;
   uint64 block_height = 2;
+}
+
+message SyncDone {
+  uint64 epoch = 1;
+  optional uint64 end_height = 2;
 }
 
 message ShardGroupAccumulatedData {

@@ -28,6 +28,7 @@ use crate::support::{Test, TestAddress, logging::setup_logger};
 const DROPPED_PROPOSALS: u64 = 3;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[expect(clippy::too_many_lines)]
 async fn a_replica_behind_a_proposal_catches_up_without_leader_timeouts() {
     setup_logger();
 
@@ -41,11 +42,16 @@ async fn a_replica_behind_a_proposal_catches_up_without_leader_timeouts() {
     // First height of the withheld window; 0 until armed.
     let drop_from = Arc::new(AtomicU64::new(0));
     let dropped = Arc::new(AtomicUsize::new(0));
+    // Catch-up requests the target sent, and done messages it received, once the window is armed.
+    let requests = Arc::new(AtomicUsize::new(0));
+    let dones = Arc::new(AtomicUsize::new(0));
     // When the target received the first proposal above the window, and the height that proposal justifies.
     let delivered = Arc::new(Mutex::new(None::<(Instant, NodeHeight)>));
 
     let drop_from_f = drop_from.clone();
     let dropped_f = dropped.clone();
+    let requests_f = requests.clone();
+    let dones_f = dones.clone();
     let delivered_f = delivered.clone();
     let target_f = target.clone();
 
@@ -57,7 +63,16 @@ async fn a_replica_behind_a_proposal_catches_up_without_leader_timeouts() {
         })
         .with_message_filter(Box::new(move |from, to, msg| {
             let start = drop_from_f.load(Ordering::SeqCst);
-            if start == 0 || *to != target_f || *from == target_f {
+            if start == 0 {
+                return true;
+            }
+            if *from == target_f && matches!(msg, HotstuffMessage::CatchUpSyncRequest(_)) {
+                requests_f.fetch_add(1, Ordering::SeqCst);
+            }
+            if *to == target_f && matches!(msg, HotstuffMessage::CatchUpSyncDone(_)) {
+                dones_f.fetch_add(1, Ordering::SeqCst);
+            }
+            if *to != target_f || *from == target_f {
                 return true;
             }
             let HotstuffMessage::Proposal(proposal) = msg else {
@@ -122,6 +137,15 @@ async fn a_replica_behind_a_proposal_catches_up_without_leader_timeouts() {
     assert!(
         dropped.load(Ordering::SeqCst) > 0,
         "test premise: proposals to the target must have been withheld"
+    );
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        1,
+        "{target} must catch up on one request, with no stall re-request"
+    );
+    assert!(
+        dones.load(Ordering::SeqCst) >= 1,
+        "the catch-up server must end its stream with a done message"
     );
     test.stop();
     test.assert_clean_shutdown().await;

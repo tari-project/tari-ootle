@@ -25,6 +25,7 @@ use std::convert::{TryFrom, TryInto};
 use anyhow::{Context, anyhow};
 use tari_common_types::types::CompressedPublicKey;
 use tari_consensus::messages::{
+    CatchUpDoneMessage,
     CatchUpRequestMessage,
     EncodedTransaction,
     ForeignProposalMessage,
@@ -128,6 +129,7 @@ impl From<&HotstuffMessage> for proto::consensus::HotStuffMessage {
             HotstuffMessage::CatchUpSyncResponse(msg) => {
                 proto::consensus::hot_stuff_message::Message::CatchUpSyncResponse((&**msg).into())
             },
+            HotstuffMessage::CatchUpSyncDone(msg) => proto::consensus::hot_stuff_message::Message::SyncDone(msg.into()),
         };
         Self { message: Some(message) }
     }
@@ -165,6 +167,7 @@ impl TryFrom<proto::consensus::HotStuffMessage> for HotstuffMessage {
             proto::consensus::hot_stuff_message::Message::CatchUpSyncResponse(msg) => {
                 HotstuffMessage::new_catch_up_sync_response(msg.try_into()?)
             },
+            proto::consensus::hot_stuff_message::Message::SyncDone(msg) => HotstuffMessage::CatchUpSyncDone(msg.into()),
         })
     }
 }
@@ -1317,6 +1320,26 @@ impl TryFrom<proto::consensus::SyncRequest> for CatchUpRequestMessage {
             epoch: Epoch(value.epoch),
             block_height: NodeHeight(value.block_height),
         })
+    }
+}
+
+// -------------------------------- SyncDone -------------------------------- //
+
+impl From<&CatchUpDoneMessage> for proto::consensus::SyncDone {
+    fn from(value: &CatchUpDoneMessage) -> Self {
+        Self {
+            epoch: value.epoch.as_u64(),
+            end_height: value.end_height.map(|height| height.as_u64()),
+        }
+    }
+}
+
+impl From<proto::consensus::SyncDone> for CatchUpDoneMessage {
+    fn from(value: proto::consensus::SyncDone) -> Self {
+        Self {
+            epoch: Epoch(value.epoch),
+            end_height: value.end_height.map(NodeHeight),
+        }
     }
 }
 

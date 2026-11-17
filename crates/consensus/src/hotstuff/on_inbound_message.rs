@@ -540,7 +540,8 @@ fn buffered_message_size(msg: &HotstuffMessage) -> usize {
         HotstuffMessage::ForeignProposalNotification(_) |
         HotstuffMessage::ForeignProposalRequest(_) |
         HotstuffMessage::MissingTransactionsRequest(_) |
-        HotstuffMessage::CatchUpSyncRequest(_) => FIXED_MESSAGE_SIZE,
+        HotstuffMessage::CatchUpSyncRequest(_) |
+        HotstuffMessage::CatchUpSyncDone(_) => FIXED_MESSAGE_SIZE,
     }
 }
 
@@ -725,6 +726,14 @@ fn msg_relative_view(
             MessageRelativeView::Current
         },
         HotstuffMessage::CatchUpSyncRequest(msg) => {
+            if msg.epoch != current_epoch {
+                return MessageRelativeView::Discard;
+            }
+            MessageRelativeView::Current
+        },
+        // Ends a catch-up response stream, which is exempt from the view filter, so it arrives after the stream's
+        // last block. One for another epoch ends a request this node no longer tracks.
+        HotstuffMessage::CatchUpSyncDone(msg) => {
             if msg.epoch != current_epoch {
                 return MessageRelativeView::Discard;
             }

@@ -15,7 +15,7 @@ use super::{
     ProposalMessage,
     VoteMessage,
 };
-use crate::messages::{CatchUpRequestMessage, MissingTransactionsRequest};
+use crate::messages::{CatchUpDoneMessage, CatchUpRequestMessage, MissingTransactionsRequest};
 
 // Serialize is implemented for the message logger
 #[derive(Debug, Clone, serde::Serialize)]
@@ -42,6 +42,8 @@ pub enum HotstuffMessage {
     /// this is an ordered block import: it is not subject to the live-consensus view filter and is
     /// processed regardless of the current view.
     CatchUpSyncResponse(Box<ProposalMessage>),
+    /// Ends the response to a catch-up request
+    CatchUpSyncDone(CatchUpDoneMessage),
 }
 
 impl HotstuffMessage {
@@ -69,6 +71,7 @@ impl HotstuffMessage {
             Self::MissingTransactionsResponse(_) => "MissingTransactionsResponse",
             Self::CatchUpSyncRequest(_) => "CatchUpSyncRequest",
             Self::CatchUpSyncResponse(_) => "CatchUpSyncResponse",
+            Self::CatchUpSyncDone(_) => "CatchUpSyncDone",
         }
     }
 
@@ -84,6 +87,7 @@ impl HotstuffMessage {
             Self::MissingTransactionsResponse(msg) => msg.epoch,
             Self::CatchUpSyncRequest(msg) => msg.epoch,
             Self::CatchUpSyncResponse(msg) => msg.block.epoch(),
+            Self::CatchUpSyncDone(msg) => msg.epoch,
         }
     }
 
@@ -162,6 +166,14 @@ impl Display for HotstuffMessage {
                     msg.block.justify().height(),
                     msg.block.timeout_certificate().display(),
                     msg.foreign_proposals.len()
+                )
+            },
+            Self::CatchUpSyncDone(msg) => {
+                write!(
+                    f,
+                    "CatchUpSyncDone(Epoch={},End={})",
+                    msg.epoch,
+                    msg.end_height.display()
                 )
             },
         }

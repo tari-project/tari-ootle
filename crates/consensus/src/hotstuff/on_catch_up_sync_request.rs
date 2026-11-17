@@ -15,7 +15,7 @@ use tari_ootle_storage::{
 use crate::{
     bounded_spawn::PerKeyBoundedSpawn,
     hotstuff::HotStuffError,
-    messages::{CatchUpRequestMessage, HotstuffMessage, ProposalMessage},
+    messages::{CatchUpDoneMessage, CatchUpRequestMessage, HotstuffMessage, ProposalMessage},
     traits::{ConsensusSpec, OutboundMessaging},
 };
 
@@ -53,17 +53,6 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
     }
 
     pub fn handle(&self, from: TConsensusSpec::Addr, epoch: Epoch, msg: CatchUpRequestMessage) {
-        if msg.epoch != epoch {
-            warn!(
-                target: LOG_TARGET,
-                "Received SyncRequest from {} for epoch {} but our epoch is {}. Ignoring request.",
-                from,
-                msg.epoch,
-                epoch
-            );
-            return;
-        }
-
         let outbound_messaging = self.outbound_messaging.clone();
         let store = self.store.clone();
 
@@ -83,7 +72,9 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
+    /// Streams the requested blocks to `from`, then a [`CatchUpDoneMessage`] naming the last one sent. The done
+    /// message goes out however the stream ends, so the requester learns where it ended, unless sending to `from`
+    /// fails.
     async fn handle_request_task(
         store: TConsensusSpec::StateStore,
         mut outbound_messaging: TConsensusSpec::OutboundMessaging,
@@ -91,6 +82,40 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
         epoch: Epoch,
         msg: CatchUpRequestMessage,
     ) {
+        let request_epoch = msg.epoch;
+        let Ok(end_height) = Self::send_blocks(&store, &mut outbound_messaging, &from, epoch, msg).await else {
+            return;
+        };
+        let done = HotstuffMessage::CatchUpSyncDone(CatchUpDoneMessage {
+            epoch: request_epoch,
+            end_height,
+        });
+        if let Err(err) = outbound_messaging.send(from.clone(), done).await {
+            warn!(target: LOG_TARGET, "Error sending catch-up done to {from}: {err}");
+        }
+    }
+
+    /// Sends the blocks a catch-up request asks for and returns the height of the last one sent, or `Err` when
+    /// sending to `from` fails.
+    #[allow(clippy::too_many_lines)]
+    async fn send_blocks(
+        store: &TConsensusSpec::StateStore,
+        outbound_messaging: &mut TConsensusSpec::OutboundMessaging,
+        from: &TConsensusSpec::Addr,
+        epoch: Epoch,
+        msg: CatchUpRequestMessage,
+    ) -> Result<Option<NodeHeight>, SendFailed> {
+        if msg.epoch != epoch {
+            warn!(
+                target: LOG_TARGET,
+                "Received SyncRequest from {} for epoch {} but our epoch is {}. Ignoring request.",
+                from,
+                msg.epoch,
+                epoch
+            );
+            return Ok(None);
+        }
+
         let result = store.with_read_tx(|tx| {
             let mut leaf_block = LeafBlock::get(tx, epoch)?;
             // Include the block we last proposed if applicable.
@@ -141,23 +166,23 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
 
         let leaf_block = match result {
             Ok(Some(leaf_block)) => leaf_block,
-            Ok(None) => {
-                return;
-            },
+            Ok(None) => return Ok(None),
             Err(err) => {
                 warn!(target: LOG_TARGET, "Failed to process sync request: {}", err);
-                return;
+                return Ok(None);
             },
         };
 
+        let mut last_sent = None;
+
         let start_height = msg.block_height.max(NodeHeight(1));
-        let batches = CatchUpBatches::new(&store, msg.epoch, start_height, leaf_block.height());
+        let batches = CatchUpBatches::new(store, msg.epoch, start_height, leaf_block.height());
         for result in batches {
             let blocks = match result {
                 Ok(blocks) => blocks,
                 Err(err) => {
                     warn!(target: LOG_TARGET, "Failed to fetch blocks for catch-up request: {}", err);
-                    return;
+                    return Ok(last_sent);
                 },
             };
 
@@ -169,7 +194,7 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                     leaf_block.height(),
                     epoch
                 );
-                return;
+                return Ok(last_sent);
             }
 
             info!(
@@ -187,7 +212,7 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                     Ok(foreign_proposals) => foreign_proposals,
                     Err(err) => {
                         warn!(target: LOG_TARGET, "Failed to fetch foreign proposals for block {}: {}", block, err);
-                        return;
+                        return Ok(last_sent);
                     },
                 };
 
@@ -198,6 +223,7 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                     from
                 );
 
+                let height = block.height();
                 let is_leaf = block.id() == leaf_block.block_id();
                 let proposal = ProposalMessage {
                     block,
@@ -214,12 +240,18 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
 
                 if let Err(err) = outbound_messaging.send(from.clone(), message).await {
                     warn!(target: LOG_TARGET, "Error sending SyncResponse: {err}");
-                    return;
+                    return Err(SendFailed);
                 }
+                last_sent = Some(height);
             }
         }
+        Ok(last_sent)
     }
 }
+
+/// Sending to the requester failed, so nothing more can reach it.
+#[derive(Debug)]
+struct SendFailed;
 
 /// The blocks of `epoch` a catch-up response sends, from a start height up to and including the leaf, read in
 /// batches of at most [`CATCH_UP_BATCH_SIZE`] so that no single read transaction spans the whole range.

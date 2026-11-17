@@ -1502,6 +1502,59 @@ mod local_only {
             })
             .unwrap();
     }
+
+    #[test]
+    fn try_lock_lets_local_only_input_use_a_version_another_local_only_transaction_is_creating() {
+        use crate::hotstuff::substate_store::LockFailedError;
+
+        let replica = Replica::new();
+        let substate_id = component_id(0x21);
+        replica.add_substate(&substate_id);
+        let v0 = VersionedSubstateId::new(substate_id.clone(), SubstateVersion::ZERO);
+        let v1 = VersionedSubstateId::new(substate_id.clone(), SubstateVersion::new(1));
+        let v2 = VersionedSubstateId::new(substate_id, SubstateVersion::new(2));
+
+        replica
+            .store
+            .with_read_tx(|tx| {
+                let mut store = PendingSubstateStore::init(tx, replica.candidate.as_leaf(), NUM_PRESHARDS)?;
+                // tx1 is creating v1 under a local-only OUTPUT lock; no diff is applied, so v1 is not UP.
+                let tx1 = TransactionId::new([1; 32]);
+                let status = store
+                    .try_lock_all(
+                        tx1,
+                        [
+                            VersionedSubstateIdLockIntent::write(v0.clone(), true),
+                            VersionedSubstateIdLockIntent::output(v1.clone()),
+                        ],
+                        true,
+                    )
+                    .unwrap();
+                assert!(!status.is_any_failed(), "{status:?}");
+
+                // Any other version is still held to the UP check.
+                let tx2 = TransactionId::new([2; 32]);
+                let status = store
+                    .try_lock_all(tx2, [VersionedSubstateIdLockIntent::read(v2.clone(), true)], true)
+                    .unwrap();
+                assert!(
+                    matches!(
+                        status.hard_conflict(),
+                        Some(LockFailedError::SubstateNotFound { id }) if id == &v2
+                    ),
+                    "{status:?}"
+                );
+
+                // The version being created may be read by another local-only transaction before it is UP.
+                let tx3 = TransactionId::new([3; 32]);
+                let status = store
+                    .try_lock_all(tx3, [VersionedSubstateIdLockIntent::read(v1, true)], true)
+                    .unwrap();
+                assert!(!status.is_any_failed(), "{status:?}");
+                Ok::<_, StorageError>(())
+            })
+            .unwrap();
+    }
 }
 
 /// The atom of a LocalPrepare or LocalAccept command.

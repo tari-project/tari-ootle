@@ -621,11 +621,12 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
 
     /// Grants `lock_type` over `id` to `transaction_id`.
     ///
-    /// An input lock requires `id` to be UP, unless a local-only transaction in this block is creating that version
-    /// (see [`Self::is_created_by_local_only_output`]). An OUTPUT lock claims a version that the transaction will create, so it is
-    /// only valid while that version does not exist, unless the lock re-marks a validator fee pool version that this
-    /// block already put UP and that this local-only transaction updates in place. A lock already held over the
-    /// substate says nothing about the requested version, so the assertion must run wherever a lock is granted.
+    /// An input lock requires `id` to be UP, unless a local-only transaction in this chain is creating that version
+    /// (see [`Self::is_created_by_local_only_output`]). An OUTPUT lock claims a version that the transaction will
+    /// create, so it is only valid while that version does not exist, unless the lock re-marks a validator fee pool
+    /// version that this block already put UP and that this local-only transaction updates in place. A lock already
+    /// held over the substate says nothing about the requested version, so the assertion must run wherever a lock is
+    /// granted.
     fn grant_lock(
         &mut self,
         transaction_id: TransactionId,
@@ -654,7 +655,7 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         Ok(())
     }
 
-    /// Whether `id` is the version a local-only transaction in this block is creating: the latest lock on it is a
+    /// Whether `id` is the version a local-only transaction in this chain is creating: the latest lock on it is a
     /// local-only OUTPUT of that same version. Local-only rules let another local-only transaction read or write that
     /// version before it is UP, so the input-lock UP assertion does not apply to it.
     fn is_created_by_local_only_output(&self, id: VersionedSubstateIdRef<'_>) -> Result<bool, SubstateStoreError> {

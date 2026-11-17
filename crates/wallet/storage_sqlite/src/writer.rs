@@ -1326,25 +1326,15 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             } else {
                 change.confidential_after.to_string()
             };
-            if merged_revealed_after == existing_revealed_after &&
-                merged_confidential_after == existing_confidential_after
-            {
-                return Ok(false);
-            }
-            if revealed_before == merged_revealed_after && confidential_before == merged_confidential_after {
-                let deleted = diesel::delete(account_balance_changes::table.filter(account_balance_changes::id.eq(id)))
-                    .execute(self.connection())
-                    .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-                return Ok(deleted == 1);
-            }
-            let updated = diesel::update(account_balance_changes::table.filter(account_balance_changes::id.eq(id)))
-                .set((
-                    account_balance_changes::revealed_after.eq(merged_revealed_after),
-                    account_balance_changes::confidential_after.eq(merged_confidential_after),
-                ))
-                .execute(self.connection())
-                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-            return Ok(updated == 1);
+            return self.apply_merged_balance_change(
+                id,
+                &revealed_before,
+                &existing_revealed_after,
+                &merged_revealed_after,
+                &confidential_before,
+                &existing_confidential_after,
+                &merged_confidential_after,
+            );
         };
         let vault_address = vault_address.to_string();
         let maybe_existing = account_balance_changes::table

@@ -501,6 +501,8 @@ impl WalletDaemonClient {
             .await
     }
 
+    /// Rejects a pending or approved transaction request. Requires an interactive user session: the daemon refuses an
+    /// API key.
     pub async fn reject_transaction_request<T: Borrow<TransactionRequestDecisionRequest>>(
         &mut self,
         request: T,

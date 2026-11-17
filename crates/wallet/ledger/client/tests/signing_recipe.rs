@@ -443,3 +443,110 @@ fn nonce_differs_from_the_tari_schnorr_app() {
 
     assert_ne!(deterministic_nonce(&secret, &pk, &m), tari_schnorr_nonce);
 }
+
+#[test]
+fn sign_stream_state_accepts_canonical_preimages_and_rejects_boundary_spoofing() {
+    use ootle_ledger_common::{
+        OotleStatusWord,
+        arg_types::{SEGMENT_LAST_CHUNK, SignMode, SignStreamState, SigningField, TxDisplay},
+    };
+    use tari_ootle_common_types::InputDeclaration;
+    use tari_template_lib_types::ComponentAddress;
+
+    fn run_stream(
+        mode: SignMode,
+        segments: &[(SigningField, Vec<u8>)],
+        max_chunk: usize,
+    ) -> Result<TxDisplay, OotleStatusWord> {
+        let mut stream = SignStreamState::new(mode);
+        for (field, bytes) in segments {
+            let tag = *field as u8;
+            if bytes.is_empty() {
+                stream.accept_segment(tag | SEGMENT_LAST_CHUNK, &[])?;
+                continue;
+            }
+            let mut chunks = bytes.chunks(max_chunk).peekable();
+            while let Some(chunk) = chunks.next() {
+                let p1 = if chunks.peek().is_none() {
+                    tag | SEGMENT_LAST_CHUNK
+                } else {
+                    tag
+                };
+                stream.accept_segment(p1, chunk)?;
+            }
+        }
+        stream.finish()
+    }
+
+    let seal_signer = pk_bytes(&random_scalar());
+    let authorizer = pk_bytes(&random_scalar());
+    let mut tx = sample_unsigned();
+    tx.min_epoch = Some(Epoch(7));
+    tx.max_epoch = Epoch(99);
+    tx.main_signer = MainSigner::Authorizer(authorizer);
+    tx.inputs
+        .insert(InputDeclaration::read(ComponentAddress::from_array([0x11; 32])));
+    for i in 0..8u8 {
+        tx.blobs.push(Blob::from(vec![i; 16])).unwrap();
+    }
+
+    let to_pairs = |segments: Vec<PreimageSegment>| -> Vec<(SigningField, Vec<u8>)> {
+        segments
+            .into_iter()
+            .map(|s| (SigningField::try_from(s.field as u8).unwrap(), s.bytes))
+            .collect()
+    };
+
+    let add_signer_segments = to_pairs(TransactionSignature::signing_preimage_v1(&seal_signer, &tx));
+    let expected_display = TxDisplay {
+        network: tx.network,
+        fee_instruction_count: tx.fee_instructions.len() as u32,
+    };
+    assert_eq!(
+        run_stream(SignMode::AddSigner, &add_signer_segments, 250),
+        Ok(expected_display)
+    );
+    assert_eq!(
+        run_stream(SignMode::AddSigner, &add_signer_segments, 64),
+        Ok(expected_display)
+    );
+
+    let signer = random_scalar();
+    let auth_msg = message(
+        TX_LABEL_SIGNATURE,
+        &TransactionSignature::signing_preimage_v1(&seal_signer, &tx),
+    );
+    let (auth_pk, auth_sig) = sign(&signer, &auth_msg);
+    let prior = TransactionSignature::new(
+        RistrettoPublicKeyBytes::from_bytes(&auth_pk).unwrap(),
+        sig_bytes(&auth_sig),
+    );
+    let unsealed = UnsealedTransactionV1::new(tx.clone(), vec![prior.clone(), prior.clone(), prior]);
+    let seal_segments = to_pairs(TransactionSealSignature::signing_preimage_v1(&unsealed));
+    assert_eq!(run_stream(SignMode::Seal, &seal_segments, 250), Ok(expected_display));
+    assert_eq!(run_stream(SignMode::Seal, &seal_segments, 64), Ok(expected_display));
+
+    // Shifting the network byte into SchemaVersion or SealSigner to spoof display.network / stealth key derivation is
+    // rejected.
+    let mut shifted_network = seal_segments.clone();
+    shifted_network[0].1.push(0x00);
+    assert_eq!(
+        run_stream(SignMode::Seal, &shifted_network, 250),
+        Err(OotleStatusWord::BadRequest)
+    );
+
+    let mut shifted_seal_signer = add_signer_segments.clone();
+    shifted_seal_signer[1].1.push(0x00);
+    assert_eq!(
+        run_stream(SignMode::AddSigner, &shifted_seal_signer, 250),
+        Err(OotleStatusWord::BadRequest)
+    );
+
+    // Shifting bytes into Network to spoof display.fee_instruction_count is rejected.
+    let mut shifted_fee_count = seal_segments;
+    shifted_fee_count[1].1.extend_from_slice(&[0u8, 0, 0, 0]);
+    assert_eq!(
+        run_stream(SignMode::Seal, &shifted_fee_count, 250),
+        Err(OotleStatusWord::BadRequest)
+    );
+}

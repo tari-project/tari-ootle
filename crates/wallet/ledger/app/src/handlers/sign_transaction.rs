@@ -24,24 +24,20 @@ use ootle_ledger_common::{
     arg_types::{
         FrameKind,
         KeyType,
-        SEGMENT_LAST_CHUNK,
         SignMode,
+        SignStreamState,
         SignTransactionHeader,
         SignTransactionResponse,
-        SigningField,
+        TxDisplay,
     },
 };
 
 use crate::{
     hashing::{MessageHasher, derive_stealth_secret, sign_message},
     key_derive::derive_from_bip32_key,
-    state::{SigningState, State, TxDisplay},
+    state::{SigningState, State},
     status::AppStatus,
 };
-
-fn expected_seq(mode: SignMode) -> &'static [SigningField] {
-    mode.expected_fields()
-}
 
 /// Everything needed to render the review screen and sign once approved.
 pub struct SignReview {
@@ -107,9 +103,7 @@ fn start_stream(state: &mut State, data: &[u8]) -> Result<(), AppStatus> {
         key_type: header.key_type,
         mode: header.mode,
         stealth_public_nonce: header.stealth_public_nonce,
-        field_cursor: 0,
-        in_field: None,
-        display: TxDisplay::default(),
+        stream: SignStreamState::new(header.mode),
     });
     Ok(())
 }
@@ -120,91 +114,9 @@ fn process_segment(state: &mut State, p1: u8, data: &[u8]) -> Result<(), AppStat
         _ => return Err(stream_err()),
     };
 
-    let is_last = (p1 & SEGMENT_LAST_CHUNK) != 0;
-    let field = SigningField::try_from(p1 & !SEGMENT_LAST_CHUNK).map_err(|_| bad_request())?;
-    let seq = expected_seq(signing.mode);
-
-    match signing.in_field {
-        None => {
-            // First chunk of the next expected field.
-            let expected = seq.get(signing.field_cursor).copied().ok_or_else(stream_err)?;
-            if field != expected {
-                return Err(stream_err());
-            }
-            capture_display(&mut signing.display, field, data)?;
-            signing.hasher.update(data).map_err(|_| hash_fail())?;
-            if is_last {
-                signing.field_cursor += 1;
-            } else {
-                signing.in_field = Some(field);
-            }
-        },
-        Some(current) => {
-            // Continuation of a large field.
-            if field != current {
-                return Err(stream_err());
-            }
-            signing.hasher.update(data).map_err(|_| hash_fail())?;
-            if is_last {
-                signing.field_cursor += 1;
-                signing.in_field = None;
-            }
-        },
-    }
+    signing.stream.accept_segment(p1, data)?;
+    signing.hasher.update(data).map_err(|_| hash_fail())?;
     Ok(())
-}
-
-/// Parse the displayable summary fields from a field's first chunk. All values are derived from
-/// the exact bytes hashed, never from a separate host-declared header. A first chunk too short to
-/// hold the field's header is rejected, so a truncated stream cannot spoof the displayed summary
-/// (show `0`/`None`) while the full data is hashed in later chunks.
-fn capture_display(display: &mut TxDisplay, field: SigningField, data: &[u8]) -> Result<(), AppStatus> {
-    match field {
-        SigningField::Network => display.network = *data.first().ok_or_else(bad_request)?,
-        // Vec/IndexSet borsh: leading u32 little-endian length is the element count.
-        SigningField::FeeInstructions => display.fee_instruction_count = read_u32(data)?,
-        SigningField::Instructions => display.instruction_count = read_u32(data)?,
-        SigningField::Inputs => display.input_count = read_u32(data)?,
-        // Option<Epoch> borsh: 1-byte tag, then a u64 little-endian if present.
-        SigningField::MinEpoch => display.min_epoch = read_option_u64(data)?,
-        // Epoch borsh: a bare u64 little-endian — max_epoch is mandatory, so there is no tag.
-        SigningField::MaxEpoch => display.max_epoch = read_u64(data)?,
-        _ => {},
-    }
-    Ok(())
-}
-
-fn read_u32(data: &[u8]) -> Result<u32, AppStatus> {
-    let bytes: [u8; 4] = data
-        .get(..4)
-        .ok_or_else(bad_request)?
-        .try_into()
-        .map_err(|_| bad_request())?;
-    Ok(u32::from_le_bytes(bytes))
-}
-
-fn read_u64(data: &[u8]) -> Result<u64, AppStatus> {
-    let bytes: [u8; 8] = data
-        .get(..8)
-        .ok_or_else(bad_request)?
-        .try_into()
-        .map_err(|_| bad_request())?;
-    Ok(u64::from_le_bytes(bytes))
-}
-
-fn read_option_u64(data: &[u8]) -> Result<Option<u64>, AppStatus> {
-    match data.first() {
-        Some(0) => Ok(None),
-        Some(1) => {
-            let bytes: [u8; 8] = data
-                .get(1..9)
-                .ok_or_else(bad_request)?
-                .try_into()
-                .map_err(|_| bad_request())?;
-            Ok(Some(u64::from_le_bytes(bytes)))
-        },
-        _ => Err(bad_request()),
-    }
 }
 
 fn finalize(state: &mut State) -> Result<ChunkResult, AppStatus> {
@@ -214,10 +126,7 @@ fn finalize(state: &mut State) -> Result<ChunkResult, AppStatus> {
         State::None => return Err(stream_err()),
     };
 
-    if signing.in_field.is_some() || signing.field_cursor != expected_seq(signing.mode).len() {
-        return Err(stream_err());
-    }
-
+    let display = signing.stream.finish()?;
     let message = signing.hasher.finalize().map_err(|_| hash_fail())?;
     Ok(ChunkResult::ReadyToSign(SignReview {
         message,
@@ -226,7 +135,7 @@ fn finalize(state: &mut State) -> Result<ChunkResult, AppStatus> {
         key_type: signing.key_type,
         mode: signing.mode,
         stealth_public_nonce: signing.stealth_public_nonce,
-        display: signing.display,
+        display,
     }))
 }
 
@@ -246,12 +155,6 @@ pub fn review_fields(review: &SignReview) -> Vec<(String, String)> {
         "Fee instructions".to_string(),
         review.display.fee_instruction_count.to_string(),
     ));
-    fields.push(("Instructions".to_string(), review.display.instruction_count.to_string()));
-    fields.push(("Inputs".to_string(), review.display.input_count.to_string()));
-    if let Some(epoch) = review.display.min_epoch {
-        fields.push(("Min epoch".to_string(), epoch.to_string()));
-    }
-    fields.push(("Max epoch".to_string(), review.display.max_epoch.to_string()));
     fields.push(("Tx digest".to_string(), to_hex(&review.message)));
     fields
 }

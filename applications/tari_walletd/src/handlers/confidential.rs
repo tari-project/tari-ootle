@@ -18,7 +18,7 @@ use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
 use tari_ootle_wallet_crypto::OutputWitness;
 use tari_ootle_wallet_sdk::{
     models::{ConfidentialOutputModel, KeyBranch, OutputStatus},
-    storage::{WalletStoreWriter, WriteableWalletStore},
+    storage::{ReadableWalletStore, WalletStoreWriter, WriteableWalletStore},
 };
 use tari_ootle_walletd_client::{
     permissions::{Crud, Permission},
@@ -45,7 +45,7 @@ use crate::handlers::{
     HandlerContext,
     auth::jwt::enforce_scopes,
     helpers::{get_account_or_default, invalid_params, invalid_request},
-    transaction_requests::ensure_free_locks_of,
+    transaction_requests::{ensure_free_locks_of, ensure_locks_owned_by},
     value_lookup::{AbortQueuedOnDropGuard, ValueRangeRequest},
 };
 
@@ -234,7 +234,9 @@ pub async fn handle_finalize_transfer(
     req: ProofsFinalizeRequest,
 ) -> Result<ProofsFinalizeResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    context.authorize(token, &[Permission::Confidential(Crud::Update, None)])?;
+    let auth = context.authorize_with_identity(token, &[Permission::Confidential(Crud::Update, None)])?;
+    sdk.store()
+        .with_read_tx(|tx| ensure_locks_owned_by(tx, auth.lock_owner(), &[req.lock_id], "lock_id"))?;
     let transaction = sdk
         .transaction_api()
         .get(req.transaction_id)
@@ -466,7 +468,7 @@ mod tests {
     use tari_ootle_wallet_sdk::{
         crypto::memo::Memo,
         models::{KeyId, LockOwner, WalletLockId},
-        storage::{ReadableWalletStore, WalletStoreReader},
+        storage::WalletStoreReader,
     };
     use tari_ootle_walletd_client::types::TransactionRequestCreateRequest;
     use tari_template_lib_types::{
@@ -603,5 +605,189 @@ mod tests {
             .unwrap();
         assert_eq!(decrypted.value(), 1_000);
         assert_eq!(decrypted.memo, Some(memo));
+    }
+
+    fn insert_finalized_tx(
+        daemon: &TestDaemon,
+        seed: u8,
+        is_dry_run: bool,
+        lock_ids: &[WalletLockId],
+        result: tari_engine_types::commit_result::TransactionResult,
+        status: tari_ootle_wallet_sdk::models::TransactionStatus,
+    ) -> tari_ootle_transaction::TransactionId {
+        use tari_crypto::ristretto::RistrettoSecretKey;
+        use tari_engine_types::{commit_result::FinalizeResult, fees::FeeReceipt};
+        use tari_ootle_transaction::{Transaction, args};
+        use tari_ootle_wallet_sdk::models::WalletTransactionUpdate;
+        use tari_template_lib_types::ComponentAddress;
+
+        let sdk = daemon.context.wallet_sdk();
+        let tx = Transaction::builder_localnet(Epoch(100))
+            .with_dry_run(is_dry_run)
+            .call_method(ComponentAddress::from_array([seed; 32]), "noop", args![])
+            .build_and_seal(&RistrettoSecretKey::from(u64::from(seed)));
+        let tx_id = sdk
+            .transaction_api()
+            .insert_new_transaction(tx, None, &[], is_dry_run, lock_ids)
+            .unwrap();
+        let finalize = FinalizeResult::new(tx_id.into_array().into(), vec![], vec![], result, FeeReceipt::default());
+        sdk.store()
+            .with_write_tx(|tx| {
+                tx.transactions_update(
+                    WalletTransactionUpdate::new(tx_id)
+                        .with_result(Some(&finalize))
+                        .with_new_status(status),
+                )
+            })
+            .unwrap();
+        tx_id
+    }
+
+    fn assert_invalid_param_err(err: anyhow::Error, field: &str) {
+        use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
+
+        let rpc = err.downcast_ref::<JsonRpcError>().expect("JsonRpcError");
+        assert!(matches!(rpc.error_reason(), JsonRpcErrorReason::InvalidParams));
+        assert!(err.to_string().contains(field), "{err}");
+    }
+
+    #[tokio::test]
+    async fn finalized_diff_requires_a_committed_non_dry_run_transaction() {
+        use tari_engine_types::{
+            commit_result::{ExecutionFailureCode, RejectReason, TransactionResult},
+            substate::SubstateDiff,
+        };
+        use tari_ootle_wallet_sdk::models::TransactionStatus;
+
+        let daemon = TestDaemon::start().await;
+        let sdk = daemon.context.wallet_sdk();
+        let tool = daemon.api_key("proof-tool", "confidential:update");
+        let tool_owner = daemon
+            .context
+            .check_auth_with_identity(Some(&tool))
+            .unwrap()
+            .lock_owner();
+
+        let rejected_lock = lock_for(&daemon, tool_owner);
+        let rejected_tx_id = insert_finalized_tx(
+            &daemon,
+            1,
+            false,
+            &[rejected_lock],
+            TransactionResult::Accept(SubstateDiff::new()),
+            TransactionStatus::Rejected,
+        );
+        assert!(
+            sdk.transaction_api()
+                .get(rejected_tx_id)
+                .unwrap()
+                .finalized_diff()
+                .is_none()
+        );
+        let err = handle_finalize_transfer(&daemon.context, Some(&tool), ProofsFinalizeRequest {
+            transaction_id: rejected_tx_id,
+            lock_id: rejected_lock,
+        })
+        .await
+        .unwrap_err();
+        assert_invalid_param_err(err, "transaction_id");
+        assert!(lock_exists(&daemon, rejected_lock));
+
+        let dry_run_lock = lock_for(&daemon, tool_owner);
+        let dry_run_tx_id = insert_finalized_tx(
+            &daemon,
+            2,
+            true,
+            &[dry_run_lock],
+            TransactionResult::Accept(SubstateDiff::new()),
+            TransactionStatus::Accepted,
+        );
+        assert!(
+            sdk.transaction_api()
+                .get(dry_run_tx_id)
+                .unwrap()
+                .finalized_diff()
+                .is_none()
+        );
+        let err = handle_finalize_transfer(&daemon.context, Some(&tool), ProofsFinalizeRequest {
+            transaction_id: dry_run_tx_id,
+            lock_id: dry_run_lock,
+        })
+        .await
+        .unwrap_err();
+        assert_invalid_param_err(err, "transaction_id");
+        assert!(lock_exists(&daemon, dry_run_lock));
+
+        let fee_only_tx_id = insert_finalized_tx(
+            &daemon,
+            3,
+            false,
+            &[],
+            TransactionResult::AcceptFeeRejectRest(SubstateDiff::new(), RejectReason::ExecutionFailure {
+                code: ExecutionFailureCode::Conflict,
+                message: "rest aborted".to_string(),
+            }),
+            TransactionStatus::OnlyFeeAccepted,
+        );
+        assert!(
+            sdk.transaction_api()
+                .get(fee_only_tx_id)
+                .unwrap()
+                .finalized_diff()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_proof_can_only_be_finalized_by_its_lock_owner() {
+        use tari_engine_types::{commit_result::TransactionResult, substate::SubstateDiff};
+        use tari_ootle_wallet_sdk::models::TransactionStatus;
+
+        let daemon = TestDaemon::start().await;
+        let tool = daemon.api_key("proof-tool", "confidential:update");
+        let other_tool = daemon.api_key("other-tool", "confidential:update");
+        let tool_owner = daemon
+            .context
+            .check_auth_with_identity(Some(&tool))
+            .unwrap()
+            .lock_owner();
+
+        let tool_lock = lock_for(&daemon, tool_owner);
+        let wallet_lock = lock_for(&daemon, LockOwner::Wallet);
+        let accepted_tx_id = insert_finalized_tx(
+            &daemon,
+            4,
+            false,
+            &[tool_lock, wallet_lock],
+            TransactionResult::Accept(SubstateDiff::new()),
+            TransactionStatus::Accepted,
+        );
+
+        let err = handle_finalize_transfer(&daemon.context, Some(&other_tool), ProofsFinalizeRequest {
+            transaction_id: accepted_tx_id,
+            lock_id: tool_lock,
+        })
+        .await
+        .unwrap_err();
+        assert_invalid_param_err(err, "lock_id");
+        assert!(lock_exists(&daemon, tool_lock));
+
+        let err = handle_finalize_transfer(&daemon.context, Some(&tool), ProofsFinalizeRequest {
+            transaction_id: accepted_tx_id,
+            lock_id: wallet_lock,
+        })
+        .await
+        .unwrap_err();
+        assert_invalid_param_err(err, "lock_id");
+        assert!(lock_exists(&daemon, wallet_lock));
+
+        handle_finalize_transfer(&daemon.context, Some(&tool), ProofsFinalizeRequest {
+            transaction_id: accepted_tx_id,
+            lock_id: tool_lock,
+        })
+        .await
+        .unwrap();
+        assert!(!lock_exists(&daemon, tool_lock));
+        assert!(lock_exists(&daemon, wallet_lock));
     }
 }

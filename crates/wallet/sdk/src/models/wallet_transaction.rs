@@ -44,8 +44,14 @@ impl WalletTransaction {
         self.status.is_accepted()
     }
 
+    /// Returns the accepted diff only when this transaction was actually committed on-chain.
+    /// Aborted (`Rejected`) or dry-run transactions can carry an `Accept` diff from execution
+    /// before consensus aborted them, and their inputs were never committed.
     pub fn finalized_diff(&self) -> Option<&SubstateDiff> {
-        self.finalize.as_ref().and_then(|f| f.any_accept())
+        (!self.is_dry_run && self.status.is_any_accept())
+            .then_some(self.finalize.as_ref())
+            .flatten()
+            .and_then(|f| f.any_accept())
     }
 
     pub fn failure_reason_as_string(&self) -> Option<String> {

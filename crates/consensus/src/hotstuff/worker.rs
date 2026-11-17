@@ -1896,8 +1896,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             }
             debug!(
                 target: LOG_TARGET,
-                "⏳ Catch-up from {} in progress (expected up to {}). Missing justify block {remote_epoch}/{remote_height} \
-                 joins it.",
+                "⏳ Catch-up from {} in progress (expected up to {}). Target {remote_epoch}/{remote_height} joins it.",
                 catch_up.from,
                 catch_up.remote_height.display(),
             );

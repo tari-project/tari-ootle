@@ -433,7 +433,9 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             let mut foreign_unparked_blocks = Vec::new();
             for transaction_id in transaction_ids {
                 debug!(target: LOG_TARGET, "🔍 Checking if transaction {} unparks any blocks", transaction_id);
-                let unparked = tx.parked_block_remove_missing_transaction(transaction_id)?;
+                let mut unparked = tx.parked_block_remove_missing_transaction(transaction_id)?;
+                // A justify block decides whether it parks again before its children check it.
+                unparked.sort_by_key(|(block, _, _)| (block.epoch(), block.height()));
                 if unparked.is_empty() {
                     debug!(target: LOG_TARGET, "🔍 Transaction {} did not unpark any blocks", transaction_id);
                 } else {
@@ -1903,6 +1905,46 @@ mod tests {
                 .unwrap();
             let unparked = unparked.iter().map(|(msg, _)| *msg.block.id()).collect::<Vec<_>>();
             assert_eq!(unparked, vec![*parent.block.id(), child_id]);
+        }
+
+        #[tokio::test]
+        async fn children_unparked_with_a_block_that_parks_again_park_again_behind_it() {
+            let epoch = Epoch(1);
+            let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+            let dir = tempfile::tempdir().unwrap();
+            let store = TestStore::open(dir.path(), DatabaseOptions::default()).unwrap();
+            let on_message_validate = new_on_message_validate(&store);
+
+            let awaited_by_grandparent = TransactionId::new([1u8; 32]);
+            let awaited_by_parent = TransactionId::new([2u8; 32]);
+            let grandparent = make_catch_up_proposal(epoch, shard_group, awaited_by_grandparent);
+            let parent = make_child_proposal(&grandparent.block, vec![local_only(awaited_by_parent)]);
+            // Several children, so that the order a transaction unparks them in puts some ahead of their parent.
+            let children = (10u8..18)
+                .map(|n| make_child_proposal(&parent.block, vec![local_only(TransactionId::new([n; 32]))]))
+                .collect::<Vec<_>>();
+            // The parent parks on its own transaction while the grandparent is neither held nor parked, and its
+            // children park behind it.
+            park(&store, &parent, &[awaited_by_parent]);
+            park(&store, &grandparent, &[awaited_by_grandparent]);
+            for child in &children {
+                park(&store, child, &[awaited_by_parent]);
+            }
+
+            let (unparked, _) = on_message_validate
+                .update_parked_blocks([awaited_by_parent].iter())
+                .unwrap();
+            assert!(
+                unparked.is_empty(),
+                "the parent parks again behind the grandparent and its children behind it"
+            );
+
+            let (unparked, _) = on_message_validate
+                .update_parked_blocks([awaited_by_grandparent].iter())
+                .unwrap();
+            let heights = unparked.iter().map(|(msg, _)| msg.block.height()).collect::<Vec<_>>();
+            assert_eq!(heights.len(), children.len() + 2);
+            assert!(heights.is_sorted(), "parents are processed before their children");
         }
 
         #[tokio::test]

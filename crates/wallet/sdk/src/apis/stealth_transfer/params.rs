@@ -49,71 +49,38 @@ pub struct StealthTransferParams {
 
 impl StealthTransferParams {
     pub fn validate(&self, network: Network) -> Result<(), StealthTransferApiError> {
-        if self.outputs.is_empty() {
-            return Err(StealthTransferApiError::InvalidParameter {
-                param: "outputs",
-                reason: "At least one output must be specified".to_string(),
-            });
-        }
-
-        let blinded_count = self.outputs.iter().filter(|o| o.blinded_amount > 0).count();
-        if blinded_count > MAX_LAZY_BP_AGG_FACTORS {
-            return Err(StealthTransferApiError::InvalidParameter {
-                param: "outputs",
-                reason: format!(
-                    "Number of outputs ({}) exceeds maximum allowed ({})",
-                    blinded_count, MAX_LAZY_BP_AGG_FACTORS
-                ),
-            });
-        }
-
-        for output in &self.outputs {
-            if output.blinded_amount == 0 && output.revealed_amount.is_zero() {
-                return Err(StealthTransferApiError::InvalidParameter {
-                    param: "blinded_output_amount and revealed_output_amount",
-                    reason: "At least one of the amounts must be greater than zero".to_string(),
-                });
-            }
-
-            if output.address.network() != network {
-                return Err(StealthTransferApiError::InvalidParameter {
-                    param: "destination_address",
-                    reason: format!(
-                        "Destination address network ({}) does not match wallet network ({})",
-                        output.address.network(),
-                        network
-                    ),
-                });
-            }
-
-            output
-                .address
-                .validate()
-                .map_err(|e| StealthTransferApiError::InvalidParameter {
-                    param: "destination_address",
-                    reason: format!("Invalid destination address: {}", e),
-                })?;
-
-            output
-                .validate_pay_to()
-                .map_err(|reason| StealthTransferApiError::InvalidParameter {
-                    param: "pay_to",
-                    reason,
-                })?;
-        }
+        validate_transfer_outputs(&self.outputs, network)?;
 
         // A TARI transfer may select inputs covering the outputs and the fee together.
         self.total_output_amount_with_fee(Amount::from(self.max_fee))?;
 
-        if let Some(swap) = &self.fee_params.pay_fee_with_swap &&
-            !swap.input_amount.is_positive()
+        if let BadgeUsage::AmountOfResource { amount, .. } = &self.badge_usage &&
+            !amount.is_positive()
         {
             return Err(StealthTransferApiError::InvalidParameter {
-                param: "pay_fee_with_swap.input_amount",
-                reason: "The amount of the input resource to swap for the fee must be specified. Use \
-                         swap_pools.get_exchange_rate to estimate it."
-                    .to_string(),
+                param: "badge_usage",
+                reason: "Badge resource amount must be greater than zero".to_string(),
             });
+        }
+
+        if let Some(swap) = &self.fee_params.pay_fee_with_swap {
+            if !swap.input_amount.is_positive() {
+                return Err(StealthTransferApiError::InvalidParameter {
+                    param: "pay_fee_with_swap.input_amount",
+                    reason: "The amount of the input resource to swap for the fee must be specified. Use \
+                             swap_pools.get_exchange_rate to estimate it."
+                        .to_string(),
+                });
+            }
+            if swap.min_xtr_output_amount < Amount::from(self.max_fee) {
+                return Err(StealthTransferApiError::InvalidParameter {
+                    param: "pay_fee_with_swap.min_xtr_output_amount",
+                    reason: format!(
+                        "Minimum XTR swap output ({}) must be at least max_fee ({})",
+                        swap.min_xtr_output_amount, self.max_fee
+                    ),
+                });
+            }
         }
 
         Ok(())
@@ -268,6 +235,66 @@ impl InputSelection {
             InputSelection::FromBucket { .. } | InputSelection::Selection(_) => None,
         }
     }
+}
+
+pub(super) fn validate_transfer_outputs(
+    outputs: &[TransferOutput],
+    network: Network,
+) -> Result<(), StealthTransferApiError> {
+    if outputs.is_empty() {
+        return Err(StealthTransferApiError::InvalidParameter {
+            param: "outputs",
+            reason: "At least one output must be specified".to_string(),
+        });
+    }
+
+    let blinded_count = outputs.iter().filter(|o| o.blinded_amount > 0).count();
+    if blinded_count > MAX_LAZY_BP_AGG_FACTORS {
+        return Err(StealthTransferApiError::InvalidParameter {
+            param: "outputs",
+            reason: format!(
+                "Number of outputs ({}) exceeds maximum allowed ({})",
+                blinded_count, MAX_LAZY_BP_AGG_FACTORS
+            ),
+        });
+    }
+
+    for output in outputs {
+        if output.blinded_amount == 0 && output.revealed_amount.is_zero() {
+            return Err(StealthTransferApiError::InvalidParameter {
+                param: "blinded_output_amount and revealed_output_amount",
+                reason: "At least one of the amounts must be greater than zero".to_string(),
+            });
+        }
+
+        if output.address.network() != network {
+            return Err(StealthTransferApiError::InvalidParameter {
+                param: "destination_address",
+                reason: format!(
+                    "Destination address network ({}) does not match wallet network ({})",
+                    output.address.network(),
+                    network
+                ),
+            });
+        }
+
+        output
+            .address
+            .validate()
+            .map_err(|e| StealthTransferApiError::InvalidParameter {
+                param: "destination_address",
+                reason: format!("Invalid destination address: {}", e),
+            })?;
+
+        output
+            .validate_pay_to()
+            .map_err(|reason| StealthTransferApiError::InvalidParameter {
+                param: "pay_to",
+                reason,
+            })?;
+    }
+
+    Ok(())
 }
 
 /// One stealth transfer statement for [`StealthTransferApi::create_transfer_statements`] to build.
@@ -607,5 +634,35 @@ mod tests {
             args: vec![Bytes::from_vec(vec![0xff])],
         };
         assert_rejects_pay_to(PayTo::TemplateFunction(invalid_cbor_tf));
+    }
+
+    #[test]
+    fn rejects_zero_amount_badge_usage() {
+        let mut params = params_paying_to(100, 0, PayTo::StealthPublicKey);
+        params.badge_usage = BadgeUsage::AmountOfResource {
+            resource: STEALTH_TARI_RESOURCE_ADDRESS,
+            amount: Amount::zero(),
+        };
+        let err = params.validate(NETWORK).unwrap_err();
+        assert!(matches!(err, StealthTransferApiError::InvalidParameter {
+            param: "badge_usage",
+            ..
+        }));
+    }
+
+    #[test]
+    fn rejects_fee_swap_min_xtr_below_max_fee() {
+        let mut params = params_paying_fee_with_swap(2100);
+        params
+            .fee_params
+            .pay_fee_with_swap
+            .as_mut()
+            .unwrap()
+            .min_xtr_output_amount = Amount::from(999u64);
+        let err = params.validate(NETWORK).unwrap_err();
+        assert!(matches!(err, StealthTransferApiError::InvalidParameter {
+            param: "pay_fee_with_swap.min_xtr_output_amount",
+            ..
+        }));
     }
 }

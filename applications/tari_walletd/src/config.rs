@@ -309,8 +309,9 @@ fn return_default_rpc_address() -> SocketAddr {
 
 /// Serde support for [`Duration`] fields as human-friendly strings (e.g. `5min`, `1h 30m`).
 mod duration_serde {
-    use serde::{Deserialize, Deserializer, Serializer};
     use std::time::Duration;
+
+    use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&super::format_duration(*duration))

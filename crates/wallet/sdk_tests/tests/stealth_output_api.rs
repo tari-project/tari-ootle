@@ -21,11 +21,13 @@ use tari_ootle_wallet_sdk::{
         stealth_outputs::StealthOutputsApiError,
         stealth_transfer::{
             BadgeUsage,
+            InputSelection,
             PayFeeWithSwapParams,
             StealthTransferApiError,
             StealthTransferParams,
             TransferFeeParams,
             TransferOutput,
+            TransferStatementSpec,
         },
     },
     crypto::pay_to::PayTo,
@@ -1582,4 +1584,77 @@ async fn stealth_transfer_with_badge_authorizes_proof_around_stealth_transfer() 
         "merged badge authorization must wrap StealthTransfer before DropProofAuthorization"
     );
     merged_lock.release();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_transfer_statements_selection_adds_and_tracks_change_output() {
+    let sets = [ValidatorSetFixture::new(1)];
+    let network = ProvingNetwork::new(&sets, 0);
+    let test = TestWithNetwork::with_network(network);
+    let sdk = test.sdk();
+    let sender = sdk
+        .accounts_api()
+        .get_account_by_address(&Test::test_account_address())
+        .unwrap();
+
+    let stealth_resource = resource_address_from_seed(9);
+    sdk.resources_api()
+        .upsert_resource(
+            &stealth_resource,
+            &Resource::new(
+                ResourceType::Stealth,
+                SubstateOwnerRule::None,
+                ResourceAccessRules::new(),
+                Metadata::new(),
+                None,
+                None,
+                6,
+                false,
+            ),
+        )
+        .unwrap();
+    add_owned_stealth_output(&test, &sender, stealth_resource, 100);
+
+    let (_, recipient_pk) = random_keypair();
+    let (_, recipient_view_pk) = random_keypair();
+    let recipient = tari_ootle_address::OotleAddress::new(
+        sender.address().network(),
+        recipient_view_pk.to_byte_type(),
+        recipient_pk.to_byte_type(),
+    );
+
+    let lock = sdk.locks_api().create_lock().unwrap();
+    let built = sdk
+        .stealth_transfer_api()
+        .create_transfer_statements(lock.id(), &[TransferStatementSpec {
+            sender: sender.clone(),
+            resource_address: stealth_resource,
+            input_selection: InputSelection::Selection(UtxoInputSelection::PreferConfidential),
+            outputs: vec![TransferOutput {
+                address: recipient,
+                revealed_amount: Amount::zero(),
+                blinded_amount: 40,
+                memo: None,
+                pay_to: PayTo::StealthPublicKey,
+            }],
+        }])
+        .await
+        .unwrap();
+
+    assert_eq!(built.statements.len(), 1);
+    let outputs = &built.statements[0].outputs_statement.outputs;
+    assert_eq!(outputs.len(), 2, "must include recipient output and change output");
+
+    let unspent_and_locked = sdk
+        .stealth_outputs_api()
+        .utxos_get_many(&stealth_resource, Some(sender.component_address()), None)
+        .unwrap();
+    let change = unspent_and_locked
+        .iter()
+        .find(|o| &o.commitment == outputs[1].commitment())
+        .expect("change output must be recorded as unconfirmed output under the lock");
+    assert_eq!(change.value, 60);
+    assert_eq!(change.status, OutputStatus::LockedUnconfirmed);
+    assert_eq!(change.lock_id, Some(lock.id()));
+    lock.release();
 }

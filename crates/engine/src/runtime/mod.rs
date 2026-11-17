@@ -153,6 +153,8 @@ pub trait RuntimeInterface {
     /// [`tari_engine_types::limits::component_load_points`] for what the state holds before
     /// indexing it. The state itself stays in the store.
     fn load_component(&self, call: ComponentReference) -> Result<LoadedComponent, RuntimeError>;
+    /// Resolves `call` to the address it names, without loading the component or indexing its state.
+    fn resolve_component_address(&self, call: ComponentReference) -> Result<ComponentAddress, RuntimeError>;
 
     fn lock_component(&self, address: ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError>;
     fn unlock_component(&self, lock: LockedSubstate) -> Result<(), RuntimeError>;

@@ -567,8 +567,9 @@ where
         component: ComponentReference,
         change: ComponentRulesChange,
     ) -> Result<Option<IndexedValue>, TransactionErrorKind> {
-        let component = runtime.interface().load_component(component)?;
-        let component_lock = runtime.interface().lock_component(component.address, LockFlag::Write)?;
+        // A rule change touches only the header, so the state is neither indexed nor charged for.
+        let address = runtime.interface().resolve_component_address(component)?;
+        let component_lock = runtime.interface().lock_component(address, LockFlag::Write)?;
         // Checked in the instruction's own scope: no frame is pushed, so the transaction's signer badges and
         // authorized proofs are what satisfy the component's rules updater.
         let result = runtime.interface().set_component_rules(&component_lock, change);

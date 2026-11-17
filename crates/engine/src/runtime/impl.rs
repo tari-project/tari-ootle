@@ -1563,6 +1563,20 @@ where
 
     fn load_component(&self, call: ComponentReference) -> Result<LoadedComponent, RuntimeError> {
         self.invoke_modules_on_runtime_call("load_component")?;
+        let address = self.resolve_component_address(call)?;
+        self.charge_component_load(address)?;
+        self.tracker.write_with(|state_mut| {
+            let component = state_mut.load_and_cache_component(address)?;
+            Ok(LoadedComponent {
+                address,
+                template_address: *component.template_address(),
+                entity_id: *component.entity_id(),
+                state_scope: IndexedWellKnownTypes::from_value(component.state())?,
+            })
+        })
+    }
+
+    fn resolve_component_address(&self, call: ComponentReference) -> Result<ComponentAddress, RuntimeError> {
         let address = match call {
             ComponentReference::Address(address) => address,
             ComponentReference::Workspace(id) => self.tracker.write_with(|state_mut| {
@@ -1618,16 +1632,7 @@ where
                 Ok::<_, RuntimeError>(address)
             })?,
         };
-        self.charge_component_load(address)?;
-        self.tracker.write_with(|state_mut| {
-            let component = state_mut.load_and_cache_component(address)?;
-            Ok(LoadedComponent {
-                address,
-                template_address: *component.template_address(),
-                entity_id: *component.entity_id(),
-                state_scope: IndexedWellKnownTypes::from_value(component.state())?,
-            })
-        })
+        Ok(address)
     }
 
     fn lock_component(&self, address: ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
@@ -4277,6 +4282,7 @@ where
         component_lock: &LockedSubstate,
         change: ComponentRulesChange,
     ) -> Result<(), RuntimeError> {
+        self.invoke_modules_on_runtime_call("set_component_rules")?;
         let template_address = self
             .tracker
             .read_with(|state| Ok::<_, RuntimeError>(*state.get_component(component_lock)?.template_address()))?;

@@ -701,7 +701,9 @@ pub enum RulesUpdater {
     #[default]
     Locked,
     /// Only the component's own code may change the rules, and only while the caller satisfies the owner rule. A
-    /// transaction instruction cannot change them. The template stays free to add its own checks around a change.
+    /// transaction instruction cannot change them. Use this only when the template must run its own logic around a
+    /// change; otherwise prefer `Owner` or `AccessRule`. Components created before this setting existed behave this
+    /// way.
     #[n(1)]
     TemplateManaged,
     /// Whoever satisfies the component's current owner rule, by instruction or from the component's own code.

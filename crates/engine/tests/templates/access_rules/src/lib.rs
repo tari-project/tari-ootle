@@ -59,7 +59,7 @@ mod access_rules_template {
             })
             .with_owner_rule(owner_rule)
             .with_access_rules(component_access_rule)
-            .with_rules_updater(RulesUpdater::TemplateManaged)
+            .with_rules_updater(RulesUpdater::Owner)
             .create()
         }
 
@@ -75,7 +75,6 @@ mod access_rules_template {
                 attack_component: None,
             })
             .with_owner_rule(owner_rule)
-            .with_rules_updater(RulesUpdater::TemplateManaged)
             .create()
         }
 
@@ -111,7 +110,6 @@ mod access_rules_template {
             })
             .with_address_allocation(address_alloc)
             .with_access_rules(ComponentAccessRules::new().default(rule!(allow_all)))
-            .with_rules_updater(RulesUpdater::TemplateManaged)
             .create()
         }
 
@@ -137,7 +135,6 @@ mod access_rules_template {
             })
             .with_address_allocation(address_alloc)
             .with_access_rules(ComponentAccessRules::new().default(rule!(allow_all)))
-            .with_rules_updater(RulesUpdater::TemplateManaged)
             .create()
         }
 
@@ -164,7 +161,6 @@ mod access_rules_template {
             })
             .with_address_allocation(address_alloc)
             .with_access_rules(ComponentAccessRules::new().default(rule!(allow_all)))
-            .with_rules_updater(RulesUpdater::TemplateManaged)
             .create()
         }
 
@@ -192,7 +188,6 @@ mod access_rules_template {
             })
             .with_address_allocation(address_alloc)
             .with_access_rules(ComponentAccessRules::new().default(rule!(allow_all)))
-            .with_rules_updater(RulesUpdater::TemplateManaged)
             .create()
         }
 
@@ -219,7 +214,6 @@ mod access_rules_template {
             })
             .with_address_allocation(address_alloc)
             .with_access_rules(ComponentAccessRules::new().default(rule!(allow_all)))
-            .with_rules_updater(RulesUpdater::TemplateManaged)
             .create()
         }
 
@@ -247,7 +241,6 @@ mod access_rules_template {
                     .method("take_tokens", rule!(allow_all))
                     .default(rule!(deny_all)),
             )
-            .with_rules_updater(RulesUpdater::TemplateManaged)
             .create()
         }
 
@@ -294,7 +287,6 @@ mod access_rules_template {
                 attack_component: None,
             })
             .with_access_rules(ComponentAccessRules::new().default(rule!(allow_all)))
-            .with_rules_updater(RulesUpdater::TemplateManaged)
             .create()
         }
 
@@ -317,7 +309,6 @@ mod access_rules_template {
                 attack_component: None,
             })
             .with_access_rules(ComponentAccessRules::new().default(rule!(allow_all)))
-            .with_rules_updater(RulesUpdater::TemplateManaged)
             .create()
         }
 
@@ -340,7 +331,6 @@ mod access_rules_template {
             })
             .with_address_allocation(allocation)
             .with_access_rules(ComponentAccessRules::new().default(rule!(allow_all)))
-            .with_rules_updater(RulesUpdater::TemplateManaged)
             .create()
         }
 
@@ -373,7 +363,6 @@ mod access_rules_template {
             })
             .with_address_allocation(allocation)
             .with_access_rules(ComponentAccessRules::new().default(rule!(allow_all)))
-            .with_rules_updater(RulesUpdater::TemplateManaged)
             .create()
         }
 

@@ -36,7 +36,7 @@ mod template {
                 items: Vec::new(),
                 extra: tari_bor::Value::Null,
             })
-            .with_rules_updater(RulesUpdater::TemplateManaged)
+            .with_rules_updater(RulesUpdater::Owner)
             .create()
         }
 

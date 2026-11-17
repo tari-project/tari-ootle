@@ -77,8 +77,9 @@ impl<T> ComponentBuilder<T> {
 
     /// Sets up who may replace the component's access rules and owner rule, by transaction instruction or through
     /// `ComponentManager::set_access_rules`/`set_owner_rule`. The setting is fixed at creation. Defaults to
-    /// `RulesUpdater::Locked`, under which the rules never change, so a template that changes them from its own code
-    /// must choose `RulesUpdater::TemplateManaged`, `RulesUpdater::Owner` or `RulesUpdater::AccessRule`.
+    /// `RulesUpdater::Locked`, under which the rules never change. `RulesUpdater::Owner` or `RulesUpdater::AccessRule`
+    /// let the rules change by instruction or from the component's own code; `RulesUpdater::TemplateManaged` is for a
+    /// template that must run its own logic around every change.
     pub fn with_rules_updater(mut self, rules_updater: RulesUpdater) -> Self {
         self.rules_updater = rules_updater;
         self

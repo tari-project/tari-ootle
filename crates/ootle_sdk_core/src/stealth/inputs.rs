@@ -84,12 +84,16 @@ impl WantList {
         WantList(items)
     }
 
-    /// The stealth want set for the live two-phase driver: the from-account component, its XTR fee
-    /// vault (and its vault for the transfer resource when withdrawing a non-XTR revealed input),
-    /// prepended to the per-input stealth-UTXO wants. The account and XTR vault are always referenced
-    /// (the fee is paid via `pay_fee_from_component`), so they must be resolved and declared as inputs
-    /// or the engine rejects the tx with the component/vault "not found".
-    /// [`WantList::from_stealth_inputs`] alone omits them — used only by the one-shot path, whose
+    /// The stealth want set for the live two-phase driver:
+    ///
+    /// 1. The `from_account` component (always required for fee payment).
+    /// 2. `from_account`'s **TARI** vault, which pays the fee via `pay_fee_from_component`.
+    /// 3. `from_account`'s vault for `intent.resource_address`, only when `revealed_input_amount > 0` and the resource
+    ///    is not TARI.
+    /// 4. Optional recipient account and vault wants for each output with `revealed_amount > 0`.
+    /// 5. The per-input stealth-UTXO wants.
+    ///
+    /// [`WantList::from_stealth_inputs`] alone emits only (5) — used by the one-shot path, whose
     /// caller supplies every substate up front.
     pub fn from_stealth_inputs_with_account(intent: &StealthTransferIntent) -> Self {
         let from_account = intent.from_account.as_str().to_string();
@@ -162,7 +166,7 @@ impl WantList {
                     ..
                 },
             ) => ac == bc && ar == br,
-            _ => existing == &want,
+            _ => false,
         });
         if !exists {
             items.push(want);

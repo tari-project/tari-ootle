@@ -283,8 +283,6 @@ where
             }
         }
 
-        substate_ids.retain(|requirement| requirement.substate_id().is_declarable_input());
-
         // `get_dependent_substates` and the parent fetches above carry the version from the wallet's
         // local store / network scan, ignoring the `unversioned` request. When the caller asked for
         // unversioned dependencies, normalise the whole set: a locally-cached version can be stale

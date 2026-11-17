@@ -2000,8 +2000,16 @@ mod component_rules {
         for (body, expected) in [
             ("set_access_rules!(component, mint = resource(pk));", "not an address"),
             (
-                "set_access_rules!(component, mint = component(badge));",
+                "set_access_rules!(component, mint = caller_component(badge));",
                 "needs a component address",
+            ),
+            (
+                "set_access_rules!(component, mint = component(component));",
+                "scopes a rule to running code",
+            ),
+            (
+                "set_owner_rule!(component, access_rule(template(badge)));",
+                "scopes a rule to running code",
             ),
             ("set_access_rules!(component, mint = public_key(badge));", "not bytes"),
             (

@@ -75,8 +75,6 @@ pub enum RequirementExpr {
     Resource(RuleArg),
     NonFungible(RuleArg),
     PublicKey(RuleArg),
-    Component(RuleArg),
-    Template(RuleArg),
     CallerComponent(RuleArg),
     DirectCallerTemplate(RuleArg),
     AnyCallerComponent,
@@ -99,8 +97,8 @@ impl fmt::Display for RuleArg {
     }
 }
 
-const REQUIREMENTS: &str = "resource, non_fungible, public_key, component, template, caller_component, \
-                            direct_caller_template, any_caller_component, any_caller_template";
+const REQUIREMENTS: &str = "resource, non_fungible, public_key, caller_component, direct_caller_template, \
+                            any_caller_component, any_caller_template";
 
 /// `rules_var` or `default = rule, method = rule, ..`.
 pub(crate) fn parse_access_rules(input: ParseStream) -> syn::Result<AccessRulesExpr> {
@@ -241,8 +239,15 @@ fn parse_requirement_named(name: &Ident, input: ParseStream) -> syn::Result<Requ
         "resource" => RequirementExpr::Resource(parse_single_arg(input, name)?),
         "non_fungible" => RequirementExpr::NonFungible(parse_single_arg(input, name)?),
         "public_key" => RequirementExpr::PublicKey(parse_single_arg(input, name)?),
-        "component" => RequirementExpr::Component(parse_single_arg(input, name)?),
-        "template" => RequirementExpr::Template(parse_single_arg(input, name)?),
+        // The engine accepts no scoped requirement in a component's access rules or owner rule.
+        "component" | "template" => {
+            return Err(syn::Error::new_spanned(
+                name,
+                format!(
+                    "`{name}(..)` scopes a rule to running code, which component access and owner rules do not accept"
+                ),
+            ));
+        },
         "caller_component" => RequirementExpr::CallerComponent(parse_single_arg(input, name)?),
         "direct_caller_template" => RequirementExpr::DirectCallerTemplate(parse_single_arg(input, name)?),
         "any_caller_component" => RequirementExpr::AnyCallerComponent,
@@ -372,14 +377,6 @@ impl RequirementExpr {
                 other => return Err(wrong_address(arg, "non_fungible", &other)),
             },
             Self::PublicKey(arg) => RuleRequirement::from(public_key(vars, arg)?),
-            Self::Component(arg) => match substate_id(vars, arg, "component")? {
-                SubstateId::Component(address) => RuleRequirement::ScopedToComponent(address),
-                other => return Err(wrong_address(arg, "component", &other)),
-            },
-            Self::Template(arg) => match substate_id(vars, arg, "template")? {
-                SubstateId::Template(address) => RuleRequirement::ScopedToTemplate(address.as_template_address()),
-                other => return Err(wrong_address(arg, "template", &other)),
-            },
             Self::CallerComponent(arg) => match substate_id(vars, arg, "caller_component")? {
                 SubstateId::Component(address) => RuleRequirement::CallerComponent(address),
                 other => return Err(wrong_address(arg, "caller_component", &other)),
@@ -417,7 +414,7 @@ fn wrong_address(arg: &RuleArg, rule: &str, id: &SubstateId) -> ManifestError {
         match rule {
             "resource" => "resource",
             "non_fungible" => "non-fungible",
-            "component" | "caller_component" => "component",
+            "caller_component" => "component",
             _ => "template",
         }
     ))

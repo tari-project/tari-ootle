@@ -104,9 +104,9 @@ set_owner_rule!(component, public_key(pk));
 variable holding the encoded `ComponentAccessRules` or `OwnerRule`.
 
 Rules use the template library's `rule!` syntax: `allow_all`, `deny_all`, `any_of(..)`, `all_of(..)`,
-`m_of_n(m, ..)` and the requirements `resource(x)`, `non_fungible(x)`, `public_key(x)`, `component(x)`,
-`template(x)`, `caller_component(x)`, `direct_caller_template(x)`, `any_caller_component` and
-`any_caller_template`. Each `x` is a variable, `TARI`, or a string literal read like a manifest variable
+`m_of_n(m, ..)` and the requirements `resource(x)`, `non_fungible(x)`, `public_key(x)`, `caller_component(x)`,
+`direct_caller_template(x)`, `any_caller_component` and `any_caller_template`. The scoped requirements
+`component(x)` and `template(x)` are rejected, because component access and owner rules do not accept them. Each `x` is a variable, `TARI`, or a string literal read like a manifest variable
 (`"resource_<hex>"`, `"nft_<hex>_str_name"`, hex public key bytes).
 
 The engine applies the change only if the component's rules updater, fixed at creation, permits it.

@@ -16,9 +16,9 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::epoch_oracles::hybrid";
 
-pub struct HybridEpochOracle<TStore> {
+pub struct HybridEpochOracle<TStore, TBaseLayer = BaseLayerOracle<TStore>> {
     configured: ConfiguredEpochOracle<TStore, MpscEpochTicker>,
-    base_layer: BaseLayerOracle<TStore>,
+    base_layer: TBaseLayer,
     trigger: mpsc::UnboundedSender<EpochTickerData>,
     has_initial_sync_completed: bool,
     last_triggered_epoch: Option<Epoch>,
@@ -30,10 +30,14 @@ pub struct HybridEpochOracle<TStore> {
     ready_event: Option<EpochEvent>,
 }
 
-impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> HybridEpochOracle<TStore> {
+impl<TStore, TBaseLayer> HybridEpochOracle<TStore, TBaseLayer>
+where
+    TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static,
+    TBaseLayer: EpochEventOracle + Send + 'static,
+{
     pub fn new(
         configured: ConfiguredEpochOracle<TStore, MpscEpochTicker>,
-        base_layer: BaseLayerOracle<TStore>,
+        base_layer: TBaseLayer,
         trigger: mpsc::UnboundedSender<EpochTickerData>,
     ) -> Self {
         Self {
@@ -49,8 +53,10 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> Hybr
     }
 }
 
-impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> EpochEventOracle
-    for HybridEpochOracle<TStore>
+impl<TStore, TBaseLayer> EpochEventOracle for HybridEpochOracle<TStore, TBaseLayer>
+where
+    TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static,
+    TBaseLayer: EpochEventOracle + Send + 'static,
 {
     async fn next_epoch_event(&mut self) -> Option<EpochEvent> {
         if let Some(event) = self.ready_event.take() {
@@ -117,5 +123,211 @@ impl<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Send + 'static> Epoc
     fn observed_epoch_boundary_hash(&self, epoch: Epoch) -> anyhow::Result<Option<FixedHash>> {
         // Epoch boundaries in hybrid mode are scanned by the base-layer oracle; defer to it.
         self.base_layer.observed_epoch_boundary_hash(epoch)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::{HashMap, VecDeque},
+        sync::Mutex,
+        time::Duration,
+    };
+
+    use serde::{Serialize, de::DeserializeOwned};
+    use tari_ootle_storage::global::BlockHeaderModel;
+
+    use super::*;
+    use crate::{configured::Config, hybrid::mpsc_ticker};
+
+    #[derive(Default)]
+    struct TestStore {
+        data: Mutex<HashMap<Vec<u8>, Vec<u8>>>,
+    }
+
+    impl EpochOracleStore for TestStore {
+        fn get<T: DeserializeOwned>(&self, key: &[u8]) -> anyhow::Result<Option<T>> {
+            let data = self.data.lock().unwrap();
+            data.get(key).map(|v| Ok(serde_json::from_slice(v)?)).transpose()
+        }
+
+        fn set<T: Serialize>(&self, key: &[u8], value: &T) -> anyhow::Result<()> {
+            let mut data = self.data.lock().unwrap();
+            data.insert(key.to_vec(), serde_json::to_vec(value)?);
+            Ok(())
+        }
+    }
+
+    impl BaseLayerBlockHeaderStore for TestStore {
+        fn add_block_headers<I: IntoIterator<Item = BlockHeaderModel>>(&self, _headers: I) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn find_block_header_by_hash(
+            &self,
+            _max_epoch: Epoch,
+            _block_hash: &FixedHash,
+        ) -> anyhow::Result<Option<BlockHeaderModel>> {
+            Ok(None)
+        }
+
+        fn get_first_block_header_in_epoch(&self, _epoch: Epoch) -> anyhow::Result<Option<BlockHeaderModel>> {
+            Ok(None)
+        }
+
+        fn delete_block_headers_above(&self, _height: u64) -> anyhow::Result<usize> {
+            Ok(0)
+        }
+    }
+
+    struct ScriptedBaseLayerOracle {
+        events: VecDeque<EpochEvent>,
+    }
+
+    impl EpochEventOracle for ScriptedBaseLayerOracle {
+        async fn next_epoch_event(&mut self) -> Option<EpochEvent> {
+            self.events.pop_front()
+        }
+    }
+
+    fn mk_config() -> Config {
+        Config {
+            epoch_time: Some(Duration::from_secs(1)),
+            initial_epoch: Epoch(0),
+            base_time: time::OffsetDateTime::now_utc(),
+            validators: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn done_for_now_after_epoch_changed_does_not_emit_duplicate_epoch_changed() {
+        let hash_1 = FixedHash::from([1u8; FixedHash::byte_size()]);
+        let hash_2 = FixedHash::from([2u8; FixedHash::byte_size()]);
+        let base_layer = ScriptedBaseLayerOracle {
+            events: VecDeque::from(vec![
+                EpochEvent::EpochChanged {
+                    epoch: Epoch(1),
+                    epoch_hash: hash_1,
+                },
+                EpochEvent::DoneForNow {
+                    epoch: Epoch(1),
+                    epoch_hash: hash_1,
+                },
+                EpochEvent::EpochChanged {
+                    epoch: Epoch(2),
+                    epoch_hash: hash_2,
+                },
+            ]),
+        };
+
+        let (ticker, trigger) = mpsc_ticker();
+        let configured = ConfiguredEpochOracle::with_custom_ticker(mk_config(), TestStore::default(), ticker);
+        let mut hybrid = HybridEpochOracle::new(configured, base_layer, trigger);
+
+        let mut events = Vec::new();
+        while let Some(ev) = hybrid.next_epoch_event().await {
+            events.push(ev);
+        }
+
+        assert!(
+            matches!(
+                events.as_slice(),
+                [
+                    EpochEvent::EpochChanged { epoch: Epoch(1), epoch_hash: h1 },
+                    EpochEvent::DoneForNow { epoch: Epoch(1), epoch_hash: h1_done },
+                    EpochEvent::EpochChanged { epoch: Epoch(2), epoch_hash: h2 },
+                    EpochEvent::DoneForNow { epoch: Epoch(2), epoch_hash: h2_done },
+                ] if *h1 == hash_1 && *h1_done == hash_1 && *h2 == hash_2 && *h2_done == hash_2
+            ),
+            "unexpected hybrid oracle event sequence: {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn done_for_now_without_prior_epoch_changed_still_triggers_configured_oracle() {
+        let hash_0 = FixedHash::from([9u8; FixedHash::byte_size()]);
+        let base_layer = ScriptedBaseLayerOracle {
+            events: VecDeque::from(vec![EpochEvent::DoneForNow {
+                epoch: Epoch(0),
+                epoch_hash: hash_0,
+            }]),
+        };
+
+        let (ticker, trigger) = mpsc_ticker();
+        let configured = ConfiguredEpochOracle::with_custom_ticker(mk_config(), TestStore::default(), ticker);
+        let mut hybrid = HybridEpochOracle::new(configured, base_layer, trigger);
+
+        let mut events = Vec::new();
+        while let Some(ev) = hybrid.next_epoch_event().await {
+            events.push(ev);
+        }
+
+        assert!(
+            matches!(
+                events.as_slice(),
+                [
+                    EpochEvent::EpochChanged { epoch: Epoch(0), epoch_hash: h0 },
+                    EpochEvent::DoneForNow { epoch: Epoch(0), epoch_hash: h0_done },
+                ] if *h0 == hash_0 && *h0_done == hash_0
+            ),
+            "unexpected hybrid oracle event sequence: {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn done_for_now_waits_for_held_back_configured_epoch_changed() {
+        struct ChannelBaseLayerOracle {
+            rx: mpsc::UnboundedReceiver<EpochEvent>,
+        }
+
+        impl EpochEventOracle for ChannelBaseLayerOracle {
+            async fn next_epoch_event(&mut self) -> Option<EpochEvent> {
+                self.rx.recv().await
+            }
+        }
+
+        let hash_1 = FixedHash::from([3u8; FixedHash::byte_size()]);
+        let (base_tx, base_rx) = mpsc::unbounded_channel();
+        let (cfg_tx, cfg_rx) = mpsc::unbounded_channel();
+
+        let (ticker, trigger) = mpsc_ticker();
+        let configured = ConfiguredEpochOracle::with_custom_ticker(mk_config(), TestStore::default(), ticker)
+            .with_config_updates(cfg_rx);
+        let mut hybrid = HybridEpochOracle::new(configured, ChannelBaseLayerOracle { rx: base_rx }, trigger);
+
+        base_tx
+            .send(EpochEvent::EpochChanged {
+                epoch: Epoch(1),
+                epoch_hash: hash_1,
+            })
+            .unwrap();
+        base_tx
+            .send(EpochEvent::DoneForNow {
+                epoch: Epoch(1),
+                epoch_hash: hash_1,
+            })
+            .unwrap();
+
+        let release = tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            cfg_tx.send(None).unwrap();
+            tokio::task::yield_now().await;
+            drop(base_tx);
+        });
+
+        let first = hybrid.next_epoch_event().await;
+        let second = hybrid.next_epoch_event().await;
+        release.await.unwrap();
+
+        assert!(
+            matches!(
+                (first, second),
+                (
+                    Some(EpochEvent::EpochChanged { epoch: Epoch(1), epoch_hash: h1 }),
+                    Some(EpochEvent::DoneForNow { epoch: Epoch(1), epoch_hash: h1_done }),
+                ) if h1 == hash_1 && h1_done == hash_1
+            ),
+            "deferred DoneForNow must follow held-back EpochChanged"
+        );
     }
 }

@@ -26,8 +26,9 @@ mod cli;
 /// Formats a duration as a compact human-readable string, e.g. `1h 2m 3s` or `45s`.
 fn format_duration(duration: Duration) -> String {
     let secs = duration.as_secs();
+    let millis = duration.subsec_millis();
     if secs == 0 {
-        return format!("{}ms", duration.subsec_millis());
+        return format!("{}ms", millis);
     }
     let days = secs / 86_400;
     let hours = (secs % 86_400) / 3_600;
@@ -43,8 +44,11 @@ fn format_duration(duration: Duration) -> String {
     if mins > 0 {
         parts.push(format!("{mins}m"));
     }
-    if s > 0 || parts.is_empty() {
+    if s > 0 || (parts.is_empty() && millis == 0) {
         parts.push(format!("{s}s"));
+    }
+    if millis > 0 {
+        parts.push(format!("{millis}ms"));
     }
     parts.join(" ")
 }

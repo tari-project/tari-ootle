@@ -99,76 +99,7 @@ pub struct CreateApiKeyArgs {
 }
 
 fn parse_human_duration(s: &str) -> Result<Duration, String> {
-    parse_duration(s).map_err(|e| format!("invalid duration '{s}': {e}"))
-}
-
-/// Parses a human-friendly duration such as `30d`, `12h`, `1y`, `90 days` or `1day 6h` into a [`Duration`].
-/// Units: `ns`, `us`, `ms`, `s`, `m` (minutes), `h`, `d`, `w`, `M` (months, 30.44 days), `y` (365.25 days).
-fn parse_duration(s: &str) -> Result<Duration, String> {
-    const UNITS: &[(&str, u64)] = &[
-        ("nsec", 1),
-        ("ns", 1),
-        ("usec", 1_000),
-        ("us", 1_000),
-        ("msec", 1_000_000),
-        ("ms", 1_000_000),
-        ("seconds", 1_000_000_000),
-        ("second", 1_000_000_000),
-        ("secs", 1_000_000_000),
-        ("sec", 1_000_000_000),
-        ("s", 1_000_000_000),
-        ("minutes", 60_000_000_000),
-        ("minute", 60_000_000_000),
-        ("mins", 60_000_000_000),
-        ("min", 60_000_000_000),
-        ("m", 60_000_000_000),
-        ("hours", 3_600_000_000_000),
-        ("hour", 3_600_000_000_000),
-        ("hrs", 3_600_000_000_000),
-        ("hr", 3_600_000_000_000),
-        ("h", 3_600_000_000_000),
-        ("days", 86_400_000_000_000),
-        ("day", 86_400_000_000_000),
-        ("d", 86_400_000_000_000),
-        ("weeks", 604_800_000_000_000),
-        ("week", 604_800_000_000_000),
-        ("w", 604_800_000_000_000),
-        ("months", 2_630_016_000_000_000),
-        ("month", 2_630_016_000_000_000),
-        ("M", 2_630_016_000_000_000),
-        ("years", 31_557_600_000_000_000),
-        ("year", 31_557_600_000_000_000),
-        ("y", 31_557_600_000_000_000),
-    ];
-
-    let mut nanos: u128 = 0;
-    let mut rest = s.trim();
-    if rest.is_empty() {
-        return Err("empty duration".to_string());
-    }
-    while !rest.is_empty() {
-        let num_len = rest
-            .find(|c: char| !(c.is_ascii_digit() || c == '.'))
-            .unwrap_or(rest.len());
-        let (num_str, after_num) = rest.split_at(num_len);
-        let value: f64 = num_str
-            .parse()
-            .map_err(|_| format!("invalid number '{num_str}'"))?;
-        rest = after_num.trim_start();
-        let unit_len = rest
-            .find(|c: char| c.is_ascii_digit() || c == '.')
-            .unwrap_or(rest.len());
-        let (unit, after_unit) = rest.split_at(unit_len);
-        let unit = unit.trim();
-        let Some(&(_, nanos_per_unit)) = UNITS.iter().find(|(name, _)| *name == unit) else {
-            return Err(format!("unknown unit '{unit}'"));
-        };
-        nanos = nanos
-            .checked_add((value * nanos_per_unit as f64) as u128)
-            .ok_or_else(|| "duration overflow".to_string())?;
-        rest = after_unit.trim_start();
-    }
-    Ok(Duration::from_nanos(u64::try_from(nanos).map_err(|_| "duration overflow".to_string())?))
+    tari_ootle_common_types::parse_duration(s).map_err(|e| format!("invalid duration '{s}': {e}"))
 }
 
 #[derive(Debug, Args, Clone)]

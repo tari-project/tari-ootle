@@ -6,7 +6,7 @@ use std::{
     sync::{
         Arc,
         Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -462,6 +462,170 @@ fn count_parked(validator: &Validator, blocks: &[Block]) -> usize {
         .count()
 }
 
+/// A peer this node asks to catch up from answers with blocks of its choosing. The page answers a real request, so its
+/// blocks reach validation, and the parking guards alone keep them from staying parked: no block at or below the
+/// locked height, no block a non-member proposed, and only a few blocks per proposer per height.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[expect(clippy::too_many_lines)]
+async fn catch_up_blocks_citing_unknown_transactions_do_not_stay_parked() {
+    setup_logger();
+    // Proposals to the victim are withheld for a few heights from `withhold_from`, so the next proposal ahead makes it
+    // ask to catch up. Pages to it are dropped while `hold_pages` is set, which keeps that request outstanding.
+    let victim_cell = Arc::new(Mutex::new(None::<TestAddress>));
+    let withhold_from = Arc::new(AtomicU64::new(0));
+    let hold_pages = Arc::new(AtomicBool::new(false));
+    let request = Arc::new(Mutex::new(None::<(u32, TestAddress)>));
+    let filter = {
+        let victim_cell = victim_cell.clone();
+        let withhold_from = withhold_from.clone();
+        let hold_pages = hold_pages.clone();
+        let request = request.clone();
+        Box::new(move |from: &TestAddress, to: &TestAddress, msg: &HotstuffMessage| {
+            let Some(victim) = victim_cell.lock().unwrap().clone() else {
+                return true;
+            };
+            if *from == victim {
+                if let HotstuffMessage::CatchUpSyncRequest(req) = msg {
+                    *request.lock().unwrap() = Some((req.request_id, to.clone()));
+                }
+                return true;
+            }
+            if *to != victim {
+                return true;
+            }
+            match msg {
+                HotstuffMessage::CatchUpPage(_) => !hold_pages.load(Ordering::SeqCst),
+                HotstuffMessage::Proposal(proposal) => {
+                    let start = withhold_from.load(Ordering::SeqCst);
+                    !(start != 0 && (start..start + 3).contains(&proposal.block.height().as_u64()))
+                },
+                _ => true,
+            }
+        })
+    };
+    let mut test = Test::builder()
+        .add_committee(0, vec!["1", "2", "3", "4"])
+        .modify_consensus_constants(|c| {
+            c.pacemaker_block_time = Duration::from_secs(2);
+            c.missed_proposal_suspend_threshold = 50;
+        })
+        .with_message_filter(filter)
+        .start()
+        .await;
+    let [victim, sender, sentinel_proposer, _] = committee_in_rotation_order(&test).await;
+    *victim_cell.lock().unwrap() = Some(victim.clone());
+    test.start_epoch(Epoch(1)).await;
+    test.wait_for_all_validators_to_start_consensus().await;
+
+    test.send_transaction_to_all(Decision::Commit, 1, 1, 1).await;
+    commit_until_pool_is_empty(&mut test, &victim).await;
+
+    hold_pages.store(true, Ordering::SeqCst);
+    *request.lock().unwrap() = None;
+    let victim_leaf = test.get_validator(&victim).get_leaf_block().height();
+    withhold_from.store((victim_leaf + NodeHeight(2)).as_u64(), Ordering::SeqCst);
+    let (request_id, catch_up_peer) = loop {
+        test.on_block_committed().await;
+        if let Some(outstanding) = request.lock().unwrap().clone() {
+            break outstanding;
+        }
+    };
+
+    let (leaf, locked_height, committed) = test
+        .get_validator(&victim)
+        .state_store
+        .with_read_tx(|tx| {
+            let leaf = Block::get(tx, test.get_validator(&victim).get_leaf_block().block_id())?;
+            let locked_height = LockedBlock::get(tx, Epoch(1))?.height;
+            let mut committed = Vec::new();
+            let mut block = leaf.clone();
+            while !block.height().is_zero() {
+                if !block.is_dummy() && block.justify().height() + NodeHeight(1) <= locked_height {
+                    committed.push(block.clone());
+                }
+                block = block.get_parent(tx)?;
+            }
+            Ok::<_, StorageError>((leaf, locked_height, committed))
+        })
+        .unwrap();
+    assert!(
+        !committed.is_empty(),
+        "no block at or below locked height {locked_height}"
+    );
+
+    let mut seed = 0;
+    let mut forge = |template: &Block, justify: &ProposalCertificate| {
+        seed += 1;
+        block_citing_an_unknown_transaction(template, justify, &sender, seed)
+    };
+    // A genuine certificate for a height the victim has already locked admits no block worth keeping
+    let mut stale = Vec::new();
+    for block in &committed {
+        for _ in 0..3 {
+            stale.push(forge(block, block.justify()));
+        }
+    }
+    // A certificate above the locked height admits blocks the victim may yet need, but only a few per proposer
+    let fresh = (0..20).map(|_| forge(&leaf, leaf.justify())).collect::<Vec<_>>();
+    // A committee member may relay a block, but only a committee member's own proposal is kept
+    let relayed = (0..5)
+        .map(|seed| block_citing_an_unknown_transaction(&leaf, leaf.justify(), &TestAddress::new("outsider"), seed))
+        .collect::<Vec<_>>();
+    let sentinel = block_citing_an_unknown_transaction(&leaf, leaf.justify(), &sentinel_proposer, u32::MAX);
+
+    let page = CatchUpPageMessage {
+        request_id,
+        epoch: Epoch(1),
+        blocks: stale
+            .iter()
+            .chain(&relayed)
+            .chain(&fresh)
+            .chain(std::iter::once(&sentinel))
+            .map(|block| ProposalMessage {
+                block: block.clone(),
+                foreign_proposals: vec![],
+            })
+            .collect(),
+        leaf: None,
+        transactions: vec![],
+        next_height: None,
+        next_skip: 0,
+    };
+    test.get_validator(&victim)
+        .tx_inbound_message
+        .send((catch_up_peer, HotstuffMessage::CatchUpPage(Box::new(page))))
+        .await
+        .unwrap();
+    // The sentinel is the page's last block, so once it parks the victim has handled the whole page.
+    let sentinel = [sentinel];
+    let mut parked = false;
+    for _ in 0..200 {
+        if count_parked(test.get_validator(&victim), &sentinel) == 1 {
+            parked = true;
+            break;
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+    assert!(parked, "the victim did not import the page answering its request");
+
+    assert_eq!(count_parked(test.get_validator(&victim), &stale), 0);
+    assert_eq!(count_parked(test.get_validator(&victim), &relayed), 0);
+    assert_eq!(
+        count_parked(test.get_validator(&victim), &fresh),
+        MAX_PARKED_BLOCKS_PER_PROPOSER_PER_HEIGHT,
+        "one proposer's parked blocks at one height"
+    );
+
+    hold_pages.store(false, Ordering::SeqCst);
+    withhold_from.store(0, Ordering::SeqCst);
+    let tx = commit_until_locked_past(&mut test, &victim, leaf.height()).await;
+    assert_eq!(count_parked(test.get_validator(&victim), &fresh), 0);
+    assert_eq!(count_parked(test.get_validator(&victim), &sentinel), 0);
+
+    test.stop();
+    test.assert_all_validators_committed(&tx);
+}
+
 /// Catch-up blocks reach a validator only in a page that answers its own request, so neither a catch-up block nor a
 /// page it did not ask for parks anything.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -502,6 +666,7 @@ async fn unrequested_catch_up_blocks_are_not_parked() {
             leaf: None,
             transactions: vec![],
             next_height: None,
+            next_skip: 0,
         };
         for message in [
             HotstuffMessage::new_catch_up_sync_response(proposal),

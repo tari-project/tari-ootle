@@ -101,8 +101,6 @@ pub enum HotStuffError {
     },
     #[error("Transaction executor error: {0}")]
     TransactionExecutorError(String),
-    #[error("Invalid sync request: {details}")]
-    InvalidSyncRequest { details: String },
     #[error("Some input versions were not resolved at execution time: {0}")]
     VersionedSubstateIdError(#[from] VersionedSubstateIdError),
     #[error("Substate store error: {0}")]

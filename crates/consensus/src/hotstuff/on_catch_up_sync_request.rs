@@ -11,6 +11,7 @@ use tari_ootle_storage::{
     StorageError,
     consensus_models::{Block, BookkeepingModel, TransactionRecord},
 };
+use tari_ootle_transaction::TransactionId;
 
 use crate::{
     bounded_spawn::PerKeyBoundedSpawn,
@@ -152,11 +153,19 @@ fn read_page<TStore: StateStore, TOutbound: OutboundMessaging>(
     }
 
     let start_height = msg.from_height.max(NodeHeight(1));
+    let mut to_skip = msg.skip;
+    // The height being filled and how many of its blocks the requester holds: those it skipped and those this page
+    // carries.
+    let mut sent_at_height = (start_height, msg.skip);
     let mut used_bytes = 0usize;
     let mut included_transactions = HashSet::new();
     'batches: for result in CatchUpBatches::new(store, msg.epoch, start_height, leaf_block.height()) {
         for block in result? {
             let height = block.height();
+            if height == start_height && to_skip > 0 {
+                to_skip -= 1;
+                continue;
+            }
             let is_leaf = block.id() == leaf_block.block_id();
             let foreign_proposals = store.with_read_tx(|tx| block.get_foreign_proposals(tx))?;
             let proposal = ProposalMessage {
@@ -166,40 +175,26 @@ fn read_page<TStore: StateStore, TOutbound: OutboundMessaging>(
             let (proposal, size) = measure(outbound_messaging, proposal)?;
             let carries_blocks = !page.blocks.is_empty() || page.leaf.is_some();
             if carries_blocks && (used_bytes + size > page_bytes || page.blocks.len() >= MAX_CATCH_UP_PAGE_BLOCKS) {
-                // A page that stops partway through a height resumes at that height, so its remaining forks are
-                // sent next, unless the page holds nothing but that height, which would only repeat itself.
-                let first_height = page.blocks.first().map(|b| b.block.height()).unwrap_or(height);
-                page.next_height = Some(if first_height < height {
-                    height
-                } else {
-                    height + NodeHeight(1)
-                });
+                // The next page resumes at this block, skipping the forks at its height the requester already holds.
+                let (filled_height, held) = sent_at_height;
+                page.next_height = Some(height);
+                page.next_skip = if filled_height == height { held } else { 0 };
                 break 'batches;
             }
             used_bytes += size;
+            sent_at_height = match sent_at_height {
+                (filled_height, held) if filled_height == height => (height, held + 1),
+                _ => (height, 1),
+            };
 
-            for transaction_id in proposal.block.all_transaction_ids() {
-                if page.transactions.len() >= MAX_REQUESTED_TRANSACTIONS ||
-                    !included_transactions.insert(*transaction_id)
-                {
-                    continue;
-                }
-                let Some(record) = store
-                    .with_read_tx(|tx| TransactionRecord::get(tx, transaction_id))
-                    .optional()?
-                else {
-                    continue;
-                };
-                let encoded = EncodedTransaction::encode(record.transaction()).map_err(|e| {
-                    HotStuffError::InvariantError(format!("Failed to encode transaction {transaction_id}: {e}"))
-                })?;
-                let size = encoded.len() + TRANSACTION_FRAMING_BYTES;
-                if used_bytes + size > page_bytes {
-                    continue;
-                }
-                used_bytes += size;
-                page.transactions.push(encoded);
-            }
+            add_transactions(
+                store,
+                &proposal.block,
+                &mut page,
+                &mut used_bytes,
+                &mut included_transactions,
+                page_bytes,
+            )?;
 
             // The leaf has no certificate yet, so it travels apart from the certified blocks: the requester
             // handles it as a live proposal and votes on it if it is still current.
@@ -213,15 +208,54 @@ fn read_page<TStore: StateStore, TOutbound: OutboundMessaging>(
 
     info!(
         target: LOG_TARGET,
-        "🌐 Sending {} block(s), leaf: {}, {} transaction(s) ({used_bytes} bytes) from {}/{} to {from}, next: {:?}",
+        "🌐 Sending {} block(s), leaf: {}, {} transaction(s) ({used_bytes} bytes) from {}/{} to {from}, next: {:?} \
+         (skip {})",
         page.blocks.len(),
         page.leaf.is_some(),
         page.transactions.len(),
         msg.epoch,
         start_height,
         page.next_height,
+        page.next_skip,
     );
     Ok(page)
+}
+
+/// Adds to `page` the transactions `block` commits to that are not in it yet, while they fit in `page_bytes`.
+fn add_transactions<TStore: StateStore>(
+    store: &TStore,
+    block: &Block,
+    page: &mut CatchUpPageMessage,
+    used_bytes: &mut usize,
+    included_transactions: &mut HashSet<TransactionId>,
+    page_bytes: usize,
+) -> Result<(), HotStuffError> {
+    for transaction_id in block.all_transaction_ids() {
+        if page.transactions.len() >= MAX_REQUESTED_TRANSACTIONS ||
+            *used_bytes + TRANSACTION_FRAMING_BYTES >= page_bytes
+        {
+            break;
+        }
+        if !included_transactions.insert(*transaction_id) {
+            continue;
+        }
+        let Some(record) = store
+            .with_read_tx(|tx| TransactionRecord::get(tx, transaction_id))
+            .optional()?
+        else {
+            continue;
+        };
+        let encoded = EncodedTransaction::encode(record.transaction()).map_err(|e| {
+            HotStuffError::InvariantError(format!("Failed to encode transaction {transaction_id}: {e}"))
+        })?;
+        let size = encoded.len() + TRANSACTION_FRAMING_BYTES;
+        if *used_bytes + size > page_bytes {
+            continue;
+        }
+        *used_bytes += size;
+        page.transactions.push(encoded);
+    }
+    Ok(())
 }
 
 /// `proposal` and the bytes it takes on the wire as a catch-up block.
@@ -367,10 +401,21 @@ mod tests {
         from_height: u64,
         page_bytes: usize,
     ) -> CatchUpPageMessage {
+        page_skipping(store, epoch, from_height, 0, page_bytes)
+    }
+
+    fn page_skipping(
+        store: &RocksDbStateStore<String>,
+        epoch: Epoch,
+        from_height: u64,
+        skip: u32,
+        page_bytes: usize,
+    ) -> CatchUpPageMessage {
         let request = CatchUpRequestMessage {
             request_id: 7,
             epoch,
             from_height: NodeHeight(from_height),
+            skip,
         };
         read_page(store, &FixedSizeOutbound, &"peer", Epoch::zero(), &request, page_bytes).unwrap()
     }
@@ -393,6 +438,60 @@ mod tests {
         assert_eq!(heights(&last), [5], "the leaf travels apart from the certified blocks");
         assert_eq!(last.leaf.as_ref().map(|leaf| leaf.block.height()), Some(NodeHeight(6)));
         assert_eq!(last.next_height, None);
+    }
+
+    #[test]
+    fn pages_of_one_block_deliver_every_fork_at_a_height_and_the_leaf() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(tmp.path(), DatabaseOptions::default()).unwrap();
+        let mut block = Block::zero_block(NETWORK, NUM_PRESHARDS);
+        let (fork_a, fork_b, leaf) = store
+            .with_write_tx(|tx| {
+                block.justify().save(tx)?;
+                block.insert(tx)?;
+                block = child(&block);
+                block.justify().save(tx)?;
+                block.insert(tx)?;
+                let fork_a = child_with_fee(&block, 0);
+                let fork_b = child_with_fee(&block, 1);
+                for fork in [&fork_a, &fork_b] {
+                    fork.justify().save(tx)?;
+                    fork.insert(tx)?;
+                }
+                // The leaf is a fork of its own at the last height.
+                let leaf = child(&fork_b);
+                let leaf_sibling = child(&fork_a);
+                for block in [&leaf_sibling, &leaf] {
+                    block.justify().save(tx)?;
+                    block.insert(tx)?;
+                }
+                leaf.as_leaf().set(tx)?;
+                Ok::<_, StorageError>((fork_a, fork_b, leaf))
+            })
+            .unwrap();
+
+        let mut received = Vec::new();
+        let mut delivered_leaf = None;
+        let mut cursor = Some((1, 0));
+        while let Some((from_height, skip)) = cursor {
+            let page = page_skipping(&store, Epoch::zero(), from_height, skip, BLOCK_BYTES);
+            assert_eq!(
+                page.blocks.len() + usize::from(page.leaf.is_some()),
+                1,
+                "one block per page"
+            );
+            received.extend(page.blocks.iter().chain(page.leaf.iter()).map(|p| *p.block.id()));
+            if let Some(leaf) = &page.leaf {
+                delivered_leaf = Some(*leaf.block.id());
+            }
+            cursor = page.next_height.map(|height| (height.as_u64(), page.next_skip));
+            assert!(received.len() <= 6, "pages must not repeat themselves: {received:?}");
+        }
+
+        assert_eq!(received.len(), 5, "{received:?}");
+        assert!(received.contains(fork_a.id()), "missing fork_a");
+        assert!(received.contains(fork_b.id()), "missing fork_b");
+        assert_eq!(delivered_leaf, Some(*leaf.id()), "the leaf travels as the page's leaf");
     }
 
     #[test]

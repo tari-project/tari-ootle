@@ -311,6 +311,7 @@ message SyncRequest {
   uint64 epoch = 1;
   uint64 from_height = 2;
   uint32 request_id = 3;
+  uint32 skip = 4;
 }
 
 message CatchUpPage {
@@ -320,6 +321,7 @@ message CatchUpPage {
   ProposalMessage leaf = 4; // optional
   repeated tari.ootle.transaction.Transaction transactions = 5;
   optional uint64 next_height = 6;
+  uint32 next_skip = 7;
 }
 
 message ShardGroupAccumulatedData {

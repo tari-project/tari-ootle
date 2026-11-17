@@ -1068,6 +1068,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         };
         catch_up.requested(to.clone(), request_id);
         let from_height = catch_up.next_height;
+        let skip = catch_up.next_skip;
         self.on_catch_up_sync
             .request_page(
                 self.pacemaker.current_view(),
@@ -1075,6 +1076,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 to,
                 request_id,
                 from_height,
+                skip,
             )
             .await
     }
@@ -1113,6 +1115,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             leaf,
             transactions,
             next_height,
+            next_skip,
             ..
         } = page;
         info!(
@@ -1131,7 +1134,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             return Ok(());
         }
         self.import_page_blocks(epoch_state, &from, blocks, leaf).await?;
-        self.continue_catch_up(epoch_state, from, next_height, end_height).await
+        self.continue_catch_up(epoch_state, from, next_height, next_skip, end_height)
+            .await
     }
 
     /// Stores the transactions a page carries, and returns whether the page is admitted: each transaction must be one
@@ -1238,19 +1242,21 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             .await
     }
 
-    /// Decides what follows an imported page from `from` that continues at `next_height` and reached `end_height`.
+    /// Decides what follows an imported page from `from` that continues at `next_height`, past `next_skip` of its
+    /// blocks, and reached `end_height`.
     async fn continue_catch_up(
         &mut self,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         from: TConsensusSpec::Addr,
         next_height: Option<NodeHeight>,
+        next_skip: u32,
         end_height: Option<NodeHeight>,
     ) -> Result<(), HotStuffError> {
         let current_height = self.pacemaker.current_height();
         let Some(catch_up) = self.worker_state.catch_up.as_mut() else {
             return Ok(());
         };
-        match catch_up.after_page(&from, next_height, end_height, current_height) {
+        match catch_up.after_page(&from, next_height, next_skip, end_height, current_height) {
             AfterPage::Finished => {
                 info!(
                     target: LOG_TARGET,
@@ -2392,6 +2398,8 @@ struct CatchUp<TAddr> {
     pub pending_request: Option<u32>,
     /// Where the next page starts, as the last page said. `None` starts at this node's highest certified block.
     pub next_height: Option<NodeHeight>,
+    /// The blocks at `next_height` the next page skips, which an earlier page carried.
+    pub next_skip: u32,
     /// The proposer whose proposal set `remote_height`, which holds the blocks up to it.
     pub target_from: Option<TAddr>,
 }
@@ -2414,6 +2422,7 @@ impl<TAddr> CatchUp<TAddr> {
             from,
             pending_request: None,
             next_height: None,
+            next_skip: 0,
             target_from: None,
         }
     }
@@ -2455,12 +2464,13 @@ impl<TAddr> CatchUp<TAddr> {
         !self.has_timed_out() && self.last_progress_height < self.remote_height
     }
 
-    /// Decides what follows a page from `from` that continues at `next_height` and reached `end_height`, with this
-    /// node at `current_height`.
+    /// Decides what follows a page from `from` that continues at `next_height`, past `next_skip` of its blocks, and
+    /// reached `end_height`, with this node at `current_height`.
     pub fn after_page(
         &mut self,
         from: &TAddr,
         next_height: Option<NodeHeight>,
+        next_skip: u32,
         end_height: Option<NodeHeight>,
         current_height: NodeHeight,
     ) -> AfterPage<TAddr>
@@ -2468,6 +2478,7 @@ impl<TAddr> CatchUp<TAddr> {
         TAddr: Clone + PartialEq,
     {
         self.next_height = next_height;
+        self.next_skip = if next_height.is_some() { next_skip } else { 0 };
         if next_height.is_some() {
             return AfterPage::RequestFrom(from.clone());
         }
@@ -2717,7 +2728,7 @@ mod tests {
             catch_up.requested("peer-a", 0);
             assert!(catch_up.take_page(0, &"peer-a"));
             assert_eq!(
-                catch_up.after_page(&"peer-a", None, None, NodeHeight(0)),
+                catch_up.after_page(&"peer-a", None, 0, None, NodeHeight(0)),
                 AfterPage::Finished
             );
         }
@@ -2732,7 +2743,7 @@ mod tests {
                 "peer-a",
             );
             assert_eq!(
-                catch_up.after_page(&"peer-a", Some(NodeHeight(30)), Some(NodeHeight(29)), NodeHeight(20)),
+                catch_up.after_page(&"peer-a", Some(NodeHeight(30)), 0, Some(NodeHeight(29)), NodeHeight(20)),
                 AfterPage::RequestFrom("peer-a")
             );
             assert_eq!(catch_up.next_height, Some(NodeHeight(30)));
@@ -2744,7 +2755,7 @@ mod tests {
             let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(50), NodeHeight(10), timeout, "peer-a");
             catch_up.raise_target(NodeHeight(60), Some("peer-b"));
             assert_eq!(
-                catch_up.after_page(&"peer-a", None, Some(NodeHeight(40)), NodeHeight(40)),
+                catch_up.after_page(&"peer-a", None, 0, Some(NodeHeight(40)), NodeHeight(40)),
                 AfterPage::RequestFrom("peer-b")
             );
             assert_eq!(
@@ -2753,7 +2764,7 @@ mod tests {
             );
 
             assert_eq!(
-                catch_up.after_page(&"peer-b", None, Some(NodeHeight(45)), NodeHeight(45)),
+                catch_up.after_page(&"peer-b", None, 0, Some(NodeHeight(45)), NodeHeight(45)),
                 AfterPage::AwaitStall,
                 "the proposer itself is not asked again at once"
             );
@@ -2769,7 +2780,7 @@ mod tests {
                 "peer-a",
             );
             assert_eq!(
-                catch_up.after_page(&"peer-a", None, Some(NodeHeight(55)), NodeHeight(40)),
+                catch_up.after_page(&"peer-a", None, 0, Some(NodeHeight(55)), NodeHeight(40)),
                 AfterPage::Importing
             );
             assert!(

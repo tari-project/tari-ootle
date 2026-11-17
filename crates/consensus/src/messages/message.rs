@@ -165,8 +165,8 @@ impl Display for HotstuffMessage {
             ),
             Self::CatchUpSyncRequest(msg) => write!(
                 f,
-                "SyncRequest(req_id={}, {}/{})",
-                msg.request_id, msg.epoch, msg.from_height
+                "SyncRequest(req_id={}, {}/{}, skip={})",
+                msg.request_id, msg.epoch, msg.from_height, msg.skip
             ),
             Self::CatchUpSyncResponse(msg) => {
                 write!(

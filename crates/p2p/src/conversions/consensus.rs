@@ -1314,6 +1314,7 @@ impl From<&CatchUpRequestMessage> for proto::consensus::SyncRequest {
             epoch: value.epoch.as_u64(),
             from_height: value.from_height.as_u64(),
             request_id: value.request_id,
+            skip: value.skip,
         }
     }
 }
@@ -1326,6 +1327,7 @@ impl TryFrom<proto::consensus::SyncRequest> for CatchUpRequestMessage {
             request_id: value.request_id,
             epoch: Epoch(value.epoch),
             from_height: NodeHeight(value.from_height),
+            skip: value.skip,
         })
     }
 }
@@ -1347,6 +1349,7 @@ impl From<&CatchUpPageMessage> for proto::consensus::CatchUpPage {
                 })
                 .collect(),
             next_height: value.next_height.map(|height| height.as_u64()),
+            next_skip: value.next_skip,
         }
     }
 }
@@ -1384,6 +1387,7 @@ impl TryFrom<proto::consensus::CatchUpPage> for CatchUpPageMessage {
                 .map(|tx| EncodedTransaction::from_bytes(tx.bor_encoded))
                 .collect(),
             next_height: value.next_height.map(NodeHeight),
+            next_skip: value.next_skip,
         })
     }
 }

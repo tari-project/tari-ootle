@@ -27,8 +27,8 @@ impl<TConsensusSpec: ConsensusSpec> OnCatchUpSync<TConsensusSpec> {
         }
     }
 
-    /// Asks `to` for the page of blocks of `epoch` starting at `from_height`. Without a height, the page starts at this
-    /// node's highest certified block.
+    /// Asks `to` for the page of blocks of `epoch` starting at `from_height`, past the `skip` blocks at that height
+    /// already received. Without a height, the page starts at this node's highest certified block.
     pub async fn request_page(
         &mut self,
         current_view: View,
@@ -36,22 +36,25 @@ impl<TConsensusSpec: ConsensusSpec> OnCatchUpSync<TConsensusSpec> {
         to: TConsensusSpec::Addr,
         request_id: u32,
         from_height: Option<NodeHeight>,
+        skip: u32,
     ) -> Result<(), HotStuffError> {
-        let from_height = match from_height {
-            Some(height) => height,
+        let (from_height, skip) = match from_height {
+            Some(height) => (height, skip),
             None => {
                 let high_qc = self.store.with_read_tx(|tx| HighPc::get(tx, epoch))?;
-                if high_qc.epoch() == epoch {
+                let height = if high_qc.epoch() == epoch {
                     high_qc.height()
                 } else {
                     NodeHeight(1)
-                }
+                };
+                (height, 0)
             },
         };
 
         info!(
             target: LOG_TARGET,
-            "⏰ Catch up page {request_id} from block {epoch}/{from_height} from {to} (current view: {current_view})",
+            "⏰ Catch up page {request_id} from block {epoch}/{from_height} (skip {skip}) from {to} (current view: \
+             {current_view})",
         );
 
         if self
@@ -62,6 +65,7 @@ impl<TConsensusSpec: ConsensusSpec> OnCatchUpSync<TConsensusSpec> {
                     request_id,
                     epoch,
                     from_height,
+                    skip,
                 }),
             )
             .await

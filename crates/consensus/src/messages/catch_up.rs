@@ -17,6 +17,8 @@ pub struct CatchUpRequestMessage {
     pub request_id: u32,
     pub epoch: Epoch,
     pub from_height: NodeHeight,
+    /// The number of blocks at `from_height` already received, in the order the responder sends a height's forks.
+    pub skip: u32,
 }
 
 /// One page of blocks in answer to a [`CatchUpRequestMessage`], filled up to the responder's byte budget.
@@ -34,6 +36,8 @@ pub struct CatchUpPageMessage {
     pub transactions: Vec<EncodedTransaction>,
     /// The height the next page starts at, or `None` when this page reaches the responder's leaf.
     pub next_height: Option<NodeHeight>,
+    /// The number of blocks at `next_height` this page already carries, which the next page skips.
+    pub next_skip: u32,
 }
 
 impl CatchUpPageMessage {
@@ -46,6 +50,7 @@ impl CatchUpPageMessage {
             leaf: None,
             transactions: Vec::new(),
             next_height: None,
+            next_skip: 0,
         }
     }
 

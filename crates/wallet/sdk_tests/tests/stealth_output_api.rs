@@ -1264,3 +1264,77 @@ async fn create_transfer_statements_selection_adds_and_tracks_change_output() {
     assert_eq!(change.lock_id, Some(lock.id()));
     lock.release();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_transfer_statements_selection_rejects_excess_outputs_with_change() {
+    let sets = [ValidatorSetFixture::new(1)];
+    let network = ProvingNetwork::new(&sets, 0);
+    let test = TestWithNetwork::with_network(network);
+    let sdk = test.sdk();
+    let sender = sdk
+        .accounts_api()
+        .get_account_by_address(&Test::test_account_address())
+        .unwrap();
+
+    let stealth_resource = resource_address_from_seed(10);
+    sdk.resources_api()
+        .upsert_resource(
+            &stealth_resource,
+            &Resource::new(
+                ResourceType::Stealth,
+                SubstateOwnerRule::None,
+                ResourceAccessRules::new(),
+                Metadata::new(),
+                None,
+                None,
+                6,
+                false,
+            ),
+        )
+        .unwrap();
+    add_owned_stealth_output(&test, &sender, stealth_resource, 100);
+
+    let (_, recipient_pk) = random_keypair();
+    let (_, recipient_view_pk) = random_keypair();
+    let recipient = tari_ootle_address::OotleAddress::new(
+        sender.address().network(),
+        recipient_view_pk.to_byte_type(),
+        recipient_pk.to_byte_type(),
+    );
+
+    let outputs = (0..16)
+        .map(|_| TransferOutput {
+            address: recipient.clone(),
+            revealed_amount: Amount::zero(),
+            blinded_amount: 5,
+            memo: None,
+            pay_to: PayTo::StealthPublicKey,
+        })
+        .collect();
+
+    let lock = sdk.locks_api().create_lock().unwrap();
+    let Err(err) = sdk
+        .stealth_transfer_api()
+        .create_transfer_statements(lock.id(), &[TransferStatementSpec {
+            sender,
+            resource_address: stealth_resource,
+            input_selection: InputSelection::Selection(UtxoInputSelection::PreferConfidential),
+            outputs,
+        }])
+        .await
+    else {
+        panic!("expected InvalidParameter for outputs exceeding MAX_STEALTH_OUTPUTS with change");
+    };
+
+    assert!(
+        matches!(
+            err,
+            tari_ootle_wallet_sdk::apis::stealth_transfer::StealthTransferApiError::InvalidParameter {
+                param: "outputs",
+                ..
+            }
+        ),
+        "expected InvalidParameter for outputs exceeding MAX_STEALTH_OUTPUTS with change, got: {err}"
+    );
+    lock.release();
+}

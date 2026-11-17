@@ -24,7 +24,7 @@ use tari_template_lib::{
         ResourceAddress,
         UtxoAddress,
         constants::TARI_TOKEN,
-        stealth::{RevealedOutput, StealthTransferStatement},
+        stealth::{MAX_STEALTH_OUTPUTS, RevealedOutput, StealthTransferStatement},
     },
 };
 use tokio::{sync::Semaphore, task::block_in_place};
@@ -138,8 +138,9 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
     /// Builds one stealth transfer statement per spec, in order, locking the inputs each one spends under `lock_id`.
     ///
     /// Every spec is checked before any input is locked. An output paying a wallet account with a plain key-path spend
-    /// is recorded as `LockedUnconfirmed` under `lock_id` once every statement is built, so each statement spends only
-    /// outputs already on chain: input selection counts same-lock unconfirmed outputs as spendable.
+    /// — including any surplus change output created for [`InputSelection::Selection`] — is recorded as
+    /// `LockedUnconfirmed` under `lock_id` once every statement is built, so each statement spends only outputs already
+    /// on chain: input selection counts same-lock unconfirmed outputs as spendable.
     ///
     /// On error, the inputs already locked and any outputs already recorded stay under `lock_id`; releasing the lock
     /// undoes both.
@@ -279,8 +280,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         })
     }
 
-    /// Locks the inputs `spec` selects and builds its statement, returning the statement, the key that signs it and
-    /// the inputs it spends.
+    /// Locks the inputs `spec` selects and builds its statement, returning the statement, the key that signs it, the
+    /// inputs it spends, and the change amount (if any).
     fn build_transfer_statement(
         &self,
         lock_id: WalletLockId,
@@ -363,6 +364,16 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             .filter(|o| o.blinded_amount > 0)
             .map(TryInto::try_into)
             .collect::<Result<Vec<StealthOutputToCreate<'_>>, _>>()?;
+        let total_outputs = outputs.len() + usize::from(change_amount > 0);
+        if total_outputs > MAX_STEALTH_OUTPUTS {
+            return Err(StealthTransferApiError::InvalidParameter {
+                param: "outputs",
+                reason: format!(
+                    "Statement has {total_outputs} blinded outputs (including change), which exceeds the maximum of \
+                     {MAX_STEALTH_OUTPUTS}",
+                ),
+            });
+        }
         if change_amount > 0 {
             let change_address =
                 sender

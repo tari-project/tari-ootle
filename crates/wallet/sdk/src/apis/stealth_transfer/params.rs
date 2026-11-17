@@ -237,6 +237,8 @@ pub enum InputSelection {
     FromBucket {
         revealed_amount: Amount,
     },
+    /// Select wallet-owned inputs to cover the requested outputs, returning any surplus to the sender as a blinded
+    /// change output.
     Selection(UtxoInputSelection),
     /// Spend exactly the named wallet-owned stealth UTXOs, in the given order. The wallet resolves, validates and
     /// locks precisely these outputs via `StealthOutputsApi::lock_specific_outputs`, rather than choosing inputs to

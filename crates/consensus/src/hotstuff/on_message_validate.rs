@@ -516,9 +516,9 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             // group matches `epoch_state.local_committee_info().shard_group()`, while the transaction's validity
             // window is checked against `proposal.block.epoch()`.
             self.resequence_unpooled_transactions(tx, epoch_state.local_committee_info(), &proposal, new_transactions)?;
-            let missing = self.get_missing_transactions(&**tx, epoch_state.local_committee_info(), &proposal)?;
             Ok(Some(
-                !missing.is_empty() || tx.parked_block_exists(&proposal.block.justify().calculate_block_id())?,
+                tx.parked_block_exists(&proposal.block.justify().calculate_block_id())? ||
+                    self.has_missing_transactions(&**tx, epoch_state.local_committee_info(), &proposal)?,
             ))
         })?
         else {
@@ -606,6 +606,30 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
 
         new_transactions.resequence_known_transactions(tx, proposal.block.epoch(), ids, local_committee_info)?;
         Ok(())
+    }
+
+    /// Whether the block, or a foreign proposal it embeds, names a transaction this node holds no record of.
+    fn has_missing_transactions<TTx: StateStoreReadTransaction>(
+        &self,
+        tx: &TTx,
+        local_committee_info: &CommitteeInfo,
+        proposal: &ProposalMessage,
+    ) -> Result<bool, HotStuffError> {
+        if proposal.block.commands().is_empty() {
+            return Ok(false);
+        }
+        if TransactionRecord::any_missing(tx, proposal.block.all_transaction_ids())? {
+            return Ok(true);
+        }
+        for foreign_proposal in &proposal.foreign_proposals {
+            if TransactionRecord::any_missing(
+                tx,
+                foreign_proposal.all_transaction_ids_in_committee(local_committee_info),
+            )? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn get_missing_transactions<TTx: StateStoreReadTransaction>(

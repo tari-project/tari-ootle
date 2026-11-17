@@ -88,7 +88,7 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
     }
 
     pub fn pay_fee<A: Into<Amount>>(mut self, amount: A) -> Self {
-        if let Some(name) = self.account_workspace_name.take() {
+        if let Some(ref name) = self.account_workspace_name {
             self.builder = self.builder.pay_fee_from_component(name, amount);
         } else {
             let component_addr = self.default_signer_address().to_account_address();
@@ -249,7 +249,10 @@ mod tests {
 
     use tari_ootle_common_types::engine_types::substate::Substate;
     use tari_ootle_transaction::{ComponentReference, Instruction};
-    use tari_template_lib_types::stealth::StealthTransferStatement;
+    use tari_template_lib_types::{
+        crypto::RistrettoPublicKeyBytes,
+        stealth::{StealthInputsStatement, StealthOutputsStatement, StealthTransferStatement},
+    };
 
     use super::*;
     use crate::{Network, key_provider::PrivateKeyProvider, provider::ProviderResult, transaction::TransactionSigner};
@@ -340,6 +343,52 @@ mod tests {
                 } if &**method == "withdraw"
             ),
             "into_stealth_transfer must withdraw from the account workspace ID 0, got: {withdraw:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn pay_fee_preserves_workspace_account_for_into_stealth_transfer_and_subsequent_calls() {
+        let signer = Address::new(
+            Network::LocalNet,
+            RistrettoPublicKeyBytes::from_bytes(&[1u8; 32]).unwrap(),
+            RistrettoPublicKeyBytes::from_bytes(&[2u8; 32]).unwrap(),
+        );
+        let provider = DummyProvider {
+            address: signer.clone(),
+        };
+        let statement = StealthTransferStatement {
+            inputs_statement: StealthInputsStatement::new_revealed_only(Amount::new(1_000)),
+            outputs_statement: StealthOutputsStatement::new_revealed_only(
+                Amount::new(1_000),
+                *signer.account_public_key(),
+            ),
+            balance_proof: None,
+            covenant_claims: vec![],
+        };
+
+        let tx = IFaucet::new(&provider, Epoch(10))
+            .take_faucet_funds()
+            .pay_fee(500u64)
+            .pay_fee(250u64)
+            .into_stealth_transfer(statement)
+            .prepare()
+            .await
+            .unwrap();
+
+        let pay_fee_calls: Vec<_> = tx
+            .fee_instructions()
+            .iter()
+            .filter_map(|instr| match instr {
+                Instruction::CallMethod { call, method, .. } if method.as_ref() == "pay_fee" => Some(call),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(pay_fee_calls.len(), 2);
+        assert!(
+            pay_fee_calls
+                .iter()
+                .all(|call| matches!(call, ComponentReference::Workspace(_))),
+            "expected workspace references for pay_fee, got {pay_fee_calls:?}"
         );
     }
 }

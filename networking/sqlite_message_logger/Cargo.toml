@@ -9,9 +9,9 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-diesel = { workspace = true, features = ["sqlite", "chrono"] }
+diesel = { workspace = true, features = ["sqlite", "time"] }
 diesel_migrations = { workspace = true }
 serde = { workspace = true, features = ["default", "derive"] }
 serde_json = { workspace = true }
 log = { workspace = true }
-chrono = { version = "0.4.42", features = ["serde"] }
+time = { workspace = true, features = ["serde"] }

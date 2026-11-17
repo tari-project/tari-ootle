@@ -11099,12 +11099,12 @@ dependencies = [
 name = "sqlite_message_logger"
 version = "0.54.0"
 dependencies = [
- "chrono",
  "diesel",
  "diesel_migrations",
  "log",
  "serde",
  "serde_json",
+ "time",
 ]
 
 [[package]]

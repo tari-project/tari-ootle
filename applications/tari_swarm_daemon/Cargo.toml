@@ -34,7 +34,6 @@ axum-jrpc = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 fern = { workspace = true, features = ["colored", "date-based"] }
 futures = { workspace = true }
-humantime = { workspace = true }
 include_dir = { workspace = true }
 serde_json5 = { workspace = true }
 lockfile = "0.4.0"

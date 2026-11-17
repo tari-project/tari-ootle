@@ -10,6 +10,12 @@ mod config;
 mod helpers;
 mod webserver;
 
+fn format_rfc3339_now() -> String {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default()
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     init_logging();
@@ -49,7 +55,7 @@ fn init_logging() {
             } else {
                 out.finish(format_args!(
                     "[{}][{}] {}",
-                    humantime::format_rfc3339(std::time::SystemTime::now()),
+                    format_rfc3339_now(),
                     record.level(),
                     message
                 ))

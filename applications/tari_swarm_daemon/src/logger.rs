@@ -8,6 +8,12 @@ use fern::FormatCallback;
 /// Target used by [`crate::process_manager`] when it relays a child process's own output.
 pub const FORWARDED_TARGET: &str = "swarm";
 
+fn format_rfc3339_now() -> String {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default()
+}
+
 pub fn init_logger(log_to_file: Option<PathBuf>) -> Result<(), log::SetLoggerError> {
     fn should_skip(target: &str) -> bool {
         const SKIP: &[&str] = &[
@@ -32,7 +38,7 @@ pub fn init_logger(log_to_file: Option<PathBuf>) -> Result<(), log::SetLoggerErr
             let fallback = |out: FormatCallback<'_>| {
                 out.finish(format_args!(
                     "{} [{}] {} {}",
-                    humantime::format_rfc3339(std::time::SystemTime::now()),
+                    format_rfc3339_now(),
                     record.target(),
                     colors.color(record.level()),
                     message
@@ -76,7 +82,7 @@ pub fn init_logger(log_to_file: Option<PathBuf>) -> Result<(), log::SetLoggerErr
 
             out.finish(format_args!(
                 "{} {}] {} {}",
-                humantime::format_rfc3339(std::time::SystemTime::now()),
+                format_rfc3339_now(),
                 target,
                 level,
                 log

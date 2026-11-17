@@ -23,6 +23,32 @@ use tempfile::{Builder, TempDir};
 use crate::cli::Cli;
 mod cli;
 
+/// Formats a duration as a compact human-readable string, e.g. `1h 2m 3s` or `45s`.
+fn format_duration(duration: Duration) -> String {
+    let secs = duration.as_secs();
+    if secs == 0 {
+        return format!("{}ms", duration.subsec_millis());
+    }
+    let days = secs / 86_400;
+    let hours = (secs % 86_400) / 3_600;
+    let mins = (secs % 3_600) / 60;
+    let s = secs % 60;
+    let mut parts = Vec::new();
+    if days > 0 {
+        parts.push(format!("{days}d"));
+    }
+    if hours > 0 {
+        parts.push(format!("{hours}h"));
+    }
+    if mins > 0 {
+        parts.push(format!("{mins}m"));
+    }
+    if s > 0 || parts.is_empty() {
+        parts.push(format!("{s}s"));
+    }
+    parts.join(" ")
+}
+
 /// Width of the internal sort key: the first [`KEY_LEN`] bytes of the compressed point read as a big-endian
 /// `u64`. The stored `prefix_len` is a truncation of this key, so `prefix_len` cannot exceed [`KEY_LEN`].
 const KEY_LEN: usize = size_of::<u64>();
@@ -180,7 +206,7 @@ async fn sort_in_memory<W: Write>(
     write_records(writer, &entries, header, &mut record)?;
     println!(
         "Sorted and wrote {count} entries in {}.",
-        humantime::format_duration(Duration::from_secs(timer.elapsed().as_secs()))
+        format_duration(Duration::from_secs(timer.elapsed().as_secs()))
     );
     Ok(())
 }
@@ -213,7 +239,7 @@ async fn sort_external<W: Write>(
     store.flush_all()?;
     println!(
         "Distributed into {num_buckets} buckets in {}.",
-        humantime::format_duration(Duration::from_secs(timer.elapsed().as_secs()))
+        format_duration(Duration::from_secs(timer.elapsed().as_secs()))
     );
 
     // Phase 2: sort each bucket in memory and append in bucket order. Buckets partition the key space in
@@ -235,7 +261,7 @@ async fn sort_external<W: Write>(
             println!(
                 "{:.1}% ({written}/{count}) sorted and written in {}",
                 written as f64 / count as f64 * 100.0,
-                humantime::format_duration(Duration::from_secs(timer.elapsed().as_secs())),
+                format_duration(Duration::from_secs(timer.elapsed().as_secs())),
             );
         }
     }
@@ -247,7 +273,7 @@ async fn sort_external<W: Write>(
     }
     println!(
         "Sorted and wrote {count} entries in {}.",
-        humantime::format_duration(Duration::from_secs(timer.elapsed().as_secs()))
+        format_duration(Duration::from_secs(timer.elapsed().as_secs()))
     );
     Ok(())
 }
@@ -327,8 +353,8 @@ where F: FnMut(&[(u64, u64)]) -> io::Result<()> {
             println!(
                 "{:.1}% ({done}/{count}) generated in {}, ETA {}",
                 done as f64 / count as f64 * 100.0,
-                humantime::format_duration(Duration::from_secs(elapsed.as_secs())),
-                humantime::format_duration(eta),
+                format_duration(Duration::from_secs(elapsed.as_secs())),
+                format_duration(eta),
             );
         }
     }

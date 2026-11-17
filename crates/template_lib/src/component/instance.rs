@@ -22,7 +22,6 @@ pub struct ComponentBuilder<T> {
     owner_rule: OwnerRule,
     access_rules: ComponentAccessRules,
     address_allocation: Option<ComponentAddressAllocation>,
-    upgrade_rule: UpdateRule,
 }
 
 impl<T> ComponentBuilder<T> {
@@ -33,7 +32,6 @@ impl<T> ComponentBuilder<T> {
             owner_rule: OwnerRule::default(),
             access_rules: ComponentAccessRules::new(),
             address_allocation: None,
-            upgrade_rule: UpdateRule::Locked,
         }
     }
 
@@ -74,13 +72,6 @@ impl<T> ComponentBuilder<T> {
         self.access_rules = access_rules;
         self
     }
-
-    /// Sets up who may swap the component's template (`UpdateComponentTemplate`). The rule is fixed at creation.
-    /// Defaults to `UpdateRule::Locked`, under which the component's code can never change.
-    pub fn with_upgrade_rule(mut self, upgrade_rule: UpdateRule) -> Self {
-        self.upgrade_rule = upgrade_rule;
-        self
-    }
 }
 
 impl<T: Encode<()>> ComponentBuilder<T> {
@@ -91,7 +82,7 @@ impl<T: Encode<()>> ComponentBuilder<T> {
             self.owner_rule,
             self.access_rules,
             self.address_allocation,
-            self.upgrade_rule,
+            UpdateRule::Locked,
         );
         Component::from_address(address)
     }

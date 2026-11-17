@@ -38,7 +38,6 @@ use crate::{
     Instruction,
     IntoSigned,
     MainSigner,
-    MigrateFunction,
     NftAssertVec,
     NftCheck,
     ResourceAddressRef,
@@ -180,45 +179,6 @@ impl TransactionBuilder<MainIntent> {
 
     pub fn add_fee_instruction(self, instruction: Instruction) -> Self {
         self.with_fee_instructions_builder(|builder| builder.add_instruction(instruction))
-    }
-
-    pub fn update_component_template_address_with_migrate<C, T>(
-        self,
-        component: C,
-        new_template: TemplateAddress,
-        migrate_name: T,
-        migrate_args: Vec<NamedArg>,
-    ) -> Self
-    where
-        C: Into<NamedComponentCall>,
-        T: TryInto<FunctionName>,
-        <T as TryInto<FunctionName>>::Error: std::fmt::Debug,
-    {
-        let component = self.resolve_call(component.into());
-        let migrate_args = self.resolve_args(migrate_args).expect("Invalid named arguments");
-        self.add_instruction(Instruction::UpdateComponentTemplate {
-            component,
-            migrate: Some(MigrateFunction {
-                name: migrate_name
-                    .try_into()
-                    .expect("Oops! The provided migrate function name is longer than the limit"),
-                args: migrate_args,
-            }),
-            new_template,
-        })
-    }
-
-    pub fn update_component_template<C: Into<NamedComponentCall>>(
-        self,
-        component: C,
-        new_template: TemplateAddress,
-    ) -> Self {
-        let component = self.resolve_call(component.into());
-        self.add_instruction(Instruction::UpdateComponentTemplate {
-            component,
-            migrate: None,
-            new_template,
-        })
     }
 
     pub fn with_min_epoch(mut self, min_epoch: Option<Epoch>) -> Self {

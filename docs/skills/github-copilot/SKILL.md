@@ -539,20 +539,6 @@ OwnerRule::ByAccessRule(rule)      // Custom rule determines ownership
 OwnerRule::ByPublicKey(pk)         // Specific public key is owner
 ```
 
-### Upgrade Rules
-
-Who may swap the component's template with `UpdateComponentTemplate`. Set once at creation with
-`.with_upgrade_rule(..)`; it can never change afterwards.
-
-```rust
-UpdateRule::Locked                 // Default: the component's code can never change
-UpdateRule::Owner                  // Whoever satisfies the owner rule at upgrade time
-UpdateRule::AccessRule(rule)       // Anyone satisfying `rule`, independent of the owner
-```
-
-Leave components `Locked` unless they genuinely need upgrades: callers can see the rule in the component header,
-and an upgradable component asks them to trust whoever holds the rule, not the code they reviewed.
-
 ### Caller Context — Complete API
 
 ```rust

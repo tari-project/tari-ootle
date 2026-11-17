@@ -1727,6 +1727,7 @@ mod tests {
                     epoch_end_grace_period: std::time::Duration::from_secs(5),
                     epoch_end_drain_period: std::time::Duration::from_secs(5),
                     catch_up_request_timeout: std::time::Duration::from_secs(15),
+                    catch_up_page_bytes: crate::hotstuff::DEFAULT_CATCH_UP_PAGE_BYTES,
                 };
                 let (tx_events, _rx_events) = broadcast::channel(16);
                 let manager = ConsensusTransactionManager::new(NoopExecutor, 2160, usize::MAX, usize::MAX);

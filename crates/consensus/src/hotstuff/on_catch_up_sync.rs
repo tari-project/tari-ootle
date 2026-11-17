@@ -27,43 +27,48 @@ impl<TConsensusSpec: ConsensusSpec> OnCatchUpSync<TConsensusSpec> {
         }
     }
 
-    pub async fn request_sync(
+    /// Asks `to` for the page of blocks of `epoch` starting at `from_height`. Without a height, the page starts at this
+    /// node's highest certified block.
+    pub async fn request_page(
         &mut self,
         current_view: View,
         epoch: Epoch,
-        from: TConsensusSpec::Addr,
+        to: TConsensusSpec::Addr,
+        request_id: u32,
+        from_height: Option<NodeHeight>,
     ) -> Result<(), HotStuffError> {
-        let high_qc = self.store.with_read_tx(|tx| HighPc::get(tx, epoch))?;
-
-        let block_height = if high_qc.epoch() == epoch {
-            high_qc.height()
-        } else {
-            NodeHeight(1)
+        let from_height = match from_height {
+            Some(height) => height,
+            None => {
+                let high_qc = self.store.with_read_tx(|tx| HighPc::get(tx, epoch))?;
+                if high_qc.epoch() == epoch {
+                    high_qc.height()
+                } else {
+                    NodeHeight(1)
+                }
+            },
         };
 
         info!(
             target: LOG_TARGET,
-            "⏰ Catch up required from block {}/{} from {} (current view: {})",
-            epoch,
-            block_height,
-            from,
-            current_view
+            "⏰ Catch up page {request_id} from block {epoch}/{from_height} from {to} (current view: {current_view})",
         );
 
-        // Request a catch-up
         if self
             .outbound_messaging
             .send(
-                from,
-                HotstuffMessage::CatchUpSyncRequest(CatchUpRequestMessage { epoch, block_height }),
+                to,
+                HotstuffMessage::CatchUpSyncRequest(CatchUpRequestMessage {
+                    request_id,
+                    epoch,
+                    from_height,
+                }),
             )
             .await
             .is_err()
         {
             warn!(target: LOG_TARGET, "Leader channel closed while sending SyncRequest");
-            return Ok(());
         }
-
         Ok(())
     }
 }

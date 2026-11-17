@@ -87,8 +87,15 @@ fn observe_target(target: TestAddress, drop_from: Arc<AtomicU64>, observed: Arc<
             return true;
         }
         match msg {
-            HotstuffMessage::CatchUpSyncResponse(response) => {
-                observed.lock().unwrap().caught_up.insert(*response.block.id());
+            HotstuffMessage::CatchUpPage(page) => {
+                let mut observed = observed.lock().unwrap();
+                observed
+                    .caught_up
+                    .extend(page.blocks.iter().map(|proposal| *proposal.block.id()));
+                // The leaf is the catch-up server's own latest block, relayed for the target to vote on.
+                observed
+                    .relayed
+                    .extend(page.leaf.iter().map(|proposal| *proposal.block.id()));
                 true
             },
             HotstuffMessage::Proposal(proposal) => {

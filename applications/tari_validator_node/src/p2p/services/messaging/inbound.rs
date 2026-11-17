@@ -278,7 +278,11 @@ mod tests {
 
     fn encoded_sync_request(epoch: u64) -> Bytes {
         let request = HotStuffMessage {
-            message: Some(Message::SyncRequest(SyncRequest { epoch, block_height: 7 })),
+            message: Some(Message::SyncRequest(SyncRequest {
+                epoch,
+                from_height: 7,
+                request_id: 0,
+            })),
         };
         Bytes::from(prost::Message::encode_to_vec(&request))
     }

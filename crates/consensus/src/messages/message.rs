@@ -15,7 +15,7 @@ use super::{
     ProposalMessage,
     VoteMessage,
 };
-use crate::messages::{CatchUpRequestMessage, MissingTransactionsRequest};
+use crate::messages::{CatchUpPageMessage, CatchUpRequestMessage, MissingTransactionsRequest};
 
 // Serialize is implemented for the message logger
 #[derive(Debug, Clone, serde::Serialize)]
@@ -36,12 +36,14 @@ pub enum HotstuffMessage {
     MissingTransactionsRequest(MissingTransactionsRequest),
     /// Response with missing transactions
     MissingTransactionsResponse(MissingTransactionsResponse),
-    /// Request to send blocks from a given height
+    /// Request for one page of blocks from a given height
     CatchUpSyncRequest(CatchUpRequestMessage),
-    /// A block delivered in response to a catch-up sync request. Unlike a [`HotstuffMessage::Proposal`],
-    /// this is an ordered block import: it is not subject to the live-consensus view filter and is
-    /// processed regardless of the current view.
+    /// A catch-up block unpacked from a [`HotstuffMessage::CatchUpPage`]. Unlike a [`HotstuffMessage::Proposal`], this
+    /// is an ordered block import: it is not subject to the live-consensus view filter and is processed regardless of
+    /// the current view. Peers send blocks only inside pages, so one arriving on its own is discarded.
     CatchUpSyncResponse(Box<ProposalMessage>),
+    /// One page of blocks in answer to a catch-up request
+    CatchUpPage(Box<CatchUpPageMessage>),
 }
 
 impl HotstuffMessage {
@@ -69,6 +71,7 @@ impl HotstuffMessage {
             Self::MissingTransactionsResponse(_) => "MissingTransactionsResponse",
             Self::CatchUpSyncRequest(_) => "CatchUpSyncRequest",
             Self::CatchUpSyncResponse(_) => "CatchUpSyncResponse",
+            Self::CatchUpPage(_) => "CatchUpPage",
         }
     }
 
@@ -84,12 +87,20 @@ impl HotstuffMessage {
             Self::MissingTransactionsResponse(msg) => msg.epoch,
             Self::CatchUpSyncRequest(msg) => msg.epoch,
             Self::CatchUpSyncResponse(msg) => msg.block.epoch(),
+            Self::CatchUpPage(msg) => msg.epoch,
         }
     }
 
     pub fn proposal(&self) -> Option<&ProposalMessage> {
         match self {
             Self::Proposal(msg) => Some(msg),
+            _ => None,
+        }
+    }
+
+    pub fn into_catch_up_sync_response(self) -> Option<ProposalMessage> {
+        match self {
+            Self::CatchUpSyncResponse(msg) => Some(*msg),
             _ => None,
         }
     }
@@ -152,7 +163,11 @@ impl Display for HotstuffMessage {
                 msg.block_id,
                 msg.epoch
             ),
-            Self::CatchUpSyncRequest(msg) => write!(f, "SyncRequest({}/{})", msg.epoch, msg.block_height),
+            Self::CatchUpSyncRequest(msg) => write!(
+                f,
+                "SyncRequest(req_id={}, {}/{})",
+                msg.request_id, msg.epoch, msg.from_height
+            ),
             Self::CatchUpSyncResponse(msg) => {
                 write!(
                     f,
@@ -164,6 +179,16 @@ impl Display for HotstuffMessage {
                     msg.foreign_proposals.len()
                 )
             },
+            Self::CatchUpPage(msg) => write!(
+                f,
+                "CatchUpPage(req_id={}, Epoch={}, #blocks={}, leaf={}, #txs={}, next={})",
+                msg.request_id,
+                msg.epoch,
+                msg.blocks.len(),
+                msg.leaf.as_ref().map(|leaf| leaf.block.height()).display(),
+                msg.transactions.len(),
+                msg.next_height.display()
+            ),
         }
     }
 }

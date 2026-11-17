@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use log::*;
 use tari_consensus_types::{LastProposed, LeafBlock};
@@ -9,38 +9,53 @@ use tari_ootle_common_types::{Epoch, NodeHeight, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
     StorageError,
-    consensus_models::{Block, BookkeepingModel},
+    consensus_models::{Block, BookkeepingModel, TransactionRecord},
 };
 
 use crate::{
     bounded_spawn::PerKeyBoundedSpawn,
     hotstuff::HotStuffError,
-    messages::{CatchUpRequestMessage, HotstuffMessage, ProposalMessage},
+    messages::{
+        CatchUpPageMessage,
+        CatchUpRequestMessage,
+        EncodedTransaction,
+        HotstuffMessage,
+        MAX_CATCH_UP_PAGE_BLOCKS,
+        MAX_REQUESTED_TRANSACTIONS,
+        ProposalMessage,
+    },
     traits::{ConsensusSpec, OutboundMessaging},
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_sync_request";
 
-/// Number of catch-up requests served concurrently. Each one walks the block store and streams every block up
-/// to our leaf, so the work this node does must not scale with the number of peers asking.
+/// Number of catch-up requests served concurrently. Each one reads a page of blocks from the store, so the work this
+/// node does must not scale with the number of peers asking.
 const MAX_CONCURRENT_SYNC_REQUESTS: usize = 5;
-/// A peer only ever needs one response at a time, and holding it to one keeps the rest of the pool for its committee.
+/// A requester has one page request outstanding at a time, and holding it to one keeps the rest of the pool for its
+/// committee.
 const MAX_SYNC_REQUESTS_PER_PEER: usize = 1;
-/// A response streams every block up to our leaf, so it is allowed to be slow. Past this the peer is not keeping up
-/// with what it asked for, and its permit is worth more to someone else.
+/// Reading and sending one page takes well under this. Past it the permit is worth more to someone else.
 const SYNC_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
-/// Number of blocks read from the store at a time while serving a catch-up request.
+/// Number of blocks read from the store at a time while filling a catch-up page.
 const CATCH_UP_BATCH_SIZE: usize = 100;
+/// What a transaction adds to a page beyond its encoded bytes: the field's tag and length prefix.
+const TRANSACTION_FRAMING_BYTES: usize = 8;
 
 #[derive(Debug)]
 pub struct OnSyncRequest<TConsensusSpec: ConsensusSpec> {
     store: TConsensusSpec::StateStore,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     bounded_spawner: PerKeyBoundedSpawn<TConsensusSpec::Addr>,
+    page_bytes: usize,
 }
 
 impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
-    pub fn new(store: TConsensusSpec::StateStore, outbound_messaging: TConsensusSpec::OutboundMessaging) -> Self {
+    pub fn new(
+        store: TConsensusSpec::StateStore,
+        outbound_messaging: TConsensusSpec::OutboundMessaging,
+        page_bytes: usize,
+    ) -> Self {
         Self {
             store,
             outbound_messaging,
@@ -49,29 +64,37 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                 MAX_SYNC_REQUESTS_PER_PEER,
                 SYNC_RESPONSE_TIMEOUT,
             ),
+            page_bytes,
         }
     }
 
+    /// Answers `msg` with one page. A request beyond the pool's or the peer's allowance is dropped, and the requester
+    /// asks again when its page does not arrive.
     pub fn handle(&self, from: TConsensusSpec::Addr, epoch: Epoch, msg: CatchUpRequestMessage) {
-        if msg.epoch != epoch {
-            warn!(
-                target: LOG_TARGET,
-                "Received SyncRequest from {} for epoch {} but our epoch is {}. Ignoring request.",
-                from,
-                msg.epoch,
-                epoch
-            );
-            return;
-        }
-
         let outbound_messaging = self.outbound_messaging.clone();
         let store = self.store.clone();
+        let page_bytes = self.page_bytes;
 
         if self
             .bounded_spawner
             .try_spawn(from.clone(), {
                 let from = from.clone();
-                Self::handle_request_task(store, outbound_messaging, from, epoch, msg)
+                async move {
+                    let page = match read_page(&store, &outbound_messaging, &from, epoch, &msg, page_bytes) {
+                        Ok(page) => page,
+                        Err(err) => {
+                            warn!(target: LOG_TARGET, "Failed to read a catch-up page for {from}: {err}");
+                            CatchUpPageMessage::empty(msg.request_id, msg.epoch)
+                        },
+                    };
+                    let mut outbound_messaging = outbound_messaging;
+                    if let Err(err) = outbound_messaging
+                        .send(from.clone(), HotstuffMessage::CatchUpPage(Box::new(page)))
+                        .await
+                    {
+                        warn!(target: LOG_TARGET, "Error sending catch-up page to {from}: {err}");
+                    }
+                }
             })
             .is_err()
         {
@@ -82,143 +105,136 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
             );
         }
     }
+}
 
-    #[allow(clippy::too_many_lines)]
-    async fn handle_request_task(
-        store: TConsensusSpec::StateStore,
-        mut outbound_messaging: TConsensusSpec::OutboundMessaging,
-        from: TConsensusSpec::Addr,
-        epoch: Epoch,
-        msg: CatchUpRequestMessage,
-    ) {
-        let result = store.with_read_tx(|tx| {
-            let mut leaf_block = LeafBlock::get(tx, epoch)?;
-            // Include the block we last proposed if applicable.
-            if let Some(last_proposed) = LastProposed::get(tx, epoch).optional()? &&
-                last_proposed.epoch == leaf_block.epoch() &&
-                last_proposed.height > leaf_block.height()
-            {
-                leaf_block = last_proposed.as_leaf_block();
-            }
+/// Reads the page `msg` asks for: the blocks of the requested epoch from `msg.from_height`, up to and including
+/// our leaf, filled up to `page_bytes` with at least one block, and the transactions those blocks commit to that
+/// still fit. A request this node cannot serve gets a page without blocks.
+fn read_page<TStore: StateStore, TOutbound: OutboundMessaging>(
+    store: &TStore,
+    outbound_messaging: &TOutbound,
+    from: &impl std::fmt::Display,
+    epoch: Epoch,
+    msg: &CatchUpRequestMessage,
+    page_bytes: usize,
+) -> Result<CatchUpPageMessage, HotStuffError> {
+    let mut page = CatchUpPageMessage::empty(msg.request_id, msg.epoch);
+    if msg.epoch != epoch {
+        info!(
+            target: LOG_TARGET,
+            "Received catch up request from {from} for epoch {} but our epoch is {epoch}. Sending an empty page.",
+            msg.epoch,
+        );
+        return Ok(page);
+    }
 
-            if leaf_block.epoch() != msg.epoch {
-                info!(
-                    target: LOG_TARGET,
-                    "Received catch up request from {} for epoch {} but our leaf block is {}. Ignoring request.",
-                    from,
-                    msg.epoch,
-                    leaf_block
-                );
-                return Ok(None);
-            }
+    let leaf_block = store.with_read_tx(|tx| {
+        let mut leaf_block = LeafBlock::get(tx, epoch)?;
+        // Include the block we last proposed if applicable.
+        if let Some(last_proposed) = LastProposed::get(tx, epoch).optional()? &&
+            last_proposed.epoch == leaf_block.epoch() &&
+            last_proposed.height > leaf_block.height()
+        {
+            leaf_block = last_proposed.as_leaf_block();
+        }
+        Ok::<_, HotStuffError>(leaf_block)
+    })?;
 
-            if leaf_block.height.is_zero() {
-                info!(
-                    target: LOG_TARGET,
-                    "This node is at height 0 so cannot return any sync blocks. Ignoring request"
-                );
-                return Ok(None);
-            }
+    if leaf_block.epoch() != msg.epoch || leaf_block.height.is_zero() || leaf_block.height() < msg.from_height {
+        info!(
+            target: LOG_TARGET,
+            "Received catch up request from {from} from block {}/{} but our leaf block is {leaf_block}. Sending an \
+             empty page.",
+            msg.epoch,
+            msg.from_height,
+        );
+        return Ok(page);
+    }
 
-            if leaf_block.height() < msg.block_height {
-                return Err(HotStuffError::InvalidSyncRequest {
-                    details: format!(
-                        "Received catch up request from {} for block {} but our leaf block is {}. Ignoring request.",
-                        from, msg.block_height, leaf_block
-                    ),
-                });
-            }
-
-            info!(
-                target: LOG_TARGET,
-                "🌐 Received catch up request from {} from block {} to {}",
-                from,
-                msg.block_height,
-                leaf_block
-            );
-            Ok(Some(leaf_block))
-        });
-
-        let leaf_block = match result {
-            Ok(Some(leaf_block)) => leaf_block,
-            Ok(None) => {
-                return;
-            },
-            Err(err) => {
-                warn!(target: LOG_TARGET, "Failed to process sync request: {}", err);
-                return;
-            },
-        };
-
-        let start_height = msg.block_height.max(NodeHeight(1));
-        let batches = CatchUpBatches::new(&store, msg.epoch, start_height, leaf_block.height());
-        for result in batches {
-            let blocks = match result {
-                Ok(blocks) => blocks,
-                Err(err) => {
-                    warn!(target: LOG_TARGET, "Failed to fetch blocks for catch-up request: {}", err);
-                    return;
-                },
+    let start_height = msg.from_height.max(NodeHeight(1));
+    let mut used_bytes = 0usize;
+    let mut included_transactions = HashSet::new();
+    'batches: for result in CatchUpBatches::new(store, msg.epoch, start_height, leaf_block.height()) {
+        for block in result? {
+            let height = block.height();
+            let is_leaf = block.id() == leaf_block.block_id();
+            let foreign_proposals = store.with_read_tx(|tx| block.get_foreign_proposals(tx))?;
+            let proposal = ProposalMessage {
+                block,
+                foreign_proposals: foreign_proposals.into_iter().map(|p| p.into_proposal()).collect(),
             };
+            let (proposal, size) = measure(outbound_messaging, proposal)?;
+            let carries_blocks = !page.blocks.is_empty() || page.leaf.is_some();
+            if carries_blocks && (used_bytes + size > page_bytes || page.blocks.len() >= MAX_CATCH_UP_PAGE_BLOCKS) {
+                // A page that stops partway through a height resumes at that height, so its remaining forks are
+                // sent next, unless the page holds nothing but that height, which would only repeat itself.
+                let first_height = page.blocks.first().map(|b| b.block.height()).unwrap_or(height);
+                page.next_height = Some(if first_height < height {
+                    height
+                } else {
+                    height + NodeHeight(1)
+                });
+                break 'batches;
+            }
+            used_bytes += size;
 
-            if blocks.is_empty() {
-                warn!(
-                    target: LOG_TARGET,
-                    "No blocks found from height {} to {} for epoch {}",
-                    start_height,
-                    leaf_block.height(),
-                    epoch
-                );
-                return;
+            for transaction_id in proposal.block.all_transaction_ids() {
+                if page.transactions.len() >= MAX_REQUESTED_TRANSACTIONS ||
+                    !included_transactions.insert(*transaction_id)
+                {
+                    continue;
+                }
+                let Some(record) = store
+                    .with_read_tx(|tx| TransactionRecord::get(tx, transaction_id))
+                    .optional()?
+                else {
+                    continue;
+                };
+                let encoded = EncodedTransaction::encode(record.transaction()).map_err(|e| {
+                    HotStuffError::InvariantError(format!("Failed to encode transaction {transaction_id}: {e}"))
+                })?;
+                let size = encoded.len() + TRANSACTION_FRAMING_BYTES;
+                if used_bytes + size > page_bytes {
+                    continue;
+                }
+                used_bytes += size;
+                page.transactions.push(encoded);
             }
 
-            info!(
-                target: LOG_TARGET,
-                "🌐 Sending {} block(s) ({} to {}) to {}",
-                blocks.len(),
-                blocks.first().map(|b| b.height()).unwrap_or_default(),
-                blocks.last().map(|b| b.height()).unwrap_or_default(),
-                from
-            );
-
-            for block in blocks {
-                // TODO(perf): O(n) queries
-                let foreign_proposals = match store.with_read_tx(|tx| block.get_foreign_proposals(tx)) {
-                    Ok(foreign_proposals) => foreign_proposals,
-                    Err(err) => {
-                        warn!(target: LOG_TARGET, "Failed to fetch foreign proposals for block {}: {}", block, err);
-                        return;
-                    },
-                };
-
-                debug!(
-                    target: LOG_TARGET,
-                    "🌐 Sending block {} to {}",
-                    block,
-                    from
-                );
-
-                let is_leaf = block.id() == leaf_block.block_id();
-                let proposal = ProposalMessage {
-                    block,
-                    foreign_proposals: foreign_proposals.into_iter().map(|p| p.into_proposal()).collect(),
-                };
-                // The requester does not vote on catch-up blocks, because a later block certifies each ancestor of
-                // our leaf. The leaf has no certificate yet, so it goes as a proposal: the requester votes on it if it
-                // is still current when it gets there.
-                let message = if is_leaf {
-                    HotstuffMessage::new_proposal(proposal)
-                } else {
-                    HotstuffMessage::new_catch_up_sync_response(proposal)
-                };
-
-                if let Err(err) = outbound_messaging.send(from.clone(), message).await {
-                    warn!(target: LOG_TARGET, "Error sending SyncResponse: {err}");
-                    return;
-                }
+            // The leaf has no certificate yet, so it travels apart from the certified blocks: the requester
+            // handles it as a live proposal and votes on it if it is still current.
+            if is_leaf {
+                page.leaf = Some(proposal);
+            } else {
+                page.blocks.push(proposal);
             }
         }
     }
+
+    info!(
+        target: LOG_TARGET,
+        "🌐 Sending {} block(s), leaf: {}, {} transaction(s) ({used_bytes} bytes) from {}/{} to {from}, next: {:?}",
+        page.blocks.len(),
+        page.leaf.is_some(),
+        page.transactions.len(),
+        msg.epoch,
+        start_height,
+        page.next_height,
+    );
+    Ok(page)
+}
+
+/// `proposal` and the bytes it takes on the wire as a catch-up block.
+fn measure<TOutbound: OutboundMessaging>(
+    outbound_messaging: &TOutbound,
+    proposal: ProposalMessage,
+) -> Result<(ProposalMessage, usize), HotStuffError> {
+    let message = HotstuffMessage::new_catch_up_sync_response(proposal);
+    let size = outbound_messaging.encoded_len(&message);
+    let proposal = message
+        .into_catch_up_sync_response()
+        .ok_or_else(|| HotStuffError::InvariantError("new_catch_up_sync_response built another message".to_string()))?;
+    Ok((proposal, size))
 }
 
 /// The blocks of `epoch` a catch-up response sends, from a start height up to and including the leaf, read in
@@ -302,7 +318,103 @@ mod tests {
     use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
     use super::*;
-    use crate::traits::CertificateStore;
+    use crate::traits::{CertificateStore, OutboundMessagingError};
+
+    /// Measures every catch-up block at `BLOCK_BYTES`, and sends nothing.
+    struct FixedSizeOutbound;
+
+    const BLOCK_BYTES: usize = 100;
+
+    impl OutboundMessaging for FixedSizeOutbound {
+        type Addr = String;
+
+        fn encoded_len(&self, _message: &HotstuffMessage) -> usize {
+            BLOCK_BYTES
+        }
+
+        async fn send_self<T: Into<HotstuffMessage> + Send>(
+            &mut self,
+            _message: T,
+        ) -> Result<(), OutboundMessagingError> {
+            Ok(())
+        }
+
+        async fn send<T: Into<HotstuffMessage> + Send>(
+            &mut self,
+            _to: Self::Addr,
+            _message: T,
+        ) -> Result<(), OutboundMessagingError> {
+            Ok(())
+        }
+
+        async fn multicast<T, I>(&mut self, _addresses: I, _message: T) -> Result<(), OutboundMessagingError>
+        where
+            I: IntoIterator<Item = Self::Addr> + Send,
+            T: Into<HotstuffMessage> + Send,
+        {
+            Ok(())
+        }
+
+        async fn broadcast<T>(&mut self, _message: T) -> Result<(), OutboundMessagingError>
+        where T: Into<HotstuffMessage> + Send {
+            Ok(())
+        }
+    }
+
+    fn page(
+        store: &RocksDbStateStore<String>,
+        epoch: Epoch,
+        from_height: u64,
+        page_bytes: usize,
+    ) -> CatchUpPageMessage {
+        let request = CatchUpRequestMessage {
+            request_id: 7,
+            epoch,
+            from_height: NodeHeight(from_height),
+        };
+        read_page(store, &FixedSizeOutbound, &"peer", Epoch::zero(), &request, page_bytes).unwrap()
+    }
+
+    fn heights(page: &CatchUpPageMessage) -> Vec<u64> {
+        page.blocks.iter().map(|p| p.block.height().as_u64()).collect()
+    }
+
+    #[test]
+    fn a_page_holds_the_blocks_that_fit_and_says_where_the_next_starts() {
+        let (store, _tmp) = store_with_chain(6);
+
+        let first = page(&store, Epoch::zero(), 1, 2 * BLOCK_BYTES);
+        assert_eq!(first.request_id, 7);
+        assert_eq!(heights(&first), [1, 2]);
+        assert!(first.leaf.is_none());
+        assert_eq!(first.next_height, Some(NodeHeight(3)));
+
+        let last = page(&store, Epoch::zero(), 5, 2 * BLOCK_BYTES);
+        assert_eq!(heights(&last), [5], "the leaf travels apart from the certified blocks");
+        assert_eq!(last.leaf.as_ref().map(|leaf| leaf.block.height()), Some(NodeHeight(6)));
+        assert_eq!(last.next_height, None);
+    }
+
+    #[test]
+    fn a_page_carries_one_block_even_when_it_alone_is_over_the_budget() {
+        let (store, _tmp) = store_with_chain(3);
+
+        let page = page(&store, Epoch::zero(), 1, BLOCK_BYTES / 2);
+        assert_eq!(heights(&page), [1]);
+        assert_eq!(page.next_height, Some(NodeHeight(2)));
+    }
+
+    #[test]
+    fn a_request_this_node_cannot_serve_gets_an_empty_page() {
+        let (store, _tmp) = store_with_chain(3);
+
+        for (epoch, from_height) in [(Epoch(1), 1), (Epoch::zero(), 4)] {
+            let page = page(&store, epoch, from_height, 10 * BLOCK_BYTES);
+            assert!(page.blocks.is_empty() && page.leaf.is_none(), "{epoch}/{from_height}");
+            assert_eq!(page.next_height, None);
+            assert_eq!(page.request_id, 7);
+        }
+    }
 
     const NETWORK: Network = Network::LocalNet;
     const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
@@ -361,6 +473,7 @@ mod tests {
                     block.justify().save(tx)?;
                     block.insert(tx)?;
                 }
+                block.as_leaf().set(tx)?;
                 Ok::<_, StorageError>(())
             })
             .unwrap();

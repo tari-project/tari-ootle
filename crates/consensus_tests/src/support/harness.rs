@@ -763,6 +763,7 @@ impl TestBuilder {
                 epoch_end_grace_period: Duration::from_secs(1),
                 epoch_end_drain_period: Duration::from_secs(5),
                 catch_up_request_timeout: Duration::from_secs(15),
+                catch_up_page_bytes: tari_consensus::hotstuff::DEFAULT_CATCH_UP_PAGE_BYTES,
             },
         }
     }

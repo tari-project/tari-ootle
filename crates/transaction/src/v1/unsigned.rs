@@ -23,7 +23,18 @@ use crate::{
     ResourceAddressRef,
     Signable,
     TransactionSignature,
+    args::InstructionArg,
 };
+
+impl InstructionArg {
+    pub(crate) fn resolve_bytes<'a>(&'a self, blobs: &'a Blobs) -> Option<&'a [u8]> {
+        match self {
+            Self::Literal(bytes) => Some(bytes),
+            Self::Blob(idx) => blobs.get(*idx).map(|b| b.as_bytes()),
+            Self::Workspace(_) => None,
+        }
+    }
+}
 
 pub(crate) fn decode_instructions<'b, C>(
     d: &mut minicbor::Decoder<'b>,
@@ -244,7 +255,7 @@ impl UnsignedTransactionV1 {
         for instruction in all_instructions {
             match instruction {
                 Instruction::CallFunction { args, .. } => {
-                    for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
+                    for arg in args.iter().filter_map(|a| a.resolve_bytes(&self.blobs)) {
                         let value = IndexedValue::from_raw(arg)?;
                         substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
                     }
@@ -253,7 +264,7 @@ impl UnsignedTransactionV1 {
                     if let Some(component_address) = call.address() {
                         substates.insert(SubstateId::Component(*component_address));
                     }
-                    for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
+                    for arg in args.iter().filter_map(|a| a.resolve_bytes(&self.blobs)) {
                         let value = IndexedValue::from_raw(arg)?;
                         substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
                     }
@@ -300,7 +311,7 @@ impl UnsignedTransactionV1 {
                         .as_ref()
                         .iter()
                         .flat_map(|m| &m.args)
-                        .filter_map(|a| a.as_literal_bytes())
+                        .filter_map(|a| a.resolve_bytes(&self.blobs))
                     {
                         let value = IndexedValue::from_raw(arg)?;
                         substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
@@ -322,5 +333,87 @@ impl Signable<&RistrettoPublicKeyBytes> for UnsignedTransactionV1 {
 
     fn to_signing_message(&self, seal_signer: &RistrettoPublicKeyBytes) -> crate::TransactionMessage {
         TransactionSignature::create_message_v1(seal_signer, self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_template_lib_types::{FunctionName, ObjectKey, ResourceAddress, TemplateAddress};
+
+    use super::*;
+    use crate::{Blob, MigrateFunction, Transaction, args};
+
+    #[test]
+    fn to_referenced_substates_and_auto_fill_inputs_resolve_blob_arguments() {
+        let comp_fn = ComponentAddress::new(ObjectKey::from_array([1; 32]));
+        let res_method = ResourceAddress::new(ObjectKey::from_array([2; 32]));
+        let comp_migrate = ComponentAddress::new(ObjectKey::from_array([3; 32]));
+        let target_comp = ComponentAddress::new(ObjectKey::from_array([4; 32]));
+        let update_comp = ComponentAddress::new(ObjectKey::from_array([5; 32]));
+
+        let unsigned = Transaction::builder_localnet(Epoch(10))
+            .with_auto_fill_inputs()
+            .add_fee_instructions_with(|b| {
+                b.add_blob("b0", tari_bor::encode(&comp_fn).unwrap()).call_function(
+                    TemplateAddress::from_array([9; 32]),
+                    FunctionName::try_from("f").unwrap(),
+                    args![Blob("b0")],
+                )
+            })
+            .add_blob("b1", tari_bor::encode(&res_method).unwrap())
+            .add_blob("b2", tari_bor::encode(&comp_migrate).unwrap())
+            .call_method(target_comp, FunctionName::try_from("m").unwrap(), args![Blob("b1")])
+            .update_component_template_address_with_migrate(
+                update_comp,
+                TemplateAddress::from_array([8; 32]),
+                FunctionName::try_from("mig").unwrap(),
+                args![Blob("b2")],
+            )
+            .build_unsigned();
+
+        let expected = HashSet::from([
+            SubstateId::Component(comp_fn),
+            SubstateId::Resource(res_method),
+            SubstateId::Component(comp_migrate),
+            SubstateId::Component(target_comp),
+            SubstateId::Component(update_comp),
+        ]);
+        let auto_filled: HashSet<_> = unsigned.inputs().iter().map(|i| i.substate_id().clone()).collect();
+        assert_eq!(auto_filled, expected);
+        assert_eq!(unsigned.to_referenced_substates().unwrap(), expected);
+
+        let mut raw_unsigned = UnsignedTransactionV1::new(
+            1u8,
+            vec![Instruction::CallFunction {
+                address: TemplateAddress::from_array([9; 32]),
+                function: FunctionName::try_from("f").unwrap(),
+                args: vec![InstructionArg::Blob(0)],
+            }],
+            vec![
+                Instruction::CallMethod {
+                    call: ComponentReference::Address(target_comp),
+                    method: FunctionName::try_from("m").unwrap(),
+                    args: vec![InstructionArg::Blob(1)],
+                },
+                Instruction::UpdateComponentTemplate {
+                    component: ComponentReference::Address(update_comp),
+                    migrate: Some(MigrateFunction {
+                        name: FunctionName::try_from("mig").unwrap(),
+                        args: vec![InstructionArg::Blob(2)],
+                    }),
+                    new_template: TemplateAddress::from_array([8; 32]),
+                },
+            ],
+            IndexSet::new(),
+            None,
+            Epoch(10),
+            false,
+        );
+        raw_unsigned.blobs = Blobs::from_vec(vec![
+            Blob::from(tari_bor::encode(&comp_fn).unwrap()),
+            Blob::from(tari_bor::encode(&res_method).unwrap()),
+            Blob::from(tari_bor::encode(&comp_migrate).unwrap()),
+        ]);
+        assert_eq!(raw_unsigned.to_referenced_substates().unwrap(), expected);
     }
 }

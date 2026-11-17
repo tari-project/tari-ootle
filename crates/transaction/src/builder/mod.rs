@@ -1020,9 +1020,19 @@ impl<D> TransactionBuilder<D> {
 
     fn add_inputs_for_args(&mut self, args: &[InstructionArg]) {
         for arg in args {
-            if let Some(bytes) = arg.as_literal_bytes() {
-                self.add_inputs_for_raw_arg(bytes, InputDeclaration::write);
-            }
+            let Some(indexed) = arg
+                .resolve_bytes(self.unsigned_transaction.blobs())
+                .and_then(|bytes| IndexedValue::from_raw(bytes).ok())
+            else {
+                continue;
+            };
+            declare_inputs(
+                self.unsigned_transaction.inputs_mut(),
+                indexed
+                    .referenced_substates()
+                    .filter(SubstateId::is_declarable_input)
+                    .map(InputDeclaration::write),
+            );
         }
     }
 

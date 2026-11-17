@@ -334,6 +334,18 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
         self.derive_account_address(key.key_index())
     }
 
+    /// Derives the account and view-only address at `index` and persists both key indices in storage
+    /// so subsequent `next_account_address` allocations advance past it.
+    pub fn create_account_address_at_index(
+        &self,
+        index: DerivedKeyIndex,
+    ) -> Result<WalletOotleAddressWithKeyIds, KeyManagerApiError> {
+        let address = self.derive_account_address(index)?;
+        self.store
+            .with_write_tx(|tx| Self::record_derived_key_index(tx, KeyBranch::Account, index))?;
+        Ok(address)
+    }
+
     pub fn derive_account_key_pair(&self, index: u64) -> Result<DerivedKeyPair, KeyManagerApiError> {
         let key = self.derive_account_key(index)?;
         let public_key = RistrettoPublicKey::from_secret_key(&key.key);
@@ -357,6 +369,22 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
         Ok(key)
     }
 
+    /// Derives the key at `index` in `branch` and persists the key index in storage
+    /// so `get_all_derived_keys` and subsequent `next_*` allocations observe it.
+    pub fn create_public_key_at_index(
+        &self,
+        branch: KeyBranch,
+        index: DerivedKeyIndex,
+    ) -> Result<WalletPublicKey, KeyManagerApiError> {
+        let key = self.derive_key(branch, index)?;
+        self.store
+            .with_write_tx(|tx| Self::record_derived_key_index(tx, branch, index))?;
+        Ok(WalletPublicKey {
+            public_key: key.to_public_key(),
+            key_id: key.as_key_id(),
+        })
+    }
+
     /// Derives the next key in the specified branch, increments the index, and sets it as the active key.
     /// If the branch does not exist, it will be created with index 0 and the first key will be returned.
     /// TODO: if there is another active DB transaction this function will block until it can acquire it.
@@ -377,16 +405,24 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
             .map(|i| i.checked_add(1).ok_or(KeyManagerApiError::KeyIndexExhausted))
             .transpose()?
             .unwrap_or(0);
-        if matches!(branch, KeyBranch::Account) {
-            // Ensure the view key branch is created if it doesn't exist
-            tx.key_manager_insert_or_ignore(KeyBranch::ViewOnlyKey.as_str(), next_index)?;
-        }
-        tx.key_manager_insert_or_ignore(branch.as_str(), next_index)?;
+        Self::record_derived_key_index(&mut tx, branch, next_index)?;
         tx.commit()?;
         Ok(DerivedKeyId {
             branch,
             index: next_index,
         })
+    }
+
+    fn record_derived_key_index<W: WalletStoreWriter>(
+        tx: &mut W,
+        branch: KeyBranch,
+        index: DerivedKeyIndex,
+    ) -> Result<(), WalletStorageError> {
+        if matches!(branch, KeyBranch::Account) {
+            // Ensure the view key branch is created if it doesn't exist
+            tx.key_manager_insert_or_ignore(KeyBranch::ViewOnlyKey.as_str(), index)?;
+        }
+        tx.key_manager_insert_or_ignore(branch.as_str(), index)
     }
 
     pub fn create_throwaway_nonce(&self) -> RistrettoSecretKey {

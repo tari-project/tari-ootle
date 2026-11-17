@@ -4,10 +4,7 @@
 use axum_extra::headers::authorization::Bearer;
 use ootle_byte_type::ToByteType;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey, tari_utilities::hex::Hex};
-use tari_ootle_wallet_sdk::{
-    apis::key_manager::KeyManagerApiError,
-    models::{KeyBranch, KeyId},
-};
+use tari_ootle_wallet_sdk::{apis::key_manager::KeyManagerApiError, models::KeyBranch};
 use tari_ootle_walletd_client::{
     permissions::{Crud, Permission},
     types::{
@@ -38,7 +35,7 @@ pub async fn handle_create(
     let key_manager = sdk.key_manager_api();
     let key = req
         .specific_index
-        .map(|idx| key_manager.get_public_key(KeyId::derived(req.branch, idx)))
+        .map(|idx| key_manager.create_public_key_at_index(req.branch, idx))
         .unwrap_or_else(|| key_manager.next_public_key(req.branch))?;
     Ok(KeysCreateResponse {
         id: key.key_id.derived_index().expect("Key is derived"),
@@ -147,5 +144,148 @@ mod tests {
         .await
         .unwrap();
         assert!(!listed.keys.is_empty());
+    }
+
+    #[tokio::test]
+    async fn keys_create_with_specific_index_persists_state_and_advances_next_index() {
+        use tari_ootle_wallet_sdk::models::KeyId;
+
+        let daemon = TestDaemon::start().await;
+        let session = Some(&daemon.session);
+
+        let explicit = handle_create(&daemon.context, session, KeysCreateRequest {
+            branch: KeyBranch::Account,
+            specific_index: Some(3),
+        })
+        .await
+        .unwrap();
+        assert_eq!(explicit.id, 3);
+
+        let listed_accounts = handle_list(&daemon.context, session, KeysListRequest {
+            branch: KeyBranch::Account,
+        })
+        .await
+        .unwrap();
+        assert!(
+            listed_accounts
+                .keys
+                .iter()
+                .any(|(id, pk, is_active)| *id == KeyId::derived(KeyBranch::Account, 3) &&
+                    *pk == explicit.public_key &&
+                    *is_active)
+        );
+
+        let listed_view_keys = handle_list(&daemon.context, session, KeysListRequest {
+            branch: KeyBranch::ViewOnlyKey,
+        })
+        .await
+        .unwrap();
+        assert!(
+            listed_view_keys
+                .keys
+                .iter()
+                .any(|(id, _, is_active)| *id == KeyId::derived(KeyBranch::ViewOnlyKey, 3) && *is_active)
+        );
+
+        let next = handle_create(&daemon.context, session, KeysCreateRequest {
+            branch: KeyBranch::Account,
+            specific_index: None,
+        })
+        .await
+        .unwrap();
+        assert_eq!(next.id, 4);
+
+        let tx_explicit = handle_create(&daemon.context, session, KeysCreateRequest {
+            branch: KeyBranch::Transaction,
+            specific_index: Some(2),
+        })
+        .await
+        .unwrap();
+        assert_eq!(tx_explicit.id, 2);
+
+        let tx_next = handle_create(&daemon.context, session, KeysCreateRequest {
+            branch: KeyBranch::Transaction,
+            specific_index: None,
+        })
+        .await
+        .unwrap();
+        assert_eq!(tx_next.id, 3);
+    }
+
+    #[tokio::test]
+    async fn accounts_create_with_explicit_key_index_advances_subsequent_allocations() {
+        use tari_ootle_wallet_sdk::models::KeyId;
+        use tari_ootle_walletd_client::{
+            ComponentAddressOrName,
+            types::{AccountsCreateOrGetRequest, AccountsCreateRequest},
+        };
+
+        use crate::handlers::accounts;
+
+        let daemon = TestDaemon::start().await;
+        let session = Some(&daemon.session);
+
+        let acc0 = accounts::handle_create(&daemon.context, session, AccountsCreateRequest {
+            account_name: Some("explicit_0".to_string()),
+            is_default: None,
+            key_index: Some(0),
+        })
+        .await
+        .unwrap();
+
+        let acc1 = accounts::handle_create(&daemon.context, session, AccountsCreateRequest {
+            account_name: Some("auto_after_0".to_string()),
+            is_default: None,
+            key_index: None,
+        })
+        .await
+        .unwrap();
+        assert_ne!(acc0.address, acc1.address);
+
+        let acc3 = accounts::handle_create_or_get(&daemon.context, session, AccountsCreateOrGetRequest {
+            account: Some(ComponentAddressOrName::Name("explicit_3".to_string())),
+            is_default: None,
+            key_index: Some(3),
+        })
+        .await
+        .unwrap();
+        assert!(acc3.created);
+
+        let acc4 = accounts::handle_create_or_get(&daemon.context, session, AccountsCreateOrGetRequest {
+            account: Some(ComponentAddressOrName::Name("auto_after_3".to_string())),
+            is_default: None,
+            key_index: None,
+        })
+        .await
+        .unwrap();
+        assert!(acc4.created);
+        assert_ne!(acc3.address, acc4.address);
+
+        let account_keys = handle_list(&daemon.context, session, KeysListRequest {
+            branch: KeyBranch::Account,
+        })
+        .await
+        .unwrap();
+        let view_keys = handle_list(&daemon.context, session, KeysListRequest {
+            branch: KeyBranch::ViewOnlyKey,
+        })
+        .await
+        .unwrap();
+        for idx in [0, 1, 3, 4] {
+            assert!(
+                account_keys
+                    .keys
+                    .iter()
+                    .any(|(id, _, _)| *id == KeyId::derived(KeyBranch::Account, idx)),
+                "missing account key index {idx}"
+            );
+            assert!(
+                view_keys
+                    .keys
+                    .iter()
+                    .any(|(id, _, _)| *id == KeyId::derived(KeyBranch::ViewOnlyKey, idx)),
+                "missing view-only key index {idx}"
+            );
+        }
     }
 }

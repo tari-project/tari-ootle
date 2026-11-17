@@ -288,7 +288,8 @@ impl GetSubstatesResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetSubstateVersionsRequest {
-    /// The substates whose live versions to look up. At most [`MAX_SUBSTATES_PER_FETCH`] are served.
+    /// The substates whose live versions to look up. A request naming more than [`MAX_SUBSTATES_PER_FETCH`] is
+    /// rejected.
     #[cfg_attr(feature = "ts", ts(as = "Vec<SubstateId>"))]
     #[cfg_attr(feature = "utoipa", schema(value_type = Vec<String>))]
     pub substate_ids: BoundedVec<SubstateId, 1, 50>,

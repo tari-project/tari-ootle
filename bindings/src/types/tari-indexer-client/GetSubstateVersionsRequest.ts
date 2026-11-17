@@ -3,7 +3,8 @@ import type { SubstateId } from "../SubstateId";
 
 export type GetSubstateVersionsRequest = {
   /**
-   * The substates whose live versions to look up. At most [`MAX_SUBSTATES_PER_FETCH`] are served.
+   * The substates whose live versions to look up. A request naming more than [`MAX_SUBSTATES_PER_FETCH`] is
+   * rejected.
    */
   substate_ids: Array<SubstateId>;
 };

@@ -31,4 +31,22 @@ impl SchemaVersion {
     pub const fn binds_authorizer_set(self) -> bool {
         matches!(self, Self::V2)
     }
+
+    /// Ok when `self` is [`Self::CURRENT`].
+    ///
+    /// A signer authorizing a transaction that another party supplied must check this first: the supplier picks
+    /// the schema, and an authorization made under an older schema stays usable under that schema's rules.
+    pub fn ensure_current(self) -> Result<(), NotCurrentSchema> {
+        if self == Self::CURRENT {
+            Ok(())
+        } else {
+            Err(NotCurrentSchema { schema: self })
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the transaction is {schema:?}, and only {current:?} transactions are signed", current = SchemaVersion::CURRENT)]
+pub struct NotCurrentSchema {
+    pub schema: SchemaVersion,
 }

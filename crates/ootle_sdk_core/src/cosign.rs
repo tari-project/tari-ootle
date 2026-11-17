@@ -193,12 +193,19 @@ pub fn unsigned_record_for_cosign(
 ///
 /// This is the only RNG site on the co-sign path. Bad key hex ⇒ [`OotleSdkError::Key`]. A signer whose
 /// key is not in the record's authorizer set ⇒ [`OotleSdkError::Invalid`], since its authorization
-/// could never verify.
+/// could never verify. A record whose transaction is not
+/// [`SchemaVersion::CURRENT`](tari_ootle_transaction::SchemaVersion::CURRENT) ⇒
+/// [`OotleSdkError::Invalid`].
 pub fn add_signature(
     unsigned: &UnsignedTransactionRecord,
     seal_public_key: &PublicKeyBytes,
     signer_secret: &SecretKeyBytes,
 ) -> Result<Authorization, OotleSdkError> {
+    unsigned
+        .unsigned
+        .schema()
+        .ensure_current()
+        .map_err(|e| OotleSdkError::Invalid(e.to_string()))?;
     let secret = parse_secret_key(signer_secret)?;
     let signer = public_key_bytes_from_secret(&secret);
     if !unsigned.authorizers.contains(&signer) {
@@ -537,6 +544,16 @@ mod tests {
         assert_eq!(err.code(), "INVALID");
         let err = unsigned_record_for_cosign(&resolved_partial(), &[], None).unwrap_err();
         assert_eq!(err.code(), "INVALID");
+    }
+
+    /// B signs only a current-schema record, whatever schema the record's sender chose.
+    #[test]
+    fn a_record_under_an_older_schema_is_refused() {
+        let mut record = record_for_b(None);
+        record.unsigned = UnsignedTransaction::V1(record.unsigned.into_body());
+        let err = add_signature(&record, &a_seal_pk(), &b_secret_bytes()).unwrap_err();
+        assert_eq!(err.code(), "INVALID");
+        assert!(err.to_string().contains("V1"), "{err}");
     }
 
     /// Sealing with a different main signer than the record B signed is refused at seal time.

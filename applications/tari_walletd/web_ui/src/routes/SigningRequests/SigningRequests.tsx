@@ -221,6 +221,16 @@ function RequestCard({ request }: { request: SigningRequestInfo }) {
             <Chip label="seal also authorizes" size="small" color="warning" variant="outlined" sx={{ ml: 1 }} />
           )}
         </Field>
+        <Field label="Authorizers">
+          {request.authorizers.map((key) => (
+            <div key={key}>
+              <span style={{ fontFamily: "monospace" }}>{key}</span>
+              {key === request.signer_public_key && (
+                <Chip label="this key" size="small" color="warning" variant="outlined" sx={{ ml: 1 }} />
+              )}
+            </div>
+          ))}
+        </Field>
         <Field label="Main signer">
           {v1?.main_signer === "SealSigner" && "the sealer"}
           {(v1?.main_signer === "None" || v1 === undefined) && "none"}

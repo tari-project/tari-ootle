@@ -97,12 +97,18 @@ impl OotleWallet {
 
     /// Authorizes `unsigned` with `address`'s key, sealed by the default address. `authorizers` is the full set of
     /// keys that will authorize the transaction and must hold `address`'s account key.
+    ///
+    /// `unsigned` must be a [`SchemaVersion::CURRENT`](tari_ootle_transaction::SchemaVersion::CURRENT) transaction.
     pub async fn authorize_transaction(
         &self,
         address: &Address,
         authorizers: &AuthorizerSet,
         unsigned: &UnsignedTransaction,
     ) -> WalletResult<TransactionAuthorization> {
+        unsigned
+            .schema()
+            .ensure_current()
+            .map_err(|e| signer::SignerError::other(e.to_string()))?;
         let default_address = self.default_address();
         let signer = self
             .key_providers
@@ -184,6 +190,10 @@ impl OotleWallet {
         context: AuthorizationContext<'_>,
         unsigned: &UnsignedTransaction,
     ) -> signer::Result<TransactionAuthorization> {
+        unsigned
+            .schema()
+            .ensure_current()
+            .map_err(|e| signer::SignerError::other(e.to_string()))?;
         let signer = self.key_providers.get(address).ok_or_else(|| {
             signer::SignerError::other(format!("Signer for address {address} not found in wallet signers"))
         })?;

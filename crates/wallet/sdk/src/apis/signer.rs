@@ -13,6 +13,8 @@ use tari_ootle_transaction::{
     AuthorizationContext,
     AuthorizerSet,
     IntoSigned,
+    NotCurrentSchema,
+    SchemaVersion,
     Signable,
     UnsealedTransaction,
     UnsignedTransaction,
@@ -52,6 +54,7 @@ impl<'a, TSpec: WalletSdkSpec> SignerApi<'a, TSpec, ()> {
     /// Every authorization signs over the full authorizer set, so every public key is resolved before anything
     /// is signed. The set is the keys of `keys` and `stealth_keys` together with those of the authorizations
     /// already attached, which must have been made over that same set. The list is kept in canonical order.
+    /// A `transaction` that is not [`SchemaVersion::CURRENT`] is refused.
     pub fn authorize(
         &self,
         seal_signer: &RistrettoPublicKeyBytes,
@@ -59,7 +62,7 @@ impl<'a, TSpec: WalletSdkSpec> SignerApi<'a, TSpec, ()> {
         stealth_keys: &[StealthUtxoSpendKeyId],
         transaction: UnsealedTransaction,
     ) -> Result<UnsealedTransaction, SignerApiError<TSpec>> {
-        let schema = transaction.schema();
+        transaction.schema().ensure_current()?;
         let mut authorizers = AuthorizerSet::from_signatures(transaction.body().signatures());
         for key in keys {
             authorizers.insert(self.key_manager.get_public_key(*key)?.public_key.to_byte_type());
@@ -74,7 +77,7 @@ impl<'a, TSpec: WalletSdkSpec> SignerApi<'a, TSpec, ()> {
 
         let context = AuthorizationContext::new(seal_signer, &authorizers);
         let (unsigned, mut signatures) = transaction.into_body().into_parts();
-        let unsigned = UnsignedTransaction::from_body(schema, unsigned);
+        let unsigned = UnsignedTransaction::from_body(SchemaVersion::CURRENT, unsigned);
         for key in keys {
             signatures.push(self.key_manager.sign_with_context(*key, context, &unsigned)?);
         }
@@ -171,6 +174,8 @@ pub enum SignerApiError<TSpec: WalletSdkSpec> {
     StoreError(#[from] WalletStorageError),
     #[error("Key manager API error: {0}")]
     KeyManagerError(#[from] KeyManagerApiError),
+    #[error(transparent)]
+    NotCurrentSchema(#[from] NotCurrentSchema),
 }
 
 impl<TSpec: WalletSdkSpec> fmt::Debug for SignerApiError<TSpec> {
@@ -179,6 +184,7 @@ impl<TSpec: WalletSdkSpec> fmt::Debug for SignerApiError<TSpec> {
             Self::KeyStoreError(e) => write!(f, "KeyStoreError: {:?}", e),
             Self::StoreError(e) => write!(f, "StoreError: {:?}", e),
             Self::KeyManagerError(e) => write!(f, "KeyManagerError: {:?}", e),
+            Self::NotCurrentSchema(e) => write!(f, "NotCurrentSchema: {:?}", e),
         }
     }
 }

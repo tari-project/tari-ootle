@@ -249,6 +249,13 @@ pub async fn handle_approve(
 
     let request = get_pending(context, req.request_id)?;
 
+    if let Err(e) = request.unsigned_transaction.schema().ensure_current() {
+        return Err(invalid_request(format!(
+            "Signing request {} cannot be approved: {e}; reject it and ask for a new one",
+            req.request_id
+        )));
+    }
+
     // The approver was shown `message_hash`; sign only if the stored request
     // still produces exactly that message.
     let context = AuthorizationContext::new(&request.seal_public_key, &request.authorizers);
@@ -438,8 +445,11 @@ mod tests {
     /// Stores a pending request the way `handle_create` would, skipping its
     /// network-dependent epoch check.
     fn insert_request(test: &SigningTest) -> SigningRequestId {
+        insert_request_for(test, transaction())
+    }
+
+    fn insert_request_for(test: &SigningTest, transaction: UnsignedTransaction) -> SigningRequestId {
         let sdk = test.context.wallet_sdk();
-        let transaction = transaction();
         let signer_public_key = sdk
             .key_manager_api()
             .get_public_key(signer_key())
@@ -522,6 +532,20 @@ mod tests {
             signature.verify_message(message),
             "the signature must verify against the message the approver was shown"
         );
+    }
+
+    #[tokio::test]
+    async fn a_stored_request_under_an_older_schema_is_not_approved() {
+        let test = setup().await;
+        let request_id = insert_request_for(&test, UnsignedTransaction::V1(transaction().into_body()));
+
+        let err = handle_approve(&test.context, Some(&test.session), SigningRequestDecisionRequest {
+            request_id,
+        })
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("V1"), "{err}");
+        assert_eq!(status_of(&test, request_id), SigningRequestStatus::Pending);
     }
 
     #[tokio::test]
@@ -643,6 +667,10 @@ mod tests {
                 .unwrap_err();
             assert!(err.to_string().contains("not a signing key"), "{key_branch:?}: {err}");
         }
+
+        let older_schema = UnsignedTransaction::V1(transaction().into_body());
+        let err = create(create_request(older_schema, signer_key())).await.unwrap_err();
+        assert!(err.to_string().contains("V1"), "{err}");
 
         let mut long_memo = create_request(transaction(), signer_key());
         long_memo.memo = "x".repeat(MAX_MEMO_CHARS + 1);

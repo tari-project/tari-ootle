@@ -244,12 +244,9 @@ where
 
 /// The device streams and signs only [`SchemaVersion::CURRENT`] preimages.
 fn current_schema<T>(schema: SchemaVersion, body: &T) -> signer::Result<&T> {
-    if schema != SchemaVersion::CURRENT {
-        return Err(SignerError::other(format!(
-            "the Ledger device signs {:?} transactions only; this transaction is {schema:?}",
-            SchemaVersion::CURRENT
-        )));
-    }
+    schema
+        .ensure_current()
+        .map_err(|e| SignerError::other(format!("the Ledger device refuses it: {e}")))?;
     Ok(body)
 }
 

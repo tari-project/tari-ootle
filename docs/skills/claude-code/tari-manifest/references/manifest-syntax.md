@@ -91,6 +91,26 @@ drop_all_proofs!();
 and passing it as a method argument only shows it to the callee. `drop_all_proofs!()` drops every proof in the
 workspace, closing their windows; typically called after protected operations.
 
+### Component Rules
+
+```rust
+set_access_rules!(component, default = deny_all, balance = allow_all, mint = any_of(resource(badge), public_key(pk)));
+set_owner_rule!(component, public_key(pk));
+```
+
+`set_access_rules!` replaces every method rule and the default (`deny_all` when omitted); write a method called
+`default` as `r#default`. `set_owner_rule!` takes `owned_by_signer`, `no_owner`, `public_key(pk)` or
+`access_rule(rule)`. The component is an input address or a workspace value. Either macro also accepts a single
+variable holding the encoded `ComponentAccessRules` or `OwnerRule`.
+
+Rules use the template library's `rule!` syntax: `allow_all`, `deny_all`, `any_of(..)`, `all_of(..)`,
+`m_of_n(m, ..)` and the requirements `resource(x)`, `non_fungible(x)`, `public_key(x)`, `component(x)`,
+`template(x)`, `caller_component(x)`, `direct_caller_template(x)`, `any_caller_component` and
+`any_caller_template`. Each `x` is a variable, `TARI`, or a string literal read like a manifest variable
+(`"resource_<hex>"`, `"nft_<hex>_str_name"`, hex public key bytes).
+
+The engine applies the change only if the component's rules updater, fixed at creation, permits it.
+
 ### Local Function Calls
 
 Define helper functions and call them from `main()` or `fee_main()`:

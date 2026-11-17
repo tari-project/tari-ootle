@@ -54,7 +54,7 @@ invariants, the reason for a non-obvious approach, tricky edge cases. They must 
 - DSL parsed by `tari_transaction_manifest::parse_manifest()`
 - Parser is in `crates/transaction_manifest/src/parser.rs`, generator in `generator.rs`
 - Macros: `var!`/`arg!`/`global!`, `new_component_addr!`, `new_resource_addr!`, `create_account!`,
-  `drop_all_proofs!`
+  `drop_all_proofs!`, `set_access_rules!`, `set_owner_rule!` (rules in `rule!` syntax, see `src/rules.rs`)
 - `create_account!(owner_pk)` generates `Instruction::CreateAccount` - idempotent account creation
 - Variables passed to manifests are parsed via `ManifestValue::FromStr` which handles: substate IDs (`component_<hex>`,
   `resource_<hex>`, etc.), NFT IDs, Rust literals, and raw hex bytes (for public keys)

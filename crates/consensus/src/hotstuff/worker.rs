@@ -453,12 +453,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             .fee_claim_public_key;
 
         // Assume we need to catch up at startup. If we're already at the latest height, validators will not return
-        // blocks. The target height is unknown until a proposal ahead of this node arrives and extends it.
+        // blocks.
         if let Some(from) = self.request_catch_up_sync(&epoch_state).await? {
-            let current_height = self.pacemaker.current_height();
-            self.worker_state.catch_up = Some(CatchUp::new(
-                current_height,
-                current_height,
+            self.worker_state.catch_up = Some(CatchUp::untargeted(
+                self.pacemaker.current_height(),
                 self.config.catch_up_request_timeout,
                 from,
             ));
@@ -1018,7 +1016,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             "⏳ Catch-up from {} has not advanced past height {} (expected up to {}). Requesting the rest of the range.",
             from,
             current_height,
-            catch_up.remote_height,
+            catch_up.remote_height.display(),
         );
         self.on_catch_up_sync
             .request_sync(self.pacemaker.current_view(), epoch_state.epoch(), from)
@@ -1762,7 +1760,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                             target: LOG_TARGET,
                             "⏳ Still catching up... current height: {}, expected up to: {}",
                             current_height,
-                            catch_up.remote_height,
+                            catch_up.remote_height.display(),
                         );
                         self.worker_state.catch_up = Some(catch_up);
                     } else {
@@ -1898,9 +1896,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             }
             debug!(
                 target: LOG_TARGET,
-                "⏳ Catch-up from {} in progress. Catching up to {} on the same request.",
+                "⏳ Catch-up from {} in progress (expected up to {}). Missing justify block {remote_epoch}/{remote_height} \
+                 joins it.",
                 catch_up.from,
-                catch_up.remote_height,
+                catch_up.remote_height.display(),
             );
             return Ok(());
         }
@@ -2078,7 +2077,8 @@ impl<TAddr> Default for WorkerState<TAddr> {
 
 #[derive(Debug)]
 struct CatchUp<TAddr> {
-    pub remote_height: NodeHeight,
+    /// The height to import up to, `None` until a proposal ahead of this node names one.
+    pub remote_height: Option<NodeHeight>,
     pub last_progress_height: NodeHeight,
     pub timeout_at: Instant,
     /// Start of the window after which a catch-up that has not advanced requests the rest of the range again.
@@ -2090,7 +2090,7 @@ impl<TAddr> CatchUp<TAddr> {
     pub fn new(remote_height: NodeHeight, current_height: NodeHeight, timeout: Duration, from: TAddr) -> Self {
         let now = Instant::now();
         Self {
-            remote_height,
+            remote_height: Some(remote_height),
             last_progress_height: current_height,
             timeout_at: now + timeout,
             stall_window_start: now,
@@ -2098,10 +2098,28 @@ impl<TAddr> CatchUp<TAddr> {
         }
     }
 
-    /// Updates catch-up progress to `current_height`, refreshing the timeout when the view advances, and returns
-    /// whether catch-up is still in progress (`current_height < self.remote_height`).
+    /// A catch-up sent before this node knows how far behind it is, as at startup. It stays in flight, so a proposal
+    /// ahead of this node extends it instead of opening a second stream, until it times out or a target is set.
+    pub fn untargeted(current_height: NodeHeight, timeout: Duration, from: TAddr) -> Self {
+        let now = Instant::now();
+        Self {
+            remote_height: None,
+            last_progress_height: current_height,
+            timeout_at: now + timeout,
+            stall_window_start: now,
+            from,
+        }
+    }
+
+    /// Updates catch-up progress to `current_height` and returns whether catch-up is still in progress: below its
+    /// target, or without one. The timeout is refreshed when the view advances toward a target, so an untargeted
+    /// catch-up lapses `timeout` after it was sent.
     pub fn record_progress(&mut self, current_height: NodeHeight, timeout: Duration) -> bool {
-        if current_height >= self.remote_height {
+        let Some(remote_height) = self.remote_height else {
+            self.last_progress_height = self.last_progress_height.max(current_height);
+            return true;
+        };
+        if current_height >= remote_height {
             return false;
         }
         if current_height > self.last_progress_height {
@@ -2135,11 +2153,16 @@ impl<TAddr> CatchUp<TAddr> {
     /// Raises the target to `remote_height` when that is higher. The in-flight request streams up to the
     /// responder's tip, and a stall re-request fetches anything past it.
     pub fn extend_target(&mut self, remote_height: NodeHeight) {
-        self.remote_height = self.remote_height.max(remote_height);
+        self.remote_height = Some(
+            self.remote_height
+                .map_or(remote_height, |target| target.max(remote_height)),
+        );
     }
 
     pub fn is_behind_target(&self) -> bool {
-        !self.has_timed_out() && self.last_progress_height < self.remote_height
+        !self.has_timed_out() &&
+            self.remote_height
+                .is_some_and(|remote_height| self.last_progress_height < remote_height)
     }
 }
 
@@ -2315,23 +2338,37 @@ mod tests {
         }
 
         #[test]
-        fn a_catch_up_at_its_target_is_in_flight_without_holding_back_proposals_until_its_target_is_extended() {
+        fn an_untargeted_catch_up_stays_in_flight_across_imported_blocks_until_a_proposal_ahead_sets_its_target() {
             let timeout = Duration::from_secs(15);
             let mut state = WorkerState {
-                catch_up: Some(CatchUp::new(NodeHeight(10), NodeHeight(10), timeout, "peer-a")),
+                catch_up: Some(CatchUp::untargeted(NodeHeight(10), timeout, "peer-a")),
                 ..WorkerState::default()
             };
-            assert!(!state.is_active_catch_up());
+            assert!(
+                !state.is_active_catch_up(),
+                "an untargeted catch-up holds back no proposal"
+            );
+
+            let catch_up = state.in_flight_catch_up_mut().expect("in flight");
+            assert!(
+                catch_up.record_progress(NodeHeight(11), timeout),
+                "an imported block keeps an untargeted catch-up"
+            );
+            assert_eq!(catch_up.last_progress_height, NodeHeight(11));
 
             state
                 .in_flight_catch_up_mut()
-                .expect("a catch-up that has not timed out is in flight")
+                .expect("still in flight, so a proposal ahead extends it instead of opening a second stream")
                 .extend_target(NodeHeight(40));
             assert!(state.is_active_catch_up());
 
             let catch_up = state.in_flight_catch_up_mut().unwrap();
             catch_up.extend_target(NodeHeight(20));
-            assert_eq!(catch_up.remote_height, NodeHeight(40), "a target is never lowered");
+            assert_eq!(
+                catch_up.remote_height,
+                Some(NodeHeight(40)),
+                "a target is never lowered"
+            );
             assert!(catch_up.record_progress(NodeHeight(39), timeout));
             assert!(!catch_up.record_progress(NodeHeight(40), timeout));
         }

@@ -439,6 +439,21 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 } else {
                     unparked_blocks.reserve(unparked.len());
                     for (unparked_block, foreign_proposals, origin) in unparked {
+                        // A block that parked before its justify block did waits on its own transactions only, so it
+                        // can become ready first. It parks again behind its justify block.
+                        let awaited_by_justify =
+                            tx.parked_block_missing_transactions(&unparked_block.justify().calculate_block_id())?;
+                        if !awaited_by_justify.is_empty() {
+                            info!(
+                                target: LOG_TARGET,
+                                "⏳ all transactions for local block {unparked_block} are ready, but its justify block \
+                                 waits on {} more. Parking it behind its justify block.",
+                                awaited_by_justify.len(),
+                            );
+                            tx.parked_block_insert(&unparked_block, &foreign_proposals, origin, &awaited_by_justify)?;
+                            continue;
+                        }
+
                         info!(
                             target: LOG_TARGET,
                             "♻️ all transactions for local block {unparked_block} are ready for consensus"
@@ -1855,6 +1870,37 @@ mod tests {
             );
 
             let (unparked, _) = on_message_validate.update_parked_blocks([missing].iter()).unwrap();
+            let unparked = unparked.iter().map(|(msg, _)| *msg.block.id()).collect::<Vec<_>>();
+            assert_eq!(unparked, vec![*parent.block.id(), child_id]);
+        }
+
+        #[tokio::test]
+        async fn a_block_ready_before_its_parked_justify_block_parks_again_behind_it() {
+            let epoch = Epoch(1);
+            let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+            let dir = tempfile::tempdir().unwrap();
+            let store = TestStore::open(dir.path(), DatabaseOptions::default()).unwrap();
+            let on_message_validate = new_on_message_validate(&store);
+
+            let awaited_by_parent = TransactionId::new([1u8; 32]);
+            let own = TransactionId::new([2u8; 32]);
+            let parent = make_catch_up_proposal(epoch, shard_group, awaited_by_parent);
+            let child = make_child_proposal(&parent.block, vec![local_only(own)]);
+            let child_id = *child.block.id();
+            // The child parks on its own transaction while its justify block is neither held nor parked.
+            park(&store, &child, &[own]);
+            park(&store, &parent, &[awaited_by_parent]);
+
+            let (unparked, _) = on_message_validate.update_parked_blocks([own].iter()).unwrap();
+            assert!(unparked.is_empty(), "the child must wait for its parked justify block");
+            let awaited = store
+                .with_read_tx(|tx| tx.parked_block_missing_transactions(&child_id))
+                .unwrap();
+            assert_eq!(awaited, vec![awaited_by_parent]);
+
+            let (unparked, _) = on_message_validate
+                .update_parked_blocks([awaited_by_parent].iter())
+                .unwrap();
             let unparked = unparked.iter().map(|(msg, _)| *msg.block.id()).collect::<Vec<_>>();
             assert_eq!(unparked, vec![*parent.block.id(), child_id]);
         }

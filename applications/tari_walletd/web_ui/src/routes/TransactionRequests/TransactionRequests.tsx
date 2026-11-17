@@ -9,6 +9,7 @@ import {
   useSubmitTransactionRequest,
 } from "@api/hooks/useTransactionRequests";
 import { Accordion, AccordionDetails, AccordionSummary } from "@components/Accordion";
+import ComponentRulesChangeWarning from "@components/ComponentRulesChangeWarning";
 import ComponentUpgradeWarning from "@components/ComponentUpgradeWarning";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import PageHeading from "@components/PageHeading";
@@ -267,6 +268,7 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
       </Stack>
 
       <ComponentUpgradeWarning upgrades={request.component_upgrades} />
+      <ComponentRulesChangeWarning changes={request.component_rules_changes} />
       <ValueSummaries request={request} />
       <InstructionSummary main={mainDescription} fee={feeDescription} />
 

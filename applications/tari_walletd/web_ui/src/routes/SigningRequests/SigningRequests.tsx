@@ -8,6 +8,7 @@ import {
   useRejectSigningRequest,
 } from "@api/hooks/useSigningRequests";
 import { Accordion, AccordionDetails, AccordionSummary } from "@components/Accordion";
+import ComponentRulesChangeWarning from "@components/ComponentRulesChangeWarning";
 import ComponentUpgradeWarning from "@components/ComponentUpgradeWarning";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import PageHeading from "@components/PageHeading";
@@ -184,6 +185,7 @@ function RequestCard({ request }: { request: SigningRequestInfo }) {
       </Stack>
 
       <ComponentUpgradeWarning upgrades={request.component_upgrades} />
+      <ComponentRulesChangeWarning changes={request.component_rules_changes} />
       <Summary request={request} />
 
       <Stack direction="row" spacing={2} alignItems="baseline" sx={{ mb: 2 }} flexWrap="wrap">

@@ -53,6 +53,7 @@ use tari_ootle_walletd_client::{
 
 use super::context::{AuthIdentity, HandlerContext};
 use crate::handlers::{
+    component_rules_changes::component_rules_changes,
     component_upgrades::component_upgrades,
     helpers,
     helpers::{OrJrpcNotFound, invalid_params, invalid_request, validate_transaction_for_approval},
@@ -364,11 +365,16 @@ fn to_info(model: SigningRequestModel) -> SigningRequestInfo {
         model.unsigned_transaction.fee_instructions(),
         model.unsigned_transaction.instructions(),
     );
+    let component_rules_changes = component_rules_changes(
+        model.unsigned_transaction.fee_instructions(),
+        model.unsigned_transaction.instructions(),
+    );
     SigningRequestInfo {
         request_id: model.id,
         status: model.effective_status_now(),
         transaction: model.unsigned_transaction,
         component_upgrades,
+        component_rules_changes,
         seal_public_key: model.seal_public_key,
         authorizers: model.authorizers,
         key_id: model.key_id,

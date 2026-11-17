@@ -91,6 +91,7 @@ use tari_template_lib_types::{
     ComponentAddress,
     ConfidentialOutputAddress,
     NonFungibleId,
+    OwnerRule,
     ResourceAddress,
     ResourceType,
     TemplateAddress,
@@ -98,7 +99,7 @@ use tari_template_lib_types::{
     UtxoId,
     ValidatorFeePoolAddress,
     VaultId,
-    access_rules::UpdateRule,
+    access_rules::{ComponentAccessRules, UpdateRule},
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
     stealth::{SpendAuthorization, StealthTransferStatement},
@@ -279,6 +280,10 @@ pub struct TransactionRequestInfo {
     /// [`ComponentUpgrade`].
     #[serde(default)]
     pub component_upgrades: Vec<ComponentUpgrade>,
+    /// Every `SetComponentAccessRules` and `SetComponentOwnerRule` instruction in the transaction, fee instructions
+    /// first. See [`ComponentRulesChange`].
+    #[serde(default)]
+    pub component_rules_changes: Vec<ComponentRulesChange>,
     /// Who the transaction acts as wherever the engine needs a single signer.
     pub main_signer: TransactionRequestMainSigner,
     /// Public keys of the signatures the request's creator supplied out of band. Each one authorizes the
@@ -398,6 +403,10 @@ pub struct SigningRequestInfo {
     /// [`ComponentUpgrade`].
     #[serde(default)]
     pub component_upgrades: Vec<ComponentUpgrade>,
+    /// Every `SetComponentAccessRules` and `SetComponentOwnerRule` instruction in the transaction, fee instructions
+    /// first. See [`ComponentRulesChange`].
+    #[serde(default)]
+    pub component_rules_changes: Vec<ComponentRulesChange>,
     pub seal_public_key: RistrettoPublicKeyBytes,
     /// Public keys of every authorizer the signature commits to.
     pub authorizers: AuthorizerSet,
@@ -522,6 +531,10 @@ pub struct TransactionSubmitDryRunResponse {
     /// [`ComponentUpgrade`].
     #[serde(default)]
     pub component_upgrades: Vec<ComponentUpgrade>,
+    /// Every `SetComponentAccessRules` and `SetComponentOwnerRule` instruction in the transaction, fee instructions
+    /// first. See [`ComponentRulesChange`].
+    #[serde(default)]
+    pub component_rules_changes: Vec<ComponentRulesChange>,
 }
 
 /// An `UpdateComponentTemplate` instruction: the transaction replaces the code of `component` with `new_template`
@@ -536,6 +549,35 @@ pub struct ComponentUpgrade {
     pub component: ComponentReference,
     pub new_template: TemplateAddress,
     pub migrate: Option<MigrateFunction>,
+}
+
+/// A `SetComponentAccessRules` or `SetComponentOwnerRule` instruction: the transaction replaces the access rules or
+/// the owner rule of `component`. A signer who satisfies the component's rules updater decides who may call each of
+/// its methods, or who owns it and everything it holds.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub enum ComponentRulesChange {
+    AccessRules {
+        /// A workspace reference names a component the transaction resolves during execution, such as one an
+        /// earlier instruction returns.
+        component: ComponentReference,
+        access_rules: ComponentAccessRules,
+    },
+    OwnerRule {
+        /// A workspace reference names a component the transaction resolves during execution, such as one an
+        /// earlier instruction returns.
+        component: ComponentReference,
+        /// `OwnedBySigner` names the transaction's main signer.
+        owner_rule: OwnerRule,
+    },
+}
+
+impl ComponentRulesChange {
+    pub fn component(&self) -> &ComponentReference {
+        match self {
+            Self::AccessRules { component, .. } | Self::OwnerRule { component, .. } => component,
+        }
+    }
 }
 
 /// A component whose template can be swapped by whoever satisfies `upgrade_rule`, so the code that runs when the
@@ -590,6 +632,10 @@ pub struct TransactionSubmitManifestResponse {
     /// runs. See [`ComponentUpgrade`].
     #[serde(default)]
     pub component_upgrades: Vec<ComponentUpgrade>,
+    /// Every `SetComponentAccessRules` and `SetComponentOwnerRule` instruction in the transaction, fee instructions
+    /// first. Only populated for dry runs. See [`ComponentRulesChange`].
+    #[serde(default)]
+    pub component_rules_changes: Vec<ComponentRulesChange>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

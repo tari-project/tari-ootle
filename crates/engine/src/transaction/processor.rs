@@ -42,7 +42,6 @@ use tari_ootle_transaction::{
     AllocatableAddressType,
     ComponentReference,
     Instruction,
-    MigrateFunction,
     ResourceAddressRef,
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
     call_arg,
@@ -549,129 +548,10 @@ where
                     .workspace_invoke(WorkspaceAction::DropProofAuthorization, invoke_args![proof].into())?;
                 Ok(None)
             },
-            Instruction::UpdateComponentTemplate {
-                component,
-                migrate,
-                new_template,
-            } => Self::update_component_template(template_provider, runtime, component, new_template, migrate),
+            Instruction::UpdateComponentTemplate { .. } => {
+                Err(TransactionErrorKind::ComponentTemplateUpdateNotSupported)
+            },
         }
-    }
-
-    fn update_component_template(
-        template_provider: &TTemplateProvider,
-        runtime: &Runtime,
-        component: ComponentReference,
-        new_template_addr: TemplateAddress,
-        migrate: Option<MigrateFunction>,
-    ) -> Result<Option<IndexedValue>, TransactionErrorKind> {
-        let component = runtime.interface().load_component(component)?;
-        let component_address = component.address;
-
-        let template = template_provider
-            .get_template(&new_template_addr)
-            .map_err(|e| TransactionErrorKind::FailedToLoadTemplate {
-                address: new_template_addr,
-                details: e.to_string(),
-            })?
-            .ok_or(TransactionErrorKind::TemplateNotFound {
-                address: new_template_addr,
-            })?;
-
-        runtime
-            .interface()
-            .track_template_loaded(&new_template_addr, template.code_size())?;
-
-        let component_lock = runtime.interface().lock_component(component_address, LockFlag::Write)?;
-        // Evaluated in the instruction's own scope: the migration frame pushed below carries no signer badges and
-        // no loan of the authorized proofs.
-        runtime.interface().check_component_upgrade_rule(&component_lock)?;
-
-        let template_def = template.shared_template_def();
-        let migration_function = migrate
-            .as_ref()
-            .map(|f| {
-                template_def
-                    .get_function(&f.name)
-                    .ok_or_else(|| TransactionErrorKind::FunctionNotFound {
-                        name: f.name.to_string(),
-                    })
-                    .and_then(|f| {
-                        if f.is_migration() {
-                            Ok(f)
-                        } else {
-                            Err(TransactionErrorKind::NotAMigrationFunction { name: f.name.clone() })
-                        }
-                    })
-            })
-            .transpose()?;
-
-        let component_scope = component.state_scope;
-
-        let (call_frame, final_args) = if migration_function.is_some() {
-            let resolved_args = migrate
-                .as_ref()
-                .map(|f| {
-                    let component_arg = InstructionArg::from_type(&component_address).map_err(|e| {
-                        // This should never happen
-                        RuntimeError::InvariantError {
-                            function: "update_component_template",
-                            details: format!("Failed to create component arg: {}", e),
-                        }
-                    })?;
-                    runtime.interface().resolve_args(Some(component_arg), &f.args)
-                })
-                .transpose()?
-                .unwrap_or_default();
-
-            let arg_scope = resolved_args
-                .iter()
-                .map(IndexedWellKnownTypes::from_value)
-                .collect::<Result<_, _>>()?;
-
-            let frame = PushCallFrame::MigrationContext {
-                template_address: new_template_addr,
-                module_name: template.template_name().to_string(),
-                component_scope,
-                component_lock,
-                arg_scope: Box::new(arg_scope),
-                entity_id: component.entity_id,
-            };
-            (frame, resolved_args)
-        } else {
-            let frame = PushCallFrame::MigrationContext {
-                template_address: new_template_addr,
-                module_name: template.template_name().to_string(),
-                component_scope,
-                component_lock,
-                arg_scope: Box::new(IndexedWellKnownTypes::new()),
-                entity_id: component.entity_id,
-            };
-            (frame, vec![])
-        };
-
-        // The migration frame runs with the *target* template as its `current_template`, while the
-        // component being migrated is the caller's. Only the target template's own migration function
-        // executes in this frame, so the template identity is honest — but `template(...)` (and
-        // `direct_caller_template(...)`) would become forgeable if any other code ever ran here.
-        runtime.interface().push_call_frame(call_frame, None)?;
-
-        runtime.interface().update_component_template(new_template_addr)?;
-
-        let returned = migration_function
-            .map(|function_def| {
-                let result =
-                    Self::invoke_template(new_template_addr, template, runtime.clone(), function_def, &final_args)?;
-                runtime.interface().validate_return_value(&result)?;
-                Ok::<_, TransactionErrorKind>(result)
-            })
-            .transpose()?;
-
-        let no_return = IndexedWellKnownTypes::new();
-        runtime
-            .interface()
-            .pop_call_frame(returned.as_ref().map_or(&no_return, IndexedValue::well_known_types))?;
-
-        Ok(returned)
     }
 
     fn pay_fee_from_bucket(

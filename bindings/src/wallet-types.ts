@@ -154,6 +154,7 @@ export * from "./types/wallet-types/SigningRequestListResponse";
 export * from "./types/wallet-types/SignTemplateMetadataRequest";
 export * from "./types/wallet-types/SignTemplateMetadataResponse";
 export * from "./types/wallet-types/StealthTransfer";
+export * from "./types/wallet-types/StealthTransferInputs";
 export * from "./types/wallet-types/StealthTransferRequest";
 export * from "./types/wallet-types/StealthTransferResponse";
 export * from "./types/wallet-types/StealthUtxosDecryptValueRequest";

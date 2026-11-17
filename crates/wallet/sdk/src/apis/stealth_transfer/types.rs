@@ -7,12 +7,18 @@ use tari_ootle_transaction::UnsignedTransaction;
 use tari_ootle_wallet_crypto::{StealthInputWitness, memo::Memo, pay_to::PayTo};
 use tari_template_lib::types::{Amount, ComponentAddress, VaultId, stealth::StealthTransferStatement};
 
+use super::StealthTransferInputs;
 use crate::models::{InputSpendData, KeyId, StealthUtxoSpendKeyId, WalletPublicKey};
 
 pub struct StealthTransferOutput {
     pub transaction: UnsignedTransaction,
     pub fee_inputs: InputsToSpend,
     pub transfer_inputs: InputsToSpend,
+    /// The stealth UTXOs this build spends. Passing them as [`StealthTransferParams::inputs`] at the same `max_fee`
+    /// rebuilds this transaction's shape.
+    ///
+    /// [`StealthTransferParams::inputs`]: super::StealthTransferParams::inputs
+    pub inputs: StealthTransferInputs,
     pub utxo_spend_keys: Vec<StealthUtxoSpendKeyId>,
     pub additional_signer: Option<WalletPublicKey>,
     pub main_signer: WalletPublicKey,

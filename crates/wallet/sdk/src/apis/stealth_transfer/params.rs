@@ -31,8 +31,13 @@ use crate::{
 pub struct StealthTransferParams {
     /// Parameters related to fee payment
     pub fee_params: TransferFeeParams,
-    /// Strategy for input selection
+    /// Strategy for input selection. With [`Self::inputs`] set it still decides how much revealed balance tops up
+    /// the named UTXOs.
     pub input_selection: UtxoInputSelection,
+    /// The stealth UTXOs to spend, in place of selecting them. A build spends exactly these, so a submission naming
+    /// the inputs a dry run reported is the transaction that dry run priced. Selection targets `amount + max_fee`,
+    /// which leaves a build that selects its own inputs free to spend a different set from the one priced.
+    pub inputs: Option<StealthTransferInputs>,
     pub outputs: Vec<TransferOutput>,
     pub badge_usage: BadgeUsage,
     /// Address of the resource to transfer
@@ -270,6 +275,25 @@ impl InputSelection {
     }
 }
 
+/// The stealth UTXOs a stealth transfer spends, by the statement that spends them.
+///
+/// A build reports these as `StealthTransferOutput::inputs`, and `StealthTransferParams::inputs` takes them back to
+/// make another build spend the same ones.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub enum StealthTransferInputs {
+    /// One statement moves the funds and reveals the fee.
+    Merged { inputs: Vec<UtxoAddress> },
+    /// The fee comes from a statement of its own.
+    Separate {
+        fee: Vec<UtxoAddress>,
+        transfer: Vec<UtxoAddress>,
+        /// Whether the transfer statement also spends the fee statement's change. The build creates that output,
+        /// so it has no address until then.
+        transfer_spends_fee_change: bool,
+    },
+}
+
 /// One stealth transfer statement for [`StealthTransferApi::create_transfer_statements`] to build.
 ///
 /// [`StealthTransferApi::create_transfer_statements`]: super::StealthTransferApi::create_transfer_statements
@@ -401,6 +425,7 @@ mod tests {
             max_epoch: Epoch(1),
             fee_params: TransferFeeParams::new(UtxoInputSelection::PreferConfidential),
             input_selection: UtxoInputSelection::PreferConfidential,
+            inputs: None,
             outputs: vec![TransferOutput {
                 address: address(),
                 revealed_amount: Amount::from(revealed_amount),

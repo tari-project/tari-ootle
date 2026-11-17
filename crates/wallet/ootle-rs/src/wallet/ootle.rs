@@ -254,11 +254,10 @@ impl From<TransactionSignature> for TransactionAuthorization {
 #[cfg(test)]
 mod tests {
     use tari_ootle_common_types::Epoch;
+    use tari_ootle_transaction::MAX_SIGNATURES_PER_TRANSACTION;
 
     use super::*;
     use crate::{Network, key_provider::PrivateKeyProvider};
-
-    const MAX_SIGNATURES_PER_TRANSACTION: usize = 16;
 
     #[tokio::test]
     async fn single_signer_wallet_has_no_additional_signers_and_attaches_no_extra_signatures() {

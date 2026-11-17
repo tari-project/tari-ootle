@@ -6,7 +6,7 @@
 
 mod support;
 
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use futures::StreamExt;
 use tari_consensus_types::Decision;
@@ -223,6 +223,13 @@ impl WalletNetworkInterface for FixedSubstateNetwork {
     }
 
     async fn get_substates(&self, _: &[SubstateId], _: bool) -> Result<FetchedSubstates, Self::Error> {
+        panic!("FixedSubstateNetwork called")
+    }
+
+    async fn get_substate_versions(
+        &self,
+        _: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, SubstateVersion>, Self::Error> {
         panic!("FixedSubstateNetwork called")
     }
 

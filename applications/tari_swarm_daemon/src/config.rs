@@ -277,7 +277,7 @@ impl CompileConfig {
     }
 }
 
-fn add_ext(path: PathBuf) -> PathBuf {
+pub(crate) fn add_ext(path: PathBuf) -> PathBuf {
     if cfg!(windows) {
         path.with_extension("exe")
     } else {

@@ -1298,9 +1298,9 @@ async fn stealth_transfer_with_badge_authorizes_proof_around_stealth_transfer() 
         .expect("merged transfer must pay fee from revealed bucket");
     assert!(
         m_auth_idx < m_stealth_idx &&
-            m_stealth_idx < m_put_idx &&
-            m_put_idx < m_drop_auth_idx &&
-            m_drop_auth_idx < m_pay_fee_idx,
+            m_stealth_idx < m_drop_auth_idx &&
+            m_drop_auth_idx < m_put_idx &&
+            m_put_idx < m_pay_fee_idx,
         "merged badge authorization must wrap StealthTransfer before DropProofAuthorization"
     );
     merged_lock.release();

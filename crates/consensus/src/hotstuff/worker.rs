@@ -453,8 +453,16 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             .fee_claim_public_key;
 
         // Assume we need to catch up at startup. If we're already at the latest height, validators will not return
-        // blocks.
-        self.request_catch_up_sync(&epoch_state).await?;
+        // blocks. The target height is unknown until a proposal ahead of this node arrives and extends it.
+        if let Some(from) = self.request_catch_up_sync(&epoch_state).await? {
+            let current_height = self.pacemaker.current_height();
+            self.worker_state.catch_up = Some(CatchUp::new(
+                current_height,
+                current_height,
+                self.config.catch_up_request_timeout,
+                from,
+            ));
+        }
 
         let mut periodic_tasks = time::interval(Duration::from_secs(10));
         periodic_tasks.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
@@ -505,7 +513,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 .worker_state
                 .catch_up
                 .as_ref()
-                .filter(|catch_up| !catch_up.has_timed_out())
+                .filter(|catch_up| catch_up.is_behind_target())
                 .map(|catch_up| catch_up.stall_deadline(self.config.catch_up_request_timeout));
 
             tokio::select! {
@@ -663,6 +671,9 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 block_id,
                 ..
             } => {
+                if missing_txs.is_empty() {
+                    return Ok(());
+                }
                 let mut request_from_address = from;
                 if request_from_address == self.local_validator_addr {
                     // Edge case: If we're catching up, we could be the proposer but we no longer have
@@ -955,7 +966,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         from: TConsensusSpec::Addr,
         justify: &ProposalCertificate,
     ) -> Result<(), HotStuffError> {
-        if self.worker_state.is_active_catch_up() || from == self.local_validator_addr {
+        if from == self.local_validator_addr {
+            return Ok(());
+        }
+        if let Some(catch_up) = self.worker_state.in_flight_catch_up_mut() {
+            if justify.epoch() == epoch_state.epoch() {
+                catch_up.extend_target(justify.height());
+            }
             return Ok(());
         }
         // A certified block we already hold, e.g. one parked on missing transactions, is not fetched by catching
@@ -1736,7 +1753,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             .handle(&mut self.pacemaker_actions, epoch_state, msg, origin)
             .await;
         self.pacemaker.apply(&mut self.pacemaker_actions);
-        match log_err("on_receive_local_proposal", result) {
+        match result {
             Ok(no_vote) => {
                 let current_height = self.pacemaker.current_height();
                 if let Some(mut catch_up) = self.worker_state.catch_up.take() {
@@ -1875,10 +1892,15 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             return Err(err);
         }
 
-        if self.worker_state.is_active_catch_up() {
-            warn!(
+        if let Some(catch_up) = self.worker_state.in_flight_catch_up_mut() {
+            if remote_epoch == local_epoch_state.epoch() {
+                catch_up.extend_target(remote_height);
+            }
+            debug!(
                 target: LOG_TARGET,
-                "⏳ Already catching up. Ignoring additional catch up."
+                "⏳ Catch-up from {} in progress. Catching up to {} on the same request.",
+                catch_up.from,
+                catch_up.remote_height,
             );
             return Ok(());
         }
@@ -2030,8 +2052,16 @@ struct WorkerState<TAddr> {
 }
 
 impl<TAddr> WorkerState<TAddr> {
+    /// Whether this node is importing blocks up to a catch-up target above its height. Proposing waits for the
+    /// catch-up to reach its target.
     pub fn is_active_catch_up(&self) -> bool {
-        self.catch_up.as_ref().is_some_and(|c| !c.has_timed_out())
+        self.catch_up.as_ref().is_some_and(|c| c.is_behind_target())
+    }
+
+    /// The catch-up whose request has not timed out. Its target may still equal this node's height, as at startup
+    /// before a proposal ahead of this node extends it.
+    pub fn in_flight_catch_up_mut(&mut self) -> Option<&mut CatchUp<TAddr>> {
+        self.catch_up.as_mut().filter(|c| !c.has_timed_out())
     }
 }
 
@@ -2100,6 +2130,16 @@ impl<TAddr> CatchUp<TAddr> {
 
     pub fn has_timed_out(&self) -> bool {
         Instant::now() >= self.timeout_at
+    }
+
+    /// Raises the target to `remote_height` when that is higher. The in-flight request streams up to the
+    /// responder's tip, and a stall re-request fetches anything past it.
+    pub fn extend_target(&mut self, remote_height: NodeHeight) {
+        self.remote_height = self.remote_height.max(remote_height);
+    }
+
+    pub fn is_behind_target(&self) -> bool {
+        !self.has_timed_out() && self.last_progress_height < self.remote_height
     }
 }
 
@@ -2272,6 +2312,28 @@ mod tests {
             assert!(catch_up.record_progress(NodeHeight(10), timeout));
             assert!(catch_up.stall_window_start >= stall_window_start);
             assert!(catch_up.timeout_at >= timeout_at);
+        }
+
+        #[test]
+        fn a_catch_up_at_its_target_is_in_flight_without_holding_back_proposals_until_its_target_is_extended() {
+            let timeout = Duration::from_secs(15);
+            let mut state = WorkerState {
+                catch_up: Some(CatchUp::new(NodeHeight(10), NodeHeight(10), timeout, "peer-a")),
+                ..WorkerState::default()
+            };
+            assert!(!state.is_active_catch_up());
+
+            state
+                .in_flight_catch_up_mut()
+                .expect("a catch-up that has not timed out is in flight")
+                .extend_target(NodeHeight(40));
+            assert!(state.is_active_catch_up());
+
+            let catch_up = state.in_flight_catch_up_mut().unwrap();
+            catch_up.extend_target(NodeHeight(20));
+            assert_eq!(catch_up.remote_height, NodeHeight(40), "a target is never lowered");
+            assert!(catch_up.record_progress(NodeHeight(39), timeout));
+            assert!(!catch_up.record_progress(NodeHeight(40), timeout));
         }
 
         #[test]

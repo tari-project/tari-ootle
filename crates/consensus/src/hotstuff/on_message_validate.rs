@@ -497,8 +497,8 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         validations::check_foreign_proposal::<TConsensusSpec>(proposal, committee, &self.config)
     }
 
-    /// Parks the block if it is waiting on transactions this node does not hold, otherwise passes it on as the
-    /// message `to_message` builds.
+    /// Parks the block if it is waiting on transactions this node does not hold or its justify block is parked,
+    /// otherwise passes it on as the message `to_message` builds.
     async fn handle_missing_transactions_local_block(
         &mut self,
         from: TConsensusSpec::Addr,
@@ -507,7 +507,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         new_transactions: &OnReceiveNewTransaction<TConsensusSpec>,
         origin: ProposalOrigin,
     ) -> Result<MessageValidationResult<TConsensusSpec::Addr>, HotStuffError> {
-        let Some(has_missing_transactions) = self.store.with_write_tx(|tx| {
+        let Some(must_park) = self.store.with_write_tx(|tx| {
             if !validations::are_block_foreign_proposals_matched(&**tx, &proposal.block, &proposal.foreign_proposals)? {
                 return Ok::<_, HotStuffError>(None);
             }
@@ -517,7 +517,9 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             // window is checked against `proposal.block.epoch()`.
             self.resequence_unpooled_transactions(tx, epoch_state.local_committee_info(), &proposal, new_transactions)?;
             let missing = self.get_missing_transactions(&**tx, epoch_state.local_committee_info(), &proposal)?;
-            Ok(Some(!missing.is_empty()))
+            Ok(Some(
+                !missing.is_empty() || tx.parked_block_exists(&proposal.block.justify().calculate_block_id())?,
+            ))
         })?
         else {
             warn!(
@@ -529,7 +531,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             return Ok(MessageValidationResult::Discard);
         };
 
-        if !has_missing_transactions {
+        if !must_park {
             return Ok(MessageValidationResult::Ready {
                 from,
                 message: proposal_message(origin, proposal),
@@ -547,20 +549,22 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             return Ok(MessageValidationResult::Discard);
         }
 
-        let missing_tx_ids = self.store.with_write_tx(|tx| {
-            self.check_for_missing_transactions(tx, epoch_state.local_committee_info(), &proposal, origin)
-        })?;
-
-        if missing_tx_ids.is_empty() {
+        let Some(ParkedLocalBlock {
+            num_awaited,
+            to_request,
+        }) = self.store.with_write_tx(|tx| {
+            self.park_if_missing_transactions(tx, epoch_state.local_committee_info(), &proposal, origin)
+        })?
+        else {
             return Ok(MessageValidationResult::Ready {
                 from,
                 message: proposal_message(origin, proposal),
             });
-        }
+        };
 
         self.publish_event(HotstuffEvent::ProposedBlockParked {
             block: proposal.block.as_leaf(),
-            num_missing_txs: missing_tx_ids.len(),
+            num_missing_txs: num_awaited,
             // TODO: remove
             num_awaiting_txs: 0,
         });
@@ -568,7 +572,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         Ok(MessageValidationResult::ParkedProposal {
             block_id: *proposal.block.id(),
             epoch: proposal.block.epoch(),
-            missing_txs: missing_tx_ids,
+            missing_txs: to_request,
         })
     }
 
@@ -722,31 +726,58 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         Ok(true)
     }
 
-    fn check_for_missing_transactions(
+    /// Parks the block while it is missing transactions or its justify block is parked, and returns `None` when it
+    /// is not parked.
+    ///
+    /// A block parked behind its justify block waits on every transaction the justify block waits on, so both unpark
+    /// on the same arrival and are processed parent first. Only the block's own missing transactions are requested
+    /// for it: the justify block's were requested when it was parked.
+    fn park_if_missing_transactions(
         &self,
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
         local_committee_info: &CommitteeInfo,
         proposal: &ProposalMessage,
         origin: ProposalOrigin,
-    ) -> Result<HashSet<TransactionId>, HotStuffError> {
-        let missing_tx_ids = self.get_missing_transactions(&**tx, local_committee_info, proposal)?;
+    ) -> Result<Option<ParkedLocalBlock>, HotStuffError> {
+        let mut to_request = self.get_missing_transactions(&**tx, local_committee_info, proposal)?;
+        let awaited_by_justify =
+            tx.parked_block_missing_transactions(&proposal.block.justify().calculate_block_id())?;
 
-        if missing_tx_ids.is_empty() {
+        if to_request.is_empty() && awaited_by_justify.is_empty() {
             debug!(
                 target: LOG_TARGET,
                 "✅ Block {} has no missing transactions", proposal.block
             );
-            return Ok(HashSet::new());
+            return Ok(None);
         }
 
-        info!(
-            target: LOG_TARGET,
-            "⏳ Block {} has {} missing transactions", proposal.block, missing_tx_ids.len(),
-        );
+        let mut awaited = to_request.clone();
+        for transaction_id in &awaited_by_justify {
+            to_request.remove(transaction_id);
+            awaited.insert(*transaction_id);
+        }
 
-        tx.parked_block_insert(&proposal.block, &proposal.foreign_proposals, origin, &missing_tx_ids)?;
+        if awaited_by_justify.is_empty() {
+            info!(
+                target: LOG_TARGET,
+                "⏳ Block {} has {} missing transactions", proposal.block, to_request.len(),
+            );
+        } else {
+            info!(
+                target: LOG_TARGET,
+                "⏳ Block {} has {} missing transactions and waits on its parked justify block for {} more",
+                proposal.block,
+                to_request.len(),
+                awaited.len() - to_request.len(),
+            );
+        }
 
-        Ok(missing_tx_ids)
+        tx.parked_block_insert(&proposal.block, &proposal.foreign_proposals, origin, &awaited)?;
+
+        Ok(Some(ParkedLocalBlock {
+            num_awaited: awaited.len(),
+            to_request,
+        }))
     }
 
     async fn process_foreign_proposal(
@@ -1026,6 +1057,13 @@ impl<TAddr: PartialEq> MissingTransactionRequests<TAddr> {
 
 type UnparkedLocalBlocks = Vec<(ProposalMessage, ProposalOrigin)>;
 
+struct ParkedLocalBlock {
+    /// Every transaction the block waits on, including those its parked justify block waits on.
+    num_awaited: usize,
+    /// The block's own missing transactions, less those its justify block waits on.
+    to_request: HashSet<TransactionId>,
+}
+
 fn sort_unparked_local_blocks(blocks: &mut [(ProposalMessage, ProposalOrigin)]) {
     blocks.sort_by_key(|(msg, _)| (msg.block.epoch(), msg.block.height()));
 }
@@ -1253,7 +1291,7 @@ mod tests {
         ]);
     }
 
-    mod catch_up_resequence {
+    mod local_block_parking {
         use std::{collections::HashMap, sync::Arc, time::Duration};
 
         use tari_consensus_types::{
@@ -1279,6 +1317,7 @@ mod tests {
             SubstateRequirement,
             ValidatorSetHash,
             VotePower,
+            committee::CommitteeMember,
         };
         use tari_ootle_storage::{
             consensus_models::{
@@ -1296,7 +1335,11 @@ mod tests {
         use tari_sidechain::{FixedHash, QuorumDecision};
         use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
         use tari_state_tree::ValidatorSetCommitteeProof;
-        use tari_template_lib_types::{ComponentAddress, ObjectKey, crypto::RistrettoPublicKeyBytes};
+        use tari_template_lib_types::{
+            ComponentAddress,
+            ObjectKey,
+            crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes},
+        };
         use tokio::sync::mpsc;
 
         use super::*;
@@ -1607,7 +1650,7 @@ mod tests {
                 ProposalCertificate::genesis_signatures(),
                 QuorumDecision::Accept,
             );
-            let header = BlockHeader::create_unsigned(
+            let mut header = BlockHeader::create_unsigned(
                 Network::LocalNet,
                 ProtocolVersion::at(Network::LocalNet, block_epoch),
                 BlockId::zero(),
@@ -1626,27 +1669,17 @@ mod tests {
                 ExtraData::new(),
             )
             .unwrap();
+            // The block id hashes the header as signed, so the header must carry a signature to hash to it.
+            header.set_signature(SchnorrSignatureBytes::zero());
             ProposalMessage {
                 block: Block::new(header, justify, commands, None),
                 foreign_proposals: vec![],
             }
         }
 
-        #[tokio::test]
-        async fn a_catch_up_block_from_an_earlier_epoch_resequences_unpooled_transactions_against_the_block_epoch() {
-            let block_epoch = Epoch(1);
-            let current_epoch = Epoch(2);
-            let shard_group = ShardGroup::all_shards(NumPreshards::P256);
-
-            let dir = tempfile::tempdir().unwrap();
-            let store = TestStore::open(dir.path(), DatabaseOptions::default()).unwrap();
-            let pool = TransactionPool::new();
-            let (tx_missing, _rx_missing) = mpsc::unbounded_channel();
-            let new_transactions =
-                OnReceiveNewTransaction::<TestSpec>::new(store.clone(), pool.clone(), MaxEpochValidator, tx_missing);
-
+        fn new_on_message_validate(store: &TestStore) -> OnMessageValidate<TestSpec> {
             let (tx_events, _rx_events) = broadcast::channel(1);
-            let mut on_message_validate = OnMessageValidate::<TestSpec>::new(
+            OnMessageValidate::<TestSpec>::new(
                 HotstuffConfig {
                     network: Network::LocalNet,
                     sidechain_id: None,
@@ -1664,7 +1697,198 @@ mod tests {
                 NoopStub,
                 NoopStub,
                 tx_events.downgrade(),
+            )
+        }
+
+        fn new_transactions_handler(store: &TestStore) -> OnReceiveNewTransaction<TestSpec> {
+            let (tx_missing, _rx_missing) = mpsc::unbounded_channel();
+            OnReceiveNewTransaction::<TestSpec>::new(
+                store.clone(),
+                TransactionPool::new(),
+                MaxEpochValidator,
+                tx_missing,
+            )
+        }
+
+        /// An epoch state whose committee holds the proposer of every block these tests build.
+        fn epoch_state_with_proposer(epoch: Epoch, shard_group: ShardGroup) -> EpochState<TestAddr> {
+            EpochState {
+                epoch,
+                epoch_hash: FixedHash::zero(),
+                exhaust_burn_rate: ExhaustBurnRate::new(0),
+                local_committee_info: CommitteeInfo::new(
+                    NumPreshards::P256,
+                    1,
+                    1,
+                    shard_group,
+                    epoch,
+                    VotePower::of(1),
+                ),
+                local_committee: Arc::new(Committee::new(vec![CommitteeMember {
+                    address: RistrettoPublicKeyBytes::default(),
+                    public_key: RistrettoPublicKeyBytes::default(),
+                    vote_power: VotePower::of(1),
+                }])),
+            }
+        }
+
+        fn local_only(tx_id: TransactionId) -> Command {
+            Command::LocalOnly(LocalOnlyAtom {
+                id: tx_id,
+                decision: Decision::Commit,
+                transaction_fee: 0,
+                leader_fee: None,
+            })
+        }
+
+        /// A proposal for the child of `parent`, certifying `parent`.
+        fn make_child_proposal(parent: &Block, commands: Vec<Command>) -> ProposalMessage {
+            let commands = BlockCommands::init(commands).unwrap();
+            let justify = ProposalCertificate::new(
+                parent.header().calculate_hash(),
+                *parent.parent(),
+                parent.height(),
+                parent.epoch(),
+                parent.shard_group(),
+                ProposalCertificate::genesis_signatures(),
+                QuorumDecision::Accept,
             );
+            assert_eq!(justify.calculate_block_id(), *parent.id());
+            let mut header = BlockHeader::create_unsigned(
+                Network::LocalNet,
+                ProtocolVersion::at(Network::LocalNet, parent.epoch()),
+                *parent.id(),
+                justify.calculate_id(),
+                None,
+                parent.height() + NodeHeight(1),
+                parent.epoch(),
+                parent.shard_group(),
+                RistrettoPublicKeyBytes::default(),
+                FixedHash::zero(),
+                &commands,
+                0,
+                0,
+                FixedHash::zero(),
+                ShardGroupAccumulatedData::default(),
+                ExtraData::new(),
+            )
+            .unwrap();
+            // The block id hashes the header as signed, so the header must carry a signature to hash to it.
+            header.set_signature(SchnorrSignatureBytes::zero());
+            ProposalMessage {
+                block: Block::new(header, justify, commands, None),
+                foreign_proposals: vec![],
+            }
+        }
+
+        /// Parks `proposal` as validation does, waiting on `missing`.
+        fn park(store: &TestStore, proposal: &ProposalMessage, missing: &[TransactionId]) {
+            store
+                .with_write_tx(|tx| {
+                    tx.parked_block_insert(
+                        &proposal.block,
+                        &proposal.foreign_proposals,
+                        ProposalOrigin::CatchUp,
+                        missing,
+                    )
+                })
+                .unwrap();
+        }
+
+        #[tokio::test]
+        async fn a_block_whose_justify_block_is_parked_unparks_after_it() {
+            let epoch = Epoch(1);
+            let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+            let dir = tempfile::tempdir().unwrap();
+            let store = TestStore::open(dir.path(), DatabaseOptions::default()).unwrap();
+            let mut on_message_validate = new_on_message_validate(&store);
+            let new_transactions = new_transactions_handler(&store);
+            let epoch_state = epoch_state_with_proposer(epoch, shard_group);
+
+            let missing = TransactionId::new([1u8; 32]);
+            let parent = make_catch_up_proposal(epoch, shard_group, missing);
+            park(&store, &parent, &[missing]);
+            let child = make_child_proposal(&parent.block, vec![]);
+            let child_id = *child.block.id();
+
+            let result = on_message_validate
+                .handle_missing_transactions_local_block(
+                    RistrettoPublicKeyBytes::default(),
+                    &epoch_state,
+                    child,
+                    &new_transactions,
+                    ProposalOrigin::CatchUp,
+                )
+                .await
+                .unwrap();
+
+            let MessageValidationResult::ParkedProposal { missing_txs, .. } = result else {
+                panic!("expected the child of a parked block to be parked, got {result:?}");
+            };
+            assert!(
+                missing_txs.is_empty(),
+                "the parent's missing transactions were requested for the parent"
+            );
+
+            let (unparked, _) = on_message_validate.update_parked_blocks([missing].iter()).unwrap();
+            let unparked = unparked.iter().map(|(msg, _)| *msg.block.id()).collect::<Vec<_>>();
+            assert_eq!(unparked, vec![*parent.block.id(), child_id]);
+        }
+
+        #[tokio::test]
+        async fn a_block_behind_a_parked_justify_block_requests_only_its_own_missing_transactions() {
+            let epoch = Epoch(1);
+            let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+            let dir = tempfile::tempdir().unwrap();
+            let store = TestStore::open(dir.path(), DatabaseOptions::default()).unwrap();
+            let mut on_message_validate = new_on_message_validate(&store);
+            let new_transactions = new_transactions_handler(&store);
+            let epoch_state = epoch_state_with_proposer(epoch, shard_group);
+
+            let awaited_by_parent = TransactionId::new([1u8; 32]);
+            let own = TransactionId::new([2u8; 32]);
+            let parent = make_catch_up_proposal(epoch, shard_group, awaited_by_parent);
+            park(&store, &parent, &[awaited_by_parent]);
+            let child = make_child_proposal(&parent.block, vec![local_only(awaited_by_parent), local_only(own)]);
+            let child_id = *child.block.id();
+
+            let result = on_message_validate
+                .handle_missing_transactions_local_block(
+                    RistrettoPublicKeyBytes::default(),
+                    &epoch_state,
+                    child,
+                    &new_transactions,
+                    ProposalOrigin::CatchUp,
+                )
+                .await
+                .unwrap();
+
+            let MessageValidationResult::ParkedProposal { missing_txs, .. } = result else {
+                panic!("expected the child of a parked block to be parked, got {result:?}");
+            };
+            assert_eq!(missing_txs, HashSet::from([own]));
+
+            let mut awaited = store
+                .with_read_tx(|tx| tx.parked_block_missing_transactions(&child_id))
+                .unwrap();
+            awaited.sort();
+            assert_eq!(awaited, vec![awaited_by_parent, own]);
+        }
+
+        #[tokio::test]
+        async fn a_catch_up_block_from_an_earlier_epoch_resequences_unpooled_transactions_against_the_block_epoch() {
+            let block_epoch = Epoch(1);
+            let current_epoch = Epoch(2);
+            let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+
+            let dir = tempfile::tempdir().unwrap();
+            let store = TestStore::open(dir.path(), DatabaseOptions::default()).unwrap();
+            let pool = TransactionPool::new();
+            let (tx_missing, _rx_missing) = mpsc::unbounded_channel();
+            let new_transactions =
+                OnReceiveNewTransaction::<TestSpec>::new(store.clone(), pool.clone(), MaxEpochValidator, tx_missing);
+
+            let mut on_message_validate = new_on_message_validate(&store);
 
             let input = SubstateId::Component(ComponentAddress::from_array([1u8; ObjectKey::LENGTH]));
             let tx_rec = TransactionRecord::new(

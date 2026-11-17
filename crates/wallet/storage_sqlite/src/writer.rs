@@ -244,10 +244,15 @@ impl<'a> WriteTransaction<'a> {
         }
 
         if !to_confirm.is_empty() {
-            // Unlock locked unconfirmed stealth_outputs
+            // Confirm unconfirmed stealth outputs minted under this lock, including those later locked for spend
+            // within the same lock (e.g. a fee-intent change output whose main-intent spend did not commit).
             diesel::update(stealth_outputs::table)
                 .filter(stealth_outputs::lock_id.eq(lock_id))
-                .filter(stealth_outputs::status.eq(OutputStatus::LockedUnconfirmed.as_key_str()))
+                .filter(stealth_outputs::is_on_chain.eq(false))
+                .filter(stealth_outputs::status.eq_any([
+                    OutputStatus::LockedUnconfirmed.as_key_str(),
+                    OutputStatus::LockedForSpend.as_key_str(),
+                ]))
                 .filter(stealth_outputs::id.eq_any(to_confirm))
                 .set((
                     stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()),

@@ -448,11 +448,8 @@ impl<'a> WriteTransaction<'a> {
         lock_id: WalletLockId,
         vault_address: VaultId,
         revealed_before: Amount,
-        amount: Amount,
         diff: &SubstateDiff,
     ) -> Result<(), WalletStorageError> {
-        const OPERATION: &str = "record_finalized_revealed_spend";
-
         let Some(transaction_id) = self.lock_transaction_id(lock_id)? else {
             // No transaction linked to the lock — the spend cannot be attributed, so skip recording.
             return Ok(());
@@ -471,18 +468,12 @@ impl<'a> WriteTransaction<'a> {
         let vault = self.vaults_get(&vault_address)?;
         let (revealed_after, vault_version) = match diff_vault {
             Some((revealed_after, version)) => (revealed_after, version),
-            None => {
-                let revealed_after =
-                    revealed_before
-                        .checked_sub(amount)
-                        .ok_or_else(|| WalletStorageError::OperationError {
-                            operation: OPERATION,
-                            details: format!("revealed balance {revealed_before} is less than spent amount {amount}"),
-                        })?;
-                (revealed_after, vault.vault_version)
-            },
+            // A linked transaction whose finalized diff omits the locked vault (e.g. OnlyFeeAccepted)
+            // left that vault untouched on-chain, so restore its pre-lock revealed balance.
+            None => (revealed_before, vault.vault_version),
         };
         if revealed_after == revealed_before {
+            self.vaults_update(vault_address, vault_version, revealed_after, vault.confidential_balance)?;
             return Ok(());
         }
 
@@ -2636,8 +2627,8 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         // and decrements the vaults' revealed balances, so the decreases can be recorded as balance changes.
         let revealed_spends = self.locked_revealed_spend(lock_id)?;
         self.vaults_finalized_locked_revealed_funds(lock_id).optional()?;
-        for (vault_address, revealed_before, amount) in revealed_spends {
-            self.record_finalized_revealed_spend(lock_id, vault_address, revealed_before, amount, diff)?;
+        for (vault_address, revealed_before, _amount) in revealed_spends {
+            self.record_finalized_revealed_spend(lock_id, vault_address, revealed_before, diff)?;
         }
         self.record_finalized_stealth_spends(lock_id, affected_stealth_balances, diff)?;
         self.locks_delete(lock_id)?;

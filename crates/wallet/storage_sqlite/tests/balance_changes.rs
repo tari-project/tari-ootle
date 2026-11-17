@@ -1851,3 +1851,122 @@ fn finalize_confirms_unconfirmed_output_relocked_via_lock_smallest_amount() {
     let vault = tx.vaults_get(&stealth_vault).unwrap();
     assert_eq!(vault.confidential_balance, Amount::from(850u64));
 }
+
+#[test]
+fn lock_finalize_restores_revealed_balance_when_diff_has_net_zero_change() {
+    let (store, _, _, _, _) = setup_store();
+    let stealth_resource = resource_address(3);
+    let stealth_vault = vault_address(6);
+    let account = account_address();
+    let transaction = build_transaction(15);
+    let transaction_id = transaction.calculate_id();
+
+    let mut tx = store.create_write_tx().unwrap();
+    upsert_stealth_resource(&mut tx, &stealth_resource);
+    tx.vaults_insert(VaultModel {
+        account_address: account,
+        id: stealth_vault,
+        vault_version: SubstateVersion::new(1),
+        resource_address: stealth_resource,
+        resource_type: ResourceType::Stealth,
+        confidential_balance: Amount::from(5_000_000u64),
+        revealed_balance: Amount::from(2_000_000u64),
+        locked_revealed_balance: Amount::zero(),
+        token_symbol: Some("STEALTH".to_string()),
+        divisibility: 6,
+    })
+    .unwrap();
+    tx.transactions_insert(&transaction, None, &[account], false).unwrap();
+
+    let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.locks_link_transaction(lock_id, transaction_id).unwrap();
+    tx.vaults_lock_revealed_funds(lock_id, &stealth_vault, Amount::from(500_000u64))
+        .unwrap();
+
+    let mut diff = SubstateDiff::new();
+    diff.up(
+        SubstateId::Vault(stealth_vault),
+        Substate::new(
+            SubstateVersion::new(2),
+            Vault::new(ResourceContainer::stealth(stealth_resource, Amount::from(2_000_000u64))),
+        ),
+    );
+    tx.locks_unlock_finalized(lock_id, &diff).unwrap();
+    tx.commit().unwrap();
+
+    let mut tx = store.create_read_tx().unwrap();
+    let page = tx
+        .balance_changes_get_page_by_account(&account, 0, 10, Some(&stealth_resource), None, None)
+        .unwrap();
+    assert_eq!(page.total, 0);
+    let vault = tx.vaults_get(&stealth_vault).unwrap();
+    assert_eq!(vault.revealed_balance, Amount::from(2_000_000u64));
+    assert_eq!(vault.locked_revealed_balance, Amount::zero());
+    assert_eq!(vault.vault_version, SubstateVersion::new(2));
+}
+
+#[test]
+fn lock_finalize_restores_revealed_balance_when_locked_vault_is_absent_from_diff() {
+    let (store, first_vault, _, first_resource, _) = setup_store();
+    let stealth_resource = resource_address(3);
+    let stealth_vault = vault_address(6);
+    let account = account_address();
+    let transaction = build_transaction(16);
+    let transaction_id = transaction.calculate_id();
+
+    let mut tx = store.create_write_tx().unwrap();
+    upsert_stealth_resource(&mut tx, &stealth_resource);
+    tx.vaults_update(
+        first_vault,
+        SubstateVersion::new(1),
+        Amount::from(10_000u64),
+        Amount::zero(),
+    )
+    .unwrap();
+    tx.vaults_insert(VaultModel {
+        account_address: account,
+        id: stealth_vault,
+        vault_version: SubstateVersion::new(1),
+        resource_address: stealth_resource,
+        resource_type: ResourceType::Stealth,
+        confidential_balance: Amount::zero(),
+        revealed_balance: Amount::from(2_000_000u64),
+        locked_revealed_balance: Amount::zero(),
+        token_symbol: Some("STEALTH".to_string()),
+        divisibility: 6,
+    })
+    .unwrap();
+    tx.transactions_insert(&transaction, None, &[account], false).unwrap();
+
+    let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.locks_link_transaction(lock_id, transaction_id).unwrap();
+    tx.vaults_lock_revealed_funds(lock_id, &first_vault, Amount::from(1_000u64))
+        .unwrap();
+    tx.vaults_lock_revealed_funds(lock_id, &stealth_vault, Amount::from(500_000u64))
+        .unwrap();
+
+    // Only `first_vault` is mutated on-chain (e.g. OnlyFeeAccepted); `stealth_vault` is untouched.
+    let mut diff = SubstateDiff::new();
+    diff.up(
+        SubstateId::Vault(first_vault),
+        Substate::new(
+            SubstateVersion::new(2),
+            Vault::new(ResourceContainer::stealth(first_resource, Amount::from(9_750u64))),
+        ),
+    );
+    tx.locks_unlock_finalized(lock_id, &diff).unwrap();
+    tx.commit().unwrap();
+
+    let mut tx = store.create_read_tx().unwrap();
+    let page = tx
+        .balance_changes_get_page_by_account(&account, 0, 10, None, None, None)
+        .unwrap();
+    assert_eq!(page.total, 1);
+    assert_eq!(page.changes[0].vault_address, Some(first_vault));
+    assert_eq!(page.changes[0].revealed_delta, "-250");
+
+    let stealth_after = tx.vaults_get(&stealth_vault).unwrap();
+    assert_eq!(stealth_after.revealed_balance, Amount::from(2_000_000u64));
+    assert_eq!(stealth_after.locked_revealed_balance, Amount::zero());
+    assert_eq!(stealth_after.vault_version, SubstateVersion::new(1));
+}

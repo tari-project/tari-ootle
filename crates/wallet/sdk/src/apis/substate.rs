@@ -213,9 +213,7 @@ where
                                 .await?;
                         },
                         SubstateValue::Resource(_) => {},
-                        SubstateValue::TransactionReceipt(_) => {
-                            continue;
-                        },
+                        SubstateValue::TransactionReceipt(_) => {},
                         SubstateValue::Vault(vault) => {
                             let resx_addr = SubstateId::Resource(*vault.resource_address());
                             self.insert_substate_if_absent(&resx_addr, unversioned, &mut substate_ids)
@@ -238,9 +236,7 @@ where
                             self.insert_substate_if_absent(&resx_addr, unversioned, &mut substate_ids)
                                 .await?;
                         },
-                        SubstateValue::ClaimedOutputTombstone(_) => {
-                            continue;
-                        },
+                        SubstateValue::ClaimedOutputTombstone(_) => {},
                         SubstateValue::Template(_) => {},
                         SubstateValue::Utxo(_) => {
                             let addr = substate_id.substate_id().as_utxo_address().ok_or_else(|| {
@@ -276,9 +272,7 @@ where
                         "Adding substate {} to dependent substates from remote source",
                         substate_id
                     );
-                    if substate_id.substate_id().is_declarable_input() {
-                        substate_ids.replace(substate_id.into());
-                    }
+                    substate_ids.replace(substate_id.into());
                 },
             }
         }
@@ -848,7 +842,6 @@ fn get_dependent_substates<TTx: WalletStoreReader>(
             get_dependent_substates_inner(tx, &referenced, substate_ids, &mut visited)?;
         }
     }
-    substate_ids.retain(|requirement| requirement.substate_id().is_declarable_input());
     Ok(())
 }
 

@@ -757,16 +757,7 @@ where TSpec: WalletSdkSpec
                         .add_vault_to_account_if_not_exist(&account_address, *vault_id, vault)
                         .await?;
 
-                    let updated_nfts = vault
-                        .get_non_fungible_ids()
-                        .iter()
-                        .filter_map(|nft_id| {
-                            diff.up_iter()
-                                .find(|(id, _)| id.as_non_fungible_address().map(|a| a.id()) == Some(nft_id))
-                                .and_then(|(_, s)| s.substate_value().non_fungible())
-                                .map(|nft| (nft_id.clone(), nft.clone()))
-                        })
-                        .collect();
+                    let updated_nfts = collect_updated_nfts_from_diff(diff, vault);
 
                     has_changed |= self
                         .refresh_vault(
@@ -835,16 +826,7 @@ where TSpec: WalletSdkSpec
             self.add_vault_to_account_if_not_exist(&account_addr, vault_id, vault)
                 .await?;
 
-            let updated_nfts = vault
-                .get_non_fungible_ids()
-                .iter()
-                .filter_map(|nft_id| {
-                    diff.up_iter()
-                        .find(|(id, _)| id.as_non_fungible_address().map(|a| a.id()) == Some(nft_id))
-                        .and_then(|(_, s)| s.substate_value().non_fungible())
-                        .map(|nft| (nft_id.clone(), nft.clone()))
-                })
-                .collect();
+            let updated_nfts = collect_updated_nfts_from_diff(diff, vault);
 
             // Update the vault balance / confidential outputs
             self.refresh_vault(
@@ -1112,6 +1094,22 @@ where TSpec: WalletSdkSpec
 
         Ok(true)
     }
+}
+
+fn collect_updated_nfts_from_diff(diff: &SubstateDiff, vault: &Vault) -> HashMap<NonFungibleId, NonFungibleContainer> {
+    vault
+        .get_non_fungible_ids()
+        .iter()
+        .filter_map(|nft_id| {
+            diff.up_iter()
+                .find(|(id, _)| {
+                    id.as_non_fungible_address()
+                        .is_some_and(|a| a.resource_address() == vault.resource_address() && a.id() == nft_id)
+                })
+                .and_then(|(_, s)| s.substate_value().non_fungible())
+                .map(|nft| (nft_id.clone(), nft.clone()))
+        })
+        .collect()
 }
 
 fn is_account(s: &Substate) -> bool {

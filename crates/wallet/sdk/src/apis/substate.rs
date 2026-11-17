@@ -301,14 +301,21 @@ where
             .filter(|req| req.version().is_none())
             .map(|req| req.substate_id().clone())
             .collect::<Vec<_>>();
-        for id in unversioned_ids {
-            match self.fetch_substate_from_network(&id, None).await.optional()? {
-                Some(ValidatorScanResult { id: versioned, .. }) => {
-                    substate_ids.replace(versioned.into());
-                },
-                None => {
-                    substate_ids.remove(&id);
-                },
+        if !unversioned_ids.is_empty() {
+            let versions = self
+                .network_interface
+                .get_substate_versions(&unversioned_ids)
+                .await
+                .map_err(|e| SubstateApiError::NetworkInterfaceError(e.into()))?;
+            for id in unversioned_ids {
+                match versions.get(&id) {
+                    Some(&version) => {
+                        substate_ids.replace(SubstateRequirement::versioned(id, version));
+                    },
+                    None => {
+                        substate_ids.remove(&id);
+                    },
+                }
             }
         }
 

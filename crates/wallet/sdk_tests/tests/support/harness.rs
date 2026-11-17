@@ -680,6 +680,16 @@ impl WalletNetworkInterface for CannedSubstateNetworkInterface {
         panic!("CannedSubstateNetworkInterface called")
     }
 
+    async fn get_substate_versions(
+        &self,
+        substate_ids: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, SubstateVersion>, Self::Error> {
+        Ok(substate_ids
+            .iter()
+            .filter_map(|id| self.substates.get(id).map(|(version, _)| (id.clone(), *version)))
+            .collect())
+    }
+
     async fn submit_transaction(&self, _transaction: Transaction) -> Result<TransactionId, Self::Error> {
         panic!("CannedSubstateNetworkInterface called")
     }

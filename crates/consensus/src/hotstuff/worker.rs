@@ -663,6 +663,9 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 block_id,
                 ..
             } => {
+                if missing_txs.is_empty() {
+                    return Ok(());
+                }
                 let mut request_from_address = from;
                 if request_from_address == self.local_validator_addr {
                     // Edge case: If we're catching up, we could be the proposer but we no longer have
@@ -1736,7 +1739,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             .handle(&mut self.pacemaker_actions, epoch_state, msg, origin)
             .await;
         self.pacemaker.apply(&mut self.pacemaker_actions);
-        match log_err("on_receive_local_proposal", result) {
+        match result {
             Ok(no_vote) => {
                 let current_height = self.pacemaker.current_height();
                 if let Some(mut catch_up) = self.worker_state.catch_up.take() {
@@ -1876,9 +1879,9 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         }
 
         if self.worker_state.is_active_catch_up() {
-            warn!(
+            debug!(
                 target: LOG_TARGET,
-                "⏳ Already catching up. Ignoring additional catch up."
+                "⏳ Already catching up. Ignoring additional catch up to {remote_epoch}/{remote_height}."
             );
             return Ok(());
         }

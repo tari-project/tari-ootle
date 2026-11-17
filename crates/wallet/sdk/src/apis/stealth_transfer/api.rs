@@ -595,7 +595,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         };
 
         let fee_stealth_change_amt = fee_inputs_to_spend
-            .total_stealth_input_amount()
+            .total_amount()
             .saturating_sub(fee_amount_to_spend)
             .to_u64_checked()
             .ok_or_else(|| {

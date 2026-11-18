@@ -1,5 +1,4 @@
 target
-.env
 cucumber-output-junit.xml
 # Non-root Cargo.locks
 **/Cargo.lock
@@ -16,7 +15,6 @@ cucumber-output-junit.xml
 *.iml
 .vs/
 *.userprefs
-.vscode/
 *.code-workspace
 tags
 .run
@@ -79,3 +77,4 @@ clients/validator_node_grpc_client/package-lock.json
 scripts/__pycache__/
 # CocoIndex Code (ccc)
 /.cocoindex_code/
+config.bat

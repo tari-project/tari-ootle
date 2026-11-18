@@ -409,8 +409,7 @@ fn explicit_index_account_without_view_key_row_decrypts_incoming_stealth_output(
     let sender = Test::new();
     let receiver = Test::without_accounts(PanicNetworkInterface);
 
-    // Simulate an account created before explicit-index key persistence so no ViewOnlyKey row exists in
-    // key_manager_states.
+    // Add an account whose ViewOnlyKey index has no row in key_manager_states.
     let explicit_index = 3;
     let derived = receiver
         .sdk()

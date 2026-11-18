@@ -831,8 +831,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        // Include view-only accounts (imported view key) and any existing explicit-index accounts whose derived
-        // ViewOnlyKey row was not recorded in key_manager_states.
+        // Accounts whose view key has no ViewOnlyKey row in key_manager_states: imported view-only keys, and
+        // derived keys not listed above.
         let accounts = self.store.with_read_tx(|tx| {
             let count = tx.accounts_count()?;
             tx.accounts_get_many(0, count as usize)

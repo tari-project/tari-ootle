@@ -18,12 +18,13 @@ If the commit touches `.ts`/`.tsx` files, also run `pnpm run fmt` (CI runs `pnpm
 - The project is called "Ootle" or "Tari Ootle" (not "DAN" or "Tari DAN")
 - **Crates** are in `crates/`, applications in `applications/`, clients in `clients/`
 - Wallet daemon package: `tari_ootle_walletd` (in `applications/tari_walletd/`)
-- Wallet CLI: `tari_wallet_cli` (in `applications/tari_wallet_cli/`)
+- Wallet CLI: `tari_ootle_wallet_cli` (in `applications/tari_wallet_cli/`)
 - Transaction manifest parser: `tari_transaction_manifest` (in `crates/transaction_manifest/`)
 - Transaction types/instructions: `tari_ootle_transaction` (in `crates/transaction/`)
 - Template lib types (OwnerRule, RistrettoPublicKeyBytes, etc.): `tari_template_lib_types` (in
   `crates/template_lib_types/`)
-- CBOR serialization: `tari_bor` (in `crates/tari_bor/`) - wraps ciborium, re-exports serde
+- CBOR serialization: `tari_bor` (in `crates/tari_bor/`) - wraps minicbor (re-exports `Encode`/`Decode`/`CborLen`);
+  serde support is opt-in via the `serde` feature
 
 ## Code Comments
 
@@ -53,11 +54,15 @@ invariants, the reason for a non-obvious approach, tricky edge cases. They must 
 
 - DSL parsed by `tari_transaction_manifest::parse_manifest()`
 - Parser is in `crates/transaction_manifest/src/parser.rs`, generator in `generator.rs`
-- Macros: `var!`/`arg!`/`global!`, `new_component_addr!`, `new_resource_addr!`, `create_account!`,
-  `drop_all_proofs!`, `set_access_rules!`, `set_owner_rule!` (rules in `rule!` syntax, see `src/rules.rs`)
+- Statement macros: `var!`/`arg!`/`global!`, `blob!`, `new_component_addr!`, `new_resource_addr!`, `create_account!`,
+  `drop_all_proofs!`, `authorize!`, `drop_authorize!`, `put_into_bucket!`, `publish_template!`, `set_access_rules!`,
+  `set_owner_rule!` (rules in `rule!` syntax, see `src/rules.rs`)
+- Literal macros: `amount!`, `cbor!`, `metadata!`, `bytes!`/`hex_bytes!`/`public_key!`, `address!`/`substate_id!`,
+  `non_fungible_id!`, `blob!`
 - `create_account!(owner_pk)` generates `Instruction::CreateAccount` - idempotent account creation
 - Variables passed to manifests are parsed via `ManifestValue::FromStr` which handles: substate IDs (`component_<hex>`,
-  `resource_<hex>`, etc.), NFT IDs, Rust literals, and raw hex bytes (for public keys)
+  `resource_<hex>`, etc.), NFT IDs, Rust literals, raw hex bytes (for public keys), and
+  `[a, b, ...]` lists of these
 
 ### Wallet Daemon JSON-RPC
 
@@ -113,8 +118,9 @@ Two scripts in `scripts/` cover publishing to crates.io and reasoning about vers
     still unpublished (`pending`).
   - `deps <crate>` / `dependents <crate> [--transitive]` — graph queries.
   - `impact <crate> [--breaking]` — for a non-breaking change, prints just a patch bump. For `--breaking`, prints the
-    tier-3 workspace rollup (every tier-3 crate moves with `workspace.package.version`) plus the tier-1/2 crates that
-    need pin updates + their republish guidance (patch min, minor if their public API re-exposes the changed types).
+    tier-3 workspace rollup (every tier-3 crate moves with `workspace.package.version`) plus the crates in other tiers
+    (1, 2, 4) that need pin updates + their republish guidance (patch min, minor if their public API re-exposes the
+    changed types).
   - Both commands query crates.io and ask only for bumps that are still outstanding. A crate whose in-tree version is
     an unreleased minor ahead of crates.io needs nothing — the pending release already carries the change, because a
     `^0.y` pin cannot exist on a version that was never published. `--offline` skips the check and lists the whole

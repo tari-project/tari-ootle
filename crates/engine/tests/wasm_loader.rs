@@ -757,7 +757,7 @@ fn a_second_active_element_segment_is_refused() {
             "#
         ));
 
-        let err = WasmModule::load_template_from_code(&code).expect_err("a second active element segment was accepted");
+        let err = WasmModule::validate_code(&code).expect_err("a second active element segment was accepted");
         assert!(
             matches!(
                 err,
@@ -1353,21 +1353,17 @@ fn rejects_duplicate_function_names_and_colliding_function_idents() {
     .unwrap();
 
     let duplicate_code = template_module_defining(&duplicate_def, "", ABI_EXPORTS);
-    for result in [
-        WasmModule::validate_code(&duplicate_code).map(|_| ()),
-        WasmModule::load_template_from_code(&duplicate_code).map(|_| ()),
-    ] {
-        let err = result.expect_err("module with duplicate function names was accepted");
-        assert!(
-            matches!(
-                &err,
-                tari_engine::template::TemplateLoaderError::WasmModuleError(WasmExecutionError::WasmValidationError(
-                    WasmValidationError::DuplicateFunctionName { name }
-                )) if name == "transfer"
-            ),
-            "unexpected error: {err:?}"
-        );
-    }
+    let err =
+        WasmModule::validate_code(&duplicate_code).expect_err("module with duplicate function names was accepted");
+    assert!(
+        matches!(
+            &err,
+            tari_engine::template::TemplateLoaderError::WasmModuleError(WasmExecutionError::WasmValidationError(
+                WasmValidationError::DuplicateFunctionName { name }
+            )) if name == "transfer"
+        ),
+        "unexpected error: {err:?}"
+    );
 
     let colliding_def = TemplateDef::V2(TemplateDefV2 {
         template_name: "Buggy".to_string(),
@@ -1391,19 +1387,56 @@ fn rejects_duplicate_function_names_and_colliding_function_idents() {
     .unwrap();
 
     let colliding_code = template_module_defining(&colliding_def, "", ABI_EXPORTS);
-    for result in [
-        WasmModule::validate_code(&colliding_code).map(|_| ()),
-        WasmModule::load_template_from_code(&colliding_code).map(|_| ()),
-    ] {
-        let err = result.expect_err("module with colliding function identifiers was accepted");
-        assert!(
-            matches!(
-                &err,
-                tari_engine::template::TemplateLoaderError::WasmModuleError(WasmExecutionError::WasmValidationError(
-                    WasmValidationError::FunctionIdentCollision { first, second, ident }
-                )) if first == "admin_90260" && second == "public_13865" && *ident == expected_ident
-            ),
-            "unexpected error: {err:?}"
-        );
-    }
+    let err = WasmModule::validate_code(&colliding_code)
+        .expect_err("module with colliding function identifiers was accepted");
+    assert!(
+        matches!(
+            &err,
+            tari_engine::template::TemplateLoaderError::WasmModuleError(WasmExecutionError::WasmValidationError(
+                WasmValidationError::FunctionIdentCollision { first, second, ident }
+            )) if first == "admin_90260" && second == "public_13865" && *ident == expected_ident
+        ),
+        "unexpected error: {err:?}"
+    );
+}
+
+/// A stored template passed the publish admission rules in force when it was published, and loads on those terms: a
+/// rule added later refuses new templates while a published one that breaks it keeps loading.
+#[test]
+fn a_stored_template_loads_without_the_publish_admission_rules() {
+    let duplicate_def = TemplateDef::V2(TemplateDefV2 {
+        template_name: "Buggy".to_string(),
+        abi_version: 0,
+        functions: vec![
+            FunctionDef {
+                name: "transfer".to_string(),
+                kind: FunctionKind::Function,
+                arguments: vec![],
+                output: Type::Unit,
+            },
+            FunctionDef {
+                name: "transfer".to_string(),
+                kind: FunctionKind::Function,
+                arguments: vec![],
+                output: Type::Unit,
+            },
+        ],
+    })
+    .encode_for_wasm_embedding()
+    .unwrap();
+    let segments = ["(elem (i32.const 0) func)"; limits::WASM_LIMITS.max_element_segments + 1].join("\n");
+    let exports = format!(
+        r#"
+        (table 1 1 funcref)
+        {ABI_EXPORTS}
+        (func (export "unexpected"))
+        {segments}
+        "#
+    );
+    // Breaks a `TemplateDef` rule, an export rule and a structural limit at once.
+    let code = template_module_defining(&duplicate_def, "", &exports);
+
+    WasmModule::validate_code(&code).expect_err("publish admitted a module that breaks its rules");
+    let loaded = WasmModule::load_template_from_code(&code).expect("a stored template was refused at load");
+    assert_eq!(loaded.template_name(), "Buggy");
 }

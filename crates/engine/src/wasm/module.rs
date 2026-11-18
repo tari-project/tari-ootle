@@ -53,11 +53,21 @@ use crate::{
         WasmProcess,
         WasmValidationError,
         engine,
-        module_shape::{ModuleStructure, validate_module_structure},
+        module_shape::{ModuleStructure, measure_module_structure, validate_module_structure},
     },
 };
 
 pub type MainFunction = TypedFunction<(WasmPtr<u8>, u32), WasmPtr<u8>>;
+
+/// Why a module is being compiled, which decides whether the publish admission rules run.
+#[derive(Debug, Clone, Copy)]
+enum Admission {
+    /// A `PublishTemplate` is admitting the module, so every admission rule runs.
+    Publish,
+    /// The module is a stored template, admitted when it was published, or a built-in.
+    Stored,
+}
+
 #[derive(Debug, Clone)]
 pub struct WasmModule {
     code: Box<[u8]>,
@@ -74,8 +84,6 @@ impl WasmModule {
     /// this and [`Self::compile_prevalidated`]: cranelift is the expensive half, and a module
     /// refused by a rule here never reaches it, so it must not be billed as though it had.
     pub fn prevalidate_code(code: &[u8]) -> Result<ModuleStructure, TemplateLoaderError> {
-        // Reject custom sections the engine does not consume. Only the registration path runs this;
-        // already-stored templates (and built-ins) load via `load_template_from_code` without it.
         reject_disallowed_custom_sections(code).map_err(WasmExecutionError::from)?;
         let structure = validate_module_structure(code).map_err(WasmExecutionError::from)?;
         Ok(structure)
@@ -85,7 +93,7 @@ impl WasmModule {
     /// pass's two walks over the binary is repeated.
     pub fn compile_prevalidated(code: &[u8], shape: ModuleShape) -> Result<TemplateDef, TemplateLoaderError> {
         // TODO: evaluate if there are acceptable cheaper ways to fully validate
-        let loaded = Self::compile(code, shape)?;
+        let loaded = Self::compile(code, shape, Admission::Publish)?;
         Ok(loaded.into_template_def())
     }
 
@@ -94,15 +102,32 @@ impl WasmModule {
         Self::compile_prevalidated(code, structure.shape)
     }
 
-    pub fn load_template_from_code(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
-        let structure = validate_module_structure(code).map_err(WasmExecutionError::from)?;
-        Self::compile(code, structure.shape)
+    /// Loads a template after holding it to every admission rule a publish applies, in one compile.
+    ///
+    /// For callers that stand in for a publish, such as a test harness adding a template it built,
+    /// so that a template a publish would refuse fails there too.
+    pub fn load_template_for_publish(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
+        let structure = Self::prevalidate_code(code)?;
+        Self::compile(code, structure.shape, Admission::Publish)
     }
 
-    fn compile(code: &[u8], shape: ModuleShape) -> Result<LoadedTemplate, TemplateLoaderError> {
+    /// Loads a template a publish has already admitted, or a built-in template.
+    ///
+    /// It runs what any module needs to load and run: the ABI version this engine supports, the
+    /// compile with its instrumentation, and the instantiation that applies the memory and table
+    /// limits. The publish admission rules belong to [`Self::validate_code`]: stored code passed
+    /// them when it was published, so a rule added later refuses new templates while published
+    /// ones keep loading. A caller standing in for a publish uses
+    /// [`Self::load_template_for_publish`] instead.
+    pub fn load_template_from_code(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
+        let structure = measure_module_structure(code);
+        Self::compile(code, structure.shape, Admission::Stored)
+    }
+
+    fn compile(code: &[u8], shape: ModuleShape, admission: Admission) -> Result<LoadedTemplate, TemplateLoaderError> {
         let engine = Self::create_engine();
         let module = wasmer::Module::new(&engine, code)?;
-        Self::finalize_loaded_module(engine, module, code.len(), shape)
+        Self::finalize_loaded_module(engine, module, code.len(), shape, admission)
     }
 
     /// Load a template from a previously serialized wasmer module (see
@@ -135,26 +160,33 @@ impl WasmModule {
         let engine = Self::create_engine();
         // SAFETY: forwarded to caller — see function-level docs.
         let module = unsafe { wasmer::Module::deserialize_unchecked(&engine, serialized) }?;
-        Self::finalize_loaded_module(engine, module, code_size, shape)
+        Self::finalize_loaded_module(engine, module, code_size, shape, Admission::Stored)
     }
 
     /// Validates a compiled module and turns it into a [`LoadedTemplate`].
     ///
     /// Every check the module itself can answer runs before the module is instantiated.
     /// Instantiating creates the guest's linear memory and tables, sized by values the module
-    /// declares, so a module reaches it only once the engine has accepted its ABI and its exports.
+    /// declares, so a module being published reaches it only once the engine has accepted its ABI
+    /// and its exports.
     fn finalize_loaded_module(
         engine: Engine,
         module: wasmer::Module,
         code_size: usize,
         shape: ModuleShape,
+        admission: Admission,
     ) -> Result<LoadedTemplate, TemplateLoaderError> {
         let template = load_template_def_from_custom_section(&module)?;
-        let main_fn = format!("{}_main", template.template_name());
 
         WasmProcess::validate_template_abi_version(&template)?;
-        validate_functions(&template)?;
-        validate_module_exports(&module, &main_fn)?;
+        match admission {
+            Admission::Publish => {
+                validate_functions(&template)?;
+                let main_fn = format!("{}_main", template.template_name());
+                validate_module_exports(&module, &main_fn)?;
+            },
+            Admission::Stored => {},
+        }
 
         let mut store = Store::new(engine);
         let imports = imports! {
@@ -437,8 +469,8 @@ fn validate_export_signature(
 ///
 /// Every validator runs these when it executes `PublishTemplate`, so they are consensus rules: adding or loosening
 /// one changes which templates the network accepts. Each rule keeps the declared ABI consistent with how the engine
-/// dispatches, locks and evaluates access rules. Loading a stored or cached module runs them again, so a published
-/// template that breaks a newly added rule stops loading.
+/// dispatches, locks and evaluates access rules. Only publishing runs them, so a rule added later refuses new
+/// templates while every published one keeps loading.
 fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionError> {
     match template_def {
         TemplateDef::V2(def) => {

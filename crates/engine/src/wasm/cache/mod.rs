@@ -100,11 +100,10 @@ const ENGINE_FINGERPRINT_BITS: u64 = {
     let h = const_hash::part(h, include_bytes!("../limiting_tunable.rs"));
     // Which count a hit reads out of each header slot. Swapping two of these is a fee change.
     let h = const_hash::values(h, &header_layout());
-    // Every limit, not just the ones the artifact bakes in: `validate_module_structure` enforces
-    // `max_tables`, `max_globals` and the module and function limits on what the compile emits at
-    // compile time only, and a hit goes straight to `finalize_loaded_module` without it.
-    // Destructured rather than read field by field, so that a limit added later does not compile
-    // until it is named here.
+    // Every limit, including the publish admission limits that no load enforces. A limit change then
+    // recompiles every template once, which is the price of a digest that cannot miss a limit that
+    // does reach the artifact. Destructured rather than read field by field, so that a limit added
+    // later does not compile until it is named here.
     let limits::WasmLimits {
         max_function_arguments,
         max_function_name_length,

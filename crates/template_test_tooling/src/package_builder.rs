@@ -112,7 +112,8 @@ impl PackageBuilder {
         let wasm = compile_template_with_envs(path.as_ref(), features, envs)
             .unwrap_or_else(|e| panic!("Failed to compile template {}: {}", path.as_ref().display(), e));
         let template_addr = hash_template_code(wasm.code());
-        let wasm = wasm.load_template().expect("failed to load template");
+        let wasm = WasmModule::load_template_for_publish(wasm.code())
+            .unwrap_or_else(|e| panic!("Template {} would not be admitted: {}", path.as_ref().display(), e));
         self.add_loaded_template(template_addr, wasm);
         template_addr
     }

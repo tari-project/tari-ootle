@@ -3,6 +3,7 @@ import type { AuthorizerSet } from "../AuthorizerSet";
 import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 import type { TransactionSignature } from "../TransactionSignature";
 import type { UnsignedTransaction } from "../UnsignedTransaction";
+import type { ComponentRulesChange } from "./ComponentRulesChange";
 import type { ComponentUpgrade } from "./ComponentUpgrade";
 import type { KeyId } from "./KeyId";
 import type { SigningRequestEffectiveStatus } from "./SigningRequestEffectiveStatus";
@@ -19,6 +20,11 @@ export type SigningRequestInfo = {
    * [`ComponentUpgrade`].
    */
   component_upgrades: Array<ComponentUpgrade>;
+  /**
+   * Every `SetComponentAccessRules` and `SetComponentOwnerRule` instruction in the transaction, fee instructions
+   * first. See [`ComponentRulesChange`].
+   */
+  component_rules_changes: Array<ComponentRulesChange>;
   seal_public_key: RistrettoPublicKeyBytes;
   /**
    * Public keys of every authorizer the signature commits to.

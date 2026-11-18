@@ -346,8 +346,8 @@ where
     Ok(ctor(action, entity))
 }
 
-/// Parses the `validators:read` and `validators:update` grants issued before `vn_fees` existed. Both were
-/// wallet-wide, so they map to the unscoped `vn_fees` grants.
+/// Parses the `validators:*` grants issued before `vn_fees` existed. All were wallet-wide, so they map to the
+/// unscoped `vn_fees` grants (`create` and `delete` only satisfied `Read` under `crud_satisfies`).
 fn parse_legacy_validators(action_str: &str, entity_str: Option<&str>) -> Result<Permission, InvalidPermissionsFormat> {
     if let Some(e) = entity_str {
         return Err(InvalidPermissionsFormat(format!(
@@ -355,7 +355,7 @@ fn parse_legacy_validators(action_str: &str, entity_str: Option<&str>) -> Result
         )));
     }
     match action_str {
-        "read" => Ok(Permission::VnFees(VnFeesAction::Read, None)),
+        "read" | "create" | "delete" => Ok(Permission::VnFees(VnFeesAction::Read, None)),
         "update" => Ok(Permission::VnFees(VnFeesAction::Claim, None)),
         other => Err(InvalidPermissionsFormat(format!(
             "invalid action '{other}' for 'validators' (use 'vn_fees:read' or 'vn_fees:claim')"
@@ -544,15 +544,17 @@ mod tests {
 
     #[test]
     fn legacy_validators_grants_parse_as_unscoped_vn_fees() {
-        assert_eq!(
-            "validators:read".parse::<Permission>().unwrap(),
-            Permission::VnFees(VnFeesAction::Read, None)
-        );
+        for grant in ["validators:read", "validators:create", "validators:delete"] {
+            assert_eq!(
+                grant.parse::<Permission>().unwrap(),
+                Permission::VnFees(VnFeesAction::Read, None)
+            );
+        }
         assert_eq!(
             "validators:update".parse::<Permission>().unwrap(),
             Permission::VnFees(VnFeesAction::Claim, None)
         );
-        assert!("validators:create".parse::<Permission>().is_err());
+        assert!("validators:unknown".parse::<Permission>().is_err());
         let claim_pk = RistrettoPublicKeyBytes::from([5u8; 32]);
         assert!(format!("validators:read:{claim_pk}").parse::<Permission>().is_err());
     }

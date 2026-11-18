@@ -15,7 +15,7 @@ use tari_ootle_transaction::args;
 use tari_ootle_wallet_crypto::{OutputWitness, StealthInputWitness, StealthOutputWitness, memo::Memo};
 use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId, TransactionContext};
 use tari_ootle_walletd_client::{
-    permissions::{Crud, Permission, VnFeesAction},
+    permissions::{Crud, Permission, Permissions, VnFeesAction},
     types::{
         AccountOrKeyId,
         ClaimValidatorFeesRequest,
@@ -35,7 +35,7 @@ use crate::{
     NUM_PRESHARDS,
     handlers::{
         HandlerContext,
-        auth::jwt::enforce_scopes,
+        auth::jwt::{AuthError, enforce_scopes},
         helpers::{
             ensure_signing_key,
             get_account_or_default,
@@ -48,6 +48,18 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::walletd::handlers::validator";
 
+fn ensure_has_vn_fees_grant(granted: &Permissions, action: VnFeesAction) -> Result<(), AuthError> {
+    if !granted
+        .iter()
+        .any(|p| matches!(p, Permission::Admin | Permission::VnFees(_, _)))
+    {
+        return Err(AuthError::InsufficientPermissions {
+            required: Permission::VnFees(action, None),
+        });
+    }
+    Ok(())
+}
+
 pub async fn handle_get_validator_fees(
     context: &HandlerContext,
     token: Option<&Bearer>,
@@ -55,6 +67,7 @@ pub async fn handle_get_validator_fees(
 ) -> Result<GetValidatorFeesResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
     let granted = context.check_auth(token)?;
+    ensure_has_vn_fees_grant(&granted, VnFeesAction::Read)?;
 
     let claim_key_id = match req.account_or_key {
         AccountOrKeyId::Account(acc) => {
@@ -132,6 +145,7 @@ pub async fn handle_claim_validator_fees(
 ) -> Result<ClaimValidatorFeesResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
     let granted = context.check_auth(token)?;
+    ensure_has_vn_fees_grant(&granted, VnFeesAction::Claim)?;
 
     let (account, inputs) = get_account_with_inputs(req.account.as_ref(), &sdk)?;
     let account_component_address = *account.component_address();
@@ -423,7 +437,7 @@ mod tests {
     use tari_template_lib_types::{ComponentAddress, crypto::RistrettoPublicKeyBytes};
 
     use super::*;
-    use crate::handlers::{auth::jwt::AuthError, test_support::TestDaemon};
+    use crate::handlers::test_support::TestDaemon;
 
     fn public_key_of(daemon: &TestDaemon, key_id: KeyId) -> RistrettoPublicKeyBytes {
         daemon
@@ -470,15 +484,15 @@ mod tests {
     }
 
     #[track_caller]
-    fn assert_vn_fees_denied(err: &anyhow::Error, action: VnFeesAction, claim_pk: RistrettoPublicKeyBytes) {
+    fn assert_vn_fees_denied(err: &anyhow::Error, action: VnFeesAction, claim_pk: Option<RistrettoPublicKeyBytes>) {
         assert!(
             matches!(
                 err.downcast_ref::<AuthError>(),
                 Some(AuthError::InsufficientPermissions {
-                    required: Permission::VnFees(a, Some(pk)),
+                    required: Permission::VnFees(a, pk),
                 }) if *a == action && *pk == claim_pk
             ),
-            "expected vn_fees:{action}:{claim_pk} to be required, got: {err}"
+            "expected vn_fees:{action} ({claim_pk:?}) to be required, got: {err}"
         );
     }
 
@@ -583,7 +597,7 @@ mod tests {
         // Account and key grants say nothing about a claim key's fee pools.
         let account_and_key_reader = daemon.api_key("account_and_key_reader", "accounts:read,keys:read");
 
-        for bearer in [&reader_0, &delegated_reader_0, &account_and_key_reader] {
+        for bearer in [&reader_0, &delegated_reader_0] {
             for (account_or_key, claim_key_id) in [
                 (AccountOrKeyId::Account(Some(account_b.into())), account_key(1)),
                 (AccountOrKeyId::KeyId(account_key(1)), account_key(1)),
@@ -592,16 +606,20 @@ mod tests {
                 (AccountOrKeyId::KeyId(imported_key_id), imported_key_id),
             ] {
                 let err = get_fees_err(&daemon, bearer, account_or_key).await;
-                assert_vn_fees_denied(&err, VnFeesAction::Read, public_key_of(&daemon, claim_key_id));
+                assert_vn_fees_denied(&err, VnFeesAction::Read, Some(public_key_of(&daemon, claim_key_id)));
             }
         }
-        let err = get_fees_err(
-            &daemon,
-            &account_and_key_reader,
+        // A token with no vn_fees grant is rejected up front before resolving the account or key.
+        let missing_account = ComponentAddress::from_array([0xff; 32]);
+        for account_or_key in [
             AccountOrKeyId::Account(Some(account_a.into())),
-        )
-        .await;
-        assert_vn_fees_denied(&err, VnFeesAction::Read, pk_0);
+            AccountOrKeyId::Account(Some(missing_account.into())),
+            AccountOrKeyId::KeyId(imported_key_id),
+            AccountOrKeyId::KeyId(KeyId::derived(KeyBranch::ConfidentialMask, 0)),
+        ] {
+            let err = get_fees_err(&daemon, &account_and_key_reader, account_or_key).await;
+            assert_vn_fees_denied(&err, VnFeesAction::Read, None);
+        }
 
         let claimer_1 = daemon.api_key("claimer_1", &format!("vn_fees:claim:{pk_1}"));
         let reader_all = daemon.api_key("reader_all", "vn_fees:read");
@@ -636,25 +654,32 @@ mod tests {
         // Transfer rights over every account say nothing about a claim key's fee pools.
         let transfer_all = daemon.api_key("transfer_all", "transfer:create");
 
-        for bearer in [&claimer_0_key, &delegated_claimer_0, &transfer_all] {
+        for bearer in [&claimer_0_key, &delegated_claimer_0] {
             for (claim_key_index, claim_pk) in [(Some(1), pk_1), (Some(99), pk_99)] {
                 for dry_run in [true, false] {
                     for output_to_revealed in [true, false] {
                         let err =
                             claim_fees_err(&daemon, bearer, account_a, claim_key_index, dry_run, output_to_revealed)
                                 .await;
-                        assert_vn_fees_denied(&err, VnFeesAction::Claim, claim_pk);
+                        assert_vn_fees_denied(&err, VnFeesAction::Claim, Some(claim_pk));
                     }
                 }
             }
             let err = claim_fees_err(&daemon, bearer, account_b, None, true, false).await;
-            assert_vn_fees_denied(&err, VnFeesAction::Claim, pk_1);
+            assert_vn_fees_denied(&err, VnFeesAction::Claim, Some(pk_1));
+        }
+
+        // A token with no vn_fees grant is rejected up front before resolving the destination account.
+        let missing_account = ComponentAddress::from_array([0xff; 32]);
+        for account in [account_a, account_b, missing_account] {
+            let err = claim_fees_err(&daemon, &transfer_all, account, None, true, false).await;
+            assert_vn_fees_denied(&err, VnFeesAction::Claim, None);
         }
 
         // Reading a key's fee pools does not let a caller claim them.
         let reader_0 = daemon.api_key("reader_0", &format!("vn_fees:read:{pk_0},transfer:create:{account_a}"));
         let err = claim_fees_err(&daemon, &reader_0, account_a, None, true, false).await;
-        assert_vn_fees_denied(&err, VnFeesAction::Claim, pk_0);
+        assert_vn_fees_denied(&err, VnFeesAction::Claim, Some(pk_0));
 
         // The claim key's grant does not cover depositing into an account the caller cannot transfer from.
         let claimer_1 = daemon.api_key(

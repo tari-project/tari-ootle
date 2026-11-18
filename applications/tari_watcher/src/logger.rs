@@ -2,6 +2,14 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use fern::FormatCallback;
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+
+/// Current UTC time in RFC 3339, with fractional seconds only when they are non-zero.
+fn now_rfc3339() -> String {
+    let now = OffsetDateTime::now_utc();
+    // Rfc3339 formatting fails only for years outside 0..=9999.
+    now.format(&Rfc3339).unwrap_or_else(|_| now.to_string())
+}
 
 pub fn init_logger() -> Result<(), log::SetLoggerError> {
     fn should_skip(target: &str) -> bool {
@@ -22,7 +30,7 @@ pub fn init_logger() -> Result<(), log::SetLoggerError> {
 
             let fallback =   |out: FormatCallback<'_>|  out.finish(format_args!(
                 "[{} {} {}] {}",
-                humantime::format_rfc3339(std::time::SystemTime::now()),
+                now_rfc3339(),
                 record.metadata().target(),
                 colors.color(record.level()),
                 message
@@ -58,7 +66,7 @@ pub fn init_logger() -> Result<(), log::SetLoggerError> {
 
             out.finish(format_args!(
                 "{} {} {}] {} {}",
-                humantime::format_rfc3339(std::time::SystemTime::now()),
+                now_rfc3339(),
                 record.metadata().target(),
                 target,
                 level,

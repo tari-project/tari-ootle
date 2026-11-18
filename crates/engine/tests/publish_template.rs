@@ -813,3 +813,47 @@ fn a_module_refused_by_its_definition_or_exports_is_not_charged_for_the_compile(
         .to_string(),
     );
 }
+
+/// The compiled module keeps only the last of several same-named custom sections, so a load decodes
+/// one `tari_tdef` whatever the bytes carry. Publishing reads every copy from the bytes and refuses
+/// a second, before the compile is charged for.
+#[test]
+fn a_module_with_two_template_definitions_is_refused_before_the_compile() {
+    use tari_template_abi::{FunctionDef, FunctionKind, TemplateDef, TemplateDefV2, Type};
+
+    let definition = |name: &str| {
+        let def = TemplateDef::V2(TemplateDefV2 {
+            template_name: "Buggy".to_string(),
+            abi_version: 0,
+            functions: vec![FunctionDef {
+                name: name.to_string(),
+                kind: FunctionKind::Function,
+                arguments: vec![],
+                output: Type::Unit,
+            }],
+        })
+        .encode_for_wasm_embedding()
+        .unwrap();
+        def.iter().map(|b| format!("\\{b:02x}")).collect::<String>()
+    };
+    let code = wat::parse_str(format!(
+        r#"
+        (module
+          (memory (export "memory") 1)
+          (func (export "tari_alloc") (param i32) (result i32) (i32.const 1024))
+          (func (export "tari_free") (param i32))
+          (func (export "Buggy_main") (param i32 i32) (result i32) (i32.const 0))
+          (@custom "tari_tdef" "{}")
+          (@custom "tari_tdef" "{}")
+        )
+        "#,
+        definition("transfer"),
+        definition("withdraw"),
+    ))
+    .unwrap();
+
+    assert_refused_before_the_compile(
+        code,
+        format!("module contains more than one `{TEMPLATE_DEF_CUSTOM_SECTION}` custom section"),
+    );
+}

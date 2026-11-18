@@ -313,6 +313,10 @@ impl fmt::Debug for LoadedWasmTemplate {
 /// Publishing reads the sections from the module bytes. Loading reads them from the compiled
 /// module: wasmer preserves custom sections through compile and `serialize` / `deserialize`, so
 /// that works on both freshly compiled modules and modules loaded from the disk cache.
+///
+/// Wasmer keeps one section per name, the last, so a load always sees a single section. Publishing
+/// sees every copy in the bytes and refuses a module with more than one, which is what makes the
+/// definition a load decodes the one publishing verified.
 fn decode_template_def<S: AsRef<[u8]>>(
     sections: impl IntoIterator<Item = S>,
 ) -> Result<TemplateDef, WasmExecutionError> {

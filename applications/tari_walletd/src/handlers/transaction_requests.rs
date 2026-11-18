@@ -754,10 +754,11 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("transaction.main_signer"), "{err}");
 
+        let external_only: tari_ootle_transaction::AuthorizerSet = [external_public_key].into_iter().collect();
         req.signatures = vec![TransactionSignature::sign(
             &external_secret,
-            &wallet_public_key,
-            &req.transaction,
+            tari_ootle_transaction::AuthorizationContext::new(&wallet_public_key, &external_only),
+            req.transaction.body(),
         )];
         let request_id = handle_create(&daemon.context, Some(&tool), req)
             .await

@@ -44,6 +44,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_template_metadata::{MetadataHash, TemplateMetadata};
 use tari_ootle_transaction::{
+    AuthorizerSet,
     ComponentReference,
     Instruction,
     MigrateFunction,
@@ -356,6 +357,11 @@ pub struct SigningRequestCreateRequest {
     /// Public key of the party that will seal the transaction. The signature
     /// commits to it.
     pub seal_public_key: RistrettoPublicKeyBytes,
+    /// Public keys of every authorizer of the transaction, the public key of
+    /// `key_id` among them. The signature commits to the whole set, so the
+    /// sealed transaction must carry an authorization from each key and no
+    /// other.
+    pub authorizers: AuthorizerSet,
     /// The wallet key to sign with.
     pub key_id: KeyId,
     /// Free text shown to the approver, labelled as coming from the requester.
@@ -393,6 +399,8 @@ pub struct SigningRequestInfo {
     #[serde(default)]
     pub component_upgrades: Vec<ComponentUpgrade>,
     pub seal_public_key: RistrettoPublicKeyBytes,
+    /// Public keys of every authorizer the signature commits to.
+    pub authorizers: AuthorizerSet,
     pub key_id: KeyId,
     /// Public key of `key_id`.
     pub signer_public_key: RistrettoPublicKeyBytes,

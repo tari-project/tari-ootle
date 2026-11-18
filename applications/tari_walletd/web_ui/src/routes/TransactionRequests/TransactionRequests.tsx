@@ -27,7 +27,7 @@ import type {
   TransactionRequestInfo,
   TransactionRequestMainSigner,
 } from "@tari-project/ootle-ts-bindings";
-import { TARI_TOKEN } from "@tari-project/ootle-ts-bindings";
+import { TARI_TOKEN, transactionBody } from "@tari-project/ootle-ts-bindings";
 import { useEffect, useState } from "react";
 import type { AccountWithdrawal, InstructionsDescription, WithdrawalDestination } from "../SigningRequests/describe";
 import { describeInstructions } from "../SigningRequests/describe";
@@ -232,7 +232,7 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
 
   const params = { request_id: request.request_id };
 
-  const v1 = request.transaction.V1;
+  const v1 = transactionBody(request.transaction);
   const instructions = v1?.instructions ?? [];
   const feeInstructions = v1?.fee_instructions ?? [];
   const inputs = v1?.inputs ?? [];

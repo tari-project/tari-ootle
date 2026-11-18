@@ -2,8 +2,8 @@
   "name": "stealth_transfer/revealed_output_multi",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.47.0",
-    "git_rev": "4096f43913407b2ffe5ef8e44d821683bcf8b58b",
+    "core_version": "0.53.5",
+    "git_rev": "f987c537728b97c86b80eaef15a7d13a1dc094b6",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "build_and_encode_stealth_transfer",
@@ -56,7 +56,7 @@
   },
   "expected": {
     "sealed_transaction_semantic": {
-      "V1": {
+      "V2": {
         "body": {
           "signatures": [
             {

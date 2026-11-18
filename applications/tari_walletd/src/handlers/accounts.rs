@@ -1690,19 +1690,14 @@ pub async fn handle_stealth_transfer(
             let transaction = transfer.transaction;
             let main_pk = transfer.main_signer.public_key().to_byte_type();
 
-            // Signer api which sign transaction types that require the seal signer public key
-            let main_signer = sdk.signer_api().with_context(&main_pk);
-            // Add additional signature if needed
-            let transaction = match transfer.additional_signer.as_ref() {
-                Some(s) => main_signer.sign(s.key_id, transaction)?,
-                None => transaction.finish(),
-            };
-
-            // Add required UTXO spend key signatures
-            let transaction = transfer
-                .utxo_spend_keys
-                .iter()
-                .try_fold(transaction, |tx, key| main_signer.sign_with_stealth_key(key, tx))?;
+            // The additional signer and every UTXO spend key authorize together, each over the set of all their keys.
+            let additional_signers: Vec<_> = transfer.additional_signer.iter().map(|s| s.key_id).collect();
+            let transaction = sdk.signer_api().authorize(
+                &main_pk,
+                &additional_signers,
+                &transfer.utxo_spend_keys,
+                transaction.finish(),
+            )?;
 
             // Sign and seal the final transaction
             let transaction = sdk.signer_api().sign(transfer.main_signer.key_id, transaction)?;

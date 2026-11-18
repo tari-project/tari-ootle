@@ -26,6 +26,7 @@ pub struct SigningRequest {
     pub decided_at: Option<PrimitiveDateTime>,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
+    pub authorizers: String,
 }
 
 #[derive(Debug, Insertable)]
@@ -40,4 +41,5 @@ pub struct NewSigningRequest<'a> {
     pub requester: &'a str,
     pub status: &'a str,
     pub expires_at: PrimitiveDateTime,
+    pub authorizers: &'a str,
 }

@@ -33,7 +33,7 @@ ootle_byte_type = { workspace = true }
 
 log = { workspace = true }
 serde = { workspace = true, default-features = true }
-tokio = { workspace = true, default-features = false, features = ["sync", "rt-multi-thread"] }
+tokio = { workspace = true, default-features = false, features = ["sync", "rt-multi-thread", "test-util"] }
 rand = { workspace = true }
 futures = { workspace = true }
 fern = { workspace = true }

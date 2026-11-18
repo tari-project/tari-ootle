@@ -833,6 +833,11 @@ impl TestBuilder {
         self
     }
 
+    /// The config each validator is built with.
+    pub fn hotstuff_config(&self) -> HotstuffConfig {
+        self.config.clone()
+    }
+
     pub fn modify_consensus_constants<F: FnOnce(&mut ConsensusConstants)>(mut self, f: F) -> Self {
         f(&mut self.config.consensus_constants);
         self

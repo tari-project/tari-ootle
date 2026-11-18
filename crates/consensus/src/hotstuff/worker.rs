@@ -63,6 +63,7 @@ use super::{
     calculate_last_dummy_block,
     config::HotstuffConfig,
     get_highest_seen_justified_view,
+    get_justified_heights,
     on_receive_new_transaction::OnReceiveNewTransaction,
 };
 use crate::{
@@ -375,7 +376,15 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         Ok(())
     }
 
+    /// Runs consensus until shutdown or an error. The pacemaker is stopped on every exit, so the next `start` resumes
+    /// with fresh timers.
     pub async fn start(&mut self) -> Result<WorkerExitReason, HotStuffError> {
+        let result = self.start_and_run().await;
+        self.pacemaker.stop();
+        result
+    }
+
+    async fn start_and_run(&mut self) -> Result<WorkerExitReason, HotStuffError> {
         let (current_epoch, current_epoch_hash) = self.get_starting_epoch().await?;
         let local_committee_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
 
@@ -389,15 +398,18 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             Ok::<_, HotStuffError>(())
         })?;
         // Resume pacemaker from the last epoch/height
-        let (current_height, leaf_height) = self.state_store.with_read_tx(|tx| {
-            let height = get_highest_seen_justified_view(tx, current_epoch)?;
+        let (justified_heights, leaf_height) = self.state_store.with_read_tx(|tx| {
+            let justified_heights = get_justified_heights(tx, current_epoch)?;
             let leaf_block = LeafBlock::get(tx, current_epoch)?;
-            Ok::<_, HotStuffError>((height, leaf_block.height()))
+            Ok::<_, HotStuffError>((justified_heights, leaf_block.height()))
         })?;
+        let current_height = justified_heights.highest();
 
         self.worker_state.has_processed_first_block = !leaf_height.is_zero();
 
-        self.pacemaker.start(current_epoch, current_height, current_height);
+        // The leader timeout backs off from the high PC, so a restart during a run of timeouts keeps its backoff.
+        self.pacemaker
+            .start(current_epoch, current_height, justified_heights.high_pc);
 
         info!(target: LOG_TARGET, "🚀 Pacemaker started at epoch {}, height: {}", current_epoch, current_height);
 
@@ -614,7 +626,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         }
 
         self.on_inbound_message.clear_buffer();
-        self.pacemaker.stop();
 
         Ok(exit_reason)
     }

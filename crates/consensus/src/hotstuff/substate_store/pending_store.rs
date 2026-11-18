@@ -387,7 +387,9 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         // Local-Only-Rules apply if: current lock is local-only AND requested lock is local only
         let has_local_only_rules = existing.is_local_only() && is_local_only;
         let same_transaction = *existing.transaction_id() == transaction_id;
-        let same_transaction_lock = same_transaction && existing.lock_type() == requested_lock_type;
+        let same_transaction_lock = same_transaction &&
+            existing.lock_type() == requested_lock_type &&
+            existing.version() == versioned_substate_id.version();
 
         debug!(
             target: LOG_TARGET,
@@ -412,6 +414,15 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
             // - if Local-Only-Rules:
             //   - it MAY be locked as READ or OUTPUT.
             SubstateLockType::Read => {
+                // An existing READ lock pins the live version of this substate; requesting a READ on a different
+                // version cannot succeed even for the same transaction.
+                if requested_lock_type.is_read() && versioned_substate_id.version() != existing.version() {
+                    return Err(LockFailedError::SubstateNotFound {
+                        id: versioned_substate_id.to_owned(),
+                    }
+                    .into());
+                }
+
                 // Cannot write to or create an output for a substate that is already read locked
                 if has_local_only_rules && requested_lock_type.is_write() {
                     warn!(
@@ -596,7 +607,15 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
                     .into());
                 }
 
-                // WRITE or READ
+                // WRITE or READ — under local-only rules, only the exact version produced by the existing OUTPUT lock
+                // is live; any older (downed) or future version does not exist.
+                if versioned_substate_id.version() != existing.version() {
+                    return Err(LockFailedError::SubstateNotFound {
+                        id: versioned_substate_id.to_owned(),
+                    }
+                    .into());
+                }
+
                 self.grant_lock(
                     transaction_id,
                     versioned_substate_id,

@@ -3260,6 +3260,66 @@ mod tests {
     }
 
     #[test]
+    fn input_locks_behind_existing_read_or_local_only_output_require_matching_version() {
+        with_fee_pool_in_parent(|store, pool_address| {
+            let pool_id = SubstateId::ValidatorFeePool(pool_address);
+            let reader_1 = TransactionId::new([30; 32]);
+            let reader_2 = TransactionId::new([31; 32]);
+
+            // 1. Existing READ lock at v0 must reject READ requests for other versions (both same tx and other tx).
+            store.try_lock(
+                reader_1,
+                &VersionedSubstateIdLockIntent::read(versioned(&pool_id, 0), true),
+                false,
+            )?;
+            for (tx_id, is_local_only) in [(reader_2, false), (reader_1, false), (reader_1, true)] {
+                let bad_read = store.try_lock_all(
+                    tx_id,
+                    [VersionedSubstateIdLockIntent::read(versioned(&pool_id, 1), true)],
+                    is_local_only,
+                )?;
+                assert!(bad_read.is_hard_conflict(), "expected hard conflict for {tx_id}: {bad_read:?}");
+                assert!(
+                    matches!(bad_read.hard_conflict(), Some(LockFailedError::SubstateNotFound { .. })),
+                    "expected SubstateNotFound for {tx_id}: {bad_read:?}"
+                );
+            }
+            store.release_new_locks(&reader_1);
+
+            // 2. Existing local-only OUTPUT lock at v1 must reject local-only READ/WRITE for stale v0 or future v2,
+            //    while still admitting v1.
+            let local_creator = TransactionId::new([32; 32]);
+            let local_consumer = TransactionId::new([33; 32]);
+            store.try_lock(
+                local_creator,
+                &VersionedSubstateIdLockIntent::output(versioned(&pool_id, 1)),
+                true,
+            )?;
+            for req in [
+                VersionedSubstateIdLockIntent::read(versioned(&pool_id, 0), true),
+                VersionedSubstateIdLockIntent::write(versioned(&pool_id, 0), true),
+                VersionedSubstateIdLockIntent::read(versioned(&pool_id, 2), true),
+                VersionedSubstateIdLockIntent::write(versioned(&pool_id, 2), true),
+            ] {
+                let bad_local = store.try_lock_all(local_consumer, [req], true)?;
+                assert!(bad_local.is_hard_conflict(), "{bad_local:?}");
+                assert!(
+                    matches!(bad_local.hard_conflict(), Some(LockFailedError::SubstateNotFound { .. })),
+                    "{bad_local:?}"
+                );
+            }
+            let valid_local = store.try_lock_all(
+                local_consumer,
+                [VersionedSubstateIdLockIntent::read(versioned(&pool_id, 1), true)],
+                true,
+            )?;
+            assert!(!valid_local.is_any_failed(), "{valid_local:?}");
+
+            Ok::<_, BlockTransactionExecutorError>(())
+        });
+    }
+
+    #[test]
     fn a_withdrawal_from_a_pool_missing_from_its_resolved_inputs_is_an_invariant_error() {
         with_fee_pool_in_parent(|store, pool_address| {
             let claim = multishard_transaction(1);

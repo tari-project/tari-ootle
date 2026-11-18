@@ -8,10 +8,10 @@
 //! methods or who owns it. An owner rule change hands the component, and every vault it holds, to the new owner.
 
 use axum_extra::headers::authorization::Bearer;
-use tari_ootle_transaction::{ComponentReference, Instruction};
+use tari_ootle_transaction::Instruction;
 use tari_ootle_walletd_client::{permissions::Permission, types::ComponentRulesChange};
 
-use super::{auth::jwt::AuthError, context::HandlerContext};
+use super::{auth::jwt::AuthError, component_upgrades::display_component_reference, context::HandlerContext};
 
 /// Every `SetComponentAccessRules` and `SetComponentOwnerRule` instruction in the transaction, fee instructions first.
 pub fn component_rules_changes(
@@ -65,15 +65,9 @@ pub fn authorize_component_rules_changes(
     }
 }
 
-fn display_component_reference(component: &ComponentReference) -> String {
-    match component {
-        ComponentReference::Address(address) => address.to_string(),
-        ComponentReference::Workspace(id) => format!("in workspace slot {id}"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use tari_ootle_transaction::ComponentReference;
     use tari_template_lib_types::{ComponentAddress, OwnerRule, access_rules::ComponentAccessRules};
 
     use super::*;

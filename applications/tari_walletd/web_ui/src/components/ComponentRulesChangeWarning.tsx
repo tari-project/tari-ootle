@@ -31,7 +31,7 @@ function describeOwnerRule(rule: OwnerRule): string {
     return "no owner";
   }
   if ("ByPublicKey" in rule) {
-    return `public key ${rule.ByPublicKey.map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+    return `public key ${rule.ByPublicKey}`;
   }
   return `whoever satisfies ${describeAccessRule(rule.ByAccessRule)}`;
 }

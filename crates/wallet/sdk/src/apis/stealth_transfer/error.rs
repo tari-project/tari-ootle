@@ -57,6 +57,16 @@ pub enum StealthTransferApiError {
     /// unknown, foreign, of another resource, locked, ...), which callers serving an untrusted party may withhold.
     #[error("Requested stealth input is ineligible: {0}")]
     IneligibleSpecificInput(StealthOutputsApiError),
+    /// The named inputs (`StealthTransferParams::inputs`) are worth less than this build needs from them, which a
+    /// higher `max_fee` than the one they were reported at can cause. Estimating the fee again names new ones.
+    #[error(
+        "The named {resource_address} inputs do not cover the {required} this transfer needs at its fee; estimate the \
+         fee again"
+    )]
+    NamedInputsShort {
+        resource_address: ResourceAddress,
+        required: Amount,
+    },
 }
 
 impl IsNotFoundError for StealthTransferApiError {

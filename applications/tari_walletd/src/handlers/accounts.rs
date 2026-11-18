@@ -1510,6 +1510,14 @@ pub async fn handle_stealth_transfer(
         Crud::Create,
         Some(*owner_account.component_address()),
     )])?;
+    // Naming exact UTXOs (and thus learning their decrypted totals through the balance check) requires scoped
+    // stealth-UTXO read authority in addition to the transfer-create scope.
+    if req.inputs.is_some() {
+        enforce_scopes(&granted, &[Permission::StealthUtxos(
+            Crud::Read,
+            Some(*owner_account.component_address()),
+        )])?;
+    }
     if owner_account.owner_key_id().is_none() {
         return Err(invalid_params(
             "owner_account",
@@ -1630,6 +1638,7 @@ pub async fn handle_stealth_transfer(
         max_epoch: context.transaction_max_epoch().await?,
         fee_params: req.fee_params,
         input_selection: req.input_selection,
+        inputs: req.inputs,
         resource_address: req.resource_address,
         max_fee: req.max_fee,
         badge_usage: req.badge_usage,
@@ -1688,6 +1697,7 @@ pub async fn handle_stealth_transfer(
             };
 
             let transaction = transfer.transaction;
+            let spent_inputs = transfer.inputs;
             let main_pk = transfer.main_signer.public_key().to_byte_type();
 
             // The additional signer and every UTXO spend key authorize together, each over the set of all their keys.
@@ -1774,6 +1784,7 @@ pub async fn handle_stealth_transfer(
                     } else {
                         required_fees
                     }),
+                    inputs: Some(spent_inputs.clone()),
                     dry_run_result: Some(result),
                 };
                 rounds += 1;
@@ -1810,7 +1821,11 @@ pub async fn handle_stealth_transfer(
                         if settled_statically {
                             return Ok(response);
                         }
-                        return Ok(candidate.expect("BUG: Settle needs a candidate or a static settle"));
+                        // This round was built at the candidate's fee, so its inputs are the ones a
+                        // submission at that fee spends.
+                        let mut answer = candidate.expect("BUG: Settle needs a candidate or a static settle");
+                        answer.inputs = Some(spent_inputs);
+                        return Ok(answer);
                     },
                     FeeEstimateStep::GiveUp => {
                         warn!(
@@ -1853,6 +1868,7 @@ pub async fn handle_stealth_transfer(
             return Ok(StealthTransferResponse {
                 transaction_id: tx_id,
                 required_fees: None,
+                inputs: None,
                 dry_run_result: None,
             });
         }
@@ -3777,6 +3793,7 @@ mod create_stealth_transfer_statement_handler_tests {
             owner_account: watch.clone(),
             fee_params: TransferFeeParams::new(UtxoInputSelection::PreferRevealed),
             input_selection: UtxoInputSelection::PreferRevealed,
+            inputs: None,
             resource_address: test.stealth_resource,
             badge_usage: BadgeUsage::None,
             transfers: vec![],

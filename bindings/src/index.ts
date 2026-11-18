@@ -243,6 +243,7 @@ export * from "./types/ValueKnowledgeProof";
 export * from "./types/Vault";
 export * from "./types/VaultFreezeFlags";
 export * from "./types/VaultId";
+export * from "./types/VnFeesAction";
 export * from "./types/VersionedSubstateId";
 export * from "./types/VersionedSubstateIdLockIntent";
 export * from "./types/ViewableBalanceProof";

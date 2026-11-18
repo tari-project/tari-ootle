@@ -8,7 +8,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tari_template_lib_types::{ComponentAddress, ResourceAddress};
+use tari_template_lib_types::{ComponentAddress, ResourceAddress, crypto::RistrettoPublicKeyBytes};
 
 /// A capability the wallet daemon recognises as granted by a caller or required
 /// by a handler.
@@ -35,7 +35,9 @@ pub enum Permission {
     Nfts(Crud, Option<ResourceAddress>),
     Confidential(Crud, Option<ComponentAddress>),
     StealthUtxos(Crud, Option<ComponentAddress>),
-    Validators(Crud),
+    /// Validator fee pools, scoped by the claim public key that owns them. A claim key is a validator credential,
+    /// so the scope names that key. Unscoped covers every key in the wallet.
+    VnFees(VnFeesAction, Option<RistrettoPublicKeyBytes>),
     Settings(Crud),
     AddressBook(Crud),
     Substates(ReadOnly),
@@ -64,6 +66,14 @@ pub enum TxRequestAction {
     Read,
     Create,
     Approve,
+}
+
+/// Actions on validator fee pools. `Claim` implies `Read`.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Hash, Eq, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum VnFeesAction {
+    Read,
+    Claim,
 }
 
 /// Marker scope for resources that only support reads. Kept as a one-variant
@@ -109,7 +119,9 @@ impl Permission {
             (Permission::StealthUtxos(ga, gs), Permission::StealthUtxos(ra, rs)) => {
                 crud_satisfies(*ga, *ra) && scope_satisfies(gs, rs)
             },
-            (Permission::Validators(ga), Permission::Validators(ra)) => crud_satisfies(*ga, *ra),
+            (Permission::VnFees(ga, gs), Permission::VnFees(ra, rs)) => {
+                vn_fees_action_satisfies(*ga, *ra) && scope_satisfies(gs, rs)
+            },
             (Permission::Settings(ga), Permission::Settings(ra)) => crud_satisfies(*ga, *ra),
             (Permission::AddressBook(ga), Permission::AddressBook(ra)) => crud_satisfies(*ga, *ra),
             (Permission::Substates(_), Permission::Substates(_)) => true,
@@ -133,6 +145,10 @@ fn crud_satisfies(granted: Crud, required: Crud) -> bool {
 fn tx_request_action_satisfies(granted: TxRequestAction, required: TxRequestAction) -> bool {
     granted == required ||
         (required == TxRequestAction::Read && matches!(granted, TxRequestAction::Create | TxRequestAction::Approve))
+}
+
+fn vn_fees_action_satisfies(granted: VnFeesAction, required: VnFeesAction) -> bool {
+    granted == required || required == VnFeesAction::Read
 }
 
 fn scope_satisfies<T: PartialEq>(granted: &Option<T>, required: &Option<T>) -> bool {
@@ -161,6 +177,27 @@ impl FromStr for TxRequestAction {
             "read" => Ok(TxRequestAction::Read),
             "create" => Ok(TxRequestAction::Create),
             "approve" => Ok(TxRequestAction::Approve),
+            _ => Err(InvalidPermissionsFormat(format!("invalid action '{s}'"))),
+        }
+    }
+}
+
+impl Display for VnFeesAction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VnFeesAction::Read => write!(f, "read"),
+            VnFeesAction::Claim => write!(f, "claim"),
+        }
+    }
+}
+
+impl FromStr for VnFeesAction {
+    type Err = InvalidPermissionsFormat;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "read" => Ok(VnFeesAction::Read),
+            "claim" => Ok(VnFeesAction::Claim),
             _ => Err(InvalidPermissionsFormat(format!("invalid action '{s}'"))),
         }
     }
@@ -206,7 +243,7 @@ impl Display for Permission {
             Permission::Nfts(a, s) => display_scoped(f, "nfts", *a, s),
             Permission::Confidential(a, s) => display_scoped(f, "confidential", *a, s),
             Permission::StealthUtxos(a, s) => display_scoped(f, "stealth_utxos", *a, s),
-            Permission::Validators(a) => write!(f, "validators:{a}"),
+            Permission::VnFees(a, s) => display_scoped(f, "vn_fees", *a, s),
             Permission::Settings(a) => write!(f, "settings:{a}"),
             Permission::AddressBook(a) => write!(f, "address_book:{a}"),
             Permission::Substates(_) => write!(f, "substates:read"),
@@ -217,10 +254,10 @@ impl Display for Permission {
     }
 }
 
-fn display_scoped<E: Display>(
+fn display_scoped<A: Display, E: Display>(
     f: &mut Formatter<'_>,
     resource: &str,
-    action: Crud,
+    action: A,
     scope: &Option<E>,
 ) -> std::fmt::Result {
     match scope {
@@ -260,7 +297,8 @@ impl FromStr for Permission {
             "nfts" => parse_scoped(action_str, entity_str, Permission::Nfts),
             "confidential" => parse_scoped(action_str, entity_str, Permission::Confidential),
             "stealth_utxos" => parse_scoped(action_str, entity_str, Permission::StealthUtxos),
-            "validators" => parse_unscoped(action_str, entity_str, Permission::Validators),
+            "vn_fees" => parse_scoped(action_str, entity_str, Permission::VnFees),
+            "validators" => parse_legacy_validators(action_str, entity_str),
             "settings" => parse_unscoped(action_str, entity_str, Permission::Settings),
             "address_book" => parse_unscoped(action_str, entity_str, Permission::AddressBook),
             "substates" => parse_read_only(action_str, entity_str, Permission::Substates),
@@ -289,22 +327,40 @@ where
     Ok(ctor(action_str.parse()?))
 }
 
-fn parse_scoped<F, E>(
+fn parse_scoped<F, A, E>(
     action_str: &str,
     entity_str: Option<&str>,
     ctor: F,
 ) -> Result<Permission, InvalidPermissionsFormat>
 where
-    F: FnOnce(Crud, Option<E>) -> Permission,
+    F: FnOnce(A, Option<E>) -> Permission,
+    A: FromStr<Err = InvalidPermissionsFormat>,
     E: FromStr,
     <E as FromStr>::Err: Display,
 {
-    let action: Crud = action_str.parse()?;
+    let action: A = action_str.parse()?;
     let entity = match entity_str {
         Some(e) => Some(E::from_str(e).map_err(|err| InvalidPermissionsFormat(format!("invalid scope '{e}': {err}")))?),
         None => None,
     };
     Ok(ctor(action, entity))
+}
+
+/// Parses the `validators:read` and `validators:update` grants issued before `vn_fees` existed. Both were
+/// wallet-wide, so they map to the unscoped `vn_fees` grants.
+fn parse_legacy_validators(action_str: &str, entity_str: Option<&str>) -> Result<Permission, InvalidPermissionsFormat> {
+    if let Some(e) = entity_str {
+        return Err(InvalidPermissionsFormat(format!(
+            "resource does not accept an entity scope (got ':{e}')"
+        )));
+    }
+    match action_str {
+        "read" => Ok(Permission::VnFees(VnFeesAction::Read, None)),
+        "update" => Ok(Permission::VnFees(VnFeesAction::Claim, None)),
+        other => Err(InvalidPermissionsFormat(format!(
+            "invalid action '{other}' for 'validators' (use 'vn_fees:read' or 'vn_fees:claim')"
+        ))),
+    }
 }
 
 fn parse_read_only<F>(
@@ -466,10 +522,61 @@ mod tests {
             round_trip(Permission::Nfts(action, None));
             round_trip(Permission::Confidential(action, None));
             round_trip(Permission::StealthUtxos(action, None));
-            round_trip(Permission::Validators(action));
             round_trip(Permission::Settings(action));
             round_trip(Permission::AddressBook(action));
         }
+    }
+
+    #[test]
+    fn round_trip_vn_fees() {
+        let claim_pk = RistrettoPublicKeyBytes::from([5u8; 32]);
+        for action in [VnFeesAction::Read, VnFeesAction::Claim] {
+            round_trip(Permission::VnFees(action, None));
+            round_trip(Permission::VnFees(action, Some(claim_pk)));
+        }
+        assert_eq!(
+            format!("vn_fees:claim:{claim_pk}").parse::<Permission>().unwrap(),
+            Permission::VnFees(VnFeesAction::Claim, Some(claim_pk))
+        );
+        assert!("vn_fees:update".parse::<Permission>().is_err());
+        assert!("vn_fees:read:not_a_key".parse::<Permission>().is_err());
+    }
+
+    #[test]
+    fn legacy_validators_grants_parse_as_unscoped_vn_fees() {
+        assert_eq!(
+            "validators:read".parse::<Permission>().unwrap(),
+            Permission::VnFees(VnFeesAction::Read, None)
+        );
+        assert_eq!(
+            "validators:update".parse::<Permission>().unwrap(),
+            Permission::VnFees(VnFeesAction::Claim, None)
+        );
+        assert!("validators:create".parse::<Permission>().is_err());
+        let claim_pk = RistrettoPublicKeyBytes::from([5u8; 32]);
+        assert!(format!("validators:read:{claim_pk}").parse::<Permission>().is_err());
+    }
+
+    #[test]
+    fn vn_fees_claim_implies_read_on_the_same_key_only() {
+        let a = RistrettoPublicKeyBytes::from([1u8; 32]);
+        let b = RistrettoPublicKeyBytes::from([2u8; 32]);
+        let claim_a = Permission::VnFees(VnFeesAction::Claim, Some(a));
+        assert!(claim_a.satisfies(&Permission::VnFees(VnFeesAction::Read, Some(a))));
+        assert!(!claim_a.satisfies(&Permission::VnFees(VnFeesAction::Read, Some(b))));
+        assert!(!claim_a.satisfies(&Permission::VnFees(VnFeesAction::Claim, Some(b))));
+
+        let read_a = Permission::VnFees(VnFeesAction::Read, Some(a));
+        assert!(!read_a.satisfies(&Permission::VnFees(VnFeesAction::Claim, Some(a))));
+
+        let claim_any = Permission::VnFees(VnFeesAction::Claim, None);
+        assert!(claim_any.satisfies(&Permission::VnFees(VnFeesAction::Claim, Some(b))));
+    }
+
+    #[test]
+    fn vn_fees_serde_shape_matches_ts_binding() {
+        let json = serde_json::to_string(&Permission::VnFees(VnFeesAction::Claim, None)).unwrap();
+        assert_eq!(json, r#"{"VnFees":["Claim",null]}"#);
     }
 
     #[test]

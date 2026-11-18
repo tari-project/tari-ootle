@@ -13,12 +13,9 @@ use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{InputDeclaration, SubstateAddress, derive_fee_pool_address};
 use tari_ootle_transaction::args;
 use tari_ootle_wallet_crypto::{OutputWitness, StealthInputWitness, StealthOutputWitness, memo::Memo};
-use tari_ootle_wallet_sdk::{
-    models::{KeyBranch, KeyId, TransactionContext},
-    storage::{ReadableWalletStore, WalletStoreReader},
-};
+use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId, TransactionContext};
 use tari_ootle_walletd_client::{
-    permissions::{Crud, Permission},
+    permissions::{Crud, Permission, VnFeesAction},
     types::{
         AccountOrKeyId,
         ClaimValidatorFeesRequest,
@@ -29,10 +26,8 @@ use tari_ootle_walletd_client::{
     },
 };
 use tari_template_lib_types::{
-    ComponentAddress,
     ValidatorFeePoolAddress,
     constants::{STEALTH_TARI_RESOURCE_ADDRESS, TARI_TOKEN},
-    crypto::RistrettoPublicKeyBytes,
     stealth::{SpendAuthorization, StealthTransferStatement},
 };
 
@@ -59,43 +54,29 @@ pub async fn handle_get_validator_fees(
     req: GetValidatorFeesRequest,
 ) -> Result<GetValidatorFeesResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    let granted = context.authorize(token, &[Permission::Validators(Crud::Read)])?;
+    let granted = context.check_auth(token)?;
 
-    let claim_key = match req.account_or_key {
+    let claim_key_id = match req.account_or_key {
         AccountOrKeyId::Account(acc) => {
             let account = get_account_or_default(acc.as_ref(), &sdk.accounts_api())?;
-            enforce_scopes(&granted, &[Permission::Accounts(
-                Crud::Read,
-                Some(*account.component_address()),
-            )])?;
-            let account_key_id = account.owner_key_id().ok_or_else(|| {
+            account.owner_key_id().ok_or_else(|| {
                 anyhow!("The specified account does not have an associated owner key to derive the claim key from")
-            })?;
-            sdk.key_manager_api().get_public_key(account_key_id)?
+            })?
         },
         AccountOrKeyId::KeyId(key_id) => {
             ensure_signing_key(&sdk, "account_or_key", &key_id)?;
-            let key = sdk.key_manager_api().get_public_key(key_id)?;
-            let public_key = key.public_key().to_byte_type();
-            let account_scopes = account_scopes_for_key(&sdk, key_id, &public_key)?;
-            if account_scopes.is_empty() {
-                if key_id.derived_branch() == Some(KeyBranch::Account) {
-                    if enforce_scopes(&granted, &[Permission::Keys(Crud::Read)]).is_err() {
-                        let derived = sdk.accounts_api().derive_account_address_from_public_key(&public_key);
-                        enforce_scopes(&granted, &[Permission::Accounts(Crud::Read, Some(derived))])?;
-                    }
-                } else {
-                    enforce_scopes(&granted, &[Permission::Keys(Crud::Read)])?;
-                }
-            } else {
-                for addr in account_scopes {
-                    enforce_scopes(&granted, &[Permission::Accounts(Crud::Read, Some(addr))])?;
-                }
-            }
-            key
+            key_id
         },
     };
-    let claim_public_key = claim_key.public_key().to_byte_type();
+    let claim_public_key = sdk
+        .key_manager_api()
+        .get_public_key(claim_key_id)?
+        .public_key()
+        .to_byte_type();
+    enforce_scopes(&granted, &[Permission::VnFees(
+        VnFeesAction::Read,
+        Some(claim_public_key),
+    )])?;
 
     let shards = req
         .shard_group
@@ -150,50 +131,34 @@ pub async fn handle_claim_validator_fees(
     mut req: ClaimValidatorFeesRequest,
 ) -> Result<ClaimValidatorFeesResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    let granted = context.authorize(token, &[Permission::Validators(Crud::Update)])?;
-    if !req.dry_run {
-        context.enforce_max_fee_limit(req.max_fee)?;
-    }
-
-    if req.shards.is_empty() {
-        return Err(invalid_params("shards", Some("At least one shard must be specified")));
-    }
+    let granted = context.check_auth(token)?;
 
     let (account, inputs) = get_account_with_inputs(req.account.as_ref(), &sdk)?;
     let account_component_address = *account.component_address();
-    enforce_scopes(&granted, &[Permission::Transfer(
-        Crud::Create,
-        Some(account_component_address),
-    )])?;
     let account_key_id = account.owner_key_id().ok_or_else(|| {
         anyhow!("The specified account does not have an associated owner key to derive the claim key from")
     })?;
 
     let claim_public_key = match req.claim_key_index {
-        Some(index) => {
-            let claim_key_id = KeyId::derived(KeyBranch::Account, index);
-            let claim_public_key = sdk
-                .key_manager_api()
-                .get_public_key(claim_key_id)?
-                .public_key
-                .to_byte_type();
-            if claim_public_key != *account.address.account_public_key() {
-                let claim_scopes = account_scopes_for_key(&sdk, claim_key_id, &claim_public_key)?;
-                if claim_scopes.is_empty() {
-                    let derived = sdk
-                        .accounts_api()
-                        .derive_account_address_from_public_key(&claim_public_key);
-                    enforce_scopes(&granted, &[Permission::Transfer(Crud::Create, Some(derived))])?;
-                } else {
-                    for addr in claim_scopes {
-                        enforce_scopes(&granted, &[Permission::Transfer(Crud::Create, Some(addr))])?;
-                    }
-                }
-            }
-            claim_public_key
-        },
+        Some(index) => sdk
+            .key_manager_api()
+            .get_public_key(KeyId::derived(KeyBranch::Account, index))?
+            .public_key
+            .to_byte_type(),
         None => *account.address.account_public_key(),
     };
+    // Checked before anything below allocates a stealth mask or signs.
+    enforce_scopes(&granted, &[
+        Permission::VnFees(VnFeesAction::Claim, Some(claim_public_key)),
+        Permission::Transfer(Crud::Create, Some(account_component_address)),
+    ])?;
+
+    if !req.dry_run {
+        context.enforce_max_fee_limit(req.max_fee)?;
+    }
+    if req.shards.is_empty() {
+        return Err(invalid_params("shards", Some("At least one shard must be specified")));
+    }
 
     req.shards.sort();
     req.shards.dedup();
@@ -449,39 +414,116 @@ async fn build_self_stealth_statement(
     Ok((statement, pool_amounts))
 }
 
-/// Returns every stored wallet account component address associated with `key_id` or `public_key`.
-fn account_scopes_for_key(
-    sdk: &crate::WalletSdk,
-    key_id: KeyId,
-    public_key: &RistrettoPublicKeyBytes,
-) -> Result<Vec<ComponentAddress>, anyhow::Error> {
-    let accounts = sdk
-        .store()
-        .with_read_tx(|tx| tx.accounts_get_many(0, isize::MAX as usize))?;
-    let mut scopes = Vec::new();
-    for account in accounts {
-        if (account.owner_key_id() == Some(key_id) || account.owner_public_key() == public_key) &&
-            !scopes.contains(account.component_address())
-        {
-            scopes.push(*account.component_address());
-        }
-    }
-    Ok(scopes)
-}
-
 #[cfg(test)]
 mod tests {
     use tari_crypto::ristretto::RistrettoSecretKey;
     use tari_ootle_common_types::{Epoch, ShardGroup, shard::Shard};
-    use tari_ootle_wallet_sdk::models::KeyType;
+    use tari_ootle_wallet_sdk::{apis::substate::SubstateApiError, models::KeyType};
+    use tari_ootle_wallet_sdk_services::indexer_rest_api::IndexerRestApiNetworkInterfaceError;
+    use tari_template_lib_types::{ComponentAddress, crypto::RistrettoPublicKeyBytes};
 
     use super::*;
     use crate::handlers::{auth::jwt::AuthError, test_support::TestDaemon};
 
+    fn public_key_of(daemon: &TestDaemon, key_id: KeyId) -> RistrettoPublicKeyBytes {
+        daemon
+            .context
+            .wallet_sdk()
+            .key_manager_api()
+            .get_public_key(key_id)
+            .unwrap()
+            .public_key()
+            .to_byte_type()
+    }
+
+    fn account_key(index: u64) -> KeyId {
+        KeyId::derived(KeyBranch::Account, index)
+    }
+
+    async fn get_fees_err(daemon: &TestDaemon, bearer: &Bearer, account_or_key: AccountOrKeyId) -> anyhow::Error {
+        handle_get_validator_fees(&daemon.context, Some(bearer), GetValidatorFeesRequest {
+            account_or_key,
+            shard_group: Some(ShardGroup::new(Shard::first(), Shard::first())),
+        })
+        .await
+        .unwrap_err()
+    }
+
+    async fn claim_fees_err(
+        daemon: &TestDaemon,
+        bearer: &Bearer,
+        account: ComponentAddress,
+        claim_key_index: Option<u64>,
+        dry_run: bool,
+        output_to_revealed: bool,
+    ) -> anyhow::Error {
+        handle_claim_validator_fees(&daemon.context, Some(bearer), ClaimValidatorFeesRequest {
+            account: Some(account.into()),
+            claim_key_index,
+            max_fee: 1000,
+            shards: vec![Shard::first()],
+            dry_run,
+            output_to_revealed,
+        })
+        .await
+        .unwrap_err()
+    }
+
+    #[track_caller]
+    fn assert_vn_fees_denied(err: &anyhow::Error, action: VnFeesAction, claim_pk: RistrettoPublicKeyBytes) {
+        assert!(
+            matches!(
+                err.downcast_ref::<AuthError>(),
+                Some(AuthError::InsufficientPermissions {
+                    required: Permission::VnFees(a, Some(pk)),
+                }) if *a == action && *pk == claim_pk
+            ),
+            "expected vn_fees:{action}:{claim_pk} to be required, got: {err}"
+        );
+    }
+
+    #[track_caller]
+    fn assert_transfer_denied(err: &anyhow::Error, account: ComponentAddress) {
+        assert!(
+            matches!(
+                err.downcast_ref::<AuthError>(),
+                Some(AuthError::InsufficientPermissions {
+                    required: Permission::Transfer(Crud::Create, Some(addr)),
+                }) if *addr == account
+            ),
+            "expected transfer:create:{account} to be required, got: {err}"
+        );
+    }
+
+    /// The test daemon's indexer is a closed port, so a request that passes every check fails on its first fee pool
+    /// lookup.
+    #[track_caller]
+    fn assert_reached_fee_pool_lookup(err: &anyhow::Error) {
+        assert!(
+            matches!(
+                err.downcast_ref::<SubstateApiError>(),
+                Some(SubstateApiError::NetworkInterfaceError(_))
+            ),
+            "expected the fee pool lookup to fail on the closed indexer port, got: {err}"
+        );
+    }
+
+    /// A claim that passes every check fails on the current epoch lookup that builds its transaction.
+    #[track_caller]
+    fn assert_reached_transaction_builder(err: &anyhow::Error) {
+        assert!(
+            matches!(
+                err.downcast_ref::<IndexerRestApiNetworkInterfaceError>(),
+                Some(IndexerRestApiNetworkInterfaceError::IndexerClientError(_))
+            ),
+            "expected the current epoch lookup to fail on the closed indexer port, got: {err}"
+        );
+    }
+
     #[tokio::test]
     async fn fees_are_looked_up_only_for_a_signing_key() {
         let daemon = TestDaemon::start().await;
-        let reader = daemon.api_key("reader", "validators:read");
+        let reader = daemon.api_key("reader", "vn_fees:read");
 
         for branch in [
             KeyBranch::ConfidentialMask,
@@ -499,67 +541,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn validator_fee_handlers_enforce_account_scopes() {
-        let daemon = TestDaemon::start().await;
-        let account_a = ComponentAddress::from_array([0xaa; 32]);
-        let account_b = ComponentAddress::from_array([0xbb; 32]);
-        for (index, (name, address)) in [("a", account_a), ("b", account_b)].into_iter().enumerate() {
-            daemon
-                .context
-                .wallet_sdk()
-                .accounts_api()
-                .add_account(
-                    Some(name),
-                    &address,
-                    KeyId::derived(KeyBranch::ViewOnlyKey, index as u64),
-                    KeyId::derived(KeyBranch::Account, index as u64),
-                    Epoch::zero(),
-                    false,
-                    index == 0,
-                )
-                .unwrap();
-        }
-
-        let reader_a = daemon.api_key("reader_a", &format!("validators:read,accounts:read:{account_a}"));
-        let err = handle_get_validator_fees(&daemon.context, Some(&reader_a), GetValidatorFeesRequest {
-            account_or_key: AccountOrKeyId::Account(Some(account_b.into())),
-            shard_group: Some(ShardGroup::new(Shard::first(), Shard::first())),
-        })
-        .await
-        .unwrap_err();
-        assert!(
-            matches!(
-                err.downcast_ref::<AuthError>(),
-                Some(AuthError::InsufficientPermissions {
-                    required: Permission::Accounts(Crud::Read, Some(addr)),
-                }) if *addr == account_b
-            ),
-            "expected accounts:read scope error for {account_b}, got: {err}"
-        );
-
-        let claimer_a = daemon.api_key("claimer_a", &format!("validators:update,transfer:create:{account_a}"));
-        let err = handle_claim_validator_fees(&daemon.context, Some(&claimer_a), ClaimValidatorFeesRequest {
-            account: Some(account_b.into()),
-            claim_key_index: None,
-            max_fee: 1000,
-            shards: vec![Shard::first()],
-            dry_run: true,
-            output_to_revealed: true,
-        })
-        .await
-        .unwrap_err();
-        assert!(
-            matches!(
-                err.downcast_ref::<AuthError>(),
-                Some(AuthError::InsufficientPermissions {
-                    required: Permission::Transfer(Crud::Create, Some(addr)),
-                }) if *addr == account_b
-            ),
-            "expected transfer:create scope error for {account_b}, got: {err}"
-        );
-    }
-
+    /// Adds account `a` (owner key `Account/0`, the default) and account `b` (owner key `Account/1`).
     fn seed_two_accounts(daemon: &TestDaemon) -> (ComponentAddress, ComponentAddress) {
         let account_a = ComponentAddress::from_array([0xaa; 32]);
         let account_b = ComponentAddress::from_array([0xbb; 32]);
@@ -583,238 +565,129 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_validator_fees_by_key_id_enforces_account_scopes() {
+    async fn get_validator_fees_requires_vn_fees_read_for_the_claim_key() {
         let daemon = TestDaemon::start().await;
-        let sdk = daemon.context.wallet_sdk();
         let (account_a, account_b) = seed_two_accounts(&daemon);
-
-        let imported_owner_key_id = sdk
+        let imported_key_id = daemon
+            .context
+            .wallet_sdk()
             .key_manager_api()
-            .import_key("imported_owner", &RistrettoSecretKey::from(42u64), KeyType::Owner)
+            .import_key("imported", &RistrettoSecretKey::from(44u64), KeyType::GeneralPurpose)
             .unwrap();
-        let imported_view_key_id = sdk
-            .key_manager_api()
-            .import_key("imported_view", &RistrettoSecretKey::from(43u64), KeyType::ViewOnly)
-            .unwrap();
-        let account_imported = ComponentAddress::from_array([0xcc; 32]);
-        sdk.accounts_api()
-            .add_account(
-                Some("imported"),
-                &account_imported,
-                imported_view_key_id,
-                imported_owner_key_id,
-                Epoch::zero(),
-                false,
-                false,
-            )
-            .unwrap();
+        let tx_key_id = KeyId::derived(KeyBranch::Transaction, 0);
+        let pk_0 = public_key_of(&daemon, account_key(0));
+        let pk_1 = public_key_of(&daemon, account_key(1));
 
-        let view_only_owner_pk = sdk
-            .key_manager_api()
-            .get_public_key(KeyId::derived(KeyBranch::Account, 7))
-            .unwrap()
-            .public_key()
-            .to_byte_type();
-        let view_only_account = *sdk
-            .accounts_api()
-            .add_view_only_account(
-                Some("watched"),
-                &view_only_owner_pk,
-                &RistrettoSecretKey::from(45u64),
-                Some(Epoch::zero()),
-            )
-            .unwrap()
-            .component_address();
+        let reader_0 = daemon.api_key("reader_0", &format!("vn_fees:read:{pk_0}"));
+        let delegated_reader_0 = daemon.delegated_session(&format!("vn_fees:read:{pk_0}"));
+        // Account and key grants say nothing about a claim key's fee pools.
+        let account_and_key_reader = daemon.api_key("account_and_key_reader", "accounts:read,keys:read");
 
-        let uncreated_pk = sdk
-            .key_manager_api()
-            .get_public_key(KeyId::derived(KeyBranch::Account, 99))
-            .unwrap()
-            .public_key()
-            .to_byte_type();
-        let derived_99 = sdk.accounts_api().derive_account_address_from_public_key(&uncreated_pk);
-
-        let one_shard = Some(ShardGroup::new(Shard::first(), Shard::first()));
-        let reader_a = daemon.api_key("reader_a", &format!("validators:read,accounts:read:{account_a}"));
-        let delegated_reader_a = daemon.delegated_session(&format!("validators:read,accounts:read:{account_a}"));
-
-        for bearer in [&reader_a, &delegated_reader_a] {
-            for (key_id, expected_addr) in [
-                (KeyId::derived(KeyBranch::Account, 1), account_b),
-                (imported_owner_key_id, account_imported),
-                (KeyId::derived(KeyBranch::Account, 7), view_only_account),
-                (KeyId::derived(KeyBranch::Account, 99), derived_99),
+        for bearer in [&reader_0, &delegated_reader_0, &account_and_key_reader] {
+            for (account_or_key, claim_key_id) in [
+                (AccountOrKeyId::Account(Some(account_b.into())), account_key(1)),
+                (AccountOrKeyId::KeyId(account_key(1)), account_key(1)),
+                (AccountOrKeyId::KeyId(account_key(99)), account_key(99)),
+                (AccountOrKeyId::KeyId(tx_key_id), tx_key_id),
+                (AccountOrKeyId::KeyId(imported_key_id), imported_key_id),
             ] {
-                let err = handle_get_validator_fees(&daemon.context, Some(bearer), GetValidatorFeesRequest {
-                    account_or_key: AccountOrKeyId::KeyId(key_id),
-                    shard_group: one_shard,
-                })
-                .await
-                .unwrap_err();
-                assert!(
-                    matches!(
-                        err.downcast_ref::<AuthError>(),
-                        Some(AuthError::InsufficientPermissions {
-                            required: Permission::Accounts(Crud::Read, Some(addr)),
-                        }) if *addr == expected_addr
-                    ),
-                    "expected accounts:read scope error for {expected_addr} on {key_id}, got: {err}"
-                );
+                let err = get_fees_err(&daemon, bearer, account_or_key).await;
+                assert_vn_fees_denied(&err, VnFeesAction::Read, public_key_of(&daemon, claim_key_id));
             }
         }
-    }
+        let err = get_fees_err(
+            &daemon,
+            &account_and_key_reader,
+            AccountOrKeyId::Account(Some(account_a.into())),
+        )
+        .await;
+        assert_vn_fees_denied(&err, VnFeesAction::Read, pk_0);
 
-    #[tokio::test]
-    async fn get_validator_fees_by_key_id_enforces_key_scopes_and_allows_authorized() {
-        let daemon = TestDaemon::start().await;
-        let sdk = daemon.context.wallet_sdk();
-        let (account_a, account_b) = seed_two_accounts(&daemon);
-
-        let unowned_imported_key_id = sdk
-            .key_manager_api()
-            .import_key("unowned_gp", &RistrettoSecretKey::from(44u64), KeyType::GeneralPurpose)
-            .unwrap();
-
-        let one_shard = Some(ShardGroup::new(Shard::first(), Shard::first()));
-        let reader_a = daemon.api_key("reader_a", &format!("validators:read,accounts:read:{account_a}"));
-        let delegated_reader_a = daemon.delegated_session(&format!("validators:read,accounts:read:{account_a}"));
-        let reader_keys = daemon.api_key("reader_keys", "validators:read,keys:read");
-        let reader_all_accounts = daemon.api_key("reader_all_accounts", "validators:read,accounts:read");
-
-        for bearer in [&reader_a, &delegated_reader_a] {
-            for key_id in [KeyId::derived(KeyBranch::Transaction, 0), unowned_imported_key_id] {
-                let err = handle_get_validator_fees(&daemon.context, Some(bearer), GetValidatorFeesRequest {
-                    account_or_key: AccountOrKeyId::KeyId(key_id),
-                    shard_group: one_shard,
-                })
-                .await
-                .unwrap_err();
-                assert!(
-                    matches!(
-                        err.downcast_ref::<AuthError>(),
-                        Some(AuthError::InsufficientPermissions {
-                            required: Permission::Keys(Crud::Read),
-                        })
-                    ),
-                    "expected keys:read error on {key_id}, got: {err}"
-                );
-            }
-        }
-
-        // `keys:read` must not bypass account-scoped restrictions on stored wallet accounts.
-        let err = handle_get_validator_fees(&daemon.context, Some(&reader_keys), GetValidatorFeesRequest {
-            account_or_key: AccountOrKeyId::KeyId(KeyId::derived(KeyBranch::Account, 1)),
-            shard_group: one_shard,
-        })
-        .await
-        .unwrap_err();
-        assert!(
-            matches!(
-                err.downcast_ref::<AuthError>(),
-                Some(AuthError::InsufficientPermissions {
-                    required: Permission::Accounts(Crud::Read, Some(addr)),
-                }) if *addr == account_b
-            ),
-            "expected keys:read to still require accounts:read:{account_b}, got: {err}"
-        );
-
-        // Authorized callers pass scope checks and fail only on the closed test indexer port.
-        for (bearer, key_id) in [
-            (&reader_a, KeyId::derived(KeyBranch::Account, 0)),
-            (&reader_keys, KeyId::derived(KeyBranch::Account, 99)),
-            (&reader_keys, KeyId::derived(KeyBranch::Transaction, 0)),
-            (&reader_keys, unowned_imported_key_id),
-            (&reader_all_accounts, KeyId::derived(KeyBranch::Account, 99)),
+        let claimer_1 = daemon.api_key("claimer_1", &format!("vn_fees:claim:{pk_1}"));
+        let reader_all = daemon.api_key("reader_all", "vn_fees:read");
+        let legacy_reader = daemon.api_key("legacy_reader", "validators:read");
+        for (bearer, account_or_key) in [
+            (&reader_0, AccountOrKeyId::Account(Some(account_a.into()))),
+            (&reader_0, AccountOrKeyId::Account(None)),
+            (&delegated_reader_0, AccountOrKeyId::KeyId(account_key(0))),
+            (&claimer_1, AccountOrKeyId::Account(Some(account_b.into()))),
+            (&claimer_1, AccountOrKeyId::KeyId(account_key(1))),
+            (&reader_all, AccountOrKeyId::KeyId(account_key(99))),
+            (&reader_all, AccountOrKeyId::KeyId(imported_key_id)),
+            (&legacy_reader, AccountOrKeyId::KeyId(tx_key_id)),
+            (&daemon.session, AccountOrKeyId::Account(Some(account_b.into()))),
         ] {
-            let err = handle_get_validator_fees(&daemon.context, Some(bearer), GetValidatorFeesRequest {
-                account_or_key: AccountOrKeyId::KeyId(key_id),
-                shard_group: one_shard,
-            })
-            .await
-            .unwrap_err();
-            assert!(
-                err.downcast_ref::<AuthError>().is_none(),
-                "unexpected auth error for {key_id}: {err}"
-            );
+            let err = get_fees_err(&daemon, bearer, account_or_key).await;
+            assert_reached_fee_pool_lookup(&err);
         }
     }
 
     #[tokio::test]
-    async fn claim_validator_fees_enforces_claim_key_index_scope() {
+    async fn claim_validator_fees_requires_vn_fees_claim_for_the_claim_key() {
         let daemon = TestDaemon::start().await;
-        let sdk = daemon.context.wallet_sdk();
         let (account_a, account_b) = seed_two_accounts(&daemon);
+        let pk_0 = public_key_of(&daemon, account_key(0));
+        let pk_1 = public_key_of(&daemon, account_key(1));
+        let pk_99 = public_key_of(&daemon, account_key(99));
 
-        let uncreated_pk = sdk
-            .key_manager_api()
-            .get_public_key(KeyId::derived(KeyBranch::Account, 99))
-            .unwrap()
-            .public_key()
-            .to_byte_type();
-        let derived_99 = sdk.accounts_api().derive_account_address_from_public_key(&uncreated_pk);
+        let claimer_0 = format!("vn_fees:claim:{pk_0},transfer:create:{account_a}");
+        let claimer_0_key = daemon.api_key("claimer_0", &claimer_0);
+        let delegated_claimer_0 = daemon.delegated_session(&claimer_0);
+        // Transfer rights over every account say nothing about a claim key's fee pools.
+        let transfer_all = daemon.api_key("transfer_all", "transfer:create");
 
-        let claimer_a = daemon.api_key("claimer_a", &format!("validators:update,transfer:create:{account_a}"));
-        let delegated_claimer_a = daemon.delegated_session(&format!("validators:update,transfer:create:{account_a}"));
-
-        for bearer in [&claimer_a, &delegated_claimer_a] {
-            for (claim_key_index, expected_addr) in [(1u64, account_b), (99u64, derived_99)] {
+        for bearer in [&claimer_0_key, &delegated_claimer_0, &transfer_all] {
+            for (claim_key_index, claim_pk) in [(Some(1), pk_1), (Some(99), pk_99)] {
                 for dry_run in [true, false] {
                     for output_to_revealed in [true, false] {
                         let err =
-                            handle_claim_validator_fees(&daemon.context, Some(bearer), ClaimValidatorFeesRequest {
-                                account: Some(account_a.into()),
-                                claim_key_index: Some(claim_key_index),
-                                max_fee: 1000,
-                                shards: vec![Shard::first()],
-                                dry_run,
-                                output_to_revealed,
-                            })
-                            .await
-                            .unwrap_err();
-                        assert!(
-                            matches!(
-                                err.downcast_ref::<AuthError>(),
-                                Some(AuthError::InsufficientPermissions {
-                                    required: Permission::Transfer(Crud::Create, Some(addr)),
-                                }) if *addr == expected_addr
-                            ),
-                            "expected transfer:create scope error for {expected_addr} (index={claim_key_index}, \
-                             dry_run={dry_run}, revealed={output_to_revealed}), got: {err}"
-                        );
+                            claim_fees_err(&daemon, bearer, account_a, claim_key_index, dry_run, output_to_revealed)
+                                .await;
+                        assert_vn_fees_denied(&err, VnFeesAction::Claim, claim_pk);
                     }
                 }
             }
+            let err = claim_fees_err(&daemon, bearer, account_b, None, true, false).await;
+            assert_vn_fees_denied(&err, VnFeesAction::Claim, pk_1);
         }
+
+        // Reading a key's fee pools does not let a caller claim them.
+        let reader_0 = daemon.api_key("reader_0", &format!("vn_fees:read:{pk_0},transfer:create:{account_a}"));
+        let err = claim_fees_err(&daemon, &reader_0, account_a, None, true, false).await;
+        assert_vn_fees_denied(&err, VnFeesAction::Claim, pk_0);
+
+        // The claim key's grant does not cover depositing into an account the caller cannot transfer from.
+        let claimer_1 = daemon.api_key(
+            "claimer_1",
+            &format!("vn_fees:claim:{pk_1},transfer:create:{account_a}"),
+        );
+        let err = claim_fees_err(&daemon, &claimer_1, account_b, None, true, false).await;
+        assert_transfer_denied(&err, account_b);
+        let err = claim_fees_err(&daemon, &claimer_1, account_b, Some(1), true, false).await;
+        assert_transfer_denied(&err, account_b);
 
         // Rejecting unauthorized stealth claims must not advance `KeyBranch::StealthMask`.
         assert!(
-            sdk.key_manager_api()
+            daemon
+                .context
+                .wallet_sdk()
+                .key_manager_api()
                 .get_all_derived_keys(KeyBranch::StealthMask)
                 .unwrap()
                 .is_empty()
         );
 
-        let claimer_ab = daemon.api_key(
-            "claimer_ab",
-            &format!("validators:update,transfer:create:{account_a},transfer:create:{account_b}"),
-        );
-        let claimer_all = daemon.api_key("claimer_all", "validators:update,transfer:create");
-
-        for (bearer, claim_key_index) in [(&claimer_a, 0u64), (&claimer_ab, 1u64), (&claimer_all, 99u64)] {
-            let err = handle_claim_validator_fees(&daemon.context, Some(bearer), ClaimValidatorFeesRequest {
-                account: Some(account_a.into()),
-                claim_key_index: Some(claim_key_index),
-                max_fee: 1000,
-                shards: vec![Shard::first()],
-                dry_run: true,
-                output_to_revealed: true,
-            })
-            .await
-            .unwrap_err();
-            assert!(
-                err.downcast_ref::<AuthError>().is_none(),
-                "unexpected auth error for claim_key_index={claim_key_index}: {err}"
-            );
+        let legacy_claimer = daemon.api_key("legacy_claimer", "validators:update,transfer:create");
+        for (bearer, claim_key_index) in [
+            (&claimer_0_key, None),
+            (&claimer_0_key, Some(0)),
+            (&delegated_claimer_0, Some(0)),
+            (&claimer_1, Some(1)),
+            (&legacy_claimer, Some(99)),
+            (&daemon.session, Some(99)),
+        ] {
+            let err = claim_fees_err(&daemon, bearer, account_a, claim_key_index, true, true).await;
+            assert_reached_transaction_builder(&err);
         }
     }
 }

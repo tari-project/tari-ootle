@@ -89,6 +89,7 @@ pub async fn spawn(
         epoch_end_grace_period: Duration::from_secs(10),
         epoch_end_drain_period: Duration::from_secs(60),
         catch_up_request_timeout: Duration::from_secs(20),
+        catch_up_page_bytes: tari_consensus::hotstuff::DEFAULT_CATCH_UP_PAGE_BYTES,
     };
 
     let hotstuff_worker = HotstuffWorker::<TariConsensusSpec>::new(

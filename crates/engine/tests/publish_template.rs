@@ -642,3 +642,87 @@ fn a_module_dense_in_metering_checks_is_charged_for_each_check() {
         result.native_execution_points
     );
 }
+
+#[test]
+fn publish_template_rejects_duplicate_function_names_and_colliding_function_idents() {
+    use tari_engine::wasm::WasmValidationError;
+    use tari_template_abi::{FunctionDef, FunctionKind, Receiver, TemplateDef, TemplateDefV2, Type, func_hasher};
+
+    let colliding_ident = func_hasher::hash_function_name("admin_90260");
+    assert_eq!(colliding_ident, func_hasher::hash_function_name("public_13865"));
+
+    let module_with_functions = |functions: Vec<FunctionDef>| {
+        let def_bytes = TemplateDef::V2(TemplateDefV2 {
+            template_name: "Buggy".to_string(),
+            abi_version: 0,
+            functions,
+        })
+        .encode_for_wasm_embedding()
+        .unwrap();
+        let escaped: String = def_bytes.iter().map(|b| format!("\\{b:02x}")).collect();
+        wat::parse_str(format!(
+            r#"
+            (module
+              (memory (export "memory") 1)
+              (func (export "tari_alloc") (param i32) (result i32) (i32.const 1024))
+              (func (export "tari_free") (param i32))
+              (func (export "Buggy_main") (param i32 i32) (result i32) (i32.const 0))
+              (@custom "tari_tdef" "{escaped}")
+            )
+            "#
+        ))
+        .unwrap()
+    };
+
+    let duplicate_code = module_with_functions(vec![
+        FunctionDef {
+            name: "transfer".to_string(),
+            kind: FunctionKind::Method(Receiver::RefMut),
+            arguments: vec![],
+            output: Type::Unit,
+        },
+        FunctionDef {
+            name: "transfer".to_string(),
+            kind: FunctionKind::Function,
+            arguments: vec![],
+            output: Type::Unit,
+        },
+    ]);
+    let colliding_code = module_with_functions(vec![
+        FunctionDef {
+            name: "admin_90260".to_string(),
+            kind: FunctionKind::Method(Receiver::RefMut),
+            arguments: vec![],
+            output: Type::Unit,
+        },
+        FunctionDef {
+            name: "public_13865".to_string(),
+            kind: FunctionKind::Method(Receiver::Ref),
+            arguments: vec![],
+            output: Type::Unit,
+        },
+    ]);
+
+    let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
+    let (account, owner_proof, key, _) = test.create_funded_account_with_keypair();
+
+    for (code, expected) in [
+        (duplicate_code, WasmValidationError::DuplicateFunctionName {
+            name: "transfer".to_string(),
+        }),
+        (colliding_code, WasmValidationError::FunctionIdentCollision {
+            first: "admin_90260".to_string(),
+            second: "public_13865".to_string(),
+            ident: colliding_ident,
+        }),
+    ] {
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet(Epoch(1))
+                .pay_fee_from_component(account, 200_000u64)
+                .publish_template(code)
+                .build_and_seal(&key),
+            vec![owner_proof.clone()],
+        );
+        assert_reject_reason_with_code(reason, expected, ExecutionFailureCode::TemplateError);
+    }
+}

@@ -113,6 +113,7 @@ fn creator_module(template_name: &str, def: &TemplateDef) -> Vec<u8> {
         access_rules: ComponentAccessRules::allow_all(),
         address_allocation: None,
         upgrade_rule: UpdateRule::Locked,
+        rules_updater: None,
     })
     .unwrap();
     let invoke_arg = tari_bor::encode(&ComponentInvokeArg {

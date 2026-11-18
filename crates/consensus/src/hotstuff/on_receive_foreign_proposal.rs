@@ -625,18 +625,28 @@ pub(super) fn validate_foreign_proposal_contents(
         });
     }
     let foreign_shard_group = proposal.shard_group_checked().ok_or_else(|| {
-            warn!(
-                target: LOG_TARGET,
-                "⚠️ FOREIGN PROPOSAL: Invalid proposal: foreign shard group does not match the local shard group. Local Shard Group: {}, Foreign Shard Group: {}",
-                local_shard_group,
-                proposal.shard_group_unchecked(),
-            );
-            ProposalValidationError::ForeignProposalInvalid {
-                block_id: proposal.calculate_block_id(),
-                shard_group: proposal.shard_group_unchecked(),
-                details: anyhow!("Invalid shard group bounds")
-            }
-        })?;
+        warn!(
+            target: LOG_TARGET,
+            "⚠️ FOREIGN PROPOSAL: Invalid proposal: foreign shard group bounds are invalid. Local Shard Group: {}, Foreign Shard Group: {}",
+            local_shard_group,
+            proposal.shard_group_unchecked(),
+        );
+        ProposalValidationError::ForeignProposalInvalid {
+            block_id: proposal.calculate_block_id(),
+            shard_group: proposal.shard_group_unchecked(),
+            details: anyhow!("Invalid shard group bounds"),
+        }
+    })?;
+    if foreign_shard_group == local_shard_group {
+        warn!(
+            target: LOG_TARGET,
+            "⚠️ FOREIGN PROPOSAL: Invalid proposal: foreign shard group {foreign_shard_group} equals the local shard group {local_shard_group}",
+        );
+        return Err(ProposalValidationError::ForeignProposalFromLocalShardGroup {
+            block_id: proposal.calculate_block_id(),
+            shard_group: foreign_shard_group,
+        });
+    }
     let protocol_version =
         proposal
             .protocol_version()
@@ -1352,7 +1362,10 @@ mod tests {
         }
 
         fn proposal(epoch: Epoch, commands: Vec<CommandOrHash>) -> ForeignProposalRecord {
-            let shard_group = foreign_shard_group();
+            proposal_from(foreign_shard_group(), epoch, commands)
+        }
+
+        fn proposal_from(shard_group: ShardGroup, epoch: Epoch, commands: Vec<CommandOrHash>) -> ForeignProposalRecord {
             let metadata = BlockHeaderMetadata {
                 total_leader_fee: 0,
                 timestamp: 0,
@@ -1477,6 +1490,30 @@ mod tests {
             let stored = stored.unwrap();
             assert_eq!(stored.status(), ForeignProposalStatus::New);
             assert!(check_foreign_proposal_record(&stored.to_atom(), &stored).is_none());
+        }
+
+        #[test]
+        fn a_proposal_from_the_local_shard_group_is_rejected_and_leaves_no_record() {
+            let local_sg = local_committee_info().shard_group();
+            let self_proposal = proposal_from(local_sg, LOCAL_EPOCH, one_command());
+            let expected_block_id = *self_proposal.block_id();
+
+            let err = validate_foreign_proposal_contents(self_proposal.proposal(), local_sg).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    ProposalValidationError::ForeignProposalFromLocalShardGroup {
+                        block_id,
+                        shard_group,
+                    } if block_id == expected_block_id && shard_group == local_sg
+                ),
+                "{err:?}"
+            );
+            assert!(err.rejects_message_not_block());
+
+            let (is_recorded, stored) = record(self_proposal);
+            assert!(!is_recorded);
+            assert!(stored.is_none(), "{stored:?}");
         }
     }
 }

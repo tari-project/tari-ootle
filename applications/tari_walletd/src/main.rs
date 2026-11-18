@@ -102,7 +102,7 @@ async fn main() -> Result<(), anyhow::Error> {
             )?;
             let km = sdk.key_manager_api();
             let account_address = if let Some(index) = key_index {
-                km.derive_account_address(*index)?
+                km.create_account_address_at_index(*index)?
             } else {
                 km.next_account_address()?
             };

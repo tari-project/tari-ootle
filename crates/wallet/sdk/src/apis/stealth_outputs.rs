@@ -812,17 +812,18 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
     }
 
     fn all_used_view_only_keys(&self) -> Result<Vec<AccountAndViewKeys>, StealthOutputsApiError> {
+        let mut seen_derived_indices = HashSet::new();
         let mut keys = self
             .key_manager_api
             .get_all_derived_keys(KeyBranch::ViewOnlyKey)?
             .into_iter()
             .map(|view_key| {
-                let account_key = self.key_manager_api.derive_account_key(
-                    view_key
-                        .key_id
-                        .derived_index()
-                        .expect("get_all_derived_keys returns only derived keys"),
-                )?;
+                let index = view_key
+                    .key_id
+                    .derived_index()
+                    .expect("get_all_derived_keys returns only derived keys");
+                seen_derived_indices.insert(index);
+                let account_key = self.key_manager_api.derive_account_key(index)?;
                 Ok::<_, KeyManagerApiError>(AccountAndViewKeys {
                     account_public_key: account_key.to_public_key().to_byte_type(),
                     account_key: Some(account_key.into()),
@@ -830,13 +831,16 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        // View-only accounts use an imported view key, which is not in the derived key branch above
+        // Include view-only accounts (imported view key) and any existing explicit-index accounts whose derived
+        // ViewOnlyKey row was not recorded in key_manager_states.
         let accounts = self.store.with_read_tx(|tx| {
             let count = tx.accounts_count()?;
             tx.accounts_get_many(0, count as usize)
         })?;
         for account in accounts {
-            if !matches!(account.view_only_key_id, KeyId::Imported { .. }) {
+            if let Some(index) = account.view_only_key_id.derived_index() &&
+                !seen_derived_indices.insert(index)
+            {
                 continue;
             }
             let loaded = account

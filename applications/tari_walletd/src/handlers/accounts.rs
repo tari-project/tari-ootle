@@ -4268,3 +4268,84 @@ mod claim_burn_dry_run_failure_tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod explicit_key_index_tests {
+    use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId};
+    use tari_ootle_walletd_client::{
+        ComponentAddressOrName,
+        types::{AccountsCreateOrGetRequest, AccountsCreateRequest, KeysListRequest},
+    };
+
+    use super::*;
+    use crate::handlers::{keys, test_support::TestDaemon};
+
+    #[tokio::test]
+    async fn accounts_create_with_explicit_key_index_advances_subsequent_allocations() {
+        let daemon = TestDaemon::start().await;
+        let session = Some(&daemon.session);
+
+        let acc0 = handle_create(&daemon.context, session, AccountsCreateRequest {
+            account_name: Some("explicit_0".to_string()),
+            is_default: None,
+            key_index: Some(0),
+        })
+        .await
+        .unwrap();
+
+        let acc1 = handle_create(&daemon.context, session, AccountsCreateRequest {
+            account_name: Some("auto_after_0".to_string()),
+            is_default: None,
+            key_index: None,
+        })
+        .await
+        .unwrap();
+        assert_ne!(acc0.address, acc1.address);
+
+        let acc3 = handle_create_or_get(&daemon.context, session, AccountsCreateOrGetRequest {
+            account: Some(ComponentAddressOrName::Name("explicit_3".to_string())),
+            is_default: None,
+            key_index: Some(3),
+        })
+        .await
+        .unwrap();
+        assert!(acc3.created);
+
+        let acc4 = handle_create_or_get(&daemon.context, session, AccountsCreateOrGetRequest {
+            account: Some(ComponentAddressOrName::Name("auto_after_3".to_string())),
+            is_default: None,
+            key_index: None,
+        })
+        .await
+        .unwrap();
+        assert!(acc4.created);
+        assert_ne!(acc3.address, acc4.address);
+
+        let account_keys = keys::handle_list(&daemon.context, session, KeysListRequest {
+            branch: KeyBranch::Account,
+        })
+        .await
+        .unwrap();
+        let view_keys = keys::handle_list(&daemon.context, session, KeysListRequest {
+            branch: KeyBranch::ViewOnlyKey,
+        })
+        .await
+        .unwrap();
+        for idx in [0, 1, 3, 4] {
+            assert!(
+                account_keys
+                    .keys
+                    .iter()
+                    .any(|(id, _, _)| *id == KeyId::derived(KeyBranch::Account, idx)),
+                "missing account key index {idx}"
+            );
+            assert!(
+                view_keys
+                    .keys
+                    .iter()
+                    .any(|(id, _, _)| *id == KeyId::derived(KeyBranch::ViewOnlyKey, idx)),
+                "missing view-only key index {idx}"
+            );
+        }
+    }
+}

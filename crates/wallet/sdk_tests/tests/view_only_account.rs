@@ -403,3 +403,85 @@ fn view_only_account_never_becomes_the_default() {
     assert!(accounts.delete_if_unused(&spending).unwrap());
     assert!(accounts.get_default().optional().unwrap().is_none());
 }
+
+#[test]
+fn explicit_index_account_without_view_key_row_decrypts_incoming_stealth_output() {
+    let sender = Test::new();
+    let receiver = Test::without_accounts(PanicNetworkInterface);
+
+    // Simulate an account created before explicit-index key persistence so no ViewOnlyKey row exists in
+    // key_manager_states.
+    let explicit_index = 3;
+    let derived = receiver
+        .sdk()
+        .key_manager_api()
+        .derive_account_address(explicit_index)
+        .unwrap();
+    let owner_pk = derived.address.account_key().to_byte_type();
+    let account_addr = receiver
+        .sdk()
+        .accounts_api()
+        .derive_account_address_from_public_key(&owner_pk);
+    receiver
+        .sdk()
+        .accounts_api()
+        .add_account(
+            Some("legacy-explicit"),
+            &account_addr,
+            derived.view_only_key_id,
+            derived.owner_key_id,
+            Epoch::zero(),
+            false,
+            true,
+        )
+        .unwrap();
+    assert!(
+        receiver
+            .sdk()
+            .key_manager_api()
+            .get_all_derived_keys(KeyBranch::ViewOnlyKey)
+            .unwrap()
+            .is_empty(),
+        "precondition: no ViewOnlyKey row recorded in key_manager_states"
+    );
+
+    let output = sender
+        .sdk()
+        .stealth_outputs_api()
+        .create_output_witness(
+            &derived.address,
+            4321,
+            &STEALTH_TARI_RESOURCE_ADDRESS,
+            None,
+            None,
+            PayTo::StealthPublicKey,
+        )
+        .unwrap();
+    let commitment: PedersenCommitmentBytes = output.witness.to_commitment().to_byte_type();
+    let utxo = Utxo::new(UtxoOutput {
+        output: OutputBody {
+            public_nonce: output.witness.sender_public_nonce.to_byte_type(),
+            encrypted_data: output.witness.encrypted_data.clone(),
+            minimum_value_promise: 0,
+            viewable_balance: None,
+        },
+        auth: output.auth,
+        tag: output.tag,
+    });
+    let utxo_address = UtxoAddress::new(STEALTH_TARI_RESOURCE_ADDRESS, commitment.into());
+
+    receiver
+        .sdk()
+        .stealth_outputs_api()
+        .verify_and_update_outputs([(utxo_address, &utxo)])
+        .unwrap();
+
+    let outputs = receiver
+        .sdk()
+        .stealth_outputs_api()
+        .utxos_get_many(&STEALTH_TARI_RESOURCE_ADDRESS, Some(&account_addr), None)
+        .unwrap();
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(outputs[0].value, 4321);
+    assert!(matches!(outputs[0].status, OutputStatus::Unspent));
+}

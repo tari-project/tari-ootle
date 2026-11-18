@@ -19,12 +19,17 @@ pub(crate) enum AddressScope {
 }
 
 impl AddressScope {
-    /// DNS names and bare relay circuits are resolved or routed beyond the local network, so they are classed as
-    /// global.
+    /// `localhost` names (RFC 6761) resolve to loopback everywhere. Other DNS names and bare relay circuits are
+    /// assumed public: a name that resolves only inside a private network is indistinguishable from a public one here.
     pub fn of(addr: &Multiaddr) -> Self {
         let ip = match addr.iter().next() {
             Some(Protocol::Ip4(ip)) => IpAddr::V4(ip),
             Some(Protocol::Ip6(ip)) => IpAddr::V6(ip),
+            Some(Protocol::Dns(name) | Protocol::Dns4(name) | Protocol::Dns6(name) | Protocol::Dnsaddr(name))
+                if is_localhost_name(&name) =>
+            {
+                return AddressScope::Loopback;
+            },
             _ => return AddressScope::Global,
         };
         if ip.is_loopback() || ip.is_unspecified() {
@@ -40,6 +45,11 @@ impl AddressScope {
             AddressScope::Private
         }
     }
+}
+
+fn is_localhost_name(name: &str) -> bool {
+    let name = name.strip_suffix('.').unwrap_or(name).to_ascii_lowercase();
+    name == "localhost" || name.ends_with(".localhost")
 }
 
 /// Returns the listen addresses a peer reports that are dialable given the address the peer is connected on.
@@ -85,6 +95,16 @@ mod tests {
         assert_eq!(AddressScope::of(&addr("/ip6/fe80::1/tcp/1")), AddressScope::Private);
         assert_eq!(AddressScope::of(&addr("/ip4/51.68.1.2/tcp/1")), AddressScope::Global);
         assert_eq!(AddressScope::of(&addr("/dns4/example.com/tcp/1")), AddressScope::Global);
+        assert_eq!(AddressScope::of(&addr("/dns4/localhost/tcp/1")), AddressScope::Loopback);
+        assert_eq!(AddressScope::of(&addr("/dns/LocalHost./tcp/1")), AddressScope::Loopback);
+        assert_eq!(
+            AddressScope::of(&addr("/dns6/vn.localhost/tcp/1")),
+            AddressScope::Loopback
+        );
+        assert_eq!(
+            AddressScope::of(&addr("/dns4/notlocalhost/tcp/1")),
+            AddressScope::Global
+        );
     }
 
     #[test]
@@ -95,6 +115,7 @@ mod tests {
             addr("/ip4/51.68.1.2/tcp/50123"),
             addr("/ip4/51.68.1.2/udp/50123/quic-v1"),
             addr("/dns4/vn.example.com/tcp/50123"),
+            addr("/dns4/localhost/tcp/50123"),
         ];
         assert_eq!(dialable(&listen_addrs, "/ip4/51.68.1.2/tcp/50123"), vec![
             addr("/ip4/51.68.1.2/tcp/50123"),

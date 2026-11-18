@@ -2399,10 +2399,10 @@ struct CatchUp<TAddr> {
     pub epoch: Epoch,
     pub remote_height: NodeHeight,
     pub last_progress_height: NodeHeight,
-    pub timeout_at: Instant,
+    pub timeout_at: time::Instant,
     /// When the outstanding page was requested, or the catch-up last advanced. A page that has not arrived, or a
     /// catch-up that has not advanced, by `stall_deadline` asks another peer.
-    pub stall_window_start: Instant,
+    pub stall_window_start: time::Instant,
     /// The peer the last page request went to.
     pub from: TAddr,
     /// The page request awaiting its reply.
@@ -2423,7 +2423,7 @@ impl<TAddr> CatchUp<TAddr> {
         timeout: Duration,
         from: TAddr,
     ) -> Self {
-        let now = Instant::now();
+        let now = time::Instant::now();
         Self {
             epoch,
             remote_height,
@@ -2524,7 +2524,7 @@ impl<TAddr> CatchUp<TAddr> {
     }
 
     pub fn reset_timeout(&mut self, timeout: Duration) {
-        let now = Instant::now();
+        let now = time::Instant::now();
         self.timeout_at = now + timeout;
         self.stall_window_start = now;
     }
@@ -2532,16 +2532,16 @@ impl<TAddr> CatchUp<TAddr> {
     /// When this catch-up asks another peer if its page has not arrived or it has not advanced. A peer may drop a
     /// request it has no slot for, or fail to send its page, so asking again resumes well before `timeout` ends the
     /// catch-up.
-    pub fn stall_deadline(&self, timeout: Duration) -> Instant {
+    pub fn stall_deadline(&self, timeout: Duration) -> time::Instant {
         self.stall_window_start + timeout / CATCH_UP_STALL_WINDOWS_PER_TIMEOUT
     }
 
     pub fn restart_stall_window(&mut self) {
-        self.stall_window_start = Instant::now();
+        self.stall_window_start = time::Instant::now();
     }
 
     pub fn has_timed_out(&self) -> bool {
-        Instant::now() >= self.timeout_at
+        time::Instant::now() >= self.timeout_at
     }
 }
 
@@ -2550,9 +2550,9 @@ impl<TAddr> CatchUp<TAddr> {
 const CATCH_UP_STALL_WINDOWS_PER_TIMEOUT: u32 = 4;
 
 /// Completes at `deadline`, or never when there is none.
-async fn sleep_until_deadline(deadline: Option<Instant>) {
+async fn sleep_until_deadline(deadline: Option<time::Instant>) {
     match deadline {
-        Some(deadline) => time::sleep_until(deadline.into()).await,
+        Some(deadline) => time::sleep_until(deadline).await,
         None => std::future::pending().await,
     }
 }

@@ -81,7 +81,7 @@ pub struct ModuleStructure {
 /// Functions, the parameters and locals they declare and the metering checks compiled into them
 /// are bounded because the compile's cost for each is far above what the bytes asking for it are
 /// priced at, and the compile runs before anything else could refuse the module.
-pub(crate) fn validate_module_structure(code: &[u8]) -> Result<ModuleStructure, WasmValidationError> {
+pub fn validate_module_structure(code: &[u8]) -> Result<ModuleStructure, WasmValidationError> {
     read_module_structure::<Enforce>(code)
 }
 

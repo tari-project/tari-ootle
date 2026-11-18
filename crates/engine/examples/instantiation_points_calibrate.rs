@@ -17,7 +17,10 @@
 
 use std::time::Instant;
 
-use tari_engine::{fees::FeeTable, wasm::WasmModule};
+use tari_engine::{
+    fees::FeeTable,
+    wasm::{WasmModule, validate_module_structure},
+};
 use tari_engine_types::{fees::FeeSource, limits};
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_test_tooling::TemplateTest;
@@ -423,7 +426,7 @@ fn strip_custom_sections(code: &[u8]) -> Vec<u8> {
 fn print_builtin_compile_counts(rate: f64) {
     for template in tari_template_builtin::all_builtin_templates() {
         let code = &strip_custom_sections(template.binary);
-        let structure = WasmModule::prevalidate_code(code).expect("built-in template is admitted");
+        let structure = WasmModule::verify_for_publish(code).expect("built-in template is admitted");
         let counts = structure.compile;
         let charged_ms = limits::template_compile_points(code.len() as u64, &counts) as f64 / rate;
         let ms = compile_ms(code);
@@ -472,7 +475,7 @@ fn print_metering_check_costs(rate: f64) {
                 .min(max_checks as u64 / checks_per_repeat - 1)
                 .min(if name == "loops" { loop_limit } else { u64::MAX });
             let code = module_of_functions(functions as usize, &body.repeat(repeats as usize));
-            let Ok(structure) = WasmModule::prevalidate_code(&code) else {
+            let Ok(structure) = validate_module_structure(&code) else {
                 println!("{functions} functions of {repeats} {name}: refused");
                 continue;
             };
@@ -522,7 +525,7 @@ fn print_metering_check_costs(rate: f64) {
     ];
     for (name, body) in worst_cases {
         let code = module_of_functions(1, &body);
-        let structure = WasmModule::prevalidate_code(&code).expect("within the function limits");
+        let structure = validate_module_structure(&code).expect("within the function limits");
         let charged_ms = limits::template_compile_points(code.len() as u64, &structure.compile) as f64 / rate;
         let ms = compile_ms(&code);
         println!(

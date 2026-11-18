@@ -2467,6 +2467,10 @@ mod cleanup {
         let up_to_epoch = up_to_epoch + Epoch(1); // Make it inclusive
         let cf = db.cf(BlockCf)?;
         let committed_cf = db.cf(chain::CommittedParentChildChainIndex)?;
+        let pending_chain_cf = db.cf(PendingChainIndex)?;
+        let pending_parent_child_cf = db.cf(chain::PendingParentChildIndex)?;
+        let proposed_in_query = db.cf(foreign_proposal::ByProposedInBlockIndexQuery)?;
+        let proposed_in_cf = db.cf(foreign_proposal::ProposedInBlockIndex)?;
         let index_cf = db.cf(block::EpochHeightIndex)?;
         let executed_cf = db.cf(block::ExecutedBlockIndex)?;
 
@@ -2477,8 +2481,18 @@ mod cleanup {
 
         let count = keys.len();
         for (epoch, height, block_id) in keys {
+            if let Some(block) = cf.get(&block_id, OPERATION).optional()? {
+                if block.is_committed() {
+                    committed_cf.delete(block.parent(), OPERATION)?;
+                } else {
+                    pending_chain_cf.delete(&block_id, OPERATION)?;
+                    pending_parent_child_cf.delete(&(*block.parent(), block_id), OPERATION)?;
+                    for key in proposed_in_query.query_prefix_range_keys(Ordering::default(), &block_id)? {
+                        proposed_in_cf.delete(&key, OPERATION)?;
+                    }
+                }
+            }
             cf.delete(&block_id, OPERATION)?;
-            committed_cf.delete(&block_id, OPERATION)?;
             index_cf.delete(&(epoch, height, block_id), OPERATION)?;
             executed_cf.delete(&block_id, OPERATION)?;
         }

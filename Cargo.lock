@@ -3827,7 +3827,6 @@ version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4316185f709b23713e41e3195f90edef7fb00c3ed4adc79769cf09cc762a3b29"
 dependencies = [
- "chrono",
  "colored 2.2.0",
  "log",
 ]
@@ -13115,7 +13114,6 @@ dependencies = [
  "clap 3.2.25",
  "fern",
  "futures 0.3.34",
- "humantime",
  "include_dir",
  "indexmap 2.14.2",
  "lockfile",
@@ -13145,6 +13143,7 @@ dependencies = [
  "tari_validator_node_client",
  "tempfile",
  "thiserror 2.0.21",
+ "time",
  "tokio",
  "toml 0.9.11+spec-1.1.0",
  "tonic 0.13.1",

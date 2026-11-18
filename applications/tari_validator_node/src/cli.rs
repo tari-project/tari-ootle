@@ -142,10 +142,6 @@ impl ConfigOverrideProvider for Cli {
                 format!("{}.peer_seeds", PeerSeedsConfig::main_key_prefix()),
                 self.peer_seeds.join(","),
             ));
-            overrides.push((
-                format!("{}.{}.peer_seeds", network, PeerSeedsConfig::main_key_prefix()),
-                self.peer_seeds.join(","),
-            ));
         }
         if let Some(listener_port) = self.listener_port {
             overrides.push((

@@ -142,10 +142,6 @@ impl ConfigOverrideProvider for Cli {
                 format!("{}.peer_seeds", PeerSeedsConfig::main_key_prefix()),
                 self.peer_seeds.join(","),
             ));
-            overrides.push((
-                format!("{}.{}.peer_seeds", network, PeerSeedsConfig::main_key_prefix()),
-                self.peer_seeds.join(","),
-            ));
         }
         if let Some(listener_port) = self.listener_port {
             overrides.push((
@@ -174,12 +170,6 @@ impl ConfigOverrideProvider for Cli {
         if let Some(url) = self.epoch_oracle_minotari_node_grpc_url.as_ref() {
             overrides.push((
                 "epoch_oracle.base_layer.base_node_grpc_url".to_string(),
-                url.to_string(),
-            ));
-            // Network presets set this key in `[<network>.epoch_oracle.base_layer]`, which the loader merges over the
-            // root section after these overrides are applied.
-            overrides.push((
-                format!("{}.epoch_oracle.base_layer.base_node_grpc_url", network),
                 url.to_string(),
             ));
         }

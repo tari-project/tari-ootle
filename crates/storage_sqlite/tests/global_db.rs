@@ -606,3 +606,61 @@ fn set_committee_shard_selects_latest_active_registration() {
         assert_eq!(vn.fee_claim_public_key, expected_claim_key);
     }
 }
+
+#[test]
+fn committee_lookup_orders_by_start_epoch_then_id_when_multiple_shard_keys_are_assigned() {
+    let high_shard_key = SubstateAddress::from_array([9u8; SubstateAddress::LENGTH]);
+    let low_shard_key = SubstateAddress::from_array([1u8; SubstateAddress::LENGTH]);
+
+    for (first_row, second_row, select_second) in [
+        ((high_shard_key, Epoch(10)), (low_shard_key, Epoch(10)), true),
+        ((low_shard_key, Epoch(20)), (high_shard_key, Epoch(10)), false),
+    ] {
+        let db = create_db();
+        let mut tx = db.create_transaction().unwrap();
+        let mut validator_nodes = db.validator_nodes(&mut tx);
+
+        let pk = new_public_key();
+        let pk_bytes = pk.to_byte_type();
+        let address: PeerAddress = pk.into();
+        let first_claim_key = new_public_key().to_byte_type();
+        let second_claim_key = new_public_key().to_byte_type();
+        let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+
+        for ((shard_key, start_epoch), claim_key) in [(first_row, first_claim_key), (second_row, second_claim_key)] {
+            validator_nodes
+                .insert_validator_node(
+                    address.clone(),
+                    pk_bytes,
+                    shard_key,
+                    start_epoch,
+                    claim_key,
+                    VotePower::of(1),
+                )
+                .unwrap();
+            validator_nodes
+                .set_committee_shard(shard_key, shard_group, Epoch(30))
+                .unwrap();
+        }
+
+        let expected_claim_key = if select_second {
+            second_claim_key
+        } else {
+            first_claim_key
+        };
+        assert_eq!(
+            validator_nodes
+                .get_by_public_key(Epoch(30), &pk_bytes)
+                .unwrap()
+                .fee_claim_public_key,
+            expected_claim_key
+        );
+        assert_eq!(
+            validator_nodes
+                .get_by_address(Epoch(30), &address)
+                .unwrap()
+                .fee_claim_public_key,
+            expected_claim_key
+        );
+    }
+}

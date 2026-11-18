@@ -205,7 +205,7 @@ fn a_claim_co_signed_by_the_claim_key_is_accepted() {
     let result = test
         .try_execute(
             claim_into_output(Transaction::builder_localnet(Epoch(1)), claim_to(claim_public_key))
-                .add_signer(&test.to_public_key_bytes(), &claim_secret)
+                .authorize(&test.to_public_key_bytes(), [&claim_secret])
                 .seal(test.secret_key()),
             vec![],
         )
@@ -276,7 +276,7 @@ fn the_burner_cannot_claim_a_burn_made_out_to_someone_else() {
     for transaction in [
         claim_into_output(Transaction::builder_localnet(Epoch(1)), proof.clone()).build_and_seal(&burner_secret),
         claim_into_output(Transaction::builder_localnet(Epoch(1)), proof)
-            .add_signer(&burner_public_key, test.secret_key())
+            .authorize(&burner_public_key, [test.secret_key()])
             .seal(&burner_secret),
     ] {
         let result = test

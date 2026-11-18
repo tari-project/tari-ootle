@@ -2,8 +2,8 @@
   "name": "generic_build/workspace_pipe",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.47.0",
-    "git_rev": "a25b2ca804a1ae75cb3f1fc1c3860e7cb5073b90",
+    "core_version": "0.53.5",
+    "git_rev": "f987c537728b97c86b80eaef15a7d13a1dc094b6",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "build_and_encode_instructions",
@@ -72,7 +72,7 @@
   },
   "expected": {
     "sealed_transaction_semantic": {
-      "V1": {
+      "V2": {
         "body": {
           "signatures": [
             {

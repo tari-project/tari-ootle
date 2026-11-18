@@ -8,7 +8,7 @@
 use std::{thread, time::Duration};
 
 use tari_ootle_common_types::{Epoch, optional::IsNotFoundError};
-use tari_ootle_transaction::{Sr25519SignatureBytes, TransactionSignature, UnsignedTransaction};
+use tari_ootle_transaction::{AuthorizerSet, Sr25519SignatureBytes, TransactionSignature, UnsignedTransaction};
 use tari_ootle_wallet_sdk::{
     models::{
         KeyBranch,
@@ -37,6 +37,15 @@ fn key_id() -> KeyId {
     }
 }
 
+fn authorizers() -> AuthorizerSet {
+    [
+        RistrettoPublicKeyBytes::default(),
+        RistrettoPublicKeyBytes::from_bytes(&[1; 32]).unwrap(),
+    ]
+    .into_iter()
+    .collect()
+}
+
 fn signature() -> TransactionSignature {
     TransactionSignature::new(RistrettoPublicKeyBytes::default(), Sr25519SignatureBytes::zero())
 }
@@ -48,6 +57,7 @@ fn insert_request(db: &SqliteWalletStore, ttl: Duration) -> SigningRequestId {
         .signing_request_insert(NewSigningRequest {
             unsigned_transaction: &transaction,
             seal_public_key: &RistrettoPublicKeyBytes::default(),
+            authorizers: &authorizers(),
             key_id: key_id(),
             signer_public_key: &RistrettoPublicKeyBytes::default(),
             message_hash: &[0xab; 64],
@@ -70,6 +80,7 @@ fn insert_and_get_round_trips_as_pending() {
     let found = db.with_read_tx(|tx| tx.signing_request_get(id)).unwrap();
     assert_eq!(found.status, SigningRequestStatus::Pending);
     assert_eq!(found.key_id, key_id());
+    assert_eq!(found.authorizers, authorizers());
     assert_eq!(found.message_hash, [0xab; 64]);
     assert_eq!(found.memo, "set burn rate to 7%");
     assert_eq!(found.requester, SigningRequester::ApiKey {

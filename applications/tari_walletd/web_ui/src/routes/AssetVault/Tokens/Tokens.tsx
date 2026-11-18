@@ -48,7 +48,7 @@ import {
   ResourceType,
   VaultId,
 } from "@tari-project/ootle-ts-bindings";
-import { bigintToDecimalString, shortenString, substateIdToString } from "@utils/helpers";
+import { bigintToDecimalString, substateIdToString } from "@utils/helpers";
 import { useState } from "react";
 import { IoWalletOutline } from "react-icons/io5";
 import { useNavigate } from "react-router-dom";
@@ -138,10 +138,7 @@ function BalanceRow({
           }}
           gap={isLg ? 1 : 0.3}
         >
-          <CopyAddress
-            address={resource_address}
-            display={shortenString(resource_address, isLg ? 3 : 1, isLg ? 6 : 4)}
-          />
+          <CopyAddress address={resource_address} />
           <TypeChip type={resource_type} symbol={token_symbol} compact />
         </Stack>
       </FluidTableCell>

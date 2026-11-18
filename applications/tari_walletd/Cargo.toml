@@ -64,6 +64,7 @@ log4rs = { workspace = true, features = [
 mime_guess = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
+rustls = { workspace = true, features = ["aws-lc-rs"] }
 serde = { workspace = true, default-features = true }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
 thiserror = { workspace = true }

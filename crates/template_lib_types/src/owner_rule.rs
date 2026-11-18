@@ -25,7 +25,7 @@ pub enum OwnerRule {
     #[n(3)]
     ByPublicKey(
         #[n(0)]
-        #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
         RistrettoPublicKeyBytes,
     ),
 }
@@ -54,7 +54,7 @@ pub enum SubstateOwnerRule {
     #[n(2)]
     ByPublicKey(
         #[n(0)]
-        #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
         RistrettoPublicKeyBytes,
     ),
 }

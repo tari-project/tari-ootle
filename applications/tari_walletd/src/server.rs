@@ -63,11 +63,10 @@ pub async fn spawn_listener(
     let shutdown_signal = context.shutdown_signal().clone();
     #[cfg(feature = "web_ui")]
     let web_ui_origin = context.config().web_ui_origin();
-    let router = router(preferred_address, signaling_server_address, context);
-
     let listener = try_bind_with_fallback(preferred_address).await?;
+    let listen_addr = listener.local_addr()?;
+    let router = router(listen_addr, signaling_server_address, context);
     let server = axum::serve(listener, router);
-    let listen_addr = server.local_addr()?;
     info!(target: LOG_TARGET, "🌐 JSON-RPC listening on {listen_addr}");
     #[cfg(feature = "web_ui")]
     {
@@ -87,7 +86,7 @@ pub async fn spawn_listener(
     Ok((listen_addr, task))
 }
 
-fn router(preferred_address: SocketAddr, signaling_server_address: SocketAddr, context: HandlerContext) -> Router {
+fn router(listen_address: SocketAddr, signaling_server_address: SocketAddr, context: HandlerContext) -> Router {
     let enable_permissive_cors = context.config().enable_permissive_cors;
     let allowed_hosts = allowed_hosts(context.config());
     let router = Router::new()
@@ -97,7 +96,7 @@ fn router(preferred_address: SocketAddr, signaling_server_address: SocketAddr, c
         // TODO: Get these traces to work
         .layer(TraceLayer::new_for_http())
         .layer(Extension(Arc::new(context)))
-        .layer(Extension((preferred_address,signaling_server_address)))
+        .layer(Extension((listen_address, signaling_server_address)))
         .layer(if enable_permissive_cors { CorsLayer::permissive() } else { CorsLayer::new() })
         // Limit the body size to 5MB to allow for wasm uploads
         .layer(DefaultBodyLimit::max(5*1024*1024));
@@ -592,5 +591,22 @@ mod tests {
             assert_eq!(response.status(), StatusCode::OK, "{host}");
             assert!(issues_token(response).await, "{host}");
         }
+    }
+
+    #[tokio::test]
+    async fn spawn_listener_falls_back_when_preferred_port_is_occupied() {
+        let daemon = TestDaemon::start_with_transaction_service().await;
+        let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let occupied_addr = occupied.local_addr().unwrap();
+        let signaling_addr: SocketAddr = "127.0.0.1:9100".parse().unwrap();
+
+        let (listen_addr, _handle) = spawn_listener(occupied_addr, signaling_addr, daemon.context.clone())
+            .await
+            .unwrap();
+        assert_ne!(listen_addr, occupied_addr);
+        assert_ne!(listen_addr.port(), 0);
+
+        let response = reqwest::get(format!("http://{listen_addr}/health")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }

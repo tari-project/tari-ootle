@@ -156,6 +156,11 @@ pub enum TransactionErrorKind {
     HashConversion(#[from] HashParseError),
     #[error("Function specified for component update is not marked as a migration function: {name}")]
     NotAMigrationFunction { name: String },
+    #[error(
+        "Updating a component's template is not supported. Deploy the new template as a new component and move the \
+         state across."
+    )]
+    ComponentTemplateUpdateNotSupported,
     #[error("Migration functions cannot be called directly: {name}")]
     CannotCallMigrationFunctionDirectly { name: String },
     #[error("The account constructor cannot be called directly. Use the CreateAccount instruction.")]
@@ -203,6 +208,7 @@ impl TransactionErrorKind {
             Self::FunctionNotFound { .. } |
             Self::HashConversion(_) |
             Self::NotAMigrationFunction { .. } |
+            Self::ComponentTemplateUpdateNotSupported |
             Self::CannotCallMigrationFunctionDirectly { .. } |
             Self::CannotCallAccountConstructor |
             Self::MethodCalledAsFunction { .. } |

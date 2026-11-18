@@ -241,6 +241,7 @@ impl TrafficSim {
                 owner_account: (*sender_account.component_address()).into(),
                 fee_params: TransferFeeParams::new(UtxoInputSelection::PreferConfidential),
                 input_selection: UtxoInputSelection::ConfidentialOnly,
+                inputs: None,
                 resource_address,
                 badge_usage: Default::default(),
                 transfers: vec![StealthTransfer {

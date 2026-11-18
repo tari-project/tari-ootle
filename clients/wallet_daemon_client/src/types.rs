@@ -44,6 +44,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_template_metadata::{MetadataHash, TemplateMetadata};
 use tari_ootle_transaction::{
+    AuthorizerSet,
     ComponentReference,
     Instruction,
     MigrateFunction,
@@ -90,6 +91,7 @@ use tari_template_lib_types::{
     ComponentAddress,
     ConfidentialOutputAddress,
     NonFungibleId,
+    OwnerRule,
     ResourceAddress,
     ResourceType,
     TemplateAddress,
@@ -97,7 +99,7 @@ use tari_template_lib_types::{
     UtxoId,
     ValidatorFeePoolAddress,
     VaultId,
-    access_rules::UpdateRule,
+    access_rules::{ComponentAccessRules, UpdateRule},
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
     stealth::{SpendAuthorization, StealthTransferStatement},
@@ -278,6 +280,10 @@ pub struct TransactionRequestInfo {
     /// [`ComponentUpgrade`].
     #[serde(default)]
     pub component_upgrades: Vec<ComponentUpgrade>,
+    /// Every `SetComponentAccessRules` and `SetComponentOwnerRule` instruction in the transaction, fee instructions
+    /// first. See [`ComponentRulesChange`].
+    #[serde(default)]
+    pub component_rules_changes: Vec<ComponentRulesChange>,
     /// Who the transaction acts as wherever the engine needs a single signer.
     pub main_signer: TransactionRequestMainSigner,
     /// Public keys of the signatures the request's creator supplied out of band. Each one authorizes the
@@ -356,6 +362,11 @@ pub struct SigningRequestCreateRequest {
     /// Public key of the party that will seal the transaction. The signature
     /// commits to it.
     pub seal_public_key: RistrettoPublicKeyBytes,
+    /// Public keys of every authorizer of the transaction, the public key of
+    /// `key_id` among them. The signature commits to the whole set, so the
+    /// sealed transaction must carry an authorization from each key and no
+    /// other.
+    pub authorizers: AuthorizerSet,
     /// The wallet key to sign with.
     pub key_id: KeyId,
     /// Free text shown to the approver, labelled as coming from the requester.
@@ -392,7 +403,13 @@ pub struct SigningRequestInfo {
     /// [`ComponentUpgrade`].
     #[serde(default)]
     pub component_upgrades: Vec<ComponentUpgrade>,
+    /// Every `SetComponentAccessRules` and `SetComponentOwnerRule` instruction in the transaction, fee instructions
+    /// first. See [`ComponentRulesChange`].
+    #[serde(default)]
+    pub component_rules_changes: Vec<ComponentRulesChange>,
     pub seal_public_key: RistrettoPublicKeyBytes,
+    /// Public keys of every authorizer the signature commits to.
+    pub authorizers: AuthorizerSet,
     pub key_id: KeyId,
     /// Public key of `key_id`.
     pub signer_public_key: RistrettoPublicKeyBytes,
@@ -514,6 +531,10 @@ pub struct TransactionSubmitDryRunResponse {
     /// [`ComponentUpgrade`].
     #[serde(default)]
     pub component_upgrades: Vec<ComponentUpgrade>,
+    /// Every `SetComponentAccessRules` and `SetComponentOwnerRule` instruction in the transaction, fee instructions
+    /// first. See [`ComponentRulesChange`].
+    #[serde(default)]
+    pub component_rules_changes: Vec<ComponentRulesChange>,
 }
 
 /// An `UpdateComponentTemplate` instruction: the transaction replaces the code of `component` with `new_template`
@@ -528,6 +549,35 @@ pub struct ComponentUpgrade {
     pub component: ComponentReference,
     pub new_template: TemplateAddress,
     pub migrate: Option<MigrateFunction>,
+}
+
+/// A `SetComponentAccessRules` or `SetComponentOwnerRule` instruction: the transaction replaces the access rules or
+/// the owner rule of `component`. A signer who satisfies the component's rules updater decides who may call each of
+/// its methods, or who owns it and everything it holds.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub enum ComponentRulesChange {
+    AccessRules {
+        /// A workspace reference names a component the transaction resolves during execution, such as one an
+        /// earlier instruction returns.
+        component: ComponentReference,
+        access_rules: ComponentAccessRules,
+    },
+    OwnerRule {
+        /// A workspace reference names a component the transaction resolves during execution, such as one an
+        /// earlier instruction returns.
+        component: ComponentReference,
+        /// `OwnedBySigner` names the transaction's main signer.
+        owner_rule: OwnerRule,
+    },
+}
+
+impl ComponentRulesChange {
+    pub fn component(&self) -> &ComponentReference {
+        match self {
+            Self::AccessRules { component, .. } | Self::OwnerRule { component, .. } => component,
+        }
+    }
 }
 
 /// A component whose template can be swapped by whoever satisfies `upgrade_rule`, so the code that runs when the
@@ -582,6 +632,10 @@ pub struct TransactionSubmitManifestResponse {
     /// runs. See [`ComponentUpgrade`].
     #[serde(default)]
     pub component_upgrades: Vec<ComponentUpgrade>,
+    /// Every `SetComponentAccessRules` and `SetComponentOwnerRule` instruction in the transaction, fee instructions
+    /// first. Only populated for dry runs. See [`ComponentRulesChange`].
+    #[serde(default)]
+    pub component_rules_changes: Vec<ComponentRulesChange>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -2059,6 +2113,11 @@ pub struct StealthTransferRequest {
     pub owner_account: ComponentAddressOrName,
     pub fee_params: TransferFeeParams,
     pub input_selection: UtxoInputSelection,
+    /// The stealth UTXOs input selection may choose from: the `inputs` a dry run reported, passed back with `max_fee`
+    /// set to its `required_fees`, so the submission spends the inputs that dry run priced. Each must still be
+    /// spendable. Requires the stealth-UTXO read scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inputs: Option<Vec<UtxoAddress>>,
     pub resource_address: ResourceAddress,
     #[serde(default, skip_serializing_if = "BadgeUsage::is_none")]
     pub badge_usage: BadgeUsage,
@@ -2104,6 +2163,10 @@ pub struct StealthTransferResponse {
     /// the inputs the dry run priced. Only present for dry runs.
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub required_fees: Option<u64>,
+    /// The stealth UTXOs the build made at `required_fees` spends. Selection targets `amount + max_fee`, and the
+    /// UTXOs on hand can change between a dry run and its submission, so a submission that selects again may spend a
+    /// different set and underpay; one passing these as `inputs` spends this set. Only present for dry runs.
+    pub inputs: Option<Vec<UtxoAddress>>,
     /// The result of the dry run. The wallet does not keep a dry run, so this is the only place it is reported.
     pub dry_run_result: Option<ExecuteResult>,
 }

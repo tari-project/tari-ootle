@@ -282,6 +282,7 @@ mod tests {
                 epoch,
                 from_height: 7,
                 request_id: 0,
+                skip: 0,
             })),
         };
         Bytes::from(prost::Message::encode_to_vec(&request))

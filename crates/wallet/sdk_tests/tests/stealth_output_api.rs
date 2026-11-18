@@ -3,6 +3,8 @@
 
 mod support;
 
+use std::time::Duration;
+
 use ootle_byte_type::ToByteType;
 use tari_engine_types::{
     component::{Component, ComponentBody, ComponentHeader},
@@ -21,7 +23,6 @@ use tari_ootle_wallet_sdk::{
             BadgeUsage,
             PayFeeWithSwapParams,
             StealthTransferApiError,
-            StealthTransferInputs,
             StealthTransferParams,
             TransferFeeParams,
             TransferOutput,
@@ -1097,7 +1098,7 @@ fn blinded_output_to_self(account: &AccountWithAddress, blinded_amount: u64) -> 
 fn confidential_transfer_params(
     outputs: Vec<TransferOutput>,
     max_fee: u64,
-    inputs: Option<StealthTransferInputs>,
+    inputs: Option<Vec<UtxoAddress>>,
 ) -> StealthTransferParams {
     StealthTransferParams {
         fee_params: TransferFeeParams::new(UtxoInputSelection::ConfidentialOnly),
@@ -1117,7 +1118,7 @@ fn tari_utxo(commitment: PedersenCommitmentBytes) -> UtxoAddress {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn named_inputs_rebuild_the_merged_build_after_a_better_fit_arrives() {
+async fn named_inputs_rebuild_the_priced_build_after_a_better_fit_arrives() {
     let test = Test::new();
     let account = test
         .sdk()
@@ -1133,9 +1134,7 @@ async fn named_inputs_rebuild_the_merged_build_after_a_better_fit_arrives() {
         .await
         .unwrap();
     lock.release();
-    assert_eq!(priced.inputs, StealthTransferInputs::Merged {
-        inputs: vec![tari_utxo(original)]
-    });
+    assert_eq!(priced.inputs, vec![tari_utxo(original)]);
 
     // An exact fit for `amount + max_fee` that selection prefers over the UTXO the first build spent.
     let exact_fit = add_owned_stealth_output(&test, &account, TARI_TOKEN, 150);
@@ -1144,9 +1143,7 @@ async fn named_inputs_rebuild_the_merged_build_after_a_better_fit_arrives() {
         .await
         .unwrap();
     lock.release();
-    assert_eq!(reselected.inputs, StealthTransferInputs::Merged {
-        inputs: vec![tari_utxo(exact_fit)]
-    });
+    assert_eq!(reselected.inputs, vec![tari_utxo(exact_fit)]);
 
     let (_lock, rebuilt) = api
         .transfer(
@@ -1156,8 +1153,6 @@ async fn named_inputs_rebuild_the_merged_build_after_a_better_fit_arrives() {
         .await
         .unwrap();
     assert_eq!(rebuilt.inputs, priced.inputs);
-    assert_eq!(rebuilt.transfer_inputs.inputs.len(), 1);
-    assert_eq!(rebuilt.transfer_inputs.inputs[0].commitment, original);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1183,11 +1178,9 @@ async fn named_inputs_rebuild_a_separate_fee_statement_and_its_spent_change() {
         .await
         .unwrap();
     lock.release();
-    assert_eq!(priced.inputs, StealthTransferInputs::Separate {
-        fee: vec![tari_utxo(original)],
-        transfer: vec![],
-        transfer_spends_fee_change: true,
-    });
+    assert_eq!(priced.inputs, vec![tari_utxo(original)]);
+    assert_eq!(priced.fee_inputs.inputs.len(), 1);
+    assert!(!priced.transfer_inputs.inputs[0].is_on_chain);
 
     // A closer fit for the fee alone than the UTXO the first build's fee statement spent.
     add_owned_stealth_output(&test, &account, TARI_TOKEN, 60);
@@ -1214,25 +1207,68 @@ async fn named_inputs_that_no_longer_cover_the_fee_fail_instead_of_reselecting()
         .accounts_api()
         .get_account_by_address(&Test::test_account_address())
         .unwrap();
-    let api = test.sdk().stealth_transfer_api();
     let original = add_owned_stealth_output(&test, &account, TARI_TOKEN, 500);
     // Enough to cover the higher fee, so a build that reselected would succeed.
     add_owned_stealth_output(&test, &account, TARI_TOKEN, 1000);
-    let named = StealthTransferInputs::Merged {
-        inputs: vec![tari_utxo(original)],
-    };
 
-    let err = api
+    let err = test
+        .sdk()
+        .stealth_transfer_api()
         .transfer(
             account.clone(),
-            confidential_transfer_params(vec![blinded_output_to_self(&account, 100)], 450, Some(named)),
+            confidential_transfer_params(
+                vec![blinded_output_to_self(&account, 100)],
+                450,
+                Some(vec![tari_utxo(original)]),
+            ),
         )
         .await
         .err()
         .expect("named inputs worth less than amount + max_fee must not build");
     assert!(
-        matches!(err, StealthTransferApiError::InsufficientFunds { available, required, .. }
-            if available == Amount::from(500u64) && required == Amount::from(550u64)),
+        matches!(err, StealthTransferApiError::NamedInputsShort { required, .. } if required == Amount::from(550u64)),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn named_input_locked_by_another_send_fails_instead_of_reselecting() {
+    let test = Test::new();
+    let account = test
+        .sdk()
+        .accounts_api()
+        .get_account_by_address(&Test::test_account_address())
+        .unwrap();
+    let original = add_owned_stealth_output(&test, &account, TARI_TOKEN, 500);
+    add_owned_stealth_output(&test, &account, TARI_TOKEN, 1000);
+    let other_send = test
+        .sdk()
+        .locks_api()
+        .create_lock_with_timeout(Duration::from_secs(60))
+        .unwrap();
+    test.sdk()
+        .stealth_outputs_api()
+        .lock_specific_outputs(account.component_address(), &TARI_TOKEN, other_send.id(), &[tari_utxo(
+            original,
+        )])
+        .unwrap();
+
+    let err = test
+        .sdk()
+        .stealth_transfer_api()
+        .transfer(
+            account.clone(),
+            confidential_transfer_params(
+                vec![blinded_output_to_self(&account, 100)],
+                50,
+                Some(vec![tari_utxo(original)]),
+            ),
+        )
+        .await
+        .err()
+        .expect("a named input another lock holds must not build");
+    assert!(
+        matches!(err, StealthTransferApiError::IneligibleSpecificInput(_)),
         "unexpected error: {err}"
     );
 }

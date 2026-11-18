@@ -58,7 +58,7 @@ use tari_ootle_wallet_sdk::{
     IndexerTrust,
     apis::{
         confidential_transfer::UtxoInputSelection,
-        stealth_transfer::{BadgeUsage, StealthTransferInputs, TransferFeeParams, TransferOutput},
+        stealth_transfer::{BadgeUsage, TransferFeeParams, TransferOutput},
     },
     crypto::{memo::Memo, pay_to::PayTo},
     models::{
@@ -2112,13 +2112,12 @@ pub struct AccountsCreateStealthTransferStatementResponse {
 pub struct StealthTransferRequest {
     pub owner_account: ComponentAddressOrName,
     pub fee_params: TransferFeeParams,
-    /// How to select inputs. With `inputs` set, it decides only how much revealed balance tops up the named UTXOs.
     pub input_selection: UtxoInputSelection,
-    /// The stealth UTXOs to spend instead of selecting them: the `inputs` a dry run reported, passed back with
-    /// `max_fee` set to its `required_fees`, so the submission spends the inputs that dry run priced. A build fails
-    /// rather than reselecting when they no longer cover the transfer. Requires the stealth-UTXO read scope.
+    /// The stealth UTXOs input selection may choose from: the `inputs` a dry run reported, passed back with `max_fee`
+    /// set to its `required_fees`, so the submission spends the inputs that dry run priced. Each must still be
+    /// spendable. Requires the stealth-UTXO read scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub inputs: Option<StealthTransferInputs>,
+    pub inputs: Option<Vec<UtxoAddress>>,
     pub resource_address: ResourceAddress,
     #[serde(default, skip_serializing_if = "BadgeUsage::is_none")]
     pub badge_usage: BadgeUsage,
@@ -2167,7 +2166,7 @@ pub struct StealthTransferResponse {
     /// The stealth UTXOs the build made at `required_fees` spends. Selection targets `amount + max_fee`, and the
     /// UTXOs on hand can change between a dry run and its submission, so a submission that selects again may spend a
     /// different set and underpay; one passing these as `inputs` spends this set. Only present for dry runs.
-    pub inputs: Option<StealthTransferInputs>,
+    pub inputs: Option<Vec<UtxoAddress>>,
     /// The result of the dry run. The wallet does not keep a dry run, so this is the only place it is reported.
     pub dry_run_result: Option<ExecuteResult>,
 }

@@ -33,7 +33,7 @@ use super::{
     BadgeUsage,
     TransferFeeParams,
     error::StealthTransferApiError,
-    params::{InputSelection, StealthTransferInputs, StealthTransferParams, TransferStatementSpec},
+    params::{InputSelection, StealthTransferParams, TransferStatementSpec},
     types::{InputsToSpend, StaticallyPricedShape, StealthOutputToCreate, StealthTransferOutput, TransferStatements},
 };
 use crate::{
@@ -45,6 +45,7 @@ use crate::{
         key_manager::KeyManagerApi,
         locks::LocksApi,
         stealth_outputs::{
+            Candidates,
             FEE_INTENT_INPUT_RESERVE,
             MAX_TRANSFER_INPUTS,
             StealthOutputsApi,
@@ -55,7 +56,6 @@ use crate::{
     },
     models::{
         AccountWithAddress,
-        InputSpendData,
         KeyBranch,
         KeyId,
         StealthUtxoSpendKeyId,
@@ -118,8 +118,6 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
     /// The reserve is held back unconditionally, including on the merged-statement path that may not need a fee
     /// statement at all: whether the merge fits the fee-intent credit is only known once the realised input count is,
     /// which is after selection, and a selection that had already claimed the whole budget could not then fall back.
-    ///
-    /// `pinned` names the stealth UTXOs to spend in place of selecting them; see [`StealthTransferParams::inputs`].
     pub fn lock_inputs_for_transfer(
         &self,
         lock_id: WalletLockId,
@@ -127,7 +125,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         resource_address: ResourceAddress,
         spend_amount: Amount,
         input_selection: UtxoInputSelection,
-        pinned: Option<&[UtxoAddress]>,
+        among: Candidates<'_>,
     ) -> Result<InputsToSpend, StealthTransferApiError> {
         self.lock_inputs_within_budget(
             lock_id,
@@ -135,8 +133,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             resource_address,
             spend_amount,
             input_selection,
-            pinned,
             MAX_TRANSFER_INPUTS,
+            among,
         )
     }
 
@@ -308,7 +306,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 spec.resource_address,
                 checked.total_amount,
                 *selection,
-                None,
+                Candidates::All,
             )?,
             InputSelection::FromBucket { .. } => InputsToSpend::empty(),
         };
@@ -353,7 +351,6 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         Ok((statement, signing_key_id, inputs))
     }
 
-    #[allow(clippy::too_many_lines)]
     fn lock_inputs_within_budget(
         &self,
         lock_id: WalletLockId,
@@ -361,8 +358,40 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         resource_address: ResourceAddress,
         spend_amount: Amount,
         input_selection: UtxoInputSelection,
-        pinned: Option<&[UtxoAddress]>,
         max_inputs: usize,
+        among: Candidates<'_>,
+    ) -> Result<InputsToSpend, StealthTransferApiError> {
+        let inputs = self.lock_inputs_within_budget_among(
+            lock_id,
+            owner_account_component_address,
+            resource_address,
+            spend_amount,
+            input_selection,
+            max_inputs,
+            among,
+        );
+        match (inputs, among) {
+            (
+                Err(StealthTransferApiError::OutputsApi(StealthOutputsApiError::InsufficientFunds)),
+                Candidates::Only(_),
+            ) => Err(StealthTransferApiError::NamedInputsShort {
+                resource_address,
+                required: spend_amount,
+            }),
+            (inputs, _) => inputs,
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn lock_inputs_within_budget_among(
+        &self,
+        lock_id: WalletLockId,
+        owner_account_component_address: &ComponentAddress,
+        resource_address: ResourceAddress,
+        spend_amount: Amount,
+        input_selection: UtxoInputSelection,
+        max_inputs: usize,
+        among: Candidates<'_>,
     ) -> Result<InputsToSpend, StealthTransferApiError> {
         if !spend_amount.is_positive() {
             return Err(StealthTransferApiError::InvalidParameter {
@@ -381,23 +410,15 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             .map(|v| v.available_revealed_balance())
             .unwrap_or_else(Amount::zero);
 
-        let has_pinned_utxos = pinned.is_some_and(|p| !p.is_empty());
-        if has_pinned_utxos && matches!(input_selection, UtxoInputSelection::RevealedOnly) {
-            return Err(StealthTransferApiError::InvalidParameter {
-                param: "inputs",
-                reason: "RevealedOnly input selection spends no stealth UTXOs, but some were named".to_string(),
-            });
-        }
-
         match input_selection {
             UtxoInputSelection::ConfidentialOnly => {
-                let (inputs, total_locked) = self.lock_utxos_for_at_least_amount(
-                    lock_id,
+                let (inputs, total_locked) = self.outputs_api.lock_outputs_for_at_least_amount(
                     owner_account_component_address,
                     &resource_address,
+                    lock_id,
                     spend_amount,
-                    pinned,
                     max_inputs,
+                    among,
                 )?;
 
                 info!(
@@ -450,8 +471,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 let revealed_to_spend = cmp::min(available_revealed_funds, spend_amount);
                 let utxo_amount_to_spend = spend_amount - revealed_to_spend;
                 if let Some(ref src_vault) = maybe_src_vault &&
-                    utxo_amount_to_spend.is_zero() &&
-                    !has_pinned_utxos
+                    utxo_amount_to_spend.is_zero()
                 {
                     info!(
                         target: LOG_TARGET,
@@ -481,13 +501,13 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                     });
                 }
 
-                let (inputs, _) = self.lock_utxos_for_at_least_amount(
-                    lock_id,
+                let (inputs, _) = self.outputs_api.lock_outputs_for_at_least_amount(
                     owner_account_component_address,
                     &resource_address,
+                    lock_id,
                     utxo_amount_to_spend,
-                    pinned,
                     max_inputs,
+                    among,
                 )?;
 
                 let total_confidential_spent = inputs.iter().map(|i| Amount::from(i.value)).sum::<Amount>();
@@ -514,22 +534,14 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 })
             },
             UtxoInputSelection::PreferConfidential => {
-                let (inputs, blinded_amount_locked) = match pinned {
-                    Some(pinned) => self.lock_pinned_utxos(
-                        lock_id,
-                        owner_account_component_address,
-                        &resource_address,
-                        pinned,
-                        max_inputs,
-                    )?,
-                    None => self.outputs_api.lock_outputs_until_partial_amount(
-                        owner_account_component_address,
-                        &resource_address,
-                        spend_amount,
-                        lock_id,
-                        max_inputs,
-                    )?,
-                };
+                let (inputs, blinded_amount_locked) = self.outputs_api.lock_outputs_until_partial_amount(
+                    owner_account_component_address,
+                    &resource_address,
+                    spend_amount,
+                    lock_id,
+                    max_inputs,
+                    among,
+                )?;
 
                 let revealed_to_spend = spend_amount.saturating_sub(blinded_amount_locked);
 
@@ -565,76 +577,13 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         }
     }
 
-    /// Locks stealth UTXOs worth at least `amount`: the `pinned` ones when given, otherwise ones selected for it.
-    fn lock_utxos_for_at_least_amount(
-        &self,
-        lock_id: WalletLockId,
-        account_address: &ComponentAddress,
-        resource_address: &ResourceAddress,
-        amount: Amount,
-        pinned: Option<&[UtxoAddress]>,
-        max_inputs: usize,
-    ) -> Result<(Vec<InputSpendData>, Amount), StealthTransferApiError> {
-        let Some(pinned) = pinned else {
-            return Ok(self.outputs_api.lock_outputs_for_at_least_amount(
-                account_address,
-                resource_address,
-                lock_id,
-                amount,
-                max_inputs,
-            )?);
-        };
-        let (inputs, total) = self.lock_pinned_utxos(lock_id, account_address, resource_address, pinned, max_inputs)?;
-        if total < amount {
-            return Err(StealthTransferApiError::InsufficientFunds {
-                details: "The named stealth inputs do not cover the transfer at this fee; estimate the fee again"
-                    .to_string(),
-                available: total,
-                required: amount,
-            });
-        }
-        Ok((inputs, total))
-    }
-
-    /// Locks exactly the stealth UTXOs `pinned` names, returning them with their total value.
-    fn lock_pinned_utxos(
-        &self,
-        lock_id: WalletLockId,
-        account_address: &ComponentAddress,
-        resource_address: &ResourceAddress,
-        pinned: &[UtxoAddress],
-        max_inputs: usize,
-    ) -> Result<(Vec<InputSpendData>, Amount), StealthTransferApiError> {
-        if pinned.is_empty() {
-            return Ok((Vec::new(), Amount::zero()));
-        }
-        if pinned.len() > max_inputs {
-            return Err(StealthTransferApiError::InvalidParameter {
-                param: "inputs",
-                reason: format!(
-                    "{} stealth inputs were named where a statement may spend at most {max_inputs}",
-                    pinned.len()
-                ),
-            });
-        }
-        let inputs = self
-            .outputs_api
-            .lock_specific_outputs(account_address, resource_address, lock_id, pinned)
-            .map_err(|e| match e {
-                StealthOutputsApiError::InvalidParameter { .. } => StealthTransferApiError::IneligibleSpecificInput(e),
-                e => e.into(),
-            })?;
-        let total = inputs.iter().map(|i| Amount::from(i.value)).sum::<Amount>();
-        Ok((inputs, total))
-    }
-
     fn lock_fee_inputs<A: Into<Amount>>(
         &self,
         lock_id: WalletLockId,
         owner_account_address: &ComponentAddress,
         max_fee: A,
         fee_params: &TransferFeeParams,
-        pinned: Option<&[UtxoAddress]>,
+        among: Candidates<'_>,
     ) -> Result<InputsToSpend, StealthTransferApiError> {
         let (resource, amount) = match fee_params.pay_fee_with_swap.as_ref() {
             Some(swap) => (swap.input_resource, swap.input_amount),
@@ -646,8 +595,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             resource,
             amount,
             fee_params.input_selection,
-            pinned,
             FEE_INTENT_INPUT_RESERVE,
+            among,
         )
     }
 
@@ -663,14 +612,13 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         owner_address: &RistrettoOotleAddress,
         account_key_id: KeyId,
         resource_view_key: Option<RistrettoPublicKey>,
-        pinned: Option<&[UtxoAddress]>,
     ) -> Result<(InputsToSpend, WalletPublicKey, StealthTransferStatement), StealthTransferApiError> {
         let fee_inputs_to_spend = self.lock_fee_inputs(
             lock_id,
             owner_account.component_address(),
             params.max_fee,
             &params.fee_params,
-            pinned,
+            params.candidates(),
         )?;
 
         debug!(
@@ -855,31 +803,34 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             // Create a lock with a timeout, the lock timeout will be removed if the lock is assigned a transaction
             let mut lock = self.locks_api.create_lock_with_timeout(Duration::from_secs(5 * 60))?;
 
+            if let Some(inputs) = &params.inputs {
+                // One transaction spends at most a transfer statement's inputs plus a fee statement's.
+                let max_inputs = MAX_TRANSFER_INPUTS + FEE_INTENT_INPUT_RESERVE;
+                if inputs.len() > max_inputs {
+                    return Err(StealthTransferApiError::InvalidParameter {
+                        param: "inputs",
+                        reason: format!("{} inputs named; a transfer spends at most {max_inputs}", inputs.len()),
+                    });
+                }
+                self.outputs_api
+                    .ensure_spendable(owner_account.component_address(), lock.id(), inputs)
+                    .map_err(|e| match e {
+                        StealthOutputsApiError::InvalidParameter { .. } => {
+                            StealthTransferApiError::IneligibleSpecificInput(e)
+                        },
+                        e => e.into(),
+                    })?;
+            }
+
             let num_blinded_outputs = params.outputs.iter().filter(|o| o.blinded_amount > 0).count();
 
             // A transfer statement whose revealed remainder covers the fee replaces the separate fee
             // statement, doing in one statement what otherwise takes two. It requires the fee and the
             // transfer resource to coincide, and the merged statement's whole verification then runs in
             // the fee intent ahead of `pay_fee`, funded by FREE_COMPUTE_GRACE_POINTS alone.
-            let can_merge = params.fee_params.pay_fee_with_swap.is_none() &&
+            let merge_candidate = params.fee_params.pay_fee_with_swap.is_none() &&
                 params.resource_address == TARI_TOKEN &&
                 merged_statement_fits_credit(0, num_blinded_outputs, resource_has_view_key);
-            // Named inputs fix the statement layout along with the UTXOs: a build that spent them in another layout
-            // would be another transaction from the one they were reported for.
-            let pinned = params.inputs.clone();
-            if matches!(pinned, Some(StealthTransferInputs::Merged { .. })) && !can_merge {
-                return Err(StealthTransferApiError::InvalidParameter {
-                    param: "inputs",
-                    reason: "The named inputs are for one statement that also pays the fee, which this transfer \
-                             cannot use"
-                        .to_string(),
-                });
-            }
-            let merge_candidate = can_merge && !matches!(pinned, Some(StealthTransferInputs::Separate { .. }));
-            let fee_pins = match &pinned {
-                Some(StealthTransferInputs::Separate { fee, .. }) => Some(fee.as_slice()),
-                Some(StealthTransferInputs::Merged { .. }) | None => None,
-            };
 
             // On the separate-statement path the fee half must run before transfer input selection, so
             // that its change output reaches the store in time for the transfer to be able to spend it.
@@ -894,7 +845,6 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                     &owner_address,
                     account_key_id,
                     fee_resource_view_key.clone(),
-                    fee_pins,
                 )?)
             };
 
@@ -907,39 +857,13 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 Amount::zero()
             };
 
-            let transfer_pins = match &pinned {
-                None => None,
-                Some(StealthTransferInputs::Merged { inputs }) => Some(inputs.clone()),
-                Some(StealthTransferInputs::Separate {
-                    transfer,
-                    transfer_spends_fee_change,
-                    ..
-                }) => {
-                    let mut pins = transfer.clone();
-                    if *transfer_spends_fee_change {
-                        let fee_change = fee_half
-                            .as_ref()
-                            .filter(|_| fee_resource == params.resource_address)
-                            .and_then(|(_, _, statement)| statement.outputs_statement.outputs.first())
-                            .ok_or_else(|| StealthTransferApiError::InvalidParameter {
-                                param: "inputs",
-                                reason: "The named inputs spend the fee statement's change, but this build's fee \
-                                         statement leaves none; estimate the fee again"
-                                    .to_string(),
-                            })?;
-                        pins.push(UtxoAddress::new(fee_resource, fee_change.output.commitment.into()));
-                    }
-                    Some(pins)
-                },
-            };
-
             let mut inputs_to_spend = self.lock_inputs_for_transfer(
                 lock.id(),
                 owner_account.account().component_address(),
                 params.resource_address,
                 params.total_output_amount_with_fee(merged_fee_amount)?,
                 params.input_selection,
-                transfer_pins.as_deref(),
+                params.candidates(),
             )?;
 
             // Output count drives the price and is known up front, but the realised input count is not,
@@ -951,16 +875,6 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                     inputs_to_spend.total_amount() > params.total_output_amount_with_fee(merged_fee_amount)?;
                 let num_outputs = num_blinded_outputs + usize::from(has_change);
                 if !merged_statement_fits_credit(inputs_to_spend.inputs.len(), num_outputs, resource_has_view_key) {
-                    if pinned.is_some() {
-                        return Err(StealthTransferApiError::InvalidParameter {
-                            param: "inputs",
-                            reason: format!(
-                                "The named inputs ({} inputs, {num_outputs} outputs) no longer fit one statement that \
-                                 also pays the fee; estimate the fee again",
-                                inputs_to_spend.inputs.len()
-                            ),
-                        });
-                    }
                     debug!(
                         target: LOG_TARGET,
                         "Merged fee/transfer statement ({} inputs, {} outputs) exceeds the fee-intent credit; \
@@ -979,7 +893,6 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                         &owner_address,
                         account_key_id,
                         fee_resource_view_key,
-                        None,
                     )?);
                     inputs_to_spend = self.lock_inputs_for_transfer(
                         lock.id(),
@@ -987,7 +900,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                         params.resource_address,
                         params.total_output_amount_with_fee(merged_fee_amount)?,
                         params.input_selection,
-                        None,
+                        params.candidates(),
                     )?;
                 }
             }
@@ -1236,27 +1149,14 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 )
             });
 
-            // Only on-chain inputs have an address to name. The one exception a build spends is the fee statement's
-            // change, which a later build recreates under a new commitment, so it is reported as a flag.
-            let on_chain_addresses = |inputs: &InputsToSpend, resource: ResourceAddress| {
-                inputs
-                    .inputs
-                    .iter()
-                    .filter(|i| i.is_on_chain)
-                    .map(|i| UtxoAddress::new(resource, i.commitment.into()))
-                    .collect::<Vec<_>>()
-            };
-            let inputs = if is_merged {
-                StealthTransferInputs::Merged {
-                    inputs: on_chain_addresses(&inputs_to_spend, params.resource_address),
-                }
-            } else {
-                StealthTransferInputs::Separate {
-                    fee: on_chain_addresses(&fee_inputs_to_spend, fee_resource),
-                    transfer: on_chain_addresses(&inputs_to_spend, params.resource_address),
-                    transfer_spends_fee_change: inputs_to_spend.inputs.iter().any(|i| !i.is_on_chain),
-                }
-            };
+            let inputs = fee_inputs_to_spend
+                .inputs
+                .iter()
+                .map(|i| (fee_resource, i))
+                .chain(inputs_to_spend.inputs.iter().map(|i| (params.resource_address, i)))
+                .filter(|(_, i)| i.is_on_chain)
+                .map(|(resource, i)| UtxoAddress::new(resource, i.commitment.into()))
+                .collect();
 
             let transaction = self.generate_transfer_transaction(
                 network,

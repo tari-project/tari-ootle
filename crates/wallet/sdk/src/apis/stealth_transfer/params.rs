@@ -21,7 +21,7 @@ use tari_template_lib::types::{
 use crate::{
     apis::{
         confidential_transfer::UtxoInputSelection,
-        stealth_outputs::StealthOutputsApiError,
+        stealth_outputs::{Candidates, StealthOutputsApiError},
         stealth_transfer::{StealthOutputToCreate, StealthTransferApiError},
     },
     models::AccountWithAddress,
@@ -31,13 +31,13 @@ use crate::{
 pub struct StealthTransferParams {
     /// Parameters related to fee payment
     pub fee_params: TransferFeeParams,
-    /// Strategy for input selection. With [`Self::inputs`] set it still decides how much revealed balance tops up
-    /// the named UTXOs.
+    /// Strategy for input selection
     pub input_selection: UtxoInputSelection,
-    /// The stealth UTXOs to spend, in place of selecting them. A build spends exactly these, so a submission naming
-    /// the inputs a dry run reported is the transaction that dry run priced. Selection targets `amount + max_fee`,
-    /// which leaves a build that selects its own inputs free to spend a different set from the one priced.
-    pub inputs: Option<StealthTransferInputs>,
+    /// The stealth UTXOs selection may choose from, in place of every UTXO the account holds: the `inputs` an
+    /// earlier build of this transfer reported. Selection targets `amount + max_fee`, so with the same candidates
+    /// and `max_fee` it spends what that build spent, whatever UTXOs have arrived since. Every one named must still be
+    /// spendable.
+    pub inputs: Option<Vec<UtxoAddress>>,
     pub outputs: Vec<TransferOutput>,
     pub badge_usage: BadgeUsage,
     /// Address of the resource to transfer
@@ -53,6 +53,11 @@ pub struct StealthTransferParams {
 }
 
 impl StealthTransferParams {
+    /// The UTXOs selection may choose from: those [`Self::inputs`] names, or all of them.
+    pub fn candidates(&self) -> Candidates<'_> {
+        self.inputs.as_deref().map_or(Candidates::All, Candidates::Only)
+    }
+
     pub fn validate(&self, network: Network) -> Result<(), StealthTransferApiError> {
         if self.outputs.is_empty() {
             return Err(StealthTransferApiError::InvalidParameter {
@@ -273,25 +278,6 @@ impl InputSelection {
             InputSelection::FromBucket { .. } | InputSelection::Selection(_) => None,
         }
     }
-}
-
-/// The stealth UTXOs a stealth transfer spends, by the statement that spends them.
-///
-/// A build reports these as `StealthTransferOutput::inputs`, and `StealthTransferParams::inputs` takes them back to
-/// make another build spend the same ones.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub enum StealthTransferInputs {
-    /// One statement moves the funds and reveals the fee.
-    Merged { inputs: Vec<UtxoAddress> },
-    /// The fee comes from a statement of its own.
-    Separate {
-        fee: Vec<UtxoAddress>,
-        transfer: Vec<UtxoAddress>,
-        /// Whether the transfer statement also spends the fee statement's change. The build creates that output,
-        /// so it has no address until then.
-        transfer_spends_fee_change: bool,
-    },
 }
 
 /// One stealth transfer statement for [`StealthTransferApi::create_transfer_statements`] to build.

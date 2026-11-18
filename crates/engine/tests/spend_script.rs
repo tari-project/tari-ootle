@@ -1574,15 +1574,20 @@ fn hashlock_rejects_empty_data() {
 fn htlc_claim_requires_both_preimage_and_signer() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let preimage = b"htlc secret".to_vec();
-    // Claim path = reveal the preimage AND prove ownership of the claimant's badge (the test signer). The access rule
-    // consumes no witness data, so the hashlock remains the sole consumer of the `data` blob.
-    let leaf = all(vec![
-        builtin(BuiltinPredicate::HashLock {
-            hash: hashlock_digest(HashAlg::Sha256, &preimage),
-            alg: HashAlg::Sha256,
-        }),
-        SpendCondition::access_rule(AccessRule::AllowAll),
-    ]);
+    let claimant = test.to_public_key_bytes();
+    let leaf = htlc_claim_leaf(&preimage, claimant);
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf.clone()]));
+    let transfer = spend_leaf_with_data(&mint, leaf, Bytes::from_vec(preimage), key_path(claimant));
+    submit_expect_success(&mut test, resx, transfer);
+}
+
+#[test]
+fn htlc_claim_rejects_correct_preimage_without_claimant_signer() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let preimage = b"htlc secret".to_vec();
+    // The transaction is sealed by the test signer, which does not hold the claimant's key.
+    let (_secret, claimant) = create_key_pair_from_seed(42);
+    let leaf = htlc_claim_leaf(&preimage, claimant.to_byte_type());
     let (resx, mint) = mint_utxo(&mut test, conditions(vec![leaf.clone()]));
     let transfer = spend_leaf_with_data(
         &mint,
@@ -1590,7 +1595,19 @@ fn htlc_claim_requires_both_preimage_and_signer() {
         Bytes::from_vec(preimage),
         key_path(test.to_public_key_bytes()),
     );
-    submit_expect_success(&mut test, resx, transfer);
+    submit_expect_rejected(&mut test, resx, transfer, "Access Denied");
+}
+
+/// HTLC claim path: reveal the preimage AND hold the claimant's signer badge. The access rule consumes no witness
+/// data, so the hashlock is the sole consumer of the `data` blob.
+fn htlc_claim_leaf(preimage: &[u8], claimant: RistrettoPublicKeyBytes) -> SpendCondition {
+    all(vec![
+        builtin(BuiltinPredicate::HashLock {
+            hash: hashlock_digest(HashAlg::Sha256, preimage),
+            alg: HashAlg::Sha256,
+        }),
+        SpendCondition::access_rule(rule!(public_key(claimant))),
+    ])
 }
 
 // ---- TemplateFunction reading witness data ----

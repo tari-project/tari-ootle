@@ -68,6 +68,7 @@ mod tests {
                     access_rules: Default::default(),
                     entity_id: Default::default(),
                     upgrade_rule: Default::default(),
+                    rules_updater: None,
                 },
                 body: ComponentBody { state: Value::Null },
             })),

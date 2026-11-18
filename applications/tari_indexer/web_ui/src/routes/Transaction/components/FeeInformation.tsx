@@ -33,7 +33,7 @@ import type { FeeReceipt } from "@tari-project/ootle-ts-bindings";
 import { useEffect, useState } from "react";
 import { Accordion, AccordionDetails, AccordionSummary } from "../../../Components/Accordion";
 import { DataTableCell } from "../../../Components/StyledComponents";
-import { formatXTM } from "../../../utils/helpers";
+import { formatTari } from "../../../utils/helpers";
 
 const FEE_SOURCE_LABELS: Record<string, string> = {
   Initial: "Initial",
@@ -100,12 +100,12 @@ function FeeInformation({
             <TableBody>
               <TableRow>
                 <TableCell>Total Fee Payment</TableCell>
-                <DataTableCell>{formatXTM(total_fee_payment)}</DataTableCell>
+                <DataTableCell>{formatTari(total_fee_payment)}</DataTableCell>
               </TableRow>
               <TableRow>
                 <TableCell>Total Fees Paid</TableCell>
                 <DataTableCell>
-                  {formatXTM(total_fees_paid)}
+                  {formatTari(total_fees_paid)}
                   {total_fee_overcharge > 0 ? ` Overcharge: ${total_fee_overcharge}` : ""}
                 </DataTableCell>
               </TableRow>

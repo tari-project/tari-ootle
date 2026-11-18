@@ -331,6 +331,23 @@ pub trait WalletStoreReader {
         after: Option<UtxoProcessQueueCursor>,
         batch_size: usize,
     ) -> Result<UtxoProcessQueueBatch, WalletStorageError>;
+    /// Whether every one of `entries` is still queued at its generation.
+    fn utxo_process_queue_is_current(&mut self, entries: &[QueuedEntry]) -> Result<bool, WalletStorageError>;
+    /// The position of the last recorded unheld spend, or 0 when none is recorded.
+    fn utxo_unheld_spends_watermark(&mut self) -> Result<u64, WalletStorageError>;
+    /// Whether a spend of any of `commitments` of the resource was recorded after `watermark`.
+    fn utxo_unheld_spends_any_after(
+        &mut self,
+        resource_address: &ResourceAddress,
+        watermark: u64,
+        commitments: &[PedersenCommitmentBytes],
+    ) -> Result<bool, WalletStorageError>;
+    /// Whether the account has any UTXO of the resource queued for recovery.
+    fn utxo_process_queue_has_entries(
+        &mut self,
+        account: &ComponentAddress,
+        resource: &ResourceAddress,
+    ) -> Result<bool, WalletStorageError>;
 
     // Address book
     fn address_book_get(&mut self, name: &str) -> Result<AddressBookEntry, WalletStorageError>;
@@ -394,11 +411,37 @@ impl QueuedUtxo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct UtxoProcessQueueCursor(pub i64);
 
+/// One account's queued entry of a tag and nonce pair, as it was when read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueuedEntry {
+    pub id: i64,
+    /// The account whose view key the pair's tag matched.
+    pub account: ComponentAddress,
+    /// Advances each time the pair is queued again for the account. Work looked up at one generation must not
+    /// acknowledge the entry at a later one, which may stand for an output the lookup did not see.
+    pub generation: u64,
+}
+
+/// A tag and nonce pair queued for recovery, with the entry of every account it is queued for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueuedPair {
+    /// Every account's entry of the pair, in this batch or not, in queue order. Each account is a candidate owner of
+    /// an output with the pair, as tags of different accounts can collide.
+    pub entries: Vec<QueuedEntry>,
+    /// Where [`QueuedUtxo::merge_unspent_at`] places every entry of the pair.
+    pub unspent_at: Option<(Shard, StateVersion)>,
+}
+
+impl QueuedPair {
+    pub fn accounts(&self) -> impl Iterator<Item = &ComponentAddress> {
+        self.entries.iter().map(|entry| &entry.account)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct UtxoProcessQueueBatch {
-    /// The queued UTXOs of each resource, by tag and nonce. A pair queued for several accounts is one entry, unspent
-    /// where [`QueuedUtxo::merge_unspent_at`] places every queued entry of the pair, in this batch or not.
-    pub entries: HashMap<ResourceAddress, HashMap<TagAndPublicNoncePair, QueuedUtxo>>,
+    /// The queued pairs of each resource that have an entry in this batch, by tag and nonce.
+    pub entries: HashMap<ResourceAddress, HashMap<TagAndPublicNoncePair, QueuedPair>>,
     /// The last entry of the batch, or `None` for an empty batch.
     pub last: Option<UtxoProcessQueueCursor>,
 }

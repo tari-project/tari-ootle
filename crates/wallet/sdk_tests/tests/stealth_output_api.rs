@@ -857,6 +857,7 @@ async fn stealth_transfer_with_stealth_fee_swap_declares_account_vault_and_swap_
                 access_rules: ComponentAccessRules::new(),
                 entity_id: Default::default(),
                 upgrade_rule: Default::default(),
+                rules_updater: None,
             },
             body: ComponentBody::empty(),
         }
@@ -967,6 +968,7 @@ async fn stealth_transfer_with_revealed_fee_swap_declares_swap_vault_input() {
                 access_rules: ComponentAccessRules::new(),
                 entity_id: Default::default(),
                 upgrade_rule: Default::default(),
+                rules_updater: None,
             },
             body: ComponentBody::empty(),
         }

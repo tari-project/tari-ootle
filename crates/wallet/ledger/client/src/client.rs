@@ -110,8 +110,8 @@ impl<T: Exchange> LedgerClient<T> {
     /// approves on-device.
     ///
     /// `mode` selects the procedure (authorization vs seal). `segments` are the canonical preimage
-    /// fields in chain order — see `tari_ootle_transaction::TransactionSignature::signing_preimage_v1`
-    /// / `TransactionSealSignature::signing_preimage_v1`. The device recomputes the signing message
+    /// fields in chain order — see `tari_ootle_transaction::TransactionSignature::signing_preimage`
+    /// / `TransactionSealSignature::signing_preimage`. The device recomputes the signing message
     /// from these bytes itself; nothing here is trusted as a precomputed hash.
     ///
     /// `stealth_public_nonce` is `Some` for a confidential (stealth) transfer: the spent UTXO's
@@ -287,8 +287,11 @@ mod tests {
             .await
             .unwrap();
         let tx = sample_unsigned();
+        // The device authorizes with the same key, so the set holds it alone.
+        let authorizers: tari_ootle_transaction::AuthorizerSet = [seal_signer].into_iter().collect();
+        let context = tari_ootle_transaction::AuthorizationContext::new(&seal_signer, &authorizers);
 
-        let segments = TransactionSignature::signing_preimage_v1(&seal_signer, &tx);
+        let segments = TransactionSignature::signing_preimage(context, &tx);
         let response = client
             .sign_transaction(
                 account,
@@ -306,7 +309,7 @@ mod tests {
             Sr25519SignatureBytes::from_array(response.signature),
         );
         assert!(
-            signature.verify_v1(&seal_signer, &tx),
+            signature.verify_message(TransactionSignature::create_message(context, &tx)),
             "device authorization signature did not verify"
         );
     }
@@ -318,7 +321,7 @@ mod tests {
         let (account, index) = (0u64, 0u64);
 
         let unsealed = UnsealedTransactionV1::new(sample_unsigned(), vec![]);
-        let segments = TransactionSealSignature::signing_preimage_v1(&unsealed);
+        let segments = TransactionSealSignature::signing_preimage(&unsealed);
         let response = client
             .sign_transaction(
                 account,
@@ -335,7 +338,10 @@ mod tests {
             RistrettoPublicKeyBytes::from(response.public_key),
             Sr25519SignatureBytes::from_array(response.signature),
         );
-        assert!(seal.verify_v1(&unsealed), "device seal signature did not verify");
+        assert!(
+            seal.verify_message(TransactionSealSignature::create_message(&unsealed)),
+            "device seal signature did not verify"
+        );
     }
 
     #[tokio::test]
@@ -373,7 +379,15 @@ mod tests {
         // Any public key works as the seal-signer context for an authorization signature.
         let seal_signer = account_pk_bytes;
         let tx = sample_unsigned();
-        let segments = TransactionSignature::signing_preimage_v1(&seal_signer, &tx);
+        // The device signs with the stealth key, which the sender derives on its own.
+        let network = Network::try_from(tx.network).unwrap();
+        let expected = owner_stealth_dh_stealth_address(network, &account_pk, &view_pk, &r);
+        let authorizers: tari_ootle_transaction::AuthorizerSet =
+            [RistrettoPublicKeyBytes::from_bytes(expected.as_bytes()).unwrap()]
+                .into_iter()
+                .collect();
+        let context = tari_ootle_transaction::AuthorizationContext::new(&seal_signer, &authorizers);
+        let segments = TransactionSignature::signing_preimage(context, &tx);
 
         let response = client
             .sign_transaction(
@@ -394,8 +408,6 @@ mod tests {
         );
 
         // The returned key must equal the sender-derived stealth address for this network.
-        let network = Network::try_from(tx.network).unwrap();
-        let expected = owner_stealth_dh_stealth_address(network, &account_pk, &view_pk, &r);
         assert_eq!(
             &response.public_key[..],
             expected.as_bytes(),
@@ -408,7 +420,7 @@ mod tests {
             Sr25519SignatureBytes::from_array(response.signature),
         );
         assert!(
-            signature.verify_v1(&seal_signer, &tx),
+            signature.verify_message(TransactionSignature::create_message(context, &tx)),
             "device stealth signature did not verify"
         );
 

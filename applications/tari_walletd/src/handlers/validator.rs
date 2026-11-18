@@ -240,9 +240,12 @@ pub async fn handle_claim_validator_fees(
                     Ok(builder.finish())
                 } else {
                     // If the claim key is different from the account secret, we need to sign with both
-                    sdk.signer_api()
-                        .with_context(&account_public_key)
-                        .sign(KeyId::derived(KeyBranch::Account, index), builder.finish())
+                    sdk.signer_api().authorize(
+                        &account_public_key,
+                        &[KeyId::derived(KeyBranch::Account, index)],
+                        &[],
+                        builder.finish(),
+                    )
                 }
             } else {
                 Ok(builder.finish())

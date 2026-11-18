@@ -12,6 +12,7 @@ use tari_crypto::{
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::signature::Sr25519SignatureBytes;
 use tari_ootle_transaction::{
+    AuthorizationContext,
     Signable,
     TransactionSealSignature,
     TransactionSignature,
@@ -76,10 +77,10 @@ where C: TransactionMessageSigner<(Sr25519SignatureBytes, RistrettoPublicKey)> +
 
     async fn sign_authorization(
         &self,
-        seal_signer: &RistrettoPublicKeyBytes,
+        context: AuthorizationContext<'_>,
         tx: &UnsignedTransaction,
     ) -> signer::Result<TransactionAuthorization> {
-        let message = tx.to_signing_message(seal_signer);
+        let message = tx.to_signing_message(context);
         let (signature, public_key) = self.credentials.sign_transaction_message(&message)?;
         let sig = TransactionSignature::new(public_key.to_byte_type(), signature);
         Ok(sig.into())
@@ -298,12 +299,12 @@ impl<C: StealthKeyPrehashSigner<(Sr25519SignatureBytes, RistrettoPublicKey)> + S
     async fn sign_authorization_with_stealth(
         &self,
         public_nonce: &RistrettoPublicKey,
-        seal_signer: &RistrettoPublicKeyBytes,
+        context: AuthorizationContext<'_>,
         tx: &UnsignedTransaction,
     ) -> signer::Result<TransactionAuthorization> {
         let (sig, pk) = self
             .credentials
-            .sign_prehash_with_stealth_key(public_nonce, &tx.to_signing_message(seal_signer))
+            .sign_prehash_with_stealth_key(public_nonce, &tx.to_signing_message(context))
             .await?;
         let sig = TransactionSignature::new(pk.to_byte_type(), sig);
         Ok(sig.into())
@@ -645,10 +646,16 @@ mod tests {
             .expect("sealing with a stealth key must succeed");
         assert_eq!(seal.public_key(), &derived);
 
+        let authorizers: tari_ootle_transaction::AuthorizerSet = [derived].into_iter().collect();
+        let context = AuthorizationContext::new(&derived, &authorizers);
         let auth = provider
-            .sign_authorization_with_stealth(&public_nonce, &derived, &unsigned)
+            .sign_authorization_with_stealth(&public_nonce, context, &unsigned)
             .await
             .expect("authorizing with a stealth key must succeed");
         assert_eq!(auth.signature().public_key(), &derived);
+        assert!(
+            auth.signature()
+                .verify_message(TransactionSignature::create_message(context, unsigned.body()))
+        );
     }
 }

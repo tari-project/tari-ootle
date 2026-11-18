@@ -38,6 +38,7 @@ use tari_ootle_walletd::{
     init_os_keyring_store,
     init_wallet_store,
     initialize_wallet_sdk,
+    install_default_crypto_provider,
     reset_wallet_passkeys,
     run_tari_ootle_walletd,
 };
@@ -57,6 +58,8 @@ async fn main() -> Result<(), anyhow::Error> {
         default_hook(info);
         process::exit(1);
     }));
+
+    install_default_crypto_provider();
 
     let mut cli = Cli::init();
     let config_path = cli.common.config_path();

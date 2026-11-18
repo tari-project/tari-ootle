@@ -467,9 +467,16 @@ impl<TStore: StateReader> WorkingState<TStore> {
         locked: &LockedSubstate,
         f: F,
     ) -> Result<(), RuntimeError> {
-        f(&mut self.get_component_mut(locked)?.header);
+        let component = self.get_component_mut(locked)?;
+        f(&mut component.header);
+        let component_template = *component.template_address();
+        // A top-level instruction changes a header outside any frame; the change is attributed to the component's
+        // own template.
+        let template_address = match self.call_frames.last() {
+            Some(frame) => *frame.current_template(),
+            None => component_template,
+        };
 
-        let template_address = *self.current_template()?;
         self.push_event(Event::std(
             Some(locked.substate_id().clone()),
             template_address,
@@ -2696,6 +2703,7 @@ mod tests {
                 access_rules: ComponentAccessRules::new(),
                 entity_id: address.entity_id(),
                 upgrade_rule: UpdateRule::default(),
+                rules_updater: None,
             },
             body: tari_engine_types::component::ComponentBody {
                 state: tari_bor::Value::Null,

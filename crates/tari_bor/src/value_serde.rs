@@ -606,10 +606,9 @@ fn decode_hex(s: &str) -> Result<Vec<u8>, &'static str> {
     }
     let mut out = Vec::with_capacity(s.len() / 2);
     let bytes = s.as_bytes();
-    for chunk in bytes.chunks_exact(2) {
-        let hi = parse_nibble(chunk[0])?;
-        let lo = parse_nibble(chunk[1])?;
-        out.push((hi << 4) | lo);
+    let (pairs, _) = bytes.as_chunks::<2>();
+    for &[hi, lo] in pairs {
+        out.push((parse_nibble(hi)? << 4) | parse_nibble(lo)?);
     }
     Ok(out)
 }

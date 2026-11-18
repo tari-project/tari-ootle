@@ -494,9 +494,12 @@ fn seal_transfer_transaction(
 ) -> anyhow::Result<tari_ootle_transaction::Transaction> {
     let transaction = if account_owner_key_id != fee_payer_key_id {
         let fee_owner_key = sdk.key_manager_api().get_public_key(fee_payer_key_id)?;
-        sdk.signer_api()
-            .with_context(&fee_owner_key.public_key().to_byte_type())
-            .sign(account_owner_key_id, transaction)?
+        sdk.signer_api().authorize(
+            &fee_owner_key.public_key().to_byte_type(),
+            &[account_owner_key_id],
+            &[],
+            transaction,
+        )?
     } else {
         transaction
     };

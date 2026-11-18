@@ -202,6 +202,7 @@ diesel::table! {
         decided_at -> Nullable<Timestamp>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+        authorizers -> Text,
     }
 }
 

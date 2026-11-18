@@ -118,17 +118,14 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 self.process_local_proposal(current_epoch, current_height, from, epoch_state, *msg, new_transactions)
                     .await
             },
-            HotstuffMessage::CatchUpSyncResponse(msg) => {
-                if !epoch_state.local_committee().contains(&from) {
-                    warn!(
-                        target: LOG_TARGET,
-                        "❌ Received CatchUpSyncResponse from non-committee member {}. Discarding message.",
-                        from
-                    );
-                    return Ok(MessageValidationResult::Discard);
-                }
-                self.process_catch_up_response(current_epoch, from, epoch_state, *msg, new_transactions)
-                    .await
+            // Catch-up blocks arrive inside pages and are validated with `validate_catch_up_block` once unpacked.
+            HotstuffMessage::CatchUpSyncResponse(_) => {
+                warn!(
+                    target: LOG_TARGET,
+                    "❌ Received a catch-up block outside a page from {}. Discarding message.",
+                    from
+                );
+                Ok(MessageValidationResult::Discard)
             },
             HotstuffMessage::ForeignProposal(msg) => {
                 // Honest late replies to a request another peer already answered also land here, so this logs at debug.
@@ -169,7 +166,8 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             },
             msg @ HotstuffMessage::NewView(_) |
             msg @ HotstuffMessage::Vote(_) |
-            msg @ HotstuffMessage::CatchUpSyncRequest(_) => {
+            msg @ HotstuffMessage::CatchUpSyncRequest(_) |
+            msg @ HotstuffMessage::CatchUpPage(_) => {
                 if !epoch_state.local_committee().contains(&from) {
                     warn!(
                         target: LOG_TARGET,
@@ -389,7 +387,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
     /// [`Self::process_local_proposal`] — it is intentionally NOT gated on the current view height:
     /// a node whose view has advanced beyond its stored blocks must still ingest the gap. Stateless
     /// validation and missing-transaction parking are identical to the live-proposal path.
-    async fn process_catch_up_response(
+    pub async fn validate_catch_up_block(
         &mut self,
         current_epoch: Epoch,
         from: TConsensusSpec::Addr,
@@ -433,12 +431,29 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             let mut foreign_unparked_blocks = Vec::new();
             for transaction_id in transaction_ids {
                 debug!(target: LOG_TARGET, "🔍 Checking if transaction {} unparks any blocks", transaction_id);
-                let unparked = tx.parked_block_remove_missing_transaction(transaction_id)?;
+                let mut unparked = tx.parked_block_remove_missing_transaction(transaction_id)?;
+                // A justify block decides whether it parks again before its children check it.
+                unparked.sort_by_key(|(block, _, _)| (block.epoch(), block.height()));
                 if unparked.is_empty() {
                     debug!(target: LOG_TARGET, "🔍 Transaction {} did not unpark any blocks", transaction_id);
                 } else {
                     unparked_blocks.reserve(unparked.len());
                     for (unparked_block, foreign_proposals, origin) in unparked {
+                        // A block that parked before its justify block did waits on its own transactions only, so it
+                        // can become ready first. It parks again behind its justify block.
+                        let awaited_by_justify =
+                            tx.parked_block_missing_transactions(&unparked_block.justify().calculate_block_id())?;
+                        if !awaited_by_justify.is_empty() {
+                            info!(
+                                target: LOG_TARGET,
+                                "⏳ all transactions for local block {unparked_block} are ready, but its justify block \
+                                 waits on {} more. Parking it behind its justify block.",
+                                awaited_by_justify.len(),
+                            );
+                            tx.parked_block_insert(&unparked_block, &foreign_proposals, origin, &awaited_by_justify)?;
+                            continue;
+                        }
+
                         info!(
                             target: LOG_TARGET,
                             "♻️ all transactions for local block {unparked_block} are ready for consensus"
@@ -497,8 +512,8 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         validations::check_foreign_proposal::<TConsensusSpec>(proposal, committee, &self.config)
     }
 
-    /// Parks the block if it is waiting on transactions this node does not hold, otherwise passes it on as the
-    /// message `to_message` builds.
+    /// Parks the block if it is waiting on transactions this node does not hold or its justify block is parked,
+    /// otherwise passes it on as the message `to_message` builds.
     async fn handle_missing_transactions_local_block(
         &mut self,
         from: TConsensusSpec::Addr,
@@ -507,7 +522,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         new_transactions: &OnReceiveNewTransaction<TConsensusSpec>,
         origin: ProposalOrigin,
     ) -> Result<MessageValidationResult<TConsensusSpec::Addr>, HotStuffError> {
-        let Some(has_missing_transactions) = self.store.with_write_tx(|tx| {
+        let Some(must_park) = self.store.with_write_tx(|tx| {
             if !validations::are_block_foreign_proposals_matched(&**tx, &proposal.block, &proposal.foreign_proposals)? {
                 return Ok::<_, HotStuffError>(None);
             }
@@ -516,8 +531,10 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             // group matches `epoch_state.local_committee_info().shard_group()`, while the transaction's validity
             // window is checked against `proposal.block.epoch()`.
             self.resequence_unpooled_transactions(tx, epoch_state.local_committee_info(), &proposal, new_transactions)?;
-            let missing = self.get_missing_transactions(&**tx, epoch_state.local_committee_info(), &proposal)?;
-            Ok(Some(!missing.is_empty()))
+            Ok(Some(
+                tx.parked_block_exists(&proposal.block.justify().calculate_block_id())? ||
+                    self.has_missing_transactions(&**tx, epoch_state.local_committee_info(), &proposal)?,
+            ))
         })?
         else {
             warn!(
@@ -529,7 +546,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             return Ok(MessageValidationResult::Discard);
         };
 
-        if !has_missing_transactions {
+        if !must_park {
             return Ok(MessageValidationResult::Ready {
                 from,
                 message: proposal_message(origin, proposal),
@@ -547,20 +564,22 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             return Ok(MessageValidationResult::Discard);
         }
 
-        let missing_tx_ids = self.store.with_write_tx(|tx| {
-            self.check_for_missing_transactions(tx, epoch_state.local_committee_info(), &proposal, origin)
-        })?;
-
-        if missing_tx_ids.is_empty() {
+        let Some(ParkedLocalBlock {
+            num_awaited,
+            to_request,
+        }) = self.store.with_write_tx(|tx| {
+            self.park_if_missing_transactions(tx, epoch_state.local_committee_info(), &proposal, origin)
+        })?
+        else {
             return Ok(MessageValidationResult::Ready {
                 from,
                 message: proposal_message(origin, proposal),
             });
-        }
+        };
 
         self.publish_event(HotstuffEvent::ProposedBlockParked {
             block: proposal.block.as_leaf(),
-            num_missing_txs: missing_tx_ids.len(),
+            num_missing_txs: num_awaited,
             // TODO: remove
             num_awaiting_txs: 0,
         });
@@ -568,7 +587,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         Ok(MessageValidationResult::ParkedProposal {
             block_id: *proposal.block.id(),
             epoch: proposal.block.epoch(),
-            missing_txs: missing_tx_ids,
+            missing_txs: to_request,
         })
     }
 
@@ -602,6 +621,30 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
 
         new_transactions.resequence_known_transactions(tx, proposal.block.epoch(), ids, local_committee_info)?;
         Ok(())
+    }
+
+    /// Whether the block, or a foreign proposal it embeds, names a transaction this node holds no record of.
+    fn has_missing_transactions<TTx: StateStoreReadTransaction>(
+        &self,
+        tx: &TTx,
+        local_committee_info: &CommitteeInfo,
+        proposal: &ProposalMessage,
+    ) -> Result<bool, HotStuffError> {
+        if proposal.block.commands().is_empty() {
+            return Ok(false);
+        }
+        if TransactionRecord::any_missing(tx, proposal.block.all_transaction_ids())? {
+            return Ok(true);
+        }
+        for foreign_proposal in &proposal.foreign_proposals {
+            if TransactionRecord::any_missing(
+                tx,
+                foreign_proposal.all_transaction_ids_in_committee(local_committee_info),
+            )? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn get_missing_transactions<TTx: StateStoreReadTransaction>(
@@ -722,31 +765,58 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         Ok(true)
     }
 
-    fn check_for_missing_transactions(
+    /// Parks the block while it is missing transactions or its justify block is parked, and returns `None` when it
+    /// is not parked.
+    ///
+    /// A block parked behind its justify block waits on every transaction the justify block waits on, so both unpark
+    /// on the same arrival and are processed parent first. Only the block's own missing transactions are requested
+    /// for it: the justify block's were requested when it was parked.
+    fn park_if_missing_transactions(
         &self,
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
         local_committee_info: &CommitteeInfo,
         proposal: &ProposalMessage,
         origin: ProposalOrigin,
-    ) -> Result<HashSet<TransactionId>, HotStuffError> {
-        let missing_tx_ids = self.get_missing_transactions(&**tx, local_committee_info, proposal)?;
+    ) -> Result<Option<ParkedLocalBlock>, HotStuffError> {
+        let mut to_request = self.get_missing_transactions(&**tx, local_committee_info, proposal)?;
+        let awaited_by_justify =
+            tx.parked_block_missing_transactions(&proposal.block.justify().calculate_block_id())?;
 
-        if missing_tx_ids.is_empty() {
+        if to_request.is_empty() && awaited_by_justify.is_empty() {
             debug!(
                 target: LOG_TARGET,
                 "✅ Block {} has no missing transactions", proposal.block
             );
-            return Ok(HashSet::new());
+            return Ok(None);
         }
 
-        info!(
-            target: LOG_TARGET,
-            "⏳ Block {} has {} missing transactions", proposal.block, missing_tx_ids.len(),
-        );
+        let mut awaited = to_request.clone();
+        for transaction_id in &awaited_by_justify {
+            to_request.remove(transaction_id);
+            awaited.insert(*transaction_id);
+        }
 
-        tx.parked_block_insert(&proposal.block, &proposal.foreign_proposals, origin, &missing_tx_ids)?;
+        if awaited_by_justify.is_empty() {
+            info!(
+                target: LOG_TARGET,
+                "⏳ Block {} has {} missing transactions", proposal.block, to_request.len(),
+            );
+        } else {
+            info!(
+                target: LOG_TARGET,
+                "⏳ Block {} has {} missing transactions and waits on its parked justify block for {} more",
+                proposal.block,
+                to_request.len(),
+                awaited.len() - to_request.len(),
+            );
+        }
 
-        Ok(missing_tx_ids)
+        tx.parked_block_insert(&proposal.block, &proposal.foreign_proposals, origin, &awaited)?;
+
+        Ok(Some(ParkedLocalBlock {
+            num_awaited: awaited.len(),
+            to_request,
+        }))
     }
 
     async fn process_foreign_proposal(
@@ -775,18 +845,40 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             });
         }
 
-        let committee = match validations::resolve_foreign_committee(&self.epoch_manager, &msg.proposal).await {
-            Ok(Some(committee)) => committee,
-            Ok(None) => return Ok(MessageValidationResult::Discard),
-            Err(HotStuffError::ProposalValidationError(err)) => {
+        let foreign_shard_group = match validations::validate_foreign_shard_group(&msg.proposal) {
+            Ok(shard_group) => shard_group,
+            Err(err) => {
                 return Ok(MessageValidationResult::Invalid {
                     from,
                     message: HotstuffMessage::ForeignProposal(msg),
                     err: err.into(),
                 });
             },
-            Err(err) => return Err(err),
         };
+
+        if foreign_shard_group == epoch_state.local_committee_info().shard_group() {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️ Foreign proposal block {} from {from} names the local shard group {foreign_shard_group}; discarding message",
+                msg.proposal,
+            );
+            return Ok(MessageValidationResult::Discard);
+        }
+
+        let committee =
+            match validations::resolve_foreign_committee(&self.epoch_manager, &msg.proposal, foreign_shard_group).await
+            {
+                Ok(Some(committee)) => committee,
+                Ok(None) => return Ok(MessageValidationResult::Discard),
+                Err(HotStuffError::ProposalValidationError(err)) => {
+                    return Ok(MessageValidationResult::Invalid {
+                        from,
+                        message: HotstuffMessage::ForeignProposal(msg),
+                        err: err.into(),
+                    });
+                },
+                Err(err) => return Err(err),
+            };
 
         if let Err(err) = self.check_foreign_proposal(&msg.proposal, &committee) {
             return Ok(MessageValidationResult::Invalid {
@@ -796,10 +888,19 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             });
         }
 
+        self.admit_or_park_foreign_proposal(epoch_state.local_committee_info(), from, msg)
+    }
+
+    fn admit_or_park_foreign_proposal(
+        &self,
+        local_committee_info: &CommitteeInfo,
+        from: TConsensusSpec::Addr,
+        msg: ForeignProposalMessage,
+    ) -> Result<MessageValidationResult<TConsensusSpec::Addr>, HotStuffError> {
         self.store.with_write_tx(|tx| {
             let all_involved_transactions = msg
                 .proposal
-                .all_transaction_ids_in_committee(epoch_state.local_committee_info());
+                .all_transaction_ids_in_committee(local_committee_info);
             // CASE: all foreign proposals must include evidence
             let num_transactions = all_involved_transactions.clone().count();
             if num_transactions == 0 {
@@ -813,9 +914,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 return Ok(MessageValidationResult::Invalid {
                     from,
                     message: HotstuffMessage::ForeignProposal(msg),
-                    err: ProposalValidationError::NoTransactionsInCommittee {
-                        block_id,
-                    }.into(),
+                    err: ProposalValidationError::NoTransactionsInCommittee { block_id }.into(),
                 });
             }
 
@@ -841,8 +940,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             // The first parked message carrying a block holds its slot until unparked, so a message that withholds a
             // command or whose pledges its evidence does not commit to is turned away here, leaving the slot for
             // another delivery of the block.
-            if let Err(err) =
-                validate_foreign_proposal_contents(&msg.proposal, epoch_state.local_committee_info().shard_group()) &&
+            if let Err(err) = validate_foreign_proposal_contents(&msg.proposal, local_committee_info.shard_group()) &&
                 err.rejects_message_not_block()
             {
                 warn!(target: LOG_TARGET, "⚠️ Discarding foreign proposal from {from}: {err}");
@@ -928,42 +1026,13 @@ struct PendingMissingTransactionsRequest<TAddr> {
 }
 
 impl<TAddr> PendingMissingTransactionsRequest<TAddr> {
-    /// Decodes the transactions a peer returned for this request, one at a time, refusing the response at the first
-    /// transaction that is over `max_transaction_size_bytes`, was not requested or is returned twice. Only
-    /// transactions this request names are ever held decoded, so the heap a response costs is bounded by the
-    /// transactions this node asked for.
+    /// Decodes the transactions a peer returned for this request. See [`decode_named_transactions`].
     fn decode_response(
         &self,
         transactions: Vec<EncodedTransaction>,
         max_transaction_size_bytes: usize,
     ) -> Result<Vec<Transaction>, RequestedTransactionsError> {
-        if transactions.len() > self.transactions.len() {
-            return Err(RequestedTransactionsError::TooMany {
-                returned: transactions.len(),
-                requested: self.transactions.len(),
-            });
-        }
-
-        let mut returned_ids = HashSet::with_capacity(transactions.len());
-        let mut decoded = Vec::with_capacity(transactions.len());
-        for encoded in transactions {
-            if encoded.len() > max_transaction_size_bytes {
-                return Err(RequestedTransactionsError::TooLarge {
-                    size: encoded.len(),
-                    max: max_transaction_size_bytes,
-                });
-            }
-            let transaction = encoded.decode().map_err(RequestedTransactionsError::Malformed)?;
-            let id = transaction.calculate_id();
-            if !self.transactions.contains(&id) {
-                return Err(RequestedTransactionsError::Unrequested { transaction_id: id });
-            }
-            if !returned_ids.insert(id) {
-                return Err(RequestedTransactionsError::Duplicate { transaction_id: id });
-            }
-            decoded.push(transaction);
-        }
-        Ok(decoded)
+        decode_named_transactions(&self.transactions, transactions, max_transaction_size_bytes)
     }
 
     /// The requested transactions that `returned` does not include.
@@ -976,8 +1045,45 @@ impl<TAddr> PendingMissingTransactionsRequest<TAddr> {
     }
 }
 
+/// Decodes the transactions a peer returned, one at a time, refusing the response at the first transaction that is over
+/// `max_transaction_size_bytes`, is not in `named` or is returned twice. Only transactions in `named` are ever held
+/// decoded, so the heap a response costs is bounded by the transactions this node asked for.
+pub(crate) fn decode_named_transactions(
+    named: &HashSet<TransactionId>,
+    transactions: Vec<EncodedTransaction>,
+    max_transaction_size_bytes: usize,
+) -> Result<Vec<Transaction>, RequestedTransactionsError> {
+    if transactions.len() > named.len() {
+        return Err(RequestedTransactionsError::TooMany {
+            returned: transactions.len(),
+            requested: named.len(),
+        });
+    }
+
+    let mut returned_ids = HashSet::with_capacity(transactions.len());
+    let mut decoded = Vec::with_capacity(transactions.len());
+    for encoded in transactions {
+        if encoded.len() > max_transaction_size_bytes {
+            return Err(RequestedTransactionsError::TooLarge {
+                size: encoded.len(),
+                max: max_transaction_size_bytes,
+            });
+        }
+        let transaction = encoded.decode().map_err(RequestedTransactionsError::Malformed)?;
+        let id = transaction.calculate_id();
+        if !named.contains(&id) {
+            return Err(RequestedTransactionsError::Unrequested { transaction_id: id });
+        }
+        if !returned_ids.insert(id) {
+            return Err(RequestedTransactionsError::Duplicate { transaction_id: id });
+        }
+        decoded.push(transaction);
+    }
+    Ok(decoded)
+}
+
 #[derive(Debug, thiserror::Error)]
-enum RequestedTransactionsError {
+pub(crate) enum RequestedTransactionsError {
     #[error("returned {returned} transaction(s) but only {requested} were requested")]
     TooMany { returned: usize, requested: usize },
     #[error("returned a {size} byte transaction, over the {max} byte limit")]
@@ -1025,6 +1131,13 @@ impl<TAddr: PartialEq> MissingTransactionRequests<TAddr> {
 }
 
 type UnparkedLocalBlocks = Vec<(ProposalMessage, ProposalOrigin)>;
+
+struct ParkedLocalBlock {
+    /// Every transaction the block waits on, including those its parked justify block waits on.
+    num_awaited: usize,
+    /// The block's own missing transactions, less those its justify block waits on.
+    to_request: HashSet<TransactionId>,
+}
 
 fn sort_unparked_local_blocks(blocks: &mut [(ProposalMessage, ProposalOrigin)]) {
     blocks.sort_by_key(|(msg, _)| (msg.block.epoch(), msg.block.height()));
@@ -1253,7 +1366,7 @@ mod tests {
         ]);
     }
 
-    mod catch_up_resequence {
+    mod local_block_parking {
         use std::{collections::HashMap, sync::Arc, time::Duration};
 
         use tari_consensus_types::{
@@ -1279,6 +1392,7 @@ mod tests {
             SubstateRequirement,
             ValidatorSetHash,
             VotePower,
+            committee::CommitteeMember,
         };
         use tari_ootle_storage::{
             consensus_models::{
@@ -1296,7 +1410,11 @@ mod tests {
         use tari_sidechain::{FixedHash, QuorumDecision};
         use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
         use tari_state_tree::ValidatorSetCommitteeProof;
-        use tari_template_lib_types::{ComponentAddress, ObjectKey, crypto::RistrettoPublicKeyBytes};
+        use tari_template_lib_types::{
+            ComponentAddress,
+            ObjectKey,
+            crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes},
+        };
         use tokio::sync::mpsc;
 
         use super::*;
@@ -1400,6 +1518,10 @@ mod tests {
 
         impl OutboundMessaging for NoopStub {
             type Addr = TestAddr;
+
+            fn encoded_len(&self, _message: &HotstuffMessage) -> usize {
+                0
+            }
 
             async fn send_self<T: Into<HotstuffMessage> + Send>(
                 &mut self,
@@ -1607,7 +1729,7 @@ mod tests {
                 ProposalCertificate::genesis_signatures(),
                 QuorumDecision::Accept,
             );
-            let header = BlockHeader::create_unsigned(
+            let mut header = BlockHeader::create_unsigned(
                 Network::LocalNet,
                 ProtocolVersion::at(Network::LocalNet, block_epoch),
                 BlockId::zero(),
@@ -1626,10 +1748,282 @@ mod tests {
                 ExtraData::new(),
             )
             .unwrap();
+            // The block id hashes the header as signed, so the header must carry a signature to hash to it.
+            header.set_signature(SchnorrSignatureBytes::zero());
             ProposalMessage {
                 block: Block::new(header, justify, commands, None),
                 foreign_proposals: vec![],
             }
+        }
+
+        fn new_on_message_validate(store: &TestStore) -> OnMessageValidate<TestSpec> {
+            let (tx_events, _rx_events) = broadcast::channel(1);
+            OnMessageValidate::<TestSpec>::new(
+                HotstuffConfig {
+                    network: Network::LocalNet,
+                    sidechain_id: None,
+                    consensus_constants: ConsensusConstants::devnet(1),
+                    state_history_length: 10,
+                    pinned_checkpoint_epochs: 1,
+                    state_tree_cleanup_interval: Duration::from_secs(60),
+                    epoch_gc_interval: Duration::from_secs(60),
+                    epoch_end_grace_period: Duration::from_secs(1),
+                    epoch_end_drain_period: Duration::from_secs(1),
+                    catch_up_request_timeout: Duration::from_secs(5),
+                    catch_up_page_bytes: crate::hotstuff::DEFAULT_CATCH_UP_PAGE_BYTES,
+                },
+                store.clone(),
+                NoopStub,
+                NoopStub,
+                NoopStub,
+                tx_events.downgrade(),
+            )
+        }
+
+        fn new_transactions_handler(store: &TestStore) -> OnReceiveNewTransaction<TestSpec> {
+            let (tx_missing, _rx_missing) = mpsc::unbounded_channel();
+            OnReceiveNewTransaction::<TestSpec>::new(
+                store.clone(),
+                TransactionPool::new(),
+                MaxEpochValidator,
+                tx_missing,
+            )
+        }
+
+        /// An epoch state whose committee holds the proposer of every block these tests build.
+        fn epoch_state_with_proposer(epoch: Epoch, shard_group: ShardGroup) -> EpochState<TestAddr> {
+            EpochState {
+                epoch,
+                epoch_hash: FixedHash::zero(),
+                exhaust_burn_rate: ExhaustBurnRate::new(0),
+                local_committee_info: CommitteeInfo::new(
+                    NumPreshards::P256,
+                    1,
+                    1,
+                    shard_group,
+                    epoch,
+                    VotePower::of(1),
+                ),
+                local_committee: Arc::new(Committee::new(vec![CommitteeMember {
+                    address: RistrettoPublicKeyBytes::default(),
+                    public_key: RistrettoPublicKeyBytes::default(),
+                    vote_power: VotePower::of(1),
+                }])),
+            }
+        }
+
+        fn local_only(tx_id: TransactionId) -> Command {
+            Command::LocalOnly(LocalOnlyAtom {
+                id: tx_id,
+                decision: Decision::Commit,
+                transaction_fee: 0,
+                leader_fee: None,
+            })
+        }
+
+        /// A proposal for the child of `parent`, certifying `parent`.
+        fn make_child_proposal(parent: &Block, commands: Vec<Command>) -> ProposalMessage {
+            let commands = BlockCommands::init(commands).unwrap();
+            let justify = ProposalCertificate::new(
+                parent.header().calculate_hash(),
+                *parent.parent(),
+                parent.height(),
+                parent.epoch(),
+                parent.shard_group(),
+                ProposalCertificate::genesis_signatures(),
+                QuorumDecision::Accept,
+            );
+            assert_eq!(justify.calculate_block_id(), *parent.id());
+            let mut header = BlockHeader::create_unsigned(
+                Network::LocalNet,
+                ProtocolVersion::at(Network::LocalNet, parent.epoch()),
+                *parent.id(),
+                justify.calculate_id(),
+                None,
+                parent.height() + NodeHeight(1),
+                parent.epoch(),
+                parent.shard_group(),
+                RistrettoPublicKeyBytes::default(),
+                FixedHash::zero(),
+                &commands,
+                0,
+                0,
+                FixedHash::zero(),
+                ShardGroupAccumulatedData::default(),
+                ExtraData::new(),
+            )
+            .unwrap();
+            // The block id hashes the header as signed, so the header must carry a signature to hash to it.
+            header.set_signature(SchnorrSignatureBytes::zero());
+            ProposalMessage {
+                block: Block::new(header, justify, commands, None),
+                foreign_proposals: vec![],
+            }
+        }
+
+        /// Parks `proposal` as validation does, waiting on `missing`.
+        fn park(store: &TestStore, proposal: &ProposalMessage, missing: &[TransactionId]) {
+            store
+                .with_write_tx(|tx| {
+                    tx.parked_block_insert(
+                        &proposal.block,
+                        &proposal.foreign_proposals,
+                        ProposalOrigin::CatchUp,
+                        missing,
+                    )
+                })
+                .unwrap();
+        }
+
+        #[tokio::test]
+        async fn a_block_whose_justify_block_is_parked_unparks_after_it() {
+            let epoch = Epoch(1);
+            let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+            let dir = tempfile::tempdir().unwrap();
+            let store = TestStore::open(dir.path(), DatabaseOptions::default()).unwrap();
+            let mut on_message_validate = new_on_message_validate(&store);
+            let new_transactions = new_transactions_handler(&store);
+            let epoch_state = epoch_state_with_proposer(epoch, shard_group);
+
+            let missing = TransactionId::new([1u8; 32]);
+            let parent = make_catch_up_proposal(epoch, shard_group, missing);
+            park(&store, &parent, &[missing]);
+            let child = make_child_proposal(&parent.block, vec![]);
+            let child_id = *child.block.id();
+
+            let result = on_message_validate
+                .handle_missing_transactions_local_block(
+                    RistrettoPublicKeyBytes::default(),
+                    &epoch_state,
+                    child,
+                    &new_transactions,
+                    ProposalOrigin::CatchUp,
+                )
+                .await
+                .unwrap();
+
+            let MessageValidationResult::ParkedProposal { missing_txs, .. } = result else {
+                panic!("expected the child of a parked block to be parked, got {result:?}");
+            };
+            assert!(
+                missing_txs.is_empty(),
+                "the parent's missing transactions were requested for the parent"
+            );
+
+            let (unparked, _) = on_message_validate.update_parked_blocks([missing].iter()).unwrap();
+            let unparked = unparked.iter().map(|(msg, _)| *msg.block.id()).collect::<Vec<_>>();
+            assert_eq!(unparked, vec![*parent.block.id(), child_id]);
+        }
+
+        #[tokio::test]
+        async fn a_block_ready_before_its_parked_justify_block_parks_again_behind_it() {
+            let epoch = Epoch(1);
+            let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+            let dir = tempfile::tempdir().unwrap();
+            let store = TestStore::open(dir.path(), DatabaseOptions::default()).unwrap();
+            let on_message_validate = new_on_message_validate(&store);
+
+            let awaited_by_parent = TransactionId::new([1u8; 32]);
+            let own = TransactionId::new([2u8; 32]);
+            let parent = make_catch_up_proposal(epoch, shard_group, awaited_by_parent);
+            let child = make_child_proposal(&parent.block, vec![local_only(own)]);
+            let child_id = *child.block.id();
+            // The child parks on its own transaction while its justify block is neither held nor parked.
+            park(&store, &child, &[own]);
+            park(&store, &parent, &[awaited_by_parent]);
+
+            let (unparked, _) = on_message_validate.update_parked_blocks([own].iter()).unwrap();
+            assert!(unparked.is_empty(), "the child must wait for its parked justify block");
+            let awaited = store
+                .with_read_tx(|tx| tx.parked_block_missing_transactions(&child_id))
+                .unwrap();
+            assert_eq!(awaited, vec![awaited_by_parent]);
+
+            let (unparked, _) = on_message_validate
+                .update_parked_blocks([awaited_by_parent].iter())
+                .unwrap();
+            let unparked = unparked.iter().map(|(msg, _)| *msg.block.id()).collect::<Vec<_>>();
+            assert_eq!(unparked, vec![*parent.block.id(), child_id]);
+        }
+
+        #[tokio::test]
+        async fn children_unparked_with_a_block_that_parks_again_park_again_behind_it() {
+            let epoch = Epoch(1);
+            let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+            let dir = tempfile::tempdir().unwrap();
+            let store = TestStore::open(dir.path(), DatabaseOptions::default()).unwrap();
+            let on_message_validate = new_on_message_validate(&store);
+
+            let awaited_by_grandparent = TransactionId::new([1u8; 32]);
+            let awaited_by_parent = TransactionId::new([2u8; 32]);
+            let grandparent = make_catch_up_proposal(epoch, shard_group, awaited_by_grandparent);
+            let parent = make_child_proposal(&grandparent.block, vec![local_only(awaited_by_parent)]);
+            // Several children, so that the order a transaction unparks them in puts some ahead of their parent.
+            let children = (10u8..18)
+                .map(|n| make_child_proposal(&parent.block, vec![local_only(TransactionId::new([n; 32]))]))
+                .collect::<Vec<_>>();
+            // The parent parks on its own transaction while the grandparent is neither held nor parked, and its
+            // children park behind it.
+            park(&store, &parent, &[awaited_by_parent]);
+            park(&store, &grandparent, &[awaited_by_grandparent]);
+            for child in &children {
+                park(&store, child, &[awaited_by_parent]);
+            }
+
+            let (unparked, _) = on_message_validate
+                .update_parked_blocks([awaited_by_parent].iter())
+                .unwrap();
+            assert!(
+                unparked.is_empty(),
+                "the parent parks again behind the grandparent and its children behind it"
+            );
+
+            let (unparked, _) = on_message_validate
+                .update_parked_blocks([awaited_by_grandparent].iter())
+                .unwrap();
+            let heights = unparked.iter().map(|(msg, _)| msg.block.height()).collect::<Vec<_>>();
+            assert_eq!(heights.len(), children.len() + 2);
+            assert!(heights.is_sorted(), "parents are processed before their children");
+        }
+
+        #[tokio::test]
+        async fn a_block_behind_a_parked_justify_block_requests_only_its_own_missing_transactions() {
+            let epoch = Epoch(1);
+            let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+            let dir = tempfile::tempdir().unwrap();
+            let store = TestStore::open(dir.path(), DatabaseOptions::default()).unwrap();
+            let mut on_message_validate = new_on_message_validate(&store);
+            let new_transactions = new_transactions_handler(&store);
+            let epoch_state = epoch_state_with_proposer(epoch, shard_group);
+
+            let awaited_by_parent = TransactionId::new([1u8; 32]);
+            let own = TransactionId::new([2u8; 32]);
+            let parent = make_catch_up_proposal(epoch, shard_group, awaited_by_parent);
+            park(&store, &parent, &[awaited_by_parent]);
+            let child = make_child_proposal(&parent.block, vec![local_only(awaited_by_parent), local_only(own)]);
+            let child_id = *child.block.id();
+
+            let result = on_message_validate
+                .handle_missing_transactions_local_block(
+                    RistrettoPublicKeyBytes::default(),
+                    &epoch_state,
+                    child,
+                    &new_transactions,
+                    ProposalOrigin::CatchUp,
+                )
+                .await
+                .unwrap();
+
+            let MessageValidationResult::ParkedProposal { missing_txs, .. } = result else {
+                panic!("expected the child of a parked block to be parked, got {result:?}");
+            };
+            assert_eq!(missing_txs, HashSet::from([own]));
+
+            let mut awaited = store
+                .with_read_tx(|tx| tx.parked_block_missing_transactions(&child_id))
+                .unwrap();
+            awaited.sort();
+            assert_eq!(awaited, vec![awaited_by_parent, own]);
         }
 
         #[tokio::test]
@@ -1645,26 +2039,7 @@ mod tests {
             let new_transactions =
                 OnReceiveNewTransaction::<TestSpec>::new(store.clone(), pool.clone(), MaxEpochValidator, tx_missing);
 
-            let (tx_events, _rx_events) = broadcast::channel(1);
-            let mut on_message_validate = OnMessageValidate::<TestSpec>::new(
-                HotstuffConfig {
-                    network: Network::LocalNet,
-                    sidechain_id: None,
-                    consensus_constants: ConsensusConstants::devnet(1),
-                    state_history_length: 10,
-                    pinned_checkpoint_epochs: 1,
-                    state_tree_cleanup_interval: Duration::from_secs(60),
-                    epoch_gc_interval: Duration::from_secs(60),
-                    epoch_end_grace_period: Duration::from_secs(1),
-                    epoch_end_drain_period: Duration::from_secs(1),
-                    catch_up_request_timeout: Duration::from_secs(5),
-                },
-                store.clone(),
-                NoopStub,
-                NoopStub,
-                NoopStub,
-                tx_events.downgrade(),
-            );
+            let mut on_message_validate = new_on_message_validate(&store);
 
             let input = SubstateId::Component(ComponentAddress::from_array([1u8; ObjectKey::LENGTH]));
             let tx_rec = TransactionRecord::new(
@@ -1724,6 +2099,119 @@ mod tests {
                     Ok::<_, HotStuffError>(())
                 })
                 .unwrap();
+        }
+
+        fn make_foreign_proposal_in_shard_group(
+            epoch: Epoch,
+            shard_group: ShardGroup,
+        ) -> tari_ootle_storage::consensus_models::ForeignProposal {
+            use tari_ootle_storage::consensus_models::{
+                BlockHeaderMetadata,
+                BlockPledge,
+                CommandOrHash,
+                CommandsCommitProof,
+                ForeignProposal,
+                PrunedCommand,
+            };
+            use tari_sidechain::{SidechainBlockCommitProof, SidechainBlockHeader};
+
+            let metadata = BlockHeaderMetadata {
+                total_leader_fee: 0,
+                timestamp: 0,
+                extra_data: ExtraData::new(),
+                timeout_certificate_id: None,
+                is_dummy: false,
+            };
+            let commands = vec![CommandOrHash::Pruned(PrunedCommand {
+                hash: FixedHash::from([1u8; 32]),
+                full_command_shard_groups: vec![],
+            })];
+            let commit_proof = CommandsCommitProof::new_latest(commands, SidechainBlockCommitProof {
+                header: SidechainBlockHeader {
+                    network: Network::LocalNet.as_byte(),
+                    protocol_version: ProtocolVersion::at(Network::LocalNet, epoch).as_u32(),
+                    parent_id: Default::default(),
+                    justify_id: Default::default(),
+                    height: 1,
+                    epoch: epoch.as_u64(),
+                    epoch_hash: FixedHash::zero(),
+                    shard_group: tari_sidechain::ShardGroup {
+                        start: shard_group.start().as_u32(),
+                        end_inclusive: shard_group.end().as_u32(),
+                    },
+                    proposed_by: Default::default(),
+                    state_merkle_root: Default::default(),
+                    command_merkle_root: Default::default(),
+                    transaction_merkle_root: Default::default(),
+                    signature: Default::default(),
+                    accumulated_data: Default::default(),
+                    metadata_hash: metadata.calculate_hash(),
+                },
+                proof_elements: vec![],
+            });
+            ForeignProposal::new(commit_proof, BlockPledge::default(), metadata)
+        }
+
+        #[tokio::test]
+        async fn a_foreign_proposal_message_naming_the_local_shard_group_is_discarded_before_committee_resolution() {
+            let epoch = Epoch(1);
+            let local_shard_group = ShardGroup::new(0, 127);
+
+            let dir = tempfile::tempdir().unwrap();
+            let store = TestStore::open(dir.path(), DatabaseOptions::default()).unwrap();
+            let (tx_events, _rx_events) = broadcast::channel(1);
+            // `NoopStub::get_committee_by_shard_group` panics with `unimplemented!()`, so returning `Discard` also
+            // proves the message is dropped before foreign committee resolution.
+            let on_message_validate = OnMessageValidate::<TestSpec>::new(
+                HotstuffConfig {
+                    network: Network::LocalNet,
+                    sidechain_id: None,
+                    consensus_constants: ConsensusConstants::devnet(1),
+                    state_history_length: 10,
+                    pinned_checkpoint_epochs: 1,
+                    state_tree_cleanup_interval: Duration::from_secs(60),
+                    epoch_gc_interval: Duration::from_secs(60),
+                    epoch_end_grace_period: Duration::from_secs(1),
+                    epoch_end_drain_period: Duration::from_secs(1),
+                    catch_up_request_timeout: Duration::from_secs(5),
+                    catch_up_page_bytes: crate::hotstuff::DEFAULT_CATCH_UP_PAGE_BYTES,
+                },
+                store,
+                NoopStub,
+                NoopStub,
+                NoopStub,
+                tx_events.downgrade(),
+            );
+
+            let proposal = make_foreign_proposal_in_shard_group(epoch, local_shard_group);
+            let epoch_state = EpochState {
+                epoch,
+                epoch_hash: FixedHash::zero(),
+                exhaust_burn_rate: ExhaustBurnRate::new(0),
+                local_committee_info: CommitteeInfo::new(
+                    NumPreshards::P256,
+                    1,
+                    2,
+                    local_shard_group,
+                    epoch,
+                    VotePower::of(1),
+                ),
+                local_committee: Arc::new(Committee::empty()),
+            };
+
+            let result = on_message_validate
+                .process_foreign_proposal(
+                    &epoch_state,
+                    RistrettoPublicKeyBytes::default(),
+                    ForeignProposalMessage::from(proposal),
+                )
+                .await
+                .unwrap();
+
+            assert!(
+                matches!(result, MessageValidationResult::Discard),
+                "expected local-shard-group ForeignProposalMessage to be discarded, got {result:?}"
+            );
         }
     }
 }

@@ -127,12 +127,6 @@ impl ConfigOverrideProvider for Cli {
                 "epoch_oracle.base_layer.base_node_grpc_url".to_string(),
                 url.to_string(),
             ));
-            // Network presets set this key in `[<network>.epoch_oracle.base_layer]`, which the loader merges over the
-            // root section after these overrides are applied.
-            overrides.push((
-                format!("{}.epoch_oracle.base_layer.base_node_grpc_url", network),
-                url.to_string(),
-            ));
         }
         // `epoch_oracle_config` is applied after the config is loaded (see main) so it can override an inline
         // `config_json` shipped in a network preset without tripping the "both set" error.
@@ -169,5 +163,29 @@ mod tests {
             config.epoch_oracle.base_layer.base_node_grpc_url.unwrap().as_str(),
             "http://my-node:18142/"
         );
+    }
+
+    #[test]
+    fn root_key_override_beats_the_network_preset() {
+        let config = load_with_presets(&[
+            "--network",
+            "esmeralda",
+            "-p",
+            "epoch_oracle.base_layer.start_height=1100000",
+        ]);
+
+        assert_eq!(config.epoch_oracle.base_layer.start_height, 1100000);
+    }
+
+    #[test]
+    fn network_scoped_override_beats_the_network_preset() {
+        let config = load_with_presets(&[
+            "--network",
+            "esmeralda",
+            "-p",
+            "esmeralda.epoch_oracle.base_layer.start_height=1100000",
+        ]);
+
+        assert_eq!(config.epoch_oracle.base_layer.start_height, 1100000);
     }
 }

@@ -12,7 +12,7 @@ use std::{
 
 use config::Config;
 use log::*;
-use tari_common::configuration::{ConfigOverrideProvider, Network as L1Network};
+use tari_common::configuration::{ConfigOverrideProvider, Network as L1Network, loader::CONFIG_OVERRIDES_KEY};
 use tari_ootle_transaction::Network;
 
 const LOG_TARGET: &str = "tari::application::configuration";
@@ -50,6 +50,11 @@ pub fn load_configuration<P: AsRef<Path>, TOverride: ConfigOverrideProvider>(
 }
 
 /// Loads the config at the given path applying all overrides.
+///
+/// A section's network-scoped table (e.g. `[esmeralda.epoch_oracle]`) is merged over its root keys when the section
+/// loads, so the overrides are also stored under [`CONFIG_OVERRIDES_KEY`] for `merge_subconfig` to re-apply on top of
+/// it. An override therefore wins over the config file whether it names the root key (`epoch_oracle.x`) or the scoped
+/// one (`esmeralda.epoch_oracle.x`).
 pub fn load_configuration_with_overrides<P: AsRef<Path>, TOverride: ConfigOverrideProvider>(
     config_path: P,
     overrides: &TOverride,
@@ -87,7 +92,9 @@ pub fn load_configuration_with_overrides<P: AsRef<Path>, TOverride: ConfigOverri
         },
     };
 
-    let overrides = overrides.get_config_property_overrides(&convert_network_to_l1_network(&network));
+    let l1_network = convert_network_to_l1_network(&network);
+    let overrides = overrides.get_config_property_overrides(&l1_network);
+    let reapply = replay_list(&overrides, l1_network.as_key_str());
 
     let mut cfg = Config::builder().add_source(cfg);
     for (key, value) in overrides {
@@ -97,12 +104,29 @@ pub fn load_configuration_with_overrides<P: AsRef<Path>, TOverride: ConfigOverri
     }
     cfg = cfg
         .set_override("network", network.to_string())
+        .map_err(|ce| ConfigError::new("Could not override config property", Some(ce.to_string())))?
+        .set_override(CONFIG_OVERRIDES_KEY, reapply)
         .map_err(|ce| ConfigError::new("Could not override config property", Some(ce.to_string())))?;
     let cfg = cfg
         .build()
         .map_err(|ce| ConfigError::new("Could not build config", Some(ce.to_string())))?;
 
     Ok(cfg)
+}
+
+/// The `key=value` entries `merge_subconfig` re-applies, later entries winning: every override as given, then each
+/// override scoped to `network` copied to its root key, so `-p esmeralda.epoch_oracle.x` also sets `epoch_oracle.x`.
+fn replay_list(overrides: &[(String, String)], network: &str) -> Vec<String> {
+    let scope = format!("{network}.");
+    let as_given = overrides.iter().map(|(key, value)| (key.to_lowercase(), value));
+    let unscoped = overrides.iter().filter_map(|(key, value)| {
+        let root_key = key.to_lowercase().strip_prefix(&scope)?.to_string();
+        root_key.contains('.').then_some((root_key, value))
+    });
+    as_given
+        .chain(unscoped)
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect()
 }
 
 /// Returns the default configuration file template in parts from the embedded presets. If use_mining_config is true,

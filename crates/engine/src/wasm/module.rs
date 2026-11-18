@@ -433,6 +433,12 @@ fn validate_export_signature(
     }
 }
 
+/// The admission rules for a template's [`TemplateDef`].
+///
+/// Every validator runs these when it executes `PublishTemplate`, so they are consensus rules: adding or loosening
+/// one changes which templates the network accepts. Each rule keeps the declared ABI consistent with how the engine
+/// dispatches, locks and evaluates access rules. Loading a stored or cached module runs them again, so a published
+/// template that breaks a newly added rule stops loading.
 fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionError> {
     match template_def {
         TemplateDef::V2(def) => {
@@ -450,30 +456,12 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                 }
                 .into());
             }
-            // Host-side lookup, receiver locking and method access rules key off `func.name`, whereas `CallInfo`
-            // dispatches into `{Template}_main` by `hash_function_name(&func.name)` alone, so every declared function
-            // must carry a distinct dispatch identifier (which also rules out duplicate function names).
-            let mut seen_idents = HashMap::with_capacity(function_count);
+            validate_unique_dispatch_idents(&def.functions)?;
             for func in &def.functions {
                 if func.name.len() > limits::WASM_LIMITS.max_function_name_length {
                     return Err(WasmValidationError::FunctionNameTooLong {
                         name: func.name.clone(),
                         max_length: limits::WASM_LIMITS.max_function_name_length,
-                    }
-                    .into());
-                }
-                let ident = hash_function_name(&func.name);
-                if let Some(first) = seen_idents.insert(ident, func.name.as_str()) {
-                    if first == func.name {
-                        return Err(WasmValidationError::DuplicateFunctionName {
-                            name: func.name.clone(),
-                        }
-                        .into());
-                    }
-                    return Err(WasmValidationError::FunctionIdentCollision {
-                        first: first.to_string(),
-                        second: func.name.clone(),
-                        ident,
                     }
                     .into());
                 }
@@ -525,6 +513,32 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                 }
             }
         },
+    }
+    Ok(())
+}
+
+/// Requires every declared function to carry its own dispatch identifier.
+///
+/// Host-side lookup, receiver locking and method access rules key off `func.name`, whereas `CallInfo` dispatches into
+/// `{Template}_main` by `hash_function_name(&func.name)` alone. A duplicated name, or two names sharing an identifier,
+/// would advertise functions that dispatch can never tell apart. The `#[template]` macro enforces the same rule when a
+/// template is compiled.
+fn validate_unique_dispatch_idents(functions: &[FunctionDef]) -> Result<(), WasmValidationError> {
+    let mut seen_idents = HashMap::with_capacity(functions.len());
+    for func in functions {
+        let ident = hash_function_name(&func.name);
+        if let Some(first) = seen_idents.insert(ident, func.name.as_str()) {
+            if first == func.name {
+                return Err(WasmValidationError::DuplicateFunctionName {
+                    name: func.name.clone(),
+                });
+            }
+            return Err(WasmValidationError::FunctionIdentCollision {
+                first: first.to_string(),
+                second: func.name.clone(),
+                ident,
+            });
+        }
     }
     Ok(())
 }

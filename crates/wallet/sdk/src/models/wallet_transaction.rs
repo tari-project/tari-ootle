@@ -44,13 +44,12 @@ impl WalletTransaction {
         self.status.is_accepted()
     }
 
-    /// Returns the accepted diff only when this transaction was actually committed on-chain.
-    /// Aborted (`Rejected`) or dry-run transactions can carry an `Accept` diff from execution
-    /// before consensus aborted them, and their inputs were never committed.
+    /// The diff the network committed for this transaction: present only for a committed (`Accepted` or
+    /// `OnlyFeeAccepted`) transaction that is not a dry run.
     pub fn finalized_diff(&self) -> Option<&SubstateDiff> {
-        (!self.is_dry_run && self.status.is_any_accept())
-            .then_some(self.finalize.as_ref())
-            .flatten()
+        self.finalize
+            .as_ref()
+            .filter(|_| !self.is_dry_run && self.status.is_any_accept())
             .and_then(|f| f.any_accept())
     }
 

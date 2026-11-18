@@ -533,9 +533,10 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
     /// The wallet's stealth outputs that a transaction submitted under `lock_ids` spends, each once.
     ///
     /// Before the transaction finalizes these are [`Self::get_locked_for_spend`]. Finalizing marks the spent outputs
-    /// `Spent` and takes them out of the lock, so once the wallet stores `transaction_id`'s finalized result, the
-    /// wallet outputs its diff downs are included too. Both are read in one snapshot, so an output that finalizes
-    /// concurrently is found through one source or the other.
+    /// `Spent` and takes them out of the lock, so once the wallet stores a committed (`Accepted` or
+    /// `OnlyFeeAccepted`), non-dry-run finalized result for `transaction_id`, the wallet outputs its diff downs are
+    /// included too. Both are read in one snapshot, so an output that finalizes concurrently is found through one
+    /// source or the other.
     pub fn get_spent_under_locks(
         &self,
         lock_ids: &[WalletLockId],
@@ -1355,8 +1356,8 @@ fn locked_for_spend<R: WalletStoreReader>(
     Ok(outputs)
 }
 
-/// The wallet's stealth outputs that `transaction_id`'s finalized diff downs. Empty until the wallet stores a
-/// finalized result for the transaction.
+/// The wallet's stealth outputs that `transaction_id`'s finalized diff downs. Empty unless the wallet stores a
+/// committed (`Accepted` or `OnlyFeeAccepted`), non-dry-run finalized result for the transaction.
 fn downed_by_finalized_transaction<R: WalletStoreReader>(
     reader: &mut R,
     transaction_id: TransactionId,

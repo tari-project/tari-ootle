@@ -31,7 +31,7 @@ permission-scoped API keys that an **Admin** user mints once and that the agent 
    against the called endpoint's required scopes.
 
 The permissions enforced for each request come from the **stored API key row**, not from anything the agent sends —
-an agent cannot self-promote by claiming `Admin` when its key only grants `AccountInfo`. Revocation is immediate:
+an agent cannot self-promote by claiming `admin` when its key only grants `accounts:read`. Revocation is immediate:
 the storage-layer lookup filters revoked rows, so the very next request after a revoke fails.
 
 <Aside type="caution">
@@ -41,17 +41,18 @@ literally cannot, because it only ever stored the hash. If you lose a key, revok
 
 ### Choosing scopes
 
-API key scopes are an arbitrary subset of [the JSON-RPC permission model](./authorization-and-access). Pick the
+API key scopes are the `Permission` string grammar: `admin`, or `<resource>:<action>[:<entity>]` in lowercase. Pick the
 smallest set that lets the agent do its job — for a read-only monitoring agent that just needs to track balances:
 
 ```json
-["AccountInfo", "AccountBalance_<your_account_substate_id>", "TransactionGet"]
+["accounts:read", "transactions:read"]
 ```
 
-For a trading agent that needs to submit transactions from one specific account:
+For an agent that submits transactions. `transactions:create` cannot be limited to one account; a transfer from one
+account is `transfer:create:<component_address>`.
 
 ```json
-["AccountInfo", "AccountBalance_<account>", "TransactionSend_<account>", "TransactionGet"]
+["accounts:read", "transactions:create"]
 ```
 
 Granting `Admin` to an API key is allowed (since you have it), but the daemon requires you to set
@@ -67,9 +68,9 @@ agent's job: shorter is safer, since a leaked short-lived key dies on its own wi
 ```bash
 # CLI: relative duration, parsed with `humantime`. Accepts forms like
 # 30d, 12h, 1y, 90 days, 1day 6h.
-tari-wallet-cli auth api-key create \
+tari_ootle_wallet_cli auth api-key create \
     --name monitoring-agent \
-    --permissions AccountInfo,TransactionGet \
+    --permissions accounts:read,transactions:read \
     --expires-in 30d
 ```
 
@@ -83,13 +84,13 @@ let expires_at = (SystemTime::now() + Duration::from_secs(30 * 24 * 3600))
 
 admin_client.auth_create_api_key(AuthCreateApiKeyRequest {
     name: "monitoring-agent".into(),
-    permissions: vec!["AccountInfo".into(), "TransactionGet".into()],
+    permissions: vec!["accounts:read".into(), "transactions:read".into()],
     confirm_admin: false,
     expires_at: Some(expires_at),
 }).await?;
 ```
 
-The Web UI exposes this as a "Never expires" checkbox plus a date picker on the create dialog. The list view
+The Web UI exposes expiry as presets, a custom date, or Never. The list view
 shows the expiry column and renders a yellow `EXPIRED` pill for keys whose expiry has passed.
 
 <Aside type="note">
@@ -104,7 +105,7 @@ key cannot establish persistence by minting fresh keys, and cannot wipe their ow
 Navigate to **API Keys** in the wallet daemon's web UI (`/api-keys` route, requires Admin auth):
 
 1. Click **Create API Key**.
-2. Enter a friendly name and the comma-separated scope list (`AccountInfo, TransactionGet, …`).
+2. Enter a friendly name and select scopes such as `accounts:read` and `transactions:read`. Admin is a separate checkbox and needs the confirmation checkbox.
 3. If granting `Admin`, tick the explicit confirmation checkbox — the form refuses to submit Admin without it.
 4. The dialog shows the raw key exactly once with a copy-to-clipboard button. **Copy it before dismissing.** Once you
    close the dialog the daemon cannot surface it again.
@@ -115,29 +116,29 @@ Revocation is immediate.
 ### Mint a key (`tari_ootle_wallet_cli`)
 
 The CLI binary wraps the same JSON-RPC endpoints for shell-based admin workflows. Authenticate as an Admin first
-(via `auth request Admin` or the WebAuthn UI), then:
+(via `auth request admin` or the WebAuthn UI), then:
 
 ```bash
 # Create a key with two scopes
-tari-wallet-cli auth api-key create \
+tari_ootle_wallet_cli auth api-key create \
     --name monitoring-agent \
-    --permissions AccountInfo,TransactionGet
+    --permissions accounts:read,transactions:read
 
 # Granting Admin requires the explicit speed-bump flag
-tari-wallet-cli auth api-key create \
+tari_ootle_wallet_cli auth api-key create \
     --name dangerous-full-access \
-    --permissions Admin \
+    --permissions admin \
     --confirm-admin
 
-# List existing keys (active and revoked)
-tari-wallet-cli auth api-key list
+# List active keys. Add --include-revoked to include revoked keys.
+tari_ootle_wallet_cli auth api-key list
 
 # Revoke by id
-tari-wallet-cli auth api-key revoke --id 7
+tari_ootle_wallet_cli auth api-key revoke --id 7
 ```
 
-The `create` command prints the raw key to stdout on its own line, prefixed with `KEY (shown ONCE — store immediately):`,
-so a shell pipeline can grep for and capture it once. Subsequent `list` calls will never include the raw key — the
+The `create` command prints `KEY (shown ONCE — store immediately):` and then the raw key on the next line,
+so a shell pipeline can capture it once. Subsequent `list` calls will never include the raw key — the
 daemon only stored a hash.
 
 ### Mint a key (Rust client)
@@ -153,10 +154,11 @@ let mut admin_client = WalletDaemonClient::connect(daemon_url, Some(admin_jwt))?
 let response = admin_client.auth_create_api_key(AuthCreateApiKeyRequest {
     name: "monitoring-agent".to_string(),
     permissions: vec![
-        "AccountInfo".to_string(),
-        "TransactionGet".to_string(),
+        "accounts:read".to_string(),
+        "transactions:read".to_string(),
     ],
     confirm_admin: false,
+    expires_at: None,
 }).await?;
 
 println!("Hand this to the agent, then forget it: {}", response.api_key);

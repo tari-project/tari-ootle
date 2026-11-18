@@ -1008,7 +1008,19 @@ fn cosign_authorize_inputs(
     PublicKeyBytes,
     SecretKeyBytes,
 ) {
-    let record = ootle_sdk_core::unsigned_record_for_cosign(&cosign_resolved_partial(fixture), None)
+    let signer_secret = fixture.input.cosign_signer_secret.clone().unwrap_or_else(|| {
+        panic!(
+            "fixture `{}`: cosign op requires `input.cosign_signer_secret`",
+            fixture.name
+        )
+    });
+    let signer_pk = {
+        use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
+        let secret = tari_crypto::ristretto::RistrettoSecretKey::from_canonical_bytes(signer_secret.as_bytes())
+            .unwrap_or_else(|e| panic!("fixture `{}`: bad cosign_signer_secret: {e}", fixture.name));
+        PublicKeyBytes::from_bytes(RistrettoPublicKey::from_secret_key(&secret).as_bytes()).unwrap()
+    };
+    let record = ootle_sdk_core::unsigned_record_for_cosign(&cosign_resolved_partial(fixture), &[signer_pk], None)
         .unwrap_or_else(|e| panic!("fixture `{}`: unsigned_record_for_cosign failed: {e}", fixture.name));
     let seal_pk_hex = fixture
         .input
@@ -1017,12 +1029,6 @@ fn cosign_authorize_inputs(
         .unwrap_or_else(|| panic!("fixture `{}`: cosign op requires `input.cosign_seal_pk`", fixture.name));
     let seal_pk = PublicKeyBytes::from_hex(seal_pk_hex)
         .unwrap_or_else(|e| panic!("fixture `{}`: bad cosign_seal_pk hex: {e}", fixture.name));
-    let signer_secret = fixture.input.cosign_signer_secret.clone().unwrap_or_else(|| {
-        panic!(
-            "fixture `{}`: cosign op requires `input.cosign_signer_secret`",
-            fixture.name
-        )
-    });
     (record, seal_pk, signer_secret)
 }
 

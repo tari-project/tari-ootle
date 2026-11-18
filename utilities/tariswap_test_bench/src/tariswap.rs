@@ -158,11 +158,12 @@ impl Runner {
                     .finish();
 
                 // First sign with the account key to authorize the use of the account component
-                let transaction = self
-                    .sdk
-                    .signer_api()
-                    .with_context(&primary_account_pk)
-                    .sign(account.owner_key_id.expect("no owner key id"), transaction)?;
+                let transaction = self.sdk.signer_api().authorize(
+                    &primary_account_pk,
+                    &[account.owner_key_id.expect("no owner key id")],
+                    &[],
+                    transaction,
+                )?;
 
                 // Then sign with the primary account key to pay the fee
                 let transaction = self.sdk.signer_api().sign(primary_account_key.key_id(), transaction)?;
@@ -277,11 +278,12 @@ impl Runner {
                     .call_method(account.component_address, "deposit", args![Workspace("swapped")])
                     .finish();
 
-                let transaction = self
-                    .sdk
-                    .signer_api()
-                    .with_context(&primary_account_pk)
-                    .sign(account.owner_key_id.expect("no owner key id"), transaction)?;
+                let transaction = self.sdk.signer_api().authorize(
+                    &primary_account_pk,
+                    &[account.owner_key_id.expect("no owner key id")],
+                    &[],
+                    transaction,
+                )?;
 
                 let transaction = self.sdk.signer_api().sign(primary_account_key.key_id(), transaction)?;
 

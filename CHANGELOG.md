@@ -3,6 +3,73 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.54.0](https://github.com/tari-project/tari-ootle/compare/v0.53.5...v0.54.0) (2026-11-17)
+
+Components can no longer change their template in place. To change a component's code, deploy the
+new template as a new component and move the state across.
+
+### ⚠️ Upgrade notes
+
+- **Validators and indexers upgrade together.** Validators reject any transaction containing
+  `UpdateComponentTemplate`, in mempool validation and in the engine, with no activation epoch.
+  (#3824)
+- **Template authors:** `ComponentBuilder::with_upgrade_rule` is removed from `tari_template_lib`
+  0.41.0, and a template that calls it no longer compiles; remove the call. Deployed templates run
+  unchanged. (#3824)
+- **App and wallet developers:** `TransactionBuilder::update_component_template` and
+  `update_component_template_address_with_migrate` are removed. A transaction carrying the
+  instruction is rejected with `ComponentTemplateUpdateNotSupported`. (#3824)
+
+### Features
+
+- **engine:** `UpdateComponentTemplate` is rejected, so a component's template never changes after
+  creation. (#3824)
+
+## [0.53.5](https://github.com/tari-project/tari-ootle/compare/v0.53.4...v0.53.5) (2026-11-16)
+
+Indexers verify a transaction result from one validator with a proof instead of polling several,
+and follow validator set changes from the validators' config. The configured oracle can schedule
+validator exits, and catch-up and multi-shard consensus fixes land.
+
+### ⚠️ Upgrade notes
+
+- **Validators and indexers upgrade together.** The catch-up, multi-shard evidence and guest export
+  changes alter which blocks and templates are accepted, with no activation epoch. (#3660, #3662,
+  #3702)
+- **Operators:** every validator must run this release before a configured validator entry sets
+  `exit_epoch`; older binaries ignore it. (#3782)
+- **Indexer operators:** `indexer.follow_validator_oracle_config` defaults to `true`, so the indexer
+  adopts validator set changes the validators serve. Set it to `false` to keep only the config
+  shipped with the release. (#3783)
+- **Indexer operators:** an abort finalized before the validators upgraded shows as pending until
+  its bookkeeping is pruned (6 epochs by default). (#3801)
+
+### Features
+
+- **indexer:** a transaction result comes from one validator and is checked against a proof: a
+  commit against its receipt, an abort against the block's transaction merkle root. A verified
+  result is cached. (#3801)
+- **validator_node:** validators store an inclusion proof for each aborted transaction and serve it
+  with `GetTransactionResult`. (#3789, #3803)
+- **indexer:** indexers fetch the configured epoch oracle config from validators at startup and each
+  epoch (new validator RPC `get_epoch_oracle_config`), and adopt it once two validators agree and it
+  matches the epochs already processed. (#3783)
+- **epoch_oracles:** a configured validator entry can set `exit_epoch`, the first epoch it is no
+  longer active. (#3782)
+
+### Bug fixes
+
+- **consensus:** a catch-up block at or below the last voted height reports `AlreadyVotedAtHeight`
+  and never triggers a leader timeout, a catch-up batch ends on a complete height across forks, and
+  a stalled catch-up re-requests the rest of its range. (#3660)
+- **consensus:** a shard group involved only through a dynamic output records its own evidence, an
+  output-only shard group ignores foreign `LocalPrepare`, and a fee-intent-only commit propagates.
+  (#3662)
+- **engine:** a template that exports a name starting with `__tari_global_` is rejected when it
+  loads. (#3702)
+- **deps:** `quinn-proto` 0.11.19 and `quinn-udp` 0.5.16 (RUSTSEC-2026-0523, 0524, 0538), and
+  `webauthn-rs` 0.5.5 (GHSA-22w3-693w-x895). (#3787, #3800)
+
 ## [0.53.4](https://github.com/tari-project/tari-ootle/compare/v0.53.3...v0.53.4) (2026-11-13)
 
 A transaction may persist at most 1,000 substates, minted non-fungibles included. Consensus checks

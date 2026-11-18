@@ -232,6 +232,11 @@ pub(super) fn validate_transaction_for_approval(
 ) -> Result<(), anyhow::Error> {
     validate_transaction_for_network(network, transaction)?;
 
+    transaction
+        .schema()
+        .ensure_current()
+        .map_err(|e| invalid_params("transaction", Some(e.to_string())))?;
+
     if transaction.is_dry_run() {
         return Err(invalid_params(
             "transaction.dry_run",

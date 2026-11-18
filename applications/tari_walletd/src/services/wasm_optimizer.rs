@@ -15,6 +15,8 @@ pub enum Error {
     Optimization(#[from] OptimizationError),
     #[error("Invalid file after optimization: {0}")]
     InvalidFile(String),
+    #[error("Task join error: {0}")]
+    Join(#[from] tokio::task::JoinError),
 }
 
 /// Optimizes a WebAssembly (WASM) template binary to reduce its size.
@@ -40,18 +42,22 @@ pub async fn optimize_wasm_template(template_binary: &[u8]) -> Result<Vec<u8>, E
     let output_file_path = temp_dir.path().join("output.wasm");
     tokio::fs::write(&input_file_path, template_binary).await?;
 
-    OptimizationOptions::new_optimize_for_size()
-        .enable_feature(Feature::BulkMemory)
-        .enable_feature(Feature::ReferenceTypes)
-        .disable_feature(Feature::Simd)
-        .disable_feature(Feature::RelaxedSimd)
-        // The engine rejects a published template carrying any custom section other than
-        // `tari_tdef` (`WasmModule::validate_code`). Strip the toolchain-emitted `name`,
-        // `producers` and `target_features` sections so the optimized binary is accepted.
-        .add_pass(Pass::StripDebug)
-        .add_pass(Pass::StripProducers)
-        .add_pass(Pass::StripTargetFeatuers)
-        .run(input_file_path, output_file_path.as_path())?;
+    let output_path_for_opt = output_file_path.clone();
+    tokio::task::spawn_blocking(move || {
+        OptimizationOptions::new_optimize_for_size()
+            .enable_feature(Feature::BulkMemory)
+            .enable_feature(Feature::ReferenceTypes)
+            .disable_feature(Feature::Simd)
+            .disable_feature(Feature::RelaxedSimd)
+            // The engine rejects a published template carrying any custom section other than
+            // `tari_tdef` (`WasmModule::validate_code`). Strip the toolchain-emitted `name`,
+            // `producers` and `target_features` sections so the optimized binary is accepted.
+            .add_pass(Pass::StripDebug)
+            .add_pass(Pass::StripProducers)
+            .add_pass(Pass::StripTargetFeatuers)
+            .run(input_file_path, output_path_for_opt.as_path())
+    })
+    .await??;
 
     let result = tokio::fs::read(output_file_path).await?;
 

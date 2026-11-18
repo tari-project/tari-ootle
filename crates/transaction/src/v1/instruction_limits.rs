@@ -85,6 +85,15 @@ impl InstructionLimitTracker {
                 }
                 Ok(())
             },
+            Instruction::SetComponentAccessRules { access_rules, .. } => {
+                self.add_access_rule_nodes(access_rules.num_nodes())
+            },
+            Instruction::SetComponentOwnerRule { owner_rule, .. } => {
+                if let OwnerRule::ByAccessRule(rule) = owner_rule {
+                    self.add_access_rule_nodes(rule.num_nodes())?;
+                }
+                Ok(())
+            },
             Instruction::StealthTransfer { statement, .. } => {
                 if !statement.is_within_decode_limits() {
                     return Err(InstructionLimitError::StealthTransferTooLarge);

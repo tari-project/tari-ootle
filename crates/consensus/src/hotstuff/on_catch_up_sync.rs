@@ -7,7 +7,7 @@ use tari_ootle_common_types::{Epoch, NodeHeight};
 use tari_ootle_storage::{StateStore, consensus_models::BookkeepingModel};
 
 use crate::{
-    hotstuff::{HotStuffError, pacemaker_handle::PaceMakerHandle},
+    hotstuff::{HotStuffError, View},
     messages::{CatchUpRequestMessage, HotstuffMessage},
     traits::{ConsensusSpec, OutboundMessaging},
 };
@@ -16,24 +16,23 @@ const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_catch_up_sync";
 
 pub struct OnCatchUpSync<TConsensusSpec: ConsensusSpec> {
     store: TConsensusSpec::StateStore,
-    pacemaker: PaceMakerHandle,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
 }
 
 impl<TConsensusSpec: ConsensusSpec> OnCatchUpSync<TConsensusSpec> {
-    pub fn new(
-        store: TConsensusSpec::StateStore,
-        pacemaker: PaceMakerHandle,
-        outbound_messaging: TConsensusSpec::OutboundMessaging,
-    ) -> Self {
+    pub fn new(store: TConsensusSpec::StateStore, outbound_messaging: TConsensusSpec::OutboundMessaging) -> Self {
         Self {
             store,
-            pacemaker,
             outbound_messaging,
         }
     }
 
-    pub async fn request_sync(&mut self, epoch: Epoch, from: TConsensusSpec::Addr) -> Result<(), HotStuffError> {
+    pub async fn request_sync(
+        &mut self,
+        current_view: View,
+        epoch: Epoch,
+        from: TConsensusSpec::Addr,
+    ) -> Result<(), HotStuffError> {
         let high_qc = self.store.with_read_tx(|tx| HighPc::get(tx, epoch))?;
 
         let block_height = if high_qc.epoch() == epoch {
@@ -48,7 +47,7 @@ impl<TConsensusSpec: ConsensusSpec> OnCatchUpSync<TConsensusSpec> {
             epoch,
             block_height,
             from,
-            self.pacemaker.current_view()
+            current_view
         );
 
         // Request a catch-up

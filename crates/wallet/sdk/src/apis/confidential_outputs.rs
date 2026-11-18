@@ -56,14 +56,7 @@ where TSpec: WalletSdkSpec
         vault_id: &VaultId,
         amount: A,
     ) -> Result<(Vec<ConfidentialOutputModel>, Amount), ConfidentialOutputsApiError> {
-        let amount =
-            amount
-                .into()
-                .non_negative_checked()
-                .ok_or_else(|| ConfidentialOutputsApiError::InvalidParameter {
-                    param: "amount",
-                    reason: "Amount must be non-negative".to_string(),
-                })?;
+        let amount = amount.into();
         self.store.with_write_tx(|tx| {
             let (outputs, total_output_amount) = self.lock_outputs_internal(tx, lock_id, vault_id, amount)?;
 
@@ -92,12 +85,6 @@ where TSpec: WalletSdkSpec
         vault_id: &VaultId,
         amount: Amount,
     ) -> Result<(Vec<ConfidentialOutputModel>, Amount), ConfidentialOutputsApiError> {
-        if amount.is_negative() {
-            return Err(ConfidentialOutputsApiError::InvalidParameter {
-                param: "amount",
-                reason: "Amount cannot be negative".to_string(),
-            });
-        }
         let mut total_output_amount = Amount::zero();
         let mut outputs = Vec::new();
         while total_output_amount < amount {
@@ -317,6 +304,8 @@ pub enum ConfidentialOutputsApiError {
 
 impl IsNotFoundError for ConfidentialOutputsApiError {
     fn is_not_found_error(&self) -> bool {
-        matches!(self, Self::StoreError(e) if e.is_not_found_error() )
+        matches!(self, Self::StoreError(e) if e.is_not_found_error()) ||
+            matches!(self, Self::KeyManager(e) if e.is_not_found_error()) ||
+            matches!(self, Self::Accounts(e) if e.is_not_found_error())
     }
 }

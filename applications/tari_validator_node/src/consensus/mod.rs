@@ -108,7 +108,7 @@ pub async fn spawn(
         hooks,
         shutdown_signal.clone(),
     );
-    let current_view = hotstuff_worker.pacemaker().current_view().clone();
+    let current_view = hotstuff_worker.current_view();
 
     let (tx_current_state, rx_current_state) = watch::channel(Default::default());
     let context = ConsensusWorkerContext {

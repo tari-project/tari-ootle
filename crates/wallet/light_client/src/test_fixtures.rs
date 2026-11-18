@@ -299,6 +299,21 @@ pub fn block_commit_proof(
     CommittedBlockProof::new(sign(header, signers)).to_bytes()
 }
 
+/// A commit proof of a block of `shard_group` in `epoch` finalizing the transactions under `transaction_merkle_root`,
+/// signed by `signers`.
+pub fn transaction_block_commit_proof(
+    network: Network,
+    epoch: Epoch,
+    shard_group: ShardGroup,
+    height: u64,
+    transaction_merkle_root: TreeHash,
+    signers: &Signers,
+) -> Vec<u8> {
+    let mut header = header(network, epoch, shard_group, height);
+    header.transaction_merkle_root = FixedHash::new(transaction_merkle_root.into_array());
+    CommittedBlockProof::new(sign(header, signers)).to_bytes()
+}
+
 fn header(network: Network, epoch: Epoch, shard_group: ShardGroup, height: u64) -> SidechainBlockHeader {
     SidechainBlockHeader {
         network: network.as_byte(),
@@ -384,10 +399,43 @@ pub fn substate_proof(
     version: SubstateVersion,
     value: &SubstateValue,
 ) -> SubstateProof {
-    let versioned_id = VersionedSubstateId::new(id.clone(), version);
-    let shard = versioned_id.to_shard(NUM_PRESHARDS);
+    let shard = VersionedSubstateId::new(id.clone(), version).to_shard(NUM_PRESHARDS);
     let shard_group = shard_group_of(shard);
-    let value_hash = hash_substate(set.network, value, version, set.epoch);
+    let anchor = ProofAnchor {
+        network: set.network,
+        num_preshards: NUM_PRESHARDS,
+        epoch: set.epoch,
+        shard_group,
+    };
+    anchored_substate_proof(&anchor, set.signers(shard_group), id, version, value)
+}
+
+/// The block a [`anchored_substate_proof`] is anchored at.
+pub struct ProofAnchor {
+    pub network: Network,
+    pub num_preshards: NumPreshards,
+    pub epoch: Epoch,
+    /// Must hold the shard of the proven substate.
+    pub shard_group: ShardGroup,
+}
+
+/// A proof that `id` at `version` holds `value`, anchored at a block of `anchor` that `signers` signed.
+pub fn anchored_substate_proof(
+    anchor: &ProofAnchor,
+    signers: &Signers,
+    id: &SubstateId,
+    version: SubstateVersion,
+    value: &SubstateValue,
+) -> SubstateProof {
+    let ProofAnchor {
+        network,
+        num_preshards,
+        epoch,
+        shard_group,
+    } = *anchor;
+    let versioned_id = VersionedSubstateId::new(id.clone(), version);
+    let shard = versioned_id.to_shard(num_preshards);
+    let value_hash = hash_substate(network, value, version, epoch);
 
     let mut store = MemoryTreeStore::<StateTreePayload>::new();
     let shard_root = SpreadPrefixStateTree::new(&mut store)
@@ -396,7 +444,7 @@ pub fn substate_proof(
             value_hash,
         }])
         .unwrap();
-    let group_tree = shard_group_root_tree(set.network, set.epoch, shard, shard_root, 1);
+    let group_tree = shard_group_root_tree(network, epoch, shard, shard_root, 1);
     let (_, _, leaf_proof) = SpreadPrefixStateTree::new(&mut store)
         .get_proof(1, &versioned_id)
         .unwrap();
@@ -410,22 +458,15 @@ pub fn substate_proof(
 
     SubstateProof {
         anchor: SubstateProofAnchor {
-            epoch: set.epoch,
+            epoch,
             shard_group,
             height: 5,
             block_id: Default::default(),
             state_merkle_root: Default::default(),
         },
-        commit_proof: block_commit_proof(
-            set.network,
-            set.epoch,
-            shard_group,
-            5,
-            group_tree.root(),
-            set.signers(shard_group),
-        ),
+        commit_proof: block_commit_proof(network, epoch, shard_group, 5, group_tree.root(), signers),
         value_proof: tari_bor::serde_codec::to_vec(&value_proof).unwrap(),
-        value_hash_epoch: set.epoch,
+        value_hash_epoch: epoch,
         down_proof: None,
     }
 }

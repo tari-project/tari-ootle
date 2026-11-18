@@ -23,6 +23,8 @@ mod epoch_end_drain;
 #[cfg(test)]
 mod extends_justify;
 #[cfg(test)]
+mod finalized_transaction_proofs;
+#[cfg(test)]
 mod foreign_prepare_timeout;
 #[cfg(test)]
 mod foreign_proposal_committee;
@@ -68,5 +70,7 @@ mod template_visibility;
 mod timeout_certificate;
 #[cfg(test)]
 mod timeout_certificate_signatures;
+#[cfg(test)]
+mod unexecuted_block_commit;
 #[cfg(test)]
 mod vote_equivocation_withholding;

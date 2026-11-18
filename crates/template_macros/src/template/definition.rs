@@ -25,7 +25,8 @@ use quote::{format_ident, quote};
 
 use crate::template::ast::TemplateAst;
 
-pub fn generate_definition(ast: &TemplateAst) -> TokenStream {
+/// The template module, holding the template's items and `checks`, which must resolve types as the template does.
+pub fn generate_definition(ast: &TemplateAst, checks: &TokenStream) -> TokenStream {
     let template_mod_name = format_ident!("{}_template", ast.template_name);
     let items = &ast.module_content;
 
@@ -35,6 +36,8 @@ pub fn generate_definition(ast: &TemplateAst) -> TokenStream {
             use ::tari_template_lib::template_macro_deps::*;
 
             #(#items)*
+
+            #checks
         }
     }
 }
@@ -69,7 +72,7 @@ mod tests {
             }
         "});
 
-        let output = generate_definition(&ast);
+        let output = generate_definition(&ast, &TokenStream::new());
 
         assert_code_eq(output, quote! {
             #[allow(non_snake_case)]
@@ -96,7 +99,7 @@ mod tests {
         // Same as `test_codegen` but *without* the inject pass — emulates
         // `#[template(skip_cbor_derives)]`.
         let ast = parse2::<TemplateAst>(input).unwrap();
-        let output = generate_definition(&ast);
+        let output = generate_definition(&ast, &TokenStream::new());
 
         assert_code_eq(output, quote! {
             #[allow(non_snake_case)]

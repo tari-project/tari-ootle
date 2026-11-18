@@ -189,3 +189,91 @@ pub(crate) struct StealthOutputUpdate<'a> {
     pub is_frozen: Option<bool>,
     pub updated_at: dsl::now,
 }
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_wallet_sdk::models::KeyId;
+    use tari_template_lib_types::{ObjectKey, ResourceAddress};
+    use time::macros::datetime;
+
+    use super::*;
+    use crate::serialization::{serialize_hex, serialize_json};
+
+    fn sample_stealth_output() -> (StealthOutput, ComponentAddress) {
+        let owner = ComponentAddress::from_array([0x11; ObjectKey::LENGTH]);
+        let resource = ResourceAddress::new(ObjectKey::from_array([0x22; ObjectKey::LENGTH]));
+        let key_id = KeyId::imported(1);
+        let output = StealthOutput {
+            id: 1,
+            owner_account_id: 1,
+            resource_address: resource.to_string(),
+            commitment: serialize_hex([0x33; 32]),
+            value: 1000,
+            sender_public_nonce: serialize_hex([0x44; 32]),
+            status: "Unspent".to_string(),
+            locked_at: None,
+            locked_by_proof: None,
+            view_only_key_id: serialize_json(&key_id).unwrap(),
+            owner_key_id: None,
+            encrypted_data: vec![0u8; EncryptedData::min_size()],
+            tag_byte: 7,
+            memo_json: None,
+            spend_key: Some(serialize_hex([0x55; 32])),
+            condition_root: None,
+            minimum_value_promise: 100,
+            is_burnt: false,
+            is_frozen: false,
+            is_on_chain: true,
+            is_condition_spendable: true,
+            proven_version: Some(2),
+            proven_up_epoch: Some(10),
+            spent_version: Some(3),
+            created_at: datetime!(2026-01-01 00:00:00),
+            updated_at: datetime!(2026-01-01 00:00:00),
+        };
+        (output, owner)
+    }
+
+    #[test]
+    fn stealth_output_conversions_round_trip_unsigned_max_values() {
+        let (valid, owner) = sample_stealth_output();
+        let converted = valid.clone().try_convert(owner).unwrap();
+        assert_eq!(converted.value, 1000);
+        assert_eq!(converted.tag_byte, UtxoTag::new(7));
+        assert_eq!(converted.minimum_value_promise, 100);
+        assert_eq!(
+            converted.proven_up,
+            Some(ProvenUp {
+                version: SubstateVersion::new(2),
+                epoch: Epoch(10),
+            })
+        );
+        assert_eq!(converted.spent_version, Some(SubstateVersion::new(3)));
+
+        let info = StealthOutputInfo::try_from(valid.clone()).unwrap();
+        assert_eq!(info.value, 1000);
+
+        // The writer stores u32 as i32 and u64 as i64 by bit reinterpretation, so maxima are stored negative.
+        let mut max_values = valid;
+        max_values.value = u64::MAX as i64;
+        max_values.minimum_value_promise = u64::MAX as i64;
+        max_values.tag_byte = u32::MAX as i32;
+        max_values.proven_version = Some(u64::MAX as i64);
+        max_values.proven_up_epoch = Some(u64::MAX as i64);
+        max_values.spent_version = Some(u64::MAX as i64);
+        let converted_max = max_values.clone().try_convert(owner).unwrap();
+        assert_eq!(converted_max.value, u64::MAX);
+        assert_eq!(converted_max.minimum_value_promise, u64::MAX);
+        assert_eq!(converted_max.tag_byte, UtxoTag::new(u32::MAX));
+        assert_eq!(
+            converted_max.proven_up,
+            Some(ProvenUp {
+                version: SubstateVersion::new(u64::MAX),
+                epoch: Epoch(u64::MAX),
+            })
+        );
+        assert_eq!(converted_max.spent_version, Some(SubstateVersion::new(u64::MAX)));
+        let info_max = StealthOutputInfo::try_from(max_values).unwrap();
+        assert_eq!(info_max.value, u64::MAX);
+    }
+}

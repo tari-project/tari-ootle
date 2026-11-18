@@ -63,7 +63,15 @@ use tari_ootle_wallet_sdk::{
         WalletTransaction,
         WebauthnRegistrationPasskeyModel,
     },
-    storage::{QueuedUtxo, UtxoProcessQueueBatch, UtxoProcessQueueCursor, WalletStorageError, WalletStoreReader},
+    storage::{
+        QueuedEntry,
+        QueuedPair,
+        QueuedUtxo,
+        UtxoProcessQueueBatch,
+        UtxoProcessQueueCursor,
+        WalletStorageError,
+        WalletStoreReader,
+    },
 };
 use tari_template_lib_types::{
     Amount,
@@ -412,15 +420,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             query = query.filter(substates::template_address.eq(template_address.to_string()));
         }
         if let Some(substate_type) = by_type {
-            match substate_type {
-                SubstateType::NonFungible => {
-                    query = query
-                        .filter(substates::address.like(format!("resource_% {}_%", substate_type.as_prefix_str())));
-                },
-                _ => {
-                    query = query.filter(substates::address.like(format!("{}_%", substate_type.as_prefix_str())));
-                },
-            }
+            query = query.filter(substates::address.like(format!("{}_%", substate_type.as_prefix_str())));
         }
         if let Some(limit) = limit {
             query = query.limit(limit as i64);
@@ -1266,19 +1266,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
                     .single_value()
                     .assume_not_null()),
             )
-            .filter(
-                stealth_outputs::status
-                    .eq(OutputStatus::Unspent.as_key_str())
-                    // Also include outputs created within the transaction
-                    .or(stealth_outputs::status
-                        .eq(OutputStatus::LockedUnconfirmed.as_key_str())
-                        .and(stealth_outputs::lock_id.eq(lock_id))),
-            )
-            .filter(stealth_outputs::owner_key_id.is_not_null())
-            // Rows stored before the Burnt status hold a burnt output as Unspent with is_burnt set.
-            .filter(stealth_outputs::is_burnt.eq(false))
-            .filter(stealth_outputs::is_condition_spendable.eq(true))
-            .filter(stealth_outputs::is_frozen.eq(false))
+            .filter(crate::writer::stealth_output_spendable_predicate(lock_id))
             .load_iter::<models::StealthOutput, _>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
@@ -1999,7 +1987,11 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
         // Every queued row of the batch's pairs, of any account and in any batch
         let pair_rows = utxo_process_queue::table
+            .inner_join(accounts::table.on(accounts::id.eq(utxo_process_queue::account_id)))
             .select((
+                utxo_process_queue::id,
+                accounts::address.assume_not_null(),
+                utxo_process_queue::generation,
                 utxo_process_queue::resource_address,
                 utxo_process_queue::utxo_tag,
                 utxo_process_queue::public_nonce,
@@ -2007,21 +1999,33 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 utxo_process_queue::state_version,
             ))
             .filter(utxo_process_queue::public_nonce.eq_any(rows.iter().map(|(row, _)| &row.public_nonce)))
-            .get_results::<(String, i32, String, Option<i32>, Option<i64>)>(self.connection())
+            .order(utxo_process_queue::id.asc())
+            .get_results::<(i32, String, i64, String, i32, String, Option<i32>, Option<i64>)>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-        let mut pair_unspent_at = HashMap::<(String, i32, String), Option<(Shard, StateVersion)>>::new();
-        for (resource_address, tag, public_nonce, shard, state_version) in pair_rows {
+        let mut pairs = HashMap::<(String, i32, String), QueuedPair>::new();
+        for (id, account_addr, generation, resource_address, tag, public_nonce, shard, state_version) in pair_rows {
             let unspent_at = shard
                 .zip(state_version)
                 .map(|(shard, state_version)| (Shard::from(shard as u32), StateVersion::new(state_version as u64)));
-            pair_unspent_at
+            let entry = QueuedEntry {
+                id: i64::from(id),
+                account: parse_queued_account_address(&account_addr)?,
+                generation: generation as u64,
+            };
+            pairs
                 .entry((resource_address, tag, public_nonce))
-                .and_modify(|merged| *merged = QueuedUtxo::merge_unspent_at(*merged, unspent_at))
-                .or_insert(unspent_at);
+                .and_modify(|pair| {
+                    pair.unspent_at = QueuedUtxo::merge_unspent_at(pair.unspent_at, unspent_at);
+                    pair.entries.push(entry);
+                })
+                .or_insert_with(|| QueuedPair {
+                    entries: vec![entry],
+                    unspent_at,
+                });
         }
 
         let mut result = HashMap::new();
-        for (row, account_addr) in &rows {
+        for (row, _) in &rows {
             let resource_address =
                 ResourceAddress::from_str(&row.resource_address).map_err(|e| WalletStorageError::DecodingError {
                     operation: OPERATION,
@@ -2030,28 +2034,97 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 })?;
             let tag = UtxoTag::new(row.utxo_tag as u32);
             let public_nonce = deserialize_hex_try_from(&row.public_nonce)?;
-            let account_addr = account_addr.parse().map_err(|e| WalletStorageError::DecodingError {
-                operation: OPERATION,
-                item: "account_address",
-                details: format!("Corrupt db: invalid account address '{}': {}", account_addr, e),
-            })?;
-            let unspent_at = pair_unspent_at
-                .get(&(row.resource_address.clone(), row.utxo_tag, row.public_nonce.clone()))
-                .copied()
-                .flatten();
+            let Some(pair) = pairs.get(&(row.resource_address.clone(), row.utxo_tag, row.public_nonce.clone())) else {
+                // Read in the same transaction as the row itself
+                return Err(WalletStorageError::general(
+                    OPERATION,
+                    format!("queued row {} is missing from the rows of its pair", row.id),
+                ));
+            };
             result
                 .entry(resource_address)
                 .or_insert_with(HashMap::new)
-                .insert((tag, public_nonce), QueuedUtxo {
-                    account: account_addr,
-                    unspent_at,
-                });
+                .insert((tag, public_nonce), pair.clone());
         }
 
         Ok(UtxoProcessQueueBatch {
             entries: result,
             last: rows.last().map(|(row, _)| UtxoProcessQueueCursor(i64::from(row.id))),
         })
+    }
+
+    fn utxo_process_queue_is_current(&mut self, entries: &[QueuedEntry]) -> Result<bool, WalletStorageError> {
+        const OPERATION: &str = "utxo_process_queue_is_current";
+        use crate::schema::utxo_process_queue;
+
+        for entry in entries {
+            let Ok(id) = i32::try_from(entry.id) else {
+                return Ok(false);
+            };
+            let count = utxo_process_queue::table
+                .filter(utxo_process_queue::id.eq(id))
+                .filter(utxo_process_queue::generation.eq(entry.generation as i64))
+                .count()
+                .get_result::<i64>(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+            if count == 0 {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn utxo_unheld_spends_watermark(&mut self) -> Result<u64, WalletStorageError> {
+        const OPERATION: &str = "utxo_unheld_spends_watermark";
+        use crate::schema::utxo_unheld_spends;
+
+        let max = utxo_unheld_spends::table
+            .select(diesel::dsl::max(utxo_unheld_spends::id))
+            .get_result::<Option<i32>>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        Ok(max.map_or(0, |id| u64::try_from(id).unwrap_or(0)))
+    }
+
+    fn utxo_unheld_spends_any_after(
+        &mut self,
+        resource_address: &ResourceAddress,
+        watermark: u64,
+        commitments: &[PedersenCommitmentBytes],
+    ) -> Result<bool, WalletStorageError> {
+        const OPERATION: &str = "utxo_unheld_spends_any_after";
+        use crate::schema::utxo_unheld_spends;
+
+        if commitments.is_empty() {
+            return Ok(false);
+        }
+        let watermark = i32::try_from(watermark).unwrap_or(i32::MAX);
+        diesel::select(diesel::dsl::exists(
+            utxo_unheld_spends::table
+                .filter(utxo_unheld_spends::resource_address.eq(resource_address.to_string()))
+                .filter(utxo_unheld_spends::id.gt(watermark))
+                .filter(utxo_unheld_spends::commitment.eq_any(commitments.iter().map(serialize_hex))),
+        ))
+        .get_result(self.connection())
+        .map_err(|e| WalletStorageError::general(OPERATION, e))
+    }
+
+    fn utxo_process_queue_has_entries(
+        &mut self,
+        account: &ComponentAddress,
+        resource: &ResourceAddress,
+    ) -> Result<bool, WalletStorageError> {
+        const OPERATION: &str = "utxo_process_queue_has_entries";
+        use crate::schema::{accounts, utxo_process_queue};
+
+        let exists = diesel::select(diesel::dsl::exists(
+            utxo_process_queue::table
+                .inner_join(accounts::table.on(accounts::id.eq(utxo_process_queue::account_id)))
+                .filter(accounts::address.eq(account.to_string()))
+                .filter(utxo_process_queue::resource_address.eq(resource.to_string())),
+        ))
+        .get_result::<bool>(self.connection())
+        .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        Ok(exists)
     }
 
     fn address_book_get(&mut self, name: &str) -> Result<AddressBookEntry, WalletStorageError> {
@@ -2245,6 +2318,14 @@ impl Drop for ReadTransaction<'_> {
             error!(target: LOG_TARGET, "Failed to rollback transaction: {}", err);
         }
     }
+}
+
+fn parse_queued_account_address(address: &str) -> Result<ComponentAddress, WalletStorageError> {
+    address.parse().map_err(|e| WalletStorageError::DecodingError {
+        operation: "utxo_process_queue_fetch_batch",
+        item: "account_address",
+        details: format!("Corrupt db: invalid account address '{}': {}", address, e),
+    })
 }
 
 #[cfg(test)]
@@ -2555,5 +2636,157 @@ mod tests {
             .unwrap();
         let mut tx = store.create_read_tx().unwrap();
         assert!(tx.webauthn_has_any_registration().unwrap());
+    }
+
+    /// A store holding one account and one resource.
+    fn store_with_account_and_resource() -> (SqliteWalletStore, ComponentAddress, ResourceAddress) {
+        use std::collections::HashSet;
+
+        use tari_ootle_common_types::Epoch;
+        use tari_ootle_wallet_sdk::models::KeyBranch;
+        use tari_template_lib_types::ObjectKey;
+
+        let store = SqliteWalletStore::try_open(":memory:").unwrap();
+        store.run_migrations().unwrap();
+
+        let acct = ComponentAddress::from_array([1u8; 32]);
+        let resource = ResourceAddress::new(ObjectKey::from_array([9u8; ObjectKey::LENGTH]));
+        {
+            let mut tx = store.create_write_tx().unwrap();
+            tx.accounts_insert(
+                Some("a"),
+                &acct,
+                KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+                Some(KeyId::derived(KeyBranch::Account, 0)),
+                &RistrettoPublicKeyBytes::from([1u8; 32]),
+                &HashSet::new(),
+                Epoch(0),
+                true,
+                false,
+            )
+            .unwrap();
+            sql_query(format!(
+                "INSERT INTO resources (address, resource_type, owner_rule, access_rules, divisibility, metadata) \
+                 VALUES ('{resource}', 'Confidential', '{{}}', '{{}}', 0, '{{}}')"
+            ))
+            .execute(tx.connection())
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        (store, acct, resource)
+    }
+
+    #[test]
+    fn reader_queries_round_trip_u64_max_amounts() {
+        use tari_ootle_common_types::SubstateVersion;
+        use tari_ootle_wallet_sdk::models::KeyBranch;
+        use tari_template_lib_types::ResourceType;
+
+        let (store, acct, resource) = store_with_account_and_resource();
+        let vault = VaultId::new([10u8; 32].into());
+        let view_key = KeyId::derived(KeyBranch::ViewOnlyKey, 0);
+        let owner_key = Some(KeyId::derived(KeyBranch::Account, 0));
+
+        {
+            let mut tx = store.create_write_tx().unwrap();
+            tx.vaults_insert(VaultModel {
+                account_address: acct,
+                id: vault,
+                vault_version: SubstateVersion::new(0),
+                resource_address: resource,
+                resource_type: ResourceType::Confidential,
+                revealed_balance: Amount::ZERO,
+                locked_revealed_balance: Amount::ZERO,
+                confidential_balance: Amount::ZERO,
+                token_symbol: None,
+                divisibility: 0,
+            })
+            .unwrap();
+
+            let mut stealth = locked_stealth_output(acct, resource, 1, (view_key, owner_key), 1);
+            stealth.value = u64::MAX;
+            stealth.minimum_value_promise = u64::MAX;
+            stealth.status = OutputStatus::Unspent;
+            stealth.lock_id = None;
+            tx.stealth_outputs_insert(&stealth).unwrap();
+
+            let mut confidential = locked_confidential_output(acct, vault, 2, (view_key, owner_key), 1);
+            confidential.value = Amount::from(u64::MAX);
+            confidential.status = OutputStatus::Unspent;
+            confidential.lock_id = None;
+            tx.confidential_outputs_insert(confidential).unwrap();
+            tx.commit().unwrap();
+        }
+
+        let mut tx = store.create_read_tx().unwrap();
+        assert_eq!(tx.confidential_outputs_get_unspent_balance(&vault).unwrap(), u64::MAX);
+        assert_eq!(
+            tx.stealth_outputs_get_unspent_balance(&resource).unwrap().balance,
+            Amount::from(u64::MAX)
+        );
+        let confidential_outputs = tx
+            .confidential_outputs_get_by_account_and_status(&acct, OutputStatus::Unspent)
+            .unwrap();
+        assert_eq!(confidential_outputs.len(), 1);
+        assert_eq!(confidential_outputs[0].value, Amount::from(u64::MAX));
+        let stealth_outputs = tx
+            .stealth_outputs_get_unspent_by_account(&acct, Some(&resource), false)
+            .unwrap();
+        assert_eq!(stealth_outputs.len(), 1);
+        assert_eq!(stealth_outputs[0].value, u64::MAX);
+    }
+
+    #[test]
+    fn reader_queries_round_trip_u32_max_shards_and_tags_and_u64_max_versions() {
+        use tari_ootle_common_types::Epoch;
+        use tari_ootle_wallet_sdk::models::UtxoUnspent;
+
+        let (store, acct, resource) = store_with_account_and_resource();
+        // The writer stores u32 as i32 and u64 as i64 by bit reinterpretation, so maxima are stored negative.
+        let max_shard = Shard::from(u32::MAX);
+        let max_version = StateVersion::new(u64::MAX);
+        let max_claim = ClaimedStateVersion {
+            state_version: max_version,
+            first_state_version: max_version,
+            verified_epoch: Some(Epoch(u64::MAX)),
+        };
+
+        {
+            let mut tx = store.create_write_tx().unwrap();
+            tx.shard_state_version_set_many(&acct, &resource, [(max_shard, max_version)])
+                .unwrap();
+            tx.shard_state_version_claims_set_many(&acct, &resource, [(max_shard, max_claim)])
+                .unwrap();
+            tx.utxo_process_queue_extend(&resource, [(
+                UtxoUnspent {
+                    tag: UtxoTag::new(u32::MAX),
+                    public_nonce: RistrettoPublicKeyBytes::default(),
+                },
+                QueuedUtxo {
+                    account: acct,
+                    unspent_at: Some((max_shard, max_version)),
+                },
+            )])
+            .unwrap();
+
+            tx.commit().unwrap();
+        }
+
+        let mut tx = store.create_read_tx().unwrap();
+        assert_eq!(
+            tx.shard_state_version_get(&acct, &resource).unwrap(),
+            HashMap::from([(max_shard, max_version)])
+        );
+        assert_eq!(
+            tx.shard_state_version_claims_get(&acct, &resource).unwrap(),
+            HashMap::from([(max_shard, max_claim)])
+        );
+        let batch = tx.utxo_process_queue_fetch_batch(None, 10).unwrap();
+        let queued = batch
+            .entries
+            .get(&resource)
+            .and_then(|entries| entries.get(&(UtxoTag::new(u32::MAX), RistrettoPublicKeyBytes::default())))
+            .unwrap();
+        assert_eq!(queued.unspent_at, Some((max_shard, max_version)));
     }
 }

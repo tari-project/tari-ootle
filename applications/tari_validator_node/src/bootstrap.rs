@@ -23,7 +23,7 @@
 use std::{collections::HashMap, fs, io, str::FromStr, sync::Arc};
 
 use anyhow::{Context, anyhow};
-use futures::{FutureExt, future};
+use futures::future;
 use libp2p::identity;
 use log::*;
 use ootle_byte_type::ToByteType;
@@ -120,6 +120,7 @@ use crate::metrics::{
 };
 use crate::{
     ApplicationConfig,
+    MIN_EPOCH_HISTORY_LENGTH,
     MIN_PINNED_CHECKPOINT_EPOCHS,
     ValidatorNodeEpochManagerSpec,
     ValidatorNodeStateStore,
@@ -272,6 +273,15 @@ pub async fn spawn_services(
             "⚠️ validator_node.pinned_checkpoint_epochs = {} is below the minimum of {MIN_PINNED_CHECKPOINT_EPOCHS}, which \
              indexers rely on to snapshot new shards. Keeping the trees of {MIN_PINNED_CHECKPOINT_EPOCHS} checkpoints",
             config.validator_node.pinned_checkpoint_epochs
+        );
+    }
+
+    if config.validator_node.epoch_history_length < MIN_EPOCH_HISTORY_LENGTH {
+        warn!(
+            target: LOG_TARGET,
+            "⚠️ validator_node.epoch_history_length = {} is below the minimum of {MIN_EPOCH_HISTORY_LENGTH}. Keeping \
+             {MIN_EPOCH_HISTORY_LENGTH} epoch of history",
+            config.validator_node.epoch_history_length
         );
     }
 
@@ -497,6 +507,7 @@ pub async fn spawn_services(
         consensus_handle.clone(),
         consensus_constants.max_transaction_size_bytes,
         epoch_history_length,
+        load_served_epoch_oracle_config(&config).await?,
     )
     .await?;
     handles.push(join_handle);
@@ -553,19 +564,16 @@ pub struct Services<TStore> {
 
 impl<TStore> Services<TStore> {
     pub async fn on_any_exit(&mut self) -> Result<(), anyhow::Error> {
-        // JoinHandler panics if polled again after reading the Result, we fuse the future to prevent this.
-        let fused = self.handles.iter_mut().map(|h| h.fuse());
-        let (res, _, _) = future::select_all(fused).await;
+        if self.handles.is_empty() {
+            return future::pending().await;
+        }
+        let (res, idx, _) = future::select_all(&mut self.handles).await;
+        self.handles.swap_remove(idx);
         res.unwrap_or_else(|e| Err(anyhow!("Task panicked: {}", e)))
     }
 
     pub async fn join_all(self) -> Result<(), anyhow::Error> {
-        // Handles that have already been polled to completion by `on_any_exit` would
-        // panic tokio's JoinHandle invariant ("polled after completion") if we awaited
-        // them again. Filter them out — their result is either already surfaced via
-        // `on_any_exit` or we're in the shutdown path and don't care about replay.
-        let handles: Vec<_> = self.handles.into_iter().filter(|h| !h.is_finished()).collect();
-        let results = future::try_join_all(handles).await?;
+        let results = future::try_join_all(self.handles).await?;
         for res in results {
             res?;
         }
@@ -582,6 +590,7 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     consensus: ConsensusHandle,
     max_transaction_size_bytes: usize,
     epoch_history_length: u64,
+    epoch_oracle_config_json: Option<Arc<str>>,
 ) -> anyhow::Result<JoinHandle<Result<(), anyhow::Error>>> {
     let rpc_server = RpcServer::builder()
         .with_maximum_simultaneous_sessions(config.validator_node.rpc.max_simultaneous_sessions)
@@ -594,6 +603,7 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
             consensus,
             max_transaction_size_bytes,
             epoch_history_length,
+            epoch_oracle_config_json,
         ));
 
     let (notify_tx, notify_rx) = mpsc::unbounded_channel();
@@ -660,10 +670,10 @@ pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
             create_node_transaction_validator(network, template_manager, constants)
                 .and_then(InputsAreDeclarableValidator::new()),
         )
-        .and_then(EpochRangeValidator::new())
         .and_then(TransactionValidityWindowValidator::new(
             constants.max_transaction_validity_epochs,
         ))
+        .and_then(EpochRangeValidator::new())
 }
 
 async fn create_base_layer_client(
@@ -717,6 +727,18 @@ async fn create_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStor
             Ok(EpochOracle::Hybrid(oracle))
         },
     }
+}
+
+/// The JSON of the configured epoch oracle's config this node runs, which it serves so that indexers can follow
+/// changes to the validator set. None when the node runs the base layer oracle alone.
+async fn load_served_epoch_oracle_config(config: &ApplicationConfig) -> anyhow::Result<Option<Arc<str>>> {
+    let oracle_config = config.epoch_oracle.for_network(config.network);
+    if oracle_config.oracle_type == EpochOracleType::BaseLayer {
+        return Ok(None);
+    }
+    let configured = oracle_config.configured.load().await?;
+    let json = serde_json::to_string(&configured).context("Failed to serialize the epoch oracle config")?;
+    Ok(Some(json.into()))
 }
 
 async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Clone + 'static>(

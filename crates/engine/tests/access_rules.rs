@@ -3069,6 +3069,73 @@ mod resource_access_rules {
     }
 }
 
+mod auth_hook_caller_state {
+    use tari_engine_types::substate::SubstateId;
+
+    use super::*;
+
+    const TEMPLATE: &str = "tests/templates/auth_hook_state";
+
+    /// Creates the hooked resource with `hook` as its auth hook, and a holder of it whose state names `other`.
+    /// Returns the holder's address.
+    fn create_holder(test: &mut TemplateTest, hook: &str, other: Option<ComponentAddress>) -> ComponentAddress {
+        let template = test.get_template_address("AuthHookState");
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_function(template, "new", args![hook])
+                .put_last_instruction_output_on_workspace("hook")
+                .call_method("hook", "take_tokens", args![10])
+                .put_last_instruction_output_on_workspace("tokens")
+                .call_function(template, "holder", args![Workspace("tokens"), other])
+                .build_and_seal(test.secret_key()),
+            vec![],
+        );
+        test.return_values()[4].decoded::<ComponentAddress>().unwrap()
+    }
+
+    fn cycle(test: &TemplateTest, holder: ComponentAddress) -> Transaction {
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(holder, "cycle", args![])
+            .build_and_seal(test.secret_key())
+    }
+
+    /// The acting component's state was validated when its own frame wrote it. A root substate it names may since
+    /// have been downed, or be one the transaction did not declare, and the hook still runs.
+    #[test]
+    fn it_runs_the_hook_when_the_caller_state_names_an_absent_root_substate() {
+        let mut test = TemplateTest::new(CRATE_PATH, [TEMPLATE]);
+        let (referenced, _, _) = test.create_empty_account();
+
+        let holder = create_holder(&mut test, "accept_hook", Some(referenced));
+        let control = create_holder(&mut test, "accept_hook", None);
+        test.execute_expect_success(cycle(&test, holder), vec![]);
+
+        test.get_state_store_mut()
+            .delete_state(&SubstateId::Component(referenced));
+
+        test.execute_expect_success(cycle(&test, control), vec![]);
+        test.execute_expect_success(cycle(&test, holder), vec![]);
+    }
+
+    /// The acting component's state reaches the hook as data only: the substates it names stay out of the hook
+    /// frame's scope, so the hook cannot take a reference to them into its own state.
+    #[test]
+    fn it_keeps_the_caller_state_out_of_the_hook_scope() {
+        let mut test = TemplateTest::new(CRATE_PATH, [TEMPLATE]);
+
+        let holder = create_holder(&mut test, "hook_records_caller_resource", None);
+        let reason = test.execute_expect_failure(cycle(&test, holder), vec![]);
+
+        let own_resource = test.extract_component_value::<ResourceAddress>(holder, "$.1");
+        assert_reject_reason(reason, RuntimeError::AccessDeniedAuthHook {
+            action_ident: ResourceAuthAction::Withdraw.into(),
+            details: format!("Runtime error: {}", RuntimeError::SubstateOutOfScope {
+                id: own_resource.into()
+            }),
+        });
+    }
+}
+
 mod access_rule_metering {
     use tari_engine_types::{
         commit_result::ExecutionFailureCode,

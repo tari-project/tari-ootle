@@ -55,7 +55,8 @@ use super::context::{AuthIdentity, HandlerContext};
 use crate::handlers::{
     component_upgrades::component_upgrades,
     helpers,
-    helpers::{invalid_params, invalid_request, validate_transaction_for_approval},
+    helpers::{OrJrpcNotFound, invalid_params, invalid_request, validate_transaction_for_approval},
+    transaction::validate_epoch_bounds,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::signing_requests";
@@ -153,6 +154,7 @@ fn validate_create_request(
     req: &SigningRequestCreateRequest,
 ) -> Result<Duration, anyhow::Error> {
     validate_transaction_for_approval(context.config().network, &req.transaction)?;
+    validate_epoch_bounds(&req.transaction)?;
 
     if req.memo.chars().count() > MAX_MEMO_CHARS {
         return Err(invalid_params(
@@ -195,7 +197,8 @@ pub async fn handle_get(
     let model = context
         .wallet_sdk()
         .store()
-        .with_read_tx(|tx| tx.signing_request_get(req.request_id))?;
+        .with_read_tx(|tx| tx.signing_request_get(req.request_id))
+        .or_jrpc_not_found()?;
 
     Ok(SigningRequestGetResponse {
         request: to_info(model),
@@ -302,7 +305,8 @@ fn get_pending(context: &HandlerContext, request_id: SigningRequestId) -> Result
     let model = context
         .wallet_sdk()
         .store()
-        .with_read_tx(|tx| tx.signing_request_get(request_id))?;
+        .with_read_tx(|tx| tx.signing_request_get(request_id))
+        .or_jrpc_not_found()?;
 
     match model.effective_status_now() {
         SigningRequestEffectiveStatus::Pending => Ok(model),
@@ -358,6 +362,7 @@ fn to_info(model: SigningRequestModel) -> SigningRequestInfo {
 
 #[cfg(test)]
 mod tests {
+    use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
     use tari_ootle_address::Network;
     use tari_ootle_common_types::Epoch;
     use tari_ootle_transaction::{Transaction, UnsignedTransaction};
@@ -365,7 +370,7 @@ mod tests {
     use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
     use super::*;
-    use crate::handlers::test_support::TestDaemon;
+    use crate::{handlers::test_support::TestDaemon, server::ApplicationErrorCode};
 
     struct SigningTest {
         daemon: TestDaemon,
@@ -610,5 +615,35 @@ mod tests {
             .with_read_tx(|tx| tx.signing_requests_list())
             .unwrap();
         assert!(none_created.is_empty());
+    }
+
+    #[tokio::test]
+    async fn missing_signing_request_maps_to_not_found_for_get_approve_and_reject() {
+        let test = setup().await;
+        let missing_id = 999_999;
+
+        for err in [
+            handle_get(&test.context, Some(&test.session), SigningRequestGetRequest {
+                request_id: missing_id,
+            })
+            .await
+            .unwrap_err(),
+            handle_approve(&test.context, Some(&test.session), SigningRequestDecisionRequest {
+                request_id: missing_id,
+            })
+            .await
+            .unwrap_err(),
+            handle_reject(&test.context, Some(&test.session), SigningRequestDecisionRequest {
+                request_id: missing_id,
+            })
+            .await
+            .unwrap_err(),
+        ] {
+            let jrpc = err.downcast_ref::<JsonRpcError>().expect("JsonRpcError");
+            assert!(matches!(
+                jrpc.error_reason(),
+                JsonRpcErrorReason::ApplicationError(code) if code == ApplicationErrorCode::NotFound as i32
+            ));
+        }
     }
 }

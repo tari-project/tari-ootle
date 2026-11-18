@@ -140,10 +140,17 @@ mod render {
         pub fn render(&self, func_def: &FunctionDef, detail: &str, max_len: usize) -> Option<String> {
             let name = &func_def.name;
             match *self {
-                Self::ComponentDecode => Some(render_bounded(
-                    format_args!("failed to decode component instance for function '{name}'{DETAIL_SEPARATOR}{detail}"),
-                    max_len,
-                )),
+                Self::ComponentDecode => {
+                    if !func_def.takes_component() {
+                        return None;
+                    }
+                    Some(render_bounded(
+                        format_args!(
+                            "failed to decode component instance for function '{name}'{DETAIL_SEPARATOR}{detail}"
+                        ),
+                        max_len,
+                    ))
+                },
                 Self::ArgDecode { index } => {
                     // The dispatcher counts the component among a method's or migration's parameters, and
                     // `arguments` does not.
@@ -460,5 +467,16 @@ mod tests {
             expand_panic_message(&func_def(), message, LIMIT),
             "failed to decode component instance for function 'withdraw': "
         );
+    }
+
+    #[test]
+    fn component_decode_on_static_function_is_passed_through() {
+        let static_func = func_def_taking(Type::U32);
+        let message = format!("{}: end of input bytes", PanicDiagnostic::ComponentDecode.marker());
+        assert_eq!(
+            PanicDiagnostic::ComponentDecode.render(&static_func, "end of input bytes", LIMIT),
+            None
+        );
+        assert_eq!(expand_panic_message(&static_func, message.clone(), LIMIT), message);
     }
 }

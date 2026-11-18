@@ -563,3 +563,25 @@ fn foreign_proposals_clear_proposed_in_does_not_reset_confirmed_or_invalid_statu
         })
         .unwrap();
 }
+
+#[test]
+fn state_sync_missing_values_get_earliest_includes_max_substate_address() {
+    use tari_ootle_common_types::{SubstateAddress, shard::Shard};
+    use tari_ootle_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTransaction};
+
+    use crate::{DatabaseOptions, RocksDbStateStore};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let store = RocksDbStateStore::<String>::open(tmp.path().join("db"), DatabaseOptions::default()).unwrap();
+    let shard = Shard::from(1u32);
+    let max_addr = SubstateAddress::max();
+
+    store
+        .with_write_tx(|tx| tx.state_sync_missing_value_insert(shard, &max_addr, 7))
+        .unwrap();
+
+    let earliest = store
+        .with_read_tx(|tx| tx.state_sync_missing_values_get_earliest(shard, 0))
+        .unwrap();
+    assert_eq!(earliest, Some((max_addr, 7)));
+}

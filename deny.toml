@@ -60,6 +60,13 @@ line can take 0.7. Of the binaries this project ships, only `tari_ootle_walletd`
 curves for ephemeral ECDH alone: each secret scalar serves one handshake, so an observer gets one
 trace per secret, and DTLS signing goes through `ring`. `pgp` and `cx448` also pull it in, reached
 only through the L1 binaries `integration_tests` runs. Remove once `dtls` moves to `p256` 0.14.""" },
+    { id = "RUSTSEC-2026-0459", reason = """
+Bundled SQLite before 3.54.0 can return uninitialized page-cache memory when a database is opened
+together with a crafted `-wal` file of a different page size. The fix ships only in `libsqlite3-sys`
+0.39, and `diesel` 2.3.14 (its latest release) requires `libsqlite3-sys` < 0.39, as does the L1's
+`tari_common_sqlite`. Exploiting it needs local write access to a wallet or validator node data
+directory: every SQLite database these binaries open is their own. Remove once `diesel` releases
+with `libsqlite3-sys` 0.39 allowed and the workspace moves to it.""" },
 ]
 
 [licenses]

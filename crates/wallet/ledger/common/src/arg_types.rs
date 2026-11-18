@@ -84,6 +84,50 @@ pub enum SignMode {
     Seal = 0x01,
 }
 
+/// Canonical field order for an authorization signature. Matches
+/// `tari_ootle_transaction::TransactionSignature::signing_preimage_v1`.
+pub const ADD_SIGNER_SEQ: &[SigningField] = &[
+    SigningField::SchemaVersion,
+    SigningField::SealSigner,
+    SigningField::Network,
+    SigningField::FeeInstructions,
+    SigningField::Instructions,
+    SigningField::Inputs,
+    SigningField::MinEpoch,
+    SigningField::MaxEpoch,
+    SigningField::MainSigner,
+    SigningField::DryRun,
+    SigningField::TransactionNonce,
+    SigningField::BlobHashes,
+];
+
+/// Canonical field order for a seal signature. Matches
+/// `tari_ootle_transaction::TransactionSealSignature::signing_preimage_v1`.
+pub const SEAL_SEQ: &[SigningField] = &[
+    SigningField::SchemaVersion,
+    SigningField::Network,
+    SigningField::FeeInstructions,
+    SigningField::Instructions,
+    SigningField::Inputs,
+    SigningField::MinEpoch,
+    SigningField::MaxEpoch,
+    SigningField::MainSigner,
+    SigningField::DryRun,
+    SigningField::TransactionNonce,
+    SigningField::BlobHashes,
+    SigningField::Signatures,
+];
+
+impl SignMode {
+    /// Expected sequence of [`SigningField`]s for this signing mode.
+    pub const fn expected_fields(self) -> &'static [SigningField] {
+        match self {
+            SignMode::AddSigner => ADD_SIGNER_SEQ,
+            SignMode::Seal => SEAL_SEQ,
+        }
+    }
+}
+
 /// `SignTransaction` APDU frame kind, carried in `P2`.
 ///
 /// A signing exchange is: one `Header`, then one `Segment` (possibly split across several APDUs)

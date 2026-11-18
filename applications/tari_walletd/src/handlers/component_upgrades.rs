@@ -279,6 +279,7 @@ mod tests {
                 access_rules: ComponentAccessRules::new(),
                 entity_id: EntityId::default(),
                 upgrade_rule,
+                rules_updater: None,
             },
             body: ComponentBody::empty(),
         }

@@ -45,6 +45,7 @@ use tari_ootle_common_types::{
     committee::Committee,
     displayable::Displayable,
     optional::Optional,
+    substate_type::check_substate_type,
 };
 use tari_ootle_storage::{
     DownProofAnchor,
@@ -55,7 +56,7 @@ use tari_ootle_storage::{
     verify_substate_down_proof_against_roots,
     verify_substate_value_proof_against_root,
 };
-use tari_sidechain::FixedHash;
+use tari_sidechain::{FixedHash, hashing::tari_consensus_hasher};
 use tari_validator_node_rpc::client::{
     SubstateBatch,
     SubstateProofData,
@@ -83,15 +84,12 @@ pub const DEFAULT_CACHE_TTL: Duration = Duration::from_secs(900);
 /// caller feels as an absence: a substate it is waiting for stays missing until this expires.
 pub const DEFAULT_NEGATIVE_CACHE_TTL: Duration = Duration::from_secs(60);
 
-/// A store of committee-validated shard-group state merkle roots that the read path consults to
-/// avoid re-validating a served commit proof's QC chain when its root is already trusted.
+/// A store of committee-validated shard-group tips, keyed by `state_merkle_root` scoped by
+/// `(epoch, shard_group)`, that the read path consults for how recent an anchor is.
 ///
-/// The trust decision is keyed on the 32-byte `state_merkle_root` scoped by `(epoch, shard_group)`:
-/// a node cannot produce a substate value proof that verifies against a root a quorum already
-/// signed, so reusing such a root is exactly as sound as re-validating the commit proof.
-///
-/// The heights of the recorded tips are also what bounds how old an anchor may be: see
-/// [`ANCHOR_HEIGHT_TOLERANCE`].
+/// A recorded root is only as recent as the block it was recorded at, and the heights of the
+/// recorded tips bound how old an anchor may be: see [`ANCHOR_HEIGHT_TOLERANCE`]. A served commit
+/// proof is validated whether or not its root is recorded, since it is cached and served with the read.
 #[async_trait]
 pub trait TrustedRootStore: std::fmt::Debug + Send + Sync + 'static {
     /// The height of the block `root` was recorded at, if `root` is a recorded, committee-validated state merkle
@@ -106,7 +104,7 @@ pub trait TrustedRootStore: std::fmt::Debug + Send + Sync + 'static {
     /// The height of the highest tip recorded at `epoch` for any shard group overlapping `shard_group`.
     async fn latest_height(&self, epoch: Epoch, shard_group: ShardGroup) -> Result<Option<NodeHeight>, IndexerError>;
 
-    /// Records a newly committee-validated tip so subsequent reads at this root hit the fast path.
+    /// Records a newly committee-validated tip.
     async fn record(&self, tip: VerifiedBlockTip) -> Result<(), IndexerError>;
 }
 
@@ -217,16 +215,15 @@ pub struct CachedSubstateManager<TEpochManager, TVnClient, TSubstateCache> {
     /// shard group committee, or they are rejected (fail-closed). The negative `DoesNotExist` case
     /// is not provable and is left to the existing f+1 agreement.
     verify_substate_proofs: bool,
-    /// When set, lets a read skip re-validating a served commit proof whose root is already trusted,
-    /// and is warmed with newly-validated roots. See [`TrustedRootStore`].
+    /// When set, bounds how old an anchor may be to prove a read, and is warmed with newly-validated
+    /// roots. See [`TrustedRootStore`].
     trusted_root_store: Option<Arc<dyn TrustedRootStore>>,
     /// Whether this manager writes what it fetches into the substate cache. A manager that does not verify proofs
     /// must not write into a cache that a verifying manager shares, or its unverified results would be served as
     /// that manager's.
     cache_writes: bool,
-    /// Tips of commit proofs this manager validated, by the block they commit. A block id is the hash of the header
-    /// the committee signed, so a later commit proof of the same block yields the same tip. Bounded by
-    /// [`VALIDATED_TIP_MEMO_SIZE`].
+    /// Tips of commit proofs this manager validated, by [`validated_tip_memo_key`] of their encoding, so that serving
+    /// the same bytes again costs no validation. Bounded by [`VALIDATED_TIP_MEMO_SIZE`].
     validated_tips: Arc<std::sync::Mutex<HashMap<FixedHash, VerifiedBlockTip>>>,
     /// The network's preshard count, from its consensus constants: it maps a substate to its shard, both to route a
     /// read and to check that a proof is anchored to a root whose shard group holds the substate.
@@ -288,8 +285,8 @@ where
         self
     }
 
-    /// Sets the trusted-root store used to skip commit-proof re-validation on a store hit (and warmed
-    /// on a miss). Only meaningful together with [`Self::with_substate_proof_verification`].
+    /// Sets the trusted-root store that bounds how old an anchor may be, warmed with every newly validated
+    /// tip. Only meaningful together with [`Self::with_substate_proof_verification`].
     pub fn with_trusted_root_store(mut self, store: Arc<dyn TrustedRootStore>) -> Self {
         self.trusted_root_store = Some(store);
         self
@@ -326,7 +323,8 @@ where
     /// Like [`Self::get_substate`], but the result comes with the proof it was verified with: a live result with its
     /// value proof, and a down one with its down proof when the read names its version. A cached head is served with
     /// the proof held for it while [`Self::read_live_proof`] still serves that proof; otherwise it is fetched from the
-    /// committee again, and cached with its proof.
+    /// committee again, and cached with its proof. With proof verification off no proof is fetched or held, so a fresh
+    /// cache entry is served as it is.
     /// The cache holds no down proofs, so a read naming a version below the cached head is fetched from the committee.
     ///
     /// The proof is `None` when proof verification is off, for a nonexistent substate, for a down head read, and when
@@ -338,6 +336,9 @@ where
     ) -> Result<SubstateLookupResult, IndexerError> {
         debug!(target: LOG_TARGET, "get_substate_with_proof: {}v{}", substate_id, specific_version.display());
         if let Some(mut lookup_result) = self.read_fresh_cache_entry(substate_id, specific_version).await? {
+            if !self.verify_substate_proofs {
+                return Ok(lookup_result);
+            }
             match &lookup_result.result {
                 SubstateResult::Up { substate } => {
                     lookup_result.proof = self.read_live_proof(substate_id, substate.version()).await?;
@@ -846,7 +847,7 @@ where
 
             // One anchor covers the whole batch, so the commit proof is validated against the
             // committee at most once per batch and each result costs only its Merkle path.
-            match self.verify_substate_batch(&batch, &member.address).await {
+            match self.verify_substate_batch(&batch, chunk, &member.address).await {
                 Ok(BatchTrust::NotRequired) => return Ok((batch, false)),
                 Ok(BatchTrust::Proven) => return Ok((batch, true)),
                 Ok(BatchTrust::Unanchored) => {
@@ -894,12 +895,35 @@ where
     /// or one too old to prove anything, proves nothing, which is not misbehaviour and is reported as
     /// [`BatchTrust::Unanchored`] or [`BatchTrust::Stale`] for the caller to weigh against what other
     /// members offer.
-    async fn verify_substate_batch(&self, batch: &SubstateBatch, vn_addr: &TAddr) -> Result<BatchTrust, IndexerError> {
-        let values = batch
-            .substates
-            .iter()
-            .map(|substate| Self::validate_substate_result(&substate.result, &substate.substate_id, vn_addr))
-            .collect::<Result<Vec<_>, _>>()?;
+    async fn verify_substate_batch(
+        &self,
+        batch: &SubstateBatch,
+        requested: &[&SubstateId],
+        vn_addr: &TAddr,
+    ) -> Result<BatchTrust, IndexerError> {
+        let mut expected = requested.iter().copied().collect::<HashSet<_>>();
+        let mut verified_entries = Vec::with_capacity(batch.substates.len());
+        for substate in &batch.substates {
+            if !expected.remove(&substate.substate_id) {
+                return Err(IndexerError::UnrequestedSubstateInBatch {
+                    vn: vn_addr.to_string(),
+                    substate_id: substate.substate_id.clone(),
+                });
+            }
+            // A batch returns only substates it holds a record of; the ids it holds none for come
+            // back as `missing`, which no proof can settle.
+            let version = match &substate.result {
+                SubstateResult::Up { substate: up } => up.version(),
+                SubstateResult::Down { version } => *version,
+                SubstateResult::DoesNotExist => {
+                    return Err(IndexerError::SubstateProofVerificationFailed {
+                        details: format!("{} was returned as DoesNotExist in a batch", substate.substate_id),
+                    });
+                },
+            };
+            let value = Self::validate_substate_result(&substate.result, &substate.substate_id, vn_addr)?;
+            verified_entries.push((substate, version, value));
+        }
         if !self.verify_substate_proofs {
             return Ok(BatchTrust::NotRequired);
         }
@@ -910,7 +934,7 @@ where
         let Some(trusted_root) = self.trusted_root_from_commit_proof(commit_proof).await? else {
             return Ok(BatchTrust::Stale);
         };
-        for (substate, value) in batch.substates.iter().zip(&values) {
+        for (substate, version, value) in &verified_entries {
             let Some(value_proof) = &substate.value_proof else {
                 return Err(IndexerError::SubstateProofVerificationFailed {
                     details: format!(
@@ -919,22 +943,10 @@ where
                     ),
                 });
             };
-            let version = match &substate.result {
-                SubstateResult::Up { substate: up } => up.version(),
-                SubstateResult::Down { version } => *version,
-                // A batch returns only substates it holds a record of; the ids it holds none for come
-                // back as `missing`, which no proof can settle. Anything else here would be cached as
-                // verified without a proof having been checked.
-                SubstateResult::DoesNotExist => {
-                    return Err(IndexerError::SubstateProofVerificationFailed {
-                        details: format!("{} was returned as DoesNotExist in a batch", substate.substate_id),
-                    });
-                },
-            };
             verify_substate_value_proof_against_root(
                 value_proof,
                 &substate.substate_id,
-                version,
+                *version,
                 value.as_ref(),
                 self.network,
                 self.num_preshards,
@@ -1102,8 +1114,9 @@ where
         Ok((result, Some(proof)))
     }
 
-    /// The value of `result` decoded, or `None` when it is not up. A member whose value does not decode, or that serves
-    /// a template whose content derives another address than `substate_id`, is disqualified.
+    /// The value of `result` decoded, or `None` when it is not up. A member whose value does not decode, whose value is
+    /// another type of substate than `substate_id` addresses, or that serves a template whose content derives another
+    /// address than `substate_id`, is disqualified.
     fn validate_substate_result(
         result: &SubstateResult,
         substate_id: &SubstateId,
@@ -1113,9 +1126,11 @@ where
             return Ok(None);
         };
         let value = Self::decode_value(substate, substate_id, vn_addr)?;
-        if let Some(expected_addr) = substate_id.as_template() &&
-            let Some(template) = value.published_template()
-        {
+        check_substate_type(substate_id, &value).map_err(|mismatch| IndexerError::MistypedSubstateValue {
+            vn: vn_addr.to_string(),
+            mismatch,
+        })?;
+        if let (Some(expected_addr), Some(template)) = (substate_id.as_template(), value.published_template()) {
             let derived = template.to_template_address();
             if derived != expected_addr {
                 return Err(IndexerError::TemplateAddressMismatch {
@@ -1275,6 +1290,9 @@ where
     /// A value proof against the root shows what was live at its block, so the root answers a read
     /// only while that block is recent. `None` when it is not: see [`Self::anchor_epoch_is_live`] and
     /// [`Self::anchor_height_is_recent`].
+    ///
+    /// The commit proof is validated even when its root is already trusted: it is cached and served with the read, and
+    /// a client that verifies it trusts only what its signatures commit.
     async fn trusted_root_from_commit_proof(
         &self,
         commit_proof: &[u8],
@@ -1294,25 +1312,13 @@ where
             return Ok(None);
         }
 
-        // Fast path: if this exact (epoch, shard_group, root) was already committee-validated and
-        // recorded in the trusted-root store, skip re-validating the commit proof's QC chain (and the
-        // committee lookup). A node cannot forge a value proof that verifies against a root a quorum
-        // already signed, so this is as sound as the full path. The header's height is not what the
-        // committee signed here, so the root is as recent as the block it was recorded at.
+        // A root recorded earlier is only as recent as the block it was recorded at, even when a later block cites it.
         let recorded_height = match &self.trusted_root_store {
             Some(store) => store.trusted_root_height(epoch, shard_group, root).await?,
             None => None,
         };
-        let height = match recorded_height {
-            Some(height) => {
-                debug!(
-                    target: LOG_TARGET,
-                    "trusted-root HIT at epoch {epoch} {shard_group}: skipped commit-proof validation"
-                );
-                height
-            },
-            None => self.validated_tip_from_commit_proof(commit_proof_bytes).await?.height,
-        };
+        let validated_height = self.validated_tip_from_commit_proof(commit_proof_bytes).await?.height;
+        let height = recorded_height.map_or(validated_height, |recorded| recorded.min(validated_height));
 
         if !self.anchor_height_is_recent(epoch, shard_group, height).await? {
             debug!(
@@ -1371,11 +1377,11 @@ where
     /// Validates `commit_proof` against its shard group committee, so that every field of the returned tip, its height
     /// included, is one the committee signed. Records the tip in the trusted-root store.
     async fn validated_tip_from_commit_proof(&self, commit_proof: &[u8]) -> Result<VerifiedBlockTip, IndexerError> {
-        let commit_proof = decode_commit_proof(commit_proof)?;
-        let block_id = commit_proof.block_id();
-        if let Some(tip) = self.remembered_tip(&block_id) {
+        let memo_key = validated_tip_memo_key(commit_proof);
+        if let Some(tip) = self.remembered_tip(&memo_key) {
             return Ok(tip);
         }
+        let commit_proof = decode_commit_proof(commit_proof)?;
         let epoch = commit_proof.epoch();
         let shard_group = commit_proof
             .shard_group()
@@ -1390,13 +1396,13 @@ where
             .map_err(|e| IndexerError::SubstateProofVerificationFailed { details: e.to_string() })?;
         debug!(
             target: LOG_TARGET,
-            "trusted-root MISS at epoch {epoch} {shard_group}: validated commit proof"
+            "Validated commit proof at epoch {epoch} {shard_group}"
         );
 
-        self.remember_tip(block_id, verified_tip);
+        self.remember_tip(memo_key, verified_tip);
 
-        // Warm the store so subsequent reads at this tip hit the fast path. A write that fails or
-        // stalls must neither fail nor hold up an otherwise-verified read.
+        // Warm the store so later reads know how recent this root is. A write that fails or stalls
+        // must neither fail nor hold up an otherwise-verified read.
         if let Some(store) = &self.trusted_root_store {
             let trusted = store
                 .trusted_root_height(epoch, shard_group, verified_tip.state_merkle_root)
@@ -1420,15 +1426,15 @@ where
         Ok(verified_tip)
     }
 
-    fn remembered_tip(&self, block_id: &FixedHash) -> Option<VerifiedBlockTip> {
+    fn remembered_tip(&self, memo_key: &FixedHash) -> Option<VerifiedBlockTip> {
         self.validated_tips
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(block_id)
+            .get(memo_key)
             .copied()
     }
 
-    fn remember_tip(&self, block_id: FixedHash, tip: VerifiedBlockTip) {
+    fn remember_tip(&self, memo_key: FixedHash, tip: VerifiedBlockTip) {
         let mut tips = self
             .validated_tips
             .lock()
@@ -1436,8 +1442,18 @@ where
         if tips.len() >= VALIDATED_TIP_MEMO_SIZE {
             tips.clear();
         }
-        tips.insert(block_id, tip);
+        tips.insert(memo_key, tip);
     }
+}
+
+/// The key of a validated commit proof in the memo: a hash of its whole encoding, so that a hit vouches for exactly the
+/// bytes that were validated, certificates included.
+fn validated_tip_memo_key(commit_proof: &[u8]) -> FixedHash {
+    FixedHash::new(
+        tari_consensus_hasher("IndexerValidatedCommitProof")
+            .chain(commit_proof)
+            .finalize_into_array(),
+    )
 }
 
 fn decode_commit_proof(commit_proof: &[u8]) -> Result<CommittedBlockProof, IndexerError> {
@@ -1461,17 +1477,20 @@ mod tests {
         encoded::Encoded,
         non_fungible::NonFungibleContainer,
         published_template::PublishedTemplate,
+        resource_container::ResourceContainer,
         substate::{Substate, SubstateValue},
+        vault::Vault,
     };
     use tari_epoch_manager::{EpochManagerError, EpochManagerEvent};
     use tari_ootle_common_types::{
         ValidatorSetHash,
         VotePower,
         committee::{CommitteeInfo, CommitteeMember},
+        substate_type::{SubstateType, SubstateTypeMismatch},
     };
     use tari_ootle_storage::global::models::ValidatorNode;
     use tari_ootle_transaction::{Transaction, TransactionId};
-    use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+    use tari_template_lib_types::{constants::TARI_TOKEN, crypto::RistrettoPublicKeyBytes};
     use tari_validator_node_rpc::{ValidatorNodeRpcClientError, client::TransactionResultStatus};
     use tokio::sync::broadcast;
 
@@ -1509,6 +1528,19 @@ mod tests {
         up_with_proof: HashMap<SubstateId, (EncodedSubstate, SubstateProofData)>,
         /// Member-specific responses: if (member, substate_id) matches, return this response.
         member_responses: HashMap<(Addr, SubstateId), SubstateResult>,
+        /// The proof a member serves on a proven read in place of the one `down_with_proof` or `up_with_proof` holds.
+        member_proofs: HashMap<Addr, SubstateProofData>,
+        /// Member-specific batches returned by `get_substates_batch`.
+        member_batches: HashMap<Addr, SubstateBatch>,
+    }
+
+    impl FakeNetwork {
+        fn proof_served_by(&self, member: Option<&Addr>, proof: &SubstateProofData) -> SubstateProofData {
+            member
+                .and_then(|member| self.member_proofs.get(member))
+                .unwrap_or(proof)
+                .clone()
+        }
     }
 
     #[derive(Clone)]
@@ -1577,14 +1609,17 @@ mod tests {
                 )));
             }
             if let Some((version, proof)) = self.0.down_with_proof.get(substate_req.substate_id()) {
-                return Ok((SubstateResult::Down { version: *version }, Some(proof.clone())));
+                return Ok((
+                    SubstateResult::Down { version: *version },
+                    Some(self.0.proof_served_by(self.1.as_ref(), proof)),
+                ));
             }
             if let Some((substate, proof)) = self.0.up_with_proof.get(substate_req.substate_id()) {
                 return Ok((
                     SubstateResult::Up {
                         substate: substate.clone(),
                     },
-                    Some(proof.clone()),
+                    Some(self.0.proof_served_by(self.1.as_ref(), proof)),
                 ));
             }
             Ok((self.get_substate(substate_req).await?, None))
@@ -1601,6 +1636,11 @@ mod tests {
                 .lock()
                 .unwrap()
                 .extend(substate_ids.iter().map(|&id| id.clone()));
+            if let Some(addr) = &self.1 &&
+                let Some(batch) = self.0.member_batches.get(addr)
+            {
+                return Ok(batch.clone());
+            }
             if let Some(batch) = &self.0.proven_batch {
                 return Ok(batch.clone());
             }
@@ -1847,8 +1887,12 @@ mod tests {
         }
     }
 
-    fn component_id(n: u8) -> SubstateId {
-        SubstateId::from_str(&format!("component_{}", hex(&[n; 32]))).unwrap()
+    fn vault_id(n: u8) -> SubstateId {
+        SubstateId::from_str(&format!("vault_{}", hex(&[n; 32]))).unwrap()
+    }
+
+    fn vault_value() -> SubstateValue {
+        SubstateValue::Vault(Vault::new(ResourceContainer::public_fungible(TARI_TOKEN, 1u64)))
     }
 
     fn hex(bytes: &[u8]) -> String {
@@ -1894,12 +1938,7 @@ mod tests {
 
     fn live(ids: &[SubstateId]) -> HashMap<SubstateId, Substate> {
         ids.iter()
-            .map(|id| {
-                (
-                    id.clone(),
-                    Substate::new(0, SubstateValue::NonFungible(NonFungibleContainer::no_data())),
-                )
-            })
+            .map(|id| (id.clone(), Substate::new(0, vault_value())))
             .collect()
     }
 
@@ -1919,7 +1958,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_down_without_a_down_proof_is_unproven_for_another_version() {
-        let id = component_id(1);
+        let id = vault_id(1);
         let (manager, _) = manager(FakeNetwork {
             down_with_proof: [(id.clone(), (SubstateVersion::new(3), down_proof_data(None)))].into(),
             ..Default::default()
@@ -1938,7 +1977,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_member_serving_an_invalid_down_proof_is_disqualified() {
-        let id = component_id(1);
+        let id = vault_id(1);
         let (manager, _) = manager(FakeNetwork {
             down_with_proof: [(id.clone(), (SubstateVersion::new(3), down_proof_data(Some(vec![0xff]))))].into(),
             ..Default::default()
@@ -1998,6 +2037,13 @@ mod tests {
             proof_elements: vec![],
         })
         .to_bytes()
+    }
+
+    /// `commit_proof` with its certificates removed: the header of the block it names, which no signature commits.
+    fn stripped(commit_proof: &[u8]) -> Vec<u8> {
+        let mut proof = CommittedBlockProof::from_bytes(commit_proof).unwrap().into_proof();
+        proof.proof_elements.clear();
+        CommittedBlockProof::new(proof).to_bytes()
     }
 
     /// A commit proof of `root` at `height`, its block committed by a 3-chain of certificates each signed by `signers`,
@@ -2141,11 +2187,11 @@ mod tests {
 
         let num_preshards = NumPreshards::P256;
         let protocol_version = tari_engine_types::ProtocolVersion::at(Network::LocalNet, Epoch(1));
-        let id = component_id(1);
+        let id = vault_id(1);
         let live = VersionedSubstateId::new(id.clone(), SubstateVersion::ZERO);
         let shard = live.to_substate_address().to_shard(num_preshards);
         let shard_group = ShardGroup::new(shard, shard);
-        let other = VersionedSubstateId::new(component_id(2), SubstateVersion::ZERO);
+        let other = VersionedSubstateId::new(vault_id(2), SubstateVersion::ZERO);
 
         let mut store = MemoryTreeStore::<StateTreePayload>::new();
         let up = |id: &VersionedSubstateId, seed: u8| SubstateTreeChange::Up {
@@ -2551,11 +2597,98 @@ mod tests {
         assert_eq!(lookups.load(Ordering::Relaxed), 2);
     }
 
+    /// A validated commit proof vouches only for its own bytes. A copy of it stripped of its certificates, as the
+    /// anchor of a down proof or nested in it, disqualifies the member serving it, and a read settles on a member whose
+    /// proof is signed.
+    #[tokio::test]
+    async fn a_stripped_copy_of_a_validated_commit_proof_disqualifies_its_member() {
+        use tari_crypto::tari_utilities::ByteArray;
+
+        let keys = (1..=4)
+            .map(tari_ootle_common_types::crypto::create_key_pair_from_seed)
+            .collect::<Vec<_>>();
+        let committee = Committee::new(
+            keys.iter()
+                .enumerate()
+                .map(|(i, (_, public))| CommitteeMember {
+                    address: format!("vn{i}"),
+                    public_key: RistrettoPublicKeyBytes::from_bytes(public.as_bytes()).unwrap(),
+                    vote_power: VotePower::of(1),
+                })
+                .collect(),
+        );
+        let signers = keys[..3].iter().map(|(secret, _)| secret.clone()).collect::<Vec<_>>();
+        let (id, down_proof, _, r2_root) = global_down_proof_signed_by(group(1, 2), &committee, &signers);
+        let honest = SubstateProofData {
+            substate_value_proof: vec![],
+            commit_proof: signed_commit_proof(group(1, 2), 4, r2_root, &committee, &signers),
+            proof_epoch: 0,
+            substate_down_proof: Some(down_proof.clone()),
+            destroyed_at_state_version: Some(2),
+        };
+        let mut nested: tari_state_tree::SubstateDownProof = tari_bor::serde_codec::from_slice(&down_proof).unwrap();
+        nested.up_commit_proof = stripped(&nested.up_commit_proof);
+        let stripped_anchor = SubstateProofData {
+            commit_proof: stripped(&honest.commit_proof),
+            ..honest.clone()
+        };
+        let stripped_nested = SubstateProofData {
+            substate_down_proof: Some(tari_bor::serde_codec::to_vec(&nested).unwrap()),
+            ..honest.clone()
+        };
+
+        let (mut manager, _) = manager(FakeNetwork {
+            down_with_proof: [(id.clone(), (SubstateVersion::ZERO, honest.clone()))].into(),
+            member_proofs: [
+                ("vn1".to_string(), stripped_anchor),
+                ("vn2".to_string(), stripped_nested),
+            ]
+            .into(),
+            ..Default::default()
+        });
+        manager.committee_provider.0 = Arc::new(committee);
+        let manager = manager.with_substate_proof_verification(true);
+        let is_honest = |proof: &SubstateProofData| {
+            proof.commit_proof == honest.commit_proof && proof.substate_down_proof == honest.substate_down_proof
+        };
+
+        let (_, proof) = manager
+            .get_substate_from_vn(
+                &"vn0".to_string(),
+                SubstateRequirementRef::new(&id, Some(SubstateVersion::ZERO)),
+            )
+            .await
+            .unwrap();
+        assert!(proof.is_some_and(|proof| is_honest(&proof)));
+        for member in ["vn1", "vn2"] {
+            let result = manager
+                .get_substate_from_vn(
+                    &member.to_string(),
+                    SubstateRequirementRef::new(&id, Some(SubstateVersion::ZERO)),
+                )
+                .await;
+            assert!(
+                matches!(result, Err(IndexerError::SubstateProofVerificationFailed { .. })),
+                "{member}: {result:?}"
+            );
+        }
+
+        // Members are raced in random order, so repeat to put a stripped one first.
+        for _ in 0..16 {
+            let lookup = manager
+                .get_substate_with_proof(&id, Some(SubstateVersion::ZERO))
+                .await
+                .unwrap();
+            assert!(lookup.verified);
+            assert!(lookup.proof.is_some_and(|proof| is_honest(&proof)));
+        }
+    }
+
     /// A head read cannot be settled by a down proof, so its down proof is not checked: an invalid one is an unproven
     /// Down, not grounds to disqualify the member. A read for the version it names checks it.
     #[tokio::test]
     async fn a_down_proof_is_checked_only_for_a_read_of_its_version() {
-        let id = component_id(1);
+        let id = vault_id(1);
         let (manager, _) = manager(FakeNetwork {
             down_with_proof: [(id.clone(), (SubstateVersion::new(3), down_proof_data(Some(vec![0xff]))))].into(),
             ..Default::default()
@@ -2628,7 +2761,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_fetches_live_inputs_in_one_batch() {
-        let ids = (0..10).map(component_id).collect::<Vec<_>>();
+        let ids = (0..10).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -2648,7 +2781,7 @@ mod tests {
     /// first such input and goes no further, however many more were declared.
     #[tokio::test]
     async fn it_stops_at_the_first_input_that_does_not_exist() {
-        let ids = (0..100).map(component_id).collect::<Vec<_>>();
+        let ids = (0..100).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork::default());
 
         let lookup = manager.get_input_substates(&requirements(&ids)).await.unwrap();
@@ -2668,7 +2801,7 @@ mod tests {
     /// live.
     #[tokio::test]
     async fn it_confirms_an_input_a_batch_omitted() {
-        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let ids = (0..3).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             omitted_from_batches: HashSet::from([ids[1].clone()]),
@@ -2688,7 +2821,7 @@ mod tests {
     /// on the committee is asked before the lookup stops at it.
     #[tokio::test]
     async fn it_confirms_an_input_a_batch_reported_down() {
-        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let ids = (0..3).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             down_in_batches: HashSet::from([ids[1].clone()]),
@@ -2707,8 +2840,8 @@ mod tests {
 
     #[tokio::test]
     async fn it_confirms_a_versioned_input_an_unproven_batch_implied_down() {
-        let ids = vec![component_id(0)];
-        let higher_up = Substate::new(1, SubstateValue::NonFungible(NonFungibleContainer::no_data()));
+        let ids = vec![vault_id(0)];
+        let higher_up = Substate::new(1, vault_value());
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             proven_batch: Some(SubstateBatch {
@@ -2741,7 +2874,7 @@ mod tests {
     /// reads, while one with them writes what it fetched without verification as before.
     #[tokio::test]
     async fn a_manager_without_cache_writes_leaves_the_cache_untouched() {
-        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let ids = (0..3).map(vault_id).collect::<Vec<_>>();
         for cache_writes in [false, true] {
             let (manager, _) = manager(FakeNetwork {
                 live: live(&ids),
@@ -2768,7 +2901,7 @@ mod tests {
     /// One member answering a batch with an unproven Down cannot hide a substate the committee holds up.
     #[tokio::test]
     async fn a_batch_reporting_a_live_substate_down_does_not_drop_it() {
-        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let ids = (0..3).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             down_in_batches: HashSet::from([ids[1].clone()]),
@@ -2786,7 +2919,7 @@ mod tests {
     /// A substate whose state the committee cannot confirm fails the call, rather than reading as not live.
     #[tokio::test]
     async fn a_batch_head_that_cannot_be_confirmed_fails_the_call() {
-        let ids = (0..4).map(component_id).collect::<Vec<_>>();
+        let ids = (0..4).map(vault_id).collect::<Vec<_>>();
         let (manager, _) = manager(FakeNetwork {
             live: live(&ids),
             down_in_batches: HashSet::from([ids[1].clone(), ids[2].clone()]),
@@ -2803,7 +2936,7 @@ mod tests {
     /// A member that leaves an id out of its batch cannot hide a substate the committee holds up.
     #[tokio::test]
     async fn an_id_a_batch_leaves_out_is_confirmed_with_the_committee() {
-        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let ids = (0..3).map(vault_id).collect::<Vec<_>>();
         for verify in [true, false] {
             let (manager, network) = manager(FakeNetwork {
                 live: live(&ids),
@@ -2870,7 +3003,7 @@ mod tests {
     /// Fresh proven heads are served from the cache with their proofs, and only the ids it cannot serve are batched.
     #[tokio::test]
     async fn fresh_proven_heads_are_served_from_the_cache() {
-        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let ids = (0..3).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -2899,7 +3032,7 @@ mod tests {
     /// Fresh cached down and nonexistent heads settle their ids as not live, with no committee call.
     #[tokio::test]
     async fn cached_down_and_absent_heads_are_left_out_from_the_cache() {
-        let ids = (0..2).map(component_id).collect::<Vec<_>>();
+        let ids = (0..2).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -2936,7 +3069,7 @@ mod tests {
     /// fetched from the committee again.
     #[tokio::test]
     async fn a_cached_head_without_its_proof_is_fetched_again() {
-        let ids = (0..2).map(component_id).collect::<Vec<_>>();
+        let ids = (0..2).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -2953,7 +3086,7 @@ mod tests {
     /// An id the committee holds absent is left out.
     #[tokio::test]
     async fn an_id_the_committee_holds_absent_is_left_out() {
-        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let ids = (0..3).map(vault_id).collect::<Vec<_>>();
         let (manager, _) = manager(FakeNetwork {
             live: live(&ids[..2]),
             ..Default::default()
@@ -2969,7 +3102,7 @@ mod tests {
     /// A cached nonexistence ends the lookup before anything is asked of the network.
     #[tokio::test]
     async fn it_stops_at_a_cached_nonexistent_input_without_fetching() {
-        let ids = (0..5).map(component_id).collect::<Vec<_>>();
+        let ids = (0..5).map(vault_id).collect::<Vec<_>>();
         let (manager, network) = manager(FakeNetwork::default());
         manager.get_substate(&ids[4], None).await.unwrap();
         network.single_requests.store(0, Ordering::Relaxed);
@@ -2990,7 +3123,7 @@ mod tests {
     /// no longer than its bound.
     #[tokio::test(start_paused = true)]
     async fn a_stalled_cache_write_holds_up_the_lookup_only_for_its_bound() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (manager, _) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3006,7 +3139,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_cache_write_still_answers_the_lookup() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (manager, _) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3021,28 +3154,30 @@ mod tests {
     /// A fresh head with no proof held for it cannot answer a read that has to return one.
     #[tokio::test]
     async fn a_cached_head_with_no_proof_held_is_fetched_again() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
         });
+        let manager = manager.with_substate_proof_verification(true);
+        seed_cache(&manager, &ids, None);
         manager.get_substate(&ids[0], None).await.unwrap();
-        manager.get_substate(&ids[0], None).await.unwrap();
-        assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 0);
 
         let lookup = manager.get_substate_with_proof(&ids[0], None).await.unwrap();
 
         assert!(lookup.result.into_up().is_some());
-        assert_eq!(network.single_requests.load(Ordering::Relaxed), 2);
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
     }
 
     #[tokio::test]
     async fn a_cached_head_is_served_with_the_proof_held_for_it() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
         });
+        let manager = manager.with_substate_proof_verification(true);
         let result = SubstateResult::Up {
             substate: encoded(live(&ids).remove(&ids[0]).unwrap()),
         };
@@ -3076,12 +3211,13 @@ mod tests {
     /// as a fresh read anchored there would be.
     #[tokio::test]
     async fn a_cached_proof_anchored_before_the_previous_epoch_is_fetched_again() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (mut manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
         });
         manager.committee_provider.3 = Epoch(3);
+        let manager = manager.with_substate_proof_verification(true);
         seed_cache(&manager, &ids, Some(cached_proof()));
 
         let lookup = manager.get_substate_with_proof(&ids[0], None).await.unwrap();
@@ -3089,7 +3225,6 @@ mod tests {
         assert!(lookup.result.into_up().is_some());
         assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
 
-        let manager = manager.with_substate_proof_verification(true);
         seed_cache(&manager, &ids, Some(cached_proof()));
 
         manager.fetch_and_cache_substates(&ids).await.unwrap();
@@ -3101,7 +3236,7 @@ mod tests {
     /// shard group overlapping the anchor's.
     #[tokio::test]
     async fn a_cached_proof_anchored_in_the_previous_epoch_is_fetched_again_once_the_new_epoch_has_a_tip() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (mut manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3120,7 +3255,7 @@ mod tests {
     /// A cached proof whose anchor does not decode is not served, so the refetch overwrites it.
     #[tokio::test]
     async fn a_cached_proof_with_an_undecodable_anchor_is_fetched_again() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3143,7 +3278,7 @@ mod tests {
     /// A cached proof anchored in the previous epoch is still served.
     #[tokio::test]
     async fn a_cached_proof_anchored_in_the_previous_epoch_is_served() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (mut manager, network) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3295,6 +3430,21 @@ mod tests {
         SubstateId,
         CachedSubstateManager<FakeEpochManager, FakeClient, FakeCache>,
     ) {
+        anchored_up_setup_with_members(current_epoch, anchor_height, recorded, serve, |_, _| HashMap::new())
+    }
+
+    /// As [`anchored_up_setup_serving`], with the members `member_proofs` names serving the proofs it gives for them,
+    /// given the honest proof and its anchor's root, in its place.
+    fn anchored_up_setup_with_members(
+        current_epoch: Epoch,
+        anchor_height: u64,
+        recorded: impl FnOnce(FixedHash) -> Vec<(Epoch, ShardGroup, u64, FixedHash)>,
+        serve: impl FnOnce(EncodedSubstate) -> EncodedSubstate,
+        member_proofs: impl FnOnce(&SubstateProofData, tari_state_tree::TreeHash) -> HashMap<Addr, SubstateProofData>,
+    ) -> (
+        SubstateId,
+        CachedSubstateManager<FakeEpochManager, FakeClient, FakeCache>,
+    ) {
         use tari_crypto::tari_utilities::ByteArray;
 
         let keys = (1..=4)
@@ -3312,21 +3462,20 @@ mod tests {
         );
         let signers = keys[..3].iter().map(|(secret, _)| secret.clone()).collect::<Vec<_>>();
 
-        let id = component_id(1);
+        let id = vault_id(1);
         let (substate, value_proof, root) = proven_up(&id);
         let commit_proof = signed_commit_proof(all_shards(), anchor_height, root, &committee, &signers);
+        let proof = SubstateProofData {
+            substate_value_proof: value_proof,
+            commit_proof,
+            proof_epoch: PROOF_EPOCH.as_u64(),
+            substate_down_proof: None,
+            destroyed_at_state_version: None,
+        };
+        let member_proofs = member_proofs(&proof, root);
         let (mut manager, _) = manager(FakeNetwork {
-            up_with_proof: [(
-                id.clone(),
-                (serve(encoded(substate)), SubstateProofData {
-                    substate_value_proof: value_proof,
-                    commit_proof,
-                    proof_epoch: PROOF_EPOCH.as_u64(),
-                    substate_down_proof: None,
-                    destroyed_at_state_version: None,
-                }),
-            )]
-            .into(),
+            up_with_proof: [(id.clone(), (serve(encoded(substate)), proof))].into(),
+            member_proofs,
             ..Default::default()
         });
         manager.committee_provider.0 = Arc::new(committee);
@@ -3438,7 +3587,7 @@ mod tests {
     /// and in a batch, and the read settles on a member whose value does.
     #[tokio::test]
     async fn an_unverified_read_skips_a_member_whose_value_does_not_decode() {
-        let id = component_id(1);
+        let id = vault_id(1);
         let honest = encoded(live(std::slice::from_ref(&id)).remove(&id).unwrap());
         let undecodable = EncodedSubstate::new(honest.version(), Encoded::from_bytes(vec![0xff]));
         // Members are asked in random order, so repeat to put the undecodable one first.
@@ -3502,6 +3651,61 @@ mod tests {
         assert!(proves_read(&manager, &id).await);
     }
 
+    /// A root the trusted-root store vouches for does not vouch for a commit proof citing it. One stripped of its
+    /// certificates, or one claiming a block its committee never signed, disqualifies the member serving it, whether
+    /// this manager validated the root or the store already held it, and the read is cached with a signed proof.
+    #[tokio::test]
+    async fn an_unsigned_commit_proof_of_a_trusted_root_disqualifies_its_member() {
+        for validated_first in [false, true] {
+            // Members are raced in random order, so repeat to put an unsigned one first.
+            for _ in 0..8 {
+                let mut honest_commit_proof = vec![];
+                let (id, manager) = anchored_up_setup_with_members(
+                    PROOF_EPOCH,
+                    4,
+                    |root| vec![(PROOF_EPOCH, all_shards(), 4, root)],
+                    |substate| substate,
+                    |honest, root| {
+                        honest_commit_proof.clone_from(&honest.commit_proof);
+                        [
+                            ("vn1".to_string(), SubstateProofData {
+                                commit_proof: stripped(&honest.commit_proof),
+                                ..honest.clone()
+                            }),
+                            ("vn2".to_string(), SubstateProofData {
+                                commit_proof: unsigned_commit_proof(all_shards(), 5, root),
+                                ..honest.clone()
+                            }),
+                        ]
+                        .into()
+                    },
+                );
+                if validated_first {
+                    assert!(proves_read(&manager, &id).await);
+                }
+                for member in ["vn1", "vn2"] {
+                    let result = manager
+                        .get_substate_from_vn(&member.to_string(), SubstateRequirementRef::new(&id, None))
+                        .await;
+                    assert!(
+                        matches!(result, Err(IndexerError::SubstateProofVerificationFailed { .. })),
+                        "{member}: {result:?}"
+                    );
+                }
+
+                let lookup = manager.get_substate_with_proof(&id, None).await.unwrap();
+                assert!(lookup.verified);
+                assert!(
+                    lookup
+                        .proof
+                        .is_some_and(|proof| proof.commit_proof == honest_commit_proof)
+                );
+                let cached = manager.read_live_proof(&id, SubstateVersion::ZERO).await.unwrap();
+                assert!(cached.is_some_and(|proof| proof.commit_proof == honest_commit_proof));
+            }
+        }
+    }
+
     /// A root the store vouches for is as old as the block it was recorded at, whatever height the header citing it
     /// claims.
     #[tokio::test]
@@ -3518,12 +3722,28 @@ mod tests {
     /// A batch anchored well behind the latest validated tip proves nothing, so its results are served unproven.
     #[tokio::test]
     async fn a_batch_anchored_far_behind_the_latest_validated_tip_is_unproven() {
+        use tari_crypto::tari_utilities::ByteArray;
+
+        let keys = (1..=4)
+            .map(tari_ootle_common_types::crypto::create_key_pair_from_seed)
+            .collect::<Vec<_>>();
+        let committee = Committee::new(
+            keys.iter()
+                .enumerate()
+                .map(|(i, (_, public))| CommitteeMember {
+                    address: format!("vn{i}"),
+                    public_key: RistrettoPublicKeyBytes::from_bytes(public.as_bytes()).unwrap(),
+                    vote_power: VotePower::of(1),
+                })
+                .collect(),
+        );
+        let signers = keys[..3].iter().map(|(secret, _)| secret.clone()).collect::<Vec<_>>();
         for (latest_height, proven) in [(100, false), (10, true)] {
-            let id = component_id(1);
+            let id = vault_id(1);
             let (substate, value_proof, root) = proven_up(&id);
-            let (manager, _) = manager(FakeNetwork {
+            let (mut manager, _) = manager(FakeNetwork {
                 proven_batch: Some(SubstateBatch {
-                    commit_proof: Some(unsigned_commit_proof(all_shards(), 4, root)),
+                    commit_proof: Some(signed_commit_proof(all_shards(), 4, root, &committee, &signers)),
                     substates: vec![tari_validator_node_rpc::client::BatchedSubstate {
                         substate_id: id.clone(),
                         result: SubstateResult::Up {
@@ -3536,7 +3756,7 @@ mod tests {
                 }),
                 ..Default::default()
             });
-            // The unsigned anchor's root is recorded, standing in for a validated one.
+            manager.committee_provider.0 = Arc::new(committee.clone());
             let store = RecordedTips::with([
                 (PROOF_EPOCH, all_shards(), 4, FixedHash::new(root.into_array())),
                 (PROOF_EPOCH, all_shards(), latest_height, NEWER_ROOT),
@@ -3727,7 +3947,7 @@ mod tests {
     /// however many ids the batch caches, and a failing one still answers it.
     #[tokio::test(start_paused = true)]
     async fn stalled_or_failed_batch_cache_writes_still_answer_the_lookup() {
-        let ids = (0..3).map(component_id).collect::<Vec<_>>();
+        let ids = (0..3).map(vault_id).collect::<Vec<_>>();
         let (manager, _) = manager(FakeNetwork {
             live: live(&ids),
             ..Default::default()
@@ -3746,7 +3966,7 @@ mod tests {
 
     #[tokio::test]
     async fn unsettled_batch_item_with_expired_cached_proof_refetches_from_committee() {
-        let ids = vec![component_id(1)];
+        let ids = vec![vault_id(1)];
         let (mut manager, network) = manager(FakeNetwork {
             live: live(&ids),
             omitted_from_batches: ids.iter().cloned().collect(),
@@ -3760,5 +3980,316 @@ mod tests {
         assert!(found.contains_key(&ids[0]));
         assert_eq!(network.batch_requests.load(Ordering::Relaxed), 1);
         assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn non_template_value_for_template_id_is_rejected_and_falls_back_to_honest_member() {
+        let (template_id, legit_template, _) = template_fixtures();
+        let legitimate_address = legit_template.to_template_address();
+        let non_template = Substate::new(0, SubstateValue::NonFungible(NonFungibleContainer::no_data()));
+
+        for verify_proofs in [false, true] {
+            let malicious_only = HashMap::from([(
+                ("vn_malicious".to_string(), template_id.clone()),
+                SubstateResult::Up {
+                    substate: encoded(non_template.clone()),
+                },
+            )]);
+            let (manager_single, _) = manager_with_members(
+                FakeNetwork {
+                    member_responses: malicious_only,
+                    ..Default::default()
+                },
+                vec!["vn_malicious".to_string()],
+            );
+            let manager_single = manager_single.with_substate_proof_verification(verify_proofs);
+
+            let err = manager_single.get_substate(&template_id, None).await.unwrap_err();
+            assert!(
+                matches!(err, IndexerError::MistypedSubstateValue {
+                    mismatch: SubstateTypeMismatch {
+                        expected: SubstateType::Template,
+                        found: SubstateType::NonFungible,
+                        ..
+                    },
+                    ..
+                }),
+                "expected MistypedSubstateValue when single member serves non-template value \
+                 (verify_proofs={verify_proofs}), got {err:?}"
+            );
+
+            for _ in 0..8 {
+                let member_responses = HashMap::from([
+                    (("vn_malicious".to_string(), template_id.clone()), SubstateResult::Up {
+                        substate: encoded(non_template.clone()),
+                    }),
+                    (("vn_honest".to_string(), template_id.clone()), SubstateResult::Up {
+                        substate: encoded(Substate::new(0, SubstateValue::Template(legit_template.clone()))),
+                    }),
+                ]);
+                let (manager, _) = manager_with_members(
+                    FakeNetwork {
+                        member_responses,
+                        ..Default::default()
+                    },
+                    vec!["vn_malicious".to_string(), "vn_honest".to_string()],
+                );
+                let manager = manager.with_substate_proof_verification(verify_proofs);
+
+                let single = manager.get_substate(&template_id, None).await.unwrap();
+                let value = single.result.into_up().unwrap().value().decode().unwrap();
+                let template = value.published_template().expect("published template value");
+                assert_eq!(template.to_template_address(), legitimate_address);
+
+                let batched = manager
+                    .fetch_and_cache_substates(std::slice::from_ref(&template_id))
+                    .await
+                    .unwrap();
+                let value = batched[&template_id].substate.value().decode().unwrap();
+                let template = value.published_template().expect("published template value");
+                assert_eq!(template.to_template_address(), legitimate_address);
+            }
+        }
+    }
+
+    /// A member serving a value of another type than its id addresses, such as a non-fungible for a vault, is
+    /// disqualified on an unproven read, single or batched, and the read falls back to an honest member.
+    #[tokio::test]
+    async fn a_value_of_another_type_than_its_id_disqualifies_its_member() {
+        let id = vault_id(1);
+        let mistyped = SubstateResult::Up {
+            substate: encoded(Substate::new(
+                0,
+                SubstateValue::NonFungible(NonFungibleContainer::no_data()),
+            )),
+        };
+        let honest_substate = encoded(Substate::new(0, vault_value()));
+        let honest = SubstateResult::Up {
+            substate: honest_substate.clone(),
+        };
+
+        let (manager, _) = manager_with_members(
+            FakeNetwork {
+                member_responses: HashMap::from([(("vn_bad".to_string(), id.clone()), mistyped.clone())]),
+                ..Default::default()
+            },
+            vec!["vn_bad".to_string()],
+        );
+        let err = manager.get_substate(&id, None).await.unwrap_err();
+        assert!(
+            matches!(&err, IndexerError::MistypedSubstateValue {
+                vn,
+                mismatch: SubstateTypeMismatch {
+                    expected: SubstateType::Vault,
+                    found: SubstateType::NonFungible,
+                    ..
+                },
+            } if vn == "vn_bad"),
+            "{err:?}"
+        );
+
+        // Members are raced in random order, so repeat to put the mistyped one first.
+        for _ in 0..8 {
+            let network = || FakeNetwork {
+                member_responses: HashMap::from([
+                    (("vn_bad".to_string(), id.clone()), mistyped.clone()),
+                    (("vn_honest".to_string(), id.clone()), honest.clone()),
+                ]),
+                ..Default::default()
+            };
+            let members = vec!["vn_bad".to_string(), "vn_honest".to_string()];
+
+            let (manager, _) = manager_with_members(network(), members.clone());
+            let single = manager.get_substate(&id, None).await.unwrap();
+            assert_eq!(single.result.into_up(), Some(honest_substate.clone()));
+
+            let (manager, _) = manager_with_members(network(), members);
+            let batched = manager
+                .fetch_and_cache_substates(std::slice::from_ref(&id))
+                .await
+                .unwrap();
+            assert_eq!(batched[&id].substate, honest_substate);
+        }
+    }
+
+    #[tokio::test]
+    async fn batch_with_does_not_exist_entry_is_rejected_in_all_proof_modes() {
+        let id = vault_id(1);
+        let honest = encoded(live(std::slice::from_ref(&id)).remove(&id).unwrap());
+
+        for verify_proofs in [false, true] {
+            for _ in 0..8 {
+                let member_batches = HashMap::from([("vn_malicious".to_string(), SubstateBatch {
+                    commit_proof: None,
+                    substates: vec![tari_validator_node_rpc::client::BatchedSubstate {
+                        substate_id: id.clone(),
+                        result: SubstateResult::DoesNotExist,
+                        value_proof: None,
+                        proof_epoch: 0,
+                    }],
+                    missing: vec![],
+                })]);
+                let (manager, _) = manager_with_members(
+                    FakeNetwork {
+                        live: live(std::slice::from_ref(&id)),
+                        member_batches,
+                        ..Default::default()
+                    },
+                    vec!["vn_malicious".to_string(), "vn_honest".to_string()],
+                );
+                let manager = manager.with_substate_proof_verification(verify_proofs);
+
+                let results = manager
+                    .fetch_and_cache_substates(std::slice::from_ref(&id))
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    results.get(&id).map(|p| &p.substate),
+                    Some(&honest),
+                    "verify_proofs={verify_proofs}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn batch_with_unrequested_or_duplicate_substate_is_rejected() {
+        let requested_id = vault_id(1);
+        let unrequested_id = vault_id(2);
+        let honest = encoded(live(std::slice::from_ref(&requested_id)).remove(&requested_id).unwrap());
+        let unrequested = encoded(
+            live(std::slice::from_ref(&unrequested_id))
+                .remove(&unrequested_id)
+                .unwrap(),
+        );
+
+        let invalid_batches = [
+            SubstateBatch {
+                commit_proof: None,
+                substates: vec![
+                    tari_validator_node_rpc::client::BatchedSubstate {
+                        substate_id: requested_id.clone(),
+                        result: SubstateResult::Up {
+                            substate: honest.clone(),
+                        },
+                        value_proof: None,
+                        proof_epoch: 0,
+                    },
+                    tari_validator_node_rpc::client::BatchedSubstate {
+                        substate_id: unrequested_id.clone(),
+                        result: SubstateResult::Up {
+                            substate: unrequested.clone(),
+                        },
+                        value_proof: None,
+                        proof_epoch: 0,
+                    },
+                ],
+                missing: vec![],
+            },
+            SubstateBatch {
+                commit_proof: None,
+                substates: vec![
+                    tari_validator_node_rpc::client::BatchedSubstate {
+                        substate_id: requested_id.clone(),
+                        result: SubstateResult::Up {
+                            substate: honest.clone(),
+                        },
+                        value_proof: None,
+                        proof_epoch: 0,
+                    },
+                    tari_validator_node_rpc::client::BatchedSubstate {
+                        substate_id: requested_id.clone(),
+                        result: SubstateResult::Down {
+                            version: SubstateVersion::ZERO,
+                        },
+                        value_proof: None,
+                        proof_epoch: 0,
+                    },
+                ],
+                missing: vec![],
+            },
+        ];
+
+        for verify_proofs in [false, true] {
+            for (bad_batch, expected_bad_id) in [
+                (&invalid_batches[0], &unrequested_id),
+                (&invalid_batches[1], &requested_id),
+            ] {
+                for _ in 0..8 {
+                    let member_batches = HashMap::from([("vn_malicious".to_string(), bad_batch.clone())]);
+                    let (manager, _) = manager_with_members(
+                        FakeNetwork {
+                            live: live(std::slice::from_ref(&requested_id)),
+                            member_batches,
+                            ..Default::default()
+                        },
+                        vec!["vn_malicious".to_string(), "vn_honest".to_string()],
+                    );
+                    let manager = manager.with_substate_proof_verification(verify_proofs);
+
+                    let err = manager
+                        .verify_substate_batch(bad_batch, &[&requested_id], &"vn_malicious".to_string())
+                        .await
+                        .unwrap_err();
+                    assert!(matches!(
+                        err,
+                        IndexerError::UnrequestedSubstateInBatch { ref vn, ref substate_id }
+                            if vn == "vn_malicious" && substate_id == expected_bad_id
+                    ));
+
+                    let results = manager
+                        .fetch_and_cache_substates(std::slice::from_ref(&requested_id))
+                        .await
+                        .unwrap();
+                    assert_eq!(results.len(), 1);
+                    assert_eq!(results[&requested_id].substate, honest);
+                    assert!(!results.contains_key(&unrequested_id));
+                    assert!(!manager.substate_cache.0.lock().unwrap().contains_key(&unrequested_id));
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn get_substate_with_proof_serves_cached_entry_when_proof_verification_is_off() {
+        let up_id = vault_id(1);
+        let down_id = vault_id(2);
+        let mut member_responses = HashMap::new();
+        member_responses.insert(("vn".to_string(), down_id.clone()), SubstateResult::Down {
+            version: SubstateVersion::new(2),
+        });
+        let (manager, network) = manager(FakeNetwork {
+            live: live(std::slice::from_ref(&up_id)),
+            member_responses,
+            ..Default::default()
+        });
+
+        let first_up = manager.get_substate_with_proof(&up_id, None).await.unwrap();
+        assert!(matches!(first_up.result, SubstateResult::Up { .. }));
+        assert!(first_up.proof.is_none());
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
+
+        let second_up = manager.get_substate_with_proof(&up_id, None).await.unwrap();
+        assert!(matches!(second_up.result, SubstateResult::Up { .. }));
+        assert!(second_up.proof.is_none());
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
+
+        let first_down = manager.get_substate_with_proof(&down_id, None).await.unwrap();
+        assert!(matches!(
+            first_down.result,
+            SubstateResult::Down { version } if version == SubstateVersion::new(2)
+        ));
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 2);
+
+        let second_down = manager
+            .get_substate_with_proof(&down_id, Some(SubstateVersion::new(1)))
+            .await
+            .unwrap();
+        assert!(matches!(
+            second_down.result,
+            SubstateResult::Down { version } if version == SubstateVersion::new(1)
+        ));
+        assert!(second_down.proof.is_none());
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 2);
     }
 }

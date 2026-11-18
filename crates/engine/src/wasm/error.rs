@@ -107,6 +107,8 @@ pub enum WasmExecutionError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum WasmValidationError {
+    #[error("Template name {name} is too long, maximum length is {max_length}")]
+    TemplateNameTooLong { name: String, max_length: usize },
     #[error("Function name {name} is too long, maximum length is {max_length}")]
     FunctionNameTooLong { name: String, max_length: usize },
     #[error("Function {name} contained too many arguments, maximum is {max_args}, but got {num_args}")]
@@ -238,6 +240,7 @@ impl WasmValidationError {
     /// Every validation failure is a property of the published module, so the template is always at fault.
     pub fn failure_code(&self) -> ExecutionFailureCode {
         match self {
+            Self::TemplateNameTooLong { .. } |
             Self::FunctionNameTooLong { .. } |
             Self::FunctionTooManyArguments { .. } |
             Self::FunctionTooManyTupleReturn { .. } |

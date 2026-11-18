@@ -80,6 +80,7 @@ pub fn sign(
 /// Verifies an adaptor pre-signature against `public_key`, `adaptor_point` (`T`) and `message`,
 /// checking `ŝ·G + T == (R + T) + e·P`. A `true` result guarantees that [`complete`] with
 /// the discrete log of `T` produces a valid transaction signature.
+#[must_use]
 pub fn verify(
     pre: &RistrettoAdaptorSignature,
     public_key: &RistrettoPublicKey,

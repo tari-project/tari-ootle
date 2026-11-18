@@ -236,7 +236,6 @@ gix-hash = { version = "0.18", features = ["serde"] }
 jsonwebtoken = { version = "10.3.0", default-features = false }
 hashbrown = { version = "0.13.2" }
 hex = "0.4"
-humantime = "2.1.0"
 humantime-serde = "1.1.1"
 include_dir = "0.7.2"
 indexmap = "2.11.4"

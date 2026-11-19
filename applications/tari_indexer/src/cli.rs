@@ -105,10 +105,6 @@ impl ConfigOverrideProvider for Cli {
                 format!("{}.peer_seeds", PeerSeedsConfig::main_key_prefix()),
                 self.peer_seeds.join(","),
             ));
-            overrides.push((
-                format!("{}.{}.peer_seeds", network, PeerSeedsConfig::main_key_prefix()),
-                self.peer_seeds.join(","),
-            ));
         }
         if let Some(listener_port) = self.listener_port {
             overrides.push(("indexer.p2p.listener_port".to_string(), listener_port.to_string()));
@@ -125,12 +121,6 @@ impl ConfigOverrideProvider for Cli {
         if let Some(url) = self.epoch_oracle_minotari_node_grpc_url.as_ref() {
             overrides.push((
                 "epoch_oracle.base_layer.base_node_grpc_url".to_string(),
-                url.to_string(),
-            ));
-            // Network presets set this key in `[<network>.epoch_oracle.base_layer]`, which the loader merges over the
-            // root section after these overrides are applied.
-            overrides.push((
-                format!("{}.epoch_oracle.base_layer.base_node_grpc_url", network),
                 url.to_string(),
             ));
         }
@@ -169,5 +159,39 @@ mod tests {
             config.epoch_oracle.base_layer.base_node_grpc_url.unwrap().as_str(),
             "http://my-node:18142/"
         );
+    }
+
+    #[test]
+    fn root_key_override_beats_the_network_preset() {
+        let config = load_with_presets(&[
+            "--network",
+            "esmeralda",
+            "-p",
+            "epoch_oracle.base_layer.start_height=1100000",
+        ]);
+
+        assert_eq!(config.epoch_oracle.base_layer.start_height, 1100000);
+    }
+
+    #[test]
+    fn network_scoped_override_beats_the_root_key_override() {
+        let config = load_with_presets(&[
+            "--network",
+            "esmeralda",
+            "-p",
+            "esmeralda.epoch_oracle.base_layer.start_height=1200000",
+            "-p",
+            "epoch_oracle.base_layer.start_height=1100000",
+        ]);
+
+        assert_eq!(config.epoch_oracle.base_layer.start_height, 1200000);
+    }
+
+    #[test]
+    fn peer_seeds_flag_overrides_the_network_preset() {
+        let seed = "fa4e3963f426aa881f5956f99b20737326c6621227bb074fe47a5c5d54954403::/ip4/127.0.0.1/udp/1/quic-v1";
+        let config = load_with_presets(&["--network", "esmeralda", "-s", seed]);
+
+        assert_eq!(config.peer_seeds.peer_seeds.as_ref(), [seed.to_string()]);
     }
 }

@@ -162,7 +162,6 @@ export function permissionToString(permission: Permission): string {
   if ("Keys" in permission) return `keys:${permission.Keys.toLowerCase()}`;
   if ("Templates" in permission) return `templates:${permission.Templates.toLowerCase()}`;
   if ("Transactions" in permission) return `transactions:${permission.Transactions.toLowerCase()}`;
-  if ("Validators" in permission) return `validators:${permission.Validators.toLowerCase()}`;
   if ("Settings" in permission) return `settings:${permission.Settings.toLowerCase()}`;
   if ("AddressBook" in permission) return `address_book:${permission.AddressBook.toLowerCase()}`;
   if ("TransactionRequests" in permission) {
@@ -178,6 +177,7 @@ export function permissionToString(permission: Permission): string {
   if ("Nfts" in permission) return scoped("nfts", permission.Nfts);
   if ("Confidential" in permission) return scoped("confidential", permission.Confidential);
   if ("StealthUtxos" in permission) return scoped("stealth_utxos", permission.StealthUtxos);
+  if ("VnFees" in permission) return scoped("vn_fees", permission.VnFees);
 
   console.error("Unknown permission", permission);
   return JSON.stringify(permission);

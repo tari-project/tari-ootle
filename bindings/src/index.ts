@@ -246,6 +246,7 @@ export * from "./types/VaultId";
 export * from "./types/VersionedSubstateId";
 export * from "./types/VersionedSubstateIdLockIntent";
 export * from "./types/ViewableBalanceProof";
+export * from "./types/VnFeesAction";
 export * from "./types/VotePower";
 export * from "./types/WalletTransaction";
 export * from "./types/WalletUtxoUpdate";

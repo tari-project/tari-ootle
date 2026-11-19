@@ -118,16 +118,15 @@ impl AuthSubcommand {
         match self {
             Request(args) => {
                 if args.permissions.is_empty() {
-                    println!("You forgot add permissions");
-                } else {
-                    let resp = client
-                        .auth_request(AuthLoginRequest {
-                            permissions: args.permissions,
-                            credentials: AuthCredentials::None,
-                        })
-                        .await?;
-                    println!("{}", format_access_granted(&resp.token));
+                    anyhow::bail!("You forgot to add permissions");
                 }
+                let resp = client
+                    .auth_request(AuthLoginRequest {
+                        permissions: args.permissions,
+                        credentials: AuthCredentials::None,
+                    })
+                    .await?;
+                println!("{}", format_access_granted(&resp.token));
             },
             Revoke(args) => {
                 client

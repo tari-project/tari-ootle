@@ -97,9 +97,9 @@ impl Cli {
         };
         match endpoint.iter().next() {
             Some(Protocol::Ip4(ip)) => ip.is_loopback(),
-            Some(Protocol::Ip6(ip)) => ip.is_loopback(),
+            Some(Protocol::Ip6(ip)) => ip.is_loopback() || ip.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback()),
             Some(Protocol::Dns(host) | Protocol::Dns4(host) | Protocol::Dns6(host) | Protocol::Dnsaddr(host)) => {
-                host.eq_ignore_ascii_case("localhost")
+                host.trim_end_matches('.').eq_ignore_ascii_case("localhost")
             },
             _ => false,
         }
@@ -217,7 +217,9 @@ mod tests {
         for loopback in [
             "/ip4/127.0.0.1/tcp/5100",
             "/ip6/::1/tcp/5100",
+            "/ip6/::ffff:127.0.0.1/tcp/5100",
             "/dns4/localhost/tcp/5100",
+            "/dns4/localhost./tcp/5100",
         ] {
             let cli = Cli::try_parse_from([
                 "tari_ootle_wallet_cli",

@@ -660,7 +660,7 @@ where
             .interface()
             .charge_template_compile(binary.len() as u64, &structure.compile)?;
 
-        let template_def = WasmModule::load(binary)?.into_template_def();
+        let template_def = WasmModule::load_with_shape(binary, structure.shape)?.into_template_def();
         // The size cap above holds the binary within `MAX_TEMPLATE_BLOB_WIRE_BYTES` — a const assertion keeps the two
         // ordered — so constructing TemplateBlob is infallible.
         let blob = TemplateBlob::new_checked(binary).expect("template binary size verified above");

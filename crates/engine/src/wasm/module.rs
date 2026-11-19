@@ -71,8 +71,8 @@ impl WasmModule {
     /// Checks a module against the template consensus rules, reading only its bytes.
     ///
     /// The rules are the custom sections a module may carry, the structure limits, and the rules
-    /// its `TemplateDef` and exports must follow. The check is one walk of the bytes ahead of any
-    /// compile, and the structure it returns carries the counts that price the compile.
+    /// its `TemplateDef` and exports must follow. The check reads the bytes ahead of any compile,
+    /// and the structure it returns carries the counts that price the compile.
     ///
     /// A template is held to these rules once, when it is published. [`Self::load`] leaves them to
     /// that check, so a rule added later refuses new templates while published ones keep loading.
@@ -91,7 +91,7 @@ impl WasmModule {
     /// [`Self::validate`], then [`Self::load`].
     pub fn validate_and_load(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
         let structure = Self::validate(code)?;
-        Self::compile(code, structure.shape)
+        Self::load_with_shape(code, structure.shape)
     }
 
     /// Compiles and instantiates a module.
@@ -101,10 +101,11 @@ impl WasmModule {
     /// The template consensus rules belong to [`Self::validate`].
     pub fn load(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
         let structure = measure_module_structure(code);
-        Self::compile(code, structure.shape)
+        Self::load_with_shape(code, structure.shape)
     }
 
-    fn compile(code: &[u8], shape: ModuleShape) -> Result<LoadedTemplate, TemplateLoaderError> {
+    /// [`Self::load`] for a module whose shape [`Self::validate`] has already measured.
+    pub(crate) fn load_with_shape(code: &[u8], shape: ModuleShape) -> Result<LoadedTemplate, TemplateLoaderError> {
         let engine = Self::create_engine();
         let module = wasmer::Module::new(&engine, code)?;
         Self::finalize_loaded_module(engine, module, code.len(), shape)

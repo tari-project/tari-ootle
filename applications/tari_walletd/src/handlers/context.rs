@@ -754,9 +754,15 @@ mod cookie_auth_tests {
     use crate::handlers::{
         accounts::handle_export_view_key,
         auth::{handle_create_api_key, handle_list_api_keys, handle_revoke_api_key},
-        signing_requests::handle_approve as handle_approve_signing_request,
+        signing_requests::{
+            handle_approve as handle_approve_signing_request,
+            handle_reject as handle_reject_signing_request,
+        },
         test_support::TestDaemon,
-        transaction_requests::handle_approve as handle_approve_transaction_request,
+        transaction_requests::{
+            handle_approve as handle_approve_transaction_request,
+            handle_reject as handle_reject_transaction_request,
+        },
     };
 
     #[tokio::test]
@@ -849,8 +855,21 @@ mod cookie_auth_tests {
         .unwrap_err();
         assert!(matches!(err.downcast_ref::<AuthError>(), Some(AuthError::UserAuthOnly)));
 
+        let err = handle_reject_transaction_request(&daemon.context, cookie, TransactionRequestDecisionRequest {
+            request_id: 1,
+        })
+        .await
+        .unwrap_err();
+        assert!(matches!(err.downcast_ref::<AuthError>(), Some(AuthError::UserAuthOnly)));
+
         let err =
             handle_approve_signing_request(&daemon.context, cookie, SigningRequestDecisionRequest { request_id: 1 })
+                .await
+                .unwrap_err();
+        assert!(matches!(err.downcast_ref::<AuthError>(), Some(AuthError::UserAuthOnly)));
+
+        let err =
+            handle_reject_signing_request(&daemon.context, cookie, SigningRequestDecisionRequest { request_id: 1 })
                 .await
                 .unwrap_err();
         assert!(matches!(err.downcast_ref::<AuthError>(), Some(AuthError::UserAuthOnly)));

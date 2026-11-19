@@ -149,7 +149,7 @@ mod tests {
             "tw_explicit_api_key",
             "--base-path",
             dir.to_str().unwrap(),
-            "keys",
+            "accounts",
             "list",
         ])
         .unwrap();
@@ -177,7 +177,7 @@ mod tests {
             dir.to_str().unwrap(),
             "--network",
             "localnet",
-            "keys",
+            "accounts",
             "list",
         ])
         .unwrap();
@@ -198,7 +198,7 @@ mod tests {
             "tari_ootle_wallet_cli",
             "--cookie-file",
             custom_cookie.to_str().unwrap(),
-            "keys",
+            "accounts",
             "list",
         ])
         .unwrap();
@@ -225,7 +225,7 @@ mod tests {
                 loopback,
                 "--base-path",
                 dir.to_str().unwrap(),
-                "keys",
+                "accounts",
                 "list",
             ])
             .unwrap();
@@ -244,7 +244,7 @@ mod tests {
                 remote,
                 "--base-path",
                 dir.to_str().unwrap(),
-                "keys",
+                "accounts",
                 "list",
             ])
             .unwrap();
@@ -261,7 +261,7 @@ mod tests {
             "/dns4/wallet.example.com/tcp/5100",
             "--cookie-file",
             cookie_file_path(&dir).to_str().unwrap(),
-            "keys",
+            "accounts",
             "list",
         ])
         .unwrap();

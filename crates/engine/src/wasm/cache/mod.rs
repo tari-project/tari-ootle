@@ -80,13 +80,16 @@ static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Computed in a `const` context, so the digest is a compile-time constant and the source text it
 /// reads never reaches the binary.
 ///
-/// The wasmer version is the one input not derived here, because a crate cannot read its
-/// dependencies' resolved versions and a published crate cannot reach the lockfile. It is hashed as
-/// [`WASMER_VERSION`] instead, which a test holds to the workspace lockfile.
+/// The dependency versions are the inputs not derived here, because a crate cannot read its
+/// dependencies' resolved versions and a published crate cannot reach the lockfile. They are hashed
+/// as [`WASMER_VERSION`] and [`WASMER_MIDDLEWARES_VERSION`] instead, which tests hold to the
+/// workspace lockfile.
 const ENGINE_FINGERPRINT_BITS: u64 = {
     let h = const_hash::init(b"tari.ootle.wasm_cache.engine_fingerprint.v2");
     // The compiler that generated every artifact's native code.
     let h = const_hash::part(h, WASMER_VERSION.as_bytes());
+    // The metering middleware that inserts the points checks into every artifact.
+    let h = const_hash::part(h, WASMER_MIDDLEWARES_VERSION.as_bytes());
     // The compiler flags, feature set and tunables every artifact is built under.
     let h = const_hash::part(h, include_bytes!("../engine.rs"));
     // The derivation of the shape counts a hit serves verbatim out of the header.
@@ -155,6 +158,11 @@ const ENGINE_FINGERPRINT_BITS: u64 = {
 /// so a release that changes only the generated code still loads every artifact the previous one
 /// wrote. Two nodes that differ only in cache history then run different code for the same template.
 const WASMER_VERSION: &str = "7.5.0";
+
+/// The resolved `tari-wasmer-middlewares` version. Its `Metering` middleware decides where the
+/// points checks go and what each one deducts, which the artifact carries as generated code, and
+/// the workspace accepts any patch release of it.
+const WASMER_MIDDLEWARES_VERSION: &str = "7.5.0";
 
 /// The fingerprint as the lowercase hex it appears in a filename as.
 ///
@@ -1145,20 +1153,41 @@ mod tests {
         }
     }
 
-    #[test]
-    fn wasmer_version_matches_the_lockfile() {
+    /// The version of `package` the workspace lockfile resolves.
+    fn resolved_version(package: &str) -> String {
         let lockfile = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.lock"))
             .expect("workspace Cargo.lock");
-        let resolved = lockfile
+        let name = format!(r#"name = "{package}""#);
+        let mut entries = lockfile
             .split("[[package]]")
-            .find(|entry| entry.lines().any(|line| line == r#"name = "wasmer""#))
-            .and_then(|entry| entry.lines().find_map(|line| line.strip_prefix(r#"version = ""#)))
+            .filter(|entry| entry.lines().any(|line| line == name));
+        let entry = entries.next().unwrap_or_else(|| panic!("{package} in Cargo.lock"));
+        assert!(entries.next().is_none(), "Cargo.lock resolves more than one {package}");
+        entry
+            .lines()
+            .find_map(|line| line.strip_prefix(r#"version = ""#))
             .and_then(|version| version.strip_suffix('"'))
-            .expect("wasmer in Cargo.lock");
+            .unwrap_or_else(|| panic!("{package} has a version in Cargo.lock"))
+            .to_string()
+    }
+
+    #[test]
+    fn wasmer_version_matches_the_lockfile() {
         assert_eq!(
-            WASMER_VERSION, resolved,
+            WASMER_VERSION,
+            resolved_version("wasmer"),
             "WASMER_VERSION must name the wasmer the workspace resolves, so that artifacts compiled by another \
              release are not served"
+        );
+    }
+
+    #[test]
+    fn wasmer_middlewares_version_matches_the_lockfile() {
+        assert_eq!(
+            WASMER_MIDDLEWARES_VERSION,
+            resolved_version("tari-wasmer-middlewares"),
+            "WASMER_MIDDLEWARES_VERSION must name the tari-wasmer-middlewares the workspace resolves, so that \
+             artifacts metered by another release are not served"
         );
     }
 

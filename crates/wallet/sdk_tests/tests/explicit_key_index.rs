@@ -6,10 +6,7 @@ mod support;
 use ootle_byte_type::ToByteType;
 use tari_engine_types::{Utxo, UtxoOutput, crypto::OutputBody};
 use tari_ootle_address::RistrettoOotleAddress;
-use tari_ootle_wallet_sdk::{
-    crypto::pay_to::PayTo,
-    models::{AccountWithAddress, KeyBranch},
-};
+use tari_ootle_wallet_sdk::{crypto::pay_to::PayTo, models::AccountWithAddress};
 use tari_template_lib::types::{
     UtxoAddress,
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
@@ -79,25 +76,6 @@ fn an_account_index_in_use_is_refused() {
         .create_account_at_index(Some("again"), false, key_index(&account))
         .unwrap_err();
     assert!(err.is_account_exists_error(), "{err}");
-}
-
-#[test]
-fn a_public_key_created_at_an_explicit_index_records_the_index() {
-    let test = Test::without_accounts(PanicNetworkInterface);
-    let km = test.sdk().key_manager_api();
-
-    let key = km.create_public_key_at_index(KeyBranch::Transaction, 3).unwrap();
-    assert_eq!(key.key_id.derived_index(), Some(3));
-    let listed = km
-        .get_all_derived_keys(KeyBranch::Transaction)
-        .unwrap()
-        .into_iter()
-        .map(|key| key.key_id().derived_index())
-        .collect::<Vec<_>>();
-    assert_eq!(listed, [Some(3)]);
-
-    let next = km.next_public_key(KeyBranch::Transaction).unwrap();
-    assert_eq!(next.key_id.derived_index(), Some(4));
 }
 
 #[test]

@@ -329,22 +329,6 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
         })
     }
 
-    /// Derives the public key at `index` in `branch` and records the index as used, so the wallet lists the key and
-    /// [`Self::next_derived_key_id`] never allocates the index again.
-    pub fn create_public_key_at_index(
-        &self,
-        branch: KeyBranch,
-        index: DerivedKeyIndex,
-    ) -> Result<WalletPublicKey, KeyManagerApiError> {
-        let key = self.derive_key(branch, index)?;
-        self.store
-            .with_write_tx(|tx| tx.key_manager_insert_or_ignore(branch.as_str(), index))?;
-        Ok(WalletPublicKey {
-            public_key: key.to_public_key(),
-            key_id: key.as_key_id(),
-        })
-    }
-
     pub fn derive_account_key_pair(&self, index: u64) -> Result<DerivedKeyPair, KeyManagerApiError> {
         let key = self.derive_account_key(index)?;
         let public_key = RistrettoPublicKey::from_secret_key(&key.key);

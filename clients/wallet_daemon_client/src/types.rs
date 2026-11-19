@@ -69,7 +69,6 @@ use tari_ootle_wallet_sdk::{
         BalanceChangeSourceType,
         DerivedKeyIndex,
         EffectiveStatus,
-        KeyBranch,
         KeyId,
         KeyType,
         NonFungibleToken,
@@ -796,34 +795,6 @@ pub struct BurnProofsGetRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct BurnProofsGetResponse {
     pub proof: ClaimBurnProofContents,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct KeysListRequest {
-    pub branch: KeyBranch,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct KeysListResponse {
-    /// (KeyId, public key, is_active)
-    pub keys: Vec<(KeyId, RistrettoPublicKeyBytes, bool)>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct KeysCreateRequest {
-    pub branch: KeyBranch,
-    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
-    pub specific_index: Option<u64>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct KeysCreateResponse {
-    pub id: u64,
-    pub public_key: RistrettoPublicKeyBytes,
 }
 
 /// Imports an externally-generated secret key into the wallet's keystore. The `secret_key` is transmitted as hex.

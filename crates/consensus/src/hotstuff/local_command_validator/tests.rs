@@ -3268,11 +3268,11 @@ mod some_accept {
             .unwrap();
 
         assert_eq!(proposed.decision, Decision::Abort(AbortReason::LockOutputsFailed));
+        assert!(no_vote.is_none(), "{no_vote:?}");
         let foreign_ev = replica_rec.evidence().get(&foreign).unwrap();
         assert!(foreign_ev.inputs().values().all(Option::is_none), "{foreign_ev:?}");
         assert!(foreign_ev.outputs().is_empty(), "{foreign_ev:?}");
         assert_eq!(*replica_rec.evidence(), proposed.evidence);
-        assert!(no_vote.is_none(), "{no_vote:?}");
     }
 }
 

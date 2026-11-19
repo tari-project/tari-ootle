@@ -106,8 +106,12 @@ where
             .get_substates(ids, verify)
             .await
             .map_err(|e| SubstateApiError::NetworkInterfaceError(e.into()))?;
+        let requested: HashSet<&SubstateId> = ids.iter().collect();
         let mut read = HashMap::with_capacity(substates.len());
         for (id, substate) in substates {
+            if !requested.contains(&id) {
+                return Err(SubstateApiError::UnrequestedSubstate { substate_id: id });
+            }
             let read_substate = self.read_served(&id, &substate, verify, proofs.get(&id)).await?;
             read.insert(id, read_substate.substate);
         }
@@ -132,6 +136,10 @@ where
             .get_substates(ids, verify)
             .await
             .map_err(|e| SubstateApiError::NetworkInterfaceError(e.into()))?;
+        let requested: HashSet<&SubstateId> = ids.iter().collect();
+        if let Some(substate_id) = substates.keys().find(|id| !requested.contains(id)).cloned() {
+            return Err(SubstateApiError::UnrequestedSubstate { substate_id });
+        }
         let mut results = Vec::with_capacity(ids.len());
         for id in ids {
             let Some(substate) = substates.remove(id) else {
@@ -716,6 +724,8 @@ pub enum SubstateApiError {
     SubstateDoesNotExist { address: SubstateId },
     #[error("ValueVisitorError: {0}")]
     ValueVisitorError(#[from] IndexedValueError),
+    #[error("The indexer answered a substate fetch with {substate_id}, which the fetch did not request")]
+    UnrequestedSubstate { substate_id: SubstateId },
     #[error("The indexer served substate {substate_id} as a value that does not decode: {details}")]
     UndecodableSubstate { substate_id: SubstateId, details: String },
     #[error("The indexer served substate {substate_id} without a proof. Retry, or use another indexer.")]

@@ -78,6 +78,8 @@ struct ProvingNetworkState {
     substates: HashMap<SubstateId, ServedSubstate>,
     /// Versions served as gone down to requests that name them, beside the version `substates` serves.
     down_versions: HashMap<(SubstateId, SubstateVersion), Option<SubstateProof>>,
+    /// Extra substates injected into every batch fetch response regardless of whether they were requested.
+    unrequested_batch_substates: HashMap<SubstateId, UnrequestedBatchSubstate>,
     /// How many of the next substate queries fail as if the indexer could not be reached.
     failing_substate_queries: usize,
     /// How many of the next substate fetches fail as if the indexer could not be reached.
@@ -110,6 +112,12 @@ struct ServedSubstate {
     proof: Option<SubstateProof>,
 }
 
+struct UnrequestedBatchSubstate {
+    version: SubstateVersion,
+    value: SubstateValue,
+    proof: Option<SubstateProof>,
+}
+
 impl ProvingNetwork {
     /// Serves the handovers between consecutive `sets`, with the latest checkpoint the one ending `sets[latest]`'s
     /// epoch.
@@ -136,6 +144,7 @@ impl ProvingNetwork {
                 walk_requests: 0,
                 substates: HashMap::new(),
                 down_versions: HashMap::new(),
+                unrequested_batch_substates: HashMap::new(),
                 failing_substate_queries: 0,
                 failing_substate_fetches: 0,
                 committee_requests: 0,
@@ -235,6 +244,21 @@ impl ProvingNetwork {
             value: Some(value),
             proof,
         });
+    }
+
+    /// Injects `id` into every batch `get_substates` answer even when the caller did not request it.
+    pub fn inject_unrequested_batch_substate(
+        &self,
+        id: SubstateId,
+        version: SubstateVersion,
+        value: SubstateValue,
+        proof: Option<SubstateProof>,
+    ) {
+        self.state
+            .lock()
+            .unwrap()
+            .unrequested_batch_substates
+            .insert(id, UnrequestedBatchSubstate { version, value, proof });
     }
 
     /// Serves `id` as gone down at `version`, with `proof` to requests for proofs that name the version.
@@ -364,6 +388,15 @@ impl WalletNetworkInterface for ProvingNetwork {
             fetched.substates.insert(
                 id.clone(),
                 EncodedSubstate::new(served.version, Encoded::encode(value).unwrap()),
+            );
+            if let Some(proof) = served.proof.clone().filter(|_| include_proofs) {
+                fetched.proofs.insert(id.clone(), proof);
+            }
+        }
+        for (id, served) in &state.unrequested_batch_substates {
+            fetched.substates.insert(
+                id.clone(),
+                EncodedSubstate::new(served.version, Encoded::encode(&served.value).unwrap()),
             );
             if let Some(proof) = served.proof.clone().filter(|_| include_proofs) {
                 fetched.proofs.insert(id.clone(), proof);

@@ -321,3 +321,42 @@ async fn a_substate_older_than_the_version_asked_for_is_refused() {
         "{err}"
     );
 }
+
+#[tokio::test]
+async fn an_unrequested_substate_in_a_batch_fetch_is_refused() {
+    let (sets, network, test) = walked_wallet(IndexerTrust::Verify).await;
+    let (requested_id, requested_value) = substate(1);
+    let requested_proof = substate_proof(&sets[4], &requested_id, VERSION, &requested_value);
+    network.serve_substate(requested_id.clone(), VERSION, requested_value, Some(requested_proof));
+
+    let (unrequested_id, unrequested_value) = substate(2);
+    let unrequested_proof = substate_proof(&sets[4], &unrequested_id, VERSION, &unrequested_value);
+    network.inject_unrequested_batch_substate(
+        unrequested_id.clone(),
+        VERSION,
+        unrequested_value,
+        Some(unrequested_proof),
+    );
+
+    let err = test
+        .sdk()
+        .substate_api()
+        .get_substates_from_network(std::slice::from_ref(&requested_id))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, SubstateApiError::UnrequestedSubstate { substate_id } if *substate_id == unrequested_id),
+        "{err}"
+    );
+
+    let err = test
+        .sdk()
+        .substate_api()
+        .get_each_substate_from_network(std::slice::from_ref(&requested_id))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, SubstateApiError::UnrequestedSubstate { substate_id } if *substate_id == unrequested_id),
+        "{err}"
+    );
+}

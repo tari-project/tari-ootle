@@ -153,7 +153,7 @@ fn creator_module(template_name: &str, def: &TemplateDef) -> Vec<u8> {
         tdef = wat_bytes(&def.encode_for_wasm_embedding().unwrap()),
     );
     let code = wat::parse_str(&wat).unwrap();
-    WasmModule::validate_code(&code).expect("template must pass publish admission");
+    WasmModule::validate_and_load(&code).expect("template must pass publish admission");
     code
 }
 

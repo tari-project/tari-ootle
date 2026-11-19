@@ -31,7 +31,7 @@ use serde_json::json;
 use tari_common::initialize_logging;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_app_utilities::configuration::load_configuration;
-use tari_ootle_wallet_sdk::{cipher_seed::CipherSeedRestore, models::KeyBranch};
+use tari_ootle_wallet_sdk::cipher_seed::CipherSeedRestore;
 use tari_ootle_walletd::{
     cli::{Cli, Subcommand},
     config::ApplicationConfig,
@@ -88,7 +88,7 @@ async fn main() -> Result<(), anyhow::Error> {
         Some(Subcommand::CreateAccount {
             name,
             key_index,
-            set_active,
+            set_active: _,
             output_path,
         }) => {
             let wallet_store = init_wallet_store(&config)?;
@@ -101,40 +101,24 @@ async fn main() -> Result<(), anyhow::Error> {
                     .unwrap_or_default(),
             )?;
             let km = sdk.key_manager_api();
-            let account_address = if let Some(index) = key_index {
-                km.derive_account_address(*index)?
-            } else {
-                km.next_account_address()?
+            let accounts_api = sdk.accounts_api();
+            let is_default = !accounts_api.has_default_account()?;
+            let created = match key_index {
+                Some(index) => accounts_api.create_account_at_index(name.as_deref(), is_default, *index)?,
+                None => accounts_api.create_next_account(name.as_deref(), is_default)?,
             };
+            let account = &created.account;
 
-            let public_key = account_address.address.account_key().to_byte_type();
-            let view_only_public_key = account_address.address.view_only_key().to_byte_type();
-            let account_addr = sdk.accounts_api().derive_account_address_from_public_key(&public_key);
-            let is_default = !sdk.accounts_api().has_default_account()?;
-            let birthday_epoch = sdk.calculate_birthday_epoch();
-            sdk.accounts_api().add_account(
-                name.as_deref(),
-                &account_addr,
-                account_address.view_only_key_id,
-                account_address.owner_key_id,
-                birthday_epoch,
-                false,
-                is_default,
-            )?;
-
-            if *set_active && let Some(index) = account_address.owner_key_id.derived_index() {
-                km.set_active_key(KeyBranch::Account, index)?;
-            }
-
-            let view_only_secret = km.get_key(account_address.view_only_key_id)?;
+            let view_only_secret = km.get_key(account.view_only_key_id)?;
+            let view_only_public_key = view_only_secret.to_public_key().to_byte_type();
 
             let json = json!({
-                "component_address": account_addr,
-                "address": account_address.address.to_byte_type(),
-                "account_public_key": public_key,
+                "component_address": account.component_address,
+                "address": created.address,
+                "account_public_key": account.owner_public_key,
                 "view_only_public_key": view_only_public_key,
                 "view_only_private_key": hex::encode(view_only_secret.secret().as_bytes()),
-                "key_index": account_address.view_only_key_id,
+                "key_index": account.view_only_key_id,
             });
             match output_path {
                 Some(path) => {

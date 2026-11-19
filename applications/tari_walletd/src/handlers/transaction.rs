@@ -17,7 +17,14 @@ use tari_ootle_common_types::{
     optional::Optional,
     response_status::ResponseErrorStatus,
 };
-use tari_ootle_transaction::{Transaction, TransactionId, TransactionSignature, UnsignedTransaction, args};
+use tari_ootle_transaction::{
+    Transaction,
+    TransactionId,
+    TransactionSignature,
+    UnsealedTransaction,
+    UnsignedTransaction,
+    args,
+};
 use tari_ootle_wallet_sdk::{
     apis::transaction::TransactionApiError,
     models::{
@@ -37,6 +44,7 @@ use tari_ootle_walletd_client::{
     permissions::{Crud, Permission},
     types::{
         CallInstructionRequest,
+        ComponentRulesChange,
         ComponentUpgrade,
         PublishTemplateRequest,
         PublishTemplateResponse,
@@ -66,6 +74,7 @@ use super::context::HandlerContext;
 use crate::{
     WalletSdk,
     handlers::{
+        component_rules_changes::{authorize_component_rules_changes, component_rules_changes},
         component_upgrades::{
             authorize_component_upgrades,
             cached_upgrade_rules,
@@ -103,6 +112,7 @@ pub async fn handle_submit_instruction(
     // broad `transactions:create` grant.
     context.authorize(token, &[Permission::Transactions(Crud::Create)])?;
     authorize_component_upgrades(context, token, &component_upgrades(&[], &req.instructions))?;
+    authorize_component_rules_changes(context, token, &component_rules_changes(&[], &req.instructions))?;
     context.enforce_max_fee_limit(req.max_fee)?;
     if let (Some(min_epoch), Some(max_epoch)) = (req.min_epoch, req.max_epoch) &&
         min_epoch > max_epoch
@@ -160,6 +170,11 @@ pub async fn handle_submit(
         context,
         token,
         &component_upgrades(req.transaction.fee_instructions(), req.transaction.instructions()),
+    )?;
+    authorize_component_rules_changes(
+        context,
+        token,
+        &component_rules_changes(req.transaction.fee_instructions(), req.transaction.instructions()),
     )?;
     // `submit_inner` signs with the stealth spend keys of the named locks' outputs and links the locks to this
     // transaction, so the caller may name only free locks it created.
@@ -241,7 +256,7 @@ async fn submit_inner(
 
     // Signatures collected out of band are attached first; walletd's own
     // signatures are added on top and the seal signature commits to all of them.
-    let mut transaction = context
+    let transaction = context
         .transaction_builder_from_unsigned(req.transaction)
         .with_inputs(detected_inputs)
         .with_signatures(req.signatures);
@@ -253,18 +268,8 @@ async fn submit_inner(
     // with a key of its choosing.
     let stealth_signers = derive_stealth_signers(sdk, &req.lock_ids)?;
 
-    if !req.other_signers.is_empty() || !stealth_signers.is_empty() {
-        let seal_signer = sdk.key_manager_api().get_public_key(req.seal_signer)?;
-        let seal_signer_pk = seal_signer.public_key.to_byte_type();
-        let local_signer = sdk.signer_api().with_context(&seal_signer_pk);
-        for key in req.other_signers {
-            transaction = local_signer.sign(key, transaction)?;
-        }
-        for key in &stealth_signers {
-            transaction = local_signer.sign_with_stealth_key(key, transaction)?;
-        }
-    }
-
+    let transaction =
+        authorize_with_wallet_keys(sdk, req.seal_signer, &req.other_signers, &stealth_signers, transaction)?;
     let transaction = sdk.signer_api().sign(req.seal_signer, transaction)?;
 
     // Linked locks are finalized or released when the transaction resolves. The claim check shares this write with the
@@ -559,7 +564,7 @@ async fn submit_dry_run_inner(
         vec![]
     };
 
-    let mut transaction = context
+    let transaction = context
         .transaction_builder_from_unsigned(req.transaction)
         .with_inputs(detected_inputs)
         .with_dry_run(true)
@@ -569,20 +574,12 @@ async fn submit_dry_run_inner(
     // spendable transaction: stealth inputs are signed with keys derived from
     // the locks, and the seal signature is added last.
     let stealth_signers = derive_stealth_signers(sdk, &req.lock_ids)?;
-    if !req.other_signers.is_empty() || !stealth_signers.is_empty() {
-        let seal_signer = sdk.key_manager_api().get_public_key(req.seal_signer)?;
-        let seal_signer_pk = seal_signer.public_key.to_byte_type();
-        let local_signer = sdk.signer_api().with_context(&seal_signer_pk);
-        for key in req.other_signers {
-            transaction = local_signer.sign(key, transaction)?;
-        }
-        for key in &stealth_signers {
-            transaction = local_signer.sign_with_stealth_key(key, transaction)?;
-        }
-    }
+    let transaction =
+        authorize_with_wallet_keys(sdk, req.seal_signer, &req.other_signers, &stealth_signers, transaction)?;
     let transaction = sdk.signer_api().sign(req.seal_signer, transaction)?;
     let called_components = transaction.as_referenced_components().copied().collect::<Vec<_>>();
     let component_upgrades = component_upgrades(transaction.fee_instructions(), transaction.instructions());
+    let component_rules_changes = component_rules_changes(transaction.fee_instructions(), transaction.instructions());
 
     // A dry run never finalizes, so it must not link the locks: a lock tied to a
     // transaction that never resolves would never be released.
@@ -610,6 +607,7 @@ async fn submit_dry_run_inner(
         result: exec_result,
         upgradable_components,
         component_upgrades,
+        component_rules_changes,
     })
 }
 
@@ -633,6 +631,11 @@ pub async fn handle_submit_manifest(
             context,
             token,
             &component_upgrades(&instructions.fee_instructions, &instructions.instructions),
+        )?;
+        authorize_component_rules_changes(
+            context,
+            token,
+            &component_rules_changes(&instructions.fee_instructions, &instructions.instructions),
         )?;
     }
     let default_account = sdk
@@ -699,12 +702,13 @@ pub async fn handle_submit_manifest(
 
     let unsigned = transaction.with_inputs(inputs);
     let component_upgrades = component_upgrades(unsigned.fee_instructions(), unsigned.instructions());
+    let component_rules_changes = component_rules_changes(unsigned.fee_instructions(), unsigned.instructions());
 
     let sign = |unsigned: UnsignedTransaction| {
         sign_manifest_transaction(sdk, unsigned, seal_signer_key_id, &req.signing_key_ids)
     };
     if req.dry_run {
-        return submit_manifest_dry_run(context, sign(unsigned)?, component_upgrades).await;
+        return submit_manifest_dry_run(context, sign(unsigned)?, component_upgrades, component_rules_changes).await;
     }
     let transaction = declare_written_inputs_only(context, unsigned, sign).await?;
 
@@ -722,6 +726,7 @@ pub async fn handle_submit_manifest(
         result: None,
         upgradable_components: Vec::new(),
         component_upgrades: Vec::new(),
+        component_rules_changes: Vec::new(),
     })
 }
 
@@ -729,6 +734,7 @@ async fn submit_manifest_dry_run(
     context: &HandlerContext,
     transaction: Transaction,
     component_upgrades: Vec<ComponentUpgrade>,
+    component_rules_changes: Vec<ComponentRulesChange>,
 ) -> Result<TransactionSubmitManifestResponse, anyhow::Error> {
     let called_components = transaction.as_referenced_components().copied().collect::<Vec<_>>();
     let upgrade_rules = context.upgrade_rules();
@@ -758,6 +764,7 @@ async fn submit_manifest_dry_run(
         result: Some(exec_result),
         upgradable_components,
         component_upgrades,
+        component_rules_changes,
     })
 }
 
@@ -1061,18 +1068,36 @@ fn sign_manifest_transaction(
     seal_signer_key_id: KeyId,
     signing_key_ids: &[KeyId],
 ) -> Result<Transaction, anyhow::Error> {
-    let mut transaction = unsigned.finish();
-    if !signing_key_ids.is_empty() {
-        let seal_signer_pk = sdk.key_manager_api().get_public_key(seal_signer_key_id)?;
-        let seal_signer_pk_bytes = seal_signer_pk.public_key.to_byte_type();
-        let signer = sdk.signer_api().with_context(&seal_signer_pk_bytes);
-        for signing_key_id in signing_key_ids {
-            if *signing_key_id != seal_signer_key_id {
-                transaction = signer.sign(*signing_key_id, transaction)?;
-            }
-        }
-    }
+    let authorizing_key_ids: Vec<_> = signing_key_ids
+        .iter()
+        .copied()
+        .filter(|key_id| *key_id != seal_signer_key_id)
+        .collect();
+    let transaction =
+        authorize_with_wallet_keys(sdk, seal_signer_key_id, &authorizing_key_ids, &[], unsigned.finish())?;
     Ok(sdk.signer_api().sign(seal_signer_key_id, transaction)?)
+}
+
+/// Adds an authorization by each of `keys` and `stealth_keys`, all signed over one authorizer set that also holds the
+/// keys of the authorizations already on `transaction`.
+fn authorize_with_wallet_keys(
+    sdk: &WalletSdk,
+    seal_signer: KeyId,
+    keys: &[KeyId],
+    stealth_keys: &[StealthUtxoSpendKeyId],
+    transaction: UnsealedTransaction,
+) -> Result<UnsealedTransaction, anyhow::Error> {
+    if keys.is_empty() && stealth_keys.is_empty() {
+        return Ok(transaction);
+    }
+    let seal_signer_pk = sdk
+        .key_manager_api()
+        .get_public_key(seal_signer)?
+        .public_key
+        .to_byte_type();
+    Ok(sdk
+        .signer_api()
+        .authorize(&seal_signer_pk, keys, stealth_keys, transaction)?)
 }
 
 /// Turns a detected dependency into a declaration, deferring to what the transaction already said
@@ -1112,6 +1137,8 @@ fn resolve_metadata_hash(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use tari_crypto::ristretto::RistrettoSecretKey;
     use tari_ootle_address::Network;
     use tari_ootle_common_types::{SubstateVersion, signature::Sr25519SignatureBytes};
@@ -1122,7 +1149,13 @@ mod tests {
         storage::{WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
     };
     use tari_ootle_walletd_client::ComponentAddressOrName;
-    use tari_template_lib_types::{ComponentAddress, TemplateAddress, crypto::RistrettoPublicKeyBytes};
+    use tari_template_lib_types::{
+        ComponentAddress,
+        OwnerRule,
+        TemplateAddress,
+        access_rules::ComponentAccessRules,
+        crypto::RistrettoPublicKeyBytes,
+    };
 
     use super::*;
     use crate::handlers::{auth::jwt::AuthError, test_support::TestDaemon};
@@ -1216,6 +1249,150 @@ mod tests {
         .await;
         assert!(
             result.as_ref().err().is_none_or(|err| !is_upgrade_refusal(err)),
+            "{result:?}"
+        );
+    }
+
+    fn rules_change_instructions() -> [Instruction; 2] {
+        let component = ComponentReference::Address(ComponentAddress::from_array([1; 32]));
+        [
+            Instruction::SetComponentOwnerRule {
+                component: component.clone(),
+                owner_rule: OwnerRule::None,
+            },
+            Instruction::SetComponentAccessRules {
+                component,
+                access_rules: ComponentAccessRules::new(),
+            },
+        ]
+    }
+
+    fn rules_change_submit_request(instruction: Instruction) -> TransactionSubmitRequest {
+        TransactionSubmitRequest {
+            transaction: TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
+                .without_auto_fill_inputs()
+                .with_instructions([instruction])
+                .build_unsigned(),
+            ..submit_request(KeyId::derived(KeyBranch::Account, 0), vec![])
+        }
+    }
+
+    fn rules_change_call_request(instruction: Instruction) -> CallInstructionRequest {
+        CallInstructionRequest {
+            instructions: vec![instruction],
+            ..upgrade_call_request()
+        }
+    }
+
+    fn rules_change_manifest_request(dry_run: bool) -> TransactionSubmitManifestRequest {
+        TransactionSubmitManifestRequest {
+            manifest: r#"
+                fn main() {
+                    let c = var!["component"];
+                    set_owner_rule!(c, no_owner);
+                }
+            "#
+            .to_string(),
+            variables: HashMap::from([(
+                "component".to_string(),
+                ComponentAddress::from_array([1; 32]).to_string(),
+            )]),
+            seal_signer_key_id: None,
+            signing_key_ids: vec![],
+            max_fee: 1000,
+            dry_run,
+            blobs: HashMap::new(),
+        }
+    }
+
+    fn is_rules_change_refusal(err: &anyhow::Error) -> bool {
+        matches!(
+            err.downcast_ref::<AuthError>(),
+            Some(AuthError::ComponentRulesChangeRequiresAdmin { .. })
+        )
+    }
+
+    #[tokio::test]
+    async fn a_tool_without_admin_cannot_submit_a_component_rules_change() {
+        let daemon = TestDaemon::start().await;
+        let tool = daemon.api_key("tool", "transactions:create");
+        let app = daemon.delegated_session("transactions:create");
+
+        for bearer in [&tool, &app] {
+            for instruction in rules_change_instructions() {
+                let err = handle_submit(
+                    &daemon.context,
+                    Some(bearer),
+                    rules_change_submit_request(instruction.clone()),
+                )
+                .await
+                .unwrap_err();
+                assert!(is_rules_change_refusal(&err), "{err}");
+
+                let err =
+                    handle_submit_instruction(&daemon.context, Some(bearer), rules_change_call_request(instruction))
+                        .await
+                        .unwrap_err();
+                assert!(is_rules_change_refusal(&err), "{err}");
+            }
+
+            let err = handle_submit_manifest(&daemon.context, Some(bearer), rules_change_manifest_request(false))
+                .await
+                .unwrap_err();
+            assert!(is_rules_change_refusal(&err), "{err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_tool_may_dry_run_a_component_rules_change() {
+        let daemon = TestDaemon::start().await;
+        let tool = daemon.api_key("tool", "transactions:create");
+
+        // The dry run fails later, on a daemon with no default account; the rules change check is what this asserts.
+        let result = handle_submit_manifest(&daemon.context, Some(&tool), rules_change_manifest_request(true)).await;
+        assert!(
+            result.as_ref().err().is_none_or(|err| !is_rules_change_refusal(err)),
+            "{result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_admin_session_may_submit_a_component_rules_change() {
+        let daemon = TestDaemon::start().await;
+
+        // The submission fails later, on a daemon with no network; the rules change check is what this asserts.
+        for instruction in rules_change_instructions() {
+            let result = handle_submit(
+                &daemon.context,
+                Some(&daemon.session),
+                rules_change_submit_request(instruction.clone()),
+            )
+            .await;
+            assert!(
+                result.as_ref().err().is_none_or(|err| !is_rules_change_refusal(err)),
+                "{result:?}"
+            );
+
+            let result = handle_submit_instruction(
+                &daemon.context,
+                Some(&daemon.session),
+                rules_change_call_request(instruction),
+            )
+            .await;
+            assert!(
+                result.as_ref().err().is_none_or(|err| !is_rules_change_refusal(err)),
+                "{result:?}"
+            );
+        }
+
+        let result = handle_submit_manifest(
+            &daemon.context,
+            Some(&daemon.session),
+            rules_change_manifest_request(false),
+        )
+        .await;
+        assert!(
+            result.as_ref().err().is_none_or(|err| !is_rules_change_refusal(err)),
             "{result:?}"
         );
     }
@@ -1627,7 +1804,13 @@ mod tests {
         let sdk = daemon.context.wallet_sdk();
         let unsigned = UnsignedTransaction::new(Network::LocalNet.as_byte(), Epoch(100));
         let seal_pk = RistrettoPublicKeyBytes::zero();
-        let signer = sdk.signer_api().with_context(&seal_pk);
+        let authorizers = tari_ootle_transaction::AuthorizerSet::new();
+        let signer = sdk
+            .signer_api()
+            .with_context(tari_ootle_transaction::AuthorizationContext::new(
+                &seal_pk,
+                &authorizers,
+            ));
 
         for key in NON_SIGNING_KEYS {
             signer.generate_signature(key, &unsigned).unwrap_err();

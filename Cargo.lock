@@ -1800,7 +1800,6 @@ version = "0.54.0"
 dependencies = [
  "fern",
  "futures 0.3.34",
- "humantime",
  "itertools 0.13.0",
  "log",
  "ootle_byte_type",
@@ -1826,6 +1825,7 @@ dependencies = [
  "tari_state_tree",
  "tari_template_lib_types",
  "tempfile",
+ "time",
  "tokio",
 ]
 
@@ -2844,7 +2844,6 @@ dependencies = [
  "clap 3.2.25",
  "fern",
  "hex",
- "humantime",
  "include_dir",
  "log",
  "mime_guess",
@@ -2855,6 +2854,7 @@ dependencies = [
  "tari_ootle_p2p",
  "tari_ootle_storage",
  "tari_state_store_rocksdb",
+ "time",
  "tokio",
  "toml 0.9.11+spec-1.1.0",
  "tower-http",
@@ -3827,7 +3827,6 @@ version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4316185f709b23713e41e3195f90edef7fb00c3ed4adc79769cf09cc762a3b29"
 dependencies = [
- "chrono",
  "colored 2.2.0",
  "log",
 ]
@@ -6550,9 +6549,9 @@ checksum = "2e126dda6f34391ab7b444f9922055facc83c07a910da3eb16f1e4d9c45dc777"
 
 [[package]]
 name = "libz-sys"
-version = "1.1.31"
+version = "1.1.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff20308ecabd635a2dc1dd5834a86c462cca20efba1d5d3ddab1f8aea3455cb2"
+checksum = "fee3f59f4321dab0c78d828942e7aa09d0bd8ad6e78a501977e6bf3d02938045"
 dependencies = [
  "cc",
  "libc",
@@ -11099,12 +11098,12 @@ dependencies = [
 name = "sqlite_message_logger"
 version = "0.54.0"
 dependencies = [
- "chrono",
  "diesel",
  "diesel_migrations",
  "log",
  "serde",
  "serde_json",
+ "time",
 ]
 
 [[package]]
@@ -12039,6 +12038,7 @@ dependencies = [
  "tokio-util",
  "toml 0.9.11+spec-1.1.0",
  "tower-http",
+ "tracing",
  "url",
  "utoipa",
  "utoipa-swagger-ui",
@@ -12536,6 +12536,7 @@ dependencies = [
  "tari_engine_types",
  "tari_hashing",
  "tari_ootle_common_types",
+ "tari_ootle_transaction",
  "tari_template_lib_types",
  "thiserror 2.0.21",
  "ts-rs",
@@ -12548,6 +12549,7 @@ dependencies = [
  "anyhow",
  "indexmap 2.14.2",
  "log",
+ "rand 0.10.1",
  "tari_common_types",
  "tari_crypto",
  "tari_engine_types",
@@ -12567,7 +12569,6 @@ dependencies = [
  "base64 0.22.1",
  "clap 3.2.25",
  "dirs-next 2.0.0",
- "humantime",
  "log",
  "multiaddr 0.19.0",
  "reqwest 0.13.2",
@@ -13115,7 +13116,6 @@ dependencies = [
  "clap 3.2.25",
  "fern",
  "futures 0.3.34",
- "humantime",
  "include_dir",
  "indexmap 2.14.2",
  "lockfile",
@@ -13145,6 +13145,7 @@ dependencies = [
  "tari_validator_node_client",
  "tempfile",
  "thiserror 2.0.21",
+ "time",
  "tokio",
  "toml 0.9.11+spec-1.1.0",
  "tonic 0.13.1",
@@ -13523,7 +13524,6 @@ dependencies = [
  "clap 3.2.25",
  "futures 0.3.34",
  "human_bytes",
- "humantime",
  "tari_crypto",
  "tari_ootle_wallet_crypto",
  "tari_template_lib_types",
@@ -13563,7 +13563,6 @@ dependencies = [
  "anyhow",
  "clap 3.2.25",
  "fern",
- "humantime",
  "log",
  "minotari_app_grpc",
  "minotari_node_grpc_client",
@@ -13578,6 +13577,7 @@ dependencies = [
  "tari_shutdown",
  "tari_template_lib_types",
  "tari_transaction_components",
+ "time",
  "tokio",
  "toml 0.8.23",
  "tonic 0.13.1",
@@ -14325,7 +14325,6 @@ version = "11.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4994acea2522cd2b3b85c1d9529a55991e3ad5e25cdcd3de9d505972c4379424"
 dependencies = [
- "chrono",
  "indexmap 2.14.2",
  "thiserror 2.0.21",
  "ts-rs-macros",

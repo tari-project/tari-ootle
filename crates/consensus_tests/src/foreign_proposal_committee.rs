@@ -274,7 +274,7 @@ async fn withheld_embedding_proposal(
                 }
                 // The replica only learns of the foreign proposal through the local proposal the test delivers
                 match msg {
-                    HotstuffMessage::ForeignProposal(_) | HotstuffMessage::CatchUpSyncResponse(_) => false,
+                    HotstuffMessage::ForeignProposal(_) | HotstuffMessage::CatchUpPage(_) => false,
                     HotstuffMessage::Proposal(proposal) if !proposal.foreign_proposals.is_empty() => {
                         captured
                             .lock()
@@ -609,7 +609,7 @@ async fn withheld_embedding_proposal_pruning_a_command() -> (Test, TestAddress, 
                     return true;
                 }
                 match msg {
-                    HotstuffMessage::ForeignProposal(_) | HotstuffMessage::CatchUpSyncResponse(_) => false,
+                    HotstuffMessage::ForeignProposal(_) | HotstuffMessage::CatchUpPage(_) => false,
                     HotstuffMessage::Proposal(proposal) if proposal.foreign_proposals.iter().any(prunes_a_command) => {
                         captured
                             .lock()
@@ -1106,7 +1106,7 @@ async fn a_proposal_message_carrying_an_unreferenced_foreign_proposal_does_not_s
                         captured_foreign.lock().unwrap().push((*fp.proposal).clone());
                         false
                     },
-                    HotstuffMessage::CatchUpSyncResponse(_) => false,
+                    HotstuffMessage::CatchUpPage(_) => false,
                     HotstuffMessage::Proposal(proposal) if !proposal.foreign_proposals.is_empty() => {
                         captured_proposal
                             .lock()

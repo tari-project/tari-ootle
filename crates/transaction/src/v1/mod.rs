@@ -2,6 +2,7 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 mod assertion;
+mod authorizers;
 mod component_reference;
 mod instruction;
 mod instruction_limits;
@@ -16,6 +17,7 @@ mod unsealed;
 mod unsigned;
 
 pub use assertion::*;
+pub use authorizers::*;
 pub use component_reference::*;
 pub use instruction::*;
 pub use instruction_limits::*;

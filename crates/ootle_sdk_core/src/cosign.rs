@@ -6,12 +6,20 @@
 //! Two-party (or N-party) flow, all crypto pure, only the transport is the host's job:
 //!
 //! 1. **Party A** builds and resolves a transaction to a [`PartialTransaction`], then derives the canonical
-//!    [`UnsignedTransactionRecord`] and ships it to B. `PartialTransaction` is deliberately not serializable, so the
-//!    [`UnsignedTransaction`] inside it is what crosses the wire.
-//! 2. **Party B** re-derives the identical authorization signing message from that record plus A's seal public key,
-//!    signs it with B's secret (a fresh random Schnorr nonce), and returns an [`Authorization`] (B's public key + the
-//!    Schnorr signature).
+//!    [`UnsignedTransactionRecord`] and ships it to every co-signer. `PartialTransaction` is deliberately not
+//!    serializable, so the [`UnsignedTransaction`] inside it is what crosses the wire, together with the set of
+//!    co-signer keys that will authorize it.
+//! 2. **Each co-signer** re-derives the identical authorization signing message from that record plus A's seal public
+//!    key, signs it with its secret (a fresh random Schnorr nonce), and returns an [`Authorization`] (its public key +
+//!    the Schnorr signature).
 //! 3. **Party A** attaches the collected authorizations and seals via [`seal_and_encode_with_auth`].
+//!
+//! ## The authorizer set
+//!
+//! Every authorization signs over the full set of authorizing keys, so A fixes the set before anyone signs and the
+//! record carries it. A sealed transaction must carry an authorization from exactly that set: with a co-signer
+//! missing, or a key added after signing, no authorization verifies. Adding a co-signer means shipping a new record
+//! and collecting every authorization again.
 //!
 //! ## Why A and B compute the same message
 //!
@@ -40,7 +48,13 @@
 use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_ootle_common_types::signature::{Sr25519SignatureBytes, components};
-use tari_ootle_transaction::{MainSigner, TRANSACTION_SIGNING_CONTEXT, TransactionSignature, UnsignedTransaction};
+use tari_ootle_transaction::{
+    AuthorizerSet,
+    MainSigner,
+    TRANSACTION_SIGNING_CONTEXT,
+    TransactionSignature,
+    UnsignedTransaction,
+};
 
 use crate::{
     PartialTransaction,
@@ -57,23 +71,31 @@ use crate::{
 /// The serializable unsigned-transaction record party A ships to party B.
 ///
 /// This is a thin, typed wrapper over the canonical [`UnsignedTransaction`] (which already derives
-/// `Serialize`/`Deserialize`). Wrapping it keeps the co-sign hand-off a named, versioned contract
-/// rather than a bare engine type, with a stable JSON shape `{ "unsigned": <UnsignedTransaction JSON> }`.
+/// `Serialize`/`Deserialize`) and the authorizer set. Wrapping it keeps the co-sign hand-off a named,
+/// versioned contract rather than a bare engine type, with a stable JSON shape
+/// `{ "unsigned": <UnsignedTransaction JSON>, "authorizers": ["<hex>", ...] }`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnsignedTransactionRecord {
-    /// The canonical unsigned transaction A will seal — the exact value B's authorization signs over.
+    /// The canonical unsigned transaction A will seal — the exact value every authorization signs over.
     pub unsigned: UnsignedTransaction,
+    /// The keys that will authorize the transaction, each of which signs over the whole set.
+    pub authorizers: AuthorizerSet,
 }
 
 impl UnsignedTransactionRecord {
-    /// Wraps a canonical [`UnsignedTransaction`].
-    pub fn new(unsigned: UnsignedTransaction) -> Self {
-        Self { unsigned }
+    /// Wraps a canonical [`UnsignedTransaction`] and the set of keys that will authorize it.
+    pub fn new(unsigned: UnsignedTransaction, authorizers: AuthorizerSet) -> Self {
+        Self { unsigned, authorizers }
     }
 
     /// Borrows the inner unsigned transaction.
     pub fn unsigned(&self) -> &UnsignedTransaction {
         &self.unsigned
+    }
+
+    /// Borrows the authorizer set.
+    pub fn authorizers(&self) -> &AuthorizerSet {
+        &self.authorizers
     }
 }
 
@@ -124,12 +146,17 @@ impl Authorization {
 /// already-canonicalized unsigned tx (the exact bytes the seal will sign over), so B's authorization
 /// signs the identical message A seals.
 ///
+/// `authorizers` are the public keys of every co-signer, one authorization each; a repeated key counts
+/// once. An empty set ⇒ [`OotleSdkError::Invalid`].
+///
 /// A co-sign hand-off always attaches at least one authorization, so the record declares
-/// `main_signer` as the co-signer `main_signer` names, or no main signer when it is `None`. B signs
-/// over that value, and [`seal_and_encode_with_auth`] settles the same value when given the same
-/// `main_signer`, so A and B commit to the identical value and the signatures cross-verify.
+/// `main_signer` as the co-signer `main_signer` names, or no main signer when it is `None`. A
+/// `main_signer` outside `authorizers` ⇒ [`OotleSdkError::Invalid`]. B signs over that value, and
+/// [`seal_and_encode_with_auth`] settles the same value when given the same `main_signer`, so A and B
+/// commit to the identical value and the signatures cross-verify.
 pub fn unsigned_record_for_cosign(
     partial: &PartialTransaction,
+    authorizers: &[PublicKeyBytes],
     main_signer: Option<&PublicKeyBytes>,
 ) -> Result<UnsignedTransactionRecord, OotleSdkError> {
     if !partial.outstanding_wants().is_empty() {
@@ -139,25 +166,58 @@ pub fn unsigned_record_for_cosign(
             partial.outstanding_wants().len(),
         )));
     }
+    let authorizers: AuthorizerSet = authorizers.iter().map(PublicKeyBytes::to_internal).collect();
+    if authorizers.is_empty() {
+        return Err(OotleSdkError::Invalid(
+            "a co-sign record needs at least one authorizer".to_string(),
+        ));
+    }
+    if let Some(main_signer) = main_signer &&
+        !authorizers.contains(&main_signer.to_internal())
+    {
+        return Err(OotleSdkError::Invalid(format!(
+            "main signer {} must be one of the record's authorizers",
+            main_signer.to_hex()
+        )));
+    }
     let mut unsigned = partial.cloned_unsigned();
     // Apply the same canonical input sort the seal path applies, so the shipped record is
     // byte-identical to what the seal will sign over.
     canonicalize_inputs(&mut unsigned);
     unsigned.set_main_signer(main_signer.map_or(MainSigner::None, |pk| MainSigner::Authorizer(pk.to_internal())));
-    Ok(UnsignedTransactionRecord::new(unsigned))
+    Ok(UnsignedTransactionRecord::new(unsigned, authorizers))
 }
 
 /// **Party B.** Authorizes A's unsigned transaction with a fresh random nonce, committing to
-/// A's `seal_public_key`. Returns B's [`Authorization`].
+/// A's `seal_public_key` and the record's authorizer set. Returns B's [`Authorization`].
 ///
-/// This is the only RNG site on the co-sign path. Bad key hex ⇒ [`OotleSdkError::Key`].
+/// This is the only RNG site on the co-sign path. Bad key hex ⇒ [`OotleSdkError::Key`]. A signer whose
+/// key is not in the record's authorizer set ⇒ [`OotleSdkError::Invalid`], since its authorization
+/// could never verify. A record whose transaction is not
+/// [`SchemaVersion::CURRENT`](tari_ootle_transaction::SchemaVersion::CURRENT) ⇒
+/// [`OotleSdkError::Invalid`].
 pub fn add_signature(
     unsigned: &UnsignedTransactionRecord,
     seal_public_key: &PublicKeyBytes,
     signer_secret: &SecretKeyBytes,
 ) -> Result<Authorization, OotleSdkError> {
+    unsigned
+        .unsigned
+        .schema()
+        .ensure_current()
+        .map_err(|e| OotleSdkError::Invalid(e.to_string()))?;
     let secret = parse_secret_key(signer_secret)?;
-    let message = cosign_auth_message(&seal_public_key.to_internal(), &unsigned.unsigned);
+    let signer = public_key_bytes_from_secret(&secret);
+    if !unsigned.authorizers.contains(&signer) {
+        return Err(OotleSdkError::Invalid(format!(
+            "signer {signer} is not one of the record's authorizers"
+        )));
+    }
+    let message = cosign_auth_message(
+        &seal_public_key.to_internal(),
+        &unsigned.authorizers,
+        &unsigned.unsigned,
+    );
     let sig = TRANSACTION_SIGNING_CONTEXT.sign(&secret, &message);
     Ok(authorization_from_parts(&secret, sig))
 }
@@ -175,11 +235,12 @@ fn authorization_from_parts(secret: &RistrettoSecretKey, sig: Sr25519SignatureBy
 /// **Party A.** Attaches the supplied `authorizations` to a resolved partial and seals it (random
 /// nonce). The bytes/id are **not** reproducible — the safe default for real submission.
 ///
-/// `main_signer` must be the key passed to [`unsigned_record_for_cosign`], and one of the
+/// `authorizations` must hold one authorization from each key of the record's authorizer set, in any
+/// order. `main_signer` must be the key passed to [`unsigned_record_for_cosign`], and one of the
 /// `authorizations`, else [`OotleSdkError::Invalid`]. An authorization that does not verify against
-/// the sealed transaction, such as one signed over a record with a different main signer, ⇒
-/// [`OotleSdkError::Validation`]. An empty slice with no main signer behaves like the plain single-key
-/// seal. An unresolved partial ⇒ [`OotleSdkError::Resolution`].
+/// the sealed transaction, such as one signed over a record with a different main signer or a
+/// different authorizer set, ⇒ [`OotleSdkError::Validation`]. An empty slice with no main signer behaves like the plain
+/// single-key seal. An unresolved partial ⇒ [`OotleSdkError::Resolution`].
 pub fn seal_and_encode_with_auth(
     partial: PartialTransaction,
     keys: &PublicTransferKeys,
@@ -275,6 +336,15 @@ mod tests {
         SecretKeyBytes::from_bytes(fixed_scalar(99).as_bytes()).unwrap()
     }
 
+    fn b_pk() -> PublicKeyBytes {
+        PublicKeyBytes::from_internal(&public_key_bytes_from_secret(&fixed_scalar(99)))
+    }
+
+    /// A record whose only authorizer is B.
+    fn record_for_b(main_signer: Option<&PublicKeyBytes>) -> UnsignedTransactionRecord {
+        unsigned_record_for_cosign(&resolved_partial(), &[b_pk()], main_signer).unwrap()
+    }
+
     fn a_keys() -> PublicTransferKeys {
         PublicTransferKeys::new(a_secret_bytes())
     }
@@ -358,23 +428,23 @@ mod tests {
     /// A's seal public key.
     #[test]
     fn a_and_b_derive_the_same_signing_message() {
-        let record = unsigned_record_for_cosign(&resolved_partial(), None).unwrap();
+        let record = record_for_b(None);
         // A computes it from the partial-derived unsigned; B reconstructs the record from JSON.
         let shipped = serde_json::to_string(&record).unwrap();
         let received: UnsignedTransactionRecord = serde_json::from_str(&shipped).unwrap();
 
-        let a_msg = cosign_auth_message(&a_seal_pk().to_internal(), record.unsigned());
-        let b_msg = cosign_auth_message(&a_seal_pk().to_internal(), received.unsigned());
+        let a_msg = cosign_auth_message(&a_seal_pk().to_internal(), record.authorizers(), record.unsigned());
+        let b_msg = cosign_auth_message(&a_seal_pk().to_internal(), received.authorizers(), received.unsigned());
         assert_eq!(a_msg, b_msg, "A and B must compute the identical signing message");
     }
 
     /// B's authorization verifies against B's public key over the shared message.
     #[test]
     fn authorization_verifies_against_signer_public_key() {
-        let record = unsigned_record_for_cosign(&resolved_partial(), None).unwrap();
+        let record = record_for_b(None);
         let auth = add_signature(&record, &a_seal_pk(), &b_secret_bytes()).unwrap();
 
-        let message = cosign_auth_message(&a_seal_pk().to_internal(), record.unsigned());
+        let message = cosign_auth_message(&a_seal_pk().to_internal(), record.authorizers(), record.unsigned());
         let sig = Sr25519SignatureBytes::from_array(auth.signature.as_bytes().try_into().unwrap());
         assert!(
             TRANSACTION_SIGNING_CONTEXT.verify(&sig, &auth.public_key.to_internal(), &message),
@@ -389,7 +459,7 @@ mod tests {
     /// verify), and `main_signer` is `None` with an authorization attached.
     #[test]
     fn cosigned_seal_validates_and_declares_no_main_signer() {
-        let record = unsigned_record_for_cosign(&resolved_partial(), None).unwrap();
+        let record = record_for_b(None);
         let auth = add_signature(&record, &a_seal_pk(), &b_secret_bytes()).unwrap();
         let out = seal_and_encode_with_auth(resolved_partial(), &a_keys(), std::slice::from_ref(&auth), None).unwrap();
 
@@ -407,8 +477,8 @@ mod tests {
     /// A co-signer named as the main signer is the key the sealed transaction declares.
     #[test]
     fn cosigned_seal_declares_the_named_main_signer() {
-        let b_pk = PublicKeyBytes::from_internal(&public_key_bytes_from_secret(&fixed_scalar(99)));
-        let record = unsigned_record_for_cosign(&resolved_partial(), Some(&b_pk)).unwrap();
+        let b_pk = b_pk();
+        let record = record_for_b(Some(&b_pk));
         let auth = add_signature(&record, &a_seal_pk(), &b_secret_bytes()).unwrap();
         let out =
             seal_and_encode_with_auth(resolved_partial(), &a_keys(), std::slice::from_ref(&auth), Some(&b_pk)).unwrap();
@@ -425,7 +495,10 @@ mod tests {
     /// A main signer must be one of the authorizations; the seal signer is not one.
     #[test]
     fn a_main_signer_outside_the_authorizations_is_invalid() {
-        let record = unsigned_record_for_cosign(&resolved_partial(), Some(&a_seal_pk())).unwrap();
+        let err = unsigned_record_for_cosign(&resolved_partial(), &[b_pk()], Some(&a_seal_pk())).unwrap_err();
+        assert_eq!(err.code(), "INVALID");
+
+        let record = record_for_b(None);
         let auth = add_signature(&record, &a_seal_pk(), &b_secret_bytes()).unwrap();
 
         let err = seal_and_encode_with_auth(
@@ -440,11 +513,55 @@ mod tests {
         assert_eq!(err.code(), "INVALID");
     }
 
+    /// Two co-signers sign over the record naming both. Their authorizations seal in either order;
+    /// one alone, or one signed over a record naming only itself, does not verify.
+    #[test]
+    fn every_authorizer_signs_over_the_whole_set() {
+        let c_secret = SecretKeyBytes::from_bytes(fixed_scalar(55).as_bytes()).unwrap();
+        let c_pk = PublicKeyBytes::from_internal(&public_key_bytes_from_secret(&fixed_scalar(55)));
+        let record = unsigned_record_for_cosign(&resolved_partial(), &[c_pk, b_pk()], None).unwrap();
+        let b_auth = add_signature(&record, &a_seal_pk(), &b_secret_bytes()).unwrap();
+        let c_auth = add_signature(&record, &a_seal_pk(), &c_secret).unwrap();
+
+        for authorizations in [[b_auth.clone(), c_auth.clone()], [c_auth.clone(), b_auth.clone()]] {
+            let out = seal_and_encode_with_auth(resolved_partial(), &a_keys(), &authorizations, None).unwrap();
+            crate::decode_and_canonicalize_sealed_transfer(Network::Esmeralda, &out.encoded_transaction.to_hex())
+                .expect("both authorizations over the joint set must verify");
+        }
+
+        let err =
+            seal_and_encode_with_auth(resolved_partial(), &a_keys(), std::slice::from_ref(&b_auth), None).unwrap_err();
+        assert_eq!(err.code(), "VALIDATION", "a co-signer missing from the sealed set");
+
+        let b_alone = add_signature(&record_for_b(None), &a_seal_pk(), &b_secret_bytes()).unwrap();
+        let err = seal_and_encode_with_auth(resolved_partial(), &a_keys(), &[b_alone, c_auth], None).unwrap_err();
+        assert_eq!(err.code(), "VALIDATION", "an authorization over a different set");
+    }
+
+    /// A signer outside the record's authorizer set is refused before it signs.
+    #[test]
+    fn a_signer_outside_the_set_is_refused() {
+        let err = add_signature(&record_for_b(None), &a_seal_pk(), &a_secret_bytes()).unwrap_err();
+        assert_eq!(err.code(), "INVALID");
+        let err = unsigned_record_for_cosign(&resolved_partial(), &[], None).unwrap_err();
+        assert_eq!(err.code(), "INVALID");
+    }
+
+    /// B signs only a current-schema record, whatever schema the record's sender chose.
+    #[test]
+    fn a_record_under_an_older_schema_is_refused() {
+        let mut record = record_for_b(None);
+        record.unsigned = UnsignedTransaction::V1(record.unsigned.into_body());
+        let err = add_signature(&record, &a_seal_pk(), &b_secret_bytes()).unwrap_err();
+        assert_eq!(err.code(), "INVALID");
+        assert!(err.to_string().contains("V1"), "{err}");
+    }
+
     /// Sealing with a different main signer than the record B signed is refused at seal time.
     #[test]
     fn a_main_signer_other_than_the_records_is_refused_at_seal() {
-        let b_pk = PublicKeyBytes::from_internal(&public_key_bytes_from_secret(&fixed_scalar(99)));
-        let record = unsigned_record_for_cosign(&resolved_partial(), Some(&b_pk)).unwrap();
+        let b_pk = b_pk();
+        let record = record_for_b(Some(&b_pk));
         let auth = add_signature(&record, &a_seal_pk(), &b_secret_bytes()).unwrap();
 
         let err =
@@ -474,7 +591,7 @@ mod tests {
     /// A tampered authorization (signature bytes mangled) ⇒ the sealed tx fails verification.
     #[test]
     fn tampered_authorization_is_rejected() {
-        let record = unsigned_record_for_cosign(&resolved_partial(), None).unwrap();
+        let record = record_for_b(None);
         let mut auth = add_signature(&record, &a_seal_pk(), &b_secret_bytes()).unwrap();
         // Flip a byte in the signature scalar (still decodes as a Schnorr sig shape, but won't verify).
         let mut sig = auth.signature.as_bytes().to_vec();
@@ -491,7 +608,7 @@ mod tests {
     /// Bad signer secret hex ⇒ `KEY`.
     #[test]
     fn bad_signer_secret_is_a_key_error() {
-        let record = unsigned_record_for_cosign(&resolved_partial(), None).unwrap();
+        let record = record_for_b(None);
         let bad = SecretKeyBytes::from_array([0xff; 32]); // not a canonical Ristretto scalar
         let err = add_signature(&record, &a_seal_pk(), &bad).unwrap_err();
         assert_eq!(err.code(), "KEY");

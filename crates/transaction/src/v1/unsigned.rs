@@ -9,10 +9,11 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, InputDeclaration, declare_input};
-use tari_template_lib_types::{ComponentAddress, UtxoAddress, constants::TARI_TOKEN, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib_types::{ComponentAddress, UtxoAddress, constants::TARI_TOKEN};
 
 use crate::{
     Assertion,
+    AuthorizationContext,
     Blobs,
     ComponentReference,
     Instruction,
@@ -138,10 +139,6 @@ impl UnsignedTransactionV1 {
             blobs: Blobs::empty(),
             nonce: 0,
         }
-    }
-
-    pub const fn schema_version(&self) -> u16 {
-        1
     }
 
     pub fn set_network<N: Into<u8>>(&mut self, network: N) -> &mut Self {
@@ -331,10 +328,10 @@ impl UnsignedTransactionV1 {
     }
 }
 
-impl Signable<&RistrettoPublicKeyBytes> for UnsignedTransactionV1 {
+impl Signable<AuthorizationContext<'_>> for UnsignedTransactionV1 {
     type Signature = TransactionSignature;
 
-    fn to_signing_message(&self, seal_signer: &RistrettoPublicKeyBytes) -> crate::TransactionMessage {
-        TransactionSignature::create_message_v1(seal_signer, self)
+    fn to_signing_message(&self, context: AuthorizationContext<'_>) -> crate::TransactionMessage {
+        TransactionSignature::create_message(context, self)
     }
 }

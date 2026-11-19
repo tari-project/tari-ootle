@@ -4,9 +4,17 @@
 use std::{fs, path::PathBuf};
 
 use fern::FormatCallback;
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 /// Target used by [`crate::process_manager`] when it relays a child process's own output.
 pub const FORWARDED_TARGET: &str = "swarm";
+
+/// Current UTC time in RFC 3339, with fractional seconds only when they are non-zero.
+fn now_rfc3339() -> String {
+    let now = OffsetDateTime::now_utc();
+    // Rfc3339 formatting fails only for years outside 0..=9999.
+    now.format(&Rfc3339).unwrap_or_else(|_| now.to_string())
+}
 
 pub fn init_logger(log_to_file: Option<PathBuf>) -> Result<(), log::SetLoggerError> {
     fn should_skip(target: &str) -> bool {
@@ -32,7 +40,7 @@ pub fn init_logger(log_to_file: Option<PathBuf>) -> Result<(), log::SetLoggerErr
             let fallback = |out: FormatCallback<'_>| {
                 out.finish(format_args!(
                     "{} [{}] {} {}",
-                    humantime::format_rfc3339(std::time::SystemTime::now()),
+                    now_rfc3339(),
                     record.target(),
                     colors.color(record.level()),
                     message
@@ -74,13 +82,7 @@ pub fn init_logger(log_to_file: Option<PathBuf>) -> Result<(), log::SetLoggerErr
                 return;
             };
 
-            out.finish(format_args!(
-                "{} {}] {} {}",
-                humantime::format_rfc3339(std::time::SystemTime::now()),
-                target,
-                level,
-                log
-            ))
+            out.finish(format_args!("{} {}] {} {}", now_rfc3339(), target, level, log))
         })
         .chain(
             fern::Dispatch::new()

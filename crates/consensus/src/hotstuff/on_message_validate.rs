@@ -118,17 +118,14 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 self.process_local_proposal(current_epoch, current_height, from, epoch_state, *msg, new_transactions)
                     .await
             },
-            HotstuffMessage::CatchUpSyncResponse(msg) => {
-                if !epoch_state.local_committee().contains(&from) {
-                    warn!(
-                        target: LOG_TARGET,
-                        "❌ Received CatchUpSyncResponse from non-committee member {}. Discarding message.",
-                        from
-                    );
-                    return Ok(MessageValidationResult::Discard);
-                }
-                self.process_catch_up_response(current_epoch, from, epoch_state, *msg, new_transactions)
-                    .await
+            // Catch-up blocks arrive inside pages and are validated with `validate_catch_up_block` once unpacked.
+            HotstuffMessage::CatchUpSyncResponse(_) => {
+                warn!(
+                    target: LOG_TARGET,
+                    "❌ Received a catch-up block outside a page from {}. Discarding message.",
+                    from
+                );
+                Ok(MessageValidationResult::Discard)
             },
             HotstuffMessage::ForeignProposal(msg) => {
                 // Honest late replies to a request another peer already answered also land here, so this logs at debug.
@@ -169,7 +166,8 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             },
             msg @ HotstuffMessage::NewView(_) |
             msg @ HotstuffMessage::Vote(_) |
-            msg @ HotstuffMessage::CatchUpSyncRequest(_) => {
+            msg @ HotstuffMessage::CatchUpSyncRequest(_) |
+            msg @ HotstuffMessage::CatchUpPage(_) => {
                 if !epoch_state.local_committee().contains(&from) {
                     warn!(
                         target: LOG_TARGET,
@@ -389,7 +387,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
     /// [`Self::process_local_proposal`] — it is intentionally NOT gated on the current view height:
     /// a node whose view has advanced beyond its stored blocks must still ingest the gap. Stateless
     /// validation and missing-transaction parking are identical to the live-proposal path.
-    async fn process_catch_up_response(
+    pub async fn validate_catch_up_block(
         &mut self,
         current_epoch: Epoch,
         from: TConsensusSpec::Addr,
@@ -1028,42 +1026,13 @@ struct PendingMissingTransactionsRequest<TAddr> {
 }
 
 impl<TAddr> PendingMissingTransactionsRequest<TAddr> {
-    /// Decodes the transactions a peer returned for this request, one at a time, refusing the response at the first
-    /// transaction that is over `max_transaction_size_bytes`, was not requested or is returned twice. Only
-    /// transactions this request names are ever held decoded, so the heap a response costs is bounded by the
-    /// transactions this node asked for.
+    /// Decodes the transactions a peer returned for this request. See [`decode_named_transactions`].
     fn decode_response(
         &self,
         transactions: Vec<EncodedTransaction>,
         max_transaction_size_bytes: usize,
     ) -> Result<Vec<Transaction>, RequestedTransactionsError> {
-        if transactions.len() > self.transactions.len() {
-            return Err(RequestedTransactionsError::TooMany {
-                returned: transactions.len(),
-                requested: self.transactions.len(),
-            });
-        }
-
-        let mut returned_ids = HashSet::with_capacity(transactions.len());
-        let mut decoded = Vec::with_capacity(transactions.len());
-        for encoded in transactions {
-            if encoded.len() > max_transaction_size_bytes {
-                return Err(RequestedTransactionsError::TooLarge {
-                    size: encoded.len(),
-                    max: max_transaction_size_bytes,
-                });
-            }
-            let transaction = encoded.decode().map_err(RequestedTransactionsError::Malformed)?;
-            let id = transaction.calculate_id();
-            if !self.transactions.contains(&id) {
-                return Err(RequestedTransactionsError::Unrequested { transaction_id: id });
-            }
-            if !returned_ids.insert(id) {
-                return Err(RequestedTransactionsError::Duplicate { transaction_id: id });
-            }
-            decoded.push(transaction);
-        }
-        Ok(decoded)
+        decode_named_transactions(&self.transactions, transactions, max_transaction_size_bytes)
     }
 
     /// The requested transactions that `returned` does not include.
@@ -1076,8 +1045,45 @@ impl<TAddr> PendingMissingTransactionsRequest<TAddr> {
     }
 }
 
+/// Decodes the transactions a peer returned, one at a time, refusing the response at the first transaction that is over
+/// `max_transaction_size_bytes`, is not in `named` or is returned twice. Only transactions in `named` are ever held
+/// decoded, so the heap a response costs is bounded by the transactions this node asked for.
+pub(crate) fn decode_named_transactions(
+    named: &HashSet<TransactionId>,
+    transactions: Vec<EncodedTransaction>,
+    max_transaction_size_bytes: usize,
+) -> Result<Vec<Transaction>, RequestedTransactionsError> {
+    if transactions.len() > named.len() {
+        return Err(RequestedTransactionsError::TooMany {
+            returned: transactions.len(),
+            requested: named.len(),
+        });
+    }
+
+    let mut returned_ids = HashSet::with_capacity(transactions.len());
+    let mut decoded = Vec::with_capacity(transactions.len());
+    for encoded in transactions {
+        if encoded.len() > max_transaction_size_bytes {
+            return Err(RequestedTransactionsError::TooLarge {
+                size: encoded.len(),
+                max: max_transaction_size_bytes,
+            });
+        }
+        let transaction = encoded.decode().map_err(RequestedTransactionsError::Malformed)?;
+        let id = transaction.calculate_id();
+        if !named.contains(&id) {
+            return Err(RequestedTransactionsError::Unrequested { transaction_id: id });
+        }
+        if !returned_ids.insert(id) {
+            return Err(RequestedTransactionsError::Duplicate { transaction_id: id });
+        }
+        decoded.push(transaction);
+    }
+    Ok(decoded)
+}
+
 #[derive(Debug, thiserror::Error)]
-enum RequestedTransactionsError {
+pub(crate) enum RequestedTransactionsError {
     #[error("returned {returned} transaction(s) but only {requested} were requested")]
     TooMany { returned: usize, requested: usize },
     #[error("returned a {size} byte transaction, over the {max} byte limit")]
@@ -1513,6 +1519,10 @@ mod tests {
         impl OutboundMessaging for NoopStub {
             type Addr = TestAddr;
 
+            fn encoded_len(&self, _message: &HotstuffMessage) -> usize {
+                0
+            }
+
             async fn send_self<T: Into<HotstuffMessage> + Send>(
                 &mut self,
                 _message: T,
@@ -1760,6 +1770,7 @@ mod tests {
                     epoch_end_grace_period: Duration::from_secs(1),
                     epoch_end_drain_period: Duration::from_secs(1),
                     catch_up_request_timeout: Duration::from_secs(5),
+                    catch_up_page_bytes: crate::hotstuff::DEFAULT_CATCH_UP_PAGE_BYTES,
                 },
                 store.clone(),
                 NoopStub,
@@ -2163,6 +2174,7 @@ mod tests {
                     epoch_end_grace_period: Duration::from_secs(1),
                     epoch_end_drain_period: Duration::from_secs(1),
                     catch_up_request_timeout: Duration::from_secs(5),
+                    catch_up_page_bytes: crate::hotstuff::DEFAULT_CATCH_UP_PAGE_BYTES,
                 },
                 store,
                 NoopStub,

@@ -32,7 +32,11 @@ import type {
   SubstateId,
   VersionedSubstateId,
 } from "@tari-project/ootle-ts-bindings";
-import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/ootle-ts-bindings";
+import {
+  getRejectReasonFromTransactionResult,
+  rejectReasonToString,
+  transactionBody,
+} from "@tari-project/ootle-ts-bindings";
 import { getSubstateDiffFromTransactionResult } from "@tari-project/ootle-ts-bindings/dist/helpers/helpers";
 import { Decision } from "@tari-project/ootle-ts-bindings/dist/types/Decision";
 import { Transaction } from "@tari-project/ootle-ts-bindings/dist/types/Transaction";
@@ -153,7 +157,7 @@ export default function TransactionDetails() {
     return <Loading />;
   }
   const { transaction: container, final_decision, finalized_at: finalized_time, result } = state;
-  const transaction = container?.V1.body.transaction;
+  const transaction = transactionBody(container)?.body.transaction;
   const decision = typeof final_decision === "object" ? "Abort" : final_decision;
   const abortReason = final_decision !== null && typeof final_decision === "object" ? final_decision.Abort : null;
   // Decision is Commit, but the body was rejected after the fee was charged (e.g. out of the

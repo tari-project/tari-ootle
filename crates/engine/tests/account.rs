@@ -197,7 +197,7 @@ fn gasless() {
             .put_last_instruction_output_on_workspace("b")
             .call_method(user2_account, "deposit", args![Workspace("b")])
             .finish()
-            .add_signer(&fee_account_pk.to_byte_type(), &user_account_sk)
+            .authorize(&fee_account_pk.to_byte_type(), [&user_account_sk])
             .seal(&fee_account_sk),
         vec![fee_account_proof, user_account_proof],
     );
@@ -273,7 +273,7 @@ fn take_from_bucket() {
             .take_from_bucket("coins", 999_999_900u64, "bar_bucket")
             .call_method(alice, "deposit", args![Workspace("foo_bucket")])
             .call_method(bob, "deposit", args![Workspace("bar_bucket")])
-            .add_signer(&test.to_public_key_bytes(), &alice_sk)
+            .authorize(&test.to_public_key_bytes(), [&alice_sk])
             .seal(test.secret_key()),
         vec![],
     );
@@ -310,7 +310,7 @@ fn put_into_bucket_merges_same_resource() {
             .put_last_instruction_output_on_workspace("second")
             .put_into_bucket("second", "first")
             .call_method(bob, "deposit", args![Workspace("first")])
-            .add_signer(&test.to_public_key_bytes(), &alice_sk)
+            .authorize(&test.to_public_key_bytes(), [&alice_sk])
             .seal(test.secret_key()),
         vec![],
     );
@@ -361,7 +361,7 @@ fn put_into_bucket_rejects_resource_mismatch() {
             .put_last_instruction_output_on_workspace("tt_bucket")
             // Different resources — engine should refuse the join.
             .put_into_bucket("tt_bucket", "tari_bucket")
-            .add_signer(&test.to_public_key_bytes(), &alice_sk)
+            .authorize(&test.to_public_key_bytes(), [&alice_sk])
             .seal(test.secret_key()),
         vec![],
     );

@@ -14,4 +14,4 @@ diesel_migrations = { workspace = true }
 serde = { workspace = true, features = ["default", "derive"] }
 serde_json = { workspace = true }
 log = { workspace = true }
-time = { workspace = true, features = ["serde"] }
+time = { workspace = true, features = ["serde", "serde-human-readable"] }

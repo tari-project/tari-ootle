@@ -1092,13 +1092,6 @@ tari_ootle_wallet_cli transactions confidential-transfer \
     --account my-account
 ```
 
-### Key Management
-
-```bash
-tari_ootle_wallet_cli keys list
-tari_ootle_wallet_cli keys create
-```
-
 ---
 
 ## Complete Examples

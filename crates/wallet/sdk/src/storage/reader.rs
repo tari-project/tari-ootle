@@ -57,7 +57,6 @@ use crate::{
 pub trait WalletStoreReader {
     // Key manager
     fn key_manager_get_all(&mut self, branch: &str) -> Result<Vec<(u64, bool)>, WalletStorageError>;
-    fn key_manager_get_active_index(&mut self, branch: &str) -> Result<u64, WalletStorageError>;
     fn key_manager_get_last_index(&mut self, branch: &str) -> Result<u64, WalletStorageError>;
     fn key_manager_get_raw_imported_key(&mut self, id: u64) -> Result<(KeyType, Box<[u8]>), WalletStorageError>;
     /// Returns the hex-encoded public key of an imported key, without decrypting the secret.

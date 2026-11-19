@@ -359,11 +359,10 @@ type Test = TestWithNetwork<UtxoNetwork>;
 
 fn new_test(network: UtxoNetwork) -> (Test, AccountWithAddress) {
     let test = TestWithNetwork::without_accounts(network);
-    let address = test.sdk().key_manager_api().next_account_address().unwrap();
     let account = test
         .sdk()
         .accounts_api()
-        .create_account(Some("test"), false, address)
+        .create_next_account(Some("test"), false)
         .unwrap();
     (test, account)
 }
@@ -521,10 +520,9 @@ fn queue_at(test: &Test, account: &AccountWithAddress, utxo: &Utxo, unspent_at: 
 }
 
 fn second_account(test: &Test) -> AccountWithAddress {
-    let address = test.sdk().key_manager_api().next_account_address().unwrap();
     test.sdk()
         .accounts_api()
-        .create_account(Some("second"), false, address)
+        .create_next_account(Some("second"), false)
         .unwrap()
 }
 

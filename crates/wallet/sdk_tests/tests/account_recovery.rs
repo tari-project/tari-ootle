@@ -327,10 +327,9 @@ fn assert_recovered_only_key_1(test: &TestWithNetwork<OneUtxoNetwork>) {
         4
     );
 
-    // The next account reuses a removed key index, so it scans from the seed birthday.
-    let address = sdk.key_manager_api().next_account_address().unwrap();
-    assert_eq!(address.owner_key_id.derived_index(), Some(2));
-    let created = accounts_api.create_account(Some("new"), false, address).unwrap();
+    // The next account reuses the removed key index 0, so it scans from the seed birthday.
+    let created = accounts_api.create_next_account(Some("new"), false).unwrap();
+    assert_eq!(created.account.owner_key_id.and_then(|id| id.derived_index()), Some(0));
     assert_eq!(
         created.account.birthday_epoch,
         sdk.key_manager_api().get_cipher_seed_birthday_epoch().unwrap()

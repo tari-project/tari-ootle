@@ -69,7 +69,6 @@ use tari_ootle_wallet_sdk::{
         BalanceChangeSourceType,
         DerivedKeyIndex,
         EffectiveStatus,
-        KeyBranch,
         KeyId,
         KeyType,
         NonFungibleToken,
@@ -798,48 +797,6 @@ pub struct BurnProofsGetResponse {
     pub proof: ClaimBurnProofContents,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct KeysListRequest {
-    pub branch: KeyBranch,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct KeysListResponse {
-    /// (KeyId, public key, is_active)
-    pub keys: Vec<(KeyId, RistrettoPublicKeyBytes, bool)>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct KeysSetActiveRequest {
-    #[cfg_attr(feature = "ts", ts(type = "number | bigint | string"))]
-    #[serde(deserialize_with = "ootle_serde::str_number::deserialize")]
-    pub index: u64,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct KeysSetActiveResponse {
-    pub public_key: RistrettoPublicKeyBytes,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct KeysCreateRequest {
-    pub branch: KeyBranch,
-    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
-    pub specific_index: Option<u64>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
-pub struct KeysCreateResponse {
-    pub id: u64,
-    pub public_key: RistrettoPublicKeyBytes,
-}
-
 /// Imports an externally-generated secret key into the wallet's keystore. The `secret_key` is transmitted as hex.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
@@ -861,6 +818,9 @@ pub struct KeysImportResponse {
 pub struct AccountsCreateRequest {
     pub account_name: Option<String>,
     pub is_default: Option<bool>,
+    /// The account key index. When absent, the account takes the lowest index no account uses. Seed recovery
+    /// stops after `recovery_abandon_count` consecutive indices with no on-chain activity, so an index further than
+    /// that above every account with activity is recovered from the seed only with a larger `recovery_abandon_count`.
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub key_index: Option<DerivedKeyIndex>,
 }
@@ -877,6 +837,9 @@ pub struct AccountsCreateResponse {
 pub struct AccountsCreateOrGetRequest {
     pub account: Option<ComponentAddressOrName>,
     pub is_default: Option<bool>,
+    /// The account key index. When absent, the account takes the lowest index no account uses. Seed recovery
+    /// stops after `recovery_abandon_count` consecutive indices with no on-chain activity, so an index further than
+    /// that above every account with activity is recovered from the seed only with a larger `recovery_abandon_count`.
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub key_index: Option<DerivedKeyIndex>,
 }
@@ -2494,11 +2457,11 @@ mod tests {
     /// accepted, for any magnitude.
     #[test]
     fn requests_accept_string_encoded_64_bit_fields() {
-        let request: KeysSetActiveRequest = serde_json::from_value(serde_json::json!({
-            "index": "18446744073709551615",
+        let request: AccountGetByKeyIndexRequest = serde_json::from_value(serde_json::json!({
+            "key_index": "18446744073709551615",
         }))
         .unwrap();
-        assert_eq!(request.index, u64::MAX);
+        assert_eq!(request.key_index, u64::MAX);
 
         let request: AccountGetByKeyIndexRequest = serde_json::from_value(serde_json::json!({
             "key_index": "9007199254740993",
@@ -2507,8 +2470,9 @@ mod tests {
         assert_eq!(request.key_index, 9_007_199_254_740_993);
 
         // Numbers still work, and the two encodings agree.
-        let request: KeysSetActiveRequest = serde_json::from_value(serde_json::json!({ "index": 7 })).unwrap();
-        assert_eq!(request.index, 7);
+        let request: AccountGetByKeyIndexRequest =
+            serde_json::from_value(serde_json::json!({ "key_index": 7 })).unwrap();
+        assert_eq!(request.key_index, 7);
     }
 
     #[test]

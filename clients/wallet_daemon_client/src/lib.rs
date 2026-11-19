@@ -43,7 +43,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use serde_json as json;
 use serde_json::json;
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_ootle_wallet_sdk::models::{KeyBranch, KeyType};
+use tari_ootle_wallet_sdk::models::KeyType;
 use types::{
     AccountsCreateFreeTestCoinsRequest,
     AccountsCreateFreeTestCoinsResponse,
@@ -143,14 +143,8 @@ use crate::{
         EncodedJwtString,
         GetValidatorFeesRequest,
         GetValidatorFeesResponse,
-        KeysCreateRequest,
-        KeysCreateResponse,
         KeysImportRequest,
         KeysImportResponse,
-        KeysListRequest,
-        KeysListResponse,
-        KeysSetActiveRequest,
-        KeysSetActiveResponse,
         PublishTemplateRequest,
         PublishTemplateResponse,
         ResourcesGetManyRequest,
@@ -368,28 +362,6 @@ impl WalletDaemonClient {
             .await
     }
 
-    /// Derives the next key for the given [`KeyBranch`].
-    pub async fn create_key(&mut self, branch: KeyBranch) -> Result<KeysCreateResponse, WalletDaemonClientError> {
-        self.send_request("keys.create", &KeysCreateRequest {
-            branch,
-            specific_index: None,
-        })
-        .await
-    }
-
-    /// Derives a key at a specific index for the given [`KeyBranch`].
-    pub async fn create_specific_key(
-        &mut self,
-        branch: KeyBranch,
-        index: u64,
-    ) -> Result<KeysCreateResponse, WalletDaemonClientError> {
-        self.send_request("keys.create", &KeysCreateRequest {
-            branch,
-            specific_index: Some(index),
-        })
-        .await
-    }
-
     /// Imports an externally-generated secret key into the wallet's keystore, returning the [`KeyId`] it can be
     /// referenced by.
     pub async fn import_key(
@@ -399,17 +371,6 @@ impl WalletDaemonClient {
     ) -> Result<KeysImportResponse, WalletDaemonClientError> {
         self.send_request("keys.import", &KeysImportRequest { secret_key, key_type })
             .await
-    }
-
-    /// Sets the active key index used for signing transactions.
-    pub async fn set_active_key(&mut self, index: u64) -> Result<KeysSetActiveResponse, WalletDaemonClientError> {
-        self.send_request("keys.set_active", &KeysSetActiveRequest { index })
-            .await
-    }
-
-    /// Lists all derived keys for the given [`KeyBranch`].
-    pub async fn list_keys(&mut self, branch: KeyBranch) -> Result<KeysListResponse, WalletDaemonClientError> {
-        self.send_request("keys.list", &KeysListRequest { branch }).await
     }
 
     /// Fetches a transaction by ID.

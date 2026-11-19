@@ -329,8 +329,7 @@ mod tests {
             NFT_FAUCET_TEMPLATE_ADDRESS,
             LIQUIDITY_POOL_TEMPLATE_ADDRESS,
         ] {
-            let LoadedTemplate::Wasm(template) =
-                WasmModule::load_template_from_code(get_template_builtin(&address)).unwrap();
+            let LoadedTemplate::Wasm(template) = WasmModule::load(get_template_builtin(&address)).unwrap();
             let mut store = template.create_store();
             let imports = imports! {
                 "env" => {
@@ -436,8 +435,8 @@ mod tests {
                 "expected reserved export refusal for {wat}"
             );
             let wasm = wat::parse_str(wat).unwrap();
-            let err = match WasmModule::load_template_from_code(&wasm) {
-                Ok(_) => panic!("expected load_template_from_code to reject {wat}"),
+            let err = match WasmModule::load(&wasm) {
+                Ok(_) => panic!("expected WasmModule::load to reject {wat}"),
                 Err(err) => err,
             };
             assert!(err.to_string().contains("is reserved"), "unexpected error: {err:?}");

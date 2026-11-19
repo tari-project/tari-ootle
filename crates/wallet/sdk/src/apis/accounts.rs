@@ -171,27 +171,16 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
         })
     }
 
-    /// Creates an account at account key `index`. Seed recovery stops after `gap_limit` consecutive indices that
-    /// hold no account, so `index` may be at most `gap_limit` above the highest index an account uses, or below
-    /// `gap_limit` when the wallet has no derived account.
+    /// Creates an account at account key `index`. Seed recovery walks account indices from 0 and stops after its gap
+    /// limit of consecutive indices with no on-chain activity, so it finds this account only when `index` is within
+    /// that gap of an account with activity.
     pub fn create_account_at_index(
         &self,
         account_name: Option<&str>,
         is_default: bool,
         index: DerivedKeyIndex,
-        gap_limit: u64,
     ) -> Result<AccountWithAddress, AccountsApiError> {
-        self.create_derived_account(account_name, is_default, |used| {
-            let reachable_below = used
-                .iter()
-                .max()
-                .map_or(0, |highest| highest.saturating_add(1))
-                .saturating_add(gap_limit);
-            if index >= reachable_below {
-                return Err(AccountsApiError::AccountIndexBeyondRecoveryGap { index, reachable_below });
-            }
-            Ok(index)
-        })
+        self.create_derived_account(account_name, is_default, |_| Ok(index))
     }
 
     /// Creates an account at the account key index `choose_index` picks from the indices accounts already use. The
@@ -923,14 +912,6 @@ pub enum AccountsApiError {
     AccountNameAlreadyExists { name: String },
     #[error("Account already exists: {address}")]
     AccountAlreadyExists { address: ComponentAddress },
-    #[error(
-        "Account key index {index} is beyond seed recovery's gap limit, so recovering the wallet from its seed would \
-         not find the account. Use an index below {reachable_below}"
-    )]
-    AccountIndexBeyondRecoveryGap {
-        index: DerivedKeyIndex,
-        reachable_below: DerivedKeyIndex,
-    },
     #[error("Invalid view-only account: {reason}")]
     InvalidViewOnlyAccount { reason: String },
     #[error("The view key is already used by account {address}")]
@@ -950,10 +931,6 @@ impl AccountsApiError {
 
     pub fn is_account_exists_error(&self) -> bool {
         matches!(self, Self::AccountAlreadyExists { .. })
-    }
-
-    pub fn is_index_beyond_recovery_gap_error(&self) -> bool {
-        matches!(self, Self::AccountIndexBeyondRecoveryGap { .. })
     }
 
     pub fn is_invalid_view_only_account_error(&self) -> bool {

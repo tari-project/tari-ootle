@@ -86,8 +86,6 @@ import type {
   KeysImportResponse,
   KeysListRequest,
   KeysListResponse,
-  KeysSetActiveRequest,
-  KeysSetActiveResponse,
   ListNftsRequest,
   ListNftsResponse,
   MintFaucetNftRequest,
@@ -580,10 +578,6 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public createKey(params: KeysCreateRequest): Promise<KeysCreateResponse> {
     return this.sendRequest("keys.create", params);
-  }
-
-  public keysSetActive(params: KeysSetActiveRequest): Promise<KeysSetActiveResponse> {
-    return this.sendRequest("keys.set_active", params);
   }
 
   public listKeys(params: KeysListRequest): Promise<KeysListResponse> {

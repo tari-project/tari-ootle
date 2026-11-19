@@ -132,11 +132,11 @@ where
         }
         let max_probed_key = key_index;
 
-        let active_key_index = last_found_key.unwrap_or(0);
+        let kept_key_index = last_found_key.unwrap_or(0);
 
-        // The account at the active key index is kept so that a wallet with nothing to recover still has its first
-        // account.
-        for (_, address) in unused_accounts.iter().filter(|(index, _)| *index != active_key_index) {
+        // The account at the last found key index (or index 0) is kept so that a wallet with nothing to recover still
+        // has its first account.
+        for (_, address) in unused_accounts.iter().filter(|(index, _)| *index != kept_key_index) {
             match self.wallet_sdk.accounts_api().delete_if_unused(address) {
                 Ok(true) => info!(target: LOG_TARGET, "🗑️ Removed unused account {address}"),
                 Ok(false) => info!(target: LOG_TARGET, "Keeping account {address} because it has activity"),
@@ -150,11 +150,6 @@ where
             .set(ConfigKey::RecoveryMaxProbedKeyIndex, &max_probed_key)
         {
             error!(target: LOG_TARGET, "Error setting the highest recovered key index: {err}");
-        }
-
-        info!(target: LOG_TARGET, "Setting active key to {}", active_key_index);
-        if let Err(err) = key_manager_api.set_active_key(KeyBranch::Account, active_key_index) {
-            error!(target: LOG_TARGET, "Error setting active key: {err}");
         }
 
         // Set a flag to indicate that the wallet has completed recovery

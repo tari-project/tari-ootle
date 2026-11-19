@@ -7,7 +7,6 @@ use ootle_byte_type::ToByteType;
 use tari_engine_types::{Utxo, UtxoOutput, crypto::OutputBody};
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_wallet_sdk::{
-    apis::accounts::AccountsApiError,
     crypto::pay_to::PayTo,
     models::{AccountWithAddress, KeyBranch},
 };
@@ -18,8 +17,6 @@ use tari_template_lib::types::{
 };
 
 use crate::support::{PanicNetworkInterface, Test};
-
-const GAP_LIMIT: u64 = 5;
 
 fn key_index(account: &AccountWithAddress) -> u64 {
     account.account.owner_key_id.and_then(|id| id.derived_index()).unwrap()
@@ -58,9 +55,7 @@ fn new_accounts_take_the_lowest_unused_key_index() {
     let test = Test::without_accounts(PanicNetworkInterface);
     let accounts_api = test.sdk().accounts_api();
 
-    let explicit = accounts_api
-        .create_account_at_index(Some("explicit"), true, 3, GAP_LIMIT)
-        .unwrap();
+    let explicit = accounts_api.create_account_at_index(Some("explicit"), true, 3).unwrap();
     assert_eq!(key_index(&explicit), 3);
 
     let next = (0..4)
@@ -75,44 +70,13 @@ fn new_accounts_take_the_lowest_unused_key_index() {
 }
 
 #[test]
-fn an_account_index_beyond_the_recovery_gap_is_refused() {
-    let test = Test::without_accounts(PanicNetworkInterface);
-    let accounts_api = test.sdk().accounts_api();
-
-    // With no account, recovery checks indices 0..GAP_LIMIT
-    let err = accounts_api
-        .create_account_at_index(None, true, GAP_LIMIT, GAP_LIMIT)
-        .unwrap_err();
-    assert!(
-        matches!(err, AccountsApiError::AccountIndexBeyondRecoveryGap {
-            index: GAP_LIMIT,
-            reachable_below: GAP_LIMIT
-        }),
-        "{err}"
-    );
-    accounts_api
-        .create_account_at_index(None, true, GAP_LIMIT - 1, GAP_LIMIT)
-        .unwrap();
-
-    // Each account extends recovery's reach by GAP_LIMIT indices
-    let highest = 2 * GAP_LIMIT - 1;
-    accounts_api
-        .create_account_at_index(None, false, highest, GAP_LIMIT)
-        .unwrap();
-    let err = accounts_api
-        .create_account_at_index(None, false, highest + GAP_LIMIT + 1, GAP_LIMIT)
-        .unwrap_err();
-    assert!(err.is_index_beyond_recovery_gap_error(), "{err}");
-}
-
-#[test]
 fn an_account_index_in_use_is_refused() {
     let test = Test::without_accounts(PanicNetworkInterface);
     let accounts_api = test.sdk().accounts_api();
     let account = accounts_api.create_next_account(None, true).unwrap();
 
     let err = accounts_api
-        .create_account_at_index(Some("again"), false, key_index(&account), GAP_LIMIT)
+        .create_account_at_index(Some("again"), false, key_index(&account))
         .unwrap_err();
     assert!(err.is_account_exists_error(), "{err}");
 }
@@ -143,7 +107,7 @@ fn an_account_at_an_explicit_index_receives_stealth_outputs() {
     let account = receiver
         .sdk()
         .accounts_api()
-        .create_account_at_index(Some("explicit"), true, 3, GAP_LIMIT)
+        .create_account_at_index(Some("explicit"), true, 3)
         .unwrap();
     let address = receiver.sdk().key_manager_api().derive_account_address(3).unwrap();
 

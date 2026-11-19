@@ -149,8 +149,6 @@ use crate::{
         KeysImportResponse,
         KeysListRequest,
         KeysListResponse,
-        KeysSetActiveRequest,
-        KeysSetActiveResponse,
         PublishTemplateRequest,
         PublishTemplateResponse,
         ResourcesGetManyRequest,
@@ -398,12 +396,6 @@ impl WalletDaemonClient {
         key_type: KeyType,
     ) -> Result<KeysImportResponse, WalletDaemonClientError> {
         self.send_request("keys.import", &KeysImportRequest { secret_key, key_type })
-            .await
-    }
-
-    /// Sets the active key index used for signing transactions.
-    pub async fn set_active_key(&mut self, index: u64) -> Result<KeysSetActiveResponse, WalletDaemonClientError> {
-        self.send_request("keys.set_active", &KeysSetActiveRequest { index })
             .await
     }
 

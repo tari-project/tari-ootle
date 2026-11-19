@@ -388,10 +388,6 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
             .map(|i| i.checked_add(1).ok_or(KeyManagerApiError::KeyIndexExhausted))
             .transpose()?
             .unwrap_or(0);
-        if matches!(branch, KeyBranch::Account) {
-            // Ensure the view key branch is created if it doesn't exist
-            tx.key_manager_insert_or_ignore(KeyBranch::ViewOnlyKey.as_str(), next_index)?;
-        }
         tx.key_manager_insert_or_ignore(branch.as_str(), next_index)?;
         tx.commit()?;
         Ok(DerivedKeyId {
@@ -402,22 +398,6 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
 
     pub fn create_throwaway_nonce(&self) -> RistrettoSecretKey {
         RistrettoSecretKey::random(&mut rand::rng())
-    }
-
-    pub fn set_active_key<B: AsRef<str>>(&self, branch: B, index: u64) -> Result<(), KeyManagerApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        tx.key_manager_set_active_index(branch.as_ref(), index)?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn get_active_key(&self, branch: KeyBranch) -> Result<DerivedWalletKey, KeyManagerApiError> {
-        let key_index = self
-            .store
-            .with_read_tx(|tx| tx.key_manager_get_active_index(branch.as_str()))
-            .optional()?
-            .unwrap_or(0);
-        self.derive_key(branch, key_index)
     }
 
     pub fn get_cipher_seed_birthday_epoch(&self) -> Result<Epoch, KeyManagerApiError> {

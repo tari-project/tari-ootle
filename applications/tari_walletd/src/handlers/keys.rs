@@ -14,8 +14,6 @@ use tari_ootle_walletd_client::{
         KeysImportResponse,
         KeysListRequest,
         KeysListResponse,
-        KeysSetActiveRequest,
-        KeysSetActiveResponse,
     },
 };
 
@@ -73,28 +71,13 @@ pub async fn handle_list(
     let sdk = context.wallet_sdk();
     context.authorize(token, &[Permission::Keys(Crud::Read)])?;
     ensure_not_mask_branch(req.branch)?;
+    ensure_not_account_branch(req.branch)?;
     let keys = sdk.key_manager_api().get_all_derived_keys(req.branch)?;
     Ok(KeysListResponse {
         keys: keys
             .into_iter()
             .map(|key| (key.key_id(), key.public_key().to_byte_type(), key.is_active()))
             .collect(),
-    })
-}
-
-pub async fn handle_set_active(
-    context: &HandlerContext,
-    token: Option<&Bearer>,
-    req: KeysSetActiveRequest,
-) -> Result<KeysSetActiveResponse, anyhow::Error> {
-    let sdk = context.wallet_sdk();
-    context.authorize(token, &[Permission::Keys(Crud::Update)])?;
-    let km = sdk.key_manager_api();
-    km.set_active_key(KeyBranch::Account, req.index)?;
-    let key = km.get_active_key(KeyBranch::Account)?;
-
-    Ok(KeysSetActiveResponse {
-        public_key: key.to_public_key().to_byte_type(),
     })
 }
 
@@ -109,14 +92,14 @@ fn ensure_not_mask_branch(branch: KeyBranch) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-/// Account and view keys are allocated with their account, so the accounts table is the one record of which
-/// account key indices are in use.
+/// Account and view keys belong to their account, so the accounts table is the one record of which account key
+/// indices are in use and the accounts methods serve them.
 fn ensure_not_account_branch(branch: KeyBranch) -> Result<(), anyhow::Error> {
     if matches!(branch, KeyBranch::Account | KeyBranch::ViewOnlyKey) {
         return Err(invalid_params(
             "branch",
             Some(format!(
-                "{branch} keys are created with an account. Use accounts.create"
+                "{branch} keys belong to accounts. Use accounts.create and accounts.list"
             )),
         ));
     }
@@ -162,11 +145,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn account_and_view_keys_are_not_created_without_an_account() {
+    async fn account_and_view_keys_are_served_only_through_accounts() {
         let daemon = TestDaemon::start().await;
         let session = Some(&daemon.session);
 
         for branch in [KeyBranch::Account, KeyBranch::ViewOnlyKey] {
+            let err = handle_list(&daemon.context, session, KeysListRequest { branch })
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("accounts.list"), "{err}");
+
             for specific_index in [None, Some(0)] {
                 let err = handle_create(&daemon.context, session, KeysCreateRequest { branch, specific_index })
                     .await

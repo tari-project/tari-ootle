@@ -261,16 +261,11 @@ fn create_derived_account(
 ) -> Result<AccountWithAddress, anyhow::Error> {
     let accounts_api = context.wallet_sdk().accounts_api();
     let created = match key_index {
-        Some(index) => {
-            let gap_limit = u64::try_from(context.config().recovery_abandon_count).unwrap_or(u64::MAX);
-            accounts_api.create_account_at_index(account_name, is_default, index, gap_limit)
-        },
+        Some(index) => accounts_api.create_account_at_index(account_name, is_default, index),
         None => accounts_api.create_next_account(account_name, is_default),
     };
     created.map_err(|e| {
-        if e.is_index_beyond_recovery_gap_error() {
-            invalid_params("key_index", Some(e))
-        } else if e.is_name_exists_error() || e.is_account_exists_error() {
+        if e.is_name_exists_error() || e.is_account_exists_error() {
             invalid_request(e)
         } else {
             general_error(e)
@@ -3684,32 +3679,6 @@ mod create_stealth_transfer_statement_handler_tests {
     }
 
     #[tokio::test]
-    async fn an_account_key_index_must_stay_within_the_recovery_gap() {
-        use crate::handlers::test_support::TestDaemon;
-
-        let daemon = TestDaemon::start().await;
-        let gap_limit = daemon.context.config().recovery_abandon_count as u64;
-        let create = |key_index| {
-            handle_create(&daemon.context, Some(&daemon.session), AccountsCreateRequest {
-                account_name: None,
-                is_default: None,
-                key_index,
-            })
-        };
-
-        let err = create(Some(gap_limit)).await.unwrap_err();
-        assert!(err.to_string().contains("key_index"), "{err}");
-
-        let explicit = create(Some(gap_limit - 1)).await.unwrap();
-        assert_eq!(
-            explicit.account.owner_key_id.and_then(|id| id.derived_index()),
-            Some(gap_limit - 1)
-        );
-        let next = create(None).await.unwrap();
-        assert_eq!(next.account.owner_key_id.and_then(|id| id.derived_index()), Some(0));
-    }
-
-    #[tokio::test]
     async fn view_only_import_reuses_an_unlinked_imported_view_key() {
         use tari_ootle_wallet_sdk::models::KeyType;
         use tari_ootle_walletd_client::types::KeysImportRequest;
@@ -4310,5 +4279,35 @@ mod claim_burn_dry_run_failure_tests {
             ClaimBurnError::from_dry_run(TransactionServiceError::ServiceShutdown),
             ClaimBurnError::Network(_)
         ));
+    }
+}
+
+#[cfg(test)]
+mod create_account_handler_tests {
+    use super::*;
+    use crate::handlers::test_support::TestDaemon;
+
+    fn key_index(response: &AccountsCreateResponse) -> Option<DerivedKeyIndex> {
+        response.account.owner_key_id.and_then(|id| id.derived_index())
+    }
+
+    #[tokio::test]
+    async fn accounts_fill_the_lowest_key_index_around_an_explicit_one() {
+        let daemon = TestDaemon::start().await;
+        let create = |key_index| {
+            handle_create(&daemon.context, Some(&daemon.session), AccountsCreateRequest {
+                account_name: None,
+                is_default: None,
+                key_index,
+            })
+        };
+
+        let explicit = create(Some(1000)).await.unwrap();
+        assert_eq!(key_index(&explicit), Some(1000));
+        let next = create(None).await.unwrap();
+        assert_eq!(key_index(&next), Some(0));
+
+        let err = create(Some(1000)).await.unwrap_err();
+        assert!(err.to_string().contains("already exists"), "{err}");
     }
 }

@@ -690,64 +690,6 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
-    fn key_manager_set_active_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError> {
-        use crate::schema::key_manager_states;
-        let index = i64::try_from(index)
-            .map_err(|_| WalletStorageError::general("key_manager_set_active_index", "index too large"))?;
-
-        // Ensure it exists
-        self.key_manager_insert_or_ignore(branch, index as u64)?;
-
-        let active_id = key_manager_states::table
-            .select(key_manager_states::id)
-            .filter(key_manager_states::branch_seed.eq(branch))
-            .filter(key_manager_states::index.eq(index))
-            .limit(1)
-            .first::<i32>(self.connection())
-            .optional()
-            .map_err(|e| WalletStorageError::general("key_manager_set_active_index", e))?
-            .ok_or_else(|| WalletStorageError::NotFound {
-                operation: "key_manager_set_active_index",
-                entity: "key_manager_states".to_string(),
-                key: format!("branch = {}, index = {}", branch, index),
-            })?;
-
-        diesel::update(key_manager_states::table)
-            .set((
-                key_manager_states::is_active.eq(false),
-                key_manager_states::updated_at.eq(diesel::dsl::now),
-            ))
-            .filter(key_manager_states::branch_seed.eq(branch))
-            .filter(key_manager_states::is_active.eq(true))
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general("key_manager_set_active_index", e))?;
-
-        diesel::update(key_manager_states::table)
-            .set((
-                key_manager_states::is_active.eq(true),
-                key_manager_states::updated_at.eq(diesel::dsl::now),
-            ))
-            .filter(key_manager_states::id.eq(active_id))
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general("key_manager_set_active_index", e))?;
-
-        Ok(())
-    }
-
-    fn key_manager_reset_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError> {
-        const OPERATION: &str = "key_manager_reset_index";
-        use crate::schema::key_manager_states;
-        let index = i64::try_from(index).map_err(|_| WalletStorageError::general(OPERATION, "index too large"))?;
-
-        diesel::delete(key_manager_states::table)
-            .filter(key_manager_states::branch_seed.eq(branch))
-            .filter(key_manager_states::index.gt(index))
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-
-        Ok(())
-    }
-
     fn key_manager_insert_imported_key(
         &mut self,
         label: &str,

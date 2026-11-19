@@ -63,8 +63,6 @@ use crate::{
 pub trait WalletStoreWriter: CommittableStore {
     // Key manager
     fn key_manager_insert_or_ignore(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
-    fn key_manager_set_active_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
-    fn key_manager_reset_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
     fn key_manager_insert_imported_key(
         &mut self,
         label: &str,

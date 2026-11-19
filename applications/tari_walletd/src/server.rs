@@ -199,7 +199,6 @@ async fn handler(
             "create" => call_handler(context, value, token, keys::handle_create).await,
             "import" => call_handler(context, value, token, keys::handle_import).await,
             "list" => call_handler(context, value, token, keys::handle_list).await,
-            "set_active" => call_handler(context, value, token, keys::handle_set_active).await,
             _ => value.method_not_found(&value.method).into_response(),
         },
         Some(("transactions", method)) => match method {

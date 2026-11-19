@@ -31,7 +31,7 @@ use serde_json::json;
 use tari_common::initialize_logging;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_app_utilities::configuration::load_configuration;
-use tari_ootle_wallet_sdk::{cipher_seed::CipherSeedRestore, models::KeyBranch};
+use tari_ootle_wallet_sdk::cipher_seed::CipherSeedRestore;
 use tari_ootle_walletd::{
     cli::{Cli, Subcommand},
     config::ApplicationConfig,
@@ -88,7 +88,7 @@ async fn main() -> Result<(), anyhow::Error> {
         Some(Subcommand::CreateAccount {
             name,
             key_index,
-            set_active,
+            set_active: _,
             output_path,
         }) => {
             let wallet_store = init_wallet_store(&config)?;
@@ -104,18 +104,10 @@ async fn main() -> Result<(), anyhow::Error> {
             let accounts_api = sdk.accounts_api();
             let is_default = !accounts_api.has_default_account()?;
             let created = match key_index {
-                Some(index) => {
-                    let gap_limit =
-                        u64::try_from(config.ootle_wallet_daemon.recovery_abandon_count).unwrap_or(u64::MAX);
-                    accounts_api.create_account_at_index(name.as_deref(), is_default, *index, gap_limit)?
-                },
+                Some(index) => accounts_api.create_account_at_index(name.as_deref(), is_default, *index)?,
                 None => accounts_api.create_next_account(name.as_deref(), is_default)?,
             };
             let account = &created.account;
-
-            if *set_active && let Some(index) = account.owner_key_id.and_then(|key_id| key_id.derived_index()) {
-                km.set_active_key(KeyBranch::Account, index)?;
-            }
 
             let view_only_secret = km.get_key(account.view_only_key_id)?;
             let view_only_public_key = view_only_secret.to_public_key().to_byte_type();

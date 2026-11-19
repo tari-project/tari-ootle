@@ -112,8 +112,6 @@ export * from "./types/wallet-types/KeysImportRequest";
 export * from "./types/wallet-types/KeysImportResponse";
 export * from "./types/wallet-types/KeysListRequest";
 export * from "./types/wallet-types/KeysListResponse";
-export * from "./types/wallet-types/KeysSetActiveRequest";
-export * from "./types/wallet-types/KeysSetActiveResponse";
 export * from "./types/wallet-types/KeyType";
 export * from "./types/wallet-types/ListNftsRequest";
 export * from "./types/wallet-types/ListNftsResponse";

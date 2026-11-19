@@ -84,8 +84,6 @@ import type {
   KeysCreateResponse,
   KeysListRequest,
   KeysListResponse,
-  KeysSetActiveRequest,
-  KeysSetActiveResponse,
   ListNftsRequest,
   ListNftsResponse,
   MintFaucetNftRequest,
@@ -280,8 +278,6 @@ export const keysCreate = (request: KeysCreateRequest): Promise<KeysCreateRespon
   client().then((c) => c.createKey(request));
 export const keysList = (request: KeysListRequest): Promise<KeysListResponse> =>
   client().then((c) => c.listKeys(request));
-export const keysSetActive = (request: KeysSetActiveRequest): Promise<KeysSetActiveResponse> =>
-  client().then((c) => c.keysSetActive(request));
 
 export const transactionsSubmit = (request: TransactionSubmitRequest): Promise<TransactionSubmitResponse> =>
   client().then((c) => c.submitTransaction(request));

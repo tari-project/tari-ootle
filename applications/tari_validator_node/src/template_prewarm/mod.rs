@@ -312,9 +312,8 @@ impl<TStore: StateStore + Send + Sync + 'static> ComponentTemplateLookup for Sta
             return HashMap::new();
         }
 
-        // Only the template address is kept from each record. A component's state can be large, so
-        // the records are read one at a time and each is dropped before the next is read, rather
-        // than every component's state being held at once.
+        // Only the template address is kept from each record, and each record is dropped before the
+        // next is read, so at most one component's state is decoded at a time.
         let templates = self.0.with_read_tx(|tx| {
             let mut templates = HashMap::with_capacity(components.len());
             for component in components {

@@ -1457,28 +1457,30 @@ mod tests {
         SubstateUpdateProof::Create(create)
     }
 
-    /// The checkpoint commits to a version's transitions as a set, so a peer may stream them in any order. A
-    /// substate's head is its latest version whichever order that is.
+    /// The checkpoint commits to a version's transitions as a set, so a peer may stream them in any order, and may
+    /// split a version across `has_more` batches anywhere. A substate's head is its latest version whichever order
+    /// that is.
     #[tokio::test]
     async fn a_version_streamed_in_another_order_leaves_the_same_substate_head() {
         let checkpoint = vec![
             (1, vec![create(HONEST)]),
             (2, vec![destroy(HONEST), create_version(HONEST, 1)]),
         ];
-        let orders = [vec![destroy(HONEST), create_version(HONEST, 1)], vec![
-            create_version(HONEST, 1),
-            destroy(HONEST),
-        ]];
+        let version_2_streams = [
+            vec![batch(2, vec![destroy(HONEST), create_version(HONEST, 1)])],
+            vec![batch(2, vec![create_version(HONEST, 1), destroy(HONEST)])],
+            vec![
+                batch_with_more(2, vec![create_version(HONEST, 1)]),
+                batch(2, vec![destroy(HONEST)]),
+            ],
+        ];
 
-        for version_2 in orders {
+        for version_2 in version_2_streams {
             let (store, _tmp) = create_store();
-            let synced_to = sync(&store, &checkpoint, vec![
-                batch(1, vec![create(HONEST)]),
-                batch(2, version_2),
-                complete(2),
-            ])
-            .await
-            .unwrap();
+            let mut stream = vec![batch(1, vec![create(HONEST)])];
+            stream.extend(version_2);
+            stream.push(complete(2));
+            let synced_to = sync(&store, &checkpoint, stream).await.unwrap();
             assert_eq!(synced_to, Some(2));
 
             let head = store

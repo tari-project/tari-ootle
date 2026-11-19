@@ -120,13 +120,13 @@ impl AuthSubcommand {
                 if args.permissions.is_empty() {
                     println!("You forgot add permissions");
                 } else {
-                    let _resp = client
+                    let resp = client
                         .auth_request(AuthLoginRequest {
                             permissions: args.permissions,
                             credentials: AuthCredentials::None,
                         })
                         .await?;
-                    println!("Access granted");
+                    println!("{}", format_access_granted(&resp.token));
                 }
             },
             Revoke(args) => {
@@ -246,5 +246,21 @@ impl ApiKeySubcommand {
             },
         }
         Ok(())
+    }
+}
+
+fn format_access_granted(token: &str) -> String {
+    format!("Access granted\nToken: {token}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_access_granted_includes_jwt_token() {
+        let output = format_access_granted("eyJhbGciOiJIUzI1NiJ9.payload.sig");
+        assert!(output.starts_with("Access granted\n"));
+        assert!(output.contains("Token: eyJhbGciOiJIUzI1NiJ9.payload.sig"));
     }
 }

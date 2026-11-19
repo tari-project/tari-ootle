@@ -86,7 +86,7 @@ export default function ClaimFees() {
   const [scannedFees, setScannedFees] = useState<GetValidatorFeesResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [validity, setValidity] = useState<{ [key: string]: boolean }>(INITIAL_VALIDITY);
-  const { data: dataAccountsList } = useAccountsList(0, 10);
+  const { data: dataAccountsList } = useAccountsList(0, 1000);
   const { setPopup } = useAccountStore();
 
   const theme = useTheme();

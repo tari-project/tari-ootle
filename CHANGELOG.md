@@ -3,6 +3,90 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.55.0](https://github.com/tari-project/tari-ootle/compare/v0.54.0...v0.55.0) (2026-11-19)
+
+Transactions move to schema V2, which binds every authorization to the whole authorizer set and
+takes signature bytes out of the transaction id. Component access and owner rules can now be
+changed by transaction instruction, under a rules updater fixed when the component is created.
+Validators catch up in bounded pages instead of an unterminated block stream.
+
+### ⚠️ Upgrade notes
+
+- **Validators and indexers upgrade together.** The catch-up protocol changed (#3833), and the
+  engine changes below switch at deployment with no activation epoch: validators on different
+  binaries diverge on V2 transactions, the new rules instructions and template admission.
+  (#3827, #3807, #3860)
+- **Operators:** each node recompiles every template once, on first use, because the compiled-module
+  cache key now includes the metering middleware version. Fees and metering are unchanged. (#3867)
+- **App and wallet developers:**
+  - Clients build V2 transactions. V2 changes the authorization message and the transaction id,
+    and the mempool rejects a V2 authorization list that is not strictly ascending by key
+    (`AuthorizationsNotCanonical`) or an authorization not over the full key set. V1 transactions
+    are still accepted. Go, Python, FFI and wasm consumers move to the new co-sign signatures; the
+    C FFI ABI tag is `ootle-sdk-ffi-c/20`. (#3827)
+  - Ledger: an installed Ootle app rejects V2 authorizations until a rebuilt app is released.
+    (#3827)
+  - `WalletNetworkInterface::get_substate_versions` is a new required method, and
+    `IndexerRestApiNetworkInterfaceError` gains `UnrequestedSubstateVersion`. (#3829)
+- **walletd users:**
+  - `keys.create`, `keys.list` and `keys.set_active` are removed; account and view keys come with
+    their account (`accounts.create` / `accounts.list`), and `keys.import` stays. Account key
+    indices are allocated from the accounts table, so `accounts.create` with a `key_index` already
+    in use returns an "already exists" error. (#3864)
+  - The `validators:*` permission becomes `vn_fees:read[:<claim_pk>]` and
+    `vn_fees:claim[:<claim_pk>]`, scoped by claim key. The old `validators:*` strings are still
+    parsed for this release. (#3796)
+  - Submitting `SetComponentAccessRules` or `SetComponentOwnerRule` directly requires `admin`.
+    (#3831)
+- **Template authors:** a component built with `tari_template_lib` 0.42.0 defaults to
+  `RulesUpdater::Locked`, so `ComponentManager::set_access_rules` and `set_owner_rule` refuse it
+  unless the template sets `ComponentBuilder::with_rules_updater`. Components and templates
+  created before this release behave as `TemplateManaged`, as before. (#3807)
+
+### Features
+
+- **engine:** `SetComponentAccessRules` and `SetComponentOwnerRule` replace a component's method
+  access rules or owner rule, as permitted by its `rules_updater` (`Locked`, `TemplateManaged`,
+  `Owner` or `AccessRule`), with `set_access_rules!` / `set_owner_rule!` manifest macros. (#3807)
+- **engine:** template admission rules run only when a template is published, so a tightened rule
+  never retires a template that is already published. (#3860)
+- **transaction:** schema V2 binds each authorization to the authorizer set, so a sealer can no
+  longer reorder, duplicate or pad co-signatures to mint a new transaction id. (#3827)
+- **consensus:** a catch-up request is answered by one page of at most 3 MiB that says where the
+  next page starts, so a catching-up validator no longer waits on stall re-requests or opens
+  duplicate streams. (#3833)
+- **indexer:** `POST /substates/versions` returns the live versions of up to 20 substates in one
+  call, unproven, for wallets that only need versions to pin inputs. (#3829)
+- **walletd:** signing requests, transaction requests and dry runs list component rules changes
+  and show a warning before signing. (#3831)
+
+### Bug fixes
+
+- **networking:** nodes dial a peer's identify listen addresses only within the connection's
+  scope, which ends the indexers' `Unexpected peer ID` dial failures through validators' loopback
+  and Docker bridge addresses. (#3855)
+- **engine:** the compiled-module cache is keyed on the metering middleware version, so a
+  middleware patch cannot leave warm-cache nodes metering differently from fresh ones. (#3867)
+- **engine:** a template whose `TemplateDef` has duplicate function names or colliding dispatch
+  identifiers is rejected at publish. (#3841)
+- **engine:** method access rules naming a static function or migration are rejected. (#3862)
+- **consensus:** foreign proposals naming the local shard group are rejected. (#3779)
+- **consensus:** fee-pool withdrawals keep their `Output` lock across several withdrawals in one
+  block, and versioned lock conflicts are deferred. (#3632)
+- **consensus:** catch-up parks blocks behind a parked justify block instead of dropping them, and
+  a restarted pacemaker keeps its timeout backoff. (#3826, #3794, #3858)
+- **walletd:** a stealth transfer submits the inputs its dry run priced, manifest narrowing keeps
+  `ValidatorFeePool` inputs write-declared, and burn-claim retries honour their budgets.
+  (#3832, #3638, #3342)
+- **wallet:** dependent-substate resolution includes `ValidatorFeePool` inputs and the TARI token,
+  and stealth transfers declare badge inputs read-only. (#3634, #3666)
+- **transaction:** `call_args!` accepts `Blob(idx)` and `Workspace(id, offset)`. (#3732)
+- **config:** `-p` and `TARI_*` overrides win over network-scoped preset tables. (#3861)
+- **indexer:** networking and libp2p log to `network.log` and `libp2p.log`, and the esmeralda scan
+  starts at block 1024283. (#3859)
+- **deps:** `libz-sys` 1.1.33 fixes RUSTSEC-2026-0544, and the unmaintained `chrono` and
+  `humantime` dependencies are removed. (#3856)
+
 ## [0.54.0](https://github.com/tari-project/tari-ootle/compare/v0.53.5...v0.54.0) (2026-11-17)
 
 Components can no longer change their template in place. To change a component's code, deploy the

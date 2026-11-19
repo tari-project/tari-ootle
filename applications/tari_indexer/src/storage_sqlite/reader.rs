@@ -1152,8 +1152,9 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                 .map_err(|e| StorageError::QueryError {
                     reason: format!("{OPERATION}: cursor lookup: {e}"),
                 })?
-                .ok_or_else(|| StorageError::QueryError {
-                    reason: format!("{OPERATION}: cursor template address {after_address} not found"),
+                .ok_or_else(|| StorageError::NotFound {
+                    item: "template_catalogue_cursor",
+                    key: after_hex,
                 })?;
 
             query = query.filter(template_catalogue::id.gt(cursor_id));

@@ -21,6 +21,7 @@ use tari_indexer_client::types::{
     TemplateCatalogueItem,
 };
 use tari_ootle_common_types::{SubstateRequirementRef, optional::Optional};
+use tari_ootle_storage::StorageError;
 use tari_template_builtin::try_get_template_builtin;
 use tari_template_lib_types::TemplateAddress;
 
@@ -49,7 +50,7 @@ pub async fn get_template_definition(
                 .get_substate(SubstateRequirementRef::unversioned(&id))
                 .await
                 .optional()
-                .map_err(|err| ErrorResponse::internal_error(format!("Error fetching template: {}", err)))?
+                .map_err(super::substates::substate_lookup_error)?
                 .ok_or_else(|| {
                     ErrorResponse::not_found(format!("Template with address {} not found", template_address))
                 })?;
@@ -102,7 +103,7 @@ pub async fn list_template_catalogue(
         .read_only_store()
         .list_template_catalogue(req.name_filter.as_deref(), req.after.as_ref(), limit)
         .await
-        .map_err(ErrorResponse::anyhow)?
+        .map_err(map_list_catalogue_error)?
         .into_iter()
         .map(TemplateCatalogueItem::from)
         .collect();
@@ -133,4 +134,39 @@ pub async fn get_template_catalogue_entry(
         .ok_or_else(|| ErrorResponse::not_found(format!("Template {} not found in the catalogue", template_address)))?;
 
     Ok(context.apply_cache_control(Json(TemplateCatalogueItem::from(entry)), 120 * 60))
+}
+
+/// Maps a missing pagination cursor to HTTP 400 Bad Request instead of 500 Internal Server Error.
+fn map_list_catalogue_error(err: StorageError) -> ErrorResponse {
+    match err {
+        StorageError::NotFound {
+            item: "template_catalogue_cursor",
+            key,
+        } => ErrorResponse::bad_request(format!("Cursor template address {key} not found")),
+        other => ErrorResponse::anyhow(other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+
+    use super::*;
+
+    #[test]
+    fn missing_cursor_maps_to_bad_request() {
+        let resp = map_list_catalogue_error(StorageError::NotFound {
+            item: "template_catalogue_cursor",
+            key: "00".repeat(32),
+        });
+        assert_eq!(resp.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn unexpected_storage_error_maps_to_internal_error() {
+        let resp = map_list_catalogue_error(StorageError::QueryError {
+            reason: "db error".to_string(),
+        });
+        assert_eq!(resp.status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
 }

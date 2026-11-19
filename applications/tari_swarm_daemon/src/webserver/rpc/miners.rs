@@ -35,13 +35,14 @@ pub async fn start_mining(
     context: &HandlerContext,
     req: StartMiningRequest,
 ) -> Result<StartMiningResponse, anyhow::Error> {
+    let interval_duration = validate_mining_interval(req.interval_seconds)?;
     let shutdown = Shutdown::new();
     context.start_mining(shutdown.clone()).await?;
 
     let process_manager = context.process_manager().clone();
     tokio::spawn(async move {
         let shutdown_signal = shutdown.to_signal();
-        let interval = tokio::time::interval(Duration::from_secs(req.interval_seconds));
+        let interval = tokio::time::interval(interval_duration);
         tokio::pin!(shutdown_signal);
         tokio::pin!(interval);
         loop {
@@ -58,6 +59,15 @@ pub async fn start_mining(
         }
     });
     Ok(StartMiningResponse {})
+}
+
+/// Validates that the auto-mining period is non-zero before calling `tokio::time::interval`,
+/// which panics on `Duration::ZERO`.
+fn validate_mining_interval(interval_seconds: u64) -> Result<Duration, anyhow::Error> {
+    if interval_seconds == 0 {
+        anyhow::bail!("interval_seconds must be greater than 0");
+    }
+    Ok(Duration::from_secs(interval_seconds))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,4 +98,19 @@ pub async fn stop_mining(
 ) -> Result<StopMiningResponse, anyhow::Error> {
     context.stop_mining().await;
     Ok(StopMiningResponse { result: true })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_mining_interval_rejects_zero() {
+        assert!(validate_mining_interval(0).is_err());
+    }
+
+    #[test]
+    fn validate_mining_interval_accepts_nonzero() {
+        assert_eq!(validate_mining_interval(5).unwrap(), Duration::from_secs(5));
+    }
 }

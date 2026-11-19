@@ -933,38 +933,15 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(outputs)
     }
 
+    /// The keys of every account in the wallet. The accounts table is the one record of which keys the wallet
+    /// receives outputs to, the same one the per-account UTXO scanner and seed recovery use.
     fn all_used_view_only_keys(&self) -> Result<Vec<AccountAndViewKeys>, StealthOutputsApiError> {
-        let derived_view_keys = self.key_manager_api.get_all_derived_keys(KeyBranch::ViewOnlyKey)?;
-        let scanned_view_key_ids = derived_view_keys
-            .iter()
-            .map(|view_key| view_key.key_id)
-            .collect::<HashSet<_>>();
-        let mut keys = derived_view_keys
-            .into_iter()
-            .map(|view_key| {
-                let account_key = self.key_manager_api.derive_account_key(
-                    view_key
-                        .key_id
-                        .derived_index()
-                        .expect("get_all_derived_keys returns only derived keys"),
-                )?;
-                Ok::<_, KeyManagerApiError>(AccountAndViewKeys {
-                    account_public_key: account_key.to_public_key().to_byte_type(),
-                    account_key: Some(account_key.into()),
-                    view_only_key: view_key.into(),
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        // An account's view key is outside the derived key branch above when it is imported (a view-only account) or
-        // derived at an index the key manager has no record of
         let accounts = self.store.with_read_tx(|tx| {
             let count = tx.accounts_count()?;
             tx.accounts_get_many(0, count as usize)
         })?;
+        let mut keys = Vec::with_capacity(accounts.len());
         for account in accounts {
-            if scanned_view_key_ids.contains(&account.view_only_key_id) {
-                continue;
-            }
             let loaded = account
                 .owner_key_id
                 .map(|key_id| self.key_manager_api.get_key(key_id))

@@ -20,11 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useKeysCreate, useKeysList, useKeysSetActive } from "@api/hooks/useKeys";
+import { useKeysList, useKeysSetActive } from "@api/hooks/useKeys";
 import FetchStatusCheck from "@components/FetchStatusCheck";
-import { BoxHeading2, DataTableCell } from "@components/StyledComponents";
-import AddIcon from "@mui/icons-material/Add";
-import Button from "@mui/material/Button";
+import { DataTableCell } from "@components/StyledComponents";
 import Fade from "@mui/material/Fade";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -33,8 +31,6 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import { KeyId } from "@tari-project/ootle-ts-bindings";
-import { useState } from "react";
-import { Form } from "react-router-dom";
 
 function Key([keyId, pk, active]: [KeyId, string, boolean], setActive: (key_id: KeyId) => void) {
   const rowKey =
@@ -51,14 +47,8 @@ function Key([keyId, pk, active]: [KeyId, string, boolean], setActive: (key_id: 
 }
 
 function Keys() {
-  const [showKeyDialog, setShowAddKeyDialog] = useState(false);
   const { data, isLoading, isError, error } = useKeysList("account");
   const { mutate: mutateSetActive } = useKeysSetActive();
-  const { mutate: mutateCreateKey } = useKeysCreate("account");
-
-  const showAddKeyDialog = (setElseToggle: boolean = !showKeyDialog) => {
-    setShowAddKeyDialog(setElseToggle);
-  };
 
   const setActive = (keyId: KeyId) => {
     if ("Derived" in keyId) {
@@ -66,38 +56,10 @@ function Keys() {
     }
   };
 
-  const onSubmitAddKey = () => {
-    mutateCreateKey();
-    setShowAddKeyDialog(false);
-  };
-
   return (
     <FetchStatusCheck isLoading={isLoading} isError={isError} errorMessage={error?.message || "Error fetching data"}>
       <Fade in={!isLoading && !isError}>
         <div>
-          <BoxHeading2>
-            {showKeyDialog && (
-              <Fade in={showKeyDialog}>
-                <Form onSubmit={onSubmitAddKey} className="flex-container">
-                  <Button variant="contained" type="submit">
-                    Add Key
-                  </Button>
-                  <Button variant="outlined" onClick={() => showAddKeyDialog(false)}>
-                    Cancel
-                  </Button>
-                </Form>
-              </Fade>
-            )}
-            {!showKeyDialog && (
-              <Fade in={!showKeyDialog}>
-                <div className="flex-container">
-                  <Button variant="outlined" startIcon={<AddIcon />} onClick={() => showAddKeyDialog()}>
-                    Add Key
-                  </Button>
-                </div>
-              </Fade>
-            )}
-          </BoxHeading2>{" "}
           <TableContainer>
             <Table>
               <TableHead>

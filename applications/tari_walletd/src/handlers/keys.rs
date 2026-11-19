@@ -32,6 +32,7 @@ pub async fn handle_create(
     let sdk = context.wallet_sdk();
     context.authorize(token, &[Permission::Keys(Crud::Create)])?;
     ensure_not_mask_branch(req.branch)?;
+    ensure_not_account_branch(req.branch)?;
     let key_manager = sdk.key_manager_api();
     let key = req
         .specific_index
@@ -108,6 +109,20 @@ fn ensure_not_mask_branch(branch: KeyBranch) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+/// Account and view keys are allocated with their account, so the accounts table is the one record of which
+/// account key indices are in use.
+fn ensure_not_account_branch(branch: KeyBranch) -> Result<(), anyhow::Error> {
+    if matches!(branch, KeyBranch::Account | KeyBranch::ViewOnlyKey) {
+        return Err(invalid_params(
+            "branch",
+            Some(format!(
+                "{branch} keys are created with an account. Use accounts.create"
+            )),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,17 +148,32 @@ mod tests {
         }
 
         handle_create(&daemon.context, session, KeysCreateRequest {
-            branch: KeyBranch::Account,
+            branch: KeyBranch::Transaction,
             specific_index: None,
         })
         .await
         .unwrap();
         let listed = handle_list(&daemon.context, session, KeysListRequest {
-            branch: KeyBranch::Account,
+            branch: KeyBranch::Transaction,
         })
         .await
         .unwrap();
         assert!(!listed.keys.is_empty());
+    }
+
+    #[tokio::test]
+    async fn account_and_view_keys_are_not_created_without_an_account() {
+        let daemon = TestDaemon::start().await;
+        let session = Some(&daemon.session);
+
+        for branch in [KeyBranch::Account, KeyBranch::ViewOnlyKey] {
+            for specific_index in [None, Some(0)] {
+                let err = handle_create(&daemon.context, session, KeysCreateRequest { branch, specific_index })
+                    .await
+                    .unwrap_err();
+                assert!(err.to_string().contains("accounts.create"), "{err}");
+            }
+        }
     }
 
     #[tokio::test]

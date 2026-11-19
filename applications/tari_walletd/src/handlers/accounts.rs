@@ -54,6 +54,7 @@ use tari_ootle_wallet_sdk::{
     },
     models::{
         AccountWithAddress,
+        DerivedKeyIndex,
         KeyBranch,
         NewAccountData,
         TransactionContext,
@@ -173,20 +174,7 @@ pub async fn handle_create(
         .unwrap_or_else(|| accounts_api.has_default_account().map(|b| !b))?;
 
     ensure_seed_recovery_finished(sdk)?;
-    let owner_address = match req.key_index {
-        Some(id) => sdk.key_manager_api().create_account_address_at_index(id)?,
-        None => sdk.key_manager_api().next_account_address()?,
-    };
-
-    let acc = accounts_api
-        .create_account(req.account_name.as_deref(), set_as_default, owner_address)
-        .map_err(|e| {
-            if e.is_name_exists_error() {
-                invalid_request(e)
-            } else {
-                general_error(e)
-            }
-        })?;
+    let acc = create_derived_account(context, req.account_name.as_deref(), set_as_default, req.key_index)?;
 
     info!(
         target: LOG_TARGET,
@@ -245,20 +233,12 @@ pub async fn handle_create_or_get(
         .unwrap_or_else(|| accounts_api.has_default_account().map(|b| !b))?;
 
     ensure_seed_recovery_finished(sdk)?;
-    let wallet_keys = match req.key_index {
-        Some(id) => sdk.key_manager_api().create_account_address_at_index(id)?,
-        None => sdk.key_manager_api().next_account_address()?,
-    };
-
-    let acc = accounts_api
-        .create_account(req.account.as_ref().and_then(|a| a.name()), set_as_default, wallet_keys)
-        .map_err(|e| {
-            if e.is_name_exists_error() {
-                invalid_request(e)
-            } else {
-                general_error(e)
-            }
-        })?;
+    let acc = create_derived_account(
+        context,
+        req.account.as_ref().and_then(|a| a.name()),
+        set_as_default,
+        req.key_index,
+    )?;
 
     info!(
         target: LOG_TARGET,
@@ -269,6 +249,32 @@ pub async fn handle_create_or_get(
         account: acc.account,
         address: acc.address,
         created: true,
+    })
+}
+
+/// Creates a derived account at `key_index`, or at the lowest account key index no account uses.
+fn create_derived_account(
+    context: &HandlerContext,
+    account_name: Option<&str>,
+    is_default: bool,
+    key_index: Option<DerivedKeyIndex>,
+) -> Result<AccountWithAddress, anyhow::Error> {
+    let accounts_api = context.wallet_sdk().accounts_api();
+    let created = match key_index {
+        Some(index) => {
+            let gap_limit = u64::try_from(context.config().recovery_abandon_count).unwrap_or(u64::MAX);
+            accounts_api.create_account_at_index(account_name, is_default, index, gap_limit)
+        },
+        None => accounts_api.create_next_account(account_name, is_default),
+    };
+    created.map_err(|e| {
+        if e.is_index_beyond_recovery_gap_error() {
+            invalid_params("key_index", Some(e))
+        } else if e.is_name_exists_error() || e.is_account_exists_error() {
+            invalid_request(e)
+        } else {
+            general_error(e)
+        }
     })
 }
 
@@ -3675,6 +3681,32 @@ mod create_stealth_transfer_statement_handler_tests {
             accounts.get_default().unwrap().component_address(),
             created.account.component_address()
         );
+    }
+
+    #[tokio::test]
+    async fn an_account_key_index_must_stay_within_the_recovery_gap() {
+        use crate::handlers::test_support::TestDaemon;
+
+        let daemon = TestDaemon::start().await;
+        let gap_limit = daemon.context.config().recovery_abandon_count as u64;
+        let create = |key_index| {
+            handle_create(&daemon.context, Some(&daemon.session), AccountsCreateRequest {
+                account_name: None,
+                is_default: None,
+                key_index,
+            })
+        };
+
+        let err = create(Some(gap_limit)).await.unwrap_err();
+        assert!(err.to_string().contains("key_index"), "{err}");
+
+        let explicit = create(Some(gap_limit - 1)).await.unwrap();
+        assert_eq!(
+            explicit.account.owner_key_id.and_then(|id| id.derived_index()),
+            Some(gap_limit - 1)
+        );
+        let next = create(None).await.unwrap();
+        assert_eq!(next.account.owner_key_id.and_then(|id| id.derived_index()), Some(0));
     }
 
     #[tokio::test]

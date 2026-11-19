@@ -6,7 +6,11 @@ mod support;
 use ootle_byte_type::ToByteType;
 use tari_engine_types::{Utxo, UtxoOutput, crypto::OutputBody};
 use tari_ootle_address::RistrettoOotleAddress;
-use tari_ootle_wallet_sdk::{crypto::pay_to::PayTo, models::KeyBranch};
+use tari_ootle_wallet_sdk::{
+    apis::accounts::AccountsApiError,
+    crypto::pay_to::PayTo,
+    models::{AccountWithAddress, KeyBranch},
+};
 use tari_template_lib::types::{
     UtxoAddress,
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
@@ -15,14 +19,10 @@ use tari_template_lib::types::{
 
 use crate::support::{PanicNetworkInterface, Test};
 
-fn derived_indices(test: &Test, branch: KeyBranch) -> Vec<u64> {
-    test.sdk()
-        .key_manager_api()
-        .get_all_derived_keys(branch)
-        .unwrap()
-        .into_iter()
-        .map(|key| key.key_id().derived_index().unwrap())
-        .collect()
+const GAP_LIMIT: u64 = 5;
+
+fn key_index(account: &AccountWithAddress) -> u64 {
+    account.account.owner_key_id.and_then(|id| id.derived_index()).unwrap()
 }
 
 /// An output `sender` pays to `destination`, encrypted and tagged for its view key.
@@ -54,17 +54,67 @@ fn stealth_output_to(sender: &Test, destination: &RistrettoOotleAddress, value: 
 }
 
 #[test]
-fn an_account_address_created_at_an_explicit_index_records_the_index() {
+fn new_accounts_take_the_lowest_unused_key_index() {
     let test = Test::without_accounts(PanicNetworkInterface);
-    let km = test.sdk().key_manager_api();
+    let accounts_api = test.sdk().accounts_api();
 
-    let address = km.create_account_address_at_index(5).unwrap();
-    assert_eq!(address.owner_key_id.derived_index(), Some(5));
-    assert_eq!(derived_indices(&test, KeyBranch::Account), [5]);
-    assert_eq!(derived_indices(&test, KeyBranch::ViewOnlyKey), [5]);
+    let explicit = accounts_api
+        .create_account_at_index(Some("explicit"), true, 3, GAP_LIMIT)
+        .unwrap();
+    assert_eq!(key_index(&explicit), 3);
 
-    let next = km.next_account_address().unwrap();
-    assert_eq!(next.owner_key_id.derived_index(), Some(6));
+    let next = (0..4)
+        .map(|n| {
+            let account = accounts_api
+                .create_next_account(Some(&format!("next-{n}")), false)
+                .unwrap();
+            key_index(&account)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(next, [0, 1, 2, 4]);
+}
+
+#[test]
+fn an_account_index_beyond_the_recovery_gap_is_refused() {
+    let test = Test::without_accounts(PanicNetworkInterface);
+    let accounts_api = test.sdk().accounts_api();
+
+    // With no account, recovery checks indices 0..GAP_LIMIT
+    let err = accounts_api
+        .create_account_at_index(None, true, GAP_LIMIT, GAP_LIMIT)
+        .unwrap_err();
+    assert!(
+        matches!(err, AccountsApiError::AccountIndexBeyondRecoveryGap {
+            index: GAP_LIMIT,
+            reachable_below: GAP_LIMIT
+        }),
+        "{err}"
+    );
+    accounts_api
+        .create_account_at_index(None, true, GAP_LIMIT - 1, GAP_LIMIT)
+        .unwrap();
+
+    // Each account extends recovery's reach by GAP_LIMIT indices
+    let highest = 2 * GAP_LIMIT - 1;
+    accounts_api
+        .create_account_at_index(None, false, highest, GAP_LIMIT)
+        .unwrap();
+    let err = accounts_api
+        .create_account_at_index(None, false, highest + GAP_LIMIT + 1, GAP_LIMIT)
+        .unwrap_err();
+    assert!(err.is_index_beyond_recovery_gap_error(), "{err}");
+}
+
+#[test]
+fn an_account_index_in_use_is_refused() {
+    let test = Test::without_accounts(PanicNetworkInterface);
+    let accounts_api = test.sdk().accounts_api();
+    let account = accounts_api.create_next_account(None, true).unwrap();
+
+    let err = accounts_api
+        .create_account_at_index(Some("again"), false, key_index(&account), GAP_LIMIT)
+        .unwrap_err();
+    assert!(err.is_account_exists_error(), "{err}");
 }
 
 #[test]
@@ -74,25 +124,28 @@ fn a_public_key_created_at_an_explicit_index_records_the_index() {
 
     let key = km.create_public_key_at_index(KeyBranch::Transaction, 3).unwrap();
     assert_eq!(key.key_id.derived_index(), Some(3));
-    assert_eq!(derived_indices(&test, KeyBranch::Transaction), [3]);
-    assert!(derived_indices(&test, KeyBranch::ViewOnlyKey).is_empty());
+    let listed = km
+        .get_all_derived_keys(KeyBranch::Transaction)
+        .unwrap()
+        .into_iter()
+        .map(|key| key.key_id().derived_index())
+        .collect::<Vec<_>>();
+    assert_eq!(listed, [Some(3)]);
 
     let next = km.next_public_key(KeyBranch::Transaction).unwrap();
     assert_eq!(next.key_id.derived_index(), Some(4));
 }
 
 #[test]
-fn an_account_at_an_unrecorded_index_receives_stealth_outputs() {
+fn an_account_at_an_explicit_index_receives_stealth_outputs() {
     let sender = Test::new();
     let receiver = Test::without_accounts(PanicNetworkInterface);
-    // `derive_account_address` records nothing, so the key manager has no view key row for index 3
-    let address = receiver.sdk().key_manager_api().derive_account_address(3).unwrap();
     let account = receiver
         .sdk()
         .accounts_api()
-        .create_account(Some("explicit"), true, address.clone())
+        .create_account_at_index(Some("explicit"), true, 3, GAP_LIMIT)
         .unwrap();
-    assert!(derived_indices(&receiver, KeyBranch::ViewOnlyKey).is_empty());
+    let address = receiver.sdk().key_manager_api().derive_account_address(3).unwrap();
 
     let (utxo_address, utxo) = stealth_output_to(&sender, &address.address, 1234);
     receiver

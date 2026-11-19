@@ -47,7 +47,9 @@ use crate::{
         BalanceChangeSnapshot,
         BalanceChangeSource,
         BalanceChangeSourceType,
+        DerivedKeyIndex,
         EpochBirthday,
+        KeyBranch,
         KeyId,
         KeyIdOrPublicKey,
         KeyType,
@@ -151,6 +153,110 @@ impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
             },
             address: account_address.address.to_byte_type(),
         })
+    }
+
+    /// Creates an account at the lowest account key index that no account uses. The wallet's derived accounts stay
+    /// contiguous from index 0, where seed recovery starts its scan.
+    pub fn create_next_account(
+        &self,
+        account_name: Option<&str>,
+        is_default: bool,
+    ) -> Result<AccountWithAddress, AccountsApiError> {
+        self.create_derived_account(account_name, is_default, |used| {
+            let mut index: DerivedKeyIndex = 0;
+            while used.contains(&index) {
+                index = index.checked_add(1).ok_or(KeyManagerApiError::KeyIndexExhausted)?;
+            }
+            Ok(index)
+        })
+    }
+
+    /// Creates an account at account key `index`. Seed recovery stops after `gap_limit` consecutive indices that
+    /// hold no account, so `index` may be at most `gap_limit` above the highest index an account uses, or below
+    /// `gap_limit` when the wallet has no derived account.
+    pub fn create_account_at_index(
+        &self,
+        account_name: Option<&str>,
+        is_default: bool,
+        index: DerivedKeyIndex,
+        gap_limit: u64,
+    ) -> Result<AccountWithAddress, AccountsApiError> {
+        self.create_derived_account(account_name, is_default, |used| {
+            let reachable_below = used
+                .iter()
+                .max()
+                .map_or(0, |highest| highest.saturating_add(1))
+                .saturating_add(gap_limit);
+            if index >= reachable_below {
+                return Err(AccountsApiError::AccountIndexBeyondRecoveryGap { index, reachable_below });
+            }
+            Ok(index)
+        })
+    }
+
+    /// Creates an account at the account key index `choose_index` picks from the indices accounts already use. The
+    /// indices are read and the account inserted in one write transaction, so concurrent creations never pick the
+    /// same index.
+    fn create_derived_account<F>(
+        &self,
+        account_name: Option<&str>,
+        is_default: bool,
+        choose_index: F,
+    ) -> Result<AccountWithAddress, AccountsApiError>
+    where
+        F: FnOnce(&HashSet<DerivedKeyIndex>) -> Result<DerivedKeyIndex, AccountsApiError>,
+    {
+        // The write transaction holds the store's only connection, so the store is read before it
+        let max_probed_index = ConfigApi::new(self.store)
+            .get::<u64>(ConfigKey::RecoveryMaxProbedKeyIndex)
+            .optional()?;
+        let seed_birthday_epoch = self.key_manager_api.get_cipher_seed_birthday_epoch()?;
+        let current_epoch = self.epoch_birthday.calculate_current_epoch();
+
+        let component_address = self.store.with_write_tx(|tx| {
+            let count = tx.accounts_count()?;
+            let used = tx
+                .accounts_get_many(0, count as usize)?
+                .into_iter()
+                .filter_map(|account| match account.owner_key_id {
+                    Some(KeyId::Derived {
+                        key_branch: KeyBranch::Account,
+                        index,
+                    }) => Some(index),
+                    _ => None,
+                })
+                .collect::<HashSet<_>>();
+            let index = choose_index(&used)?;
+            let keys = self.key_manager_api.derive_account_address(index)?;
+            let owner_public_key = keys.address.account_key().to_byte_type();
+            let component_address = self.derive_account_address_from_public_key(&owner_public_key);
+            if tx.accounts_get(&component_address).optional()?.is_some() {
+                return Err(AccountsApiError::AccountAlreadyExists {
+                    address: component_address,
+                });
+            }
+            // Seed recovery may have checked this index and deleted its account as unused. Payments sent to it
+            // after recovery are only found if the scan starts from the seed birthday.
+            let birthday_epoch = if max_probed_index.is_some_and(|max_probed| index <= max_probed) {
+                seed_birthday_epoch
+            } else {
+                current_epoch
+            };
+            Self::insert_account(
+                tx,
+                account_name,
+                &component_address,
+                keys.view_only_key_id,
+                Some(keys.owner_key_id),
+                &owner_public_key,
+                birthday_epoch,
+                false,
+                is_default,
+            )?;
+            Ok::<_, AccountsApiError>(component_address)
+        })?;
+
+        self.get_account_by_address(&component_address)
     }
 
     /// Adds an account that can be scanned and viewed but not spent from. The view secret key is stored as an
@@ -817,6 +923,14 @@ pub enum AccountsApiError {
     AccountNameAlreadyExists { name: String },
     #[error("Account already exists: {address}")]
     AccountAlreadyExists { address: ComponentAddress },
+    #[error(
+        "Account key index {index} is beyond seed recovery's gap limit, so recovering the wallet from its seed would \
+         not find the account. Use an index below {reachable_below}"
+    )]
+    AccountIndexBeyondRecoveryGap {
+        index: DerivedKeyIndex,
+        reachable_below: DerivedKeyIndex,
+    },
     #[error("Invalid view-only account: {reason}")]
     InvalidViewOnlyAccount { reason: String },
     #[error("The view key is already used by account {address}")]
@@ -836,6 +950,10 @@ impl AccountsApiError {
 
     pub fn is_account_exists_error(&self) -> bool {
         matches!(self, Self::AccountAlreadyExists { .. })
+    }
+
+    pub fn is_index_beyond_recovery_gap_error(&self) -> bool {
+        matches!(self, Self::AccountIndexBeyondRecoveryGap { .. })
     }
 
     pub fn is_invalid_view_only_account_error(&self) -> bool {

@@ -153,9 +153,6 @@ where
         }
 
         info!(target: LOG_TARGET, "Setting active key to {}", active_key_index);
-        if let Err(err) = key_manager_api.reset_key_index_to(KeyBranch::Account, active_key_index) {
-            error!(target: LOG_TARGET, "Error setting active key: {err}");
-        }
         if let Err(err) = key_manager_api.set_active_key(KeyBranch::Account, active_key_index) {
             error!(target: LOG_TARGET, "Error setting active key: {err}");
         }

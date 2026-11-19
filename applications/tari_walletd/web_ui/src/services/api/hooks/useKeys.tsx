@@ -24,25 +24,13 @@ import { ApiError } from "@api/helpers/types";
 import queryClient from "@api/queryClient";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { KeyBranch } from "@tari-project/ootle-ts-bindings";
-import { keysCreate, keysList, keysSetActive } from "@utils/json_rpc";
+import { keysList, keysSetActive } from "@utils/json_rpc";
 
 export const useKeysList = (branch: KeyBranch) => {
   return useQuery({
     queryKey: ["keys_list", branch],
     queryFn: () => {
       return keysList({ branch });
-    },
-  });
-};
-
-export const useKeysCreate = (branch: KeyBranch) => {
-  return useMutation({
-    mutationFn: () => keysCreate({ branch, specific_index: null }),
-    onError: (error: ApiError) => {
-      error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["keys_list"] });
     },
   });
 };

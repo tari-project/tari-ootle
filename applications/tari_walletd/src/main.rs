@@ -101,40 +101,32 @@ async fn main() -> Result<(), anyhow::Error> {
                     .unwrap_or_default(),
             )?;
             let km = sdk.key_manager_api();
-            let account_address = if let Some(index) = key_index {
-                km.create_account_address_at_index(*index)?
-            } else {
-                km.next_account_address()?
+            let accounts_api = sdk.accounts_api();
+            let is_default = !accounts_api.has_default_account()?;
+            let created = match key_index {
+                Some(index) => {
+                    let gap_limit =
+                        u64::try_from(config.ootle_wallet_daemon.recovery_abandon_count).unwrap_or(u64::MAX);
+                    accounts_api.create_account_at_index(name.as_deref(), is_default, *index, gap_limit)?
+                },
+                None => accounts_api.create_next_account(name.as_deref(), is_default)?,
             };
+            let account = &created.account;
 
-            let public_key = account_address.address.account_key().to_byte_type();
-            let view_only_public_key = account_address.address.view_only_key().to_byte_type();
-            let account_addr = sdk.accounts_api().derive_account_address_from_public_key(&public_key);
-            let is_default = !sdk.accounts_api().has_default_account()?;
-            let birthday_epoch = sdk.calculate_birthday_epoch();
-            sdk.accounts_api().add_account(
-                name.as_deref(),
-                &account_addr,
-                account_address.view_only_key_id,
-                account_address.owner_key_id,
-                birthday_epoch,
-                false,
-                is_default,
-            )?;
-
-            if *set_active && let Some(index) = account_address.owner_key_id.derived_index() {
+            if *set_active && let Some(index) = account.owner_key_id.and_then(|key_id| key_id.derived_index()) {
                 km.set_active_key(KeyBranch::Account, index)?;
             }
 
-            let view_only_secret = km.get_key(account_address.view_only_key_id)?;
+            let view_only_secret = km.get_key(account.view_only_key_id)?;
+            let view_only_public_key = view_only_secret.to_public_key().to_byte_type();
 
             let json = json!({
-                "component_address": account_addr,
-                "address": account_address.address.to_byte_type(),
-                "account_public_key": public_key,
+                "component_address": account.component_address,
+                "address": created.address,
+                "account_public_key": account.owner_public_key,
                 "view_only_public_key": view_only_public_key,
                 "view_only_private_key": hex::encode(view_only_secret.secret().as_bytes()),
-                "key_index": account_address.view_only_key_id,
+                "key_index": account.view_only_key_id,
             });
             match output_path {
                 Some(path) => {

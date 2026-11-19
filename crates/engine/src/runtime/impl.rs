@@ -4790,14 +4790,21 @@ fn validate_component_access_rule_methods(
     template_def: &TemplateDef,
 ) -> Result<(), RuntimeError> {
     for (name, _) in access_rules.method_access_rules_iter() {
-        if !template_def
+        if template_def
             .functions()
             .iter()
-            .any(|f| f.name == *name && f.has_receiver())
+            .all(|f| !f.has_receiver() || f.name != *name)
         {
+            let details = match template_def.functions().iter().find(|f| f.name == *name) {
+                Some(f) if f.is_migration() => {
+                    format!("'{name}' is a migration function; method access rules apply to component methods")
+                },
+                Some(_) => format!("'{name}' is a static function; method access rules apply to component methods"),
+                None => format!("No method '{name}' found in template"),
+            };
             return Err(RuntimeError::InvalidMethodAccessRule {
                 template_name: template_def.template_name().to_string(),
-                details: format!("No method '{}' found in template", name),
+                details,
             });
         }
     }
@@ -5990,15 +5997,22 @@ mod tests {
         let static_fn = ComponentAccessRules::new().add_method_rule("new", AccessRule::AllowAll);
         let err = validate_component_access_rule_methods(&static_fn, &template_def).unwrap_err();
         assert!(
-            matches!(err, RuntimeError::InvalidMethodAccessRule { ref details, .. } if details.contains("'new'")),
+            matches!(err, RuntimeError::InvalidMethodAccessRule { ref details, .. } if details.contains("'new' is a static function")),
             "unexpected error for static function: {err:?}"
         );
 
         let migration_fn = ComponentAccessRules::new().add_method_rule("migrate_v2", AccessRule::AllowAll);
         let err = validate_component_access_rule_methods(&migration_fn, &template_def).unwrap_err();
         assert!(
-            matches!(err, RuntimeError::InvalidMethodAccessRule { ref details, .. } if details.contains("'migrate_v2'")),
+            matches!(err, RuntimeError::InvalidMethodAccessRule { ref details, .. } if details.contains("'migrate_v2' is a migration function")),
             "unexpected error for migration function: {err:?}"
+        );
+
+        let missing = ComponentAccessRules::new().add_method_rule("deposit", AccessRule::AllowAll);
+        let err = validate_component_access_rule_methods(&missing, &template_def).unwrap_err();
+        assert!(
+            matches!(err, RuntimeError::InvalidMethodAccessRule { ref details, .. } if details.contains("No method 'deposit' found")),
+            "unexpected error for missing method: {err:?}"
         );
     }
 }

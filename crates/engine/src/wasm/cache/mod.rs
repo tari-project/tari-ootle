@@ -100,11 +100,10 @@ const ENGINE_FINGERPRINT_BITS: u64 = {
     let h = const_hash::part(h, include_bytes!("../limiting_tunable.rs"));
     // Which count a hit reads out of each header slot. Swapping two of these is a fee change.
     let h = const_hash::values(h, &header_layout());
-    // Every limit, not just the ones the artifact bakes in: `validate_module_structure` enforces
-    // `max_tables`, `max_globals` and the module and function limits on what the compile emits at
-    // compile time only, and a hit goes straight to `finalize_loaded_module` without it.
-    // Destructured rather than read field by field, so that a limit added later does not compile
-    // until it is named here.
+    // Every limit, including the publish admission limits that no load enforces. A limit change then
+    // recompiles every template once, which is the price of a digest that cannot miss a limit that
+    // does reach the artifact. Destructured rather than read field by field, so that a limit added
+    // later does not compile until it is named here.
     let limits::WasmLimits {
         max_function_arguments,
         max_function_name_length,
@@ -781,7 +780,7 @@ impl WasmModuleCache {
         // matching one, which is what [`restrict_dir_to_owner`] is for: `deserialize_unchecked`
         // reads a body past its 32-byte prefix with `rkyv::access_unchecked` and hands one that
         // fails the prefix check to an ELF loader, so bytes that reach it are already trusted.
-        match unsafe { WasmModule::load_template_from_serialized(body, code_size, shape) } {
+        match unsafe { WasmModule::load_serialized(body, code_size, shape) } {
             Ok(loaded) => {
                 debug!(target: LOG_TARGET, "Cache hit for template {}", addr);
                 // A hit also adopts a file this instance never wrote, so a cache inherited from an
@@ -994,9 +993,9 @@ fn write_durable(path: &Path, bytes: &[u8]) -> io::Result<Option<u64>> {
 /// On `get_template(addr)`:
 /// 1. If the cache file `{addr}_{ENGINE_FINGERPRINT}.bin` exists, deserialize and return — no compile, no
 ///    inner-provider call.
-/// 2. Otherwise delegate to `inner` for the raw `PublishedTemplate`, compile via
-///    [`WasmModule::load_template_from_code`], offer the compiled module to the cache, return. The artifact is written
-///    by the cache's writer thread, so the caller pays the compile but not the flush.
+/// 2. Otherwise delegate to `inner` for the raw `PublishedTemplate`, compile via [`WasmModule::load`], offer the
+///    compiled module to the cache, return. The artifact is written by the cache's writer thread, so the caller pays
+///    the compile but not the flush.
 ///
 /// Intended placement is between an outer in-memory cache (e.g. moka) and the
 /// raw state-store provider, so a process-lifetime hot path skips disk
@@ -1056,7 +1055,7 @@ where TStore: TemplateProvider<Template = PublishedTemplate> + Clone + 'static
             else {
                 return Ok(None);
             };
-            return Ok(Some(WasmModule::load_template_from_code(published.binary.as_slice())?));
+            return Ok(Some(WasmModule::load(published.binary.as_slice())?));
         }
 
         if let Some(loaded) = self.cache.try_load(address) {
@@ -1071,7 +1070,7 @@ where TStore: TemplateProvider<Template = PublishedTemplate> + Clone + 'static
             return Ok(None);
         };
 
-        let loaded = WasmModule::load_template_from_code(published.binary.as_slice())?;
+        let loaded = WasmModule::load(published.binary.as_slice())?;
         self.cache.store(address, &loaded);
         Ok(Some(loaded))
     }
@@ -1189,7 +1188,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let cache = WasmModuleCache::open(dir.path(), TEST_CAP_BYTES).unwrap();
         let addr = addr_of_byte(0x01);
-        let loaded = WasmModule::load_template_from_code(account_binary()).unwrap();
+        let loaded = WasmModule::load(account_binary()).unwrap();
         cache.store(&addr, &loaded);
         cache.flush();
         let size = fs::metadata(cache.path_for(&addr)).unwrap().len();

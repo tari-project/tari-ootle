@@ -28,7 +28,7 @@ use tari_ootle_walletd_client::{
 use tari_template_lib_types::{
     ComponentAddress,
     SubstateOwnerRule,
-    access_rules::{AccessRule, UpdateRule},
+    access_rules::{AccessRule, RulesUpdater, UpdateRule},
 };
 
 use super::{auth::jwt::AuthError, context::HandlerContext};
@@ -91,8 +91,8 @@ pub(super) fn display_component_reference(component: &ComponentReference) -> Str
 /// Upgrade rules of components this daemon has read.
 ///
 /// Every entry stays valid: a component's upgrade rule is fixed when the component is created. The one rule derived
-/// from mutable state, an ownerless `Owner` rule stored as [`UpdateRule::Locked`], is final too, see
-/// [`effective_upgrade_rule`].
+/// from mutable state, an ownerless `Owner` rule whose [`RulesUpdater`] cannot assign a new owner (stored as
+/// [`UpdateRule::Locked`]), is final too, see [`effective_upgrade_rule`].
 #[derive(Clone)]
 pub struct UpgradeRuleCache {
     rules: Cache<ComponentAddress, UpdateRule>,
@@ -122,13 +122,29 @@ impl UpgradeRuleCache {
     }
 }
 
-/// The component's upgrade rule, with an `Owner` rule on an ownerless component reported as [`UpdateRule::Locked`].
+/// Whether `component` is ownerless and can never be given an owner.
 ///
-/// [`SubstateOwnerRule::None`] satisfies no caller, and replacing an owner rule requires satisfying it, so an
-/// ownerless component stays ownerless and its `Owner` upgrade rule can never pass.
+/// [`SubstateOwnerRule::None`] satisfies no caller, so `Locked`, `TemplateManaged`, `Owner`, and
+/// `AccessRule(DenyAll)` updaters can never replace it. Any other [`RulesUpdater::AccessRule`] gates
+/// `SetComponentOwnerRule` independently of the current owner rule, so an ownerless component can still gain an owner.
+fn is_owner_permanently_none(component: &Component) -> bool {
+    matches!(component.owner_rule(), SubstateOwnerRule::None) &&
+        matches!(
+            component.rules_updater(),
+            RulesUpdater::Locked |
+                RulesUpdater::TemplateManaged |
+                RulesUpdater::Owner |
+                RulesUpdater::AccessRule(AccessRule::DenyAll)
+        )
+}
+
+/// The component's upgrade rule, with an `Owner` rule on a permanently ownerless component reported as
+/// [`UpdateRule::Locked`].
+///
+/// Only when [`is_owner_permanently_none`] holds is `UpdateRule::Owner` permanently unsatisfiable.
 fn effective_upgrade_rule(component: &Component) -> UpdateRule {
     match component.upgrade_rule() {
-        UpdateRule::Owner if matches!(component.owner_rule(), SubstateOwnerRule::None) => UpdateRule::Locked,
+        UpdateRule::Owner if is_owner_permanently_none(component) => UpdateRule::Locked,
         rule => rule.clone(),
     }
 }
@@ -272,6 +288,14 @@ mod tests {
     }
 
     fn component_with_owner(upgrade_rule: UpdateRule, owner_rule: SubstateOwnerRule) -> Component {
+        component_with_owner_and_updater(upgrade_rule, owner_rule, None)
+    }
+
+    fn component_with_owner_and_updater(
+        upgrade_rule: UpdateRule,
+        owner_rule: SubstateOwnerRule,
+        rules_updater: Option<RulesUpdater>,
+    ) -> Component {
         Component {
             header: ComponentHeader {
                 template_address: Default::default(),
@@ -279,7 +303,7 @@ mod tests {
                 access_rules: ComponentAccessRules::new(),
                 entity_id: EntityId::default(),
                 upgrade_rule,
-                rules_updater: None,
+                rules_updater,
             },
             body: ComponentBody::empty(),
         }
@@ -396,6 +420,49 @@ mod tests {
             effective_upgrade_rule(&by_rule),
             UpdateRule::AccessRule(AccessRule::AllowAll)
         ));
+    }
+
+    #[test]
+    fn ownerless_component_with_satisfiable_rules_updater_is_not_locked() {
+        let restricted_updater = RulesUpdater::AccessRule(AccessRule::Restricted(RestrictedAccessRule::Require(
+            RequireRule::Require(RuleRequirement::CallerComponent(address(1))),
+        )));
+
+        // Updaters that gate SetComponentOwnerRule independently of the current owner rule allow an ownerless
+        // component to gain an owner, so UpdateRule::Owner must stay reported as upgradable and never be cached
+        // as Locked.
+        for updater in [RulesUpdater::AccessRule(AccessRule::AllowAll), restricted_updater] {
+            let addr = address(42);
+            let comp = component_with_owner_and_updater(UpdateRule::Owner, SubstateOwnerRule::None, Some(updater));
+            assert!(matches!(effective_upgrade_rule(&comp), UpdateRule::Owner));
+
+            let cache = cache_with(&[(addr, comp)]);
+            let (known, uncached) = cached_upgrade_rules(&cache, &[addr]);
+            assert!(uncached.is_empty());
+            assert!(matches!(known.get(&addr), Some(UpdateRule::Owner)));
+
+            let upgradable = resolve_upgradable_components(&cache, &[addr], &known, None);
+            assert_eq!(upgradable.len(), 1);
+            assert_eq!(upgradable[0].component_address, addr);
+            assert!(matches!(upgradable[0].upgrade_rule, UpdateRule::Owner));
+        }
+
+        // Updaters that cannot replace SubstateOwnerRule::None keep the component permanently locked.
+        for updater in [
+            None,
+            Some(RulesUpdater::Locked),
+            Some(RulesUpdater::TemplateManaged),
+            Some(RulesUpdater::Owner),
+            Some(RulesUpdater::AccessRule(AccessRule::DenyAll)),
+        ] {
+            let addr = address(43);
+            let comp = component_with_owner_and_updater(UpdateRule::Owner, SubstateOwnerRule::None, updater);
+            assert!(matches!(effective_upgrade_rule(&comp), UpdateRule::Locked));
+
+            let cache = cache_with(&[(addr, comp)]);
+            let (known, _) = cached_upgrade_rules(&cache, &[addr]);
+            assert!(resolve_upgradable_components(&cache, &[addr], &known, None).is_empty());
+        }
     }
 
     #[test]

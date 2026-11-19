@@ -71,6 +71,9 @@ Validators catch up in bounded pages instead of an unterminated block stream.
   identifiers is rejected at publish. (#3841)
 - **engine:** method access rules naming a static function or migration are rejected. (#3862)
 - **consensus:** foreign proposals naming the local shard group are rejected. (#3779)
+- **state store:** a substate's head is its highest committed version whatever order a batch lists
+  its transitions in, so a validator that state-synced a version streamed out of order no longer
+  resolves an unversioned input to a down version. (#3820)
 - **consensus:** fee-pool withdrawals keep their `Output` lock across several withdrawals in one
   block, and versioned lock conflicts are deferred. (#3632)
 - **consensus:** catch-up parks blocks behind a parked justify block instead of dropping them, and
@@ -80,6 +83,8 @@ Validators catch up in bounded pages instead of an unterminated block stream.
   (#3832, #3638, #3342)
 - **wallet:** dependent-substate resolution includes `ValidatorFeePool` inputs and the TARI token,
   and stealth transfers declare badge inputs read-only. (#3634, #3666)
+- **wallet:** an unconfirmed stealth output relocked for spend is confirmed when its transaction
+  mints it on chain unspent, instead of being deleted from the wallet. (#3851)
 - **transaction:** `call_args!` accepts `Blob(idx)` and `Workspace(id, offset)`. (#3732)
 - **config:** `-p` and `TARI_*` overrides win over network-scoped preset tables. (#3861)
 - **indexer:** networking and libp2p log to `network.log` and `libp2p.log`, and the esmeralda scan

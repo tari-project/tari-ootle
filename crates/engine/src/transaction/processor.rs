@@ -651,16 +651,16 @@ where
 
         // The template consensus rules run first, so a module refused by one of them is not billed
         // for a compile nothing performed.
-        let structure = WasmModule::verify_for_publish(binary)?;
+        let structure = WasmModule::validate(binary)?;
 
         // The compile is the most expensive thing a single instruction can ask of a validator, so it
         // is paid for before it runs. The size cap above and the function and variable caps in the
-        // verification are what keep this charge affordable.
+        // validation are what keep this charge affordable.
         runtime
             .interface()
             .charge_template_compile(binary.len() as u64, &structure.compile)?;
 
-        let template_def = WasmModule::compile_verified(binary, structure.shape)?;
+        let template_def = WasmModule::load(binary)?.into_template_def();
         // The size cap above holds the binary within `MAX_TEMPLATE_BLOB_WIRE_BYTES` — a const assertion keeps the two
         // ordered — so constructing TemplateBlob is infallible.
         let blob = TemplateBlob::new_checked(binary).expect("template binary size verified above");

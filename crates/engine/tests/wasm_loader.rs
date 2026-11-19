@@ -105,14 +105,14 @@ const ABI_EXPORTS: &str = r#"
 "#;
 
 fn validation_error(code: &[u8]) -> String {
-    WasmModule::validate_code(code)
+    WasmModule::validate_and_load(code)
         .expect_err("module was accepted")
         .to_string()
 }
 
 #[test]
 fn accepts_a_hand_written_template() {
-    let def = WasmModule::validate_code(&template_module(ABI_EXPORTS)).unwrap();
+    let def = WasmModule::validate_and_load(&template_module(ABI_EXPORTS)).unwrap();
     assert_eq!(def.template_name(), "Buggy");
 }
 
@@ -128,7 +128,7 @@ fn rejects_a_start_section() {
         "#
     ));
 
-    let err = WasmModule::validate_code(&code).expect_err("module with a start section was accepted");
+    let err = WasmModule::validate_and_load(&code).expect_err("module with a start section was accepted");
     assert!(
         matches!(
             err,
@@ -484,7 +484,7 @@ fn a_table_growing_module_is_refused() {
         "#,
     );
 
-    let err = WasmModule::load_template_from_code(&code).expect_err("a table-growing module was accepted");
+    let err = WasmModule::load(&code).expect_err("a table-growing module was accepted");
     assert!(err.to_string().contains("modifies a table"), "unexpected error: {err}");
 }
 
@@ -702,7 +702,7 @@ fn element_segment_entries_are_charged_per_instantiation() {
         "#
     ));
 
-    let shape = match WasmModule::load_template_from_code(&code).expect("module was rejected") {
+    let shape = match WasmModule::load(&code).expect("module was rejected") {
         tari_engine::template::LoadedTemplate::Wasm(loaded) => loaded.shape(),
     };
 
@@ -729,7 +729,7 @@ fn passive_segments_are_refused() {
             "#
         ));
 
-        let err = WasmModule::load_template_from_code(&code).expect_err("a passive segment was accepted");
+        let err = WasmModule::load(&code).expect_err("a passive segment was accepted");
         assert!(
             err.to_string().contains("passive"),
             "unexpected error for {segment}: {err}"
@@ -757,7 +757,7 @@ fn a_second_active_element_segment_is_refused() {
             "#
         ));
 
-        let err = WasmModule::validate_code(&code).expect_err("a second active element segment was accepted");
+        let err = WasmModule::validate_and_load(&code).expect_err("a second active element segment was accepted");
         assert!(
             matches!(
                 err,
@@ -784,7 +784,7 @@ fn declarative_element_segments_load_alongside_the_active_one() {
         "#
     ));
 
-    let shape = match WasmModule::load_template_from_code(&code).expect("module was rejected") {
+    let shape = match WasmModule::load(&code).expect("module was rejected") {
         tari_engine::template::LoadedTemplate::Wasm(loaded) => loaded.shape(),
     };
     assert_eq!(shape.element_segment_entries, 2);
@@ -807,7 +807,7 @@ fn table_init_is_refused() {
         "#,
     );
 
-    let err = WasmModule::load_template_from_code(&code).expect_err("table.init was accepted");
+    let err = WasmModule::load(&code).expect_err("table.init was accepted");
     assert!(err.to_string().contains("TableInit"), "unexpected error: {err}");
 }
 
@@ -833,7 +833,7 @@ fn empty_data_segments_are_charged_per_segment() {
         "#
     ));
 
-    let shape = match WasmModule::load_template_from_code(&code).expect("module was rejected") {
+    let shape = match WasmModule::load(&code).expect("module was rejected") {
         tari_engine::template::LoadedTemplate::Wasm(loaded) => loaded.shape(),
     };
 
@@ -862,7 +862,7 @@ fn declared_table_capacity_is_charged_without_any_element_segment() {
         "#
     ));
 
-    let shape = match WasmModule::load_template_from_code(&code).expect("module was rejected") {
+    let shape = match WasmModule::load(&code).expect("module was rejected") {
         tari_engine::template::LoadedTemplate::Wasm(loaded) => loaded.shape(),
     };
 
@@ -1125,7 +1125,7 @@ fn rejects_an_abi_type_past_the_limits_at_any_depth() {
     ];
     for (case, arg_type, output) in cases {
         let code = template_module_defining(&template_def_with(arg_type, output), "", ABI_EXPORTS);
-        let error = WasmModule::validate_code(&code)
+        let error = WasmModule::validate_and_load(&code)
             .err()
             .unwrap_or_else(|| panic!("{case} past the limits was admitted"))
             .to_string();
@@ -1136,7 +1136,7 @@ fn rejects_an_abi_type_past_the_limits_at_any_depth() {
 
     let at_the_limits = Type::Tuple(vec![nested(other(max_name), max_depth - 2); 2]);
     let code = template_module_defining(&template_def_with(at_the_limits, other(max_name)), "", ABI_EXPORTS);
-    WasmModule::validate_code(&code).expect("a type at the limits was rejected");
+    WasmModule::validate_and_load(&code).expect("a type at the limits was rejected");
 }
 
 /// A panic report is logged only once the trap it announces ends the call, so a template that
@@ -1354,7 +1354,7 @@ fn rejects_duplicate_function_names_and_colliding_function_idents() {
 
     let duplicate_code = template_module_defining(&duplicate_def, "", ABI_EXPORTS);
     let err =
-        WasmModule::validate_code(&duplicate_code).expect_err("module with duplicate function names was accepted");
+        WasmModule::validate_and_load(&duplicate_code).expect_err("module with duplicate function names was accepted");
     assert!(
         matches!(
             &err,
@@ -1387,7 +1387,7 @@ fn rejects_duplicate_function_names_and_colliding_function_idents() {
     .unwrap();
 
     let colliding_code = template_module_defining(&colliding_def, "", ABI_EXPORTS);
-    let err = WasmModule::validate_code(&colliding_code)
+    let err = WasmModule::validate_and_load(&colliding_code)
         .expect_err("module with colliding function identifiers was accepted");
     assert!(
         matches!(
@@ -1436,7 +1436,7 @@ fn a_stored_template_loads_without_the_publish_admission_rules() {
     // Breaks a `TemplateDef` rule, an export rule and a structural limit at once.
     let code = template_module_defining(&duplicate_def, "", &exports);
 
-    WasmModule::validate_code(&code).expect_err("publish admitted a module that breaks its rules");
-    let loaded = WasmModule::load_template_from_code(&code).expect("a stored template was refused at load");
+    WasmModule::validate_and_load(&code).expect_err("publish admitted a module that breaks its rules");
+    let loaded = WasmModule::load(&code).expect("a stored template was refused at load");
     assert_eq!(loaded.template_name(), "Buggy");
 }

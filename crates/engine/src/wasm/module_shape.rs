@@ -134,7 +134,7 @@ fn read_module_structure<L: LimitPolicy>(code: &[u8]) -> Result<ModuleStructure,
     let mut loops = 0usize;
     for payload in Parser::new(0).parse_all(code) {
         // Malformed wasm: stop and let the cranelift compile in
-        // `load_template_from_code` report the canonical CompileError.
+        // `WasmModule::load` report the canonical CompileError.
         let Ok(payload) = payload else { break };
         match payload {
             Payload::StartSection { .. } => L::check(false, || WasmValidationError::StartSectionNotAllowed)?,

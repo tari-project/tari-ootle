@@ -4832,7 +4832,7 @@ mod tests {
 
         fn get_template(&self, id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
             Ok(tari_template_builtin::try_get_template_builtin(id)
-                .map(|code| crate::wasm::WasmModule::load_template_from_code(code).unwrap()))
+                .map(|code| crate::wasm::WasmModule::load(code).unwrap()))
         }
     }
 

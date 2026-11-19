@@ -216,7 +216,7 @@ fn test_buggy_template() {
     // println!("];");
 
     let module = compile_template("tests/templates/buggy", &["unexpected_export_function"]).unwrap();
-    let err = WasmModule::validate_code(module.code()).unwrap_err();
+    let err = WasmModule::validate_and_load(module.code()).unwrap_err();
     assert!(matches!(
         err,
         TemplateLoaderError::WasmModuleError(WasmExecutionError::UnexpectedAbiFunction { .. })
@@ -1348,7 +1348,7 @@ fn all_builtin_templates_are_correct() {
     // admission rules. They are compiled with a `name` section, which only a publish refuses.
     for template in all_builtin_templates() {
         let code = without_custom_sections_but_tdef(template.binary);
-        let def = WasmModule::validate_code(&code).unwrap_or_else(|e| {
+        let def = WasmModule::validate_and_load(&code).unwrap_or_else(|e| {
             panic!(
                 "Builtin template at address {} fails publish admission: {}",
                 template.address, e

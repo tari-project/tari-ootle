@@ -68,19 +68,15 @@ impl WasmModule {
         Self { code: code.into() }
     }
 
-    /// The template consensus rules: everything a `PublishTemplate` holds a module to, answered
-    /// from the module bytes before the module is compiled.
+    /// Checks a module against the template consensus rules, reading only its bytes.
     ///
-    /// Only publishing runs them. A stored template passed them when it was published, so a rule
-    /// added later refuses new templates while published ones keep loading. The compile and the
-    /// instantiation that follow apply what every load applies: wasmer's validation, the
-    /// instrumentation's refusals, the ABI version this engine supports, and the memory and table
-    /// limits.
+    /// The rules are the custom sections a module may carry, the structure limits, and the rules
+    /// its `TemplateDef` and exports must follow. The check is one walk of the bytes ahead of any
+    /// compile, and the structure it returns carries the counts that price the compile.
     ///
-    /// Running ahead of the compile lets a publisher be charged for the compile between this and
-    /// [`Self::compile_verified`]: cranelift is the expensive half, and a module refused here never
-    /// reaches it, so it is not billed as though it had.
-    pub fn verify_for_publish(code: &[u8]) -> Result<ModuleStructure, TemplateLoaderError> {
+    /// A template is held to these rules once, when it is published. [`Self::load`] leaves them to
+    /// that check, so a rule added later refuses new templates while published ones keep loading.
+    pub fn validate(code: &[u8]) -> Result<ModuleStructure, TemplateLoaderError> {
         reject_disallowed_custom_sections(code).map_err(WasmExecutionError::from)?;
         let structure = validate_module_structure(code).map_err(WasmExecutionError::from)?;
         // Bytes that do not parse are refused by the compile, which reports the canonical error.
@@ -92,35 +88,18 @@ impl WasmModule {
         Ok(structure)
     }
 
-    /// Compiles a module [`Self::verify_for_publish`] admitted and returns its definition.
-    pub fn compile_verified(code: &[u8], shape: ModuleShape) -> Result<TemplateDef, TemplateLoaderError> {
-        let loaded = Self::compile(code, shape)?;
-        Ok(loaded.into_template_def())
-    }
-
-    /// Holds a module to the template consensus rules and compiles it, as a `PublishTemplate` does.
-    pub fn validate_code(code: &[u8]) -> Result<TemplateDef, TemplateLoaderError> {
-        let structure = Self::verify_for_publish(code)?;
-        Self::compile_verified(code, structure.shape)
-    }
-
-    /// Loads a template after holding it to the template consensus rules.
-    ///
-    /// For callers that stand in for a publish, such as a test harness adding a template it built,
-    /// so that a template a publish would refuse fails there too.
-    pub fn load_template_for_publish(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
-        let structure = Self::verify_for_publish(code)?;
+    /// [`Self::validate`], then [`Self::load`].
+    pub fn validate_and_load(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
+        let structure = Self::validate(code)?;
         Self::compile(code, structure.shape)
     }
 
-    /// Loads a template a publish has already admitted, or a built-in template.
+    /// Compiles and instantiates a module.
     ///
-    /// It runs what any module needs to load and run: the compile with its instrumentation, the
-    /// ABI version this engine supports, and the instantiation that applies the memory and table
-    /// limits. The template consensus rules are [`Self::verify_for_publish`], which stored code
-    /// passed when it was published. A caller standing in for a publish uses
-    /// [`Self::load_template_for_publish`] instead.
-    pub fn load_template_from_code(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
+    /// It applies what any module needs to run: the compile with its instrumentation, the ABI
+    /// version this engine supports, and the memory and table limits that instantiation enforces.
+    /// The template consensus rules belong to [`Self::validate`].
+    pub fn load(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
         let structure = measure_module_structure(code);
         Self::compile(code, structure.shape)
     }
@@ -153,7 +132,7 @@ impl WasmModule {
     /// this behind a node-local cache directory whose contents only this process
     /// writes.
     #[cfg(feature = "wasm-cache")]
-    pub unsafe fn load_template_from_serialized(
+    pub unsafe fn load_serialized(
         serialized: bytes::Bytes,
         code_size: usize,
         shape: ModuleShape,
@@ -214,7 +193,7 @@ impl WasmModule {
 
 impl TemplateModuleLoader for WasmModule {
     fn load_template(&self) -> Result<LoadedTemplate, TemplateLoaderError> {
-        Self::load_template_from_code(&self.code)
+        Self::load(&self.code)
     }
 }
 
@@ -377,14 +356,14 @@ const ALLOWED_CUSTOM_SECTIONS: &[&str] = &[TEMPLATE_DEF_CUSTOM_SECTION];
 /// in [`ALLOWED_CUSTOM_SECTIONS`].
 ///
 /// The scan defers to the cranelift compile in
-/// [`WasmModule::load_template_from_code`] for malformed input: a binary that
+/// [`WasmModule::load`] for malformed input: a binary that
 /// `wasmparser` cannot parse will also fail wasmer's validation, so stopping at
 /// the first parse error lets that path report the canonical `CompileError`
 /// rather than a less precise one here.
 fn reject_disallowed_custom_sections(code: &[u8]) -> Result<(), WasmValidationError> {
     for payload in Parser::new(0).parse_all(code) {
         // Malformed wasm: stop and let the cranelift compile in
-        // `load_template_from_code` report the canonical CompileError.
+        // `WasmModule::load` report the canonical CompileError.
         let Ok(payload) = payload else { break };
         if let Payload::CustomSection(reader) = payload &&
             !ALLOWED_CUSTOM_SECTIONS.contains(&reader.name())

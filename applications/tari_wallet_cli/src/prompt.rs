@@ -50,29 +50,42 @@ impl Prompt {
     }
 
     pub fn ask(self) -> Result<String, CommandError> {
+        let mut stdin = io::stdin().lock();
+        let mut stdout = io::stdout();
+        self.ask_with(&mut stdin, &mut stdout)
+    }
+
+    fn ask_with<R: io::BufRead, W: io::Write>(self, reader: &mut R, writer: &mut W) -> Result<String, CommandError> {
         if let Some(response) = self.value {
             return Ok(response);
         }
+        let default = self.default.filter(|s| !s.is_empty());
         loop {
-            match self.default.as_ref().filter(|s| !s.is_empty()) {
+            match default.as_ref() {
                 Some(default) => {
-                    println!("{} (Default: {})", self.label, default);
+                    writeln!(writer, "{} (Default: {})", self.label, default)?;
                 },
                 None => {
-                    println!("{}", self.label);
+                    writeln!(writer, "{}", self.label)?;
                 },
             }
-            print!("> ");
-            io::stdout().flush()?;
+            write!(writer, "> ")?;
+            writer.flush()?;
             let mut line_buf = String::new();
-            io::stdin().read_line(&mut line_buf)?;
-            println!();
+            let bytes_read = reader.read_line(&mut line_buf)?;
+            writeln!(writer)?;
             let trimmed = line_buf.trim();
             if trimmed.is_empty() {
-                match self.default {
-                    Some(default) => return Ok(default),
-                    None => continue,
+                if let Some(default) = default {
+                    return Ok(default);
                 }
+                if bytes_read == 0 {
+                    return Err(CommandError::IoError(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "Unexpected EOF while reading prompt input",
+                    )));
+                }
+                continue;
             } else {
                 return Ok(trimmed.to_string());
             }
@@ -99,4 +112,41 @@ pub enum CommandError {
     InvalidArgument(String),
     #[error(transparent)]
     IoError(#[from] io::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ask_returns_unexpected_eof_when_input_closes_without_default() {
+        let mut input = io::Cursor::new(b"" as &[u8]);
+        let mut output = Vec::new();
+        let err = Prompt::new("Enter value:")
+            .ask_with(&mut input, &mut output)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            CommandError::IoError(ref io_err) if io_err.kind() == io::ErrorKind::UnexpectedEof
+        ));
+    }
+
+    #[test]
+    fn ask_ignores_empty_default_and_uses_non_empty_default_on_blank_line() {
+        let mut input = io::Cursor::new(b"\nfallback\n" as &[u8]);
+        let mut output = Vec::new();
+        let val = Prompt::new("Enter value:")
+            .with_default("")
+            .ask_with(&mut input, &mut output)
+            .unwrap();
+        assert_eq!(val, "fallback");
+
+        let mut blank = io::Cursor::new(b"\n" as &[u8]);
+        let mut output = Vec::new();
+        let val = Prompt::new("Enter value:")
+            .with_default("preset")
+            .ask_with(&mut blank, &mut output)
+            .unwrap();
+        assert_eq!(val, "preset");
+    }
 }

@@ -1809,6 +1809,71 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn an_aborted_transaction_does_not_count_its_released_inputs_as_leaving() {
+            let wallet = Wallet::start().await;
+            let sdk = wallet.daemon.context.wallet_sdk();
+            let input = wallet_output(2, 500_000, OutputStatus::Unspent);
+            wallet.add_output(&input);
+            let lock_id = wallet.tool_lock_over(&input);
+
+            let mut req = create_request(vec![lock_id], 60 * 60);
+            req.transaction = UnsignedTransaction::new(Network::LocalNet.as_byte(), Epoch(100));
+            let created = handle_create(&wallet.daemon.context, Some(&wallet.tool), req)
+                .await
+                .unwrap();
+
+            let transaction = Transaction::builder_localnet(Epoch(100))
+                .call_method(account(), "anything", args![])
+                .build_and_seal(&RistrettoSecretKey::from(1u64));
+            let transaction_id = sdk
+                .transaction_api()
+                .insert_new_transaction(transaction, None, &[], false, &[lock_id])
+                .unwrap();
+            // Execution accepted a diff that spends the input, then consensus aborted the transaction.
+            let mut diff = SubstateDiff::new();
+            diff.down(SubstateId::Utxo(input.to_utxo_address()), SubstateVersion::ZERO);
+            let finalize = FinalizeResult::new(
+                transaction_id.into_array().into(),
+                vec![],
+                vec![],
+                TransactionResult::Accept(diff),
+                FeeReceipt::default(),
+            );
+            sdk.store()
+                .with_write_tx(|tx| {
+                    tx.transactions_update(
+                        WalletTransactionUpdate::new(transaction_id)
+                            .with_result(Some(&finalize))
+                            .with_new_status(TransactionStatus::Rejected),
+                    )?;
+                    tx.transaction_request_transition(
+                        created.request_id,
+                        &[TransactionRequestStatus::Pending],
+                        TransactionRequestStatus::Submitting,
+                    )?;
+                    tx.transaction_request_mark_submitted(created.request_id, transaction_id)
+                })
+                .unwrap();
+            sdk.locks_api().release_lock(lock_id).unwrap();
+
+            let info = handle_get(
+                &wallet.daemon.context,
+                Some(&wallet.daemon.session),
+                TransactionRequestGetRequest {
+                    request_id: created.request_id,
+                },
+            )
+            .await
+            .unwrap()
+            .request;
+            assert!(
+                info.value_summaries.is_empty(),
+                "an aborted transaction spends nothing: {:?}",
+                info.value_summaries
+            );
+        }
+
+        #[tokio::test]
         async fn handle_create_rejects_wrong_network_and_dry_run_transactions() {
             let wallet = Wallet::start().await;
 

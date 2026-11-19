@@ -44,7 +44,13 @@ impl WalletTransaction {
         self.status.is_accepted()
     }
 
+    /// The diff this transaction committed to the chain: the accepted diff of a non-dry-run transaction whose
+    /// status is a commit, including a fee-only commit. An aborted transaction or a dry run keeps its execution
+    /// result, but commits no diff.
     pub fn finalized_diff(&self) -> Option<&SubstateDiff> {
+        if self.is_dry_run || !self.status.is_any_accept() {
+            return None;
+        }
         self.finalize.as_ref().and_then(|f| f.any_accept())
     }
 

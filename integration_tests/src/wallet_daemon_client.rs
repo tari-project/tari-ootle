@@ -133,6 +133,7 @@ pub async fn transfer_stealth(
             owner_account: source_account_name,
             fee_params: TransferFeeParams::new(UtxoInputSelection::PreferRevealed),
             input_selection: UtxoInputSelection::PreferRevealed,
+            inputs: None,
             resource_address,
             badge_usage: BadgeUsage::None,
             transfers: vec![StealthTransfer {

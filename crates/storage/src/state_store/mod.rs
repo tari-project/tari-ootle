@@ -548,6 +548,8 @@ pub trait StateStoreReadTransaction: Sized {
     ) -> Result<SubstatePledges, StorageError>;
     // -------------------------------- Parked blocks / Missing Transactions -------------------------------- //
     fn parked_block_exists(&self, block_id: &BlockId) -> Result<bool, StorageError>;
+    /// The transactions a parked block is still waiting on. Empty when the block is not parked.
+    fn parked_block_missing_transactions(&self, block_id: &BlockId) -> Result<Vec<TransactionId>, StorageError>;
     fn parked_blocks_count_by_proposer(
         &self,
         epoch: Epoch,

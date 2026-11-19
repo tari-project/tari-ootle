@@ -41,7 +41,17 @@ use wasmer::{
     TypedFunction,
     WasmPtr,
     imports,
-    wasmparser::{ExternalKind, FuncType, Parser, Payload, TypeRef, ValType},
+    wasmparser::{
+        Export,
+        ExportSectionReader,
+        ExternalKind,
+        FuncType,
+        Parser,
+        Payload,
+        TypeRef,
+        TypeSectionReader,
+        ValType,
+    },
 };
 
 use crate::{
@@ -81,9 +91,9 @@ impl WasmModule {
         let structure = validate_module_structure(code).map_err(WasmExecutionError::from)?;
         // Bytes that do not parse are refused by the compile, which reports the canonical error.
         if let Some(interface) = read_module_interface(code) {
-            let template = decode_template_def(interface.template_defs)?;
+            let template = decode_template_def(&interface.template_defs)?;
             validate_functions(&template)?;
-            validate_module_exports(&interface.exports, &format!("{}_main", template.template_name()))?;
+            validate_module_exports(&interface, &format!("{}_main", template.template_name()))?;
         }
         Ok(structure)
     }
@@ -378,76 +388,73 @@ fn reject_disallowed_custom_sections(code: &[u8]) -> Result<(), WasmValidationEr
 }
 
 /// What a module's bytes declare at its boundary with the engine.
+///
+/// The type and export sections stay as readers over the module bytes, so reading the interface
+/// allocates nothing in proportion to how many exports or how large a signature the module
+/// declares. Only the signatures of the ABI exports are ever converted.
 struct ModuleInterface<'a> {
     /// The contents of each `tari_tdef` custom section, in module order.
     template_defs: Vec<&'a [u8]>,
-    /// Each export's name and what it exports, in module order.
-    exports: Vec<(&'a str, DeclaredExport)>,
+    types: Option<TypeSectionReader<'a>>,
+    /// The type index of each function, imported functions first as their indexes are the lowest.
+    /// The structure limits bound its length by `max_module_functions`.
+    function_types: Vec<u32>,
+    /// Every entry has been read once, so each one parses.
+    exports: Option<ExportSectionReader<'a>>,
 }
 
-enum DeclaredExport {
-    /// A function, with its signature when the type section declares one the engine can represent.
-    Function(Option<FunctionType>),
-    Memory,
-    Other,
+impl<'a> ModuleInterface<'a> {
+    fn exports(&self) -> impl Iterator<Item = Export<'a>> + '_ {
+        self.exports
+            .iter()
+            .flat_map(|reader| reader.clone().into_iter().flatten())
+    }
+
+    /// The signature of function `function`, or `None` when the module declares none the engine
+    /// can represent.
+    fn signature(&self, function: u32) -> Option<FunctionType> {
+        let ty = *self.function_types.get(function as usize)?;
+        let ty = self.types.clone()?.into_iter_err_on_gc_types().nth(ty as usize)?.ok()?;
+        to_function_type(&ty)
+    }
 }
 
 /// Reads a module's [`ModuleInterface`] from its bytes, or `None` for bytes that do not parse.
 fn read_module_interface(code: &[u8]) -> Option<ModuleInterface<'_>> {
-    // Indexed by type index, so a signature the engine cannot represent keeps its slot.
-    let mut signatures = Vec::new();
-    // The type index of each function, imported functions first as their indexes are the lowest.
-    let mut function_types = Vec::new();
-    let mut template_defs = Vec::new();
-    let mut exports = Vec::new();
+    let mut interface = ModuleInterface {
+        template_defs: Vec::new(),
+        types: None,
+        function_types: Vec::new(),
+        exports: None,
+    };
     for payload in Parser::new(0).parse_all(code) {
         match payload.ok()? {
-            Payload::TypeSection(reader) => {
-                for ty in reader.into_iter_err_on_gc_types() {
-                    signatures.push(ty.ok().and_then(|ty| to_function_type(&ty)));
-                }
-            },
+            Payload::TypeSection(reader) => interface.types = Some(reader),
             Payload::ImportSection(reader) => {
                 for import in reader.into_imports() {
                     if let TypeRef::Func(ty) | TypeRef::FuncExact(ty) = import.ok()?.ty {
-                        function_types.push(ty);
+                        interface.function_types.push(ty);
                     }
                 }
             },
             Payload::FunctionSection(reader) => {
                 for ty in reader {
-                    function_types.push(ty.ok()?);
+                    interface.function_types.push(ty.ok()?);
                 }
             },
             Payload::ExportSection(reader) => {
-                for export in reader {
-                    exports.push(export.ok()?);
+                for export in reader.clone() {
+                    export.ok()?;
                 }
+                interface.exports = Some(reader);
             },
             Payload::CustomSection(reader) if reader.name() == TEMPLATE_DEF_CUSTOM_SECTION => {
-                template_defs.push(reader.data());
+                interface.template_defs.push(reader.data());
             },
             _ => {},
         }
     }
-    let exports = exports
-        .into_iter()
-        .map(|export| {
-            let declared = match export.kind {
-                ExternalKind::Func | ExternalKind::FuncExact => DeclaredExport::Function(
-                    function_types
-                        .get(export.index as usize)
-                        .and_then(|ty| signatures.get(*ty as usize))
-                        .cloned()
-                        .flatten(),
-                ),
-                ExternalKind::Memory => DeclaredExport::Memory,
-                ExternalKind::Table | ExternalKind::Global | ExternalKind::Tag => DeclaredExport::Other,
-            };
-            (export.name, declared)
-        })
-        .collect();
-    Some(ModuleInterface { template_defs, exports })
+    Some(interface)
 }
 
 /// `ty` as the engine's [`FunctionType`], or `None` for a signature with a type it cannot represent.
@@ -469,7 +476,7 @@ fn to_function_type(ty: &FuncType) -> Option<FunctionType> {
 
 /// Checks a module's exports against the template ABI: the memory the engine reads and writes, the
 /// three functions it calls and their signatures, and that the module exports no other function.
-fn validate_module_exports(exports: &[(&str, DeclaredExport)], main_fn: &str) -> Result<(), WasmExecutionError> {
+fn validate_module_exports(interface: &ModuleInterface<'_>, main_fn: &str) -> Result<(), WasmExecutionError> {
     // `(call_info_ptr: i32, call_info_len: i32) -> i32`, matching [`MainFunction`].
     let expected_main = FunctionType::new([wasmer::Type::I32, wasmer::Type::I32], [wasmer::Type::I32]);
     // `(len: i32) -> i32` and `(ptr: i32)`, matching `WasmAllocFn` and `WasmFreeFn`.
@@ -477,24 +484,24 @@ fn validate_module_exports(exports: &[(&str, DeclaredExport)], main_fn: &str) ->
     let expected_free = FunctionType::new([wasmer::Type::I32], []);
 
     let mut memory_export = false;
-    let mut main_signature = None;
-    let mut alloc_signature = None;
-    let mut free_signature = None;
+    let mut main_function = None;
+    let mut alloc_function = None;
+    let mut free_function = None;
 
-    for (name, declared) in exports {
-        match declared {
-            DeclaredExport::Function(signature) => match *name {
-                name if name == main_fn => main_signature = Some(signature.as_ref()),
-                "tari_alloc" => alloc_signature = Some(signature.as_ref()),
-                "tari_free" => free_signature = Some(signature.as_ref()),
+    for export in interface.exports() {
+        match export.kind {
+            ExternalKind::Func | ExternalKind::FuncExact => match export.name {
+                name if name == main_fn => main_function = Some(export.index),
+                "tari_alloc" => alloc_function = Some(export.index),
+                "tari_free" => free_function = Some(export.index),
                 name => {
                     return Err(WasmExecutionError::UnexpectedAbiFunction { name: name.to_string() });
                 },
             },
-            DeclaredExport::Memory => {
-                memory_export |= *name == "memory";
+            ExternalKind::Memory => {
+                memory_export |= export.name == "memory";
             },
-            DeclaredExport::Other => {},
+            ExternalKind::Table | ExternalKind::Global | ExternalKind::Tag => {},
         }
     }
 
@@ -505,9 +512,22 @@ fn validate_module_exports(exports: &[(&str, DeclaredExport)], main_fn: &str) ->
         .into());
     }
 
-    validate_export_signature(main_fn, main_signature, &expected_main)?;
-    validate_export_signature("tari_alloc", alloc_signature, &expected_alloc)?;
-    validate_export_signature("tari_free", free_signature, &expected_free)?;
+    let signature = |function: Option<u32>| function.map(|function| interface.signature(function));
+    validate_export_signature(
+        main_fn,
+        signature(main_function).as_ref().map(Option::as_ref),
+        &expected_main,
+    )?;
+    validate_export_signature(
+        "tari_alloc",
+        signature(alloc_function).as_ref().map(Option::as_ref),
+        &expected_alloc,
+    )?;
+    validate_export_signature(
+        "tari_free",
+        signature(free_function).as_ref().map(Option::as_ref),
+        &expected_free,
+    )?;
 
     Ok(())
 }

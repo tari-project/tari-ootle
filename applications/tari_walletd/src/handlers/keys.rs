@@ -4,10 +4,7 @@
 use axum_extra::headers::authorization::Bearer;
 use ootle_byte_type::ToByteType;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey, tari_utilities::hex::Hex};
-use tari_ootle_wallet_sdk::{
-    apis::key_manager::KeyManagerApiError,
-    models::{KeyBranch, KeyId},
-};
+use tari_ootle_wallet_sdk::{apis::key_manager::KeyManagerApiError, models::KeyBranch};
 use tari_ootle_walletd_client::{
     permissions::{Crud, Permission},
     types::{
@@ -38,7 +35,7 @@ pub async fn handle_create(
     let key_manager = sdk.key_manager_api();
     let key = req
         .specific_index
-        .map(|idx| key_manager.get_public_key(KeyId::derived(req.branch, idx)))
+        .map(|idx| key_manager.create_public_key_at_index(req.branch, idx))
         .unwrap_or_else(|| key_manager.next_public_key(req.branch))?;
     Ok(KeysCreateResponse {
         id: key.key_id.derived_index().expect("Key is derived"),
@@ -147,5 +144,31 @@ mod tests {
         .await
         .unwrap();
         assert!(!listed.keys.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_key_created_at_an_explicit_index_is_listed() {
+        let daemon = TestDaemon::start().await;
+        let session = Some(&daemon.session);
+
+        let created = handle_create(&daemon.context, session, KeysCreateRequest {
+            branch: KeyBranch::Transaction,
+            specific_index: Some(7),
+        })
+        .await
+        .unwrap();
+        assert_eq!(created.id, 7);
+
+        let listed = handle_list(&daemon.context, session, KeysListRequest {
+            branch: KeyBranch::Transaction,
+        })
+        .await
+        .unwrap();
+        let listed = listed
+            .keys
+            .iter()
+            .map(|(key_id, public_key, _)| (key_id.derived_index(), *public_key))
+            .collect::<Vec<_>>();
+        assert!(listed.contains(&(Some(7), created.public_key)), "{listed:?}");
     }
 }

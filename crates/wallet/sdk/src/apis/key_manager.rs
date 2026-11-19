@@ -334,6 +334,33 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
         self.derive_account_address(key.key_index())
     }
 
+    /// Derives the account address at `index` and records the index as used, so the wallet scans for outputs to
+    /// the address, lists its keys and never allocates the index again.
+    pub fn create_account_address_at_index(
+        &self,
+        index: DerivedKeyIndex,
+    ) -> Result<WalletOotleAddressWithKeyIds, KeyManagerApiError> {
+        let address = self.derive_account_address(index)?;
+        self.store
+            .with_write_tx(|tx| record_derived_index(tx, KeyBranch::Account, index))?;
+        Ok(address)
+    }
+
+    /// Derives the public key at `index` in `branch` and records the index as used, so the wallet lists the key and
+    /// never allocates the index again.
+    pub fn create_public_key_at_index(
+        &self,
+        branch: KeyBranch,
+        index: DerivedKeyIndex,
+    ) -> Result<WalletPublicKey, KeyManagerApiError> {
+        let key = self.derive_key(branch, index)?;
+        self.store.with_write_tx(|tx| record_derived_index(tx, branch, index))?;
+        Ok(WalletPublicKey {
+            public_key: key.to_public_key(),
+            key_id: key.as_key_id(),
+        })
+    }
+
     pub fn derive_account_key_pair(&self, index: u64) -> Result<DerivedKeyPair, KeyManagerApiError> {
         let key = self.derive_account_key(index)?;
         let public_key = RistrettoPublicKey::from_secret_key(&key.key);
@@ -377,11 +404,7 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
             .map(|i| i.checked_add(1).ok_or(KeyManagerApiError::KeyIndexExhausted))
             .transpose()?
             .unwrap_or(0);
-        if matches!(branch, KeyBranch::Account) {
-            // Ensure the view key branch is created if it doesn't exist
-            tx.key_manager_insert_or_ignore(KeyBranch::ViewOnlyKey.as_str(), next_index)?;
-        }
-        tx.key_manager_insert_or_ignore(branch.as_str(), next_index)?;
+        record_derived_index(&mut tx, branch, next_index)?;
         tx.commit()?;
         Ok(DerivedKeyId {
             branch,
@@ -491,6 +514,19 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
         let public_key = RistrettoPublicKey::from_secret_key(secret_key);
         Ok(SignatureOutput { public_key, signature }.into())
     }
+}
+
+/// Records `index` as used in `branch`. An account index also records its view key index, because the stealth
+/// output scan finds an account's view key through the `ViewOnlyKey` branch.
+fn record_derived_index<W: WalletStoreWriter>(
+    tx: &mut W,
+    branch: KeyBranch,
+    index: DerivedKeyIndex,
+) -> Result<(), WalletStorageError> {
+    if matches!(branch, KeyBranch::Account) {
+        tx.key_manager_insert_or_ignore(KeyBranch::ViewOnlyKey.as_str(), index)?;
+    }
+    tx.key_manager_insert_or_ignore(branch.as_str(), index)
 }
 
 impl<TSpec: WalletSdkSpec> Clone for KeyManagerApi<'_, TSpec> {

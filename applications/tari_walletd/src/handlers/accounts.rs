@@ -174,7 +174,7 @@ pub async fn handle_create(
 
     ensure_seed_recovery_finished(sdk)?;
     let owner_address = match req.key_index {
-        Some(id) => sdk.key_manager_api().derive_account_address(id)?,
+        Some(id) => sdk.key_manager_api().create_account_address_at_index(id)?,
         None => sdk.key_manager_api().next_account_address()?,
     };
 
@@ -246,7 +246,7 @@ pub async fn handle_create_or_get(
 
     ensure_seed_recovery_finished(sdk)?;
     let wallet_keys = match req.key_index {
-        Some(id) => sdk.key_manager_api().derive_account_address(id)?,
+        Some(id) => sdk.key_manager_api().create_account_address_at_index(id)?,
         None => sdk.key_manager_api().next_account_address()?,
     };
 

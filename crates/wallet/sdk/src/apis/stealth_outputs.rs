@@ -934,9 +934,12 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
     }
 
     fn all_used_view_only_keys(&self) -> Result<Vec<AccountAndViewKeys>, StealthOutputsApiError> {
-        let mut keys = self
-            .key_manager_api
-            .get_all_derived_keys(KeyBranch::ViewOnlyKey)?
+        let derived_view_keys = self.key_manager_api.get_all_derived_keys(KeyBranch::ViewOnlyKey)?;
+        let scanned_view_key_ids = derived_view_keys
+            .iter()
+            .map(|view_key| view_key.key_id)
+            .collect::<HashSet<_>>();
+        let mut keys = derived_view_keys
             .into_iter()
             .map(|view_key| {
                 let account_key = self.key_manager_api.derive_account_key(
@@ -952,13 +955,14 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        // View-only accounts use an imported view key, which is not in the derived key branch above
+        // An account's view key is outside the derived key branch above when it is imported (a view-only account) or
+        // derived at an index the key manager has no record of
         let accounts = self.store.with_read_tx(|tx| {
             let count = tx.accounts_count()?;
             tx.accounts_get_many(0, count as usize)
         })?;
         for account in accounts {
-            if !matches!(account.view_only_key_id, KeyId::Imported { .. }) {
+            if scanned_view_key_ids.contains(&account.view_only_key_id) {
                 continue;
             }
             let loaded = account

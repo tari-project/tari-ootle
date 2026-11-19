@@ -20,10 +20,18 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{fmt, fmt::Formatter, sync::Arc};
+use std::{collections::HashMap, fmt, fmt::Formatter, sync::Arc};
 
 use tari_engine_types::limits::{self, ModuleShape};
-use tari_template_abi::{FunctionDef, FunctionKind, TEMPLATE_DEF_CUSTOM_SECTION, TemplateDef, Type, WASM_PTR_SIZE};
+use tari_template_abi::{
+    FunctionDef,
+    FunctionKind,
+    TEMPLATE_DEF_CUSTOM_SECTION,
+    TemplateDef,
+    Type,
+    WASM_PTR_SIZE,
+    func_hasher::hash_function_name,
+};
 use wasmer::{
     Engine,
     ExternType,
@@ -425,6 +433,12 @@ fn validate_export_signature(
     }
 }
 
+/// The admission rules for a template's [`TemplateDef`].
+///
+/// Every validator runs these when it executes `PublishTemplate`, so they are consensus rules: adding or loosening
+/// one changes which templates the network accepts. Each rule keeps the declared ABI consistent with how the engine
+/// dispatches, locks and evaluates access rules. Loading a stored or cached module runs them again, so a published
+/// template that breaks a newly added rule stops loading.
 fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionError> {
     match template_def {
         TemplateDef::V2(def) => {
@@ -442,6 +456,7 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                 }
                 .into());
             }
+            validate_unique_dispatch_idents(&def.functions)?;
             for func in &def.functions {
                 if func.name.len() > limits::WASM_LIMITS.max_function_name_length {
                     return Err(WasmValidationError::FunctionNameTooLong {
@@ -498,6 +513,32 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                 }
             }
         },
+    }
+    Ok(())
+}
+
+/// Requires every declared function to carry its own dispatch identifier.
+///
+/// Host-side lookup, receiver locking and method access rules key off `func.name`, whereas `CallInfo` dispatches into
+/// `{Template}_main` by `hash_function_name(&func.name)` alone. A duplicated name, or two names sharing an identifier,
+/// would advertise functions that dispatch can never tell apart. The `#[template]` macro enforces the same rule when a
+/// template is compiled.
+fn validate_unique_dispatch_idents(functions: &[FunctionDef]) -> Result<(), WasmValidationError> {
+    let mut seen_idents = HashMap::with_capacity(functions.len());
+    for func in functions {
+        let ident = hash_function_name(&func.name);
+        if let Some(first) = seen_idents.insert(ident, func.name.as_str()) {
+            if first == func.name {
+                return Err(WasmValidationError::DuplicateFunctionName {
+                    name: func.name.clone(),
+                });
+            }
+            return Err(WasmValidationError::FunctionIdentCollision {
+                first: first.to_string(),
+                second: func.name.clone(),
+                ident,
+            });
+        }
     }
     Ok(())
 }
@@ -753,6 +794,77 @@ mod tests {
                 assert_eq!(max_length, max_len);
             },
             other => panic!("expected TemplateNameTooLong, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_duplicate_function_names() {
+        use tari_template_abi::Receiver;
+
+        let def = TemplateDef::V2(tari_template_abi::TemplateDefV2 {
+            template_name: "Test".to_string(),
+            abi_version: 0,
+            functions: vec![
+                FunctionDef {
+                    name: "transfer".to_string(),
+                    kind: FunctionKind::Method(Receiver::RefMut),
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+                FunctionDef {
+                    name: "transfer".to_string(),
+                    kind: FunctionKind::Function,
+                    arguments: vec![],
+                    output: Type::U64,
+                },
+            ],
+        });
+
+        match validate_functions(&def) {
+            Err(WasmExecutionError::WasmValidationError(WasmValidationError::DuplicateFunctionName { name })) => {
+                assert_eq!(name, "transfer");
+            },
+            other => panic!("expected DuplicateFunctionName, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_colliding_function_idents() {
+        use tari_template_abi::Receiver;
+
+        let expected_ident = hash_function_name("admin_90260");
+        assert_eq!(expected_ident, hash_function_name("public_13865"));
+
+        let def = TemplateDef::V2(tari_template_abi::TemplateDefV2 {
+            template_name: "Test".to_string(),
+            abi_version: 0,
+            functions: vec![
+                FunctionDef {
+                    name: "admin_90260".to_string(),
+                    kind: FunctionKind::Method(Receiver::RefMut),
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+                FunctionDef {
+                    name: "public_13865".to_string(),
+                    kind: FunctionKind::Method(Receiver::Ref),
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+            ],
+        });
+
+        match validate_functions(&def) {
+            Err(WasmExecutionError::WasmValidationError(WasmValidationError::FunctionIdentCollision {
+                first,
+                second,
+                ident,
+            })) => {
+                assert_eq!(first, "admin_90260");
+                assert_eq!(second, "public_13865");
+                assert_eq!(ident, expected_ident);
+            },
+            other => panic!("expected FunctionIdentCollision, got {other:?}"),
         }
     }
 }

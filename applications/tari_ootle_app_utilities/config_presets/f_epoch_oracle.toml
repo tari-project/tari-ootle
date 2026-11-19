@@ -85,8 +85,8 @@ oracle = "Hybrid"
 
 [esmeralda.epoch_oracle.base_layer]
 base_node_grpc_url = "https://grpc.esmeralda.tari.com"
-# This is the "birthday" height if the current esme testnet for ootle
-start_height = 669506
+# The base layer height the current esmeralda Ootle testnet starts scanning from
+start_height = 1024283
 
 [esmeralda.epoch_oracle.configured]
 

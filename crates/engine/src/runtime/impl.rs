@@ -4790,10 +4790,21 @@ fn validate_component_access_rule_methods(
     template_def: &TemplateDef,
 ) -> Result<(), RuntimeError> {
     for (name, _) in access_rules.method_access_rules_iter() {
-        if template_def.functions().iter().all(|f| f.name != *name) {
+        if template_def
+            .functions()
+            .iter()
+            .all(|f| !f.has_receiver() || f.name != *name)
+        {
+            let details = match template_def.functions().iter().find(|f| f.name == *name) {
+                Some(f) if f.is_migration() => {
+                    format!("'{name}' is a migration function; method access rules apply to component methods")
+                },
+                Some(_) => format!("'{name}' is a static function; method access rules apply to component methods"),
+                None => format!("No method '{name}' found in template"),
+            };
             return Err(RuntimeError::InvalidMethodAccessRule {
                 template_name: template_def.template_name().to_string(),
-                details: format!("No method '{}' found in template", name),
+                details,
             });
         }
     }
@@ -5949,5 +5960,59 @@ mod tests {
             })
             .unwrap();
         runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn validate_component_access_rule_methods_rejects_static_and_migration_functions() {
+        use tari_template_abi::{FunctionDef, FunctionKind, Receiver, TemplateDefV2, Type};
+
+        let template_def = TemplateDef::V2(TemplateDefV2 {
+            template_name: "TestTemplate".to_string(),
+            abi_version: tari_template_abi::version::LATEST_TEMPLATE_VERSION,
+            functions: vec![
+                FunctionDef {
+                    name: "new".to_string(),
+                    kind: FunctionKind::Function,
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+                FunctionDef {
+                    name: "withdraw".to_string(),
+                    kind: FunctionKind::Method(Receiver::RefMut),
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+                FunctionDef {
+                    name: "migrate_v2".to_string(),
+                    kind: FunctionKind::Migration { from: Type::Unit },
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+            ],
+        });
+
+        let valid = ComponentAccessRules::new().add_method_rule("withdraw", AccessRule::AllowAll);
+        assert!(validate_component_access_rule_methods(&valid, &template_def).is_ok());
+
+        let static_fn = ComponentAccessRules::new().add_method_rule("new", AccessRule::AllowAll);
+        let err = validate_component_access_rule_methods(&static_fn, &template_def).unwrap_err();
+        assert!(
+            matches!(err, RuntimeError::InvalidMethodAccessRule { ref details, .. } if details.contains("'new' is a static function")),
+            "unexpected error for static function: {err:?}"
+        );
+
+        let migration_fn = ComponentAccessRules::new().add_method_rule("migrate_v2", AccessRule::AllowAll);
+        let err = validate_component_access_rule_methods(&migration_fn, &template_def).unwrap_err();
+        assert!(
+            matches!(err, RuntimeError::InvalidMethodAccessRule { ref details, .. } if details.contains("'migrate_v2' is a migration function")),
+            "unexpected error for migration function: {err:?}"
+        );
+
+        let missing = ComponentAccessRules::new().add_method_rule("deposit", AccessRule::AllowAll);
+        let err = validate_component_access_rule_methods(&missing, &template_def).unwrap_err();
+        assert!(
+            matches!(err, RuntimeError::InvalidMethodAccessRule { ref details, .. } if details.contains("No method 'deposit' found")),
+            "unexpected error for missing method: {err:?}"
+        );
     }
 }

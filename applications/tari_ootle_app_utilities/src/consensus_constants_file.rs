@@ -76,6 +76,13 @@ impl ConsensusConstantsFile {
             return Err(ConsensusConstantsFileError::CommitteeSizeIsZero);
         }
 
+        if constants.probation_max_backoff_exp >= u64::BITS {
+            return Err(ConsensusConstantsFileError::ProbationMaxBackoffExpTooHigh {
+                exp: constants.probation_max_backoff_exp,
+                max: u64::BITS - 1,
+            });
+        }
+
         if let Some(bps) = self.exhaust_burn_rate_bps {
             if bps > MAX_EXHAUST_BURN_RATE_BPS {
                 return Err(ConsensusConstantsFileError::ExhaustBurnRateTooHigh {
@@ -143,6 +150,8 @@ pub enum ConsensusConstantsFileError {
     Parse { path: PathBuf, source: toml::de::Error },
     #[error("Committee size must be greater than zero")]
     CommitteeSizeIsZero,
+    #[error("Probation max backoff exponent {exp} is above the maximum of {max}")]
+    ProbationMaxBackoffExpTooHigh { exp: u32, max: u32 },
     #[error("Exhaust burn rate {bps}bps is above the maximum of {max}bps")]
     ExhaustBurnRateTooHigh { bps: u16, max: u16 },
 }
@@ -191,6 +200,26 @@ mod tests {
         assert!(matches!(
             overrides.apply_to(&mut constants),
             Err(ConsensusConstantsFileError::CommitteeSizeIsZero)
+        ));
+    }
+
+    #[test]
+    fn a_probation_backoff_exponent_above_the_maximum_is_refused() {
+        let mut constants = ConsensusConstants::from(Network::LocalNet);
+        let at_max = ConsensusConstantsFile {
+            probation_max_backoff_exp: Some(u64::BITS - 1),
+            ..Default::default()
+        };
+        at_max.apply_to(&mut constants).unwrap();
+        assert_eq!(constants.probation_max_backoff_exp, u64::BITS - 1);
+
+        let above_max = ConsensusConstantsFile {
+            probation_max_backoff_exp: Some(u64::BITS),
+            ..Default::default()
+        };
+        assert!(matches!(
+            above_max.apply_to(&mut constants),
+            Err(ConsensusConstantsFileError::ProbationMaxBackoffExpTooHigh { .. })
         ));
     }
 

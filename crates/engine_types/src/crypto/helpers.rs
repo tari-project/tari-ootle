@@ -40,12 +40,12 @@ lazy_static! {
 }
 
 pub fn get_static_range_proof_service(aggregation_factor: usize) -> &'static BulletproofsPlusService {
-    match aggregation_factor.next_power_of_two() {
-        1 => &RANGE_PROOF_AGG_1_SERVICE,
-        2 => &RANGE_PROOF_AGG_2_SERVICE,
-        4 => &RANGE_PROOF_AGG_4_SERVICE,
-        8 => &RANGE_PROOF_AGG_8_SERVICE,
-        16 => &RANGE_PROOF_AGG_16_SERVICE,
+    match aggregation_factor.checked_next_power_of_two() {
+        Some(1) => &RANGE_PROOF_AGG_1_SERVICE,
+        Some(2) => &RANGE_PROOF_AGG_2_SERVICE,
+        Some(4) => &RANGE_PROOF_AGG_4_SERVICE,
+        Some(8) => &RANGE_PROOF_AGG_8_SERVICE,
+        Some(16) => &RANGE_PROOF_AGG_16_SERVICE,
         _ => panic!(
             "Unsupported BP aggregation factor {}. Expected 1/2/4/8 or 16",
             aggregation_factor
@@ -126,5 +126,11 @@ mod tests {
         let sub = Amount::from_le_slice((v1 - v2).as_bytes()).unwrap();
         let expected = amount - Amount::from_u64(1000);
         assert_eq!(sub, expected);
+    }
+
+    #[test]
+    #[should_panic(expected = "Unsupported BP aggregation factor")]
+    fn range_proof_service_rejects_overflowing_aggregation_factor() {
+        let _ = get_static_range_proof_service(usize::MAX);
     }
 }

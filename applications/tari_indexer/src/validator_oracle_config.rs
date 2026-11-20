@@ -79,37 +79,49 @@ impl ValidatorOracleConfigFollower {
     pub async fn run(mut self, mut shutdown: ShutdownSignal) {
         let mut events = self.epoch_manager.subscribe();
 
-        // The epoch manager sets the wanted peers on each epoch change, which the oracle holds back until this
-        // first fetch resolves, so a fresh indexer asks peer sync for the validators it started with.
-        if let Err(err) = self
-            .networking
-            .set_want_peers(self.bootstrap_validators.iter().map(|vn| vn.to_peer_id()))
-            .await
-        {
-            warn!(target: LOG_TARGET, "Failed to request the configured validators' peer records: {err}");
-        }
+        // Wait for the epoch manager service to load its persisted epoch before reading its shared epoch atomic.
+        let _ = self.epoch_manager.is_initial_scanning_complete().await;
 
-        let started = time::Instant::now();
-        loop {
-            match self.fetch_and_send().await {
-                FetchOutcome::Sent => break,
-                FetchOutcome::OracleGone => return,
-                FetchOutcome::NoAgreement => {},
+        // The epoch manager sets the wanted peers on each epoch change, which the oracle holds back until this
+        // first fetch resolves, so request peer records for the current epoch's validators (or the bootstrap set on
+        // a fresh store) up front. When neither holds any validator, release the oracle immediately because no peer
+        // can be queried during the startup hold.
+        let initial_peers = current_or_bootstrap_validators(&self.epoch_manager, &self.bootstrap_validators).await;
+        if initial_peers.is_empty() {
+            if self.updates.send(None).is_err() {
+                return;
             }
-            if started.elapsed() >= STARTUP_FETCH_TIMEOUT {
-                warn!(
-                    target: LOG_TARGET,
-                    "Validators did not agree on an epoch oracle config within {STARTUP_FETCH_TIMEOUT:.0?}; \
-                     continuing with the config this indexer holds and retrying each epoch"
-                );
-                if self.updates.send(None).is_err() {
-                    return;
+        } else {
+            if let Err(err) = self
+                .networking
+                .set_want_peers(initial_peers.iter().map(ToPeerId::to_peer_id))
+                .await
+            {
+                warn!(target: LOG_TARGET, "Failed to request the configured validators' peer records: {err}");
+            }
+
+            let started = time::Instant::now();
+            loop {
+                match self.fetch_and_send().await {
+                    FetchOutcome::Sent => break,
+                    FetchOutcome::OracleGone => return,
+                    FetchOutcome::NoAgreement => {},
                 }
-                break;
-            }
-            tokio::select! {
-                _ = time::sleep(STARTUP_RETRY_INTERVAL) => {},
-                _ = shutdown.wait() => return,
+                if started.elapsed() >= STARTUP_FETCH_TIMEOUT {
+                    warn!(
+                        target: LOG_TARGET,
+                        "Validators did not agree on an epoch oracle config within {STARTUP_FETCH_TIMEOUT:.0?}; \
+                         continuing with the config this indexer holds and retrying each epoch"
+                    );
+                    if self.updates.send(None).is_err() {
+                        return;
+                    }
+                    break;
+                }
+                tokio::select! {
+                    _ = time::sleep(STARTUP_RETRY_INTERVAL) => {},
+                    _ = shutdown.wait() => return,
+                }
             }
         }
 
@@ -182,16 +194,10 @@ impl ValidatorOracleConfigFollower {
     /// The current epoch's validators, falling back to the bootstrap validators, starting from a different one on
     /// each attempt.
     async fn candidates(&mut self) -> Vec<PeerAddress> {
-        let mut candidates = BTreeSet::new();
-        if let Ok(epoch) = self.epoch_manager.current_epoch().await &&
-            let Ok(validators) = self.epoch_manager.get_all_validator_nodes(epoch).await
-        {
-            candidates.extend(validators.into_iter().map(|vn| vn.address));
-        }
-        if candidates.is_empty() {
-            candidates.extend(self.bootstrap_validators.iter().copied());
-        }
-        let mut candidates = candidates.into_iter().collect::<Vec<_>>();
+        let mut candidates = current_or_bootstrap_validators(&self.epoch_manager, &self.bootstrap_validators)
+            .await
+            .into_iter()
+            .collect::<Vec<_>>();
         if !candidates.is_empty() {
             let len = candidates.len();
             candidates.rotate_left(self.next_offset % len);
@@ -213,6 +219,22 @@ impl ValidatorOracleConfigFollower {
     }
 }
 
+async fn current_or_bootstrap_validators<TEpochManager: EpochManagerReader<Addr = PeerAddress>>(
+    epoch_manager: &TEpochManager,
+    bootstrap_validators: &[PeerAddress],
+) -> BTreeSet<PeerAddress> {
+    let mut candidates = BTreeSet::new();
+    if let Ok(epoch) = epoch_manager.current_epoch().await &&
+        let Ok(validators) = epoch_manager.get_all_validator_nodes(epoch).await
+    {
+        candidates.extend(validators.into_iter().map(|vn| vn.address));
+    }
+    if candidates.is_empty() {
+        candidates.extend(bootstrap_validators.iter().copied());
+    }
+    candidates
+}
+
 enum FetchOutcome {
     /// Enough validators agreed on a config, which the oracle has, or was just sent.
     Sent,
@@ -220,4 +242,236 @@ enum FetchOutcome {
     NoAgreement,
     /// The oracle has stopped and takes no more updates.
     OracleGone,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    };
+
+    use ootle_byte_type::ToByteType;
+    use tari_common_types::types::PrivateKey;
+    use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
+    use tari_epoch_manager::{EpochManagerError, EpochManagerEvent, EpochManagerReader, PendingActivation};
+    use tari_ootle_common_types::{
+        DerivableFromPublicKey,
+        Epoch,
+        ShardGroup,
+        SubstateAddress,
+        ValidatorSetHash,
+        VotePower,
+        committee::{Committee, CommitteeInfo},
+    };
+    use tari_ootle_p2p::PeerAddress;
+    use tari_ootle_storage::global::models::ValidatorNode;
+    use tari_sidechain::FixedHash;
+    use tari_state_tree::ValidatorSetCommitteeProof;
+    use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+    use tokio::sync::broadcast;
+
+    use super::current_or_bootstrap_validators;
+
+    struct StubEpochManager {
+        epoch: Epoch,
+        validators: Vec<ValidatorNode<PeerAddress>>,
+    }
+
+    impl EpochManagerReader for StubEpochManager {
+        type Addr = PeerAddress;
+
+        fn subscribe(&self) -> broadcast::Receiver<EpochManagerEvent> {
+            unimplemented!()
+        }
+
+        async fn wait_for_initial_scanning_to_complete(&self) -> Result<(), EpochManagerError> {
+            Ok(())
+        }
+
+        async fn get_all_validator_nodes(
+            &self,
+            epoch: Epoch,
+        ) -> Result<Vec<ValidatorNode<PeerAddress>>, EpochManagerError> {
+            if epoch == self.epoch {
+                Ok(self.validators.clone())
+            } else {
+                Ok(vec![])
+            }
+        }
+
+        async fn get_committee_info_by_validator_address(
+            &self,
+            _: Epoch,
+            _: &PeerAddress,
+        ) -> Result<CommitteeInfo, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_committee_for_substate(
+            &self,
+            _: Epoch,
+            _: SubstateAddress,
+        ) -> Result<Arc<Committee<PeerAddress>>, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_validator_node_by_public_key(
+            &self,
+            _: Epoch,
+            _: RistrettoPublicKeyBytes,
+        ) -> Result<ValidatorNode<PeerAddress>, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_our_validator_node(&self, _: Epoch) -> Result<ValidatorNode<PeerAddress>, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_local_committee_info(&self, _: Epoch) -> Result<CommitteeInfo, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_committee_info(&self, _: Epoch, _: ShardGroup) -> Result<CommitteeInfo, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_committee_info_for_substate(
+            &self,
+            _: Epoch,
+            _: SubstateAddress,
+        ) -> Result<CommitteeInfo, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn current_epoch(&self) -> Result<Epoch, EpochManagerError> {
+            Ok(self.epoch)
+        }
+
+        async fn get_current_epoch_hash(&self) -> Result<FixedHash, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_epoch_hash(&self, _: Epoch) -> Result<FixedHash, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_validator_set_hash(&self, _: Epoch) -> Result<ValidatorSetHash, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_validator_set_committee_proof(
+            &self,
+            _: Epoch,
+            _: ShardGroup,
+        ) -> Result<ValidatorSetCommitteeProof, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_num_committees(&self, _: Epoch) -> Result<u32, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_committee_by_shard_group(
+            &self,
+            _: Epoch,
+            _: ShardGroup,
+        ) -> Result<Arc<Committee<PeerAddress>>, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_committees_overlapping_shard_group(
+            &self,
+            _: Epoch,
+            _: ShardGroup,
+        ) -> Result<HashMap<ShardGroup, Committee<PeerAddress>>, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_random_committee_member(
+            &self,
+            _: Epoch,
+            _: Option<ShardGroup>,
+            _: HashSet<PeerAddress>,
+        ) -> Result<ValidatorNode<PeerAddress>, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn lock_epoch(&self, _: Epoch) -> Result<(), EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_observed_epoch_hash(&self, _: Epoch) -> Result<Option<FixedHash>, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_birthday_epoch(&self) -> Result<Option<Epoch>, EpochManagerError> {
+            unimplemented!()
+        }
+
+        async fn get_pending_activation(&self) -> Result<Option<PendingActivation>, EpochManagerError> {
+            unimplemented!()
+        }
+    }
+
+    fn peer_address(seed: u64) -> (PeerAddress, RistrettoPublicKeyBytes) {
+        let pk = RistrettoPublicKey::from_secret_key(&PrivateKey::from(seed));
+        (PeerAddress::derive_from_public_key(&pk), pk.to_byte_type())
+    }
+
+    fn validator_node(seed: u64, epoch: Epoch) -> ValidatorNode<PeerAddress> {
+        let (address, public_key) = peer_address(seed);
+        ValidatorNode {
+            address,
+            public_key,
+            shard_key: SubstateAddress::zero(),
+            start_epoch: epoch,
+            end_epoch: None,
+            fee_claim_public_key: public_key,
+            vote_power: VotePower::of(1),
+        }
+    }
+
+    #[tokio::test]
+    async fn current_or_bootstrap_validators_prefers_epoch_manager_validators() {
+        let active_a = validator_node(1, Epoch(6));
+        let active_b = validator_node(2, Epoch(6));
+        let (exited_bootstrap, _) = peer_address(3);
+        let em = StubEpochManager {
+            epoch: Epoch(6),
+            validators: vec![active_a.clone(), active_b.clone()],
+        };
+        let mut expected = vec![active_a.address, active_b.address];
+        expected.sort();
+
+        let resolved = current_or_bootstrap_validators(&em, &[exited_bootstrap]).await;
+
+        assert_eq!(resolved.into_iter().collect::<Vec<_>>(), expected);
+    }
+
+    #[tokio::test]
+    async fn current_or_bootstrap_validators_falls_back_to_bootstrap_on_fresh_store() {
+        let (bootstrap_a, _) = peer_address(1);
+        let (bootstrap_b, _) = peer_address(2);
+        let em = StubEpochManager {
+            epoch: Epoch(0),
+            validators: vec![],
+        };
+        let mut expected = vec![bootstrap_a, bootstrap_b];
+        expected.sort();
+
+        let resolved = current_or_bootstrap_validators(&em, &[bootstrap_a, bootstrap_b]).await;
+
+        assert_eq!(resolved.into_iter().collect::<Vec<_>>(), expected);
+    }
+
+    #[tokio::test]
+    async fn current_or_bootstrap_validators_is_empty_when_neither_source_has_validators() {
+        let em = StubEpochManager {
+            epoch: Epoch(0),
+            validators: vec![],
+        };
+
+        assert!(current_or_bootstrap_validators(&em, &[]).await.is_empty());
+    }
 }

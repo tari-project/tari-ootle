@@ -59,9 +59,12 @@ impl StateTreeRetention {
         self
     }
 
-    /// Pins the tree of `shard` at `version`. A shard not added has no tree to keep, so its pins are ignored.
+    /// Pins the tree of `shard` at `version`. A shard not added, or a pin at version 0 (the empty tree), has no tree
+    /// to keep, so its pin is ignored.
     pub fn pin(&mut self, shard: Shard, version: Version) -> &mut Self {
-        if let Some(retention) = self.shards.get_mut(&shard) {
+        if version > 0 &&
+            let Some(retention) = self.shards.get_mut(&shard)
+        {
             retention.pinned_versions.insert(version);
         }
         self
@@ -139,5 +142,18 @@ mod tests {
         retention.pin(Shard::from_u32(2), 40);
         assert_eq!(retention.get(Shard::from_u32(1)).unwrap().lowest_pin(), Some(40));
         assert!(retention.get(Shard::from_u32(2)).is_none());
+    }
+
+    #[test]
+    fn pin_at_version_zero_is_ignored() {
+        let mut retention = StateTreeRetention::default();
+        retention
+            .add_shard(Shard::from_u32(1), 50)
+            .pin(Shard::from_u32(1), 0)
+            .pin(Shard::from_u32(1), 40);
+        assert_eq!(retention.get(Shard::from_u32(1)).unwrap().lowest_pin(), Some(40));
+
+        retention.add_shard(Shard::from_u32(2), 50).pin(Shard::from_u32(2), 0);
+        assert_eq!(retention.get(Shard::from_u32(2)).unwrap().lowest_pin(), None);
     }
 }

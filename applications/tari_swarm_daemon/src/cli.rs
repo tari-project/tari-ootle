@@ -113,6 +113,10 @@ impl Overrides {
             config.start_port = port;
         }
 
+        if self.skip_registration {
+            config.skip_registration = true;
+        }
+
         if let Some(auth) = self.wallet_daemon_auth {
             // set wallet daemon auth method for all instances using the override
             config.processes.instances.iter_mut().for_each(|instance| {

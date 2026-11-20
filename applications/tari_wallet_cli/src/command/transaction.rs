@@ -655,15 +655,21 @@ pub fn print_substate_diff(diff: &SubstateDiff) {
             },
             SubstateValue::Utxo(_) => {
                 println!("      ▶ UTXO:");
-                let utxo_address = id.as_utxo_address().unwrap();
-                println!("        ▶ Resource: {}", utxo_address.resource_address());
-                println!("        ▶ id: {}", utxo_address.id());
+                if let Some(utxo_address) = id.as_utxo_address() {
+                    println!("        ▶ Resource: {}", utxo_address.resource_address());
+                    println!("        ▶ id: {}", utxo_address.id());
+                } else {
+                    println!("        ▶ id: {}", id);
+                }
             },
             SubstateValue::ConfidentialOutput(_) => {
                 println!("      ▶ Confidential output:");
-                let output_address = id.as_confidential_output_address().unwrap();
-                println!("        ▶ Resource: {}", output_address.resource_address());
-                println!("        ▶ commitment: {}", output_address.commitment());
+                if let Some(output_address) = id.as_confidential_output_address() {
+                    println!("        ▶ Resource: {}", output_address.resource_address());
+                    println!("        ▶ commitment: {}", output_address.commitment());
+                } else {
+                    println!("        ▶ id: {}", id);
+                }
             },
         }
         println!();

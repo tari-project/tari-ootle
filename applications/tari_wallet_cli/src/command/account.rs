@@ -68,6 +68,8 @@ pub struct SetDefaultArgs {
 #[derive(Debug, Args, Clone)]
 pub struct GetBalancesArgs {
     pub account_name: Option<ComponentAddressOrName>,
+    #[clap(long, short = 'a', alias = "account", conflicts_with = "account_name")]
+    pub account: Option<ComponentAddressOrName>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -77,6 +79,8 @@ pub struct GetArgs {
 
 #[derive(Debug, Args, Clone)]
 pub struct CreateFreeTestCoinsArgs {
+    pub account_name: Option<ComponentAddressOrName>,
+    #[clap(long, short = 'a', alias = "account", conflicts_with = "account_name")]
     pub account: Option<ComponentAddressOrName>,
     #[clap(long, short, alias = "fee")]
     pub fee: Option<u64>,
@@ -127,11 +131,9 @@ async fn handle_set_default(args: SetDefaultArgs, client: &mut WalletDaemonClien
 }
 
 async fn handle_get_balances(args: GetBalancesArgs, client: &mut WalletDaemonClient) -> Result<(), anyhow::Error> {
+    let account = args.account.or(args.account_name);
     let resp = client
-        .get_account_balances(AccountsGetBalancesRequest {
-            account: args.account_name,
-            refresh: true,
-        })
+        .get_account_balances(AccountsGetBalancesRequest { account, refresh: true })
         .await?;
 
     if resp.balances.is_empty() {
@@ -160,7 +162,8 @@ async fn handle_create_free_test_coins(
     client: &mut WalletDaemonClient,
 ) -> Result<(), anyhow::Error> {
     println!("Creating free test coins...");
-    let account = match args.account {
+    let account_arg = args.account.or(args.account_name);
+    let account = match account_arg {
         Some(account) => {
             let resp = client
                 .create_or_get_account(AccountsCreateOrGetRequest {
@@ -235,4 +238,140 @@ async fn handle_get(args: GetArgs, client: &mut WalletDaemonClient) -> Result<()
     println!();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+
+    #[derive(Debug, Parser)]
+    struct CliTest {
+        #[clap(subcommand)]
+        command: AccountsSubcommand,
+    }
+
+    #[test]
+    fn test_get_balances_args_parsing() {
+        let cli_pos = CliTest::try_parse_from(["wallet", "get-balances", "my_positional_acc"])
+            .expect("Failed to parse get-balances with positional argument");
+
+        match cli_pos.command {
+            AccountsSubcommand::GetBalances(args) => {
+                assert!(matches!(
+                    args.account_name,
+                    Some(ComponentAddressOrName::Name(ref n)) if n == "my_positional_acc"
+                ));
+                assert_eq!(args.account, None);
+            },
+            _ => panic!("Expected AccountsSubcommand::GetBalances"),
+        }
+
+        let cli_named = CliTest::try_parse_from(["wallet", "get-balances", "--account", "my_special_acc"])
+            .expect("Failed to parse get-balances with --account");
+
+        match cli_named.command {
+            AccountsSubcommand::GetBalances(args) => {
+                assert_eq!(args.account_name, None);
+                assert!(matches!(
+                    args.account,
+                    Some(ComponentAddressOrName::Name(ref n)) if n == "my_special_acc"
+                ));
+            },
+            _ => panic!("Expected AccountsSubcommand::GetBalances"),
+        }
+
+        let cli_short = CliTest::try_parse_from(["wallet", "get-balances", "-a", "another_acc"])
+            .expect("Failed to parse get-balances with -a");
+
+        match cli_short.command {
+            AccountsSubcommand::GetBalances(args) => {
+                assert_eq!(args.account_name, None);
+                assert!(matches!(
+                    args.account,
+                    Some(ComponentAddressOrName::Name(ref n)) if n == "another_acc"
+                ));
+            },
+            _ => panic!("Expected AccountsSubcommand::GetBalances"),
+        }
+
+        let cli_default =
+            CliTest::try_parse_from(["wallet", "get-balances"]).expect("Failed to parse get-balances without args");
+
+        match cli_default.command {
+            AccountsSubcommand::GetBalances(args) => {
+                assert_eq!(args.account_name, None);
+                assert_eq!(args.account, None);
+            },
+            _ => panic!("Expected AccountsSubcommand::GetBalances"),
+        }
+    }
+
+    #[test]
+    fn test_create_free_test_coins_args_parsing() {
+        let cli_pos = CliTest::try_parse_from(["wallet", "create-free-test-coins", "my_positional_acc"])
+            .expect("Failed to parse create-free-test-coins with positional argument");
+
+        match cli_pos.command {
+            AccountsSubcommand::CreateFreeTestCoins(args) => {
+                assert!(matches!(
+                    args.account_name,
+                    Some(ComponentAddressOrName::Name(ref n)) if n == "my_positional_acc"
+                ));
+                assert_eq!(args.account, None);
+            },
+            _ => panic!("Expected AccountsSubcommand::CreateFreeTestCoins"),
+        }
+
+        let cli_flags = CliTest::try_parse_from([
+            "wallet",
+            "create-free-test-coins",
+            "--account",
+            "my_special_acc",
+            "--fee",
+            "1000",
+            "--key",
+            "2",
+        ])
+        .expect("Failed to parse create-free-test-coins with flags");
+
+        match cli_flags.command {
+            AccountsSubcommand::CreateFreeTestCoins(args) => {
+                assert_eq!(args.account_name, None);
+                assert!(matches!(
+                    args.account,
+                    Some(ComponentAddressOrName::Name(ref n)) if n == "my_special_acc"
+                ));
+                assert_eq!(args.fee, Some(1000));
+                assert_eq!(args.key_id, Some(2));
+            },
+            _ => panic!("Expected AccountsSubcommand::CreateFreeTestCoins"),
+        }
+
+        let cli_short = CliTest::try_parse_from([
+            "wallet",
+            "create-free-test-coins",
+            "-a",
+            "another_acc",
+            "-f",
+            "500",
+            "-k",
+            "1",
+        ])
+        .expect("Failed to parse create-free-test-coins with short flags");
+
+        match cli_short.command {
+            AccountsSubcommand::CreateFreeTestCoins(args) => {
+                assert_eq!(args.account_name, None);
+                assert!(matches!(
+                    args.account,
+                    Some(ComponentAddressOrName::Name(ref n)) if n == "another_acc"
+                ));
+                assert_eq!(args.fee, Some(500));
+                assert_eq!(args.key_id, Some(1));
+            },
+            _ => panic!("Expected AccountsSubcommand::CreateFreeTestCoins"),
+        }
+    }
 }

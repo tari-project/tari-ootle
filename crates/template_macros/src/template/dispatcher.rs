@@ -363,3 +363,103 @@ fn build_tuple_field_expr(base: Expr, i: u32) -> Expr {
 
     Expr::Field(field_expr)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use indoc::indoc;
+    use proc_macro2::TokenStream;
+    use quote::ToTokens;
+    use syn::{Expr, ExprBlock, Local, LocalInit, Pat, PatIdent, Stmt, parse2};
+
+    use super::{generate_dispatcher, get_function_block};
+    use crate::template::ast::TemplateAst;
+
+    /// The value the dispatcher arm for `name` encodes, re-parsed from the emitted tokens.
+    fn encoded_return(ast: &TemplateAst, name: &str) -> Expr {
+        let function = ast.get_functions().find(|f| f.name == name).unwrap();
+        let block = get_function_block(&ast.template_name, function, ast.stateless);
+        let block = parse2::<ExprBlock>(block.to_token_stream()).unwrap();
+        block
+            .block
+            .stmts
+            .iter()
+            .rev()
+            .find_map(|stmt| match stmt {
+                Stmt::Local(Local {
+                    pat: Pat::Ident(PatIdent { ident, .. }),
+                    init: Some(LocalInit { expr, .. }),
+                    ..
+                }) if ident == "rtn" => Some((**expr).clone()),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    fn tuple_elems(expr: &Expr) -> Vec<&Expr> {
+        let Expr::Tuple(tuple) = expr else {
+            panic!("expected a tuple, got {}", expr.to_token_stream());
+        };
+        tuple.elems.iter().collect()
+    }
+
+    /// The component state passed to `create_component`.
+    fn created_component(expr: &Expr) -> String {
+        let Expr::MethodCall(call) = expr else {
+            panic!("expected create_component, got {}", expr.to_token_stream());
+        };
+        assert_eq!(call.method, "create_component");
+        call.args.first().unwrap().to_token_stream().to_string()
+    }
+
+    #[test]
+    fn supports_nested_and_unit_tuple_returns() {
+        let ast = parse2::<TemplateAst>(
+            TokenStream::from_str(indoc! {"
+                mod tuple_test {
+                    pub struct TupleComponent {}
+                    impl TupleComponent {
+                        pub fn unit_ret(&self) -> () { }
+                        pub fn nested_ret(&self) -> (u32, (u64, String)) { (1, (2, String::new())) }
+                        pub fn nested_self_ret() -> (u32, (Self, String)) { (1, (Self {}, String::new())) }
+                        pub fn single_self_tuple() -> (Self,) { (Self {},) }
+                    }
+                }
+            "})
+            .unwrap(),
+        )
+        .unwrap();
+
+        generate_dispatcher(&ast).unwrap();
+
+        // `unit_ret` encodes the unit value.
+        assert!(tuple_elems(&encoded_return(&ast, "unit_ret")).is_empty());
+
+        // `nested_ret` encodes each field of the nested tuple unchanged.
+        let nested = encoded_return(&ast, "nested_ret");
+        let outer = tuple_elems(&nested);
+        assert_eq!(outer.len(), 2);
+        assert_eq!(outer[0].to_token_stream().to_string(), "rtn . 0");
+        let inner = tuple_elems(outer[1]);
+        assert_eq!(inner.len(), 2);
+        assert_eq!(inner[0].to_token_stream().to_string(), "rtn . 1 . 0");
+        assert_eq!(inner[1].to_token_stream().to_string(), "rtn . 1 . 1");
+
+        // `nested_self_ret` creates a component from `rtn.1.0` and encodes `rtn.0` and `rtn.1.1` unchanged.
+        let nested_self = encoded_return(&ast, "nested_self_ret");
+        let outer = tuple_elems(&nested_self);
+        assert_eq!(outer.len(), 2);
+        assert_eq!(outer[0].to_token_stream().to_string(), "rtn . 0");
+        let inner = tuple_elems(outer[1]);
+        assert_eq!(inner.len(), 2);
+        assert_eq!(created_component(inner[0]), "rtn . 1 . 0");
+        assert_eq!(inner[1].to_token_stream().to_string(), "rtn . 1 . 1");
+
+        // `single_self_tuple` encodes a 1-tuple, so the emitted tokens keep the trailing comma.
+        let single = encoded_return(&ast, "single_self_tuple");
+        let elems = tuple_elems(&single);
+        assert_eq!(elems.len(), 1);
+        assert_eq!(created_component(elems[0]), "rtn . 0");
+    }
+}

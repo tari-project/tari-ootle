@@ -122,8 +122,9 @@ impl SignatureRequirements {
     /// sealing input is not the first one.
     pub fn stealth_seal_with(
         seal_signer: StealthSignerRequirement,
-        authorizers: IndexSet<StealthSignerRequirement>,
+        mut authorizers: IndexSet<StealthSignerRequirement>,
     ) -> Self {
+        authorizers.shift_remove(&seal_signer);
         Self {
             seal: SealSource::StealthInput(seal_signer),
             authorizers,
@@ -154,7 +155,7 @@ impl SignatureRequirements {
         // A sealing input's seal signature is its own authorization, so it must not also be asked
         // for one.
         if let SealSource::StealthInput(seal_signer) = &seal {
-            authorizers.swap_remove(seal_signer);
+            authorizers.shift_remove(seal_signer);
         }
         Self { seal, authorizers }
     }
@@ -361,12 +362,13 @@ mod tests {
         /// An explicitly chosen seal signer is not one of the authorizers.
         #[test]
         fn stealth_seal_with_an_explicit_seal_signer() {
-            let spec = SignatureRequirements::stealth_seal_with(signer_from_seed(2), signers([1, 3]));
+            let spec = SignatureRequirements::stealth_seal_with(signer_from_seed(2), signers([1, 2, 3, 4]));
 
             assert_eq!(spec.seal(), &SealSource::StealthInput(signer_from_seed(2)));
             assert_eq!(spec.authorizers().collect::<Vec<_>>(), vec![
                 &signer_from_seed(1),
-                &signer_from_seed(3)
+                &signer_from_seed(3),
+                &signer_from_seed(4)
             ]);
         }
 
@@ -465,10 +467,16 @@ mod tests {
                 signer_from_seed(1)
             ]);
 
-            // Signer 1 seals, so it is not also listed.
-            let merged = fee.merge(SignatureRequirements::stealth_seal(signers([1])));
+            // Signer 1 seals, so it is not also listed, and remaining authorizers keep their order.
+            let merged = fee.merge(SignatureRequirements::stealth_seal_with(
+                signer_from_seed(2),
+                signers([1, 3]),
+            ));
             assert_eq!(merged.seal(), &SealSource::StealthInput(signer_from_seed(1)));
-            assert_eq!(merged.authorizers().len(), 0);
+            assert_eq!(merged.authorizers().cloned().collect::<Vec<_>>(), vec![
+                signer_from_seed(2),
+                signer_from_seed(3),
+            ]);
         }
     }
 }

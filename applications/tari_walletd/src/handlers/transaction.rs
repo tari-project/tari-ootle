@@ -929,13 +929,19 @@ pub async fn handle_publish_template(
     token: Option<&Bearer>,
     req: PublishTemplateRequest,
 ) -> Result<PublishTemplateResponse, anyhow::Error> {
-    context.authorize(token, &[Permission::Templates(Crud::Create)])?;
+    let granted = context.authorize(token, &[Permission::Templates(Crud::Create)])?;
     if !req.dry_run {
         context.enforce_max_fee_limit(req.max_fee)?;
     }
     let sdk = context.wallet_sdk();
 
     let fee_account = get_account_or_default(req.fee_account.as_ref(), &sdk.accounts_api())?;
+    // The fee payer's key signs the transaction and its account pays the fee, so the caller needs
+    // transfer scope on the resolved fee account.
+    enforce_scopes(&granted, &[Permission::Transfer(
+        Crud::Create,
+        Some(*fee_account.component_address()),
+    )])?;
     let owner_key_id = fee_account.owner_key_id().ok_or_else(|| {
         invalid_params(
             "fee_account",
@@ -2016,5 +2022,107 @@ mod tests {
             .unwrap();
         assert!(!resp.timed_out);
         assert_eq!(resp.status, TransactionStatus::InvalidTransaction);
+    }
+#[tokio::test]
+    async fn publish_template_requires_transfer_scope_on_resolved_fee_account() {
+        let daemon = TestDaemon::start().await;
+        let sdk = daemon.context.wallet_sdk();
+        let treasury = ComponentAddress::from_array([0xaa; 32]);
+        let sandbox = ComponentAddress::from_array([0xbb; 32]);
+        for (index, (name, address)) in [("treasury", treasury), ("sandbox", sandbox)].into_iter().enumerate() {
+            sdk.accounts_api()
+                .add_account(
+                    Some(name),
+                    &address,
+                    KeyId::derived(KeyBranch::ViewOnlyKey, index as u64),
+                    KeyId::derived(KeyBranch::Account, index as u64),
+                    Epoch::zero(),
+                    false,
+                    index == 0,
+                )
+                .unwrap();
+        }
+
+        let publish_req = |fee_account: Option<ComponentAddressOrName>, dry_run: bool| PublishTemplateRequest {
+            binary: vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00],
+            fee_account,
+            max_fee: 1000,
+            detect_inputs: false,
+            dry_run,
+            metadata: None,
+        };
+
+        let templates_only_key = daemon.api_key("templates-only", "templates:create");
+        let templates_only_delegated = daemon.delegated_session("templates:create");
+        let sandbox_scoped_key = daemon.api_key(
+            "sandbox-publisher",
+            &format!("templates:create,transfer:create:{sandbox}"),
+        );
+        let sandbox_scoped_delegated = daemon.delegated_session(&format!("templates:create,transfer:create:{sandbox}"));
+
+        // Callers without transfer:create on `treasury` cannot charge or sign with `treasury` explicitly or via the
+        // default account fallback (`fee_account: None`), on either live submissions or dry runs.
+        for bearer in [
+            &templates_only_key,
+            &templates_only_delegated,
+            &sandbox_scoped_key,
+            &sandbox_scoped_delegated,
+        ] {
+            for fee_account in [
+                None,
+                Some(ComponentAddressOrName::Name("treasury".to_string())),
+                Some(ComponentAddressOrName::ComponentAddress(treasury)),
+            ] {
+                for dry_run in [false, true] {
+                    let err = handle_publish_template(
+                        &daemon.context,
+                        Some(bearer),
+                        publish_req(fee_account.clone(), dry_run),
+                    )
+                    .await
+                    .expect_err("fee payer outside transfer:create scope must be rejected");
+                    let auth_err = err
+                        .downcast_ref::<AuthError>()
+                        .unwrap_or_else(|| panic!("expected AuthError, got: {err}"));
+                    assert!(
+                        matches!(
+                            auth_err,
+                            AuthError::InsufficientPermissions {
+                                required: Permission::Transfer(Crud::Create, Some(addr)),
+                            } if *addr == treasury
+                        ),
+                        "expected missing transfer:create scope on treasury: {auth_err}"
+                    );
+                }
+            }
+        }
+        assert!(
+            sdk.transaction_api().fetch_all(None, None).unwrap().is_empty(),
+            "rejected publish_template calls must not store any transaction"
+        );
+
+        // Scoped `transfer:create:<sandbox>` passes authorization when `sandbox` is the resolved fee payer, and
+        // unscoped `transfer:create` / interactive `admin` pass for the default `treasury` account.
+        let unscoped_publisher = daemon.api_key("unscoped-publisher", "templates:create,transfer:create");
+        for (bearer, fee_account) in [
+            (
+                &sandbox_scoped_key,
+                Some(ComponentAddressOrName::ComponentAddress(sandbox)),
+            ),
+            (
+                &sandbox_scoped_delegated,
+                Some(ComponentAddressOrName::Name("sandbox".to_string())),
+            ),
+            (&unscoped_publisher, None),
+            (&daemon.session, None),
+        ] {
+            let err = handle_publish_template(&daemon.context, Some(bearer), publish_req(fee_account, false))
+                .await
+                .expect_err("offline indexer fails after authorization succeeds");
+            assert!(
+                err.downcast_ref::<AuthError>().is_none(),
+                "expected authorization to succeed, got AuthError: {err}"
+            );
+        }
     }
 }

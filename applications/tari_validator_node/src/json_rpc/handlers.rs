@@ -35,7 +35,7 @@ use serde_json::{self as json, json};
 use tari_base_node_client::types::BaseLayerValidatorNode;
 use tari_common_types::types::CompressedPublicKey;
 use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::ConsensusCurrentState};
-use tari_consensus_types::{Decision, LeafBlock};
+use tari_consensus_types::{BlockId, Decision, LeafBlock};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_epoch_manager::{EpochManagerReader, service::EpochManagerHandle, traits::LayerOneTransactionSubmitter};
 use tari_epoch_oracles::store::StoreKey;
@@ -312,19 +312,9 @@ impl JsonRpcHandlers {
             .create_read_tx()
             .map_err(internal_error(answer_id.clone()))?;
 
-        let start_block = match req.from_id {
-            Some(id) => Block::get(&tx, &id)
-                .optional()
-                .map_err(internal_error(answer_id.clone()))?
-                .ok_or_else(|| not_found(answer_id.clone(), format!("Block {} not found", id)))?,
-            None => {
-                let leaf = LeafBlock::get(&tx, current_epoch)
-                    .optional()
-                    .map_err(internal_error(answer_id.clone()))?
-                    .ok_or_else(|| not_found(answer_id.clone(), format!("No leaf block for epoch {current_epoch}")))?;
-                Block::get(&tx, leaf.block_id()).map_err(internal_error(answer_id.clone()))?
-            },
-        };
+        let start_block = resolve_list_blocks_start(&tx, current_epoch, req.from_id)
+            .map_err(internal_error(answer_id.clone()))?
+            .map_err(|msg| not_found(answer_id.clone(), msg))?;
         let blocks = tx
             .blocks_get_parent_chain(start_block.id(), blocks_page_limit(req.limit))
             .map_err(internal_error(answer_id.clone()))?;
@@ -610,40 +600,32 @@ impl JsonRpcHandlers {
             .epoch_manager
             .get_our_validator_node(current_epoch)
             .await
-            .map(|vn| vn.start_epoch)
-            .map(Some)
-            .or_else(|err| {
-                if err.is_not_registered_error() {
-                    Ok(None)
-                } else {
-                    Err(JsonRpcResponse::error(
-                        answer_id.clone(),
-                        JsonRpcError::new(
-                            JsonRpcErrorReason::InternalError,
-                            format!("Could not get committee shard:{}", err),
-                            json::Value::Null,
-                        ),
-                    ))
-                }
-            })?;
+            .optional()
+            .map_err(|err| {
+                JsonRpcResponse::error(
+                    answer_id.clone(),
+                    JsonRpcError::new(
+                        JsonRpcErrorReason::InternalError,
+                        format!("Could not get committee shard:{}", err),
+                        json::Value::Null,
+                    ),
+                )
+            })?
+            .map(|vn| vn.start_epoch);
         let committee_info = self
             .epoch_manager
             .get_local_committee_info(current_epoch)
             .await
-            .map(Some)
-            .or_else(|err| {
-                if err.is_not_registered_error() {
-                    Ok(None)
-                } else {
-                    Err(JsonRpcResponse::error(
-                        answer_id.clone(),
-                        JsonRpcError::new(
-                            JsonRpcErrorReason::InternalError,
-                            format!("Could not get committee shard:{}", err),
-                            json::Value::Null,
-                        ),
-                    ))
-                }
+            .optional()
+            .map_err(|err| {
+                JsonRpcResponse::error(
+                    answer_id.clone(),
+                    JsonRpcError::new(
+                        JsonRpcErrorReason::InternalError,
+                        format!("Could not get committee shard:{}", err),
+                        json::Value::Null,
+                    ),
+                )
             })?;
         let is_initial_scanning_complete = self
             .epoch_manager
@@ -747,7 +729,7 @@ impl JsonRpcHandlers {
         let request = value.parse_params::<GetShardKeyRequest>()?;
         let maybe_vn = self
             .epoch_manager
-            .get_our_validator_node(request.epoch)
+            .get_validator_node_by_public_key(request.epoch, request.public_key)
             .await
             .optional()
             .map_err(internal_error(answer_id.clone()))?;
@@ -943,7 +925,7 @@ impl JsonRpcHandlers {
                 let sidechain_id = self.compressed_sidechain_id();
                 // TODO: we permit the registration within the next 3 epochs. Since we scan behind the chain, this
                 // should be set according to the number of epochs behind (consensus constants) rather than arbitrarily.
-                let max_epoch = current_epoch + Epoch(3);
+                let max_epoch = current_epoch.saturating_add(Epoch(3));
 
                 let signature = ValidatorNodeSignature::sign_for_registration(
                     self.keypair.secret_key(),
@@ -1005,7 +987,7 @@ impl JsonRpcHandlers {
                     .await
                     .map_err(internal_error(answer_id.clone()))?;
                 let sidechain_id = self.compressed_sidechain_id();
-                let max_epoch = current_epoch + Epoch(3);
+                let max_epoch = current_epoch.saturating_add(Epoch(3));
                 let signature = ValidatorNodeSignature::sign_for_exit(
                     self.keypair.secret_key(),
                     self.config.network.as_byte(),
@@ -1075,8 +1057,34 @@ fn blocks_page_limit(requested: usize) -> usize {
     requested.clamp(1, MAX_BLOCKS_PAGE_LIMIT)
 }
 
+fn resolve_list_blocks_start<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    current_epoch: Epoch,
+    from_id: Option<BlockId>,
+) -> Result<Result<Block, String>, StorageError> {
+    match from_id {
+        Some(id) => Block::get(tx, &id)
+            .optional()?
+            .ok_or_else(|| format!("Block {id} not found"))
+            .map(Ok),
+        None => {
+            let Some(leaf) = LeafBlock::get(tx, current_epoch).optional()? else {
+                return Ok(Err(format!("No leaf block for epoch {current_epoch}")));
+            };
+            let Some(block) = Block::get(tx, leaf.block_id()).optional()? else {
+                return Ok(Err(format!("Block {} not found", leaf.block_id())));
+            };
+            Ok(Ok(block))
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use tari_ootle_common_types::NodeHeight;
+    use tari_ootle_storage::StateStoreWriteTransaction;
+    use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+
     use super::*;
 
     #[test]
@@ -1096,5 +1104,31 @@ mod tests {
         assert_eq!(blocks_page_limit(1), 1);
         assert_eq!(blocks_page_limit(10), 10);
         assert_eq!(blocks_page_limit(MAX_BLOCKS_PAGE_LIMIT), MAX_BLOCKS_PAGE_LIMIT);
+    }
+
+    #[test]
+    fn resolve_list_blocks_start_reports_not_found_for_missing_leaf_or_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<PeerAddress>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+
+        let tx = store.create_read_tx().unwrap();
+        let no_leaf = resolve_list_blocks_start(&tx, Epoch(1), None).unwrap();
+        assert_eq!(no_leaf.unwrap_err(), "No leaf block for epoch Epoch(1)");
+
+        let missing_id = BlockId::from_array([0xab; 32]);
+        let missing_explicit = resolve_list_blocks_start(&tx, Epoch(1), Some(missing_id)).unwrap();
+        assert_eq!(missing_explicit.unwrap_err(), format!("Block {missing_id} not found"));
+        drop(tx);
+
+        let dangling_leaf = LeafBlock {
+            block_id: missing_id,
+            height: NodeHeight(5),
+            epoch: Epoch(1),
+        };
+        store.with_write_tx(|tx| tx.leaf_block_set(&dangling_leaf)).unwrap();
+
+        let tx = store.create_read_tx().unwrap();
+        let missing_leaf_block = resolve_list_blocks_start(&tx, Epoch(1), None).unwrap();
+        assert_eq!(missing_leaf_block.unwrap_err(), format!("Block {missing_id} not found"));
     }
 }

@@ -463,6 +463,10 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a, R: RocksRea
             });
         };
 
+        if limit == 0 {
+            return Ok(vec![]);
+        }
+
         let cf = self.db().cf(BlockCf)?;
 
         let query = self.db().cf(block::ByEpochQuery)?;
@@ -730,6 +734,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         }
 
         let locked = self.get_current_locked_block()?;
+        if limit == 0 {
+            return Ok(vec![]);
+        }
         let pending_block_ids = self.get_pending_chain_with_commands_between(block_id)?;
 
         let cf = self.db().cf(ForeignProposalCf)?;
@@ -994,6 +1001,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
             });
         }
 
+        if limit == 0 {
+            return Ok(vec![]);
+        }
+
         let query = self.db().cf(block::ByEpochHeightQuery)?;
 
         let iter = query.query_start_range_key_iterator(Ordering::Ascending, &(query_epoch, start_block_height));
@@ -1110,6 +1121,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         let Some(locked) = self.get_current_locked_block().optional()? else {
             return Ok(vec![]);
         };
+        if limit == 0 {
+            return Ok(vec![]);
+        }
 
         let cf = self.db().cf(BlockCf)?;
         let query = self.db().cf(block::ByEpochHeightQuery)?;
@@ -1120,12 +1134,12 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
             Box::new(query.query_start_range_key_iterator(ordering, &(locked.epoch, NodeHeight(offset))))
         } else {
             let leaf_block = self.db().cf(LeafBlockCf)?.get_by_default_key(OPERATION)?;
+            let Some(max_height) = leaf_block.height.as_u64().checked_sub(offset) else {
+                return Ok(vec![]);
+            };
             Box::new(query.query_end_range_key_iterator(
                 ordering,
-                &(
-                    locked.epoch,
-                    NodeHeight(leaf_block.height.as_u64().saturating_sub(offset).saturating_add(1)),
-                ),
+                &(locked.epoch, NodeHeight(max_height.saturating_add(1))),
             ))
         };
 
@@ -1352,6 +1366,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
     fn transaction_pool_get_all(&self, limit: usize) -> Result<Vec<TransactionPoolRecord>, StorageError> {
         const OPERATION: &str = "transaction_pool_get_all";
         let cf = self.db().cf(TransactionPoolCf)?;
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
 
         // Overlay each record's latest pending update by walking the pending chain back from the leaf block, so
         // callers see its effective state at the tip. With no leaf block yet (e.g. freshly state-synced, before

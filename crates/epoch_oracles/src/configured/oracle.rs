@@ -1564,4 +1564,31 @@ mod tests {
             Some(Epoch(1))
         );
     }
+
+    #[test]
+    fn prepare_next_epoch_handles_u64_max_without_overflow() {
+        let validator = mk_validator(1, Epoch(u64::MAX - 1));
+        let config = mk_config(vec![validator.clone()]);
+        let ticker = ScriptedTicker::new(vec![EpochTickerData {
+            epoch: Epoch(u64::MAX),
+            epoch_hash: FixedHash::zero(),
+            done_for_now: true,
+        }]);
+        let mut oracle = ConfiguredEpochOracle::with_custom_ticker(config, TestStore::default(), ticker);
+
+        let events = drive_events(&mut oracle);
+
+        assert_eq!(
+            added_validators(&events)
+                .into_iter()
+                .map(|(epoch, claim_key, activation_epoch, _)| (epoch, claim_key, activation_epoch))
+                .collect::<Vec<_>>(),
+            vec![(Epoch(u64::MAX - 1), validator.claim_key, Epoch(u64::MAX))]
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, EpochEvent::DoneForNow { epoch, .. } if *epoch == Epoch(u64::MAX)))
+        );
+    }
 }

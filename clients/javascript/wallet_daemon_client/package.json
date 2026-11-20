@@ -16,7 +16,7 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.prod.json",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test test/*.test.js",
     "clean-dist": "rm -rf dist && rm -f tsconfig.tsbuildinfo",
     "fmt": "pnpm npx prettier --write \"./**/*.{ts,tsx,css,json}\" --log-level=warn"
   },

@@ -326,8 +326,8 @@ where
                 }
             },
             WalletEvent::TransactionFinalized(event) => {
+                let new_account = self.pending_accounts.remove(&event.transaction_id);
                 if let Some(diff) = event.finalize.result.any_accept() {
-                    let new_account = self.pending_accounts.remove(&event.transaction_id);
                     self.scanner
                         .process_result(event.transaction_id, diff, new_account)
                         .await?;

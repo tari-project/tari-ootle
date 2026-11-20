@@ -210,9 +210,16 @@ mod tests {
         let decoded: Amount = decode_exact(&cbor).unwrap();
         assert_eq!(decoded, amount);
 
+        // Indefinite-length CBOR string within the cap decodes
+        let indef = [0x7f, 0x63, b'1', b'2', b'3', 0x62, b'4', b'5', 0xff];
+        let decoded: Amount = decode_exact(&indef).unwrap();
+        assert_eq!(decoded, Amount::from(12345u64));
+
+        // Indefinite-length CBOR string exceeding 128 bytes is rejected before parsing
         let mut overlong_indef = vec![0x7f, 0x78, 0x81];
         overlong_indef.extend_from_slice(&[b'9'; 129]);
         overlong_indef.push(0xff);
-        assert!(decode_exact::<PrecisionAmount>(&overlong_indef).is_err());
+        let err = decode_exact::<Amount>(&overlong_indef).unwrap_err();
+        assert!(err.to_string().contains("exceeds maximum length"), "{err}");
     }
 }

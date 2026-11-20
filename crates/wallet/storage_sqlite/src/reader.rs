@@ -1505,17 +1505,19 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 OutputStatus::LockedForSpend.as_key_str(),
                 OutputStatus::LockedUnconfirmed.as_key_str(),
             ]))
-            .get_results::<String>(self.connection())
+            .load_iter::<String, _>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         resources
-            .into_iter()
-            .map(|resource| {
-                resource.parse().map_err(|e| WalletStorageError::DecodingError {
-                    operation: OPERATION,
-                    item: "resource_address",
-                    details: format!("Corrupt db: invalid resource address '{resource}': {e}"),
-                })
+            .map(|row| {
+                row.map_err(|e| WalletStorageError::general(OPERATION, e))
+                    .and_then(|resource| {
+                        resource.parse().map_err(|e| WalletStorageError::DecodingError {
+                            operation: OPERATION,
+                            item: "resource_address",
+                            details: format!("Corrupt db: invalid resource address '{resource}': {e}"),
+                        })
+                    })
             })
             .collect()
     }

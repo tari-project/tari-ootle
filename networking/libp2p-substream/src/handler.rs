@@ -52,9 +52,15 @@ pub struct Handler {
 
 impl Handler {
     pub fn new(peer_id: PeerId, protocols: SmallVec<[StreamProtocol; 32]>) -> Self {
+        let mut unique_protocols = SmallVec::new();
+        for protocol in protocols {
+            if !unique_protocols.contains(&protocol) {
+                unique_protocols.push(protocol);
+            }
+        }
         Self {
             peer_id,
-            protocols: Protocols::new(protocols),
+            protocols: Protocols::new(unique_protocols),
             requested_streams: VecDeque::new(),
             pending_behaviour_events: VecDeque::new(),
             pending_events: VecDeque::new(),
@@ -121,7 +127,10 @@ impl Handler {
     ) {
         let (stream, protocol) = outbound.protocol;
         let stream_id = outbound.info;
-        let _request = self.take_requested_stream(stream_id);
+        let Some(_request) = self.take_requested_stream(stream_id) else {
+            tracing::warn!("outbound stream {} negotiated without a pending request", stream_id);
+            return;
+        };
 
         self.pending_events.push_back(Event::SubstreamOpen {
             peer_id: self.peer_id,
@@ -372,6 +381,15 @@ mod tests {
 
         let mut cx = Context::from_waker(Waker::noop());
         assert!(handler.poll(&mut cx).is_pending());
+        assert_eq!(handler.protocols.protocols.as_slice(), &[p1, p2]);
+    }
+
+    #[test]
+    fn handler_new_deduplicates_initial_protocols() {
+        let peer_id = PeerId::random();
+        let p1 = StreamProtocol::new("/test/1");
+        let p2 = StreamProtocol::new("/test/2");
+        let handler = Handler::new(peer_id, smallvec::smallvec![p1.clone(), p2.clone(), p1.clone()]);
         assert_eq!(handler.protocols.protocols.as_slice(), &[p1, p2]);
     }
 }

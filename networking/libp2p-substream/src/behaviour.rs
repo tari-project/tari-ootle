@@ -164,6 +164,17 @@ impl Behaviour {
             self.connected.remove(&peer_id);
         }
 
+        // Remove any queued NotifyHandler events targeting the closed connection before emitting failures.
+        self.pending_events.retain(|event| {
+            !matches!(
+                event,
+                ToSwarm::NotifyHandler {
+                    handler: NotifyHandler::One(target_id),
+                    ..
+                } if *target_id == connection_id
+            )
+        });
+
         for (stream_id, protocol) in connection.pending_streams {
             self.pending_events
                 .push_back(ToSwarm::GenerateEvent(Event::OutboundFailure {
@@ -235,6 +246,12 @@ impl Behaviour {
         let mut connection = Connection::new(connection_id, remote_address);
 
         if let Some(pending_streams) = self.pending_outbound_streams.remove(&peer_id) {
+            self.pending_events.retain(|event| {
+                !matches!(
+                    event,
+                    ToSwarm::Dial { opts } if opts.get_peer_id() == Some(peer_id)
+                )
+            });
             for stream in pending_streams {
                 connection
                     .pending_streams
@@ -294,15 +311,23 @@ impl NetworkBehaviour for Behaviour {
     fn on_connection_handler_event(
         &mut self,
         _peer_id: PeerId,
-        _connection_id: ConnectionId,
+        connection_id: ConnectionId,
         event: THandlerOutEvent<Self>,
     ) {
         match &event {
             Event::SubstreamOpen { peer_id, stream_id, .. } | Event::OutboundFailure { peer_id, stream_id, .. } => {
-                if let Some(connections) = self.connected.get_mut(peer_id) {
-                    for connection in connections {
-                        connection.pending_streams.remove(stream_id);
-                    }
+                let was_pending = self
+                    .connected
+                    .get_mut(peer_id)
+                    .and_then(|connections| connections.iter_mut().find(|c| c.id == connection_id))
+                    .and_then(|connection| connection.pending_streams.remove(stream_id))
+                    .is_some();
+                if !was_pending {
+                    tracing::warn!(
+                        "Ignoring handler event for unknown or already completed outbound stream (peer_id={peer_id}, \
+                         connection_id={connection_id}, stream_id={stream_id})"
+                    );
+                    return;
                 }
             },
             Event::InboundSubstreamOpen { .. } => {},
@@ -484,5 +509,91 @@ mod tests {
         behaviour.add_protocol(protocol.clone());
         assert_eq!(behaviour.supported_protocols(), [protocol]);
         assert!(drain(&mut behaviour).is_empty());
+    }
+
+    #[test]
+    fn connection_close_before_poll_prunes_queued_notify_handler_events() {
+        let peer_id = PeerId::random();
+        let p1 = StreamProtocol::new("/test/1");
+        let p2 = StreamProtocol::new("/test/2");
+        let connection_id = ConnectionId::new_unchecked(1);
+        let mut behaviour = Behaviour::new([p1.clone()], Config::default());
+        let _handler = connect(&mut behaviour, peer_id, connection_id);
+
+        // Queue both an open_substream NotifyHandler and an add_protocol NotifyHandler without draining.
+        let stream_id = behaviour.open_substream(peer_id, p1.clone());
+        behaviour.add_protocol(p2);
+
+        let endpoint = ConnectedPoint::Dialer {
+            address: address(),
+            role_override: Endpoint::Dialer,
+            port_use: PortUse::Reuse,
+        };
+        behaviour.on_swarm_event(FromSwarm::ConnectionClosed(ConnectionClosed {
+            peer_id,
+            connection_id,
+            endpoint: &endpoint,
+            cause: None,
+            remaining_established: 0,
+        }));
+
+        let events = drain(&mut behaviour);
+        assert!(
+            !events.iter().any(|e| matches!(e, ToSwarm::NotifyHandler { .. })),
+            "stale NotifyHandler events for closed connection should be removed, got {events:?}"
+        );
+        match outbound_failures(&events).as_slice() {
+            [(failed_id, failed_protocol, Error::ConnectionClosed)] => {
+                assert_eq!(*failed_id, stream_id);
+                assert_eq!(**failed_protocol, p1);
+            },
+            other => panic!("expected one connection-closed outbound failure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn connection_established_before_poll_removes_pending_dial_for_peer() {
+        let peer_id = PeerId::random();
+        let protocol = StreamProtocol::new("/test/1");
+        let mut behaviour = Behaviour::new([protocol.clone()], Config::default());
+
+        // Queue a dial and pending outbound stream without draining `pending_events`.
+        behaviour.open_substream(peer_id, protocol);
+
+        let mut handler = connect(&mut behaviour, peer_id, ConnectionId::new_unchecked(1));
+        let events = drain(&mut behaviour);
+        assert!(
+            events.is_empty(),
+            "redundant Dial event should be removed once connection is established, got {events:?}"
+        );
+
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(matches!(
+            handler.poll(&mut cx),
+            Poll::Ready(ConnectionHandlerEvent::OutboundSubstreamRequest { .. })
+        ));
+    }
+
+    #[test]
+    fn duplicate_or_late_outbound_handler_event_is_ignored() {
+        let peer_id = PeerId::random();
+        let protocol = StreamProtocol::new("/test/1");
+        let connection_id = ConnectionId::new_unchecked(1);
+        let mut behaviour = Behaviour::new([protocol.clone()], Config::default());
+        let _handler = connect(&mut behaviour, peer_id, connection_id);
+        let stream_id = behaviour.open_substream(peer_id, protocol.clone());
+        drain(&mut behaviour);
+
+        let failure = || Event::OutboundFailure {
+            peer_id,
+            protocol: protocol.clone(),
+            stream_id,
+            error: Error::ProtocolNotSupported,
+        };
+        behaviour.on_connection_handler_event(peer_id, connection_id, failure());
+        behaviour.on_connection_handler_event(peer_id, connection_id, failure());
+
+        let events = drain(&mut behaviour);
+        assert_eq!(events.len(), 1);
     }
 }

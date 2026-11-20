@@ -1275,6 +1275,7 @@ pub async fn handle_transfer(
 
                     // Found it
                     found_dest_vault = Some(*vault_id);
+                    break;
                 },
             }
         }

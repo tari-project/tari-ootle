@@ -84,25 +84,35 @@ impl WantList {
         WantList(items)
     }
 
-    /// The stealth want set for the live two-phase driver: the from-account component and its vault
-    /// for the transfer resource, prepended to the per-input stealth-UTXO wants. The account is
-    /// always referenced (the fee is paid from it via `pay_fee_from_component`, and a revealed input
-    /// withdraws from it), so both must be resolved and declared as inputs or the engine rejects the
-    /// tx with the component/vault "not found". [`WantList::from_stealth_inputs`] alone omits them —
-    /// used only by the one-shot path, whose caller supplies every substate up front.
+    /// The stealth want set for the live two-phase driver: the from-account component, its TARI
+    /// fee vault, and (when spending revealed funds of a non-TARI resource) its vault for the
+    /// transfer resource, prepended to the per-input stealth-UTXO wants. The account and its TARI
+    /// vault are always referenced (the fee is paid from it via `pay_fee_from_component`, and a
+    /// revealed input withdraws from it), so they must be resolved and declared as inputs or the
+    /// engine rejects the tx with the component/vault "not found". [`WantList::from_stealth_inputs`]
+    /// alone omits them — used only by the one-shot path, whose caller supplies every substate up
+    /// front.
     pub fn from_stealth_inputs_with_account(intent: &StealthTransferIntent) -> Self {
         let from_account = intent.from_account.as_str().to_string();
+        let tari = tari_template_lib_types::constants::TARI_TOKEN.to_string();
         let mut items = vec![
             WantItem::SpecificSubstate {
                 substate_id: from_account.clone(),
                 required: true,
             },
             WantItem::VaultForResource {
-                component_address: from_account,
-                resource_address: intent.resource_address.as_str().to_string(),
+                component_address: from_account.clone(),
+                resource_address: tari.clone(),
                 required: true,
             },
         ];
+        if intent.revealed_input_amount > 0 && intent.resource_address.as_str() != tari {
+            items.push(WantItem::VaultForResource {
+                component_address: from_account,
+                resource_address: intent.resource_address.as_str().to_string(),
+                required: true,
+            });
+        }
         items.extend(Self::from_stealth_inputs(intent).0);
         WantList(items)
     }
@@ -166,6 +176,13 @@ pub(crate) fn resolve_one_stealth_utxo(
 ) -> Result<bool, OotleSdkError> {
     // Derive the UTXO substate id.
     let utxo_substate_id = stealth_utxo_substate_id(resource_address, commitment)?;
+    // Reject duplicate spending of the same commitment in one transfer before decrypting or
+    // accumulating its mask.
+    if resolved.iter().any(|decl| *decl.substate_id() == utxo_substate_id) {
+        return Err(OotleSdkError::Validation(format!(
+            "stealth UTXO '{utxo_substate_id}' appears more than once in stealth inputs"
+        )));
+    }
 
     // Resolve it against the cache.
     let value = match cache.get(&utxo_substate_id) {
@@ -779,5 +796,105 @@ mod tests {
         let err = spend_secrets_map(&intent, &secrets).unwrap_err();
         assert_eq!(err.code(), "VALIDATION");
         assert!(err.to_string().contains("duplicate"));
+    }
+
+    #[test]
+    fn from_stealth_inputs_with_account_always_includes_account_and_tari_fee_vault() {
+        let f1 = make_fixture(1000, 104, 105, 106, 107);
+        let (_, com1, owner1) = want_fields(&f1.want);
+        let custom_resource = ResourceAddressStr::parse(resource().to_string()).unwrap();
+        let tari_str = tari_template_lib_types::constants::TARI_TOKEN.to_string();
+        let tari_resource = ResourceAddressStr::parse(tari_str.clone()).unwrap();
+        let from_acc = tari_template_lib_types::ComponentAddress::new(ObjectKey::from_array([0xaa; ObjectKey::LENGTH]));
+        let from_acc_str = from_acc.to_string();
+        let input_spec = vec![StealthInputSpec {
+            commitment: crate::types::stealth::CommitmentBytes::from_hex(com1).unwrap(),
+            owner_account_pk: PublicKeyBytes::from_hex(owner1).unwrap(),
+        }];
+
+        let make_intent = |res: ResourceAddressStr, revealed_in: u64, fee: u64| StealthTransferIntent {
+            from_account: crate::types::address::ComponentAddressStr::parse(from_acc_str.clone()).unwrap(),
+            resource_address: res,
+            fee: BoundaryAmount::new(fee),
+            inputs: input_spec.clone(),
+            outputs: vec![],
+            revealed_input_amount: revealed_in,
+            revealed_output_amount: 0,
+            min_epoch: None,
+            max_epoch: 1,
+            dry_run: false,
+            pay_fee_from_revealed: false,
+        };
+
+        let account_want = WantItem::SpecificSubstate {
+            substate_id: from_acc_str.clone(),
+            required: true,
+        };
+        let tari_vault_want = WantItem::VaultForResource {
+            component_address: from_acc_str.clone(),
+            resource_address: tari_str,
+            required: true,
+        };
+        let custom_vault_want = WantItem::VaultForResource {
+            component_address: from_acc_str.clone(),
+            resource_address: custom_resource.as_str().to_string(),
+            required: true,
+        };
+
+        // 1. Custom resource with revealed input: wants account, TARI fee vault, and custom resource vault.
+        let wants = WantList::from_stealth_inputs_with_account(&make_intent(custom_resource.clone(), 500, 2000));
+        assert!(wants.0.contains(&account_want));
+        assert!(wants.0.contains(&tari_vault_want));
+        assert!(wants.0.contains(&custom_vault_want));
+
+        // 2. Custom resource with revealed_input_amount == 0: wants account and TARI fee vault only.
+        let wants = WantList::from_stealth_inputs_with_account(&make_intent(custom_resource.clone(), 0, 2000));
+        assert!(wants.0.contains(&account_want));
+        assert!(wants.0.contains(&tari_vault_want));
+        assert!(!wants.0.contains(&custom_vault_want));
+
+        // 3. Zero-fee, no revealed input: `pay_fee_from_component` is still emitted, so account and TARI vault stay
+        //    wanted.
+        let wants = WantList::from_stealth_inputs_with_account(&make_intent(custom_resource, 0, 0));
+        assert!(wants.0.contains(&account_want));
+        assert!(wants.0.contains(&tari_vault_want));
+        assert!(!wants.0.contains(&custom_vault_want));
+
+        // 4. TARI resource with revealed input: wants account and exactly one TARI vault want.
+        let wants = WantList::from_stealth_inputs_with_account(&make_intent(tari_resource, 500, 2000));
+        assert!(wants.0.contains(&account_want));
+        assert_eq!(wants.0.iter().filter(|w| **w == tari_vault_want).count(), 1);
+    }
+
+    #[test]
+    fn resolve_one_stealth_utxo_rejects_duplicate_commitment() {
+        let f1 = make_fixture(1000, 108, 109, 110, 111);
+        let (_, com1, owner1) = want_fields(&f1.want);
+        let custom_resource = ResourceAddressStr::parse(resource().to_string()).unwrap();
+
+        let mut cache: HashMap<SubstateId, Option<SubstateValue>> = HashMap::new();
+        cache.insert(
+            f1.substate_id.clone(),
+            Some(serde_json::from_value(f1.value_json.clone()).unwrap()),
+        );
+        let secrets = secrets_for(&f1);
+        let mut resolved = vec![InputDeclaration::write(f1.substate_id.clone())];
+        let err = resolve_one_stealth_utxo(
+            custom_resource.as_str(),
+            com1,
+            owner1,
+            &cache,
+            &secrets,
+            &mut Vec::new(),
+            &mut RistrettoSecretKey::default(),
+            false,
+            &mut None,
+            &mut Vec::new(),
+            &mut resolved,
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        assert_eq!(err.code(), "VALIDATION");
+        assert!(err.to_string().contains("more than once"));
     }
 }

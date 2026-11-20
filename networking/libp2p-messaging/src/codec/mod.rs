@@ -54,6 +54,7 @@ where W: AsyncWrite + Unpin {
     }
     writer.write_all(&(len as u32).to_be_bytes()).await?;
     writer.write_all(body).await?;
+    writer.flush().await?;
     Ok(())
 }
 

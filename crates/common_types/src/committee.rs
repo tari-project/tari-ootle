@@ -215,6 +215,17 @@ impl<TAddr: PartialEq> FromIterator<Committee<TAddr>> for Committee<TAddr> {
     }
 }
 
+impl<'de, TAddr: PartialEq + Deserialize<'de>> Deserialize<'de> for Committee<TAddr> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct RawCommittee<TAddr> {
+            members: Vec<CommitteeMember<TAddr>>,
+        }
+        let RawCommittee { members } = RawCommittee::deserialize(deserializer)?;
+        Ok(Self::new(members))
+    }
+}
+
 /// Represents a "slice" of the 256-bit shard space
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -366,6 +377,15 @@ mod tests {
             .into_iter()
             .collect::<Committee<_>>();
         assert_eq!(merged.address_iter().copied().collect::<Vec<_>>(), vec![2, 1]);
+
+        let unsorted_json = serde_json::json!({
+            "members": [member(1, 3), member(2, 1), member(3, 2)]
+        });
+        let deserialized: Committee<u32> = serde_json::from_value(unsorted_json).unwrap();
+        assert_eq!(deserialized.address_iter().copied().collect::<Vec<_>>(), vec![2, 3, 1]);
+        let key = |byte| RistrettoPublicKeyBytes::from_bytes(&[byte; 32]).unwrap();
+        assert_eq!(deserialized.index_of_public_key(&key(1)), Some(0));
+        assert_eq!(deserialized.index_of_public_key(&key(3)), Some(2));
     }
 
     #[test]

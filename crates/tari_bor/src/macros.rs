@@ -57,33 +57,33 @@ macro_rules! cbor {
 #[doc(hidden)]
 macro_rules! __cbor_map_entries {
     // === Terminal arms (last entry, with optional trailing comma) ===
-    ($m:ident, $k:tt => null $(,)?) => {
+    ($m:ident, $k:expr => null $(,)?) => {
         $m.push(($crate::__cbor_macro::key($k), $crate::Value::Null));
     };
-    ($m:ident, $k:tt => [ $($inner:tt)* ] $(,)?) => {
+    ($m:ident, $k:expr => [ $($inner:tt)* ] $(,)?) => {
         $m.push(($crate::__cbor_macro::key($k), $crate::cbor!([ $($inner)* ])));
     };
-    ($m:ident, $k:tt => { $($inner:tt)* } $(,)?) => {
+    ($m:ident, $k:expr => { $($inner:tt)* } $(,)?) => {
         $m.push(($crate::__cbor_macro::key($k), $crate::cbor!({ $($inner)* })));
     };
-    ($m:ident, $k:tt => $v:expr $(,)?) => {
+    ($m:ident, $k:expr => $v:expr $(,)?) => {
         $m.push(($crate::__cbor_macro::key($k), $crate::__cbor_macro::value($v)));
     };
 
     // === Continuation arms (entry followed by comma + more) ===
-    ($m:ident, $k:tt => null, $($rest:tt)+) => {
+    ($m:ident, $k:expr => null, $($rest:tt)+) => {
         $m.push(($crate::__cbor_macro::key($k), $crate::Value::Null));
         $crate::__cbor_map_entries!($m, $($rest)+);
     };
-    ($m:ident, $k:tt => [ $($inner:tt)* ], $($rest:tt)+) => {
+    ($m:ident, $k:expr => [ $($inner:tt)* ], $($rest:tt)+) => {
         $m.push(($crate::__cbor_macro::key($k), $crate::cbor!([ $($inner)* ])));
         $crate::__cbor_map_entries!($m, $($rest)+);
     };
-    ($m:ident, $k:tt => { $($inner:tt)* }, $($rest:tt)+) => {
+    ($m:ident, $k:expr => { $($inner:tt)* }, $($rest:tt)+) => {
         $m.push(($crate::__cbor_macro::key($k), $crate::cbor!({ $($inner)* })));
         $crate::__cbor_map_entries!($m, $($rest)+);
     };
-    ($m:ident, $k:tt => $v:expr, $($rest:tt)+) => {
+    ($m:ident, $k:expr => $v:expr, $($rest:tt)+) => {
         $m.push(($crate::__cbor_macro::key($k), $crate::__cbor_macro::value($v)));
         $crate::__cbor_map_entries!($m, $($rest)+);
     };
@@ -279,6 +279,32 @@ mod tests {
             Value::Map(vec![
                 (Value::Integer(0), Value::Text("zero".into())),
                 (Value::Integer(1), Value::Text("one".into())),
+            ])
+        );
+    }
+
+    #[test]
+    fn expression_keys() {
+        let key = String::from("dynamic_key");
+        let v = cbor!({
+            -1i32 => "neg",
+            key.clone() => [1u32, 2u32],
+            String::from("nested") => { -2i32 => null },
+            1i32 + 2i32 => null,
+        });
+        assert_eq!(
+            v,
+            Value::Map(vec![
+                (Value::Integer(-1), Value::Text("neg".into())),
+                (
+                    Value::Text("dynamic_key".into()),
+                    Value::Array(vec![Value::Integer(1), Value::Integer(2)]),
+                ),
+                (
+                    Value::Text("nested".into()),
+                    Value::Map(vec![(Value::Integer(-2), Value::Null)]),
+                ),
+                (Value::Integer(3), Value::Null),
             ])
         );
     }

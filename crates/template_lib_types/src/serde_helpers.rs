@@ -286,9 +286,15 @@ mod tests {
     fn bytes_visitor_enforces_max_len() {
         use serde::de::value::Error as ValueError;
 
-        let ok = BytesVisitor::with_max_len(4).visit_bytes::<ValueError>(&[1, 2, 3, 4]).unwrap();
+        let ok = BytesVisitor::with_max_len(4)
+            .visit_bytes::<ValueError>(&[1, 2, 3, 4])
+            .unwrap();
         assert_eq!(ok.as_ref(), &[1, 2, 3, 4]);
-        assert!(BytesVisitor::with_max_len(4).visit_bytes::<ValueError>(&[1, 2, 3, 4, 5]).is_err());
+        assert!(
+            BytesVisitor::with_max_len(4)
+                .visit_bytes::<ValueError>(&[1, 2, 3, 4, 5])
+                .is_err()
+        );
         assert!(
             BytesVisitor::with_max_len(4)
                 .visit_borrowed_bytes::<ValueError>(&[1, 2, 3, 4, 5])

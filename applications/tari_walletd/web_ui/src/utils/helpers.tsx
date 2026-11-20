@@ -376,6 +376,11 @@ export function displayNftId(nftId: NonFungibleId): string {
   return `NFT ${JSON.stringify(nftId)}`;
 }
 
+/** Divisibility 0 is whole tokens. Only a missing value takes `fallback`. */
+export function divisibilityOrDefault(value: number | null | undefined, fallback: number): number {
+  return value ?? fallback;
+}
+
 /**
  * Converts a decimal string amount to base units using BigInt arithmetic.
  * e.g. "1000.5" with divisibility=6 → 1_000_500_000n

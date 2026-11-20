@@ -232,6 +232,12 @@ pub trait WalletStoreReader {
     /// chain, and has no proof of any version.
     fn stealth_outputs_get_unproven_held(&mut self) -> Result<Vec<StealthOutputModel>, WalletStorageError>;
 
+    /// The resources of which `account` holds a stealth output unspent, locked for spending or locked unconfirmed.
+    fn stealth_outputs_get_live_resources(
+        &mut self,
+        account: &ComponentAddress,
+    ) -> Result<HashSet<ResourceAddress>, WalletStorageError>;
+
     // Output Locks
     /// Every lock linked to `transaction_id`, in creation order. Empty when none is.
     fn locks_get_by_transaction_id(

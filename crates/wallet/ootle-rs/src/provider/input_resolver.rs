@@ -277,6 +277,7 @@ impl TransactionInputResolver {
         match self.cache.get(&component_substate_id) {
             Some(Some(SubstateValue::Component(data))) => {
                 let component_state = data.body.to_indexed_well_known_types()?;
+                tx_mut.add_input(InputDeclaration::write(component_substate_id));
                 let vault_ids = component_state
                     .vault_ids()
                     .iter()
@@ -369,5 +370,79 @@ impl TransactionInputResolver {
         substates_to_cache.clear();
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Weak;
+
+    use tari_ootle_common_types::engine_types::{
+        component::{Component, ComponentBody, ComponentHeader},
+        resource_container::ResourceContainer,
+        vault::Vault,
+    };
+    use tari_ootle_transaction::Transaction;
+    use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
+    use tari_template_lib_types::{
+        Amount,
+        EntityId,
+        ObjectKey,
+        SubstateOwnerRule,
+        VaultId,
+        access_rules::ComponentAccessRules,
+    };
+
+    use super::*;
+    use crate::{Network, provider::verifier::IndexerTrust};
+
+    #[test]
+    fn resolve_all_component_vaults_adds_the_component_itself_and_its_vaults() {
+        let verifier = Arc::new(IndexerVerifier::new(
+            Weak::new(),
+            Network::LocalNet,
+            IndexerTrust::Trust,
+        ));
+        let mut resolver = TransactionInputResolver::new(verifier);
+
+        let component_addr = ComponentAddress::new(ObjectKey::from_array([0xaa; ObjectKey::LENGTH]));
+        let vault_id = VaultId::new(ObjectKey::from_array([0xbb; ObjectKey::LENGTH]));
+        let resource_addr = ResourceAddress::new(ObjectKey::from_array([0xcc; ObjectKey::LENGTH]));
+
+        let component = Component {
+            header: ComponentHeader {
+                template_address: ACCOUNT_TEMPLATE_ADDRESS,
+                owner_rule: SubstateOwnerRule::None,
+                access_rules: ComponentAccessRules::new(),
+                entity_id: EntityId::from_array([0; EntityId::LENGTH]),
+                upgrade_rule: Default::default(),
+            },
+            body: ComponentBody::from_cbor_value(tari_bor::to_value(&vec![vault_id]).unwrap()),
+        };
+        let vault = Vault::new(ResourceContainer::public_fungible(resource_addr, Amount::new(100)));
+
+        resolver.cache.insert(
+            SubstateId::Component(component_addr),
+            Some(SubstateValue::Component(component)),
+        );
+        resolver
+            .cache
+            .insert(SubstateId::Vault(vault_id), Some(SubstateValue::Vault(vault)));
+
+        let mut unsigned = Transaction::builder_localnet(1u64.into()).build_unsigned();
+        let mut to_cache = Vec::new();
+        let satisfied = resolver
+            .resolve_all_component_vaults(&mut unsigned, &mut to_cache, &component_addr)
+            .unwrap();
+        assert!(satisfied);
+        assert!(to_cache.is_empty());
+
+        let inputs = unsigned.inputs();
+        assert!(
+            inputs.contains(&SubstateId::Component(component_addr)),
+            "the called component itself must be added as a write input: {inputs:?}"
+        );
+        assert!(inputs.contains(&SubstateId::Vault(vault_id)));
+        assert!(inputs.contains(&SubstateId::Resource(resource_addr)));
     }
 }

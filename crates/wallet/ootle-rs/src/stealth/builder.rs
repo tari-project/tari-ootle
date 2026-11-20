@@ -213,7 +213,11 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> StealthTransfer<'a, P> {
         if !amount.is_positive() {
             panic!("Transfer amount must be positive");
         }
-        self.spec.revealed_input_amount += amount;
+        self.spec.revealed_input_amount = self
+            .spec
+            .revealed_input_amount
+            .checked_add(amount)
+            .expect("revealed input amount overflow");
         self
     }
 
@@ -242,7 +246,11 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> StealthTransfer<'a, P> {
     ///
     /// Revealing zero is a no-op, so an amount that came out at zero needs no guard at the call site.
     pub fn to_revealed_output<A: Into<Amount>>(mut self, amount: A) -> Self {
-        self.spec.revealed_output_amount += amount.into();
+        self.spec.revealed_output_amount = self
+            .spec
+            .revealed_output_amount
+            .checked_add(amount.into())
+            .expect("revealed output amount overflow");
         self
     }
 
@@ -261,7 +269,11 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> StealthTransfer<'a, P> {
         if amount.is_zero() {
             return self;
         }
-        self.spec.revealed_output_amount += amount;
+        self.spec.revealed_output_amount = self
+            .spec
+            .revealed_output_amount
+            .checked_add(amount)
+            .expect("revealed output amount overflow");
         match self.spec.revealed_receiver {
             Some(existing) if existing != receiver => {
                 panic!("Revealed output is already assigned to a different receiver");
@@ -296,8 +308,9 @@ impl StealthTransferSpec {
     }
 
     pub fn total_output_amount(&self) -> Amount {
-        let stealth_output_total: Amount = self.outputs.iter().map(|o| Amount::from(o.amount.get())).sum();
-        stealth_output_total + self.revealed_output_amount
+        self.outputs.iter().fold(self.revealed_output_amount, |acc, o| {
+            acc.checked_add(Amount::from(o.amount.get())).unwrap_or(Amount::MAX)
+        })
     }
 }
 

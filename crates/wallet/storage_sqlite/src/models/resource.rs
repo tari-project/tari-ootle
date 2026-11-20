@@ -57,7 +57,7 @@ impl ResourceModel {
             item: "resource.access_rules",
             details: e.to_string(),
         })?;
-        let divisibility = u8::try_from(self.divisibility as u32).map_err(|e| WalletStorageError::DecodingError {
+        let divisibility = u8::try_from(self.divisibility).map_err(|e| WalletStorageError::DecodingError {
             operation: "try_convert",
             item: "resource.divisibility",
             details: format!("Invalid divisibility: {}", e),

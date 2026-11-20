@@ -54,8 +54,23 @@ impl<TAddr: NodeAddressable> TryFrom<DbValidatorNode> for ValidatorNode<TAddr> {
             public_key: RistrettoPublicKeyBytes::from_bytes(&vn.public_key).map_err(|_| {
                 SqliteStorageError::MalformedDbData(format!("Invalid public key in validator node record id={}", vn.id))
             })?,
-            start_epoch: Epoch(vn.start_epoch as u64),
-            end_epoch: vn.end_epoch.map(|e| Epoch(e as u64)),
+            start_epoch: u64::try_from(vn.start_epoch).map(Epoch).map_err(|_| {
+                SqliteStorageError::MalformedDbData(format!(
+                    "Negative start_epoch {} in validator node record id={}",
+                    vn.start_epoch, vn.id
+                ))
+            })?,
+            end_epoch: vn
+                .end_epoch
+                .map(|e| {
+                    u64::try_from(e).map(Epoch).map_err(|_| {
+                        SqliteStorageError::MalformedDbData(format!(
+                            "Negative end_epoch {e} in validator node record id={}",
+                            vn.id
+                        ))
+                    })
+                })
+                .transpose()?,
             fee_claim_public_key: RistrettoPublicKeyBytes::from_bytes(&vn.fee_claim_public_key).map_err(|_| {
                 SqliteStorageError::MalformedDbData(format!(
                     "Invalid fee claim public key in validator node record id={}",

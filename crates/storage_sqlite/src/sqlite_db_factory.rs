@@ -57,7 +57,9 @@ impl<TAddr> SqliteDbFactory<TAddr> {
                 details: format!("Failed to create parent directory for database file: {}", e),
             })?;
         }
-        let database_url = self.db_path.to_str().expect("database_url utf-8 error");
+        let database_url = self.db_path.to_str().ok_or_else(|| StorageError::General {
+            details: format!("Database path {} is not valid UTF-8", self.db_path.display()),
+        })?;
         let connection = SqliteConnection::establish(database_url).map_err(SqliteStorageError::from)?;
         Ok(connection)
     }

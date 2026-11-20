@@ -38,7 +38,7 @@ impl NonFungibleToken {
         let mutable_data: Value =
             serde_json::from_str(&self.mutable_data).map_err(|e| WalletStorageError::DecodingError {
                 operation: "try_from",
-                item: "non_fungible_tokens.data",
+                item: "non_fungible_tokens.mutable_data",
                 details: e.to_string(),
             })?;
         Ok(tari_ootle_wallet_sdk::models::NonFungibleToken {

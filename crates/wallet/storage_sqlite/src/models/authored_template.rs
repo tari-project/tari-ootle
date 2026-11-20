@@ -33,7 +33,7 @@ impl TryFrom<&AuthoredTemplate> for AuthoredTemplateModel {
             abi_version: template
                 .abi_version
                 .try_into()
-                .map_err(|e| WalletStorageError::EncodingError {
+                .map_err(|e| WalletStorageError::DecodingError {
                     operation: "AuthoredTemplateModel::try_from",
                     item: "abi_version",
                     details: format!("Failed to convert abi_version: {}", e),

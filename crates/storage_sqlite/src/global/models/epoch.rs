@@ -38,7 +38,11 @@ impl TryFrom<DbEpochData> for EpochData {
 
     fn try_from(e: DbEpochData) -> Result<Self, Self::Error> {
         Ok(Self {
-            epoch: e.epoch as u64,
+            epoch: u64::try_from(e.epoch).map_err(|err| SqliteStorageError::DecodingError {
+                operation: "TryFrom<DbEpochData> for EpochData",
+                item: "Epoch",
+                details: format!("epoch is negative ({}): {err}", e.epoch),
+            })?,
             epoch_hash: e.epoch_hash.try_into().map_err(|e| SqliteStorageError::DecodingError {
                 operation: "TryFrom<DbEpochData> for EpochData",
                 item: "Epoch",

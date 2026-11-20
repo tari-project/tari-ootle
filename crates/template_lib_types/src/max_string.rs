@@ -15,14 +15,10 @@ pub struct MaxString<const N: usize>(Box<str>);
 #[cfg(feature = "borsh")]
 impl<const N: usize> borsh::BorshDeserialize for MaxString<N> {
     fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
-        let s = Box::<str>::deserialize_reader(reader)?;
-        let len = s.len();
-        Self::new_checked(s).ok_or_else(|| {
-            borsh::io::Error::new(
-                borsh::io::ErrorKind::InvalidData,
-                format!("string length exceeds maximum of {}: got {}", N, len),
-            )
-        })
+        let buf = crate::max_bytes::read_bounded_bytes::<N, _>(reader, "string")?;
+        let s = String::from_utf8(buf)
+            .map_err(|e| borsh::io::Error::new(borsh::io::ErrorKind::InvalidData, e.to_string()))?;
+        Ok(Self(s.into_boxed_str()))
     }
 }
 
@@ -83,13 +79,69 @@ impl<const N: usize> serde::Serialize for MaxString<N> {
 }
 
 #[cfg(feature = "serde")]
+struct MaxStringVisitor<const N: usize>;
+
+#[cfg(feature = "serde")]
+impl<const N: usize> serde::de::Visitor<'_> for MaxStringVisitor<N> {
+    type Value = MaxString<N>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "a string of at most {} bytes", N)
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where E: serde::de::Error {
+        if v.len() > N {
+            return Err(E::custom(format!(
+                "string length exceeds maximum of {}: got {}",
+                N,
+                v.len()
+            )));
+        }
+        Ok(MaxString(Box::from(v)))
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where E: serde::de::Error {
+        let len = v.len();
+        MaxString::new_checked(v)
+            .ok_or_else(|| E::custom(format!("string length exceeds maximum of {}: got {}", N, len)))
+    }
+
+    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+    where E: serde::de::Error {
+        if v.len() > N {
+            return Err(E::custom(format!(
+                "string length exceeds maximum of {}: got {}",
+                N,
+                v.len()
+            )));
+        }
+        let s = tari_template_abi::rust::str::from_utf8(v)
+            .map_err(|_| E::invalid_value(serde::de::Unexpected::Bytes(v), &self))?;
+        Ok(MaxString(Box::from(s)))
+    }
+
+    fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+    where E: serde::de::Error {
+        if v.len() > N {
+            return Err(E::custom(format!(
+                "string length exceeds maximum of {}: got {}",
+                N,
+                v.len()
+            )));
+        }
+        let s =
+            String::from_utf8(v).map_err(|e| E::invalid_value(serde::de::Unexpected::Bytes(e.as_bytes()), &self))?;
+        Ok(MaxString(s.into_boxed_str()))
+    }
+}
+
+#[cfg(feature = "serde")]
 impl<'de, const N: usize> serde::Deserialize<'de> for MaxString<N> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where D: serde::Deserializer<'de> {
-        let s = String::deserialize(deserializer)?;
-        let len = s.len();
-        Self::new_checked(s)
-            .ok_or_else(|| serde::de::Error::custom(format!("string length exceeds maximum of {}: got {}", N, len)))
+        deserializer.deserialize_str(MaxStringVisitor::<N>)
     }
 }
 
@@ -209,6 +261,15 @@ mod tests {
 
     #[cfg(feature = "serde")]
     mod serde_impl {
+        use serde::{
+            Deserialize,
+            de::{
+                IntoDeserializer,
+                Visitor,
+                value::{self, BytesDeserializer, StrDeserializer, StringDeserializer},
+            },
+        };
+
         use super::*;
 
         #[test]
@@ -231,6 +292,57 @@ mod tests {
             let err = tari_bor::decode::<MaxString<5>>(&serialized).unwrap_err();
             assert!(err.to_string().contains("string length exceeds maximum"));
         }
+
+        #[test]
+        fn it_enforces_max_length_on_borrowed_and_owned_strings() {
+            // `StrDeserializer` calls `visit_str`; `StringDeserializer` calls `visit_string`.
+            let de: StrDeserializer<'_, value::Error> = "123456".into_deserializer();
+            let err = MaxString::<5>::deserialize(de).unwrap_err();
+            assert!(err.to_string().contains("string length exceeds maximum of 5: got 6"));
+
+            let de: StringDeserializer<value::Error> = String::from("123456").into_deserializer();
+            let err = MaxString::<5>::deserialize(de).unwrap_err();
+            assert!(err.to_string().contains("string length exceeds maximum of 5: got 6"));
+
+            let de: StrDeserializer<'_, value::Error> = "12345".into_deserializer();
+            let s = MaxString::<5>::deserialize(de).unwrap();
+            assert_eq!(&*s, "12345");
+
+            let de: StringDeserializer<value::Error> = String::from("12345").into_deserializer();
+            let s = MaxString::<5>::deserialize(de).unwrap();
+            assert_eq!(&*s, "12345");
+        }
+
+        #[test]
+        fn it_deserializes_utf8_bytes_within_max_length() {
+            // `BytesDeserializer` calls `visit_bytes`.
+            let de = BytesDeserializer::<value::Error>::new(b"12345");
+            let s = MaxString::<5>::deserialize(de).unwrap();
+            assert_eq!(&*s, "12345");
+
+            let de = BytesDeserializer::<value::Error>::new(b"123456");
+            let err = MaxString::<5>::deserialize(de).unwrap_err();
+            assert!(err.to_string().contains("string length exceeds maximum of 5: got 6"));
+
+            let de = BytesDeserializer::<value::Error>::new(&[0xff, 0xfe]);
+            let err = MaxString::<5>::deserialize(de).unwrap_err();
+            assert!(err.to_string().contains("invalid value"));
+
+            let s = MaxStringVisitor::<5>
+                .visit_byte_buf::<value::Error>(b"12345".to_vec())
+                .unwrap();
+            assert_eq!(&*s, "12345");
+
+            let err = MaxStringVisitor::<5>
+                .visit_byte_buf::<value::Error>(b"123456".to_vec())
+                .unwrap_err();
+            assert!(err.to_string().contains("string length exceeds maximum of 5: got 6"));
+
+            let err = MaxStringVisitor::<5>
+                .visit_byte_buf::<value::Error>([0xff, 0xfe].to_vec())
+                .unwrap_err();
+            assert!(err.to_string().contains("invalid value"));
+        }
     }
 
     #[cfg(feature = "borsh")]
@@ -250,6 +362,12 @@ mod tests {
             let mut oversized = Vec::new();
             "123456".serialize(&mut oversized).unwrap();
             let err = MaxString::<5>::try_from_slice(&oversized).unwrap_err();
+            assert!(err.to_string().contains("string length exceeds maximum"));
+
+            // Header claiming u32::MAX bytes on a 4-byte buffer fails on the bound check before reading payload bytes.
+            let oversized_header = u32::MAX.to_le_bytes();
+            let err = MaxString::<5>::try_from_slice(&oversized_header).unwrap_err();
+            assert_eq!(err.kind(), borsh::io::ErrorKind::InvalidData);
             assert!(err.to_string().contains("string length exceeds maximum"));
         }
     }

@@ -277,8 +277,8 @@ impl RpcResponse {
     pub fn exceeded_message_size(self) -> RpcResponse {
         let msg = format!(
             "The response size exceeded the maximum allowed payload size. Max = {} bytes, Got = {} bytes",
-            max_response_payload_size() as f32,
-            self.payload.len() as f32,
+            max_response_payload_size(),
+            self.payload.len(),
         );
         RpcResponse {
             request_id: self.request_id,
@@ -311,11 +311,13 @@ impl proto::RpcResponse {
         ))
     }
 
-    /// True if this is a keepalive frame: ACK-flagged and not terminating the stream.
+    /// True if this is a keepalive frame: an empty, OK-status, ACK-flagged frame not terminating the stream.
     pub fn is_keepalive(&self) -> bool {
-        self.flags()
-            .map(|flags| flags.is_ack() && !flags.is_fin())
-            .unwrap_or(false)
+        self.status == RpcStatusCode::Ok.as_u32() &&
+            self.payload.is_empty() &&
+            self.flags()
+                .map(|flags| flags.is_ack() && !flags.is_fin())
+                .unwrap_or(false)
     }
 }
 
@@ -338,15 +340,95 @@ impl proto::RpcSessionReply {
     pub fn result(&self) -> Result<u32, HandshakeRejectReason> {
         match self.session_result.as_ref() {
             Some(SessionResult::AcceptedVersion(v)) => Ok(*v),
-            Some(SessionResult::Rejected(_)) => {
+            Some(SessionResult::Rejected(true)) => {
                 let reason = HandshakeRejectReason::from_i32(self.reject_reason).unwrap_or(
                     HandshakeRejectReason::Unknown("server returned unrecognised rejection reason"),
                 );
                 Err(reason)
             },
+            Some(SessionResult::Rejected(false)) => {
+                Err(HandshakeRejectReason::Unknown("handshake reply did not reject session"))
+            },
             None => Err(HandshakeRejectReason::Unknown(
                 "handshake reply did not contain a session result",
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keepalive_requires_ok_status_and_empty_payload() {
+        let valid = RpcResponse::keepalive(42).to_proto();
+        assert!(valid.is_keepalive());
+
+        let with_payload = proto::RpcResponse {
+            request_id: 42,
+            status: RpcStatusCode::Ok.as_u32(),
+            flags: u32::from(RpcMessageFlags::ACK.bits()),
+            payload: vec![1, 2, 3],
+        };
+        assert!(!with_payload.is_keepalive());
+
+        let with_error_status = proto::RpcResponse {
+            request_id: 42,
+            status: RpcStatusCode::BadRequest.as_u32(),
+            flags: u32::from(RpcMessageFlags::ACK.bits()),
+            payload: Vec::new(),
+        };
+        assert!(!with_error_status.is_keepalive());
+
+        let with_fin = proto::RpcResponse {
+            request_id: 42,
+            status: RpcStatusCode::Ok.as_u32(),
+            flags: u32::from((RpcMessageFlags::ACK | RpcMessageFlags::FIN).bits()),
+            payload: Vec::new(),
+        };
+        assert!(!with_fin.is_keepalive());
+    }
+
+    #[test]
+    fn exceeded_message_size_preserves_exact_byte_count_above_f32_precision() {
+        // 16_777_217 (2^24 + 1) cannot be represented exactly as f32 (rounds to 16_777_216).
+        let exact_len = 16_777_217usize;
+        let resp = RpcResponse {
+            request_id: 7,
+            status: RpcStatusCode::Ok,
+            flags: RpcMessageFlags::empty(),
+            payload: Bytes::from(vec![0u8; exact_len]),
+        }
+        .exceeded_message_size();
+
+        assert_eq!(resp.status, RpcStatusCode::MalformedResponse);
+        assert!(resp.flags.is_fin());
+        let msg = String::from_utf8(resp.payload.to_vec()).unwrap();
+        assert!(
+            msg.contains(&format!("Got = {exact_len} bytes")),
+            "expected exact byte count in message, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn session_reply_rejected_false_is_not_treated_as_valid_rejection_reason() {
+        let reply = proto::RpcSessionReply {
+            session_result: Some(SessionResult::Rejected(false)),
+            reject_reason: HandshakeRejectReason::UnsupportedVersion.as_i32(),
+        };
+        assert!(matches!(
+            reply.result(),
+            Err(HandshakeRejectReason::Unknown("handshake reply did not reject session"))
+        ));
+
+        let rejected_true = proto::RpcSessionReply {
+            session_result: Some(SessionResult::Rejected(true)),
+            reject_reason: HandshakeRejectReason::UnsupportedVersion.as_i32(),
+        };
+        assert!(matches!(
+            rejected_true.result(),
+            Err(HandshakeRejectReason::UnsupportedVersion)
+        ));
     }
 }

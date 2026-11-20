@@ -279,6 +279,17 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
         &self,
         key_id: &StealthUtxoSpendKeyId,
     ) -> Result<RistrettoSecretKey, KeyManagerApiError> {
+        if !self.is_signing_key(key_id.account_key_id)? {
+            return Err(KeyManagerApiError::NotASigningKey {
+                key_id: key_id.account_key_id,
+            });
+        }
+        let view_key_id = key_id.view_key_id;
+        if view_key_id.derived_branch().is_some_and(|b| b.is_mask()) {
+            return Err(KeyManagerApiError::InvalidKeyId {
+                details: format!("{view_key_id} is a mask key and cannot be used as a stealth view key"),
+            });
+        }
         let public_nonce = key_id
             .public_nonce
             .try_from_byte_type()

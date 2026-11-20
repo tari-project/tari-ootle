@@ -6,6 +6,7 @@ use indexmap::IndexMap;
 use log::info;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_address::{DestinationTag, Network, OotleAddress};
+use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_crypto::memo::Memo;
 use tari_ootle_walletd_client::{
     permissions::{Crud, Permission},
@@ -95,8 +96,26 @@ pub async fn handle_decrypt_value(
         ));
     }
 
-    // Get view secret key
-    let view_key = sdk.key_manager_api().get_key(req.view_key_id)?;
+    let view_key_id = req.view_key_id;
+    if let Some(branch) = view_key_id.derived_branch().filter(|b| b.is_mask()) {
+        return Err(invalid_params(
+            "view_key_id",
+            Some(format!("{branch} keys cannot be used as a view key")),
+        ));
+    }
+
+    let view_key = sdk
+        .key_manager_api()
+        .get_key(view_key_id)
+        .optional()?
+        .ok_or_else(|| {
+            invalid_params(
+                "view_key_id",
+                Some(format!(
+                    "{view_key_id} does not exist: the wallet holds no imported key with that id"
+                )),
+            )
+        })?;
 
     let utxo_ids = req
         .ids
@@ -155,4 +174,141 @@ pub async fn handle_get_value_lookup_info(
 ) -> Result<StealthUtxosGetValueLookupInfoResponse, anyhow::Error> {
     context.authorize(token, &[Permission::StealthUtxos(Crud::Read, None)])?;
     crate::handlers::value_lookup::value_lookup_info(context.config().value_lookup_table_file.as_deref())
+}
+
+#[cfg(test)]
+mod tests {
+    use ootle_byte_type::ToByteType;
+    use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
+    use tari_ootle_common_types::{Epoch, signature::SignatureOutput};
+    use tari_ootle_transaction::UnsignedTransaction;
+    use tari_ootle_wallet_sdk::{
+        apis::key_manager::KeyManagerApiError,
+        models::{KeyBranch, KeyId, KeyType, StealthUtxoSpendKeyId},
+    };
+    use tari_template_lib_types::{UtxoId, constants::STEALTH_TARI_RESOURCE_ADDRESS};
+
+    use super::*;
+    use crate::handlers::test_support::TestDaemon;
+
+    #[tokio::test]
+    async fn decrypt_value_refuses_mask_and_unknown_view_keys_before_network_io() {
+        let daemon = TestDaemon::start().await;
+        let session = Some(&daemon.session);
+        let request = |view_key_id| StealthUtxosDecryptValueRequest {
+            resource_address: STEALTH_TARI_RESOURCE_ADDRESS,
+            ids: vec![UtxoId::from_array([1u8; 32])],
+            view_key_id,
+            minimum_expected_value: Some(0),
+            maximum_expected_value: Some(10),
+        };
+
+        for branch in [KeyBranch::ConfidentialMask, KeyBranch::StealthMask] {
+            let err = handle_decrypt_value(&daemon.context, session, request(KeyId::derived(branch, 0)))
+                .await
+                .unwrap_err();
+            assert!(
+                err.to_string().contains("view_key_id") && err.to_string().contains("cannot be used as a view key"),
+                "{branch}: {err}"
+            );
+        }
+
+        let err = handle_decrypt_value(&daemon.context, session, request(KeyId::imported(999)))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("view_key_id") && err.to_string().contains("does not exist"),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stealth_owner_signing_requires_signing_account_key_and_non_mask_view_key() {
+        let daemon = TestDaemon::start().await;
+        let sdk = daemon.context.wallet_sdk();
+        let km = sdk.key_manager_api();
+        let (_, nonce_pk) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let public_nonce = nonce_pk.to_byte_type();
+        let (_, seal_pk) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let seal_public_key = seal_pk.to_byte_type();
+        let tx = UnsignedTransaction::new(Network::LocalNet.as_byte(), Epoch(1));
+        let valid_view_key = KeyId::derived(KeyBranch::ViewOnlyKey, 0);
+        let valid_account_key = KeyId::derived(KeyBranch::Account, 0);
+
+        for branch in [
+            KeyBranch::ConfidentialMask,
+            KeyBranch::StealthMask,
+            KeyBranch::ViewOnlyKey,
+            KeyBranch::ElgamalEncryptionViewKey,
+        ] {
+            let spend_key = StealthUtxoSpendKeyId {
+                account_key_id: KeyId::derived(branch, 0),
+                view_key_id: valid_view_key,
+                public_nonce,
+            };
+            let err = km
+                .sign_with_stealth_key::<_, _>(&spend_key, &seal_public_key, &tx)
+                .map(|_: SignatureOutput| ())
+                .unwrap_err();
+            assert!(
+                matches!(err, KeyManagerApiError::NotASigningKey { key_id } if key_id == KeyId::derived(branch, 0)),
+                "{branch}: {err:?}"
+            );
+        }
+
+        let (imported_view_secret, _) = RistrettoPublicKey::random_keypair(&mut rand::rng());
+        let imported_view = km
+            .import_key("view-only", &imported_view_secret, KeyType::ViewOnly)
+            .unwrap();
+        let spend_with_imported_view = StealthUtxoSpendKeyId {
+            account_key_id: imported_view,
+            view_key_id: valid_view_key,
+            public_nonce,
+        };
+        let err = km
+            .sign_with_stealth_key::<_, _>(&spend_with_imported_view, &seal_public_key, &tx)
+            .map(|_: SignatureOutput| ())
+            .unwrap_err();
+        assert!(
+            matches!(err, KeyManagerApiError::NotASigningKey { key_id } if key_id == imported_view),
+            "{err:?}"
+        );
+
+        let spend_with_unknown = StealthUtxoSpendKeyId {
+            account_key_id: KeyId::imported(999),
+            view_key_id: valid_view_key,
+            public_nonce,
+        };
+        let err = km
+            .sign_with_stealth_key::<_, _>(&spend_with_unknown, &seal_public_key, &tx)
+            .map(|_: SignatureOutput| ())
+            .unwrap_err();
+        assert!(
+            matches!(err, KeyManagerApiError::KeyNotFound { key_id } if key_id == KeyId::imported(999)),
+            "{err:?}"
+        );
+
+        for branch in [KeyBranch::ConfidentialMask, KeyBranch::StealthMask] {
+            let spend_key = StealthUtxoSpendKeyId {
+                account_key_id: valid_account_key,
+                view_key_id: KeyId::derived(branch, 0),
+                public_nonce,
+            };
+            let err = km
+                .sign_with_stealth_key::<_, _>(&spend_key, &seal_public_key, &tx)
+                .map(|_: SignatureOutput| ())
+                .unwrap_err();
+            assert!(matches!(err, KeyManagerApiError::InvalidKeyId { .. }), "{branch}: {err:?}");
+        }
+
+        let valid_spend_key = StealthUtxoSpendKeyId {
+            account_key_id: valid_account_key,
+            view_key_id: valid_view_key,
+            public_nonce,
+        };
+        let sig: SignatureOutput = km
+            .sign_with_stealth_key(&valid_spend_key, &seal_public_key, &tx)
+            .unwrap();
+        assert_ne!(sig.public_key, km.get_public_key(valid_account_key).unwrap().public_key);
+    }
 }

@@ -65,8 +65,10 @@ impl Config {
     }
 
     fn overrides_from_cli(&mut self, cli: &Cli) {
-        if let Commands::Start(ref overrides) = cli.command {
-            self.skip_registration = overrides.skip_registration;
+        if let Commands::Start(ref overrides) = cli.command &&
+            overrides.skip_registration
+        {
+            self.skip_registration = true;
         }
         if let Some(ref base_dir) = cli.common.base_dir {
             self.base_dir.clone_from(base_dir);
@@ -249,7 +251,7 @@ impl ExecutableConfig {
     pub fn get_executable_path(&self) -> Option<PathBuf> {
         self.execuable_path
             .clone()
-            .or_else(|| self.compile.as_ref().map(|c| c.target_dir().join(&c.package_name)))
+            .or_else(|| self.compile.as_ref().map(CompileConfig::bin_path))
     }
 }
 
@@ -280,7 +282,7 @@ impl CompileConfig {
     }
 }
 
-fn add_ext(path: PathBuf) -> PathBuf {
+pub(crate) fn add_ext(path: PathBuf) -> PathBuf {
     if cfg!(windows) {
         path.with_extension("exe")
     } else {

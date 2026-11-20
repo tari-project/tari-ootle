@@ -477,18 +477,20 @@ impl InstanceManager {
 
     pub async fn wait(&mut self, id: InstanceId) -> anyhow::Result<ExitStatus> {
         let instance = self.get_instance_mut(id).ok_or_else(|| anyhow!("Instance not found"))?;
-        let status = instance.child_mut().wait().await?;
-        Ok(status)
+        instance.wait().await
     }
 
     pub async fn start_instance(&mut self, id: InstanceId, executable: &Executable) -> anyhow::Result<()> {
         let instance = self
-            .instances()
+            .instances_mut()
             .find(|i| i.id() == id)
             .ok_or_else(|| anyhow!("Instance not found"))?;
 
+        instance.terminate().await?;
+
         let instance_type = instance.instance_type();
         let instance_name = instance.name().to_string();
+        let process_dir = instance.process_dir().clone();
         let settings = instance.settings().clone();
         let ports = instance.allocated_ports().clone();
         let envs = instance.envs().to_vec();
@@ -499,7 +501,7 @@ impl InstanceManager {
             executable,
             instance_type,
             instance_name,
-            None,
+            Some(process_dir),
             envs,
             settings,
             Some(ports),
@@ -722,6 +724,87 @@ mod tests {
             instance_type: InstanceType::MinoTariNode,
             path,
         }
+    }
+
+    #[tokio::test]
+    async fn start_instance_terminates_running_process_and_reuses_process_dir() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_path = temp_dir.path().to_path_buf();
+        let executable = stub_executable(&base_path).await;
+        let mut manager = InstanceManager::new(base_path.clone(), Network::LocalNet, HashMap::new(), vec![], 47400);
+
+        let id = manager
+            .fork_new(
+                &executable,
+                InstanceType::MinoTariNode,
+                "node-1".to_string(),
+                Some(PathBuf::from("custom-node-dir")),
+                vec![],
+                HashMap::new(),
+            )
+            .await
+            .unwrap();
+
+        let (first_pid, first_process_dir, first_base_path) = {
+            let instance = manager.get_instance_mut(id).unwrap();
+            assert!(instance.is_running());
+            (
+                instance.child().id().expect("running child must have a pid"),
+                instance.process_dir().clone(),
+                instance.base_path().clone(),
+            )
+        };
+        assert_eq!(first_process_dir, base_path.join("processes").join("custom-node-dir"));
+
+        manager.start_instance(id, &executable).await.unwrap();
+
+        assert_eq!(
+            nix::sys::signal::kill(nix::unistd::Pid::from_raw(first_pid as i32), None),
+            Err(nix::errno::Errno::ESRCH),
+            "previous child process should be terminated and reaped"
+        );
+
+        let instance = manager.get_instance_mut(id).unwrap();
+        assert!(instance.is_running());
+        let second_pid = instance.child().id().expect("restarted child must have a pid");
+        assert_ne!(first_pid, second_pid);
+        assert_eq!(instance.process_dir(), &first_process_dir);
+        assert_eq!(instance.base_path(), &first_base_path);
+
+        manager.stop_instance(id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn wait_records_exit_status_so_is_running_returns_false() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_path = temp_dir.path().to_path_buf();
+        let path = base_path.join("stub_create_key");
+        fs::write(&path, "#!/bin/sh\nexit 0\n").await.unwrap();
+        fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+            .await
+            .unwrap();
+        let executable = Executable {
+            instance_type: InstanceType::TariWalletDaemonCreateKey,
+            path,
+        };
+        let mut manager = InstanceManager::new(base_path, Network::LocalNet, HashMap::new(), vec![], 47500);
+
+        let id = manager
+            .fork_new(
+                &executable,
+                InstanceType::TariWalletDaemonCreateKey,
+                "create-key".to_string(),
+                None,
+                vec![],
+                HashMap::new(),
+            )
+            .await
+            .unwrap();
+
+        assert!(manager.get_instance_mut(id).unwrap().is_running());
+        let status = manager.wait(id).await.unwrap();
+        assert!(status.success());
+        assert!(!manager.get_instance_mut(id).unwrap().is_running());
     }
 
     #[tokio::test]

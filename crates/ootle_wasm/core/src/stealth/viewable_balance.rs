@@ -4,8 +4,12 @@
 //! ElGamal viewable-balance proof generation and decryption.
 
 use ootle_byte_type::ConvertFromByteType;
-use tari_crypto::ristretto::pedersen::PedersenCommitment;
-use tari_engine_types::crypto::validate_elgamal_verifiable_balance_proof;
+use tari_crypto::{
+    commitment::HomomorphicCommitmentFactory,
+    keys::PublicKey,
+    ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment},
+};
+use tari_engine_types::crypto::{get_commitment_factory, validate_elgamal_verifiable_balance_proof};
 use tari_ootle_wallet_crypto::{
     GenerateValueLookup,
     viewable_balance_proof::generate_elgamal_viewable_balance_proof as crypto_generate,
@@ -35,6 +39,11 @@ pub fn generate_elgamal_viewable_balance_proof(
     let commitment = PedersenCommitment::convert_from_byte_type(&commitment_bytes)
         .map_err(|e| OotleWasmError::InvalidCommitment(e.to_string()))?;
     let view_key = public_key_from_bytes(view_public_key)?;
+    if !get_commitment_factory().open_value(&mask, amount, &commitment) {
+        return Err(OotleWasmError::InvalidCommitment(
+            "commitment does not match the supplied mask and amount".to_string(),
+        ));
+    }
 
     let proof =
         crypto_generate(&mask, amount, &commitment, &view_key).map_err(|e| OotleWasmError::Stealth(e.to_string()))?;
@@ -72,6 +81,11 @@ pub fn decrypt_elgamal_viewable_balance(
         .map_err(|e| OotleWasmError::InvalidCommitment(e.to_string()))?;
     let view_pk = public_key_from_bytes(view_public_key)?;
     let view_sk = secret_key_from_bytes(view_secret_key)?;
+    if RistrettoPublicKey::from_secret_key(&view_sk) != view_pk {
+        return Err(OotleWasmError::InvalidSecretKey(
+            "view_secret_key does not match view_public_key".to_string(),
+        ));
+    }
 
     let verifiable = validate_elgamal_verifiable_balance_proof(&commitment, Some(&view_pk), Some(&proof))
         .map_err(|e| OotleWasmError::Stealth(e.to_string()))?
@@ -152,5 +166,33 @@ mod tests {
             decrypt_elgamal_viewable_balance(&proof_json, &commitment, view_pk.as_bytes(), view_sk.as_bytes(), 10, 5)
                 .unwrap_err();
         assert!(matches!(err, OotleWasmError::Stealth(_)));
+    }
+
+    #[test]
+    fn rejects_commitment_mismatch_when_generating_proof() {
+        let mut rng = rand::rng();
+        let mask = RistrettoSecretKey::random(&mut rng);
+        let (_view_sk, view_pk) = RistrettoPublicKey::random_keypair(&mut rng);
+        let commitment = get_commitment_factory().commit_value(&mask, 100).to_byte_type();
+
+        let err = generate_elgamal_viewable_balance_proof(
+            mask.as_bytes(),
+            99,
+            commitment.as_bytes(),
+            view_pk.as_bytes(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, OotleWasmError::InvalidCommitment(_)));
+    }
+
+    #[test]
+    fn rejects_mismatched_view_key_pair_when_decrypting() {
+        let (_mask, view_pk, _view_sk, commitment, proof_json) = build_proof(42);
+        let wrong_sk = RistrettoSecretKey::random(&mut rand::rng());
+
+        let err =
+            decrypt_elgamal_viewable_balance(&proof_json, &commitment, view_pk.as_bytes(), wrong_sk.as_bytes(), 0, 100)
+                .unwrap_err();
+        assert!(matches!(err, OotleWasmError::InvalidSecretKey(_)));
     }
 }

@@ -16,6 +16,7 @@
 
 use std::time::Duration;
 
+use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_ootle_wallet_sdk::storage::{CommittableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore};
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 
@@ -353,4 +354,12 @@ fn find_active_by_hash_returns_row_with_future_expiry() {
     let found = tx.api_key_find_active_by_hash("beefcafe").unwrap();
     assert!(found.is_some(), "non-expired key must surface");
     assert_eq!(found.unwrap().expires_at, Some(future));
+}
+
+#[test]
+fn api_key_get_by_id_missing_returns_not_found() {
+    let db = open_store();
+    let mut tx = db.create_read_tx().unwrap();
+    let err = tx.api_key_get_by_id(999_999).unwrap_err();
+    assert!(err.is_not_found_error(), "expected NotFound error, got {err:?}");
 }

@@ -36,7 +36,7 @@ use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_ootle_address::Network;
 use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
-    keypair::create_new_keypair,
+    keypair::{RistrettoKeypair, create_new_keypair},
     p2p_config::PeerSeedsConfig,
 };
 use tari_ootle_common_types::layer_one_transaction::{LayerOneTransactionDef, ValidatorRegistrationParams};
@@ -67,6 +67,8 @@ pub struct ValidatorNodeProcess {
     pub handle: task::JoinHandle<Result<(), anyhow::Error>>,
     pub temp_dir_path: PathBuf,
     pub shutdown: Shutdown,
+    /// Reused on respawn so the node keeps claiming fees to the same key.
+    pub fee_claim_public_key: RistrettoPublicKey,
 }
 
 impl ValidatorNodeProcess {
@@ -124,7 +126,6 @@ pub async fn spawn_validator_node(
     base_node_name: String,
     claim_account_name: Option<&str>,
 ) -> ValidatorNodeProcess {
-    let base_node_grpc_port = world.get_base_node(&base_node_name).grpc_port;
     let fee_claim_public_key = claim_account_name
         .map(|n| {
             let account = world.wallet_accounts.get(n).unwrap_or_else(|| {
@@ -132,12 +133,34 @@ pub async fn spawn_validator_node(
             });
             account.address.account_public_key().try_from_byte_type().unwrap()
         })
-        .unwrap_or_default();
-    let temp_dir = get_base_dir_for_scenario(
+        // A validator requires a fee claim key; scenarios that never claim fees get an unclaimed one
+        .unwrap_or_else(|| RistrettoKeypair::random(&mut rand::rng()).public_key().clone());
+    spawn_validator_node_with_fee_claim_key(world, validator_node_name, base_node_name, fee_claim_public_key).await
+}
+
+/// The data directory of validator node `validator_node_name` in the current scenario. A validator started with an
+/// identity file already in it runs under that identity.
+pub fn validator_node_dir(world: &TariWorld, validator_node_name: &str) -> PathBuf {
+    get_base_dir_for_scenario(
         "validator_node",
         world.current_scenario_name.as_ref().unwrap(),
-        &validator_node_name,
-    );
+        validator_node_name,
+    )
+}
+
+/// The path of the identity file a validator node started in `dir` loads, or creates if it is absent.
+pub fn validator_node_identity_file(dir: &Path) -> PathBuf {
+    dir.join("validator_node_id.json")
+}
+
+pub async fn spawn_validator_node_with_fee_claim_key(
+    world: &mut TariWorld,
+    validator_node_name: String,
+    base_node_name: String,
+    fee_claim_public_key: RistrettoPublicKey,
+) -> ValidatorNodeProcess {
+    let base_node_grpc_port = world.get_base_node(&base_node_name).grpc_port;
+    let temp_dir = validator_node_dir(world, &validator_node_name);
     let peer_seeds = collect_peer_seeds(world);
 
     spawn_validator_node_process(ValidatorSpawn {
@@ -147,6 +170,7 @@ pub async fn spawn_validator_node(
         fee_claim_public_key,
         peer_seeds,
         localnet_consensus_constants_file: world.consensus_constants_file.clone(),
+        epoch_oracle: world.epoch_oracle.clone().unwrap_or_default(),
     })
     .await
 }
@@ -154,7 +178,8 @@ pub async fn spawn_validator_node(
 /// Restart a previously-stopped validator node against its existing data directory.
 /// Takes the existing `temp_dir` / `base_node_grpc_port` from the VN being replaced;
 /// fresh p2p / json-rpc ports are OS-assigned. Keypair is loaded from the identity
-/// file so the VN's public key and L1 registration stay stable.
+/// file so the VN's public key and L1 registration stay stable, and the fee claim key is the
+/// one the VN first started with.
 ///
 /// Caller is responsible for re-wiring peers — this function does not touch
 /// `world.validator_nodes` for any other VN.
@@ -163,21 +188,16 @@ pub async fn respawn_validator_node(world: &mut TariWorld, validator_node_name: 
         .validator_nodes
         .shift_remove(&validator_node_name)
         .unwrap_or_else(|| panic!("Validator node {validator_node_name} not found for respawn"));
-    let fee_claim_public_key = world
-        .wallet_accounts
-        .values()
-        .next()
-        .map(|a| a.address.account_public_key().try_from_byte_type().unwrap())
-        .unwrap_or_default();
     let peer_seeds = collect_peer_seeds(world);
 
     spawn_validator_node_process(ValidatorSpawn {
         name: validator_node_name,
         temp_dir: old.temp_dir_path,
         base_node_grpc_port: old.base_node_grpc_port,
-        fee_claim_public_key,
+        fee_claim_public_key: old.fee_claim_public_key,
         peer_seeds,
         localnet_consensus_constants_file: world.consensus_constants_file.clone(),
+        epoch_oracle: world.epoch_oracle.clone().unwrap_or_default(),
     })
     .await
 }
@@ -197,6 +217,7 @@ struct ValidatorSpawn {
     fee_claim_public_key: RistrettoPublicKey,
     peer_seeds: Vec<String>,
     localnet_consensus_constants_file: Option<PathBuf>,
+    epoch_oracle: EpochOracleConfig,
 }
 
 async fn spawn_validator_node_process(spawn: ValidatorSpawn) -> ValidatorNodeProcess {
@@ -207,17 +228,19 @@ async fn spawn_validator_node_process(spawn: ValidatorSpawn) -> ValidatorNodePro
         fee_claim_public_key,
         peer_seeds,
         localnet_consensus_constants_file,
+        epoch_oracle,
     } = spawn;
     let (port, json_rpc_port) = get_os_assigned_ports();
     let shutdown = Shutdown::new();
     let handle = task::spawn({
         let shutdown = shutdown.clone();
         let temp_dir = temp_dir.clone();
+        let fee_claim_public_key = fee_claim_public_key.clone();
         async move {
             let mut config = ApplicationConfig {
                 common: CommonConfig::default(),
                 validator_node: ValidatorNodeConfig::default(),
-                epoch_oracle: EpochOracleConfig::default(),
+                epoch_oracle,
                 peer_seeds: PeerSeedsConfig::default(),
                 network: Network::LocalNet,
             };
@@ -226,7 +249,7 @@ async fn spawn_validator_node_process(spawn: ValidatorSpawn) -> ValidatorNodePro
             config.network = Network::LocalNet;
             config.validator_node.set_base_path(&temp_dir);
             config.validator_node.shard_key_file = temp_dir.join("shard_key.json");
-            config.validator_node.identity_file = temp_dir.join("validator_node_id.json");
+            config.validator_node.identity_file = validator_node_identity_file(&temp_dir);
             config.epoch_oracle.base_layer.base_node_grpc_url =
                 Some(format!("http://127.0.0.1:{}", base_node_grpc_port).parse().unwrap());
             config.validator_node.p2p.enable_mdns = false;
@@ -260,6 +283,7 @@ async fn spawn_validator_node_process(spawn: ValidatorSpawn) -> ValidatorNodePro
         json_rpc_port,
         temp_dir_path: temp_dir,
         shutdown,
+        fee_claim_public_key,
     }
 }
 

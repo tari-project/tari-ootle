@@ -22,7 +22,6 @@
 
 import PopupTitle from "@/components/PopupTitle";
 import { useAccountsList } from "@api/hooks/useAccounts";
-import { useKeysList } from "@api/hooks/useKeys";
 import {
   FormControl,
   FormControlLabel,
@@ -44,7 +43,6 @@ import {
   AccountInfo,
   getRejectReasonFromTransactionResult,
   GetValidatorFeesResponse,
-  KeyId,
   matchesTypeEnum,
   rejectReasonToString,
   substateIdToString,
@@ -60,6 +58,11 @@ interface FormState {
   shards: Array<number>;
   keyIndex: number | null;
   outputToRevealed: boolean;
+}
+
+interface ClaimKey {
+  index: bigint;
+  account: AccountInfo["account"];
 }
 
 const INITIAL_VALUES: FormState = {
@@ -83,8 +86,7 @@ export default function ClaimFees() {
   const [scannedFees, setScannedFees] = useState<GetValidatorFeesResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [validity, setValidity] = useState<{ [key: string]: boolean }>(INITIAL_VALIDITY);
-  const { data: dataAccountsList } = useAccountsList(0, 10);
-  const { data: dataKeysList } = useKeysList("account");
+  const { data: dataAccountsList } = useAccountsList(0, 1000);
   const { setPopup } = useAccountStore();
 
   const theme = useTheme();
@@ -98,7 +100,7 @@ export default function ClaimFees() {
   }, [validity]);
 
   const onClaimFeesKeyChange = (e: SelectChangeEvent<number>) => {
-    if (!dataKeysList) {
+    if (!dataAccountsList) {
       return;
     }
     const keyIndex = +e.target.value;
@@ -212,35 +214,14 @@ export default function ClaimFees() {
     }
   };
 
-  function extractKeyIndex(keyId: KeyId): bigint | null {
-    if ("Derived" in keyId) {
-      return BigInt(keyId.Derived.index);
+  // A validator's fees are claimed with the key of a derived account
+  const claimKeys: ClaimKey[] = (dataAccountsList?.accounts ?? []).flatMap((info: AccountInfo): ClaimKey[] => {
+    const keyId = info.account.owner_key_id;
+    if (keyId && "Derived" in keyId && keyId.Derived.key_branch === "account") {
+      return [{ index: BigInt(keyId.Derived.index), account: info.account }];
     }
-    return null;
-  }
-
-  const formatKey = ([keyId, publicKey, _isActive]: [KeyId, string, boolean]) => {
-    let account = dataAccountsList?.accounts.find((account: AccountInfo) =>
-      matchesTypeEnum(account.account.owner_key_id, keyId),
-    );
-
-    function displayKeyId(keyId: KeyId): string {
-      if ("Derived" in keyId) {
-        return `Derived:${keyId.Derived.index}`;
-      }
-      if ("Imported" in keyId) {
-        return `Imported:${keyId.Imported.local_key_id}`;
-      }
-      return JSON.stringify(keyId);
-    }
-
-    return (
-      <div>
-        <b>{displayKeyId(keyId)}</b> {publicKey}
-        <br></br>Account <i>{account?.account.name || "<None>"}</i>
-      </div>
-    );
-  };
+    return [];
+  });
 
   return (
     <div>
@@ -262,9 +243,12 @@ export default function ClaimFees() {
                 style={{ flexGrow: 1, minWidth: "200px" }}
                 disabled={disabled}
               >
-                {dataKeysList?.keys.map((account: [KeyId, string, boolean], i) => (
-                  <MenuItem key={i} value={extractKeyIndex(account[0])!.toString()}>
-                    {formatKey(account)}
+                {claimKeys.map(({ index, account }) => (
+                  <MenuItem key={index.toString()} value={index.toString()}>
+                    <div>
+                      <b>Derived:{index.toString()}</b> {account.owner_public_key}
+                      <br></br>Account <i>{account.name || "<None>"}</i>
+                    </div>
                   </MenuItem>
                 ))}
               </Select>

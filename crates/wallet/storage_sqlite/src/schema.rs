@@ -202,6 +202,7 @@ diesel::table! {
         decided_at -> Nullable<Timestamp>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+        authorizers -> Text,
     }
 }
 
@@ -317,6 +318,15 @@ diesel::table! {
         shard -> Nullable<Integer>,
         state_version -> Nullable<BigInt>,
         created_at -> Timestamp,
+        generation -> BigInt,
+    }
+}
+
+diesel::table! {
+    utxo_unheld_spends (id) {
+        id -> Integer,
+        resource_address -> Text,
+        commitment -> Text,
     }
 }
 
@@ -428,6 +438,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     transactions,
     trusted_validator_sets,
     utxo_process_queue,
+    utxo_unheld_spends,
     vault_locks,
     vaults,
     wallet_events,

@@ -6,12 +6,11 @@ use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
 use tari_ootle_common_types::engine_types::crypto::OutputBody;
 use tari_ootle_wallet_crypto::DecryptedData;
 use tari_template_lib_types::{
-    EncryptedData,
     crypto::PedersenCommitmentBytes,
     stealth::{RevealedOutput, StealthOutputsStatement, StealthTransferStatement},
 };
 
-use crate::stealth::{BurnClaimStatementSpec, Output, ResolvedStealthTransferSpec, error::StealthProviderError};
+use crate::stealth::{Output, ResolvedStealthTransferSpec, error::StealthProviderError};
 
 pub type StealthResult<T> = Result<T, StealthProviderError>;
 
@@ -72,11 +71,10 @@ pub(crate) trait InputDecryptor {
     ) -> StealthResult<DecryptedData>;
 }
 
-/// Cryptographic operations required to claim a Layer 1 (minotari) burn.
+/// The key required to claim a Layer 1 (minotari) burn.
 ///
-/// Unlike a regular stealth transfer (which decrypts inputs with the view-only key), a burn claim
-/// uses the account secret directly: the L1 burn output is a stealth output addressed to the
-/// claiming account, and only the account secret can derive the key that spends the minted UTXO.
+/// The L1 burn output names a stealth claim key derived from the claiming account's secret, and the
+/// engine accepts a claim only when that key signs it.
 ///
 /// A burn claim is inherently local-custody: [`derive_burn_claim_secret`](Self::derive_burn_claim_secret)
 /// hands out the key that seals the claim transaction, so unlike [`StealthStatementProvider`] this
@@ -86,31 +84,11 @@ pub trait BurnClaimKeyProvider {
     /// Derive the L1 burn-claim stealth secret `s = H(p·R) + p`, where `p` is the account secret and
     /// `R` is the burn proof's `sender_offset_public_key`.
     ///
-    /// This is the only key that satisfies the spend condition on the just-minted burn UTXO, so the
-    /// claim transaction must be sealed with it.
+    /// `S = s·G` is the claim key the burn output names, so the claim transaction must be signed with it.
     async fn derive_burn_claim_secret(
         &self,
         sender_offset_public_key: &RistrettoPublicKey,
     ) -> StealthResult<RistrettoSecretKey>;
-
-    /// Decrypt the L1 burn output's encrypted value and mask using the account secret and the burn
-    /// proof's `sender_offset_public_key`.
-    async fn decrypt_burn_claim_output(
-        &self,
-        encrypted_data: &EncryptedData,
-        commitment: &PedersenCommitmentBytes,
-        sender_offset_public_key: &RistrettoPublicKey,
-    ) -> StealthResult<DecryptedData>;
-
-    /// Build the statement that spends the minted burn UTXO into `spec.output`.
-    ///
-    /// The burn UTXO's mask is recovered from `spec.encrypted_data` internally, so — as with
-    /// [`StealthStatementProvider::create_transfer_statement`] — only the finished statement is
-    /// returned.
-    async fn create_burn_claim_statement(
-        &self,
-        spec: BurnClaimStatementSpec,
-    ) -> StealthResult<StealthTransferStatement>;
 }
 
 pub trait StealthSigner {

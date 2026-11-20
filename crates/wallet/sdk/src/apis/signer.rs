@@ -3,9 +3,23 @@
 
 use std::fmt;
 
-use tari_crypto::ristretto::RistrettoSecretKey;
+use ootle_byte_type::ToByteType;
+use tari_crypto::{
+    keys::PublicKey,
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+};
 use tari_ootle_common_types::signature::SignatureOutput;
-use tari_ootle_transaction::{IntoSigned, Signable};
+use tari_ootle_transaction::{
+    AuthorizationContext,
+    AuthorizerSet,
+    IntoSigned,
+    NotCurrentSchema,
+    SchemaVersion,
+    Signable,
+    UnsealedTransaction,
+    UnsignedTransaction,
+};
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     WalletSdkSpec,
@@ -33,6 +47,44 @@ impl<'a, TSpec: WalletSdkSpec> SignerApi<'a, TSpec, ()> {
             key_manager: self.key_manager,
             context,
         }
+    }
+
+    /// Adds one authorization per key in `keys` and `stealth_keys` to `transaction`, under `seal_signer`.
+    ///
+    /// Every authorization signs over the full authorizer set, so every public key is resolved before anything
+    /// is signed. The set is the keys of `keys` and `stealth_keys` together with those of the authorizations
+    /// already attached, which must have been made over that same set. The list is kept in canonical order.
+    /// A `transaction` that is not [`SchemaVersion::CURRENT`] is refused.
+    pub fn authorize(
+        &self,
+        seal_signer: &RistrettoPublicKeyBytes,
+        keys: &[KeyId],
+        stealth_keys: &[StealthUtxoSpendKeyId],
+        transaction: UnsealedTransaction,
+    ) -> Result<UnsealedTransaction, SignerApiError<TSpec>> {
+        transaction.schema().ensure_current()?;
+        let mut authorizers = AuthorizerSet::from_signatures(transaction.body().signatures());
+        for key in keys {
+            authorizers.insert(self.key_manager.get_public_key(*key)?.public_key.to_byte_type());
+        }
+        let stealth_secrets = stealth_keys
+            .iter()
+            .map(|key| self.key_manager.generate_stealth_owner_key(key))
+            .collect::<Result<Vec<_>, _>>()?;
+        for secret in &stealth_secrets {
+            authorizers.insert(RistrettoPublicKey::from_secret_key(secret).to_byte_type());
+        }
+
+        let context = AuthorizationContext::new(seal_signer, &authorizers);
+        let (unsigned, mut signatures) = transaction.into_body().into_parts();
+        let unsigned = UnsignedTransaction::from_body(SchemaVersion::CURRENT, unsigned);
+        for key in keys {
+            signatures.push(self.key_manager.sign_with_context(*key, context, &unsigned)?);
+        }
+        for secret in &stealth_secrets {
+            signatures.push(self.key_manager.sign_with_explicit_key(secret, context, &unsigned)?);
+        }
+        Ok(unsigned.with_signatures(signatures))
     }
 }
 
@@ -122,6 +174,8 @@ pub enum SignerApiError<TSpec: WalletSdkSpec> {
     StoreError(#[from] WalletStorageError),
     #[error("Key manager API error: {0}")]
     KeyManagerError(#[from] KeyManagerApiError),
+    #[error(transparent)]
+    NotCurrentSchema(#[from] NotCurrentSchema),
 }
 
 impl<TSpec: WalletSdkSpec> fmt::Debug for SignerApiError<TSpec> {
@@ -130,6 +184,7 @@ impl<TSpec: WalletSdkSpec> fmt::Debug for SignerApiError<TSpec> {
             Self::KeyStoreError(e) => write!(f, "KeyStoreError: {:?}", e),
             Self::StoreError(e) => write!(f, "StoreError: {:?}", e),
             Self::KeyManagerError(e) => write!(f, "KeyManagerError: {:?}", e),
+            Self::NotCurrentSchema(e) => write!(f, "NotCurrentSchema: {:?}", e),
         }
     }
 }

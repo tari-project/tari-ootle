@@ -180,10 +180,7 @@ pub async fn handle_finish_registration(
     let jwt = context.jwt_api();
     let claims = jwt.generate_auth_claims(Permissions::from(BOOTSTRAP_PERMISSIONS.to_vec()))?;
     let token = jwt.grant(&claims)?;
-    let refresh_token = context
-        .refresh_token_store()
-        .new_token(claims.permissions, claims.exp)
-        .await;
+    let refresh_token = context.refresh_token_store().new_token(claims.permissions).await;
     let refresh_cookie = refresh_token.into_cookie(REFRESH_TOKEN_COOKIE);
     let cookie = CookieJar::new().add(refresh_cookie);
     context.notifier().notify(AuthLoginRequestEvent);

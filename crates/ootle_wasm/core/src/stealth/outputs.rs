@@ -22,15 +22,11 @@ use tari_ootle_wallet_crypto::{
     pay_to::PayTo,
     stealth::{create_outputs_statement, pay_to_output_authorization},
 };
-use tari_template_lib_types::{
-    Amount,
-    ResourceAddress,
-    crypto::{RangeProofBytes, RistrettoPublicKeyBytes},
-    stealth::RevealedOutput,
-};
+use tari_template_lib_types::{Amount, ResourceAddress, crypto::RangeProofBytes, stealth::RevealedOutput};
 
 use crate::{
     error::OotleWasmError,
+    hash::public_key_bytes_from_bytes,
     keys::public_key_from_bytes,
     stealth::types::{OutputWitnessJson, StealthOutputWitnessJson},
 };
@@ -74,13 +70,7 @@ pub fn generate_stealth_outputs_statement(
     let revealed_output = match revealed_output_amount_microtari {
         0 => None,
         amount => {
-            let receiver = RistrettoPublicKeyBytes::from_bytes(revealed_receiver).map_err(|e| {
-                OotleWasmError::InvalidByteLength {
-                    field: "revealed_receiver",
-                    expected: RistrettoPublicKeyBytes::length(),
-                    got: e.actual_size(),
-                }
-            })?;
+            let receiver = public_key_bytes_from_bytes(revealed_receiver)?;
             Some(RevealedOutput::new(Amount::from_u64(amount), receiver))
         },
     };
@@ -233,7 +223,7 @@ mod tests {
     }
 
     /// A stand-in receiver for a revealed output; the badge check that gives it meaning is the engine's.
-    fn a_receiver() -> RistrettoPublicKeyBytes {
+    fn a_receiver() -> tari_template_lib_types::crypto::RistrettoPublicKeyBytes {
         let nonce = tari_crypto::ristretto::RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(5u64));
         nonce.to_byte_type()
     }
@@ -254,6 +244,12 @@ mod tests {
         assert!(stmt.outputs.is_empty());
         assert!(stmt.agg_range_proof.is_empty());
         assert_eq!(result.aggregated_output_mask, vec![0u8; 32]);
+    }
+
+    #[test]
+    fn generate_outputs_rejects_non_canonical_revealed_receiver() {
+        let err = generate_stealth_outputs_statement("[]", 100, &[0xff; 32]).unwrap_err();
+        assert!(matches!(err, OotleWasmError::InvalidPublicKey(_)));
     }
 
     #[test]

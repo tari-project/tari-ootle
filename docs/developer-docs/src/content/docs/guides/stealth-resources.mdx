@@ -720,9 +720,11 @@ This has implications for minting and burning:
   engine needs to update the total supply. You then use a stealth transfer to convert the bucket into
   stealth UTXOs.
 - **Burning** a stealth UTXO requires a `CommitmentValueProof`. This proof reveals the value of the UTXO being burnt
-  so that the total supply can be decremented. It also limits burns to the UTXO owner (who proves knowledge of the
-  commitment mask) or the holder of the secret view key (who proves the value against the encrypted viewable
-  balance), since only they can construct the proof. A frozen UTXO cannot be burnt.
+  so that the total supply can be decremented. It also limits burns to the UTXO owner or the holder of the secret
+  view key. The owner proves knowledge of the commitment mask and must also sign with the UTXO's spend key, because
+  the sender who created the output knows the mask too. A UTXO with only a script path has no spend key, so its
+  owner spends it into a bucket and burns that instead. The view key holder proves the value against the encrypted
+  viewable balance and needs no signature. A frozen UTXO cannot be burnt.
 - The same applies to **burning a bucket** that holds confidential commitments: use
   `Bucket::burn_with_value_proofs` with one `CommitmentValueProof` per commitment, and to **minting**
   commitments via `mint_confidential`, which requires a proof for each commitment the statement mints.
@@ -738,7 +740,7 @@ ResourceBuilder::stealth()
 
 <Aside type="note">
 `burn_utxo` requires a `CommitmentValueProof` even when total supply tracking is disabled, because the proof is
-what shows the burner holds the UTXO's opening or the view key.
+what shows the burner holds the UTXO's opening (together with its spend key) or the view key.
 </Aside>
 
 ---

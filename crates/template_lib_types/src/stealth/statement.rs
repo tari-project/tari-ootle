@@ -157,7 +157,6 @@ pub struct StealthInputsStatement {
 
 impl StealthInputsStatement {
     pub fn new(inputs: Vec<StealthInput>, revealed_amount: Amount) -> Self {
-        assert!(!revealed_amount.is_negative(), "Revealed amount must be non-negative");
         assert!(
             !inputs.is_empty() || !revealed_amount.is_zero(),
             "At least one input or a revealed amount must be provided"

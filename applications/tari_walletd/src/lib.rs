@@ -149,7 +149,7 @@ pub async fn run_tari_ootle_walletd(
     }
 
     let jrpc_address = config.ootle_wallet_daemon.json_rpc_address;
-    let signaling_server_address = config.ootle_wallet_daemon.signaling_server_address.unwrap();
+    let signaling_server_address = config.ootle_wallet_daemon.signaling_server_address;
 
     // webauthn
 
@@ -169,9 +169,12 @@ pub async fn run_tari_ootle_walletd(
     let authenticator = create_authenticator(&config.ootle_wallet_daemon, wallet_store.clone())?;
     let webauthn_service = authenticator.webauthn_service().cloned();
     if config.ootle_wallet_daemon.enable_webrtc {
+        let addr_display = signaling_server_address
+            .map(|addr| addr.to_string())
+            .unwrap_or_else(|| "unconfigured".to_string());
         info!(
             target: LOG_TARGET,
-            "🔌 WebRTC is enabled: apps can connect through the signaling server at {signaling_server_address}"
+            "🔌 WebRTC is enabled: apps can connect through the signaling server at {addr_display}"
         );
     }
 

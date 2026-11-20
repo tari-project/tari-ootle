@@ -57,7 +57,7 @@ const LOG_TARGET: &str = "tari::ootle::wallet_daemon::json_rpc";
 
 pub async fn spawn_listener(
     preferred_address: SocketAddr,
-    signaling_server_address: SocketAddr,
+    signaling_server_address: Option<SocketAddr>,
     context: HandlerContext,
 ) -> anyhow::Result<(SocketAddr, task::JoinHandle<anyhow::Result<()>>)> {
     let shutdown_signal = context.shutdown_signal().clone();
@@ -86,7 +86,7 @@ pub async fn spawn_listener(
     Ok((listen_addr, task))
 }
 
-fn router(listen_address: SocketAddr, signaling_server_address: SocketAddr, context: HandlerContext) -> Router {
+fn router(listen_address: SocketAddr, signaling_server_address: Option<SocketAddr>, context: HandlerContext) -> Router {
     let enable_permissive_cors = context.config().enable_permissive_cors;
     let allowed_hosts = allowed_hosts(context.config());
     let router = Router::new()
@@ -146,7 +146,7 @@ fn describe_request(request: &JsonRpcExtractor) -> String {
 #[allow(clippy::too_many_lines)]
 async fn handler(
     Extension(context): Extension<Arc<HandlerContext>>,
-    Extension(addresses): Extension<(SocketAddr, SocketAddr)>,
+    Extension(addresses): Extension<(SocketAddr, Option<SocketAddr>)>,
     authorization_header: Option<TypedHeader<headers::Authorization<Bearer>>>,
     cookie_jar: CookieJar,
     value: JsonRpcExtractor,
@@ -594,7 +594,7 @@ mod tests {
         let occupied_addr = occupied.local_addr().unwrap();
         let signaling_addr: SocketAddr = "127.0.0.1:9100".parse().unwrap();
 
-        let (listen_addr, _handle) = spawn_listener(occupied_addr, signaling_addr, daemon.context.clone())
+        let (listen_addr, _handle) = spawn_listener(occupied_addr, Some(signaling_addr), daemon.context.clone())
             .await
             .unwrap();
         assert_ne!(listen_addr, occupied_addr);

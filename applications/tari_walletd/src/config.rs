@@ -214,6 +214,11 @@ impl WalletDaemonConfig {
         if self.cookie_auth {
             self.parsed_cookie_scopes()?;
         }
+        if self.enable_webrtc && self.signaling_server_address.is_none() {
+            return Err(anyhow::anyhow!(
+                "signaling_server_address must be configured when enable_webrtc is true"
+            ));
+        }
         if self.default_transaction_validity_epochs > IMPLAUSIBLE_TRANSACTION_VALIDITY_EPOCHS {
             log::warn!(
                 target: LOG_TARGET,
@@ -593,5 +598,22 @@ mod tests {
             ..Default::default()
         };
         disabled.validate().unwrap();
+    }
+
+    #[test]
+    fn signaling_server_address_is_required_only_when_webrtc_is_enabled() {
+        let disabled = WalletDaemonConfig {
+            enable_webrtc: false,
+            signaling_server_address: None,
+            ..Default::default()
+        };
+        disabled.validate().unwrap();
+
+        let enabled_missing = WalletDaemonConfig {
+            enable_webrtc: true,
+            signaling_server_address: None,
+            ..Default::default()
+        };
+        assert!(enabled_missing.validate().is_err());
     }
 }

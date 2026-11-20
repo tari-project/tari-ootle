@@ -5695,6 +5695,7 @@ mod tests {
                 ComponentAccessRules::new(),
                 None,
                 UpdateRule::Locked,
+                RulesUpdater::Locked,
             )
             .unwrap();
         runtime

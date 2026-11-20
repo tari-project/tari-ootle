@@ -270,18 +270,33 @@ pub fn declare_inputs<I: IntoIterator<Item = InputDeclaration>>(inputs: &mut Ind
 /// substate twice has no single meaning: keeping either one would silently discard the other's intent.
 pub fn deserialize_input_declarations<'de, D>(deserializer: D) -> Result<IndexSet<InputDeclaration>, D::Error>
 where D: serde::Deserializer<'de> {
-    let decls = Vec::<InputDeclaration>::deserialize(deserializer)?;
-    let mut set = IndexSet::<InputDeclaration>::with_capacity(decls.len());
-    for decl in decls {
-        if let Some(existing) = set.get(decl.substate_id()) {
-            return Err(serde::de::Error::custom(format!(
-                "input {} is declared more than once",
-                existing.substate_id()
-            )));
+    struct InputDeclarationsVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for InputDeclarationsVisitor {
+        type Value = IndexSet<InputDeclaration>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a sequence of unique input declarations")
         }
-        set.insert(decl);
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where A: serde::de::SeqAccess<'de> {
+            let cap = seq.size_hint().unwrap_or(0).min(64);
+            let mut set = IndexSet::<InputDeclaration>::with_capacity(cap);
+            while let Some(decl) = seq.next_element::<InputDeclaration>()? {
+                if let Some(existing) = set.get(decl.substate_id()) {
+                    return Err(serde::de::Error::custom(format!(
+                        "input {} is declared more than once",
+                        existing.substate_id()
+                    )));
+                }
+                set.insert(decl);
+            }
+            Ok(set)
+        }
     }
-    Ok(set)
+
+    deserializer.deserialize_seq(InputDeclarationsVisitor)
 }
 
 #[derive(Debug, Clone, Copy)]

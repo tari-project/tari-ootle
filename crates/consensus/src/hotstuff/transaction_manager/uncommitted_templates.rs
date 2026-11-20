@@ -104,6 +104,7 @@ impl UncommittedTemplateStore {
 
     /// Records the templates published in every block descended from `committed` whose diff is saved.
     pub fn rebuild<TTx: StateStoreReadTransaction>(&self, tx: &TTx, committed: &BlockId) -> Result<(), StorageError> {
+        self.blocks.write().unwrap().clear();
         let mut parents = vec![*committed];
         while let Some(parent) = parents.pop() {
             for child in tx.blocks_get_pending_ids_by_parent(&parent)? {
@@ -244,6 +245,7 @@ mod tests {
         .unwrap();
 
         let store = UncommittedTemplateStore::default();
+        store.record(&leaf(9), &[publishes(9)]);
         db.with_read_tx(|tx| store.rebuild(tx, committed.id())).unwrap();
         assert_eq!(recorded(&store), vec![NodeHeight(2), NodeHeight(2)]);
     }

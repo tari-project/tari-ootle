@@ -1488,6 +1488,38 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .collect()
     }
 
+    fn stealth_outputs_get_live_resources(
+        &mut self,
+        account: &ComponentAddress,
+    ) -> Result<HashSet<ResourceAddress>, WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_get_live_resources";
+        use crate::schema::{accounts, stealth_outputs};
+
+        let resources = stealth_outputs::table
+            .inner_join(accounts::table.on(accounts::id.eq(stealth_outputs::owner_account_id)))
+            .select(stealth_outputs::resource_address)
+            .distinct()
+            .filter(accounts::address.eq(account.to_string()))
+            .filter(stealth_outputs::status.eq_any([
+                OutputStatus::Unspent.as_key_str(),
+                OutputStatus::LockedForSpend.as_key_str(),
+                OutputStatus::LockedUnconfirmed.as_key_str(),
+            ]))
+            .get_results::<String>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        resources
+            .into_iter()
+            .map(|resource| {
+                resource.parse().map_err(|e| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "resource_address",
+                    details: format!("Corrupt db: invalid resource address '{resource}': {e}"),
+                })
+            })
+            .collect()
+    }
+
     fn transaction_request_get(
         &mut self,
         id: TransactionRequestId,

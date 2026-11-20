@@ -3,7 +3,7 @@
 
 use tari_bor::BorError;
 use tari_engine_types::{commit_result::ExecutionFailureCode, indexed_value::IndexedValueError};
-use tari_template_abi::{TEMPLATE_DEF_CUSTOM_SECTION, version::WasmAbiVersion};
+use tari_template_abi::{FunctionIdent, TEMPLATE_DEF_CUSTOM_SECTION, version::WasmAbiVersion};
 use wasmer::{ExportError, InstantiationError, MemoryAccessError};
 
 use crate::runtime::RuntimeError;
@@ -111,6 +111,14 @@ pub enum WasmValidationError {
     TemplateNameTooLong { name: String, max_length: usize },
     #[error("Function name {name} is too long, maximum length is {max_length}")]
     FunctionNameTooLong { name: String, max_length: usize },
+    #[error("Template declares duplicate function `{name}`")]
+    DuplicateFunctionName { name: String },
+    #[error("Functions `{first}` and `{second}` share function identifier {ident:#010x}")]
+    FunctionIdentCollision {
+        first: String,
+        second: String,
+        ident: FunctionIdent,
+    },
     #[error("Function {name} contained too many arguments, maximum is {max_args}, but got {num_args}")]
     FunctionTooManyArguments {
         name: String,
@@ -242,6 +250,8 @@ impl WasmValidationError {
         match self {
             Self::TemplateNameTooLong { .. } |
             Self::FunctionNameTooLong { .. } |
+            Self::DuplicateFunctionName { .. } |
+            Self::FunctionIdentCollision { .. } |
             Self::FunctionTooManyArguments { .. } |
             Self::FunctionTooManyTupleReturn { .. } |
             Self::TooManyFunctions { .. } |

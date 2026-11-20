@@ -229,7 +229,8 @@ pub enum Subcommand {
         name: Option<String>,
         #[clap(long, alias = "key")]
         key_index: Option<u64>,
-        #[clap(long)]
+        /// Accepted so that scripts which pass it keep working; it has no effect.
+        #[clap(long, hide = true)]
         set_active: bool,
         #[clap(long, alias = "output", short = 'o')]
         output_path: Option<PathBuf>,

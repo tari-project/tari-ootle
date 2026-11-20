@@ -164,6 +164,23 @@ pub enum Instruction {
         #[n(0)]
         proof: WorkspaceOffsetId,
     },
+    /// Replaces every method access rule of `component`. Permitted when the transaction satisfies the component's
+    /// rules updater (`Owner` or `AccessRule`); refused when it is `Locked` or `TemplateManaged`.
+    #[n(18)]
+    SetComponentAccessRules {
+        #[n(0)]
+        component: ComponentReference,
+        #[n(1)]
+        access_rules: ComponentAccessRules,
+    },
+    /// Replaces the owner rule of `component`, under the same rules updater as `SetComponentAccessRules`.
+    #[n(19)]
+    SetComponentOwnerRule {
+        #[n(0)]
+        component: ComponentReference,
+        #[n(1)]
+        owner_rule: OwnerRule,
+    },
 }
 
 impl Instruction {
@@ -225,7 +242,9 @@ impl Instruction {
             Self::StealthTransfer { .. } |
             Self::PayFeeFromBucket { .. } |
             Self::AuthorizeProof { .. } |
-            Self::DropProofAuthorization { .. } => {},
+            Self::DropProofAuthorization { .. } |
+            Self::SetComponentAccessRules { .. } |
+            Self::SetComponentOwnerRule { .. } => {},
         }
         out
     }
@@ -272,7 +291,9 @@ impl Instruction {
             Self::StealthTransfer { .. } |
             Self::PayFeeFromBucket { .. } |
             Self::AuthorizeProof { .. } |
-            Self::DropProofAuthorization { .. } => {},
+            Self::DropProofAuthorization { .. } |
+            Self::SetComponentAccessRules { .. } |
+            Self::SetComponentOwnerRule { .. } => {},
         }
     }
 
@@ -305,18 +326,23 @@ impl Instruction {
             Self::UpdateComponentTemplate { .. } |
             Self::PutIntoBucket { .. } |
             Self::AuthorizeProof { .. } |
-            Self::DropProofAuthorization { .. } => false,
+            Self::DropProofAuthorization { .. } |
+            Self::SetComponentAccessRules { .. } |
+            Self::SetComponentOwnerRule { .. } => false,
         }
     }
 
     /// Whether this instruction is permitted inside a transaction's fee instructions.
     ///
     /// The fee intent runs on a flat compute credit and its writes commit even when the main intent fails, so it
-    /// holds only the work of funding the fee. Publishing a template and changing a component's template are main
-    /// intent work, funded by the fee already paid.
+    /// holds only the work of funding the fee. Publishing a template and changing a component's template or rules are
+    /// main intent work, funded by the fee already paid.
     pub fn is_allowed_in_fee_intent(&self) -> bool {
         match self {
-            Self::PublishTemplate { .. } | Self::UpdateComponentTemplate { .. } => false,
+            Self::PublishTemplate { .. } |
+            Self::UpdateComponentTemplate { .. } |
+            Self::SetComponentAccessRules { .. } |
+            Self::SetComponentOwnerRule { .. } => false,
             Self::CreateAccount { .. } |
             Self::CallFunction { .. } |
             Self::CallMethod { .. } |
@@ -404,6 +430,9 @@ impl Instruction {
             },
             Self::AuthorizeProof { proof } | Self::DropProofAuthorization { proof } => {
                 proof.remap_id(id_offset);
+            },
+            Self::SetComponentAccessRules { component, .. } | Self::SetComponentOwnerRule { component, .. } => {
+                component.remap_workspace_id(id_offset);
             },
             Self::UpdateComponentTemplate { component, migrate, .. } => {
                 component.remap_workspace_id(id_offset);
@@ -560,6 +589,23 @@ impl Display for Instruction {
                     component,
                     migrate.display(),
                     new_template
+                )
+            },
+            Self::SetComponentAccessRules {
+                component,
+                access_rules,
+            } => {
+                write!(
+                    f,
+                    "SetComponentAccessRules {{ component: {}, access_rules: {:?} }}",
+                    component, access_rules
+                )
+            },
+            Self::SetComponentOwnerRule { component, owner_rule } => {
+                write!(
+                    f,
+                    "SetComponentOwnerRule {{ component: {}, owner_rule: {:?} }}",
+                    component, owner_rule
                 )
             },
         }

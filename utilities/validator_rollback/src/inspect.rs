@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use clap::Args as ClapArgs;
 
-use crate::audit::{AuditReader, AuditRecord};
+use crate::audit::{AuditReader, AuditRecord, FORMAT_VERSION};
 
 #[derive(Debug, ClapArgs)]
 pub struct Args {
@@ -25,7 +25,7 @@ pub fn run(args: Args) -> anyhow::Result<()> {
         let record = record?;
         match record {
             AuditRecord::Header(h) => {
-                println!("  Format version: 1");
+                println!("  Format version: {FORMAT_VERSION}");
                 println!(
                     "  Generated:      unix={}  {}",
                     h.generated_at_unix_secs,

@@ -73,6 +73,10 @@ impl GlobalIp for std::net::Ipv6Addr {
     // Note that contrary to `Ipv4Addr::is_global_ip` this currently checks for global scope
     // rather than global reachability.
     fn is_global_ip(&self) -> bool {
+        if let Some(ipv4) = self.to_ipv4_mapped() {
+            return ipv4.is_global_ip();
+        }
+
         // Copied from the unstable method `std::net::Ipv6Addr::is_unicast`.
         fn is_unicast(addr: &std::net::Ipv6Addr) -> bool {
             !addr.is_multicast()
@@ -89,6 +93,10 @@ impl GlobalIp for std::net::Ipv6Addr {
         fn is_documentation(addr: &std::net::Ipv6Addr) -> bool {
             (addr.segments()[0] == 0x2001) && (addr.segments()[1] == 0xdb8)
         }
+        // Copied from the unstable method `std::net::Ipv6Addr::is_benchmarking`.
+        fn is_benchmarking(addr: &std::net::Ipv6Addr) -> bool {
+            (addr.segments()[0] == 0x2001) && (addr.segments()[1] == 0x2) && (addr.segments()[2] == 0)
+        }
 
         // Copied from the unstable method `std::net::Ipv6Addr::is_unicast_global`.
         fn is_unicast_global(addr: &std::net::Ipv6Addr) -> bool {
@@ -97,7 +105,8 @@ impl GlobalIp for std::net::Ipv6Addr {
                 !is_unicast_link_local(addr) &&
                 !is_unique_local(addr) &&
                 !addr.is_unspecified() &&
-                !is_documentation(addr)
+                !is_documentation(addr) &&
+                !is_benchmarking(addr)
         }
 
         // Variation of unstable method [`std::net::Ipv6Addr::multicast_scope`] that instead of the
@@ -151,5 +160,20 @@ mod tests {
 
         let local_multicast: Multiaddr = "/ip6/ff02::1/tcp/18000".parse().unwrap();
         assert!(!local_multicast.is_global_ip());
+
+        let benchmarking: Multiaddr = "/ip6/2001:2::1/tcp/18000".parse().unwrap();
+        assert!(!benchmarking.is_global_ip());
+
+        let mapped_loopback: Multiaddr = "/ip6/::ffff:127.0.0.1/tcp/18000".parse().unwrap();
+        assert!(!mapped_loopback.is_global_ip());
+
+        let mapped_private: Multiaddr = "/ip6/::ffff:192.168.1.1/tcp/18000".parse().unwrap();
+        assert!(!mapped_private.is_global_ip());
+
+        let mapped_link_local: Multiaddr = "/ip6/::ffff:169.254.1.1/tcp/18000".parse().unwrap();
+        assert!(!mapped_link_local.is_global_ip());
+
+        let mapped_global: Multiaddr = "/ip6/::ffff:8.8.8.8/tcp/18000".parse().unwrap();
+        assert!(mapped_global.is_global_ip());
     }
 }

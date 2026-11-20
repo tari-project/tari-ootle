@@ -222,6 +222,40 @@ pub mod dynamic_hex {
         T::try_from(bytes.as_ref())
             .map_err(|_| Error::custom(format!("Failed to convert bytes to type: {}", any::type_name::<T>())))
     }
+
+    /// Deserializes at most `max_len` bytes, rejecting longer input before decoding or copying it.
+    ///
+    /// Human-readable formats carry a hex string whose length is checked against `max_len * 2` before hex decoding.
+    /// Binary formats use [`BytesVisitor::with_max_len`].
+    pub fn deserialize_max_len<'de, D>(d: D, max_len: usize) -> Result<Vec<u8>, D::Error>
+    where D: Deserializer<'de> {
+        if d.is_human_readable() {
+            return d.deserialize_str(BoundedHexVisitor { max_len });
+        }
+
+        let bytes = d.deserialize_byte_buf(BytesVisitor::with_max_len(max_len))?;
+        Ok(bytes.into())
+    }
+
+    struct BoundedHexVisitor {
+        max_len: usize,
+    }
+
+    impl Visitor<'_> for BoundedHexVisitor {
+        type Value = Vec<u8>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            write!(formatter, "a hex string of at most {} bytes", self.max_len)
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where E: Error {
+            if v.len() > self.max_len.saturating_mul(2) {
+                return Err(E::invalid_length(v.len().div_ceil(2), &self));
+            }
+            bytes_from_hex(v).map_err(E::custom)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -258,6 +292,56 @@ mod tests {
             json["pk"].as_str().expect("string"),
             "0101010101010101010101010101010101010101010101010101010101010101"
         );
+    }
+
+    #[derive(Deserialize, Debug)]
+    struct BoundedCase {
+        #[serde(deserialize_with = "deserialize_max_3")]
+        bytes: Vec<u8>,
+    }
+
+    fn deserialize_max_3<'de, D>(d: D) -> Result<Vec<u8>, D::Error>
+    where D: Deserializer<'de> {
+        dynamic_hex::deserialize_max_len(d, 3)
+    }
+
+    #[test]
+    fn dynamic_hex_deserialize_max_len_json() {
+        let ok: BoundedCase = serde_json::from_str(r#"{"bytes":"010203"}"#).unwrap();
+        assert_eq!(ok.bytes, [1, 2, 3]);
+
+        let err = serde_json::from_str::<BoundedCase>(r#"{"bytes":"01020304"}"#).unwrap_err();
+        assert!(err.to_string().contains("at most 3 bytes"), "{err}");
+
+        // The length check runs before hex decoding, so invalid hex that is too long reports the length
+        let err = serde_json::from_str::<BoundedCase>(r#"{"bytes":"zzzzzzzz"}"#).unwrap_err();
+        assert!(err.to_string().contains("at most 3 bytes"), "{err}");
+
+        let err = serde_json::from_str::<BoundedCase>(r#"{"bytes":"0102030"}"#).unwrap_err();
+        assert!(err.to_string().contains("at most 3 bytes"), "{err}");
+
+        // A JSON byte array is rejected; the human-readable form is a hex string only
+        assert!(serde_json::from_str::<BoundedCase>(r#"{"bytes":[1,2,3]}"#).is_err());
+    }
+
+    #[test]
+    fn dynamic_hex_deserialize_max_len_cbor() {
+        #[derive(Serialize)]
+        struct Raw {
+            #[serde(with = "super::dynamic_hex")]
+            bytes: Vec<u8>,
+        }
+
+        let ok = tari_bor::serde_codec::to_vec(&Raw { bytes: vec![1, 2, 3] }).unwrap();
+        let decoded: BoundedCase = tari_bor::serde_codec::from_slice(&ok).unwrap();
+        assert_eq!(decoded.bytes, [1, 2, 3]);
+
+        let oversized = tari_bor::serde_codec::to_vec(&Raw {
+            bytes: vec![1, 2, 3, 4],
+        })
+        .unwrap();
+        let err = tari_bor::serde_codec::from_slice::<BoundedCase>(&oversized).unwrap_err();
+        assert!(err.to_string().contains("at most 3 bytes"), "{err}");
     }
 
     #[test]

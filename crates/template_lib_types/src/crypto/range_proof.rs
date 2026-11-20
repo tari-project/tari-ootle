@@ -93,38 +93,7 @@ impl TryFrom<Vec<u8>> for RangeProofBytes {
 #[cfg(feature = "serde")]
 fn serde_validated_range_proof_deserialize_impl<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
 where D: serde::Deserializer<'de> {
-    if deserializer.is_human_readable() {
-        struct RangeProofHexVisitor;
-
-        impl serde::de::Visitor<'_> for RangeProofHexVisitor {
-            type Value = Vec<u8>;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                write!(
-                    formatter,
-                    "a hex string of at most {} bytes",
-                    RangeProofBytes::MAX_LENGTH
-                )
-            }
-
-            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-            where E: serde::de::Error {
-                if v.len() > RangeProofBytes::MAX_LENGTH * 2 {
-                    return Err(E::custom(RangeProofSizeExceeded {
-                        size: v.len().div_ceil(2),
-                    }));
-                }
-                crate::hex::bytes_from_hex(v).map_err(E::custom)
-            }
-        }
-
-        deserializer.deserialize_str(RangeProofHexVisitor)
-    } else {
-        let bytes = deserializer.deserialize_byte_buf(crate::serde_helpers::BytesVisitor::with_max_len(
-            RangeProofBytes::MAX_LENGTH,
-        ))?;
-        Ok(bytes.into())
-    }
+    crate::serde_helpers::dynamic_hex::deserialize_max_len(deserializer, RangeProofBytes::MAX_LENGTH)
 }
 
 #[derive(Debug)]

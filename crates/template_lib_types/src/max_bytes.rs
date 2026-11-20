@@ -8,10 +8,7 @@ use tari_template_abi::rust::{
 };
 
 #[cfg(feature = "serde")]
-use crate::{
-    hex::{bytes_from_hex, bytes_to_hex},
-    serde_helpers::BytesVisitor,
-};
+use crate::{hex::bytes_to_hex, serde_helpers::dynamic_hex};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
@@ -122,21 +119,9 @@ impl<const N: usize> serde::Serialize for MaxBytes<N> {
 impl<'de, const N: usize> serde::Deserialize<'de> for MaxBytes<N> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where D: serde::Deserializer<'de> {
-        if deserializer.is_human_readable() {
-            let s = String::deserialize(deserializer)?;
-            if s.len() > N * 2 {
-                return Err(serde::de::Error::custom(format!(
-                    "byte array length exceeds maximum of {}",
-                    N
-                )));
-            }
-            let bytes = bytes_from_hex(&s).map_err(serde::de::Error::custom)?;
-            MaxBytes::new_checked(bytes.into_boxed_slice())
-                .ok_or_else(|| serde::de::Error::custom(format!("byte array length exceeds maximum of {}", N)))
-        } else {
-            let bytes = deserializer.deserialize_byte_buf(BytesVisitor::with_max_len(N))?;
-            Ok(MaxBytes::new_checked(bytes.into_owned()).expect("length checked by BytesVisitor"))
-        }
+        let bytes = dynamic_hex::deserialize_max_len(deserializer, N)?;
+        MaxBytes::new_checked(bytes)
+            .ok_or_else(|| serde::de::Error::custom(format!("byte array length exceeds maximum of {}", N)))
     }
 }
 
@@ -224,7 +209,11 @@ mod tests {
         fn it_fails_to_deserialize_if_length_is_too_large() {
             let json = "\"010203040506\""; // 6 bytes, max is 5
             let err: serde_json::Error = serde_json::from_str::<MaxBytes<5>>(json).unwrap_err();
-            assert!(err.to_string().contains("byte array length exceeds maximum"));
+            assert!(err.to_string().contains("at most 5 bytes"), "{err}");
+
+            // Oversized input is rejected on length before the hex is decoded
+            let err = serde_json::from_str::<MaxBytes<5>>("\"zzzzzzzzzzzz\"").unwrap_err();
+            assert!(err.to_string().contains("at most 5 bytes"), "{err}");
 
             let bytes = MaxBytes::<5>(vec![1; 6].into_boxed_slice());
             let serialized = tari_bor::encode(&bytes).unwrap();

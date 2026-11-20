@@ -10,7 +10,7 @@ license.workspace = true
 [dependencies]
 tari_bor = { workspace = true, features = ["std"] }
 tari_template_lib_types = { workspace = true, features = ["serde"] }
-minicbor = { workspace = true, default-features = false, features = ["alloc", "derive"] }
+minicbor = { workspace = true, default-features = false, features = ["std", "derive"] }
 
 borsh = { workspace = true, optional = true, features = ["std"] }
 cargo_toml = "0.22"

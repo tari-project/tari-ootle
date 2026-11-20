@@ -860,6 +860,10 @@ where TSpec: WalletSdkSpec
         }
 
         for (account_address, resource_address) in touched_stealth_balances {
+            // The UTXO scanner scans only an account's associated resources, and only it sees later changes to the
+            // output (spend, freeze) when another wallet makes them.
+            self.associate_resource_with_account(&account_address, resource_address)
+                .await?;
             let revealed_balance = accounts_api
                 .get_vault_by_resource(&account_address, &resource_address)
                 .optional()?

@@ -252,6 +252,18 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
         amount: u64,
         nonce_secret: &RistrettoSecretKey,
     ) -> (UtxoId, Utxo) {
+        self.owned_utxo_of_resource(account, &STEALTH_TARI_RESOURCE_ADDRESS, amount, nonce_secret)
+    }
+
+    /// A UTXO of the stealth resource `resource_address` paying `amount` to `account`, with the public nonce of
+    /// `nonce_secret`.
+    pub fn owned_utxo_of_resource(
+        &self,
+        account: &AccountWithAddress,
+        resource_address: &ResourceAddress,
+        amount: u64,
+        nonce_secret: &RistrettoSecretKey,
+    ) -> (UtxoId, Utxo) {
         let sdk = &self.sdk;
         let view_key = sdk.key_manager_api().get_key(account.view_only_key_id()).unwrap();
         let owner_key = sdk
@@ -266,7 +278,7 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
             sdk.network(),
             &view_key.secret,
             &public_nonce,
-            &STEALTH_TARI_RESOURCE_ADDRESS,
+            resource_address,
         );
         let mask = random_key();
         let commitment = commit_amount(&mask, amount.into()).unwrap().to_byte_type();

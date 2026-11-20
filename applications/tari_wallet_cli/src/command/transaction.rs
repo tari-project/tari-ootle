@@ -64,6 +64,7 @@ use tari_ootle_walletd_client::{
     },
 };
 use tari_template_lib::types::{
+    ComponentAddress,
     NonFungibleAddress,
     NonFungibleId,
     ResourceAddress,
@@ -71,7 +72,7 @@ use tari_template_lib::types::{
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
     crypto::RistrettoPublicKeyBytes,
 };
-use tari_transaction_manifest::{ManifestValue, parse_manifest};
+use tari_transaction_manifest::{ManifestInstructions, ManifestValue, parse_manifest};
 
 use crate::from_hex::FromHex;
 
@@ -358,6 +359,13 @@ async fn handle_submit_manifest(
         .owner_key_id
         .ok_or_else(|| anyhow!("Fee account does not have an owner key ID"))?;
 
+    let dump_account_address = if let Some(dump_account) = common.dump_outputs_into {
+        let AccountGetResponse { account, .. } = client.accounts_get(dump_account).await?;
+        Some(account.component_address)
+    } else {
+        None
+    };
+
     let SettingsGetResponse {
         network,
         current_epoch,
@@ -366,19 +374,16 @@ async fn handle_submit_manifest(
     } = client.get_settings().await?;
     let max_epoch = common.resolve_max_epoch(current_epoch, default_transaction_validity_epochs)?;
 
-    let builder = Transaction::builder(network.byte, max_epoch)
-        .with_fee_instructions_builder(|builder| {
-            builder.with_instructions(instructions.fee_instructions).call_method(
-                fee_account.component_address,
-                "pay_fee",
-                args![common.max_fee],
-            )
-        })
-        .with_instructions(instructions.instructions)
-        .with_inputs(common.inputs)
-        .with_min_epoch(common.min_epoch.map(Epoch));
-
-    let transaction = builder.build_unsigned();
+    let transaction = build_manifest_transaction(
+        network.byte,
+        max_epoch,
+        common.min_epoch.map(Epoch),
+        common.inputs,
+        fee_account.component_address,
+        common.max_fee,
+        dump_account_address,
+        instructions,
+    )?;
     summarize_transaction(&transaction);
 
     if common.dry_run {
@@ -928,4 +933,178 @@ fn parse_globals(globals: Vec<String>) -> Result<HashMap<String, ManifestValue>,
 fn base64_decode<T: AsRef<[u8]>>(s: T) -> Result<Vec<u8>, base64::DecodeError> {
     use base64::Engine;
     base64::prelude::BASE64_STANDARD.decode(s)
+}
+
+fn build_manifest_transaction(
+    network_byte: u8,
+    max_epoch: Epoch,
+    min_epoch: Option<Epoch>,
+    inputs: Vec<InputDeclaration>,
+    fee_account_address: ComponentAddress,
+    max_fee: u64,
+    dump_account_address: Option<ComponentAddress>,
+    instructions: ManifestInstructions,
+) -> Result<UnsignedTransaction, anyhow::Error> {
+    let mut builder = Transaction::builder(network_byte, max_epoch)
+        .with_fee_instructions_builder(|builder| {
+            if instructions.fee_instructions.is_empty() {
+                builder.call_method(fee_account_address, "pay_fee", args![max_fee])
+            } else {
+                builder.with_instructions(instructions.fee_instructions)
+            }
+        })
+        .with_instructions(instructions.instructions)
+        .with_inputs(inputs)
+        .with_min_epoch(min_epoch);
+
+    if let Some(dump_address) = dump_account_address {
+        builder =
+            builder
+                .put_last_instruction_output_on_workspace("bucket")
+                .call_method(dump_address, "deposit", args![Workspace("bucket")]);
+    }
+
+    let mut transaction = builder.build_unsigned();
+
+    for blob in instructions.blobs.iter().cloned() {
+        transaction.add_blob(blob)?;
+    }
+
+    Ok(transaction)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use tari_ootle_transaction::blobs::Blob;
+
+    use super::*;
+
+    #[test]
+    fn test_build_manifest_transaction_attaches_blobs() {
+        let manifest_src = r#"
+            let b = blob!("test_data");
+        "#;
+        let mut globals = HashMap::new();
+        globals.insert(
+            "test_data".to_string(),
+            ManifestValue::Value(tari_bor::Value::Bytes(vec![1, 2, 3, 4])),
+        );
+        let instructions = parse_manifest(manifest_src, globals, Default::default(), Default::default()).unwrap();
+        assert_eq!(instructions.blobs.len(), 1);
+
+        let fee_addr = ComponentAddress::from_array([1u8; 32]);
+        let tx = build_manifest_transaction(0, Epoch(10), None, vec![], fee_addr, 1000, None, instructions).unwrap();
+
+        assert_eq!(tx.blobs().len(), 1);
+        assert_eq!(tx.blobs()[0], Blob::from(vec![1, 2, 3, 4]));
+    }
+
+    #[test]
+    fn test_build_manifest_transaction_fee_instructions() {
+        let fee_addr = ComponentAddress::from_array([1u8; 32]);
+
+        // Case 1: manifest has no fee instructions -> default pay_fee is added
+        let manifest_no_fee = r#"
+            // no fee instructions
+        "#;
+        let instructions =
+            parse_manifest(manifest_no_fee, HashMap::new(), Default::default(), Default::default()).unwrap();
+        assert!(instructions.fee_instructions.is_empty());
+
+        let tx = build_manifest_transaction(0, Epoch(10), None, vec![], fee_addr, 5000, None, instructions).unwrap();
+
+        assert_eq!(tx.fee_instructions().len(), 1);
+        match &tx.fee_instructions()[0] {
+            Instruction::CallMethod {
+                component_address,
+                method,
+                ..
+            } => {
+                assert_eq!(component_address, &fee_addr);
+                assert_eq!(method, "pay_fee");
+            },
+            other => panic!("Expected CallMethod, got {:?}", other),
+        }
+
+        // Case 2: manifest specifies explicit fee instructions -> pay_fee is NOT duplicate-appended
+        let other_fee_addr = ComponentAddress::from_array([2u8; 32]);
+        let manifest_with_fee = format!(
+            r#"
+            fn fee_main() {{
+                let fee_account = ComponentAddress("{}");
+                fee_account.pay_fee(2000);
+            }}
+            "#,
+            other_fee_addr
+        );
+        let instructions_with_fee = parse_manifest(
+            &manifest_with_fee,
+            HashMap::new(),
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
+        assert_eq!(instructions_with_fee.fee_instructions.len(), 1);
+
+        let tx2 = build_manifest_transaction(0, Epoch(10), None, vec![], fee_addr, 5000, None, instructions_with_fee)
+            .unwrap();
+
+        // Exactly 1 fee instruction, NOT 2 (no duplicate pay_fee)
+        assert_eq!(tx2.fee_instructions().len(), 1);
+        match &tx2.fee_instructions()[0] {
+            Instruction::CallMethod {
+                component_address,
+                method,
+                ..
+            } => {
+                assert_eq!(component_address, &other_fee_addr);
+                assert_eq!(method, "pay_fee");
+            },
+            other => panic!("Expected CallMethod, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_manifest_transaction_dump_outputs_into() {
+        let fee_addr = ComponentAddress::from_array([1u8; 32]);
+        let dump_addr = ComponentAddress::from_array([9u8; 32]);
+
+        let manifest = r#"
+            // empty
+        "#;
+        let instructions = parse_manifest(manifest, HashMap::new(), Default::default(), Default::default()).unwrap();
+
+        // With dump_outputs_into
+        let tx = build_manifest_transaction(
+            0,
+            Epoch(10),
+            None,
+            vec![],
+            fee_addr,
+            1000,
+            Some(dump_addr),
+            instructions,
+        )
+        .unwrap();
+
+        let instructions = tx.instructions();
+        assert!(instructions.len() >= 2);
+        assert!(matches!(
+            instructions[instructions.len() - 2],
+            Instruction::PutLastInstructionOutputOnWorkspace { .. }
+        ));
+        match &instructions[instructions.len() - 1] {
+            Instruction::CallMethod {
+                component_address,
+                method,
+                ..
+            } => {
+                assert_eq!(component_address, &dump_addr);
+                assert_eq!(method, "deposit");
+            },
+            other => panic!("Expected deposit CallMethod, got {:?}", other),
+        }
+    }
 }

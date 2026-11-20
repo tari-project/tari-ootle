@@ -125,8 +125,9 @@ impl OotleWallet {
         Ok(signature)
     }
 
+    /// Iterate over registered key provider addresses other than the default signer.
     pub fn additional_signers(&self) -> impl Iterator<Item = &Address> {
-        self.key_providers.keys()
+        self.key_providers.keys().filter(|&addr| addr != &self.default)
     }
 
     /// Build the complete stealth transfer statement for `spec` using the default key provider.
@@ -275,5 +276,49 @@ impl TransactionAuthorization {
 impl From<TransactionSignature> for TransactionAuthorization {
     fn from(signature: TransactionSignature) -> Self {
         Self::new(signature)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_common_types::Epoch;
+    use tari_ootle_transaction::MAX_SIGNATURES_PER_TRANSACTION;
+
+    use super::*;
+    use crate::{Network, key_provider::PrivateKeyProvider};
+
+    #[tokio::test]
+    async fn single_signer_wallet_has_no_additional_signers_and_attaches_no_extra_signatures() {
+        let signer = PrivateKeyProvider::random(Network::LocalNet);
+        let wallet = OotleWallet::from(signer);
+
+        assert_eq!(wallet.additional_signers().count(), 0);
+
+        let unsigned = Transaction::builder(Network::LocalNet, Epoch(1)).build_unsigned();
+        let tx = wallet.sign_transaction(unsigned).await.unwrap();
+
+        assert!(tx.signatures().is_empty());
+        assert!(tx.verify_all_signatures());
+    }
+
+    #[tokio::test]
+    async fn sixteen_additional_signers_stay_within_transaction_signature_limit() {
+        let default_signer = PrivateKeyProvider::random(Network::LocalNet);
+        let mut wallet = OotleWallet::from(default_signer);
+        let default_addr = wallet.default_address().clone();
+
+        for _ in 0..MAX_SIGNATURES_PER_TRANSACTION {
+            wallet.register_key_provider(PrivateKeyProvider::random(Network::LocalNet));
+        }
+
+        let additional: Vec<_> = wallet.additional_signers().collect();
+        assert_eq!(additional.len(), MAX_SIGNATURES_PER_TRANSACTION);
+        assert!(!additional.contains(&&default_addr));
+
+        let unsigned = Transaction::builder(Network::LocalNet, Epoch(1)).build_unsigned();
+        let tx = wallet.sign_transaction(unsigned).await.unwrap();
+
+        assert_eq!(tx.signatures().len(), MAX_SIGNATURES_PER_TRANSACTION);
+        assert!(tx.verify_all_signatures());
     }
 }

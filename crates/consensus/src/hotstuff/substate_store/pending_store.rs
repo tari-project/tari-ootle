@@ -371,10 +371,6 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         let versioned_substate_id = requested_lock.to_versioned_substate_id_ref();
 
         let Some(existing) = self.get_latest_lock_by_id(versioned_substate_id.substate_id())? else {
-            if requested_lock_type.is_input() {
-                self.lock_assert_is_up(versioned_substate_id)?;
-            }
-
             self.grant_lock(
                 transaction_id,
                 versioned_substate_id,
@@ -387,7 +383,9 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         // Local-Only-Rules apply if: current lock is local-only AND requested lock is local only
         let has_local_only_rules = existing.is_local_only() && is_local_only;
         let same_transaction = *existing.transaction_id() == transaction_id;
-        let same_transaction_lock = same_transaction && existing.lock_type() == requested_lock_type;
+        let same_transaction_lock = same_transaction &&
+            existing.lock_type() == requested_lock_type &&
+            existing.version() == versioned_substate_id.version();
 
         debug!(
             target: LOG_TARGET,
@@ -623,10 +621,12 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
 
     /// Grants `lock_type` over `id` to `transaction_id`.
     ///
-    /// An OUTPUT lock claims a version that the transaction will create, so it is only valid while that version does
-    /// not exist, unless the lock re-marks a validator fee pool version that this block already put UP and that this
-    /// local-only transaction updates in place. A lock already held over the substate says nothing about the requested
-    /// version, so the assertion must run wherever an OUTPUT lock is granted.
+    /// An input lock requires `id` to be UP, unless a local-only transaction in this chain is creating that version
+    /// (see [`Self::is_created_by_local_only_output`]). An OUTPUT lock claims a version that the transaction will
+    /// create, so it is only valid while that version does not exist, unless the lock re-marks a validator fee pool
+    /// version that this block already put UP and that this local-only transaction updates in place. A lock already
+    /// held over the substate says nothing about the requested version, so the assertion must run wherever a lock is
+    /// granted.
     fn grant_lock(
         &mut self,
         transaction_id: TransactionId,
@@ -634,6 +634,9 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         lock_type: SubstateLockType,
         is_local_only: bool,
     ) -> Result<(), SubstateStoreError> {
+        if lock_type.is_input() && !self.is_created_by_local_only_output(id)? {
+            self.lock_assert_is_up(id)?;
+        }
         if lock_type.is_output() {
             let is_in_place_fee_pool_update = is_local_only &&
                 id.substate_id().is_validator_fee_pool() &&
@@ -650,6 +653,15 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
             SubstateLock::new(transaction_id, id.version(), lock_type, is_local_only),
         );
         Ok(())
+    }
+
+    /// Whether `id` is the version a local-only transaction in this chain is creating: the latest lock on it is a
+    /// local-only OUTPUT of that same version. Local-only rules let another local-only transaction read or write that
+    /// version before it is UP, so the input-lock UP assertion does not apply to it.
+    fn is_created_by_local_only_output(&self, id: VersionedSubstateIdRef<'_>) -> Result<bool, SubstateStoreError> {
+        Ok(self.get_latest_lock_by_id(id.substate_id())?.is_some_and(|lock| {
+            lock.lock_type().is_output() && lock.is_local_only() && lock.version() == id.version()
+        }))
     }
 
     /// Whether `transaction_id` cannot create `id`: a version of it has existed in this chain, or a local-only

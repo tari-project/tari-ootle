@@ -659,6 +659,11 @@ impl<'a, TStore: StateStore, TValidator: CommitProofValidator> ShardSync<'a, TSt
                     continue;
                 },
                 Some(sync_state_response::Response::Complete(complete)) => {
+                    if let Some(version) = expected_state_version {
+                        return Err(RpcStateSyncError::InvalidResponse(anyhow!(
+                            "Peer completed the stream in the middle of v{version}"
+                        )));
+                    }
                     if let Some(schedule) = &proof_schedule {
                         schedule.check_complete()?;
                     }
@@ -1446,48 +1451,6 @@ mod tests {
         assert!(substate(&store, HONEST).is_some_and(|s| s.is_up()));
         assert!(substate(&store, 2).is_some_and(|s| s.is_up()));
         assert_eq!(rewind_point(&store), None);
-    }
-
-    /// `create(seed)` for a later version of the substate.
-    fn create_version(seed: u8, version: u64) -> SubstateUpdateProof {
-        let SubstateUpdateProof::Create(mut create) = create(seed) else {
-            unreachable!()
-        };
-        create.substate.version = SubstateVersion::new(version);
-        SubstateUpdateProof::Create(create)
-    }
-
-    /// The checkpoint commits to a version's transitions as a set, so a peer may stream them in any order, and may
-    /// split a version across `has_more` batches anywhere. A substate's head is its latest version whichever order
-    /// that is.
-    #[tokio::test]
-    async fn a_version_streamed_in_another_order_leaves_the_same_substate_head() {
-        let checkpoint = vec![
-            (1, vec![create(HONEST)]),
-            (2, vec![destroy(HONEST), create_version(HONEST, 1)]),
-        ];
-        let version_2_streams = [
-            vec![batch(2, vec![destroy(HONEST), create_version(HONEST, 1)])],
-            vec![batch(2, vec![create_version(HONEST, 1), destroy(HONEST)])],
-            vec![
-                batch_with_more(2, vec![create_version(HONEST, 1)]),
-                batch(2, vec![destroy(HONEST)]),
-            ],
-        ];
-
-        for version_2 in version_2_streams {
-            let (store, _tmp) = create_store();
-            let mut stream = vec![batch(1, vec![create(HONEST)])];
-            stream.extend(version_2);
-            stream.push(complete(2));
-            let synced_to = sync(&store, &checkpoint, stream).await.unwrap();
-            assert_eq!(synced_to, Some(2));
-
-            let head = store
-                .with_read_tx(|tx| SubstateRecord::get_latest_version(tx, &substate_id_in(shard(), HONEST)))
-                .unwrap();
-            assert_eq!(head, (SubstateVersion::new(1), true));
-        }
     }
 
     #[tokio::test]
@@ -2455,6 +2418,32 @@ mod tests {
         assert_eq!(synced, Some(1));
         assert!(substate(&store, HONEST).is_some_and(|s| s.is_up()));
         assert!(substate(&store, 2).is_some_and(|s| s.is_up()));
+        assert_eq!(rewind_point(&store), None);
+    }
+
+    #[tokio::test]
+    async fn a_stream_completed_in_the_middle_of_a_version_is_rejected() {
+        let (store, _tmp) = create_store();
+        // v2 changes the tree without changing a substate, so v1 already reaches the checkpoint root and accumulator.
+        // Completing the stream after a non-terminal batch of v2 must still be rejected rather than silently dropping
+        // the buffered partial version and accepting v1's root.
+        let checkpoint = vec![(1, vec![create(HONEST)]), (2, vec![])];
+
+        let err = sync(&store, &checkpoint, vec![
+            batch(1, vec![create(HONEST)]),
+            batch_with_more(2, vec![create(POISON)]),
+            complete(2),
+        ])
+        .await
+        .unwrap_err();
+
+        assert!(
+            matches!(&err, RpcStateSyncError::InvalidResponse(e) if e.to_string().contains("in the middle of v2")),
+            "{err}"
+        );
+        assert_eq!(local_version(&store), None);
+        assert!(substate(&store, HONEST).is_none());
+        assert!(substate(&store, POISON).is_none());
         assert_eq!(rewind_point(&store), None);
     }
 

@@ -138,6 +138,11 @@ const VERIFICATION_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 /// versions. A burst's versions are promoted on the next leaf, so this bounds how far promotion trails the stream at
 /// one probe per group a second.
 const BURST_PROBE_MIN_INTERVAL: Duration = Duration::from_secs(1);
+/// `tokio::time::interval` panics on a zero period, which would kill the reporting task, and a
+/// zero work interval also turns error/pause cooldowns into tight loops, so configured intervals
+/// are raised to this floor.
+const MIN_WORK_INTERVAL: Duration = Duration::from_secs(1);
+
 /// The soonest a shard group syncs a missing checkpoint again once its stream shows the committee has entered the
 /// epoch after it. Committee members commit the checkpoint within moments of each other, and one that has not yet costs
 /// a reopen, so this bounds the reopens to one a period. See [`CheckpointRetryBackoff`] for how it grows.
@@ -216,7 +221,7 @@ impl NetworkWideStateSync {
         epoch_manager: EpochManagerHandle<PeerAddress>,
         networking: NetworkingHandle<TariMessagingSpec>,
         storage: SqliteIndexerStore,
-        config: NetworkWideStateSyncConfig,
+        mut config: NetworkWideStateSyncConfig,
         notify: Notify<IndexerEvent>,
         transaction_event_notify: Notify<TransactionEvent>,
         validator_status: ValidatorStatusMonitor,
@@ -228,6 +233,7 @@ impl NetworkWideStateSync {
         #[cfg(feature = "metrics")] substate_cache_metrics: SubstateCacheMetrics,
         #[cfg(feature = "metrics")] substate_manager: SubstateManager,
     ) -> Self {
+        config.work_interval = effective_work_interval(config.work_interval);
         Self {
             epoch_manager,
             networking,
@@ -382,7 +388,7 @@ impl NetworkWideStateSync {
             #[cfg(feature = "metrics")]
             self.update_metrics().await;
 
-            let mut report_interval = time::interval(self.config.work_interval);
+            let mut report_interval = time::interval(effective_work_interval(self.config.work_interval));
             report_interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
             report_interval.reset();
             loop {
@@ -3245,6 +3251,10 @@ impl VersionBuf {
     }
 }
 
+fn effective_work_interval(work_interval: Duration) -> Duration {
+    work_interval.max(MIN_WORK_INTERVAL)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4930,6 +4940,26 @@ mod tests {
             );
 
             sync.await.unwrap();
+        }
+    }
+
+    mod work_interval {
+        use super::*;
+
+        #[test]
+        fn zero_work_interval_is_raised_to_floor() {
+            assert_eq!(effective_work_interval(Duration::ZERO), MIN_WORK_INTERVAL);
+            assert_eq!(effective_work_interval(Duration::from_millis(500)), MIN_WORK_INTERVAL);
+            assert_eq!(effective_work_interval(Duration::from_secs(60)), Duration::from_secs(60));
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn clamped_zero_interval_builds_reporting_timer_without_panicking() {
+            let started = time::Instant::now();
+            let mut interval = time::interval(effective_work_interval(Duration::ZERO));
+            interval.tick().await;
+            interval.tick().await;
+            assert_eq!(started.elapsed(), MIN_WORK_INTERVAL);
         }
     }
 }

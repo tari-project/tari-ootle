@@ -28,6 +28,7 @@ import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import { FeeReceipt as FeeReceiptProps } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
+import { feeReceiptFigures } from "./feeReceiptMath";
 
 const FEE_SOURCE_LABELS: Record<string, string> = {
   Initial: "Initial",
@@ -40,9 +41,6 @@ const FEE_SOURCE_LABELS: Record<string, string> = {
   TemplatePublish: "Template publish",
 };
 
-function unsignedSaturatingSub(a: bigint): bigint {
-  return a < BigInt(0) ? BigInt(0) : a;
-}
 export default function FeeReceipt({ data, finalFee }: { data: FeeReceiptProps; finalFee?: number | null }) {
   if (!data) {
     return (
@@ -54,19 +52,10 @@ export default function FeeReceipt({ data, finalFee }: { data: FeeReceiptProps; 
     );
   }
 
-  const totalFeesCharged = Object.entries(data.cost_breakdown?.breakdown || {}).reduce(
-    (sum, [_, value]) => BigInt(sum) + BigInt(value),
-    BigInt(0),
-  );
-
-  // If final_fee is available, use it as the actual fee paid to compute accurate overcharge/refund
-  const totalFeePayment = finalFee != null ? BigInt(finalFee) : BigInt(data.total_fee_payment);
-  const totalRefunded = unsignedSaturatingSub(totalFeePayment - totalFeesCharged - BigInt(data.total_fee_overcharge));
-  const overcharge = unsignedSaturatingSub(totalFeePayment - totalFeesCharged - totalRefunded);
+  const { totalFeesPaid, totalFeesCharged, totalRefunded, overcharge } = feeReceiptFigures(data, finalFee);
 
   // The burn is a share of what was paid, so the rate shown is burn / paid to one decimal place
   const exhaustBurn = BigInt(data.exhaust_burn ?? 0);
-  const totalFeesPaid = BigInt(data.total_fees_paid);
   const burnPercent =
     exhaustBurn > BigInt(0) && totalFeesPaid > BigInt(0)
       ? Number((exhaustBurn * BigInt(1000)) / totalFeesPaid) / 10
@@ -75,7 +64,7 @@ export default function FeeReceipt({ data, finalFee }: { data: FeeReceiptProps; 
   const feeItems: { label: string; value: string; color: "primary" | "success"; help?: string }[] = [
     {
       label: "Total Fees Paid",
-      value: formatCurrency(totalFeePayment, XTR_CURRENCY),
+      value: formatCurrency(totalFeesPaid, XTR_CURRENCY),
       color: "primary",
     },
     {

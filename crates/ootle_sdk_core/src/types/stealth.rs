@@ -103,6 +103,11 @@ macro_rules! stealth_fixed_byte_newtype {
 
             /// Parses from a lowercase-hex string.
             pub fn from_hex(s: &str) -> Result<Self, OotleSdkError> {
+                if s.chars().any(|c| c.is_ascii_uppercase()) {
+                    return Err(OotleSdkError::Parse(
+                        concat!(stringify!($name), ": expected lowercase hex").to_string(),
+                    ));
+                }
                 let v = hex::decode(s).map_err(|e| {
                     OotleSdkError::Parse(format!(concat!(stringify!($name), ": invalid hex: {}"), e))
                 })?;
@@ -148,6 +153,11 @@ macro_rules! stealth_var_byte_newtype {
 
             /// Parses from a lowercase-hex string.
             pub fn from_hex(s: &str) -> Result<Self, OotleSdkError> {
+                if s.chars().any(|c| c.is_ascii_uppercase()) {
+                    return Err(OotleSdkError::Parse(
+                        concat!(stringify!($name), ": expected lowercase hex").to_string(),
+                    ));
+                }
                 let v = hex::decode(s).map_err(|e| {
                     OotleSdkError::Parse(format!(concat!(stringify!($name), ": invalid hex: {}"), e))
                 })?;
@@ -554,7 +564,7 @@ impl StealthEntropy {
         }
         for i in 0..scalars.len() {
             for j in (i + 1)..scalars.len() {
-                if scalars[i].1 == scalars[j].1 {
+                if scalars[i].1 == scalars[j].1 || scalars[i].2 == scalars[j].2 {
                     return Err(OotleSdkError::Validation(format!(
                         "derived entropy {} collides with {}",
                         scalars[i].0, scalars[j].0
@@ -934,6 +944,36 @@ mod tests {
     #[test]
     fn commitment_from_bytes_rejects_wrong_width() {
         let err = CommitmentBytes::from_bytes(&[0u8; 31]).unwrap_err();
+        assert!(matches!(err, OotleSdkError::Validation(_)));
+        assert_eq!(CommitmentBytes::from_hex(&"AB".repeat(32)).unwrap_err().code(), "PARSE");
+        assert_eq!(EncryptedDataBytes::from_hex("0A0B").unwrap_err().code(), "PARSE");
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_aead_nonce_prefix() {
+        let mut a = [0x11u8; 32];
+        a[24..].copy_from_slice(&[0xaa; 8]);
+        let mut b = [0x11u8; 32];
+        b[24..].copy_from_slice(&[0xbb; 8]);
+        let e = StealthEntropy {
+            per_output: vec![
+                PerOutputEntropy {
+                    mask: SecretKeyBytes::from_array([1; 32]),
+                    sender_nonce: SecretKeyBytes::from_array([2; 32]),
+                    aead_nonce: SecretKeyBytes::from_array(a),
+                    elgamal_nonce: None,
+                    zk_nonces: None,
+                },
+                PerOutputEntropy {
+                    mask: SecretKeyBytes::from_array([3; 32]),
+                    sender_nonce: SecretKeyBytes::from_array([4; 32]),
+                    aead_nonce: SecretKeyBytes::from_array(b),
+                    elgamal_nonce: None,
+                    zk_nonces: None,
+                },
+            ],
+        };
+        let err = e.validate().unwrap_err();
         assert!(matches!(err, OotleSdkError::Validation(_)));
     }
 }

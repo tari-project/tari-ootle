@@ -20,7 +20,17 @@ use crate::{
     ManifestValue,
     ast::ManifestAst,
     error::ManifestError,
-    parser::{InvokeIntent, ManifestIntent, ManifestLiteral, OrVar, OutputBinding, SpecialLiteral},
+    parser::{
+        ComponentRulesChangeExpr,
+        InvokeIntent,
+        ManifestIntent,
+        ManifestLiteral,
+        OrVar,
+        OutputBinding,
+        SetComponentRulesIntent,
+        SpecialLiteral,
+    },
+    rules::RuleVariables,
     value::{MAX_LIST_DEPTH, address_value, arg_to_value, lit_to_arg},
 };
 
@@ -137,6 +147,15 @@ impl ManifestInstructionGenerator {
 
     #[expect(clippy::too_many_lines)]
     fn translate_intent(&mut self, intent: ManifestIntent) -> Result<Vec<Instruction>, ManifestError> {
+        // Every visited intent is charged, whether or not it emits anything, so a call tree of empty
+        // bodies cannot expand without bound.
+        self.generated_instructions = self.generated_instructions.saturating_add(1);
+        if self.generated_instructions > MAX_GENERATED_INSTRUCTIONS {
+            return Err(ManifestError::TooManyInstructions {
+                max: MAX_GENERATED_INSTRUCTIONS,
+            });
+        }
+
         match intent {
             ManifestIntent::InvokeTemplate(InvokeIntent {
                 output_variable,
@@ -176,21 +195,7 @@ impl ManifestInstructionGenerator {
                     .as_ref()
                     .expect("AST parse should have failed: no component ident for ComponentInvoke statement")
                     .to_string();
-                let call = match self.resolve(&component_ident)? {
-                    Resolved::Value(value) => ComponentReference::Address(Self::extract_component_address(value)?),
-                    Resolved::Workspace(workspace_offset) => {
-                        if workspace_offset.offset().is_some() {
-                            return Err(ManifestError::InvalidInstruction {
-                                reason: format!(
-                                    "Tuple-destructured variable '{component_ident}' cannot be used as a component \
-                                     reference. Use a single variable binding instead."
-                                ),
-                            });
-                        }
-                        ComponentReference::Workspace(workspace_offset.id())
-                    },
-                    Resolved::Blob => return Err(Self::misplaced_blob(&component_ident)),
-                };
+                let call = self.resolve_component(&component_ident)?;
                 let mut instructions = vec![Instruction::CallMethod {
                     call,
                     method: function_name
@@ -252,10 +257,12 @@ impl ManifestInstructionGenerator {
                 Ok(vec![])
             },
             ManifestIntent::AssignBlob(assign) => {
-                self.bindings.insert(
-                    assign.variable_name.to_string(),
-                    Binding::Blob(assign.blob_name.to_string()),
-                );
+                let blob_name = assign.blob_name.to_string();
+                if !self.blob_inputs.contains_key(&blob_name) {
+                    return Err(ManifestError::BlobNotProvided { name: blob_name });
+                }
+                self.bindings
+                    .insert(assign.variable_name.to_string(), Binding::Blob(blob_name));
                 Ok(vec![])
             },
             ManifestIntent::DropAllProofs => Ok(vec![Instruction::DropAllProofsInWorkspace]),
@@ -301,6 +308,19 @@ impl ManifestInstructionGenerator {
                     })?;
                 Ok(vec![Instruction::PublishTemplate { binary, metadata_hash }])
             },
+            ManifestIntent::SetComponentRules(SetComponentRulesIntent { component, change }) => {
+                let component = self.resolve_component(&component.to_string())?;
+                Ok(vec![match change {
+                    ComponentRulesChangeExpr::AccessRules(rules) => Instruction::SetComponentAccessRules {
+                        component,
+                        access_rules: rules.build(self)?,
+                    },
+                    ComponentRulesChangeExpr::OwnerRule(rule) => Instruction::SetComponentOwnerRule {
+                        component,
+                        owner_rule: rule.build(self)?,
+                    },
+                }])
+            },
             ManifestIntent::CallLocalFunction(ident) => {
                 if self.call_depth >= MAX_CALL_DEPTH {
                     return Err(ManifestError::MaxCallDepthExceeded { max: MAX_CALL_DEPTH });
@@ -314,14 +334,6 @@ impl ManifestInstructionGenerator {
                 self.call_depth += 1;
                 let mut instructions = Vec::with_capacity(body.len());
                 for intent in body {
-                    // Every visited intent is charged, whether or not it emits anything, so a call tree of empty
-                    // bodies cannot expand without bound.
-                    self.generated_instructions = self.generated_instructions.saturating_add(1);
-                    if self.generated_instructions > MAX_GENERATED_INSTRUCTIONS {
-                        return Err(ManifestError::TooManyInstructions {
-                            max: MAX_GENERATED_INSTRUCTIONS,
-                        });
-                    }
                     instructions.extend(self.translate_intent(intent)?);
                 }
                 self.call_depth -= 1;
@@ -468,6 +480,25 @@ impl ManifestInstructionGenerator {
             .ok_or_else(|| ManifestError::UndefinedGlobal { name: name.to_string() })
     }
 
+    /// The component a method call or rule change names: an input component address or a single workspace value.
+    fn resolve_component(&self, name: &str) -> Result<ComponentReference, ManifestError> {
+        match self.resolve(name)? {
+            Resolved::Value(value) => Ok(ComponentReference::Address(Self::extract_component_address(value)?)),
+            Resolved::Workspace(workspace_offset) => {
+                if workspace_offset.offset().is_some() {
+                    return Err(ManifestError::InvalidInstruction {
+                        reason: format!(
+                            "Tuple-destructured variable '{name}' cannot be used as a component reference. Use a \
+                             single variable binding instead."
+                        ),
+                    });
+                }
+                Ok(ComponentReference::Workspace(workspace_offset.id()))
+            },
+            Resolved::Blob => Err(Self::misplaced_blob(name)),
+        }
+    }
+
     fn extract_component_address(value: &ManifestValue) -> Result<ComponentAddress, ManifestError> {
         value
             .as_address()
@@ -530,13 +561,12 @@ impl ManifestInstructionGenerator {
     }
 
     fn get_workspace_id(&self, name: &str) -> Result<WorkspaceOffsetId, ManifestError> {
-        match self.bindings.get(name) {
-            Some(Binding::Workspace(id)) => Ok(*id),
-            Some(Binding::Input(_)) => Err(ManifestError::InvalidVariableType(format!(
+        match self.resolve(name)? {
+            Resolved::Workspace(id) => Ok(id),
+            Resolved::Value(_) => Err(ManifestError::InvalidVariableType(format!(
                 "'{name}' is an input value, but this position requires a workspace value"
             ))),
-            Some(Binding::Blob(_)) => Err(Self::misplaced_blob(name)),
-            None => Err(ManifestError::UndefinedVariable { name: name.to_string() }),
+            Resolved::Blob => Err(Self::misplaced_blob(name)),
         }
     }
 
@@ -553,5 +583,11 @@ impl ManifestInstructionGenerator {
             "'{name}' is bound to a blob, which only publish_template!({name}) accepts; pass blob!(..) directly to \
              use a blob as an argument"
         ))
+    }
+}
+
+impl RuleVariables for ManifestInstructionGenerator {
+    fn rule_variable(&self, name: &str) -> Result<&ManifestValue, ManifestError> {
+        self.resolve_value(name)
     }
 }

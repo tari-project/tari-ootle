@@ -37,6 +37,9 @@ function getTypeAsString(funcType: FuncType): string {
         const other = funcType["Other" as keyof typeof funcType] as { name: string };
         return other.name;
       }
+      case "WellKnown": {
+        return funcType["WellKnown" as keyof typeof funcType] as string;
+      }
     }
   }
 

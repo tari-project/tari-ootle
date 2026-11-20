@@ -4,7 +4,7 @@
 //! On-device reproduction of the Ootle transaction signing message and its sr25519 signature.
 //!
 //! The host streams the canonical preimage bytes (see `tari_ootle_transaction`'s
-//! `signing_preimage_v1`); the device feeds them, in order, into a domain-separated Blake2b-512
+//! `signing_preimage`); the device feeds them, in order, into a domain-separated Blake2b-512
 //! hasher seeded here, recomputes the 64-byte message itself, and signs it as sr25519 under the
 //! transaction signing context. The byte recipe is pinned by the host reference test in the
 //! ledger client crate and the constants in `ootle_ledger_common::signing`.

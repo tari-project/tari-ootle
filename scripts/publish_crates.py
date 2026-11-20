@@ -70,6 +70,7 @@ CRATES = [
     ("ootle_ledger_client", "crates/wallet/ledger/client", 4),
     ("ootle-rs", "crates/wallet/ootle-rs", 4),
     ("tari_ootle_wallet_sdk", "crates/wallet/sdk", 4),
+    ("tari_ootle_wallet_sdk_services", "crates/wallet/sdk_services", 4),
     ("tari_ootle_wallet_storage_sqlite", "crates/wallet/storage_sqlite", 4),
     ("tari_ootle_walletd_client", "clients/wallet_daemon_client", 4),
 ]

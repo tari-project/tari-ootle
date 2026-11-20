@@ -19,6 +19,7 @@ use tari_consensus_types::{
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     Epoch,
+    NodeHeight,
     ProtocolVersion,
     ValidatorSetHash,
     committee::{Committee, CommitteeInfo},
@@ -57,7 +58,7 @@ use crate::{
         on_propose::drop_executions_of_uninserted_proposal,
         on_ready_to_vote_on_local_block::{LocalNextEpochView, OnReadyToVoteOnLocalBlock},
         on_receive_foreign_proposal::OnReceiveForeignProposalHandler,
-        pacemaker_handle::PaceMakerHandle,
+        pacemaker_action::PacemakerActions,
         transaction_manager::ConsensusTransactionManager,
     },
     messages::{ForeignProposalNotificationMessage, HotstuffMessage, ProposalMessage, VoteMessage},
@@ -78,7 +79,6 @@ pub struct OnReceiveLocalProposalHandler<TConsensusSpec: ConsensusSpec> {
     store: TConsensusSpec::StateStore,
     epoch_manager: TConsensusSpec::EpochManager,
     leader_strategy: TConsensusSpec::LeaderStrategy,
-    pacemaker: PaceMakerHandle,
     on_ready_to_vote_on_local_block:
         OnReadyToVoteOnLocalBlock<TConsensusSpec::StateStore, TConsensusSpec::TransactionExecutor>,
     change_set: Option<ProposedBlockChangeSet>,
@@ -98,10 +98,37 @@ pub struct OnReceiveLocalProposalHandler<TConsensusSpec: ConsensusSpec> {
 /// The most recent block processed from a catch-up delivery that this node would have voted on had it arrived as a
 /// proposal. Whether a block comes as a catch-up response is the sending peer's choice, so a proposal for the block
 /// that arrives afterwards still gets the vote.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct UnvotedCatchUpBlock {
     block_id: BlockId,
+    height: NodeHeight,
     decision: QuorumDecision,
+}
+
+impl UnvotedCatchUpBlock {
+    /// Records `block_id` as the pending unvoted catch-up block unless a strictly higher catch-up block is already
+    /// held, preventing an out-of-order or past catch-up delivery from clobbering the latest block's withheld vote.
+    fn record(slot: &mut Option<Self>, block_id: BlockId, height: NodeHeight, decision: QuorumDecision) {
+        if slot.is_none_or(|prev| height >= prev.height) {
+            *slot = Some(Self {
+                block_id,
+                height,
+                decision,
+            });
+        }
+    }
+}
+
+/// Whether processing a block moves the pacemaker to the highest view the block justifies. A block this node decided
+/// on does. A catch-up block at or below `last_voted` reports `AlreadyVotedAtHeight` and also does, since the committee
+/// has already certified it and a catching-up node must advance through the views it justifies.
+fn enters_justified_view(
+    local_decision: Option<QuorumDecision>,
+    no_vote_reason: Option<&NoVoteReason>,
+    origin: ProposalOrigin,
+) -> bool {
+    local_decision.is_some() ||
+        (origin.is_catch_up() && matches!(no_vote_reason, Some(NoVoteReason::AlreadyVotedAtHeight)))
 }
 
 #[derive(Debug, Clone)]
@@ -134,7 +161,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         store: TConsensusSpec::StateStore,
         epoch_manager: TConsensusSpec::EpochManager,
         leader_strategy: TConsensusSpec::LeaderStrategy,
-        pacemaker: PaceMakerHandle,
         outbound_messaging: TConsensusSpec::OutboundMessaging,
         signing_service: TConsensusSpec::SignerService,
         transaction_pool: TransactionPool<TConsensusSpec::StateStore>,
@@ -152,17 +178,11 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             store: store.clone(),
             epoch_manager: epoch_manager.clone(),
             leader_strategy,
-            pacemaker: pacemaker.clone(),
             signing_service,
             outbound_messaging: outbound_messaging.clone(),
             hooks,
             tx_events: tx_events.clone(),
-            on_receive_foreign_proposal: OnReceiveForeignProposalHandler::new(
-                store,
-                epoch_manager,
-                pacemaker,
-                outbound_messaging,
-            ),
+            on_receive_foreign_proposal: OnReceiveForeignProposalHandler::new(store, epoch_manager, outbound_messaging),
             on_ready_to_vote_on_local_block: OnReadyToVoteOnLocalBlock::new(
                 local_validator_pk,
                 config,
@@ -180,16 +200,13 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
     #[allow(clippy::too_many_lines)]
     pub async fn handle(
         &mut self,
+        pacemaker_actions: &mut PacemakerActions,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         msg: ProposalMessage,
         origin: ProposalOrigin,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "OnReceiveLocalProposalHandler");
 
-        // Do not trigger leader failures while processing a proposal.
-        // Leader failures will be resumed after the proposal has been processed.
-        // If we vote ACCEPT for the proposal, the leader failure timer will be reset and resume, otherwise (no vote)
-        // the timer will resume but not be reset.
         debug!(
             target: LOG_TARGET,
             "🔥 LOCAL PROPOSAL: block {} from {}",
@@ -229,9 +246,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             let view_height = existing
                 .timeout_certificate()
                 .map_or(justify_height, |tc| tc.height().max(justify_height));
-            self.pacemaker
-                .enter_view(existing.epoch(), view_height, justify_height)
-                .await?;
+            pacemaker_actions.enter_view(existing.epoch(), view_height, justify_height);
             if !origin.is_catch_up() {
                 self.vote_on_proposal_processed_through_catch_up(epoch_state, &existing)
                     .await?;
@@ -279,7 +294,9 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             for foreign_proposal in foreign_proposals {
                 let mut foreign_proposal = ForeignProposalRecord::new(foreign_proposal);
                 if foreign_proposal.exists(&**tx)? {
-                    // This is expected behaviour, we may receive the same foreign proposal multiple times
+                    // This is expected behaviour, we may receive the same foreign proposal multiple times. A proposal
+                    // already marked invalid is refused at voting (`check_foreign_proposal_record`), so the block is
+                    // still stored and this node can follow the chain if the block is certified anyway.
                     debug!(
                         target: LOG_TARGET,
                         "FOREIGN PROPOSAL: Already received proposal for block {}",
@@ -291,7 +308,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
                 if let Err(err) = self.on_receive_foreign_proposal.validate_and_save(
                     tx,
-                    &foreign_proposal,
+                    &mut foreign_proposal,
                     epoch_state.local_committee_info(),
                 ) {
                     if let Some(err) = err.validation_error().filter(|err| err.rejects_message_not_block()) {
@@ -338,17 +355,12 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             return Ok(None);
         }
 
-        // If a leader failure occurs while we are processing the block, ignore it
-        self.pacemaker.suspend_leader_timeout().await?;
-
-        let result = self.process_valid_block(epoch_state, valid_block, origin).await;
-
-        // Ensure leader failure is resumed
-        // If the result was successful, the leader timeout was reset, and no leader failure will occur. Otherwise,
-        // resuming will cause a leader failure
-        if let Err(err) = self.pacemaker.resume_leader_timeout().await {
-            error!(target: LOG_TARGET, "Error resuming leader failure: {}", err);
-        }
+        // No leader timeout fires while the block is processed: the worker applies the pacemaker actions and polls the
+        // pacemaker's timers only after this handler returns. Entering the view the block justifies restarts the
+        // timeout; if the view does not advance and the deadline has passed, the timeout fires on the next poll.
+        let result = self
+            .process_valid_block(pacemaker_actions, epoch_state, valid_block, origin)
+            .await;
 
         result.inspect_err(|err| {
             if matches!(err, HotStuffError::ProposalValidationError(_)) {
@@ -430,6 +442,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
     async fn process_valid_block(
         &mut self,
+        pacemaker_actions: &mut PacemakerActions,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         valid_block: ValidBlock,
         origin: ProposalOrigin,
@@ -442,6 +455,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             .await?;
 
         self.process_block(
+            pacemaker_actions,
             epoch_state.epoch(),
             *epoch_state.local_committee_info(),
             epoch_state.local_committee(),
@@ -454,6 +468,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
     async fn process_block(
         &mut self,
+        pacemaker_actions: &mut PacemakerActions,
         current_epoch: Epoch,
         local_committee_info: CommitteeInfo,
         local_committee: &Committee<TConsensusSpec::Addr>,
@@ -537,7 +552,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     can_propose_epoch_end,
                     local_next_epoch,
                     next_epoch_changes_layout,
-                    origin,
                     &mut change_set,
                 )?;
 
@@ -574,6 +588,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         let no_vote = self
             .process_block_decision(
+                pacemaker_actions,
                 local_committee_info,
                 local_committee,
                 process_result,
@@ -587,6 +602,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
     async fn process_block_decision(
         &mut self,
+        pacemaker_actions: &mut PacemakerActions,
         local_committee_info: CommitteeInfo,
         local_committee: &Committee<TConsensusSpec::Addr>,
         process_block_result: ProcessBlockResult,
@@ -604,31 +620,37 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         let is_accept_decision = block_decision.is_accept();
 
         // End of epoch committed? No need to enter the view or send votes
-        if !block_decision.is_committed_epoch_end() &&
-            let Some(decision) = block_decision.local_decision
-        {
-            // Enter the highest view justified by this block
-            self.pacemaker
-                .enter_view(
+        if !block_decision.is_committed_epoch_end() {
+            if enters_justified_view(
+                block_decision.local_decision,
+                block_decision.no_vote_reason.as_ref(),
+                origin,
+            ) {
+                // Enter the highest view justified by this block
+                pacemaker_actions.enter_view(
                     valid_block.epoch(),
                     block_decision.highest_qc_view(),
                     block_decision.high_pc.height(),
-                )
-                .await?;
-
-            if origin.is_catch_up() {
-                debug!(
-                    target: LOG_TARGET,
-                    "🌐 Not voting on {}: it arrived through catch-up. A proposal for it later gets the vote.",
-                    valid_block.block(),
                 );
-                self.unvoted_catch_up_block = Some(UnvotedCatchUpBlock {
-                    block_id: *valid_block.id(),
-                    decision,
-                });
-            } else {
-                self.vote_on_block(local_committee, valid_block.block(), decision)
-                    .await?;
+            }
+
+            if let Some(decision) = block_decision.local_decision {
+                if origin.is_catch_up() {
+                    debug!(
+                        target: LOG_TARGET,
+                        "🌐 Not voting on {}: it arrived through catch-up. A proposal for it later gets the vote.",
+                        valid_block.block(),
+                    );
+                    UnvotedCatchUpBlock::record(
+                        &mut self.unvoted_catch_up_block,
+                        *valid_block.id(),
+                        valid_block.height(),
+                        decision,
+                    );
+                } else {
+                    self.vote_on_block(local_committee, valid_block.block(), decision)
+                        .await?;
+                }
             }
         }
 
@@ -656,14 +678,15 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             // The QC of the block we're processing is the QC that committed the EOE via the
             // 3-chain rule. Use it as the commit proof.
             let commit_qc = valid_block.justify().clone();
-            self.process_end_of_epoch(eoe_block, commit_qc).await?;
+            self.process_end_of_epoch(pacemaker_actions, eoe_block, commit_qc)
+                .await?;
         }
 
         self.propose_foreign_proposals(local_committee_info, block_decision.commit_blocks);
 
         // Propose quickly for the end-of-epoch chain
         if is_accept_decision && is_epoch_end {
-            self.pacemaker.beat();
+            pacemaker_actions.beat();
         }
 
         Ok(block_decision.no_vote_reason)
@@ -672,6 +695,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
     #[expect(clippy::too_many_lines)]
     async fn process_end_of_epoch(
         &mut self,
+        pacemaker_actions: &mut PacemakerActions,
         eoe_block: Block,
         commit_qc: ProposalCertificate,
     ) -> Result<(), HotStuffError> {
@@ -856,7 +880,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             });
         }
 
-        self.pacemaker.set_epoch(next_epoch).await?;
+        pacemaker_actions.set_epoch(next_epoch);
         self.publish_event(HotstuffEvent::EpochChanged {
             epoch: next_epoch,
             registered_shard_group: next_shard_group,
@@ -889,7 +913,10 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
     /// Retry deferred end-of-epoch processing. The worker polls this so that the resume happens
     /// as soon as the oracle has written the epoch row, without waiting for the base-layer scan
     /// to finish. If the oracle is still not ready, `process_end_of_epoch` will re-defer.
-    pub async fn try_resume_pending_end_of_epoch(&mut self) -> Result<bool, HotStuffError> {
+    pub async fn try_resume_pending_end_of_epoch(
+        &mut self,
+        pacemaker_actions: &mut PacemakerActions,
+    ) -> Result<bool, HotStuffError> {
         let Some(pending) = self.pending_end_of_epoch.take() else {
             return Ok(false);
         };
@@ -900,7 +927,8 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             "▶️ Attempting deferred end-of-epoch processing for EOE block {}",
             pending.eoe_block.id()
         );
-        self.process_end_of_epoch(pending.eoe_block, pending.commit_qc).await?;
+        self.process_end_of_epoch(pacemaker_actions, pending.eoe_block, pending.commit_qc)
+            .await?;
         Ok(true)
     }
 
@@ -1172,7 +1200,8 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 Some(b) => b,
                 None => {
                     if tx.parked_block_exists(&justify_block_id)? {
-                        // This case shouldnt happen because the message buffer should not yet send the proposal through
+                        // Validation and unparking both hold a block behind its parked justify block, so this path is
+                        // unreachable.
                         warn!(target: LOG_TARGET, "⚠️ BUG: Justify block {} for candidate block {} is parked", justify_block_id, candidate_block);
                         return Err(ProposalValidationError::JustifyBlockParked {
                             proposed_by: candidate_block.proposed_by().to_string(),
@@ -1353,5 +1382,66 @@ mod tests {
         assert!(!reported.record(eoe_block, local));
         assert!(reported.record(eoe_block, corrected));
         assert!(reported.record(BlockId::from([4; 32]), corrected));
+    }
+
+    #[test]
+    fn a_catch_up_block_at_or_below_last_voted_enters_the_view_it_justifies() {
+        let already_voted = Some(&NoVoteReason::AlreadyVotedAtHeight);
+
+        assert!(enters_justified_view(None, already_voted, ProposalOrigin::CatchUp));
+        assert!(!enters_justified_view(None, already_voted, ProposalOrigin::Live));
+        assert!(!enters_justified_view(
+            None,
+            Some(&NoVoteReason::StateMerkleRootMismatch),
+            ProposalOrigin::CatchUp
+        ));
+        assert!(enters_justified_view(
+            Some(QuorumDecision::Accept),
+            None,
+            ProposalOrigin::Live
+        ));
+        assert!(enters_justified_view(
+            Some(QuorumDecision::Accept),
+            None,
+            ProposalOrigin::CatchUp
+        ));
+    }
+
+    #[test]
+    fn a_lower_height_catch_up_block_does_not_overwrite_a_higher_unvoted_catch_up_block() {
+        let mut slot = None;
+        let block_10 = BlockId::from([10; 32]);
+        let block_4 = BlockId::from([4; 32]);
+        let block_11 = BlockId::from([11; 32]);
+
+        UnvotedCatchUpBlock::record(&mut slot, block_10, NodeHeight(10), QuorumDecision::Accept);
+        assert_eq!(
+            slot,
+            Some(UnvotedCatchUpBlock {
+                block_id: block_10,
+                height: NodeHeight(10),
+                decision: QuorumDecision::Accept,
+            })
+        );
+
+        UnvotedCatchUpBlock::record(&mut slot, block_4, NodeHeight(4), QuorumDecision::Accept);
+        assert_eq!(
+            slot,
+            Some(UnvotedCatchUpBlock {
+                block_id: block_10,
+                height: NodeHeight(10),
+                decision: QuorumDecision::Accept,
+            })
+        );
+
+        UnvotedCatchUpBlock::record(&mut slot, block_11, NodeHeight(11), QuorumDecision::Accept);
+        assert_eq!(
+            slot,
+            Some(UnvotedCatchUpBlock {
+                block_id: block_11,
+                height: NodeHeight(11),
+                decision: QuorumDecision::Accept,
+            })
+        );
     }
 }

@@ -1091,6 +1091,7 @@ fn new_substate_value(seed: u8) -> SubstateValue {
             access_rules: Default::default(),
             entity_id: [seed; EntityId::LENGTH].into(),
             upgrade_rule: Default::default(),
+            rules_updater: None,
         },
         body: ComponentBody {
             state: tari_bor::Value::Null,

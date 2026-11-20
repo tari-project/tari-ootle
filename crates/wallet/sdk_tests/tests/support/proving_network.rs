@@ -372,6 +372,19 @@ impl WalletNetworkInterface for ProvingNetwork {
         Ok(fetched)
     }
 
+    async fn get_substate_versions(
+        &self,
+        substate_ids: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, SubstateVersion>, Self::Error> {
+        Ok(self
+            .get_substates(substate_ids, false)
+            .await?
+            .substates
+            .into_iter()
+            .map(|(id, substate)| (id, substate.version()))
+            .collect())
+    }
+
     async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, Self::Error> {
         self.state.lock().unwrap().submissions += 1;
         Ok(transaction.calculate_id())

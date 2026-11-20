@@ -36,6 +36,7 @@ mod cbor_literal;
 mod error;
 mod generator;
 mod parser;
+mod rules;
 mod value;
 
 /// Parse a manifest into a set of instructions plus the ordered `Blobs` they reference.

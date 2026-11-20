@@ -18,7 +18,7 @@ jobs:
       - name: install
         run: |
           npm install -g @commitlint/cli @commitlint/config-conventional
-          echo "module.exports = {extends: ['@commitlint/config-conventional']}" > commitlint.config.js
+          echo "module.exports = {extends: ['@commitlint/config-conventional'], rules: {'header-max-length': [2, 'always', 120]}}" > commitlint.config.js
 
       - name: lint
         run: |

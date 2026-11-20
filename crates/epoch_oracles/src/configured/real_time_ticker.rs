@@ -48,7 +48,7 @@ impl RealTimeEpochTicker {
 
     fn calc_current_epoch(&self) -> Epoch {
         let now = time::OffsetDateTime::now_utc();
-        let elapsed_secs = (now - self.base_time).whole_seconds().max(0) as u64 / self.epoch_time_secs.get();
+        let elapsed_secs = (now - self.base_time).whole_seconds().max(0) as u64 / self.epoch_time_secs;
         Epoch(elapsed_secs)
     }
 

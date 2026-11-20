@@ -5,7 +5,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use log::*;
 use tari_epoch_manager::EpochManagerReader;
-use tari_ootle_common_types::{ProtocolVersion, committee::Committee, optional::Optional};
+use tari_ootle_common_types::{ProtocolVersion, ShardGroup, committee::Committee, optional::Optional};
 use tari_ootle_storage::{
     StateStoreReadTransaction,
     consensus_models::{Block, CommandsCommitProof, ForeignProposal, ForeignProposalRecord},
@@ -19,22 +19,27 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::consensus::validations::foreign_proposal";
 
-/// Returns the committee of the shard group the proposal's header names, in the proposal's epoch. The proposal is
-/// processed as the evidence and pledges of that shard group, so its proof must verify against this committee.
-///
-/// Returns `None` when no committee is assigned to exactly that shard group in that epoch.
-pub async fn resolve_foreign_committee<TEpochManager: EpochManagerReader>(
-    epoch_manager: &TEpochManager,
-    proposal: &ForeignProposal,
-) -> Result<Option<Arc<Committee<TEpochManager::Addr>>>, HotStuffError> {
-    let shard_group = proposal
+/// Returns the shard group the proposal's header names, rejecting the proposal as malformed if its bounds are invalid.
+pub fn validate_foreign_shard_group(proposal: &ForeignProposal) -> Result<ShardGroup, ProposalValidationError> {
+    proposal
         .shard_group_checked()
         .ok_or_else(|| ProposalValidationError::InvalidShardGroup {
             block_id: proposal.calculate_block_id(),
             shard_group: proposal.shard_group_unchecked(),
             details: "Foreign proposal header names a shard group with invalid bounds".to_string(),
-        })?;
+        })
+}
 
+/// Returns the committee of `shard_group`, the shard group the proposal's header names (see
+/// [`validate_foreign_shard_group`]), in the proposal's epoch. The proposal is processed as the evidence and pledges of
+/// that shard group, so its proof must verify against this committee.
+///
+/// Returns `None` when no committee is assigned to exactly that shard group in that epoch.
+pub async fn resolve_foreign_committee<TEpochManager: EpochManagerReader>(
+    epoch_manager: &TEpochManager,
+    proposal: &ForeignProposal,
+    shard_group: ShardGroup,
+) -> Result<Option<Arc<Committee<TEpochManager::Addr>>>, HotStuffError> {
     let committee = epoch_manager
         .get_committee_by_shard_group(proposal.epoch(), shard_group)
         .await
@@ -109,11 +114,12 @@ pub async fn authenticate_foreign_proposal<TConsensusSpec: ConsensusSpec>(
     proposal: &ForeignProposal,
     config: &HotstuffConfig,
 ) -> Result<(), HotStuffError> {
-    let committee = resolve_foreign_committee(epoch_manager, proposal)
+    let shard_group = validate_foreign_shard_group(proposal)?;
+    let committee = resolve_foreign_committee(epoch_manager, proposal, shard_group)
         .await?
         .ok_or_else(|| ProposalValidationError::InvalidShardGroup {
             block_id: proposal.calculate_block_id(),
-            shard_group: proposal.shard_group_unchecked(),
+            shard_group,
             details: format!(
                 "Foreign proposal header names a shard group with no committee in epoch {}",
                 proposal.epoch()
@@ -130,7 +136,6 @@ pub fn check_foreign_proposal<TConsensusSpec: ConsensusSpec>(
     check_network(proposal, config.network)?;
     check_protocol_version(proposal, config.network)?;
     check_proposer_in_committee(proposal, foreign_committee)?;
-    check_header(proposal)?;
     check_block_metadata(proposal)?;
     check_commit_proof::<TConsensusSpec>(proposal.commit_proof(), config.network, foreign_committee)?;
     Ok(())
@@ -169,11 +174,6 @@ fn check_proposer_in_committee<TAddr: PartialEq>(
             ),
         });
     }
-    Ok(())
-}
-
-fn check_header(proposal: &ForeignProposal) -> Result<(), ProposalValidationError> {
-    proposal.commit_proof().validate_header()?;
     Ok(())
 }
 

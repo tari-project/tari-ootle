@@ -955,7 +955,7 @@ mod tests {
         let file_arg = format!("@{}", file_path.display());
         let parsed = CliArg::from_str(&file_arg).unwrap();
         let _unused = fs::remove_file(&file_path);
-        assert!(matches!(parsed, CliArg::Blob(tari_bor::Value::Integer(v)) if v == 42u64.into()));
+        assert!(matches!(parsed, CliArg::Blob(tari_bor::Value::Integer(42))));
     }
 
     #[test]

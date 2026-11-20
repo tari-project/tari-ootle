@@ -160,6 +160,16 @@ where
     let output_witnesses = output_statements.into_iter().collect::<Vec<_>>();
     let num_outputs = output_witnesses.len();
 
+    let requires_balance_proof = num_inputs > 0 || num_outputs > 0;
+    if requires_balance_proof &&
+        (revealed_input_amount > u64::MAX || outputs_statement.revealed_output_amount() > u64::MAX)
+    {
+        return Err(WalletCryptoError::InvalidArgument {
+            name: "amounts",
+            details: "Revealed amount in a stealth transfer with stealth inputs or outputs must fit in u64".to_string(),
+        });
+    }
+
     let mut inputs_to_spend = Vec::with_capacity(num_inputs);
     let mut agg_input_mask = RistrettoSecretKey::default();
     let mut seen = HashSet::with_capacity(num_inputs);
@@ -195,7 +205,6 @@ where
     // The claims are bound by the balance proof, so they must exist before it is signed.
     let covenant_claims = generate_covenant_claims(&inputs, &output_witnesses)?;
 
-    let requires_balance_proof = num_inputs > 0 || num_outputs > 0;
     let balance_proof = requires_balance_proof.then(|| {
         generate_stealth_balance_proof_signature(
             &agg_input_mask,
@@ -278,6 +287,12 @@ fn generate_covenant_claims(
                     .to_string(),
             });
         };
+        if revealed_amount > u64::MAX {
+            return Err(WalletCryptoError::InvalidArgument {
+                name: "covenant",
+                details: "Covenant partition revealed amount exceeds u64::MAX".to_string(),
+            });
+        }
 
         claims.push(CovenantBalanceClaim {
             partition_input_index: partition_input_index as u32,
@@ -467,5 +482,50 @@ mod tests {
         validate_stealth_outputs_statement(&proof, None).unwrap_err();
         proof.outputs[0].output.minimum_value_promise = 1000;
         validate_stealth_outputs_statement(&proof, None).unwrap_err();
+    }
+
+    #[test]
+    fn it_rejects_oversized_revealed_and_covenant_partition_amounts() {
+        let mask1 = RistrettoSecretKey::random(&mut rand::rng());
+        let mask2 = RistrettoSecretKey::random(&mut rand::rng());
+        let input1 = StealthInputWitness::new(MaskAndValue {
+            mask: mask1.clone(),
+            value: u64::MAX,
+        });
+        let oversized = Amount::new(u128::from(u64::MAX) + 1);
+
+        let err = create_transfer_statement(
+            [input1],
+            oversized,
+            &[] as &[StealthOutputWitness],
+            Some(RevealedOutput::new(oversized, RistrettoPublicKeyBytes::default())),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, WalletCryptoError::InvalidArgument { name: "amounts", .. }),
+            "unexpected error: {err}"
+        );
+
+        let leaf = SpendCondition::single(AtomicCondition::AccessRule(AccessRule::AllowAll));
+        let (witness, root) = script_path_witness(&[leaf.clone()], &leaf).unwrap();
+        let cov_in1 = StealthInputWitness {
+            mask_and_value: MaskAndValue {
+                mask: mask1,
+                value: u64::MAX,
+            },
+            witness: witness.clone(),
+            condition_root: Some(root),
+        };
+        let cov_in2 = StealthInputWitness {
+            mask_and_value: MaskAndValue { mask: mask2, value: 1 },
+            witness,
+            condition_root: Some(root),
+        };
+        let err = create_transfer_statement([cov_in1, cov_in2], Amount::zero(), &[] as &[StealthOutputWitness], None)
+            .unwrap_err();
+        assert!(
+            matches!(err, WalletCryptoError::InvalidArgument { name: "covenant", .. }),
+            "unexpected error: {err}"
+        );
     }
 }

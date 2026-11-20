@@ -86,7 +86,7 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
     }
 
     pub fn pay_fee<A: Into<Amount>>(mut self, amount: A) -> Self {
-        if let Some(name) = self.account_workspace_name.take() {
+        if let Some(ref name) = self.account_workspace_name {
             self.builder = self.builder.pay_fee_from_component(name, amount);
         } else {
             let component_addr = self.default_signer_address().to_account_address();
@@ -177,15 +177,8 @@ impl<'a, P: Provider> FaucetInvokeBuilder<'a, P> {
 }
 
 impl<P: Provider> TransactionBuildable for FaucetInvokeBuilder<'_, P> {
-    fn pay_fee<A: Into<Amount>>(mut self, amount: A) -> Self {
-        let component_addr = self.provider.default_signer_address().to_account_address();
-        self.want_list.insert(WantInput::VaultForResource {
-            component_address: component_addr,
-            resource_address: TARI_TOKEN,
-            required: true,
-        });
-        self.builder = self.builder.pay_fee_from_component(component_addr, amount);
-        self
+    fn pay_fee<A: Into<Amount>>(self, amount: A) -> Self {
+        Self::pay_fee(self, amount)
     }
 
     fn want_vault_for(
@@ -234,5 +227,103 @@ impl<P: Provider> TransactionBuildable for FaucetInvokeBuilder<'_, P> {
         self.builder = self.builder.merge(other_builder);
         self.want_list.extend(other_wants);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::Weak,
+    };
+
+    use tari_ootle_address::Network;
+    use tari_ootle_common_types::engine_types::substate::Substate;
+    use tari_ootle_transaction::{ComponentReference, Instruction};
+    use tari_template_lib_types::{
+        crypto::RistrettoPublicKeyBytes,
+        stealth::{StealthInputsStatement, StealthOutputsStatement},
+    };
+
+    use super::*;
+    use crate::provider::ProviderResult;
+
+    struct MockProvider {
+        signer: Address,
+    }
+
+    impl Provider for MockProvider {
+        type Client = ();
+
+        fn network(&self) -> Network {
+            self.signer.network()
+        }
+
+        fn weak_client(&self) -> Weak<Self::Client> {
+            Weak::new()
+        }
+
+        fn default_signer_address(&self) -> &Address {
+            &self.signer
+        }
+
+        async fn resolve_input_want_list(
+            &self,
+            transaction: UnsignedTransaction,
+            _want_list: &HashSet<WantInput>,
+        ) -> ProviderResult<UnsignedTransaction> {
+            Ok(transaction)
+        }
+
+        async fn fetch_substates<I: IntoIterator<Item = SubstateId> + Send>(
+            &self,
+            _substate_ids: I,
+        ) -> ProviderResult<HashMap<SubstateId, Substate>> {
+            Ok(HashMap::new())
+        }
+    }
+
+    #[tokio::test]
+    async fn pay_fee_preserves_workspace_account_for_into_stealth_transfer_and_subsequent_calls() {
+        let signer = Address::new(
+            Network::LocalNet,
+            RistrettoPublicKeyBytes::from_bytes(&[1u8; 32]).unwrap(),
+            RistrettoPublicKeyBytes::from_bytes(&[2u8; 32]).unwrap(),
+        );
+        let provider = MockProvider { signer: signer.clone() };
+        let statement = StealthTransferStatement {
+            inputs_statement: StealthInputsStatement::new_revealed_only(Amount::new(1_000)),
+            outputs_statement: StealthOutputsStatement::new_revealed_only(
+                Amount::new(1_000),
+                *signer.account_public_key(),
+            ),
+            balance_proof: None,
+            covenant_claims: vec![],
+        };
+
+        let tx = IFaucet::new(&provider, Epoch(10))
+            .take_faucet_funds()
+            .pay_fee(500u64)
+            .pay_fee(250u64)
+            .into_stealth_transfer(statement)
+            .prepare()
+            .await
+            .unwrap();
+
+        let pay_fee_calls: Vec<_> = tx
+            .fee_instructions()
+            .iter()
+            .filter_map(|instr| match instr {
+                Instruction::CallMethod { call, method, .. } if method.as_ref() == "pay_fee" => Some(call),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(pay_fee_calls.len(), 2);
+        assert!(
+            pay_fee_calls
+                .iter()
+                .all(|call| matches!(call, ComponentReference::Workspace(_))),
+            "expected workspace references for pay_fee, got {pay_fee_calls:?}"
+        );
     }
 }

@@ -5,7 +5,6 @@ use std::{fmt, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 use tari_template_lib::types::{
-    EncryptedData,
     Hash32,
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes},
 };
@@ -238,23 +237,6 @@ pub struct MmrInclusionProof {
     #[serde(deserialize_with = "bounded_hashes::deserialize")]
     #[cbor(with = "bounded_hashes")]
     pub peaks: Vec<Hash32>,
-}
-
-#[derive(
-    Debug,
-    Clone,
-    Deserialize,
-    Serialize,
-    PartialEq,
-    borsh::BorshSerialize,
-    minicbor::Encode,
-    minicbor::Decode,
-    minicbor::CborLen,
-)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct ClaimBurnOutputData {
-    #[n(0)]
-    pub encrypted_data: EncryptedData,
 }
 
 /// Adapter for `bounded_vec::BoundedVec<u8, LOW, HIGH>` so it can participate in minicbor derives.

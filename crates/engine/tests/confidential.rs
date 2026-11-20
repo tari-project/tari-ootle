@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ootle_byte_type::ToByteType;
 use tari_crypto::{
@@ -12,7 +12,7 @@ use tari_engine::runtime::{ArgumentValidationError, RuntimeError};
 use tari_engine_types::{
     crypto::{ElgamalVerifiableBalance, OutputBody, ValueLookup, commit_amount},
     limits::CONFIDENTIAL_LIMITS,
-    resource_container::ResourceError,
+    resource_container::{ResourceContainer, ResourceError},
     substate::SubstateId,
 };
 use tari_ootle_common_types::substate_type::SubstateType;
@@ -1023,5 +1023,27 @@ fn liquidity_pool_rejects_confidential_commitments() {
             .call_method(pool, "protected_add_liquidity", args![Workspace("added")])
             .build_and_seal(&owner_secret),
         vec![owner_proof],
+    );
+}
+
+#[test]
+fn withdraw_rejects_a_change_commitment_the_container_holds_locked() {
+    let input_mask = RistrettoSecretKey::from(7u64);
+    let input = commit_amount(&input_mask, Amount::new(100)).unwrap().to_byte_type();
+    let withdraw = generate_withdraw_proof(&input_mask, 60, Some(40), Amount::zero());
+    let change_mask = withdraw.change_mask.as_ref().unwrap();
+    let change = commit_amount(change_mask, Amount::new(40)).unwrap().to_byte_type();
+
+    let mut container = ResourceContainer::Confidential {
+        address: TARI_TOKEN,
+        commitments: BTreeSet::from([input]),
+        revealed_amount: Amount::zero(),
+        locked_commitments: BTreeSet::from([change]),
+        locked_revealed_amount: Amount::zero(),
+    };
+    let err = container.withdraw_confidential(withdraw.proof, None).unwrap_err();
+    assert!(
+        matches!(&err, ResourceError::InvariantError(msg) if msg.contains("change commitment")),
+        "unexpected error: {err:?}"
     );
 }

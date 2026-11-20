@@ -72,6 +72,7 @@ use tari_ootle_storage::{
         BlockDiff,
         BlockTransactionExecution,
         EpochCheckpoint,
+        FinalizedTransactionInclusion,
         ForeignProposalRecord,
         LivenessCounters,
         LockedSubstateValue,
@@ -135,6 +136,7 @@ use crate::{
         foreign_substate_pledge,
         foreign_substate_pledge::ForeignSubstatePledgeCf,
         lock_conflict,
+        missing_transactions,
         parked_block,
         pending_state_tree_diff::ShardStateTreeDiff,
         state_sync_rewind_point::{StateSyncMissingValueByShardQuery, StateSyncRewindPointCf},
@@ -819,6 +821,19 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         let cf = self.db().cf(FinalizedTransactionLinkCf)?;
         let data = cf.get(tx_id, OPERATION)?;
         Ok(data.finalized_at)
+    }
+
+    fn finalized_transaction_inclusion_get(
+        &self,
+        tx_id: &TransactionId,
+    ) -> Result<Option<FinalizedTransactionInclusion>, StorageError> {
+        const OPERATION: &str = "finalized_transaction_inclusion_get";
+        let link = self
+            .db()
+            .cf(FinalizedTransactionLinkCf)?
+            .get(tx_id, OPERATION)
+            .optional()?;
+        Ok(link.and_then(|link| link.inclusion).map(Into::into))
     }
 
     fn block_transaction_executions_get_pending_for_block(
@@ -2144,6 +2159,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         const OPERATION: &str = "parked_block_exists";
         let exists = self.db().cf(parked_block::ParkedBlockCf)?.exists(block_id, OPERATION)?;
         Ok(exists)
+    }
+
+    fn parked_block_missing_transactions(&self, block_id: &BlockId) -> Result<Vec<TransactionId>, StorageError> {
+        let keys = self
+            .db()
+            .cf(missing_transactions::ByBlockIdQuery)?
+            .query_prefix_range_keys(Ordering::default(), block_id)?;
+        Ok(keys.into_iter().map(|(_, transaction_id)| transaction_id).collect())
     }
 
     fn parked_blocks_count_by_proposer(

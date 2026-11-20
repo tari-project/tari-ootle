@@ -1,7 +1,10 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::DerefMut,
+};
 
 use log::*;
 use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
@@ -109,6 +112,37 @@ pub const MAX_TRANSFER_INPUTS: usize = MAX_INPUTS_PER_TRANSACTION - FEE_INTENT_I
 const _: () = assert!(MAX_TRANSFER_INPUTS <= limits::STEALTH_LIMITS.max_inputs);
 const _: () = assert!(FEE_INTENT_INPUT_RESERVE <= limits::STEALTH_LIMITS.max_inputs);
 
+/// The outputs a selection may choose from.
+#[derive(Debug, Clone, Copy)]
+pub enum Candidates<'a> {
+    /// Every output the account can spend.
+    All,
+    /// Only the on-chain outputs named here, together with outputs the selecting lock created.
+    Only(&'a [UtxoAddress]),
+}
+
+impl Candidates<'_> {
+    /// Whether selection may choose an output of `resource_address`. An output the selecting lock created is always
+    /// admitted: it is the build's own change, which has no address to name until the build exists.
+    fn admitter(self, resource_address: &ResourceAddress) -> impl Fn(&StealthOutputInfo) -> bool + use<> {
+        let allowed = match self {
+            Candidates::All => None,
+            Candidates::Only(addresses) => Some(
+                addresses
+                    .iter()
+                    .filter(|a| a.resource_address() == resource_address)
+                    .map(|a| a.id().into_commitment_bytes())
+                    .collect::<HashSet<_>>(),
+            ),
+        };
+        move |output| {
+            allowed
+                .as_ref()
+                .is_none_or(|allowed| !output.is_on_chain || allowed.contains(&output.commitment))
+        }
+    }
+}
+
 /// What a selection locked, and whether the input budget rather than the balance is what stopped it.
 struct Selection {
     outputs: Vec<InputSpendData>,
@@ -144,6 +178,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
     /// (see [`MAX_TRANSFER_INPUTS`]). If there are insufficient funds, an `InsufficientFunds` error is returned and no
     /// outputs are locked; if the funds are there but no `max_inputs` of them reach the amount, the error says so
     /// rather than reporting the balance as insufficient.
+    ///
+    /// `among` limits selection to the on-chain outputs it names; see [`Candidates`].
     pub fn lock_outputs_for_at_least_amount<A: Into<Amount>>(
         &self,
         account_address: &ComponentAddress,
@@ -151,14 +187,9 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         lock_id: WalletLockId,
         amount: A,
         max_inputs: usize,
+        among: Candidates<'_>,
     ) -> Result<(Vec<InputSpendData>, Amount), StealthOutputsApiError> {
-        let amount = amount
-            .into()
-            .non_negative_checked()
-            .ok_or_else(|| StealthOutputsApiError::InvalidParameter {
-                param: "amount",
-                reason: "lock_outputs_for_at_least_amount: Amount must be non-negative".to_string(),
-            })?;
+        let amount = amount.into();
         if amount.is_zero() {
             return Ok((Vec::new(), Amount::zero()));
         }
@@ -172,6 +203,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 lock_id,
                 InputSelectionAlgorithm::BranchAndBound,
                 max_inputs,
+                among,
             )?;
 
             if selection.total < amount {
@@ -191,6 +223,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
     /// Locks as many outputs required to reach at least the specified amount, selecting at most `max_inputs` of them
     /// (see [`MAX_TRANSFER_INPUTS`]). If the available outputs or `max_inputs` fall short, all that could be locked is
     /// returned along with the total amount locked, for the caller to top up from revealed funds.
+    ///
+    /// `among` limits selection to the on-chain outputs it names; see [`Candidates`].
     pub fn lock_outputs_until_partial_amount(
         &self,
         account_address: &ComponentAddress,
@@ -198,6 +232,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         amount: Amount,
         locked_by_id: WalletLockId,
         max_inputs: usize,
+        among: Candidates<'_>,
     ) -> Result<(Vec<InputSpendData>, Amount), StealthOutputsApiError> {
         self.store.with_write_tx(|tx| {
             let selection = self.lock_outputs_internal(
@@ -208,6 +243,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 locked_by_id,
                 InputSelectionAlgorithm::SmallestFirst,
                 max_inputs,
+                among,
             )?;
             Ok((selection.outputs, selection.total))
         })
@@ -301,6 +337,30 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         })
     }
 
+    /// Checks that `account_address` can spend every output `utxo_addresses` names under `lock_id` right now, by the
+    /// same rules as [`Self::lock_specific_outputs`], without locking any of them.
+    pub fn ensure_spendable(
+        &self,
+        account_address: &ComponentAddress,
+        lock_id: WalletLockId,
+        utxo_addresses: &[UtxoAddress],
+    ) -> Result<(), StealthOutputsApiError> {
+        self.store.with_read_tx(|tx| {
+            for address in utxo_addresses {
+                let commitment = address.id().into_commitment_bytes();
+                let output = tx
+                    .stealth_outputs_get_by_commitment(address.resource_address(), &commitment)
+                    .optional()?
+                    .ok_or_else(|| StealthOutputsApiError::InvalidParameter {
+                        param: "utxo_addresses",
+                        reason: format!("UTXO {} is not known to this wallet", address),
+                    })?;
+                self.validate_output_for_specific_spend(account_address, lock_id, address, &output)?;
+            }
+            Ok(())
+        })
+    }
+
     /// Validates that a resolved stealth output is a wallet-owned, key-path-spendable input for `account_address` that
     /// is currently eligible to be locked under `lock_id`. Mirrors the eligibility predicate of
     /// [`WalletStoreReader::stealth_outputs_get_unspent_for_spending`], with an explicit account-ownership check so a
@@ -388,6 +448,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     fn lock_outputs_internal(
         &self,
         tx: &mut <TSpec::Store as WriteableWalletStore>::WriteTransaction<'_>,
@@ -397,13 +458,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         locked_by_id: WalletLockId,
         selection_algo: InputSelectionAlgorithm,
         max_inputs: usize,
+        among: Candidates<'_>,
     ) -> Result<Selection, StealthOutputsApiError> {
-        if amount.is_negative() {
-            return Err(StealthOutputsApiError::InvalidParameter {
-                param: "amount",
-                reason: "lock_outputs_internal: Amount cannot be negative".to_string(),
-            });
-        }
         // A selection's inputs are spent by one statement, so no selection may be given more than one statement can
         // carry — the per-transaction total is the sum of the budgets, not a bound on any one of them.
         if max_inputs == 0 || max_inputs > MAX_TRANSFER_INPUTS {
@@ -413,7 +469,20 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
             });
         }
 
+        let is_allowed = among.admitter(resource_address);
+
         match selection_algo {
+            InputSelectionAlgorithm::SmallestFirst if matches!(among, Candidates::Only(_)) => {
+                Self::lock_smallest_among(
+                    tx,
+                    account_address,
+                    resource_address,
+                    amount,
+                    locked_by_id,
+                    max_inputs,
+                    &is_allowed,
+                )
+            },
             InputSelectionAlgorithm::SmallestFirst => {
                 let mut total_output_amount = Amount::zero();
                 let mut outputs = Vec::new();
@@ -462,6 +531,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
 
                 let mut unspent = unspent
                     .into_iter()
+                    .filter(|o| is_allowed(o))
                     .map(|o| (o.commitment, InputSpendData::from(o)))
                     .collect::<HashMap<_, _>>();
 
@@ -496,7 +566,12 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                     .collect::<Vec<_>>();
 
                 // Lock the selected outputs
-                tx.stealth_outputs_lock_many(resource_address, result.selected_keys(), locked_by_id)?;
+                tx.stealth_outputs_lock_many_for_account(
+                    account_address,
+                    resource_address,
+                    result.selected_keys(),
+                    locked_by_id,
+                )?;
 
                 Ok(Selection {
                     outputs,
@@ -505,6 +580,49 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 })
             },
         }
+    }
+
+    /// The smallest-first selection over the outputs `is_allowed` admits, done in memory because the store's
+    /// smallest-first lock takes no filter.
+    fn lock_smallest_among(
+        tx: &mut <TSpec::Store as WriteableWalletStore>::WriteTransaction<'_>,
+        account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        amount: Amount,
+        locked_by_id: WalletLockId,
+        max_inputs: usize,
+        is_allowed: impl Fn(&StealthOutputInfo) -> bool,
+    ) -> Result<Selection, StealthOutputsApiError> {
+        let mut candidates = tx
+            .stealth_outputs_get_unspent_for_spending(account_address, resource_address, locked_by_id)?
+            .into_iter()
+            .filter(|o| is_allowed(o))
+            .collect::<Vec<_>>();
+        candidates.sort_by_key(|o| o.value);
+
+        let mut total = Amount::zero();
+        let mut outputs = Vec::new();
+        let mut reached_input_limit = false;
+        for output in candidates {
+            if total >= amount {
+                break;
+            }
+            if outputs.len() >= max_inputs {
+                reached_input_limit = true;
+                break;
+            }
+            total += Amount::from(output.value);
+            outputs.push(InputSpendData::from(output));
+        }
+
+        let commitments = outputs.iter().map(|o| &o.commitment).collect::<Vec<_>>();
+        tx.stealth_outputs_lock_many_for_account(account_address, resource_address, &commitments, locked_by_id)?;
+
+        Ok(Selection {
+            outputs,
+            total,
+            reached_input_limit,
+        })
     }
 
     /// Every stealth output held by a lock: both the inputs it locked for
@@ -685,6 +803,17 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(balance)
     }
 
+    /// The resources of which `account_address` holds a stealth output unspent or locked.
+    pub fn get_live_resources_for_account(
+        &self,
+        account_address: &ComponentAddress,
+    ) -> Result<HashSet<ResourceAddress>, StealthOutputsApiError> {
+        let resources = self
+            .store
+            .with_read_tx(|tx| tx.stealth_outputs_get_live_resources(account_address))?;
+        Ok(resources)
+    }
+
     /// Counts the account's outputs that are unspent or locked by a pending transaction. A spend of
     /// any of them may still have to reach the wallet through the UTXO scanner.
     pub fn count_unspent_or_locked_outputs_for_account(
@@ -706,34 +835,10 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(count)
     }
 
-    /// Inserts `utxo`, or updates the stored output's burnt and frozen flags and, while it is unspent, its status.
-    /// Returns whether the stored output was inserted or changed.
+    /// Inserts `utxo`, or updates the stored output as [`upsert_utxo_in`] does. Returns whether the stored output was
+    /// inserted or changed.
     pub fn upsert_utxo(&self, utxo: &StealthOutputModel) -> Result<bool, StealthOutputsApiError> {
-        let changed = self.store.with_write_tx(|tx| {
-            // TODO(perf): consider a dedicated exists query
-            let maybe_utxo = tx
-                .stealth_outputs_get_by_commitment(&utxo.resource_address, &utxo.commitment)
-                .optional()?;
-            if let Some(prev_utxo) = maybe_utxo {
-                let new_status = match prev_utxo.status {
-                    OutputStatus::Unspent => Some(utxo.status),
-                    // If not unspent, don't allow status to be changed.
-                    // EDGE-CASE: scanning picks up a local UTXO that we know was spent
-                    _ => None,
-                };
-                // A burn is final, so a burnt output stays burnt.
-                let is_burnt = prev_utxo.is_burnt || utxo.is_burnt;
-                let changed = new_status.is_some_and(|status| status != prev_utxo.status) ||
-                    prev_utxo.is_burnt != is_burnt ||
-                    prev_utxo.is_frozen != utxo.is_frozen;
-                let address = utxo.to_utxo_address();
-                tx.stealth_outputs_update(&address, Some(is_burnt), new_status, Some(utxo.is_frozen))?;
-                Ok::<_, WalletStorageError>(changed)
-            } else {
-                tx.stealth_outputs_insert(utxo)?;
-                Ok(true)
-            }
-        })?;
+        let changed = self.store.with_write_tx(|tx| upsert_utxo_in(tx, utxo))?;
         Ok(changed)
     }
 
@@ -839,34 +944,15 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(outputs)
     }
 
+    /// The keys of every account in the wallet. The accounts table is the one record of which keys the wallet
+    /// receives outputs to, the same one the per-account UTXO scanner and seed recovery use.
     fn all_used_view_only_keys(&self) -> Result<Vec<AccountAndViewKeys>, StealthOutputsApiError> {
-        let mut keys = self
-            .key_manager_api
-            .get_all_derived_keys(KeyBranch::ViewOnlyKey)?
-            .into_iter()
-            .map(|view_key| {
-                let account_key = self.key_manager_api.derive_account_key(
-                    view_key
-                        .key_id
-                        .derived_index()
-                        .expect("get_all_derived_keys returns only derived keys"),
-                )?;
-                Ok::<_, KeyManagerApiError>(AccountAndViewKeys {
-                    account_public_key: account_key.to_public_key().to_byte_type(),
-                    account_key: Some(account_key.into()),
-                    view_only_key: view_key.into(),
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        // View-only accounts use an imported view key, which is not in the derived key branch above
         let accounts = self.store.with_read_tx(|tx| {
             let count = tx.accounts_count()?;
             tx.accounts_get_many(0, count as usize)
         })?;
+        let mut keys = Vec::with_capacity(accounts.len());
         for account in accounts {
-            if !matches!(account.view_only_key_id, KeyId::Imported { .. }) {
-                continue;
-            }
             let loaded = account
                 .owner_key_id
                 .map(|key_id| self.key_manager_api.get_key(key_id))
@@ -904,6 +990,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         let network = self.config_api.get_network()?;
 
         let mut found_utxos_count = 0usize;
+        let mut held_utxos_count = 0usize;
         let mut num_outputs = 0usize;
         let mut touched_balances = HashSet::new();
         let mut burnt = Vec::new();
@@ -927,10 +1014,11 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 if held.is_some() || utxo.output().is_none() || all_used_view_only_keys.is_some() {
                     break (tx, held);
                 }
-                drop(tx);
+                tx.rollback()?;
                 all_used_view_only_keys = Some(self.all_used_view_only_keys()?);
             };
             if let Some(held) = held {
+                held_utxos_count += 1;
                 info!(
                     target: LOG_TARGET,
                     "Output already exists in the wallet. Updating. (commitment: {})",
@@ -1006,9 +1094,11 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         if num_outputs > 0 {
             info!(
                 target: LOG_TARGET,
-                "✅️ Found {}/{} stealth outputs owned by this wallet.",
-                found_utxos_count,
+                "✅️ Found {}/{} stealth outputs owned by this wallet ({} new, {} already held).",
+                found_utxos_count + held_utxos_count,
                 num_outputs,
+                found_utxos_count,
+                held_utxos_count,
             );
         }
 
@@ -1320,6 +1410,47 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
 
 /// Each lock's `LockedForSpend` outputs. A lock also holds the change its statement creates (`LockedUnconfirmed`),
 /// which its transaction does not spend.
+/// Inserts `utxo`, or updates the stored output's burnt and frozen flags and, while it is unspent, its status. An
+/// output stored as invalid is replaced when `utxo` is not invalid: `utxo` was validated with a key that owns it, where
+/// the stored one was validated with another account's key that only decrypts it. Returns whether the stored output was
+/// inserted or changed.
+pub fn upsert_utxo_in<TTx, TReader>(tx: &mut TTx, utxo: &StealthOutputModel) -> Result<bool, WalletStorageError>
+where
+    TTx: WalletStoreWriter + DerefMut<Target = TReader>,
+    TReader: WalletStoreReader,
+{
+    // TODO(perf): consider a dedicated exists query
+    let maybe_utxo = tx
+        .stealth_outputs_get_by_commitment(&utxo.resource_address, &utxo.commitment)
+        .optional()?;
+    let Some(prev_utxo) = maybe_utxo else {
+        tx.stealth_outputs_insert(utxo)?;
+        return Ok(true);
+    };
+    let address = utxo.to_utxo_address();
+    // A burn is final, so a burnt output stays burnt.
+    let is_burnt = prev_utxo.is_burnt || utxo.is_burnt;
+    if prev_utxo.status == OutputStatus::Invalid && utxo.status != OutputStatus::Invalid {
+        tx.stealth_outputs_delete_invalid(&address)?;
+        tx.stealth_outputs_insert(&StealthOutputModel {
+            is_burnt,
+            ..utxo.clone()
+        })?;
+        return Ok(true);
+    }
+    let new_status = match prev_utxo.status {
+        OutputStatus::Unspent => Some(utxo.status),
+        // If not unspent, don't allow status to be changed.
+        // EDGE-CASE: scanning picks up a local UTXO that we know was spent
+        _ => None,
+    };
+    let changed = new_status.is_some_and(|status| status != prev_utxo.status) ||
+        prev_utxo.is_burnt != is_burnt ||
+        prev_utxo.is_frozen != utxo.is_frozen;
+    tx.stealth_outputs_update(&address, Some(is_burnt), new_status, Some(utxo.is_frozen))?;
+    Ok(changed)
+}
+
 fn locked_for_spend<R: WalletStoreReader>(
     reader: &mut R,
     lock_ids: &[WalletLockId],

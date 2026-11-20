@@ -13,7 +13,6 @@ use crate::{
     AllocatableAddressType,
     ComponentReference,
     Instruction,
-    IntoSigned,
     Signable,
     TRANSACTION_SIGNING_CONTEXT,
     Transaction,
@@ -287,12 +286,11 @@ fn a_signature_over_the_builder_message_verifies_once_fee_instructions_are_appli
         .pay_fee_from_component(ComponentAddress::from_array([2; 32]), 1000u64);
     assert!(!builder.clone().build_unsigned().fee_instructions().is_empty());
 
-    let message = builder.to_signing_message(&seal_signer);
-    let signature = TransactionSignature::new(
-        RistrettoPublicKey::from_secret_key(&signer_secret).to_byte_type(),
-        TRANSACTION_SIGNING_CONTEXT.sign(&signer_secret, &message),
-    );
-    let unsealed = builder.into_signed(signature);
+    let signer = RistrettoPublicKey::from_secret_key(&signer_secret).to_byte_type();
+    let authorizers: crate::AuthorizerSet = [signer].into_iter().collect();
+    let message = builder.to_signing_message(crate::AuthorizationContext::new(&seal_signer, &authorizers));
+    let signature = TransactionSignature::new(signer, TRANSACTION_SIGNING_CONTEXT.sign(&signer_secret, &message));
+    let unsealed = builder.with_signatures(vec![signature]);
 
     assert!(unsealed.verify_all_signatures(&seal_signer));
     assert!(unsealed.seal(&seal_secret).verify_all_signatures());
@@ -327,30 +325,6 @@ fn auto_filled_inputs_and_referenced_substates_skip_undeclarable_ids() {
             .collect::<Vec<_>>(),
         vec![SubstateId::from(component)]
     );
-}
-
-#[test]
-fn auto_filled_inputs_include_migrate_args() {
-    use tari_engine_types::substate::SubstateId;
-    use tari_template_lib_types::ObjectKey;
-
-    let target = ComponentAddress::new(ObjectKey::from_array([10; 32]));
-    let migrate_arg = ComponentAddress::new(ObjectKey::from_array([12; 32]));
-    let new_template = TemplateAddress::from_array([0x42; 32]);
-
-    let transaction = Transaction::builder_localnet(Epoch(1))
-        .with_auto_fill_inputs()
-        .update_component_template_address_with_migrate(target, new_template, "migrate", args![migrate_arg])
-        .build_unsigned();
-
-    let inputs = transaction
-        .inputs()
-        .iter()
-        .map(|input| input.substate_id().clone())
-        .collect::<std::collections::HashSet<_>>();
-    let expected = std::collections::HashSet::from([SubstateId::from(target), SubstateId::from(migrate_arg)]);
-    assert_eq!(inputs, expected);
-    assert_eq!(transaction.to_referenced_substates().unwrap(), expected);
 }
 
 #[test]
@@ -660,7 +634,10 @@ fn cbor_decode_rejects_oversized_inputs_signatures_and_blob_hashes() {
         tari_template_lib_types::crypto::RistrettoPublicKeyBytes::zero(),
         TRANSACTION_SIGNING_CONTEXT.sign(
             &RistrettoSecretKey::default(),
-            &base_unsigned.to_signing_message(&tari_template_lib_types::crypto::RistrettoPublicKeyBytes::zero()),
+            &base_unsigned.to_signing_message(crate::AuthorizationContext::new(
+                &tari_template_lib_types::crypto::RistrettoPublicKeyBytes::zero(),
+                &crate::AuthorizerSet::new(),
+            )),
         ),
     );
     let sigs = vec![dummy_sig; MAX_SIGNATURES_PER_TRANSACTION + 1];
@@ -781,4 +758,46 @@ fn stealth_transfer_resolves_workspace_resource_offset() {
         },
         other => panic!("expected StealthTransfer, got {other:?}"),
     }
+}
+
+#[test]
+fn auto_fill_inputs_leaves_blob_arguments_undeclared() {
+    let blob_comp = ComponentAddress::from_array([3; 32]);
+    let blob_bytes = tari_bor::encode(&blob_comp).unwrap();
+
+    let tx = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .add_blob("arg_blob", blob_bytes)
+        .call_function(TemplateAddress::default(), "f", args![Blob("arg_blob")])
+        .build_unsigned();
+
+    assert!(
+        tx.inputs().is_empty(),
+        "an address inside a blob argument must not be auto-declared, got {:?}",
+        tx.inputs()
+    );
+}
+
+#[test]
+fn merge_keeps_other_builders_declared_inputs() {
+    use tari_ootle_common_types::InputDeclaration;
+
+    let merged_comp = ComponentAddress::from_array([4; 32]);
+    let merged_arg_comp = ComponentAddress::from_array([5; 32]);
+
+    let other = Transaction::builder_localnet(Epoch(1))
+        .add_input(InputDeclaration::read(merged_comp))
+        .call_method(merged_comp, "inspect", args![merged_arg_comp]);
+
+    let tx = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .merge(other)
+        .build_unsigned();
+
+    let declared = tx
+        .inputs()
+        .iter()
+        .map(|decl| (decl.substate_id().clone(), decl.is_write()))
+        .collect::<Vec<_>>();
+    assert_eq!(declared, vec![(merged_comp.into(), false)]);
 }

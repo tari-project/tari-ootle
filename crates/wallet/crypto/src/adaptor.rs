@@ -80,6 +80,7 @@ pub fn sign(
 /// Verifies an adaptor pre-signature against `public_key`, `adaptor_point` (`T`) and `message`,
 /// checking `ŝ·G + T == (R + T) + e·P`. A `true` result guarantees that [`complete`] with
 /// the discrete log of `T` produces a valid transaction signature.
+#[must_use]
 pub fn verify(
     pre: &RistrettoAdaptorSignature,
     public_key: &RistrettoPublicKey,
@@ -137,7 +138,7 @@ mod tests {
     fn message(max_epoch: u64) -> TransactionMessage {
         let transaction =
             UnsignedTransactionV1::new(0u8, vec![], vec![], Default::default(), None, Epoch(max_epoch), false);
-        TransactionSealSignature::create_message_v1(&UnsealedTransactionV1::new(transaction, vec![]))
+        TransactionSealSignature::create_message(&UnsealedTransactionV1::new(transaction, vec![]))
     }
 
     #[test]

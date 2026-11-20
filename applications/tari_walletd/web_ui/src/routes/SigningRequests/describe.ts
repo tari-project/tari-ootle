@@ -282,6 +282,12 @@ function workspaceKeysRead(instruction: Instruction): number[] {
     const { component, migrate } = instruction.UpdateComponentTemplate;
     return [...componentKeys(component), ...(migrate ? argKeys(migrate.args) : [])];
   }
+  if ("SetComponentAccessRules" in instruction) {
+    return componentKeys(instruction.SetComponentAccessRules.component);
+  }
+  if ("SetComponentOwnerRule" in instruction) {
+    return componentKeys(instruction.SetComponentOwnerRule.component);
+  }
   return [];
 }
 

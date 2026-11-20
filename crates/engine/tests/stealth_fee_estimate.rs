@@ -199,18 +199,15 @@ fn build(
 
     let transfer = stealth::generate_transfer_data(inputs, Amount::zero(), outputs, Amount::from(revealed_fee));
 
-    let transaction = (0..num_inputs)
-        .fold(
-            Transaction::builder_localnet(Epoch(1))
-                .with_fee_instructions_builder(|builder| {
-                    builder
-                        .stealth_transfer(TARI_TOKEN, transfer.statement.clone())
-                        .put_last_instruction_output_on_workspace("revealed_bucket")
-                        .pay_fee_from_bucket("revealed_bucket")
-                })
-                .finish(),
-            |tx, i| tx.add_signer(&harness.test.to_public_key_bytes(), &minted.output_masks[i]),
-        )
+    let transaction = Transaction::builder_localnet(Epoch(1))
+        .with_fee_instructions_builder(|builder| {
+            builder
+                .stealth_transfer(TARI_TOKEN, transfer.statement.clone())
+                .put_last_instruction_output_on_workspace("revealed_bucket")
+                .pay_fee_from_bucket("revealed_bucket")
+        })
+        .finish()
+        .authorize(&harness.test.to_public_key_bytes(), &minted.output_masks[..num_inputs])
         .seal(harness.test.secret_key());
 
     Build {
@@ -297,7 +294,7 @@ fn the_runtime_call_count_matches_the_instruction_sequence() {
                 .pay_fee_from_bucket("revealed_bucket")
         })
         .finish()
-        .add_signer(&harness.test.to_public_key_bytes(), &minted.output_masks[0])
+        .authorize(&harness.test.to_public_key_bytes(), [&minted.output_masks[0]])
         .seal(harness.test.secret_key());
 
     let result = harness.test.execute_expect_success(tx, vec![]);

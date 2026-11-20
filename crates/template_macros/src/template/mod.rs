@@ -58,9 +58,10 @@ pub fn generate_template(options: TemplateOptions, input: TokenStream) -> Result
         ast::inject_cbor_derives(&mut ast.module_content)?;
     }
 
-    let definition = generate_definition(&ast);
     let template_def = generate_template_def(&ast)?;
+    let definition = generate_definition(&ast, &template_def.well_known_checks);
     let dispatcher = generate_dispatcher(&ast)?;
+    let template_def = template_def.section;
 
     let output = quote! {
         #definition
@@ -123,5 +124,51 @@ mod tests {
             skip_cbor_derives: true,
         });
         assert!(!skipped.contains("minicbor :: Encode"), "{skipped}");
+    }
+
+    #[test]
+    fn respects_explicit_cbor_index_attributes() {
+        let src = r#"
+            mod foo {
+                pub struct Foo {
+                    #[cbor(n(7))]
+                    a: u32,
+                    #[cbor(encode_with = "my_fn")]
+                    b: u32,
+                }
+                impl Foo {
+                    pub fn new() -> Self { Self { a: 0, b: 0 } }
+                }
+            }
+        "#;
+        let out = expand(src, TemplateOptions::default());
+        // Injected tags are appended after existing attributes.
+        assert!(!out.contains("# [cbor (n (7))] # [n (0)]"), "{out}");
+        assert!(out.contains("# [cbor (encode_with = \"my_fn\")] # [n (1)]"), "{out}");
+    }
+
+    #[test]
+    fn supports_associated_consts_trait_impls_and_nested_or_singleton_tuples() {
+        let src = r#"
+            mod foo {
+                pub struct Foo { x: u32 }
+                impl Default for Foo {
+                    fn default() -> Self { Self { x: 0 } }
+                }
+                impl Foo {
+                    pub const MAX: u32 = 100;
+                    pub fn singleton(x: u32) -> (u32,) { (x,) }
+                    pub fn nested(&self) -> ((u32, u64), u32) { ((self.x, 1), 2) }
+                    #[migration]
+                    pub fn migrate(old: (u32, u64)) -> Self { Self { x: old.0 } }
+                }
+            }
+        "#;
+        let out = expand(src, TemplateOptions::default());
+        assert!(out.contains("(rtn . 0 ,)") || out.contains("(rtn.0,)"), "{out}");
+        assert!(
+            out.contains("component_manager . get_state :: < (u32 , u64) >") || out.contains("get_state::<(u32, u64)>"),
+            "{out}"
+        );
     }
 }

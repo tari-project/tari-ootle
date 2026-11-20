@@ -57,6 +57,7 @@ pub fn mint_cookie_token() -> SafePassword {
 /// Both inputs are hashed with SHA-256 (32-byte fixed-size digests) and all 32
 /// bytes are XOR-accumulated alongside a constant-time length check so neither
 /// token contents nor prefix match length is leaked via timing side channels.
+#[must_use]
 pub fn verify_cookie_token(expected: &SafePassword, presented: &str) -> bool {
     if !presented.starts_with(COOKIE_TOKEN_PREFIX) {
         return false;

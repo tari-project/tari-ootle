@@ -87,6 +87,11 @@ impl ForeignProposalRecord {
         &self.proposal
     }
 
+    /// See [`CommandsCommitProof::prune_for_shard_group`].
+    pub fn prune_for_shard_group(&mut self, shard_group: ShardGroup) -> Result<(), UnknownProtocolVersionError> {
+        self.proposal.prune_for_shard_group(shard_group)
+    }
+
     pub fn into_proposal(self) -> ForeignProposal {
         self.proposal
     }
@@ -408,6 +413,11 @@ impl ForeignProposal {
 
     pub fn commit_proof(&self) -> &CommandsCommitProof {
         &self.commit_proof
+    }
+
+    /// See [`CommandsCommitProof::prune_for_shard_group`].
+    pub fn prune_for_shard_group(&mut self, shard_group: ShardGroup) -> Result<(), UnknownProtocolVersionError> {
+        self.commit_proof.prune_for_shard_group(shard_group)
     }
 
     pub fn block_pledge(&self) -> &BlockPledge {

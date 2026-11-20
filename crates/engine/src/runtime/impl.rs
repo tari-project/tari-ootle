@@ -178,7 +178,7 @@ use crate::{
         error::{ArgumentValidationError, LimitError},
         locking::{LockError, LockedSubstate},
         pay_fee::PayFee,
-        scope::{FrameWriteMode, PushCallFrame},
+        scope::{FrameWriteMode, HookFrame, PushCallFrame},
         tracker::{ComputeAllowance, FinalizedState, StateTracker},
     },
     state_store::StateReader,
@@ -697,7 +697,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         .into_iter()
         .collect();
 
-        if let Some(component) = auth_caller.component().copied() {
+        let acting_component = auth_caller.component().copied();
+        if let Some(component) = acting_component {
             self.invoke_modules_on_runtime_call("load_component")?;
             self.charge_component_load(component)?;
             let state = self.tracker.write_with(|state_mut| {
@@ -723,13 +724,18 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         })?;
 
         // The acting component never chose the hook code, so the hook's frame is confined to its own component
-        // state: it cannot act on any vault or resource it was handed, nor call out to a frame that could.
+        // state: it cannot act on any vault or resource it was handed, nor call out to a frame that could. It may
+        // read the vaults the acting component owns, which `check_component_scope` resolves through the acting
+        // component's loaded state.
         let ret = self.invoke_component_method(
             auth_hook.component_address,
             &auth_hook.method,
             args,
             Some(FrameWriteMode::OwnComponent),
-            Some(hook_arg_scope),
+            Some(HookFrame {
+                arg_scope: hook_arg_scope,
+                acting_component,
+            }),
         );
         if !resource_was_in_scope {
             self.tracker.write_with(|state_mut| {
@@ -826,15 +832,15 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         Runtime::new(Rc::new(self.clone()))
     }
 
-    /// Calls `method` on `component_address`. `arg_scope`, when given, is the callee frame's argument scope in
-    /// place of the one derived from `args`.
+    /// Calls `method` on `component_address`. `hook_frame`, when given, pushes the callee as a resource auth hook's
+    /// frame, with its argument scope in place of the one derived from `args`.
     fn invoke_component_method(
         &self,
         component_address: ComponentAddress,
         method: &str,
         args: Vec<Bytes>,
         restrict_frame_to: Option<FrameWriteMode>,
-        arg_scope: Option<IndexedWellKnownTypes>,
+        hook_frame: Option<HookFrame>,
     ) -> Result<IndexedValue, RuntimeError> {
         let call_runtime = self.for_nested_call();
 
@@ -845,7 +851,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             method,
             args.into_iter().map(InstructionArg::Literal).collect(),
             restrict_frame_to,
-            arg_scope,
+            hook_frame,
         )
         .map_err(|e| RuntimeError::CrossTemplateCallMethodError {
             component_address,
@@ -5558,6 +5564,7 @@ mod tests {
                     component_lock,
                     arg_scope: Box::new(arg_scope),
                     entity_id,
+                    acting_component: None,
                 },
                 None,
             )
@@ -5762,6 +5769,7 @@ mod tests {
                     component_lock: other_lock,
                     arg_scope: Box::new(IndexedWellKnownTypes::new()),
                     entity_id: f.other_entity,
+                    acting_component: None,
                 },
                 None,
             )
@@ -5800,6 +5808,7 @@ mod tests {
                     component_lock: owner_lock,
                     arg_scope: Box::new(IndexedWellKnownTypes::new()),
                     entity_id: f.owner_entity,
+                    acting_component: None,
                 },
                 None,
             )
@@ -5874,6 +5883,107 @@ mod tests {
         f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
     }
 
+    /// Pushes a resource auth hook frame on `hook_component`, triggered by `acting_component`.
+    fn push_hook_frame(f: &VaultScopeFixture, hook_component: ComponentAddress, acting_component: ComponentAddress) {
+        let hook_lock = f.runtime.lock_component(hook_component, LockFlag::Read).unwrap();
+        f.runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address: f.template_address,
+                    module_name: "Hook".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: hook_lock,
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id: f.other_entity,
+                    acting_component: Some(acting_component),
+                },
+                Some(FrameWriteMode::OwnComponent),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn hook_frame_reads_vaults_of_the_acting_component() {
+        let f = setup_vault_scope_fixture();
+        push_hook_frame(&f, f.other_component, f.owner_component);
+
+        for action in VAULT_READ_ACTIONS {
+            f.runtime
+                .vault_invoke(VaultRef::Ref(f.vault_id), action, EngineArgs::default())
+                .unwrap_or_else(|err| panic!("hook read {action:?} of the acting component's vault failed: {err:?}"));
+        }
+        let balance: Amount = f
+            .runtime
+            .vault_invoke(
+                VaultRef::Ref(f.vault_id),
+                VaultAction::GetBalance,
+                EngineArgs::default(),
+            )
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(balance, Amount::new(42));
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn hook_frame_rejects_reads_of_vaults_the_acting_component_does_not_own() {
+        let f = setup_vault_scope_fixture();
+        let third_component = create_test_component(
+            &f.runtime,
+            f.template_address,
+            "Third",
+            EntityId::new([4u8; EntityId::LENGTH]),
+        );
+        push_hook_frame(&f, f.other_component, third_component);
+
+        let expected_id = SubstateId::Vault(f.vault_id);
+        let expected_owner = SubstateId::Component(f.other_component);
+        for action in VAULT_READ_ACTIONS {
+            let err = f
+                .runtime
+                .vault_invoke(VaultRef::Ref(f.vault_id), action, EngineArgs::default())
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    RuntimeError::SubstateNotOwned { ref id, ref requested_owner }
+                        if *id == expected_id && **requested_owner == expected_owner
+                ),
+                "expected SubstateNotOwned for {action:?}, got {err:?}"
+            );
+        }
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn hook_frame_rejects_writes_to_vaults_of_the_acting_component() {
+        let f = setup_vault_scope_fixture();
+        push_hook_frame(&f, f.other_component, f.owner_component);
+
+        let expected_id = SubstateId::Vault(f.vault_id);
+        let expected_owner = SubstateId::Component(f.other_component);
+        for action in [
+            VaultAction::Withdraw,
+            VaultAction::Deposit,
+            VaultAction::CreateProofByResource,
+        ] {
+            let err = f
+                .runtime
+                .vault_invoke(VaultRef::Ref(f.vault_id), action, EngineArgs::default())
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    RuntimeError::SubstateNotOwned { ref id, ref requested_owner }
+                        if *id == expected_id && **requested_owner == expected_owner
+                ),
+                "expected SubstateNotOwned for {action:?}, got {err:?}"
+            );
+        }
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
     #[test]
     fn component_get_state_enforces_call_scope_and_charges_component_load() {
         use tari_engine_types::limits::component_load_points;
@@ -5933,6 +6043,7 @@ mod tests {
                     component_lock: caller_lock,
                     arg_scope: Box::new(IndexedWellKnownTypes::new()),
                     entity_id,
+                    acting_component: None,
                 },
                 None,
             )
@@ -5965,6 +6076,7 @@ mod tests {
                     component_lock: caller_lock,
                     arg_scope: Box::new(arg_scope),
                     entity_id,
+                    acting_component: None,
                 },
                 None,
             )
@@ -6010,6 +6122,7 @@ mod tests {
                     component_lock: caller_lock,
                     arg_scope: Box::new(IndexedWellKnownTypes::new()),
                     entity_id,
+                    acting_component: None,
                 },
                 None,
             )
@@ -6081,6 +6194,7 @@ mod tests {
                     component_lock: caller_lock,
                     arg_scope: Box::new(arg_scope),
                     entity_id,
+                    acting_component: None,
                 },
                 None,
             )

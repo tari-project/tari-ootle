@@ -195,7 +195,7 @@ impl ValidatorNodeClient {
     }
 
     fn next_request_id(&mut self) -> i64 {
-        self.request_id += 1;
+        self.request_id = self.request_id.wrapping_add(1);
         self.request_id
     }
 
@@ -237,7 +237,7 @@ impl ValidatorNodeClient {
 }
 
 fn jsonrpc_result(mut val: json::Value) -> Result<json::Value, ValidatorNodeClientError> {
-    if let Some(err) = val.get("error") {
+    if let Some(err) = val.get("error").filter(|e| !e.is_null()) {
         let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
         let message = err.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error");
         return Err(ValidatorNodeClientError::RequestFailedWithStatus {
@@ -394,5 +394,17 @@ mod tests {
         });
         let err = jsonrpc_result(payload).unwrap_err();
         assert!(matches!(err, ValidatorNodeClientError::InvalidResponse { .. }));
+    }
+
+    #[test]
+    fn jsonrpc_result_ignores_null_error_field() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {"size": 7},
+            "error": null
+        });
+        let res = jsonrpc_result(payload).unwrap();
+        assert_eq!(res["size"], 7);
     }
 }

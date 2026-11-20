@@ -1,13 +1,15 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-//! (De)serialization for 64-bit integers that may arrive as a JSON number or a JSON string.
+//! (De)serialization for integers that may arrive as a JSON number or a JSON string.
 //!
 //! JavaScript cannot hold an integer above `Number.MAX_SAFE_INTEGER` (2^53 - 1) in a `number`
 //! without losing precision, so JS clients encode 64-bit fields as strings. A field using this
 //! module accepts either form on the wire.
 //!
-//! Serialization is unchanged — always a number — so existing consumers are unaffected.
+//! For 64-bit and pointer-sized integers, serialization writes a JSON number so existing consumers
+//! are unaffected. For 128-bit integers (`u128`, `i128`), human-readable serializers write a string
+//! so values outside the 64-bit range round-trip through `serde_json`.
 
 use alloc::{format, string::String};
 use core::{any, fmt, marker::PhantomData};
@@ -20,8 +22,14 @@ use serde::{
 
 /// An integer that a JSON client may encode as a string.
 ///
-/// Implemented for the widths that ts-rs maps to a TypeScript `bigint`.
-pub trait StrNumber: Sized {
+/// Implemented for 64-bit, 128-bit, and pointer-sized integers (`u64`, `i64`, `u128`, `i128`, `usize`, `isize`).
+/// Values outside the 64-bit range must be supplied in string form when deserializing from JSON.
+pub trait StrNumber: Sized + Serialize {
+    /// Serializes this value, using a string in human-readable formats for widths above 64 bits.
+    fn serialize_as<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.serialize(serializer)
+    }
+
     /// Requests this type's natural integer width from the deserializer.
     ///
     /// Only used for non-self-describing formats, where `deserialize_any` is unavailable.
@@ -38,8 +46,18 @@ pub trait StrNumber: Sized {
 }
 
 macro_rules! impl_str_number {
-    ($ty:ty, $deserialize_as:ident) => {
+    ($ty:ty, $deserialize_as:ident $(, human_readable_str = $flag:literal)?) => {
         impl StrNumber for $ty {
+            $(
+                fn serialize_as<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    if $flag && serializer.is_human_readable() {
+                        serializer.collect_str(self)
+                    } else {
+                        self.serialize(serializer)
+                    }
+                }
+            )?
+
             fn deserialize_as<'de, D, V>(deserializer: D, visitor: V) -> Result<V::Value, D::Error>
             where
                 D: de::Deserializer<'de>,
@@ -73,6 +91,10 @@ macro_rules! impl_str_number {
 
 impl_str_number!(u64, deserialize_u64);
 impl_str_number!(i64, deserialize_i64);
+impl_str_number!(u128, deserialize_u128, human_readable_str = true);
+impl_str_number!(i128, deserialize_i128, human_readable_str = true);
+impl_str_number!(usize, deserialize_u64);
+impl_str_number!(isize, deserialize_i64);
 
 struct StrNumberVisitor<T>(PhantomData<T>);
 
@@ -108,8 +130,8 @@ impl<'de, T: StrNumber> Visitor<'de> for StrNumberVisitor<T> {
     }
 }
 
-pub fn serialize<T: Serialize, S: Serializer>(v: &T, s: S) -> Result<S::Ok, S::Error> {
-    v.serialize(s)
+pub fn serialize<T: StrNumber, S: Serializer>(v: &T, s: S) -> Result<S::Ok, S::Error> {
+    v.serialize_as(s)
 }
 
 /// Deserializes an integer from either a JSON number or a JSON string.
@@ -157,8 +179,16 @@ pub mod option {
         }
     }
 
-    pub fn serialize<T: Serialize, S: Serializer>(v: &Option<T>, s: S) -> Result<S::Ok, S::Error> {
-        v.serialize(s)
+    struct StrNumberRef<'a, T>(&'a T);
+
+    impl<T: StrNumber> Serialize for StrNumberRef<'_, T> {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            self.0.serialize_as(s)
+        }
+    }
+
+    pub fn serialize<T: StrNumber, S: Serializer>(v: &Option<T>, s: S) -> Result<S::Ok, S::Error> {
+        v.as_ref().map(StrNumberRef).serialize(s)
     }
 
     pub fn deserialize<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
@@ -363,5 +393,32 @@ mod tests {
             let decoded: OptWrapper = tari_bor::serde_codec::from_slice(&encoded).unwrap();
             assert_eq!(decoded, o(value));
         }
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct WideWrapper {
+        #[serde(with = "crate::str_number")]
+        unsigned: u128,
+        #[serde(with = "crate::str_number")]
+        signed: i128,
+    }
+
+    #[test]
+    fn round_trip_u128_and_i128_json_and_binary() {
+        let original = WideWrapper {
+            unsigned: u128::MAX,
+            signed: i128::MIN,
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        assert_eq!(
+            json,
+            r#"{"unsigned":"340282366920938463463374607431768211455","signed":"-170141183460469231731687303715884105728"}"#
+        );
+        let parsed: WideWrapper = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, original);
+
+        let encoded = tari_bor::serde_codec::to_vec(&original).unwrap();
+        let decoded: WideWrapper = tari_bor::serde_codec::from_slice(&encoded).unwrap();
+        assert_eq!(decoded, original);
     }
 }

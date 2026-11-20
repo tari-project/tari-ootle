@@ -85,6 +85,9 @@ impl SubstateRequirement {
     }
 
     pub fn to_shard_group(&self, num_shards: NumPreshards, num_committees: u32) -> Option<ShardGroup> {
+        if self.substate_id.is_global() {
+            return None;
+        }
         self.to_substate_address()
             .map(|a| a.to_shard_group(num_shards, num_committees))
     }
@@ -588,5 +591,17 @@ mod tests {
 
         assert!(VersionedSubstateId::from_str(&id.to_string()).is_err());
         assert!(VersionedSubstateId::from_str(&format!("{id}:?")).is_err());
+    }
+
+    #[test]
+    fn to_shard_group_returns_none_for_global_substate() {
+        let global_req = SubstateRequirement::versioned(
+            SubstateId::Template(
+                tari_engine_types::published_template::PublishedTemplateAddress::from_hash([9; 32].into()),
+            ),
+            SubstateVersion::ZERO,
+        );
+        assert_eq!(global_req.to_shard(NumPreshards::P64), Some(Shard::global()));
+        assert_eq!(global_req.to_shard_group(NumPreshards::P64, 4), None);
     }
 }

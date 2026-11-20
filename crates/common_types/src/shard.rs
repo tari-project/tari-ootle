@@ -6,6 +6,7 @@ use std::{fmt::Display, ops::RangeInclusive};
 use borsh::BorshSerialize;
 use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
+use tari_engine_types::SubstateVersion;
 
 use crate::{NumPreshards, ShardGroup, SubstateAddress, uint::U256};
 
@@ -68,8 +69,7 @@ impl Shard {
     }
 
     pub fn relative_to_shard_group_start(self, shard_group: ShardGroup) -> Option<usize> {
-        if !shard_group.contains(&self) {
-            // Also return None for global
+        if self.is_global() || !shard_group.contains(&self) {
             return None;
         }
         let relative_index = self.as_u32().checked_sub(shard_group.start().as_u32())?;
@@ -93,7 +93,7 @@ impl Shard {
         let end = if shard == num_shards {
             SubstateAddress::max()
         } else {
-            SubstateAddress::from_u256_zero_version(start + shard_size - U256::ONE)
+            SubstateAddress::from_u256(start + shard_size - U256::ONE, SubstateVersion::new(u64::MAX))
         };
         RangeInclusive::new(SubstateAddress::from_u256_zero_version(start), end)
     }
@@ -198,5 +198,21 @@ mod test {
 
         // Check that we didnt break early
         assert_eq!(i, 7);
+    }
+
+    #[test]
+    fn to_substate_address_range_includes_nonzero_versions_at_shard_upper_boundary() {
+        let shard1 = Shard::from(1);
+        let range = shard1.to_substate_address_range(NumPreshards::P2);
+        let upper_key = range.end().to_u256();
+        let addr_v5 = SubstateAddress::from_u256(upper_key, SubstateVersion::new(5));
+        assert_eq!(addr_v5.to_shard(NumPreshards::P2), shard1);
+        assert!(range.contains(&addr_v5));
+    }
+
+    #[test]
+    fn relative_to_shard_group_start_rejects_global_shard() {
+        let sg = ShardGroup::new(0, 10);
+        assert_eq!(Shard::global().relative_to_shard_group_start(sg), None);
     }
 }

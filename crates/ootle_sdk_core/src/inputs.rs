@@ -68,7 +68,9 @@ pub enum WantItem {
         component_address: String,
         /// The resource the vault must hold.
         resource_address: String,
-        /// When `true`, a missing component/vault is an error; when `false`, it is silently dropped.
+        /// When `true`, a missing component or vault is an error. When `false`, a missing component or
+        /// no vault holding the resource satisfies the want with no input; a vault the component
+        /// references but the indexer does not serve is always an error.
         required: bool,
     },
     /// A specific substate (added as an input if it exists / unconditionally if `required`).
@@ -738,22 +740,24 @@ fn resolve_vault(
     let vault_ids = component_vault_ids(component)?;
 
     let mut have_all_vaults = true;
-    let mut matched = false;
+    let mut matching_vaults = Vec::new();
     for vault_id in vault_ids {
         match cache.get(&vault_id) {
-            Some(Some(value)) => {
-                if let SubstateValue::Vault(vault) = value &&
-                    *vault.resource_address() == resource
-                {
-                    push_unique(resolved, InputDeclaration::write(vault_id.clone()));
-                    if resource != TARI_TOKEN {
-                        push_unique(resolved, InputDeclaration::read(resource));
-                    }
-                    matched = true;
+            Some(Some(SubstateValue::Vault(vault))) => {
+                if *vault.resource_address() == resource {
+                    matching_vaults.push(vault_id);
                 }
             },
-            // Fetched-but-absent vault: keep looking at the others.
-            Some(None) => {},
+            Some(Some(_)) => {
+                return Err(OotleSdkError::Resolution(format!(
+                    "expected a vault at '{vault_id}' but the indexer returned a different substate kind"
+                )));
+            },
+            Some(None) => {
+                return Err(OotleSdkError::Resolution(format!(
+                    "vault '{vault_id}' referenced by component '{component_address}' was not found"
+                )));
+            },
             None => {
                 have_all_vaults = false;
                 to_fetch.push(vault_id);
@@ -761,19 +765,24 @@ fn resolve_vault(
         }
     }
 
-    if matched {
-        return Ok(true);
-    }
     if !have_all_vaults {
         // Still need to fetch some vaults before we can decide.
         return Ok(false);
     }
-    if required {
-        return Err(OotleSdkError::Resolution(format!(
-            "required vault for resource '{resource_address}' in component '{component_address}' does not exist"
-        )));
+    if matching_vaults.is_empty() {
+        if required {
+            return Err(OotleSdkError::Resolution(format!(
+                "required vault for resource '{resource_address}' in component '{component_address}' does not exist"
+            )));
+        }
+        return Ok(true);
     }
-    // Optional and not found after checking every vault → satisfied (the create instruction handles it).
+    for vault_id in matching_vaults {
+        push_unique(resolved, InputDeclaration::write(vault_id));
+    }
+    if resource != TARI_TOKEN {
+        push_unique(resolved, InputDeclaration::read(resource));
+    }
     Ok(true)
 }
 
@@ -816,14 +825,17 @@ fn resolve_all_vaults(
     let mut all_cached = true;
     for vault_id in vault_ids {
         match cache.get(&vault_id) {
-            Some(Some(value)) => {
-                if let SubstateValue::Vault(vault) = value {
-                    push_unique(resolved, InputDeclaration::write(vault_id.clone()));
-                    let resource = *vault.resource_address();
-                    if resource != TARI_TOKEN {
-                        push_unique(resolved, InputDeclaration::write(resource));
-                    }
+            Some(Some(SubstateValue::Vault(vault))) => {
+                push_unique(resolved, InputDeclaration::write(vault_id.clone()));
+                let resource = *vault.resource_address();
+                if resource != TARI_TOKEN {
+                    push_unique(resolved, InputDeclaration::write(resource));
                 }
+            },
+            Some(Some(_)) => {
+                return Err(OotleSdkError::Resolution(format!(
+                    "expected a vault at '{vault_id}' but the indexer returned a different substate kind"
+                )));
             },
             Some(None) => {
                 // The component referenced this vault but the indexer reports it missing — an
@@ -1324,6 +1336,125 @@ mod tests {
             let decl = tx.inputs().get(&id).expect("input must be present");
             assert!(decl.is_write(), "resolved write must upgrade existing read");
             assert_eq!(decl.version(), Some(SubstateVersion::from(5)));
+        }
+    }
+
+    #[test]
+    fn resolve_vault_rejects_omitted_referenced_vault() {
+        let vault_a = VaultId::new(ObjectKey::from_array([0xc1; ObjectKey::LENGTH]));
+        let vault_b = VaultId::new(ObjectKey::from_array([0xc2; ObjectKey::LENGTH]));
+        for with_served_vault_cached in [false, true] {
+            for required in [false, true] {
+                let unsigned = TransactionBuilder::new(Network::Esmeralda.as_byte(), Epoch(1)).build_unsigned();
+                let mut wants = vec![WantItem::VaultForResource {
+                    component_address: from_component().to_string(),
+                    resource_address: resource().to_string(),
+                    required,
+                }];
+                if with_served_vault_cached {
+                    wants.push(WantItem::SpecificSubstate {
+                        substate_id: SubstateId::Vault(vault_a).to_string(),
+                        required: false,
+                    });
+                }
+                let partial = PartialTransaction::new_for_wants(unsigned, WantList(wants));
+
+                let mut r1 = vec![fetched(
+                    SubstateId::Component(from_component()),
+                    component_substate_json(&[vault_a, vault_b]),
+                )];
+                if with_served_vault_cached {
+                    r1.push(fetched(SubstateId::Vault(vault_a), vault_substate_json(resource())));
+                }
+                let (partial, _w) = unwrap_need_more(apply_fetched_substates(partial, &r1).unwrap());
+
+                // Round 2 serves vault_a (if not already cached) and omits vault_b.
+                let r2 = if with_served_vault_cached {
+                    vec![]
+                } else {
+                    vec![fetched(SubstateId::Vault(vault_a), vault_substate_json(resource()))]
+                };
+                let err = apply_fetched_substates(partial, &r2).unwrap_err();
+                assert_eq!(err.code(), "RESOLUTION");
+                assert!(
+                    err.to_string().contains(&SubstateId::Vault(vault_b).to_string()),
+                    "unexpected error: {err}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn resolve_vault_waits_for_all_referenced_vaults_and_declares_all_matching_vaults() {
+        let vault_a = VaultId::new(ObjectKey::from_array([0xd1; ObjectKey::LENGTH]));
+        let vault_b = VaultId::new(ObjectKey::from_array([0xd2; ObjectKey::LENGTH]));
+        let unsigned = TransactionBuilder::new(Network::Esmeralda.as_byte(), Epoch(1)).build_unsigned();
+        let wants = WantList(vec![
+            WantItem::SpecificSubstate {
+                substate_id: SubstateId::Vault(vault_a).to_string(),
+                required: false,
+            },
+            WantItem::VaultForResource {
+                component_address: from_component().to_string(),
+                resource_address: resource().to_string(),
+                required: true,
+            },
+        ]);
+        let partial = PartialTransaction::new_for_wants(unsigned, wants);
+
+        // Round 1 supplies the component and vault_a (which matches), leaving vault_b unfetched.
+        let r1 = vec![
+            fetched(
+                SubstateId::Component(from_component()),
+                component_substate_json(&[vault_a, vault_b]),
+            ),
+            fetched(SubstateId::Vault(vault_a), vault_substate_json(resource())),
+        ];
+        let (partial, fetch_ids) = match apply_fetched_substates(partial, &r1).unwrap() {
+            Resolution::NeedMore { partial, fetch_ids, .. } => (partial, fetch_ids),
+            Resolution::Resolved(_) => panic!("expected NeedMore while vault_b is unfetched"),
+        };
+        assert_eq!(fetch_ids, vec![SubstateId::Vault(vault_b).to_string()]);
+
+        // Round 2 supplies vault_b (also holding the same resource).
+        let r2 = vec![fetched(SubstateId::Vault(vault_b), vault_substate_json(resource()))];
+        let partial = unwrap_resolved(apply_fetched_substates(partial, &r2).unwrap());
+        let resolved = partial.resolved_inputs();
+        assert!(resolved.iter().any(|r| *r.substate_id() == SubstateId::Vault(vault_a)));
+        assert!(resolved.iter().any(|r| *r.substate_id() == SubstateId::Vault(vault_b)));
+        assert!(
+            resolved
+                .iter()
+                .any(|r| *r.substate_id() == SubstateId::Resource(resource()) && r.is_read())
+        );
+    }
+
+    #[test]
+    fn resolve_vault_and_all_vaults_reject_non_vault_substate_at_referenced_vault_id() {
+        for want in [
+            WantItem::VaultForResource {
+                component_address: from_component().to_string(),
+                resource_address: resource().to_string(),
+                required: false,
+            },
+            WantItem::AllComponentVaults {
+                component_address: from_component().to_string(),
+            },
+        ] {
+            let unsigned = TransactionBuilder::new(Network::Esmeralda.as_byte(), Epoch(1)).build_unsigned();
+            let partial = PartialTransaction::new_for_wants(unsigned, WantList(vec![want]));
+            let r1 = vec![fetched(
+                SubstateId::Component(from_component()),
+                component_substate_json(&[from_vault_id()]),
+            )];
+            let (partial, _w) = unwrap_need_more(apply_fetched_substates(partial, &r1).unwrap());
+            let r2 = vec![fetched(SubstateId::Vault(from_vault_id()), component_substate_json(&[]))];
+            let err = apply_fetched_substates(partial, &r2).unwrap_err();
+            assert_eq!(err.code(), "RESOLUTION");
+            assert!(
+                err.to_string().contains("different substate kind"),
+                "unexpected error: {err}"
+            );
         }
     }
 }

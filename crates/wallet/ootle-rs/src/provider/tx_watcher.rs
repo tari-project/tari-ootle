@@ -2,9 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     future::Future,
-    mem,
     pin::{Pin, pin},
     sync::{Arc, Weak},
     task::{Context, Poll},
@@ -52,11 +51,15 @@ const MAX_RESULT_POLL_INTERVAL: Duration = Duration::from_secs(4);
 /// the last one goes.
 const ABANDONED_WATCH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
+struct PendingWatch {
+    reap_at: Option<Instant>,
+    reply: oneshot::Sender<Result<FinalizeOutcome, PendingTransactionError>>,
+}
+
 pub struct TransactionWatcher {
     stream: BoxStream<'static, Result<sse::Event, EventStreamError>>,
     span: tracing::Span,
-    pending_requests: HashMap<TransactionId, TxWatchRequest>,
-    reap_times: BTreeMap<Instant, TransactionId>,
+    pending_requests: HashMap<TransactionId, Vec<PendingWatch>>,
     paused: Paused,
 }
 
@@ -67,7 +70,6 @@ impl TransactionWatcher {
             stream,
             span,
             pending_requests: HashMap::new(),
-            reap_times: BTreeMap::new(),
             paused,
         }
     }
@@ -83,9 +85,11 @@ impl TransactionWatcher {
     fn next_reap_time(&self) -> Instant {
         let now = Instant::now();
         let next_reap = self
-            .reap_times
-            .first_key_value()
-            .map(|(instant, _)| *instant)
+            .pending_requests
+            .values()
+            .flatten()
+            .filter_map(|watch| watch.reap_at)
+            .min()
             .unwrap_or(now + Duration::from_secs(60_000));
         if self.pending_requests.is_empty() {
             return next_reap;
@@ -95,12 +99,15 @@ impl TransactionWatcher {
 
     /// Drops the watches whose waiter has gone, such as a watch answered by asking the indexer directly.
     fn drop_abandoned_watches(&mut self) {
-        self.pending_requests.retain(|tx_id, request| {
-            let waited_on = !request.reply.is_closed();
-            if !waited_on {
-                tracing::debug!("Dropping the watch of tx_id {tx_id}, which nothing waits on");
-            }
-            waited_on
+        self.pending_requests.retain(|tx_id, watches| {
+            watches.retain(|watch| {
+                let waited_on = !watch.reply.is_closed();
+                if !waited_on {
+                    tracing::debug!("Dropping the watch of tx_id {tx_id}, which nothing waits on");
+                }
+                waited_on
+            });
+            !watches.is_empty()
         });
     }
 
@@ -130,37 +137,39 @@ impl TransactionWatcher {
     }
 
     fn reap_timeouts(&mut self) {
-        let to_keep = self.reap_times.split_off(&Instant::now());
-        let to_reap = mem::replace(&mut self.reap_times, to_keep);
-        for tx_id in to_reap.into_values() {
-            if let Some(request) = self.pending_requests.remove(&tx_id) {
+        let now = Instant::now();
+        self.pending_requests.retain(|&tx_id, watches| {
+            for watch in watches.extract_if(.., |watch| watch.reap_at.is_some_and(|reap_at| reap_at <= now)) {
                 tracing::warn!("Transaction watch timed out for tx_id: {}", tx_id);
-                let _ignore = request
+                let _ignore = watch
                     .reply
                     .send(Err(PendingTransactionError::Timeout { tx_id }))
                     .inspect_err(|_| {
                         tracing::debug!("The watch of tx_id {} was dropped before it timed out", tx_id);
                     });
             }
-        }
+            !watches.is_empty()
+        });
     }
 
     async fn handle_request(&mut self, request: TxWatchRequest) {
         let _enter = self.span.enter();
         tracing::debug!("Received watch request for tx_id: {}", request.tx_id);
         // A timeout too large to represent as an `Instant` never reaps.
-        match Instant::now().checked_add(request.timeout) {
-            Some(reap_at) => {
-                self.reap_times.insert(reap_at, request.tx_id);
-            },
-            None => {
-                tracing::warn!(
-                    "Watch request for tx_id {} has an unrepresentable timeout",
-                    request.tx_id
-                );
-            },
+        let reap_at = Instant::now().checked_add(request.timeout);
+        if reap_at.is_none() {
+            tracing::warn!(
+                "Watch request for tx_id {} has an unrepresentable timeout",
+                request.tx_id
+            );
         }
-        self.pending_requests.insert(request.tx_id, request);
+        self.pending_requests
+            .entry(request.tx_id)
+            .or_default()
+            .push(PendingWatch {
+                reap_at,
+                reply: request.reply,
+            });
     }
 
     async fn handle_event(&mut self, event: Result<sse::Event, EventStreamError>) {
@@ -183,7 +192,7 @@ impl TransactionWatcher {
                     },
                 };
 
-                let Some(watch) = self.pending_requests.remove(&event_data.transaction_id) else {
+                let Some(watches) = self.pending_requests.remove(&event_data.transaction_id) else {
                     tracing::debug!("No pending watch found for tx_id: {}", event_data.transaction_id);
                     return;
                 };
@@ -194,12 +203,14 @@ impl TransactionWatcher {
                     event_data.outcome
                 );
 
-                watch.reply.send(Ok(event_data.outcome)).unwrap_or_else(|_| {
-                    tracing::debug!(
-                        "The watch of tx_id {} was dropped before it finalized",
-                        event_data.transaction_id
-                    );
-                });
+                for watch in watches {
+                    watch.reply.send(Ok(event_data.outcome)).unwrap_or_else(|_| {
+                        tracing::debug!(
+                            "The watch of tx_id {} was dropped before it finalized",
+                            event_data.transaction_id
+                        );
+                    });
+                }
             },
             Err(e) => {
                 tracing::error!("Error receiving SSE event: {}", e);
@@ -900,5 +911,34 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(3), pause_waiter.wait_paused())
             .await
             .expect("the event stream stays unpaused for the answered watch");
+    }
+
+    #[tokio::test]
+    async fn concurrent_watches_for_the_same_transaction_all_receive_its_outcome() {
+        let indexer = indexer_that_committed(without_proof).await;
+        let (_client, pending) = pending(&indexer, IndexerTrust::Trust);
+
+        let watch_a = pending.register(Duration::from_secs(2)).await.unwrap();
+        let watch_b = pending.register(Duration::from_secs(2)).await.unwrap();
+        let (outcome_a, outcome_b) = tokio::join!(watch_a, watch_b);
+
+        assert_eq!(outcome_a.unwrap(), FinalizeOutcome::Commit);
+        assert_eq!(outcome_b.unwrap(), FinalizeOutcome::Commit);
+    }
+
+    #[tokio::test]
+    async fn a_dropped_watch_does_not_time_out_a_later_watch_for_the_same_transaction() {
+        let watcher = TransactionWatcher::new(Box::pin(futures::stream::pending()), Paused::default()).spawn();
+
+        let dropped = watcher
+            .watch_transaction(TRANSACTION_ID, Duration::from_millis(150))
+            .await;
+        drop(dropped);
+
+        let active = watcher.watch_transaction(TRANSACTION_ID, Duration::from_secs(2)).await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(500), active).await.is_err(),
+            "stale deadline from dropped watch timed out the active watch early"
+        );
     }
 }

@@ -87,8 +87,12 @@ pub fn generate_template_non_wasm(options: TemplateOptions, mut module: ItemMod)
     // Run template definition and dispatcher validation so host builds surface the same
     // compile-time errors (e.g. invalid migration signatures, reserved template names, or
     // function hash collisions) as WASM builds.
-    generate_template_def(&ast)?;
+    let template_def = generate_template_def(&ast)?;
     generate_dispatcher(&ast)?;
+
+    // Each tagged well-known type path must name that type on host builds too.
+    let well_known_checks = parse2::<syn::File>(template_def.well_known_checks)?;
+    ast.module_content.extend(well_known_checks.items);
 
     if !options.skip_cbor_derives {
         ast::inject_cbor_derives(&mut ast.module_content)?;
@@ -269,5 +273,24 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("not permitted"), "{err}");
+    }
+
+    #[test]
+    fn non_wasm_checks_well_known_type_paths() {
+        let out = expand_non_wasm(
+            r#"
+            mod vault {
+                pub struct Vault { amount: Amount }
+                impl Vault {
+                    pub fn deposit(&mut self, bucket: Bucket) {}
+                }
+            }
+            "#,
+            TemplateOptions::default(),
+        )
+        .unwrap();
+
+        let check = "assert_well_known :: < Bucket > (:: tari_template_lib :: well_known :: WellKnownType :: Bucket ,)";
+        assert_eq!(out.matches(check).count(), 1, "{out}");
     }
 }

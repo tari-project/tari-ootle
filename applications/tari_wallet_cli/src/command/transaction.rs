@@ -825,8 +825,8 @@ impl FromStr for NewResourceOutput {
         let (template_address, token_symbol) = s
             .split_once(':')
             .ok_or_else(|| anyhow!("Expected template address and token symbol"))?;
-        let template_address = parse_template_address(template_address)
-            .map_or_else(|| TemplateAddress::from_hex(template_address), Ok)?;
+        let template_address =
+            parse_template_address(template_address).map_or_else(|| TemplateAddress::from_hex(template_address), Ok)?;
         Ok(NewResourceOutput {
             template_address,
             token_symbol: token_symbol.to_string(),

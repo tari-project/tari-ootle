@@ -3058,6 +3058,44 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn earlier_stream_invalidation_does_not_lower_a_higher_retire_ahead_watermark() {
+        let (_d, store) = temp_store().await;
+        let id = substate(1);
+
+        // A finalized transaction retires `id` ahead of the stream at watermark 101 (creates v1).
+        let ahead = StateVersion::new(101);
+        store
+            .with_write_tx({
+                let id = id.clone();
+                move |tx| {
+                    tx.substate_cache_retire_ahead([(
+                        SubstateCacheInvalidation::created(&id, SubstateVersion::new(1)).unwrap(),
+                        ahead,
+                    )])
+                }
+            })
+            .await
+            .unwrap();
+
+        // Next, the stream promotes an earlier state_version (100) that touched `id` (created v0).
+        // This must NOT lower the journal's `state_version` from 101 back to 100.
+        invalidate(
+            &store,
+            SubstateCacheInvalidation::created(&id, SubstateVersion::ZERO).unwrap(),
+            100,
+        )
+        .await;
+
+        // An in-flight fetch that started at watermark 100 (before the v1 commit at 101) must still be vetoed.
+        assert!(!put(&store, &id, SubstateVersion::new(1), 100).await);
+        assert_eq!(read(&store, &id).await, None);
+
+        // Once the watermark reaches 101, the write is accepted.
+        assert!(put(&store, &id, SubstateVersion::new(1), 101).await);
+        assert_eq!(read(&store, &id).await, Some(SubstateVersion::new(1)));
+    }
+
+    #[tokio::test]
     async fn pruning_evicts_down_to_the_cap_and_expires_the_journal() {
         let (_d, store) = temp_store().await;
         // Descending `cached_at`, so the substates with the lowest n are the oldest and evicted first.

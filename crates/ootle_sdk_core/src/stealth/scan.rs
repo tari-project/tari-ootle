@@ -20,7 +20,9 @@
 //! - `Ok(None)` — **not ours**. An AEAD failure, a commitment mismatch, a tag mismatch, or a spend-key mismatch are all
 //!   **normal** for UTXOs addressed to another recipient — never errors.
 //! - `Err(OotleSdkError::Parse)` — structurally malformed inputs only (wrong byte widths, a non-canonical public key,
-//!   an encrypted-data length out of the valid `[80, 335]` range).
+//!   an unparseable `resource_address`, a missing `spend_public_key` on a `StealthPublicKey` output or a present
+//!   `spend_public_key` on an `AccessRuleAllowAll` output, or an encrypted-data length out of the valid `[80, 335]`
+//!   range).
 //!
 //! Every check needs only the view secret and the account public key, so a view-only wallet confirms
 //! ownership as fully as a spending one.
@@ -132,6 +134,23 @@ pub fn scan_stealth_output(
     let sender_nonce = parse_sender_nonce(&output.sender_public_nonce)?;
     let commitment = parse_commitment(&output.commitment)?;
     let enc_data = parse_encrypted_data(&output.encrypted_data)?;
+    let resource_address: ResourceAddress = output.resource_address.to_internal()?;
+    let expected_spend_pk = match output.pay_to {
+        StealthPayTo::StealthPublicKey => {
+            let spend_pk_bytes = output.spend_public_key.as_ref().ok_or_else(|| {
+                OotleSdkError::Parse("StealthPublicKey output is missing its spend_public_key".to_string())
+            })?;
+            Some(parse_spend_public_key(spend_pk_bytes)?)
+        },
+        StealthPayTo::AccessRuleAllowAll => {
+            if output.spend_public_key.is_some() {
+                return Err(OotleSdkError::Parse(
+                    "AccessRuleAllowAll output must not carry a spend_public_key".to_string(),
+                ));
+            }
+            None
+        },
+    };
 
     // Derive the AEAD encryption key: DH(view_secret, sender_public_nonce). The inverse of the
     // send-side `(nonce_secret, view_public_key)` derivation.
@@ -151,10 +170,6 @@ pub fn scan_stealth_output(
     // `derive_stealth_output_tag` but with `secret = view_secret`, `public_key = sender_public_nonce`
     // (the DH product is the same by commutativity).
     if let Some(tag_bytes) = &output.utxo_tag {
-        let resource_address: ResourceAddress = output
-            .resource_address
-            .to_internal()
-            .map_err(|e| OotleSdkError::Parse(format!("invalid resource address: {e}")))?;
         let expected_tag =
             crypto.derive_stealth_output_tag(internal_network, &view_key, &sender_nonce, &resource_address);
         if expected_tag != UtxoTag::new(tag_bytes.to_u32()) {
@@ -164,19 +179,14 @@ pub fn scan_stealth_output(
 
     // Authorisation check for a `StealthPublicKey` output carrying a one-time spend key `H(v·R)·G + A`.
     // A sender can encrypt to our view key while committing a spend key it controls, so a successful
-    // decrypt alone does not make the output ours. A `StealthPublicKey` output ALWAYS carries the
-    // one-time spend key on the wire; its absence is malformed input.
-    if output.pay_to == StealthPayTo::StealthPublicKey {
-        let spend_pk_bytes = output.spend_public_key.as_ref().ok_or_else(|| {
-            OotleSdkError::Parse("StealthPublicKey output is missing its spend_public_key".to_string())
-        })?;
+    // decrypt alone does not make the output ours.
+    if let Some(expected_spend_pk) = expected_spend_pk {
         let derived_spend_pk = crypto.derive_stealth_owner_public_key_from_view_key(
             internal_network,
             &account_key,
             &view_key,
             &sender_nonce,
         );
-        let expected_spend_pk = parse_spend_public_key(spend_pk_bytes)?;
         if derived_spend_pk != expected_spend_pk {
             return Ok(None); // spend-key mismatch — not addressed to us
         }
@@ -210,7 +220,7 @@ pub fn scan_stealth_output(
 ///
 /// Returns `Ok(None)` for a "not mine" output exactly like [`scan_stealth_output`] (a decrypt-miss is
 /// normal, never an error). A malformed substate id ⇒ `Parse`; a non-UTXO / frozen / burnt substate
-/// or a malformed nonce ⇒ `Invalid` / `Key` (from the decode).
+/// or a malformed nonce / spend public key ⇒ `Invalid` / `Key` (from the decode).
 pub fn scan_stealth_substate(
     network: Network,
     view_secret: &SecretKeyBytes,
@@ -587,6 +597,53 @@ mod tests {
         let mut utxo = make_inbound(net, &account_pk, &view_pk, &nonce_secret, &mask, 5, None, false, true);
         utxo.spend_public_key = None; // StealthPublicKey but no key on the wire — malformed.
         let err = scan_stealth_output(net, &secret_bytes(&view_sk), &pk_bytes(&account_pk), &utxo, false).unwrap_err();
+        assert_eq!(err.code(), "PARSE");
+
+        // Also fails fast when scanned with a non-matching view key.
+        let other_view = scalar(199);
+        let err =
+            scan_stealth_output(net, &secret_bytes(&other_view), &pk_bytes(&account_pk), &utxo, false).unwrap_err();
+        assert_eq!(err.code(), "PARSE");
+
+        // A non-canonical spend public key fails fast even on a non-matching view key.
+        utxo.spend_public_key = Some(PublicKeyBytes::from_array([0xff; 32]));
+        let err =
+            scan_stealth_output(net, &secret_bytes(&other_view), &pk_bytes(&account_pk), &utxo, false).unwrap_err();
+        assert_eq!(err.code(), "PARSE");
+    }
+
+    #[test]
+    fn access_rule_with_spend_key_is_parse_error() {
+        let net = Network::LocalNet;
+        let view_sk = scalar(124);
+        let view_pk = RistrettoPublicKey::from_secret_key(&view_sk);
+        let account_pk = RistrettoPublicKey::from_secret_key(&scalar(125));
+        let nonce_secret = scalar(126);
+        let mask = scalar(127);
+
+        let mut utxo = make_inbound(net, &account_pk, &view_pk, &nonce_secret, &mask, 5, None, false, false);
+        utxo.spend_public_key = Some(pk_bytes(&account_pk));
+        let err = scan_stealth_output(net, &secret_bytes(&view_sk), &pk_bytes(&account_pk), &utxo, false).unwrap_err();
+        assert_eq!(err.code(), "PARSE");
+    }
+
+    #[test]
+    fn malformed_resource_address_is_parse_error() {
+        let net = Network::LocalNet;
+        let view_sk = scalar(128);
+        let view_pk = RistrettoPublicKey::from_secret_key(&view_sk);
+        let account_pk = RistrettoPublicKey::from_secret_key(&scalar(129));
+        let nonce_secret = scalar(130);
+        let mask = scalar(131);
+
+        let mut utxo = make_inbound(net, &account_pk, &view_pk, &nonce_secret, &mask, 5, None, false, false);
+        utxo.resource_address = ResourceAddressStr("not-a-resource".to_string());
+        let err = scan_stealth_output(net, &secret_bytes(&view_sk), &pk_bytes(&account_pk), &utxo, false).unwrap_err();
+        assert_eq!(err.code(), "PARSE");
+
+        let other_view = scalar(199);
+        let err =
+            scan_stealth_output(net, &secret_bytes(&other_view), &pk_bytes(&account_pk), &utxo, false).unwrap_err();
         assert_eq!(err.code(), "PARSE");
     }
 

@@ -56,13 +56,17 @@ impl ExecutableManager {
     /// prepared executable no longer matches the config; they are prepared again the next time an instance of that
     /// type starts.
     pub fn apply_config_update(&mut self, config: Vec<ExecutableConfig>, always_compile: bool) -> Vec<InstanceType> {
+        let prev_always_compile = self.always_compile;
         self.config = config;
         self.always_compile = always_compile;
 
         let changed = self
             .prepared_from
             .iter()
-            .filter(|(instance_type, prepared_from)| self.find_config(**instance_type) != Some(*prepared_from))
+            .filter(|(instance_type, prepared_from)| {
+                (always_compile && !prev_always_compile) ||
+                    self.find_config(**instance_type) != Some(*prepared_from)
+            })
             .map(|(instance_type, _)| *instance_type)
             .collect::<Vec<_>>();
         for instance_type in &changed {
@@ -72,6 +76,7 @@ impl ExecutableManager {
     }
 
     pub fn get_executable(&self, instance_type: InstanceType) -> Option<&Executable> {
+        self.find_config(instance_type)?;
         self.prepared.iter().find(|e| e.instance_type == instance_type)
     }
 
@@ -104,7 +109,7 @@ impl ExecutableManager {
         }
         let compile_changed = current.is_some_and(|current| {
             current.compile.is_some() &&
-                prepared_from.is_some_and(|prepared_from| prepared_from.compile != current.compile)
+                prepared_from.map(|prepared_from| &prepared_from.compile) != Some(&current.compile)
         });
         Some(self.always_compile || compile_changed)
     }
@@ -298,11 +303,26 @@ mod tests {
 
         let changed = manager.apply_config_update(vec![], false);
         assert_eq!(changed, vec![InstanceType::TariValidatorNode]);
+        assert!(manager.get_executable(InstanceType::TariValidatorNode).is_none());
         assert!(
             manager
                 .compile_executable_if_required(InstanceType::TariValidatorNode)
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn enabling_always_compile_marks_prepared_executables_changed_and_new_compile_configs_force_build() {
+        let exec = exec_at(env::current_exe().unwrap());
+        let mut manager = prepared_manager(exec.clone()).await;
+
+        let changed = manager.apply_config_update(vec![exec.clone()], true);
+        assert_eq!(changed, vec![InstanceType::TariValidatorNode]);
+        assert_eq!(manager.reprepare(InstanceType::TariValidatorNode), Some(true));
+
+        let mut uninitialized = ExecutableManager::new(vec![], false);
+        uninitialized.apply_config_update(vec![with_features(exec, &["mimalloc"])], false);
+        assert_eq!(uninitialized.reprepare(InstanceType::TariValidatorNode), Some(true));
     }
 }

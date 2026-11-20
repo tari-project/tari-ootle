@@ -321,3 +321,44 @@ async fn a_substate_older_than_the_version_asked_for_is_refused() {
         "{err}"
     );
 }
+
+#[tokio::test]
+async fn a_substate_served_of_the_wrong_type_is_refused() {
+    let (sets, network, test) = walked_wallet(IndexerTrust::Verify).await;
+    let (_, value) = substate(1);
+    let wrong_id = SubstateId::Resource(tari_template_lib::types::constants::TARI_TOKEN);
+    let proof = substate_proof(&sets[4], &wrong_id, VERSION, &value);
+    network.serve_substate(wrong_id.clone(), VERSION, value, Some(proof));
+
+    let err = read_error(&test, &wrong_id).await;
+    assert!(matches!(err, SubstateApiError::SubstateOfAnotherType(_)), "{err}");
+
+    let err = test
+        .sdk()
+        .substate_api()
+        .get_substates_from_network(std::slice::from_ref(&wrong_id))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, SubstateApiError::SubstateOfAnotherType(_)), "{err}");
+}
+
+#[tokio::test]
+async fn an_unrequested_substate_in_a_batch_is_refused() {
+    let (sets, network, test) = walked_wallet(IndexerTrust::Verify).await;
+    let [(asked_id, asked_value), (extra_id, extra_value)] = high_substates(2).try_into().unwrap();
+    let asked_proof = substate_proof(&sets[4], &asked_id, VERSION, &asked_value);
+    let extra_proof = substate_proof(&sets[4], &extra_id, VERSION, &extra_value);
+    network.serve_substate(asked_id.clone(), VERSION, asked_value, Some(asked_proof));
+    network.serve_unrequested_substate(extra_id.clone(), VERSION, extra_value, Some(extra_proof));
+
+    let err = test
+        .sdk()
+        .substate_api()
+        .get_substates_from_network(std::slice::from_ref(&asked_id))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, SubstateApiError::UnrequestedSubstate { substate_id } if *substate_id == extra_id),
+        "{err}"
+    );
+}

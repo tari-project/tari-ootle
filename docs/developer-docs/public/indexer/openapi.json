@@ -877,6 +877,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "No committee answers for the template's shard group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }

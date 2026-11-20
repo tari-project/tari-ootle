@@ -33,6 +33,11 @@ use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::H
     responses(
         (status = 200, description = "Template definition", body = GetTemplateDefinitionResponse),
         (status = 404, description = "Template not found", body = ErrorResponse),
+        (
+            status = SERVICE_UNAVAILABLE,
+            description = "No committee answers for the template's shard group",
+            body = ErrorResponse
+        ),
         (status = INTERNAL_SERVER_ERROR, description = "Failed to fetch template definition", body = ErrorResponse),
     ),
 )]
@@ -49,7 +54,7 @@ pub async fn get_template_definition(
                 .get_substate(SubstateRequirementRef::unversioned(&id))
                 .await
                 .optional()
-                .map_err(|err| ErrorResponse::internal_error(format!("Error fetching template: {}", err)))?
+                .map_err(super::substates::substate_lookup_error)?
                 .ok_or_else(|| {
                     ErrorResponse::not_found(format!("Template with address {} not found", template_address))
                 })?;
@@ -102,7 +107,14 @@ pub async fn list_template_catalogue(
         .read_only_store()
         .list_template_catalogue(req.name_filter.as_deref(), req.after.as_ref(), limit)
         .await
+        .optional()
         .map_err(ErrorResponse::anyhow)?
+        .ok_or_else(|| {
+            ErrorResponse::bad_request(
+                "The `after` cursor template address is not in this indexer's template catalogue. Omit `after` to \
+                 start from the beginning.",
+            )
+        })?
         .into_iter()
         .map(TemplateCatalogueItem::from)
         .collect();

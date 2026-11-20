@@ -3480,4 +3480,15 @@ pub(crate) mod tests {
             (Epoch(1), all)
         ]);
     }
+
+    #[tokio::test]
+    async fn a_missing_template_catalogue_cursor_is_not_found() {
+        let (_dir, store) = temp_store().await;
+        let missing = tari_template_lib_types::TemplateAddress::from_array([0xaa; 32]);
+        let err = store
+            .with_read_tx(move |tx| tx.list_template_catalogue(None, Some(&missing), 20))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, StorageError::NotFound { .. }), "{err}");
+    }
 }

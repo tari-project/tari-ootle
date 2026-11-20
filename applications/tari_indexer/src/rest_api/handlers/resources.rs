@@ -45,7 +45,7 @@ pub async fn get_resource(
         .substate_manager()
         .fetch_substate(SubstateRequirementRef::new(&resource_address, None))
         .await
-        .map_err(|e| ErrorResponse::internal_error(format!("Error getting resource: {}", e)))?
+        .map_err(super::substates::substate_lookup_error)?
         .ok_or_else(|| ErrorResponse::not_found(format!("Resource {} not found", resource_address)))?;
 
     let substate = decode_substate(&resource_address, &fetched.substate)

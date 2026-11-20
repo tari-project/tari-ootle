@@ -131,9 +131,22 @@ impl RejectReason {
         }
     }
 
-    /// Builds a boundary reject from a free-form **abort** message (e.g. an indexer `Finalized` result
-    /// whose `abort_details` is set but which carries no `execution_result`). The stable `code` is
-    /// `ABORT` (matching the engine `Abort` variant) and there is no structured abort sub-code.
+    /// Builds a boundary reject from a consensus [`AbortReason`] and optional free-form abort details.
+    ///
+    /// Sets `code` to `"ABORT"` and `abort_code` to the canonical [`abort_code`] for `reason`. Uses `details` as
+    /// `message` when present, or the engine [`InternalRejectReason::Abort`] display string when `details` is `None`.
+    pub fn from_abort(reason: AbortReason, details: Option<String>) -> Self {
+        Self {
+            code: "ABORT".to_string(),
+            abort_code: Some(abort_code(&reason).to_string()),
+            failure_code: None,
+            message: details.unwrap_or_else(|| InternalRejectReason::Abort { reason }.to_string()),
+        }
+    }
+
+    /// Builds a boundary reject from a free-form **abort** message when no structured [`AbortReason`]
+    /// is available. Sets `code` to `"ABORT"` and leaves `abort_code` as `None`; prefer
+    /// [`Self::from_abort`] whenever the consensus [`AbortReason`] is known.
     pub fn from_abort_details(message: impl Into<String>) -> Self {
         Self {
             code: "ABORT".to_string(),
@@ -496,6 +509,33 @@ mod tests {
         });
         assert_eq!(r.code, "ABORT");
         assert_eq!(r.abort_code.as_deref(), Some("EPOCH_EXPIRED"));
+    }
+
+    #[test]
+    fn from_abort_preserves_canonical_abort_code_and_details() {
+        let with_details = RejectReason::from_abort(
+            AbortReason::OneOrMoreInputsNotFound,
+            Some("input substate missing".to_string()),
+        );
+        assert_eq!(with_details.code, "ABORT");
+        assert_eq!(
+            with_details.abort_code.as_deref(),
+            Some("ONE_OR_MORE_INPUTS_NOT_FOUND")
+        );
+        assert_eq!(with_details.failure_code, None);
+        assert_eq!(with_details.message, "input substate missing");
+
+        let without_details = RejectReason::from_abort(AbortReason::EpochExpired, None);
+        assert_eq!(without_details.code, "ABORT");
+        assert_eq!(without_details.abort_code.as_deref(), Some("EPOCH_EXPIRED"));
+        assert_eq!(without_details.failure_code, None);
+        assert_eq!(
+            without_details.message,
+            InternalRejectReason::Abort {
+                reason: AbortReason::EpochExpired,
+            }
+            .to_string()
+        );
     }
 
     #[test]

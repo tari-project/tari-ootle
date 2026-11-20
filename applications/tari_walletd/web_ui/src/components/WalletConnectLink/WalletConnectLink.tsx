@@ -46,7 +46,6 @@ import {
   accountsGetDefault,
   accountsList,
   confidentialViewVaultBalance,
-  keysCreate,
   nftList,
   substatesGet,
   substatesList,
@@ -138,8 +137,6 @@ const ConnectorDialog = () => {
         return transactionsGetResult(params);
       case "tari_getTemplate":
         return templatesGet(params);
-      case "tari_createKey":
-        return keysCreate(params);
       case "tari_viewConfidentialVaultBalance":
         return confidentialViewVaultBalance(params);
       case "tari_createFreeTestCoins":
@@ -253,7 +250,6 @@ const ConnectorDialog = () => {
               "tari_submitTransaction",
               "tari_getTransactionResult",
               "tari_getTemplate",
-              "tari_createKey",
               "tari_viewConfidentialVaultBalance",
               "tari_createFreeTestCoins",
               "tari_listSubstates",

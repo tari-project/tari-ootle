@@ -763,6 +763,7 @@ impl TestBuilder {
                 epoch_end_grace_period: Duration::from_secs(1),
                 epoch_end_drain_period: Duration::from_secs(5),
                 catch_up_request_timeout: Duration::from_secs(15),
+                catch_up_page_bytes: tari_consensus::hotstuff::DEFAULT_CATCH_UP_PAGE_BYTES,
             },
         }
     }
@@ -830,6 +831,11 @@ impl TestBuilder {
     pub fn with_message_filter(mut self, message_filter: MessageFilter) -> Self {
         self.message_filter = Some(message_filter);
         self
+    }
+
+    /// The config each validator is built with.
+    pub fn hotstuff_config(&self) -> HotstuffConfig {
+        self.config.clone()
     }
 
     pub fn modify_consensus_constants<F: FnOnce(&mut ConsensusConstants)>(mut self, f: F) -> Self {

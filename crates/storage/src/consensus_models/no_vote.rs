@@ -191,6 +191,15 @@ pub enum NoVoteReason {
         locked_epoch: Epoch,
         block_epoch: Epoch,
     },
+    #[error(
+        "The leader sequenced transaction {transaction_id}, whose minimum epoch is {min_epoch}, in a block of the \
+         earlier {block_epoch}"
+    )]
+    MinEpochAfterBlock {
+        transaction_id: TransactionId,
+        min_epoch: Epoch,
+        block_epoch: Epoch,
+    },
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -254,6 +263,7 @@ impl NoVoteReason {
             Self::ConflictingTransactionProposed { .. } => "ConflictingTransactionProposed",
             Self::LockedEpochDisagreement { .. } => "LockedEpochDisagreement",
             Self::LockedEpochAfterBlock { .. } => "LockedEpochAfterBlock",
+            Self::MinEpochAfterBlock { .. } => "MinEpochAfterBlock",
         }
     }
 }

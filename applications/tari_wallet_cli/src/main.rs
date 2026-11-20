@@ -51,7 +51,6 @@ async fn main() -> Result<(), anyhow::Error> {
 async fn handle_command(command: Command, client: WalletDaemonClient) -> anyhow::Result<()> {
     match command {
         // Command::Templates(cmd) => cmd.handle(client).await?,
-        Command::Keys(cmd) => cmd.handle(client).await?,
         Command::Transactions(cmd) => cmd.handle(client).await?,
         Command::Accounts(cmd) => cmd.handle(client).await?,
         Command::Proofs(cmd) => cmd.handle(client).await?,

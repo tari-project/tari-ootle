@@ -104,9 +104,11 @@ use tari_template_lib::{
         LogLevel,
         Metadata,
         NonFungibleAddress,
+        OwnerRule,
         TemplateAddress,
         TemplateMetadataHash,
         ValidatorFeePoolAddress,
+        access_rules::ComponentAccessRules,
         crypto::RistrettoPublicKeyBytes,
         engine_args::IntrinsicId,
         stealth::StealthTransferStatement,
@@ -123,6 +125,13 @@ use crate::{
     },
     wasm::WasmInstanceCache,
 };
+
+/// A rule a top-level instruction replaces on a component.
+#[derive(Debug, Clone)]
+pub enum ComponentRulesChange {
+    AccessRules(ComponentAccessRules),
+    OwnerRule(OwnerRule),
+}
 
 /// What a call on a component needs of it: the header fields its frame runs under, and the
 /// substates its state holds.
@@ -144,8 +153,11 @@ pub trait RuntimeInterface {
     /// [`tari_engine_types::limits::component_load_points`] for what the state holds before
     /// indexing it. The state itself stays in the store.
     fn load_component(&self, call: ComponentReference) -> Result<LoadedComponent, RuntimeError>;
+    /// Resolves `call` to the address it names, without loading the component or indexing its state.
+    fn resolve_component_address(&self, call: ComponentReference) -> Result<ComponentAddress, RuntimeError>;
 
     fn lock_component(&self, address: ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError>;
+    fn unlock_component(&self, lock: LockedSubstate) -> Result<(), RuntimeError>;
 
     fn component_invoke(
         &self,
@@ -245,6 +257,15 @@ pub trait RuntimeInterface {
 
     fn update_component_template(&self, new_template: TemplateAddress) -> Result<(), RuntimeError>;
 
+    /// Replaces a rule of the component behind `component_lock` for a top-level instruction. The component's rules
+    /// updater is checked against the current frame's scope, which for an instruction is the transaction's signer
+    /// badges and the proofs it has authorized.
+    fn set_component_rules(
+        &self,
+        component_lock: &LockedSubstate,
+        change: ComponentRulesChange,
+    ) -> Result<(), RuntimeError>;
+
     fn validate_return_value(&self, value: &IndexedValue) -> Result<(), RuntimeError>;
 
     fn push_call_frame(&self, frame: PushCallFrame, restrict_to: Option<FrameWriteMode>) -> Result<(), RuntimeError>;
@@ -300,11 +321,11 @@ pub trait RuntimeInterface {
     /// the work.
     fn charge_template_instantiation(&self, shape: &ModuleShape) -> Result<(), RuntimeError>;
 
-    /// Charges the host-side handling of a value a template call returned, `bytes` long and holding
-    /// `items` CBOR data items, before it is decoded. Priced by
-    /// [`tari_engine_types::limits::return_value_points`] and charged against the same compute
-    /// allowance as native verification.
-    fn charge_return_value(&self, bytes: u64, items: u64) -> Result<(), RuntimeError>;
+    /// Charges the host-side handling of a value a template call returned, `raw`, before it is
+    /// decoded. Priced by [`tari_engine_types::limits::return_value_points`] and charged against
+    /// the same compute allowance as native verification; its items are counted as
+    /// [`Self::charge_engine_arg`] counts an argument's.
+    fn charge_return_value_read(&self, raw: &[u8]) -> Result<(), EngineArgChargeError>;
 
     /// Charges the host-side decode of CBOR a template wrote, `input`, before it is decoded: an
     /// engine call's argument, or a value nested in one. Priced by

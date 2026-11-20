@@ -65,12 +65,11 @@ stops surfacing the key once that timestamp has passed — the agent's next requ
 agent's job: shorter is safer, since a leaked short-lived key dies on its own without manual revocation.
 
 ```bash
-# CLI: relative duration, parsed with `humantime`. Accepts forms like
-# 30d, 12h, 1y, 90 days, 1day 6h.
+# CLI: expiry in whole days from now.
 tari-wallet-cli auth api-key create \
     --name monitoring-agent \
     --permissions AccountInfo,TransactionGet \
-    --expires-in 30d
+    --expires-in-days 30
 ```
 
 ```rust

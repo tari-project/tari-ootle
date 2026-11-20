@@ -192,6 +192,7 @@ mod tests {
     fn justifies_zero_block_requires_canonical_genesis_shape() {
         let genesis = ProposalCertificate::genesis(Epoch(3), shard_group());
         assert!(genesis.justifies_zero_block());
+        assert!(genesis.calculate_block_id().is_zero());
 
         // Non-zero height with zero header hash is not a genesis certificate.
         let non_zero_height = ProposalCertificate::new(
@@ -216,6 +217,7 @@ mod tests {
             QuorumDecision::Accept,
         );
         assert!(!non_zero_parent.justifies_zero_block());
+        assert!(!non_zero_parent.calculate_block_id().is_zero());
 
         // Reject decision is not a genesis certificate.
         let reject = ProposalCertificate::new(

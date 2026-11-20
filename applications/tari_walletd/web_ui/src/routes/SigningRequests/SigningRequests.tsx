@@ -8,6 +8,7 @@ import {
   useRejectSigningRequest,
 } from "@api/hooks/useSigningRequests";
 import { Accordion, AccordionDetails, AccordionSummary } from "@components/Accordion";
+import ComponentRulesChangeWarning from "@components/ComponentRulesChangeWarning";
 import ComponentUpgradeWarning from "@components/ComponentUpgradeWarning";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import PageHeading from "@components/PageHeading";
@@ -26,6 +27,7 @@ import type {
   SigningRequester,
   SigningRequestInfo,
 } from "@tari-project/ootle-ts-bindings";
+import { transactionBody } from "@tari-project/ootle-ts-bindings";
 import { useEffect, useState } from "react";
 import Inputs from "../Transactions/Inputs";
 import Instructions, { BlobContents } from "../Transactions/Instructions";
@@ -102,7 +104,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 /// What the signature authorises, in words, for the instructions this page
 /// knows how to read.
 function Summary({ request }: { request: SigningRequestInfo }) {
-  const v1 = request.transaction.V1;
+  const v1 = transactionBody(request.transaction);
   const instructions = v1?.instructions ?? [];
   const blobs = v1?.blobs ?? [];
   const governance = instructions.map((instruction) => describeGovernanceCall(instruction, blobs));
@@ -148,7 +150,7 @@ function RequestCard({ request }: { request: SigningRequestInfo }) {
   const error = isActionable ? (approve.error ?? reject.error) : null;
   const params = { request_id: request.request_id };
 
-  const v1 = request.transaction.V1;
+  const v1 = transactionBody(request.transaction);
   const instructions = v1?.instructions ?? [];
   const feeInstructions = v1?.fee_instructions ?? [];
   const inputs = v1?.inputs ?? [];
@@ -183,6 +185,7 @@ function RequestCard({ request }: { request: SigningRequestInfo }) {
       </Stack>
 
       <ComponentUpgradeWarning upgrades={request.component_upgrades} />
+      <ComponentRulesChangeWarning changes={request.component_rules_changes} />
       <Summary request={request} />
 
       <Stack direction="row" spacing={2} alignItems="baseline" sx={{ mb: 2 }} flexWrap="wrap">
@@ -219,6 +222,16 @@ function RequestCard({ request }: { request: SigningRequestInfo }) {
           {v1?.main_signer === "SealSigner" && (
             <Chip label="seal also authorizes" size="small" color="warning" variant="outlined" sx={{ ml: 1 }} />
           )}
+        </Field>
+        <Field label="Authorizers">
+          {request.authorizers.map((key) => (
+            <div key={key}>
+              <span style={{ fontFamily: "monospace" }}>{key}</span>
+              {key === request.signer_public_key && (
+                <Chip label="this key" size="small" color="warning" variant="outlined" sx={{ ml: 1 }} />
+              )}
+            </div>
+          ))}
         </Field>
         <Field label="Main signer">
           {v1?.main_signer === "SealSigner" && "the sealer"}

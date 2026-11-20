@@ -8,11 +8,11 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
-use chrono::NaiveDateTime;
 use diesel::{prelude::*, sql_query};
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use log::error;
 use serde::{Deserialize, Serialize};
+use time::PrimitiveDateTime;
 
 use crate::schema::*;
 
@@ -52,7 +52,7 @@ pub struct LoggedMessage {
     #[diesel(sql_type = diesel::sql_types::Text)]
     pub message_json: String,
     #[diesel(sql_type = diesel::sql_types::Timestamp)]
-    pub timestamp: NaiveDateTime,
+    pub timestamp: PrimitiveDateTime,
 }
 
 impl Display for LoggedMessage {

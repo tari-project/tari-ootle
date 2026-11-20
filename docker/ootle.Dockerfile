@@ -24,7 +24,7 @@
 #   docker run --rm ootle:local tari_validator_node --help
 #   docker run --rm ootle-walletd:local --help
 
-ARG RUST_VERSION=1.97.1
+ARG RUST_VERSION=1.100.0
 ARG DEBIAN_VERSION=trixie
 ARG NODE_MAJOR=24
 ARG PNPM_VERSION=9

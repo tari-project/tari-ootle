@@ -178,10 +178,7 @@ async fn sort_in_memory<W: Write>(
     entries.sort_unstable();
     let mut record = vec![0u8; header.stride()];
     write_records(writer, &entries, header, &mut record)?;
-    println!(
-        "Sorted and wrote {count} entries in {}.",
-        humantime::format_duration(Duration::from_secs(timer.elapsed().as_secs()))
-    );
+    println!("Sorted and wrote {count} entries in {:.0?}.", timer.elapsed());
     Ok(())
 }
 
@@ -211,10 +208,7 @@ async fn sort_external<W: Write>(
     })
     .await?;
     store.flush_all()?;
-    println!(
-        "Distributed into {num_buckets} buckets in {}.",
-        humantime::format_duration(Duration::from_secs(timer.elapsed().as_secs()))
-    );
+    println!("Distributed into {num_buckets} buckets in {:.0?}.", timer.elapsed());
 
     // Phase 2: sort each bucket in memory and append in bucket order. Buckets partition the key space in
     // ascending order, so the concatenation is globally sorted.
@@ -233,9 +227,9 @@ async fn sort_external<W: Write>(
         if written - last_report > count / 20 {
             last_report = written;
             println!(
-                "{:.1}% ({written}/{count}) sorted and written in {}",
+                "{:.1}% ({written}/{count}) sorted and written in {:.0?}",
                 written as f64 / count as f64 * 100.0,
-                humantime::format_duration(Duration::from_secs(timer.elapsed().as_secs())),
+                timer.elapsed(),
             );
         }
     }
@@ -245,10 +239,7 @@ async fn sort_external<W: Write>(
             format!("bucket files contained {written} entries, expected {count}"),
         ));
     }
-    println!(
-        "Sorted and wrote {count} entries in {}.",
-        humantime::format_duration(Duration::from_secs(timer.elapsed().as_secs()))
-    );
+    println!("Sorted and wrote {count} entries in {:.0?}.", timer.elapsed());
     Ok(())
 }
 
@@ -325,10 +316,10 @@ where F: FnMut(&[(u64, u64)]) -> io::Result<()> {
                 ((count - done) as f64 / done.max(1) as f64 * elapsed.as_secs_f64()).round() as u64,
             );
             println!(
-                "{:.1}% ({done}/{count}) generated in {}, ETA {}",
+                "{:.1}% ({done}/{count}) generated in {:.0?}, ETA {:.0?}",
                 done as f64 / count as f64 * 100.0,
-                humantime::format_duration(Duration::from_secs(elapsed.as_secs())),
-                humantime::format_duration(eta),
+                elapsed,
+                eta,
             );
         }
     }
@@ -436,8 +427,9 @@ impl BucketStore {
                 format!("bucket file {} contains a partial entry", path.display()),
             ));
         }
-        let entries = bytes
-            .chunks_exact(ENTRY_SIZE)
+        let (chunks, _) = bytes.as_chunks::<ENTRY_SIZE>();
+        let entries = chunks
+            .iter()
             .map(|c| {
                 (
                     u64::from_le_bytes(c[..8].try_into().expect("chunk is ENTRY_SIZE bytes")),

@@ -35,12 +35,15 @@ const publicKey = publicKeyFromSecretKey(secretKey);
 // publicKey: Uint8Array (32 bytes)
 ```
 
-### `hashUnsignedTransaction(unsignedTxJson, sealSignerPublicKey)`
+### `hashUnsignedTransaction(unsignedTxJson, sealSignerPublicKey, authorizerPublicKeys)`
 
 Hash a transaction for an authorization signature. Returns the 64-byte `Uint8Array` an external signer signs (see [External signers](#external-signers-hsm-mpc)). The hash excludes attached signatures, so it is the same before and after `attachTransactionSignature`.
 
 - `unsignedTxJson` — JSON-serialised `UnsignedTransactionV1` or `UnsealedTransactionV1`
 - `sealSignerPublicKey` — raw public key bytes of the account owner (seal signer)
+- `authorizerPublicKeys` — the 32-byte public keys of every authorizer, concatenated in any order
+
+Every authorizer signs over the same set of authorizer keys, so decide the set before anyone signs. The sealed transaction verifies only with an authorization from each key in the set and no other.
 
 ```typescript
 import { hashUnsignedTransaction } from "@tari-project/ootle-wasm";
@@ -48,12 +51,13 @@ import { hashUnsignedTransaction } from "@tari-project/ootle-wasm";
 const hash = hashUnsignedTransaction(
   JSON.stringify(unsignedTransaction),
   sealSignerPublicKey,
+  authorizerPublicKeys,
 );
 ```
 
-### `addTransactionSigner(txJson, signerSecretKey, sealSignerPublicKey)`
+### `addTransactionSigner(txJson, signerSecretKey, sealSignerPublicKey, authorizerPublicKeys)`
 
-Hash the transaction and append an authorization signature by `signerSecretKey`, committing to the seal signer `sealSignerPublicKey`. Accepts unsigned or unsealed transaction JSON and returns the unsealed transaction JSON.
+Hash the transaction and add an authorization signature by `signerSecretKey`, committing to the seal signer `sealSignerPublicKey` and the authorizer set `authorizerPublicKeys`, which must include the signer's own key. Accepts unsigned or unsealed transaction JSON and returns the unsealed transaction JSON.
 
 ### `sealTransaction(txJson, sealSignerSecretKey)`
 
@@ -63,8 +67,8 @@ Hash the transaction and seal it with `sealSignerSecretKey`. Accepts unsigned or
 import { addTransactionSigner, sealTransaction } from "@tari-project/ootle-wasm";
 
 let txJson = JSON.stringify(unsignedTransaction);
-// Optional: authorizations from other keys
-txJson = addTransactionSigner(txJson, authorizerSecretKey, sealSignerPublicKey);
+// Optional: authorizations from other keys, each over the set of all of them
+txJson = addTransactionSigner(txJson, authorizerSecretKey, sealSignerPublicKey, authorizerPublicKeys);
 const transactionJson = sealTransaction(txJson, sealSignerSecretKey);
 ```
 
@@ -95,9 +99,9 @@ Hash a transaction for sealing. Returns the 64-byte seal message for the seal si
 
 Seal a transaction with the seal signer's signature over the `hashUnsealedTransaction` hash. Returns the sealed `Transaction` JSON. Throws if the seal signature, or any authorization signature already attached, does not verify.
 
-### `attachTransactionSignature(txJson, signerPublicKey, signature, sealSignerPublicKey)`
+### `attachTransactionSignature(txJson, signerPublicKey, signature, sealSignerPublicKey, authorizerPublicKeys)`
 
-Append an authorization signature from an additional authorizer key. The signature is over the `hashUnsignedTransaction` hash for `sealSignerPublicKey`. Returns the unsealed transaction JSON. Throws if the signature does not verify.
+Add an authorization signature from an additional authorizer key. The signature is over the `hashUnsignedTransaction` hash for `sealSignerPublicKey` and `authorizerPublicKeys`, which must include `signerPublicKey`. Returns the unsealed transaction JSON. Throws if the signature does not verify.
 
 ```typescript
 import {
@@ -110,10 +114,10 @@ import {
 
 let txJson = JSON.stringify(unsignedTransaction);
 
-// Optional: authorizations from other keys (repeat per authorizer)
-const authHash = hashUnsignedTransaction(txJson, sealSignerPublicKey);
+// Optional: authorizations from other keys (repeat per authorizer, each over the same set)
+const authHash = hashUnsignedTransaction(txJson, sealSignerPublicKey, authorizerPublicKeys);
 const authSig = await externalSigner.sign(authorizerKeyId, authHash);
-txJson = attachTransactionSignature(txJson, authorizerPublicKey, authSig, sealSignerPublicKey);
+txJson = attachTransactionSignature(txJson, authorizerPublicKey, authSig, sealSignerPublicKey, authorizerPublicKeys);
 
 // Seal last
 const sealHash = hashUnsealedTransaction(txJson);

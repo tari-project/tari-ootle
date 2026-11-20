@@ -25,6 +25,7 @@ mod blobs;
 pub mod builder;
 mod envelope;
 mod hashing;
+mod schema;
 mod signable;
 mod signing;
 mod transaction;
@@ -32,12 +33,15 @@ mod transaction_id;
 mod unsealed;
 mod unsigned_transaction;
 mod v1;
+#[cfg(any(test, feature = "test-v1-signing"))]
+pub mod v1_signing;
 mod weight;
 
 pub use blobs::*;
 pub use builder::TransactionBuilder;
 pub use envelope::*;
 pub use ootle_network::Network;
+pub use schema::*;
 pub use signable::*;
 pub use signing::*;
 // Re-exported because `max_epoch` is a mandatory public field of the unsigned transaction, so any

@@ -163,8 +163,9 @@ fn data_json(r: &OotleResult) -> serde_json::Value {
 // --- (1) one-shot round-trip --------------------------------------------------------------------
 
 /// The random-nonce default `ootle_build_and_encode_public_transfer` (account-secret-only keys) is
-/// **structural-only**: it returns a well-formed encoded transfer, and two calls differ (fresh seed
-/// each call). No byte-equality against a committed vector (the seal nonces are non-deterministic).
+/// **structural-only**: it returns a well-formed encoded transfer, and two calls' bytes differ (fresh
+/// nonces each call) while their id is the same. No byte-equality against a committed vector (the
+/// signature nonces are non-deterministic).
 #[test]
 fn one_shot_random_default_is_structural_and_non_reproducible() {
     let fx = load_fixture("public_transfer/single_key_basic.json");
@@ -187,13 +188,18 @@ fn one_shot_random_default_is_structural_and_non_reproducible() {
     let a_tx = a_out["transaction_id"].as_str().unwrap().to_string();
     unsafe { ootle_result_free(a) };
 
+    let a_bytes = a_out["encoded_transaction"].as_str().unwrap().to_string();
+
     let b = unsafe { ootle_build_and_encode_public_transfer(network, intent.ptr(), keys.ptr()) };
     assert!(ok(&b));
-    let b_tx = data_json(&b)["transaction_id"].as_str().unwrap().to_string();
+    let b_out = data_json(&b);
+    let b_tx = b_out["transaction_id"].as_str().unwrap().to_string();
+    let b_bytes = b_out["encoded_transaction"].as_str().unwrap().to_string();
     unsafe { ootle_result_free(b) };
-    assert_ne!(
+    assert_ne!(a_bytes, b_bytes, "the random-nonce default signs afresh each call");
+    assert_eq!(
         a_tx, b_tx,
-        "the random-nonce default seals a fresh transaction id each call"
+        "the id hashes signer keys, not signatures, so the same intent signed twice is one transaction"
     );
 }
 
@@ -1097,7 +1103,7 @@ fn cosign_round_trip_seals_a_validating_transaction() {
     let keys = CArg::new(&serde_json::to_string(&fx["input"]["keys"]).unwrap());
     let seal_pk = CArg::new(fx["input"]["cosign_seal_pk"].as_str().unwrap());
     let signer_secret = CArg::new(fx["input"]["cosign_signer_secret"].as_str().unwrap());
-    let signer_pk = fx["expected"]["sealed_transaction_semantic"]["V1"]["body"]["signatures"][0]["public_key"]
+    let signer_pk = fx["expected"]["sealed_transaction_semantic"]["V2"]["body"]["signatures"][0]["public_key"]
         .as_str()
         .unwrap();
     let main_signer = CArg::new(signer_pk);
@@ -1113,10 +1119,11 @@ fn cosign_round_trip_seals_a_validating_transaction() {
     unsafe { ootle_result_free(applied) };
 
     // A: extract the unsigned record to ship, naming B as the main signer (does NOT consume the handle).
-    let rec = unsafe { ootle_unsigned_record_for_cosign(h, main_signer.ptr()) };
+    let authorizers = CArg::new(&serde_json::json!([signer_pk]).to_string());
+    let rec = unsafe { ootle_unsigned_record_for_cosign(h, authorizers.ptr(), main_signer.ptr()) };
     assert!(ok(&rec));
     assert_eq!(
-        data_json(&rec)["unsigned"]["V1"]["main_signer"],
+        data_json(&rec)["unsigned"]["V2"]["main_signer"],
         serde_json::json!({ "Authorizer": signer_pk })
     );
     let record_json = serde_json::to_string(&data_json(&rec)).unwrap();
@@ -1159,12 +1166,26 @@ fn cosign_add_signature_bad_secret_hex_is_a_key_error() {
     let applied = unsafe { ootle_apply_fetched_substates(h, fetched.ptr()) };
     let h = applied.handle;
     unsafe { ootle_result_free(applied) };
+    let signer_pk = fx["expected"]["sealed_transaction_semantic"]["V2"]["body"]["signatures"][0]["public_key"]
+        .as_str()
+        .unwrap();
+    let authorizers = CArg::new(&serde_json::json!([signer_pk]).to_string());
     let bad_main_signer = CArg::new("zz");
-    let r = unsafe { ootle_unsigned_record_for_cosign(h, bad_main_signer.ptr()) };
+    let r = unsafe { ootle_unsigned_record_for_cosign(h, authorizers.ptr(), bad_main_signer.ptr()) };
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "PARSE");
     unsafe { ootle_result_free(r) };
-    let rec = unsafe { ootle_unsigned_record_for_cosign(h, std::ptr::null()) };
+    let bad_authorizers = CArg::new("[\"zz\"]");
+    let r = unsafe { ootle_unsigned_record_for_cosign(h, bad_authorizers.ptr(), std::ptr::null()) };
+    assert!(!ok(&r));
+    assert_eq!(error_code(&r), "PARSE");
+    unsafe { ootle_result_free(r) };
+    let no_authorizers = CArg::new("[]");
+    let r = unsafe { ootle_unsigned_record_for_cosign(h, no_authorizers.ptr(), std::ptr::null()) };
+    assert!(!ok(&r));
+    assert_eq!(error_code(&r), "INVALID");
+    unsafe { ootle_result_free(r) };
+    let rec = unsafe { ootle_unsigned_record_for_cosign(h, authorizers.ptr(), std::ptr::null()) };
     let record_json = serde_json::to_string(&data_json(&rec)).unwrap();
     unsafe { ootle_result_free(rec) };
     unsafe { ootle_partial_transaction_free(h) };
@@ -1223,9 +1244,9 @@ fn abi_version_is_the_stable_tag() {
     assert!(!p.is_null());
     let s = unsafe { CStr::from_ptr(p) }.to_str().unwrap();
     assert_eq!(
-        s, "ootle-sdk-ffi-c/19",
-        "the ABI tag every host binding asserts against (bumped when the stealth key bundles gained `view_secret` and \
-         the scan exports took `account_public_key`)"
+        s, "ootle-sdk-ffi-c/20",
+        "the ABI tag every host binding asserts against (bumped when the co-sign record export took the authorizer \
+         set)"
     );
     // Static pointer — explicitly NOT freed (freeing it would be UB).
 }
@@ -2308,6 +2329,20 @@ fn stealth_build_outputs_statement_error_envelopes() {
     assert!(!ok(&r));
     assert_eq!(error_code(&r), "INVALID");
     unsafe { ootle_result_free(r) };
+
+    // Uppercase revealed_receiver_hex → PARSE.
+    let upper_receiver = CArg::new(&"AA".repeat(32));
+    let r = unsafe {
+        ootle_build_stealth_outputs_statement_with_seed(
+            net,
+            args.intent.ptr(),
+            args.seed_hex.ptr(),
+            upper_receiver.ptr(),
+        )
+    };
+    assert!(!ok(&r));
+    assert_eq!(error_code(&r), "PARSE");
+    unsafe { ootle_result_free(r) };
 }
 
 // --- (8) leak check (looped, amplifies any per-iteration leak above cross-thread noise) ----------
@@ -2409,6 +2444,12 @@ fn no_leaks_over_many_round_trips() {
     let cs_keys = CArg::new(&serde_json::to_string(&cosign_fx["input"]["keys"]).unwrap());
     let cs_seal_pk = CArg::new(cosign_fx["input"]["cosign_seal_pk"].as_str().unwrap());
     let cs_signer_secret = CArg::new(cosign_fx["input"]["cosign_signer_secret"].as_str().unwrap());
+    let cs_authorizers = CArg::new(
+        &serde_json::json!([
+            cosign_fx["expected"]["sealed_transaction_semantic"]["V2"]["body"]["signatures"][0]["public_key"]
+        ])
+        .to_string(),
+    );
 
     let before = live();
     for _ in 0..ITERS {
@@ -2641,7 +2682,7 @@ fn no_leaks_over_many_round_trips() {
         unsafe { ootle_result_free(cs_applied) };
 
         // A extracts the record JSON to ship to B (does NOT consume the handle).
-        let cs_record = unsafe { ootle_unsigned_record_for_cosign(cs_h, std::ptr::null()) };
+        let cs_record = unsafe { ootle_unsigned_record_for_cosign(cs_h, cs_authorizers.ptr(), std::ptr::null()) };
         assert!(ok(&cs_record));
         let cs_record_json = serde_json::to_string(&data_json(&cs_record)).unwrap();
         unsafe { ootle_result_free(cs_record) };

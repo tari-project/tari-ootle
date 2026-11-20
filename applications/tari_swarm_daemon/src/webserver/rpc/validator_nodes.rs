@@ -68,15 +68,8 @@ pub async fn create(
 ) -> Result<ValidatorNodeCreateResponse, anyhow::Error> {
     let process_manager = context.process_manager();
 
-    let name = match req.name {
-        Some(name) => name,
-        None => {
-            let all_instances = process_manager.list_instances(None).await?;
-            format!("New VN-#{}", all_instances.len())
-        },
-    };
     let instance_id = process_manager
-        .create_instance(name, InstanceType::TariValidatorNode, HashMap::new())
+        .create_instance(req.name, InstanceType::TariValidatorNode, HashMap::new())
         .await?;
 
     if req.register {

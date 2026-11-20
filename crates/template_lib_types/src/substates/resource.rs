@@ -57,6 +57,10 @@ impl ResourceAddress {
         Self(BorTag::new(key))
     }
 
+    pub const fn from_array(arr: [u8; ObjectKey::LENGTH]) -> Self {
+        Self::new(ObjectKey::from_array(arr))
+    }
+
     pub const fn as_object_key(&self) -> &ObjectKey {
         self.0.inner()
     }

@@ -12,11 +12,7 @@ mod workspace_ids;
 
 pub use named_component_call::*;
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_engine_types::{
-    confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
-    indexed_value::IndexedValue,
-    substate::SubstateId,
-};
+use tari_engine_types::{confidential::MinotariBurnClaimProof, indexed_value::IndexedValue, substate::SubstateId};
 use tari_ootle_common_types::{Epoch, InputDeclaration, declare_input, declare_inputs};
 use tari_template_lib_types::{
     Amount,
@@ -35,14 +31,13 @@ use tari_template_lib_types::{
 use crate::{
     AllocatableAddressType,
     Assertion,
+    AuthorizationContext,
     Blob,
     BlobIndex,
     CheckOrd,
     ComponentReference,
     Instruction,
-    IntoSigned,
     MainSigner,
-    MigrateFunction,
     NftAssertVec,
     NftCheck,
     ResourceAddressRef,
@@ -186,43 +181,23 @@ impl TransactionBuilder<MainIntent> {
         self.with_fee_instructions_builder(|builder| builder.add_instruction(instruction))
     }
 
-    pub fn update_component_template_address_with_migrate<C, T>(
+    /// Replaces every method access rule of `component`. The transaction must satisfy the component's rules updater.
+    pub fn set_component_access_rules<C: Into<NamedComponentCall>>(
         self,
         component: C,
-        new_template: TemplateAddress,
-        migrate_name: T,
-        migrate_args: Vec<NamedArg>,
-    ) -> Self
-    where
-        C: Into<NamedComponentCall>,
-        T: TryInto<FunctionName>,
-        <T as TryInto<FunctionName>>::Error: std::fmt::Debug,
-    {
+        access_rules: ComponentAccessRules,
+    ) -> Self {
         let component = self.resolve_call(component.into());
-        let migrate_args = self.resolve_args(migrate_args).expect("Invalid named arguments");
-        self.add_instruction(Instruction::UpdateComponentTemplate {
+        self.add_instruction(Instruction::SetComponentAccessRules {
             component,
-            migrate: Some(MigrateFunction {
-                name: migrate_name
-                    .try_into()
-                    .expect("Oops! The provided migrate function name is longer than the limit"),
-                args: migrate_args,
-            }),
-            new_template,
+            access_rules,
         })
     }
 
-    pub fn update_component_template<C: Into<NamedComponentCall>>(
-        self,
-        component: C,
-        new_template: TemplateAddress,
-    ) -> Self {
+    /// Replaces the owner rule of `component`. The transaction must satisfy the component's rules updater.
+    pub fn set_component_owner_rule<C: Into<NamedComponentCall>>(self, component: C, owner_rule: OwnerRule) -> Self {
         let component = self.resolve_call(component.into());
-        self.add_instruction(Instruction::UpdateComponentTemplate {
-            component,
-            migrate: None,
-            new_template,
-        })
+        self.add_instruction(Instruction::SetComponentOwnerRule { component, owner_rule })
     }
 
     pub fn with_min_epoch(mut self, min_epoch: Option<Epoch>) -> Self {
@@ -243,14 +218,11 @@ impl TransactionBuilder<MainIntent> {
         self
     }
 
-    pub fn add_signer(
-        self,
-        sealed_signer: &RistrettoPublicKeyBytes,
-        secret_key: &RistrettoSecretKey,
-    ) -> UnsealedTransaction {
-        let unsigned = self.build_unsigned();
-        let signature = TransactionSignature::sign(secret_key, sealed_signer, &unsigned);
-        unsigned.add_single_signature(signature)
+    /// Builds the transaction and signs it with every key in `secrets`, each under `seal_signer`
+    /// and the set of their public keys. See [`UnsignedTransaction::authorize`].
+    pub fn authorize<'a, I>(self, seal_signer: &RistrettoPublicKeyBytes, secrets: I) -> UnsealedTransaction
+    where I: IntoIterator<Item = &'a RistrettoSecretKey> {
+        self.build_unsigned().authorize(seal_signer, secrets)
     }
 
     pub fn with_signatures(self, signatures: Vec<TransactionSignature>) -> UnsealedTransaction {
@@ -414,6 +386,10 @@ impl<D> TransactionBuilder<D> {
     /// builder's. Fee instructions from `other` are NOT merged — fees should be managed on the
     /// outer builder.
     ///
+    /// The merged inputs are the union of both builders' declared inputs. `other`'s instructions
+    /// keep the inputs `other` declared for them, so this builder's auto-fill setting applies only
+    /// to instructions added to it directly.
+    ///
     /// This is the low-level primitive behind the higher-level `chain` method on
     /// `OotleInvoke`.
     ///
@@ -422,8 +398,6 @@ impl<D> TransactionBuilder<D> {
     /// - If the combined blob count would exceed the `BlobIndex` range (256 blobs total).
     /// - If a named blob in `other` collides with one already registered on `self`.
     pub fn merge(mut self, other: TransactionBuilder<D>) -> Self {
-        let workspace_id_offset = self.workspace_ids.next_id();
-        let other_next_workspace_id = other.workspace_ids.next_id();
         // A transaction may hold `BlobIndex::MAX + 1` blobs, so the count alone does not fit a
         // `BlobIndex`; only an offset a blob is actually placed at has to.
         let own_blob_count = self.unsigned_transaction.blobs().len();
@@ -441,9 +415,12 @@ impl<D> TransactionBuilder<D> {
 
         let TransactionBuilder {
             unsigned_transaction: mut other_tx,
+            workspace_ids: other_workspace_ids,
             blob_ids: other_blob_ids,
             ..
         } = other;
+
+        let workspace_id_offset = self.workspace_ids.merge(other_workspace_ids);
 
         // Merge inputs first (before consuming the transaction)
         declare_inputs(
@@ -476,10 +453,6 @@ impl<D> TransactionBuilder<D> {
             instruction.remap_blob_ids(blob_id_offset);
             self.unsigned_transaction.instructions_mut().push(instruction);
         }
-
-        // Advance workspace ID counter past merged IDs
-        self.workspace_ids
-            .set_next_id(workspace_id_offset + other_next_workspace_id);
 
         self
     }
@@ -905,11 +878,10 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
-    pub fn claim_burn(self, claim: MinotariBurnClaimProof, output_data: ClaimBurnOutputData) -> Self {
-        self.add_instruction(Instruction::ClaimBurn {
-            claim: Box::new(claim),
-            output_data,
-        })
+    /// Claims an L1 burn. The instruction's output is a bucket of the burn's value, which the transaction must
+    /// move on, e.g. with [`Self::put_last_instruction_output_on_workspace`].
+    pub fn claim_burn(self, claim: MinotariBurnClaimProof) -> Self {
+        self.add_instruction(Instruction::ClaimBurn { claim: Box::new(claim) })
     }
 
     pub fn claim_validator_fees(self, address: ValidatorFeePoolAddress) -> Self {
@@ -1072,6 +1044,10 @@ impl<D> TransactionBuilder<D> {
                     self.add_inputs_for_args(&migrate.args);
                 }
             },
+            Instruction::SetComponentAccessRules { component, .. } |
+            Instruction::SetComponentOwnerRule { component, .. } => {
+                self.add_input_for_component_ref(component);
+            },
             Instruction::Assert {
                 assertion: Assertion::IsNotNull,
                 ..
@@ -1105,12 +1081,7 @@ impl<D> TransactionBuilder<D> {
     fn resolve_resource_ref(&self, resx_ref: NamedResourceRef) -> ResourceAddressRef {
         match resx_ref {
             NamedResourceRef::Address(addr) => addr.into(),
-            NamedResourceRef::Workspace(id) => {
-                let id = self.workspace_ids.get(id.name()).unwrap_or_else(|| {
-                    panic!("Workspace key '{}' not found", id.name());
-                });
-                WorkspaceOffsetId::new(id).into()
-            },
+            NamedResourceRef::Workspace(id) => self.get_workspace_offset_id_from_named_arg(id.name()).into(),
         }
     }
 
@@ -1151,20 +1122,12 @@ impl<D> TransactionBuilder<D> {
     }
 }
 
-impl Signable<&RistrettoPublicKeyBytes> for TransactionBuilder<MainIntent> {
+impl Signable<AuthorizationContext<'_>> for TransactionBuilder<MainIntent> {
     type Signature = TransactionSignature;
 
-    /// The message covers the body [`IntoSigned::into_signed`] produces, so it is taken over a copy with the fee
-    /// instructions applied.
-    fn to_signing_message(&self, sealed_signer: &RistrettoPublicKeyBytes) -> crate::TransactionMessage {
-        self.clone().build_unsigned().to_signing_message(sealed_signer)
-    }
-}
-
-impl IntoSigned<&RistrettoPublicKeyBytes> for TransactionBuilder<MainIntent> {
-    type SignedOutput = UnsealedTransaction;
-
-    fn into_signed(self, sig: TransactionSignature) -> Self::SignedOutput {
-        self.finish().add_signature(sig)
+    /// The message covers the body [`TransactionBuilder::build_unsigned`] produces, so it is taken over a copy with
+    /// the fee instructions applied.
+    fn to_signing_message(&self, context: AuthorizationContext<'_>) -> crate::TransactionMessage {
+        self.clone().build_unsigned().to_signing_message(context)
     }
 }

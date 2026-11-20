@@ -618,10 +618,13 @@ fn decode_method_access<'b, C>(
             },
             _ => {},
         }
+        let method_pos = d.position();
         let method = String::decode(d, ctx)?;
         let rule = AccessRule::decode(d, ctx)?;
         count_nodes(num_nodes, 1 + rule.num_nodes())?;
-        method_access.insert(method, rule);
+        if method_access.insert(method, rule).is_some() {
+            return Err(decode::Error::message("duplicate method in ComponentAccessRules").at(method_pos));
+        }
         index += 1;
     }
     Ok(method_access)
@@ -683,6 +686,39 @@ impl From<AccessRule> for UpdateRule {
 
 pub const LOCKED: UpdateRule = UpdateRule::Locked;
 pub const OWNER: UpdateRule = UpdateRule::Owner;
+
+/// Who may replace a component's method access rules and its owner rule. Fixed when the component is created.
+///
+/// The setting governs every change, whether it comes from a `SetComponentAccessRules`/`SetComponentOwnerRule`
+/// transaction instruction or from the component's own code through `ComponentManager`.
+#[derive(Debug, Clone, Default, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum RulesUpdater {
+    /// Nobody may change the rules, the component's own code included.
+    #[n(0)]
+    #[default]
+    Locked,
+    /// Only the component's own code may change the rules, and only while the caller satisfies the owner rule. A
+    /// transaction instruction cannot change them. Use this only when the template must run its own logic around a
+    /// change; otherwise prefer `Owner` or `AccessRule`. Components created before this setting existed behave this
+    /// way.
+    #[n(1)]
+    TemplateManaged,
+    /// Whoever satisfies the component's current owner rule, by instruction or from the component's own code.
+    #[n(2)]
+    Owner,
+    /// Whoever satisfies the rule, by instruction or from the component's own code, independent of the owner rule.
+    #[n(3)]
+    AccessRule(#[n(0)] AccessRule),
+}
+
+impl From<AccessRule> for RulesUpdater {
+    fn from(rule: AccessRule) -> Self {
+        Self::AccessRule(rule)
+    }
+}
 
 /// Information needed to specify access rules to a resource
 #[derive(Debug, Clone, Encode, Decode, CborLen)]
@@ -1435,6 +1471,27 @@ mod tests {
         let mut e = minicbor::Encoder::new(Vec::new());
         e.array(1).unwrap().map(0).unwrap();
         assert!(tari_bor::decode::<ComponentAccessRules>(e.writer()).is_err());
+    }
+
+    #[test]
+    fn component_access_rules_decode_rejects_duplicate_methods() {
+        let mut e = minicbor::Encoder::new(Vec::new());
+        e.array(2)
+            .unwrap()
+            .map(2)
+            .unwrap()
+            .str("transfer")
+            .unwrap()
+            .encode(AccessRule::DenyAll)
+            .unwrap()
+            .str("transfer")
+            .unwrap()
+            .encode(AccessRule::AllowAll)
+            .unwrap()
+            .encode(AccessRule::DenyAll)
+            .unwrap();
+        let err = tari_bor::decode::<ComponentAccessRules>(e.writer()).unwrap_err();
+        assert!(err.to_string().contains("duplicate method in ComponentAccessRules"));
     }
 
     #[test]

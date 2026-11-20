@@ -91,15 +91,9 @@ pub struct CreateApiKeyArgs {
     /// so an admin doesn't accidentally mint a fully-privileged key.
     #[clap(long)]
     pub confirm_admin: bool,
-    /// Optional expiry, expressed as a duration from now. Accepts the
-    /// usual human-friendly forms (`30d`, `12h`, `1y`, `90 days`,
-    /// `1day 6h`). Omit for a never-expiring key.
-    #[clap(long, value_parser = parse_human_duration)]
-    pub expires_in: Option<Duration>,
-}
-
-fn parse_human_duration(s: &str) -> Result<Duration, String> {
-    humantime::parse_duration(s).map_err(|e| format!("invalid duration '{s}': {e}"))
+    /// Optional expiry, in whole days from now. Omit for a never-expiring key.
+    #[clap(long)]
+    pub expires_in_days: Option<u64>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -165,19 +159,20 @@ impl ApiKeySubcommand {
                     anyhow::bail!("--permissions must contain at least one scope; refusing to mint an unusable key");
                 }
                 let perm_strings: Vec<String> = args.permissions.iter().map(|p| p.to_string()).collect();
-                // Convert the relative `--expires-in` duration to the absolute
+                // Convert the relative `--expires-in-days` to the absolute
                 // unix-seconds the wire type expects. Done client-side because
                 // the absolute timestamp is what gets persisted; subsequent
                 // listings show absolute timestamps anyway.
                 let expires_at = args
-                    .expires_in
-                    .map(|d| -> anyhow::Result<i64> {
-                        let when = SystemTime::now()
-                            .checked_add(d)
-                            .ok_or_else(|| anyhow::anyhow!("expires_in is too far in the future"))?;
+                    .expires_in_days
+                    .map(|days| -> anyhow::Result<i64> {
+                        let when = days
+                            .checked_mul(24 * 60 * 60)
+                            .and_then(|secs| SystemTime::now().checked_add(Duration::from_secs(secs)))
+                            .ok_or_else(|| anyhow::anyhow!("--expires-in-days is too far in the future"))?;
                         let secs = when
                             .duration_since(UNIX_EPOCH)
-                            .map_err(|e| anyhow::anyhow!("expires_in produced a pre-epoch timestamp: {e}"))?
+                            .map_err(|e| anyhow::anyhow!("--expires-in-days produced a pre-epoch timestamp: {e}"))?
                             .as_secs();
                         Ok(secs as i64)
                     })

@@ -5,10 +5,11 @@
 //! proof, and covenant claims) from unblinded input/output witnesses.
 
 use tari_ootle_wallet_crypto::stealth::create_transfer_statement as crypto_create_transfer_statement;
-use tari_template_lib_types::{Amount, crypto::RistrettoPublicKeyBytes, stealth::RevealedOutput};
+use tari_template_lib_types::{Amount, stealth::RevealedOutput};
 
 use crate::{
     error::OotleWasmError,
+    hash::public_key_bytes_from_bytes,
     stealth::types::{StealthInputWitnessJson, StealthOutputWitnessJson},
 };
 
@@ -53,13 +54,7 @@ pub fn build_stealth_transfer_statement(
     let revealed_output = match revealed_output_amount_microtari {
         0 => None,
         amount => {
-            let receiver = RistrettoPublicKeyBytes::from_bytes(revealed_receiver).map_err(|e| {
-                OotleWasmError::InvalidByteLength {
-                    field: "revealed_receiver",
-                    expected: RistrettoPublicKeyBytes::length(),
-                    got: e.actual_size(),
-                }
-            })?;
+            let receiver = public_key_bytes_from_bytes(revealed_receiver)?;
             Some(RevealedOutput::new(Amount::from_u64(amount), receiver))
         },
     };
@@ -267,5 +262,11 @@ mod tests {
         );
         let err = build_stealth_transfer_statement(&inputs_json, 0, "[]", 500, &[0u8; 32]).unwrap_err();
         assert!(matches!(err, OotleWasmError::Stealth(_)));
+    }
+
+    #[test]
+    fn rejects_non_canonical_revealed_receiver() {
+        let err = build_stealth_transfer_statement("[]", 500, "[]", 500, &[0xff; 32]).unwrap_err();
+        assert!(matches!(err, OotleWasmError::InvalidPublicKey(_)));
     }
 }

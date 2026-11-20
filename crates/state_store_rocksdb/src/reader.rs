@@ -72,6 +72,7 @@ use tari_ootle_storage::{
         BlockDiff,
         BlockTransactionExecution,
         EpochCheckpoint,
+        FinalizedTransactionInclusion,
         ForeignProposalRecord,
         LivenessCounters,
         LockedSubstateValue,
@@ -135,9 +136,10 @@ use crate::{
         foreign_substate_pledge,
         foreign_substate_pledge::ForeignSubstatePledgeCf,
         lock_conflict,
+        missing_transactions,
         parked_block,
         pending_state_tree_diff::ShardStateTreeDiff,
-        state_sync_rewind_point::{StateSyncMissingValueCf, StateSyncRewindPointCf},
+        state_sync_rewind_point::{StateSyncMissingValueByShardQuery, StateSyncRewindPointCf},
         state_transition,
         state_transition::StateTransitionType,
         state_tree,
@@ -821,6 +823,19 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         Ok(data.finalized_at)
     }
 
+    fn finalized_transaction_inclusion_get(
+        &self,
+        tx_id: &TransactionId,
+    ) -> Result<Option<FinalizedTransactionInclusion>, StorageError> {
+        const OPERATION: &str = "finalized_transaction_inclusion_get";
+        let link = self
+            .db()
+            .cf(FinalizedTransactionLinkCf)?
+            .get(tx_id, OPERATION)
+            .optional()?;
+        Ok(link.and_then(|link| link.inclusion).map(Into::into))
+    }
+
     fn block_transaction_executions_get_pending_for_block(
         &self,
         transaction_id: &TransactionId,
@@ -1009,6 +1024,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
     fn blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {
         let exists = self.db().cf(BlockCf)?.exists(block_id, "blocks_exists")?;
         Ok(exists)
+    }
+
+    fn blocks_is_executed(&self, block_id: &BlockId) -> Result<bool, StorageError> {
+        let executed = self
+            .db()
+            .cf(block::ExecutedBlockIndex)?
+            .exists(block_id, "blocks_is_executed")?;
+        Ok(executed)
     }
 
     fn blocks_is_pending_ancestor(&self, descendant: &BlockId, ancestor: &BlockId) -> Result<bool, StorageError> {
@@ -1786,10 +1809,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         const OPERATION: &str = "state_transitions_get_n_after";
 
         let query = self.db().cf(state_transition::ByShardAndStateVersionQuery)?;
-        let mut iter = query.query_range_iterator(
-            Ordering::Ascending,
-            (req_shard, state_version)..(Shard::max(), Version::MAX),
-        );
+        let mut iter = query.query_start_range_iterator(Ordering::Ascending, &(req_shard, state_version));
         let substate_cf = self.db().cf(SubstateCf)?;
 
         // NOTE: The state version may not have any transitions
@@ -1985,11 +2005,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         shard: Shard,
         from: Version,
     ) -> Result<Option<(SubstateAddress, Version)>, StorageError> {
-        let cf = self.db().cf(StateSyncMissingValueCf)?;
-        let start = cf.encode_key(&(shard, SubstateAddress::zero()));
-        let end = cf.encode_key(&(shard, SubstateAddress::max()));
+        let query = self.db().cf(StateSyncMissingValueByShardQuery)?;
         let mut earliest = None::<(SubstateAddress, Version)>;
-        for entry in cf.range_iterator(Ordering::Ascending, start..end) {
+        for entry in query.query_prefix_range_iterator(Ordering::Ascending, &shard) {
             let ((_, address), created_at) = entry?;
             if created_at >= from && earliest.is_none_or(|(_, version)| created_at < version) {
                 earliest = Some((address, created_at));
@@ -2141,6 +2159,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         const OPERATION: &str = "parked_block_exists";
         let exists = self.db().cf(parked_block::ParkedBlockCf)?.exists(block_id, OPERATION)?;
         Ok(exists)
+    }
+
+    fn parked_block_missing_transactions(&self, block_id: &BlockId) -> Result<Vec<TransactionId>, StorageError> {
+        let keys = self
+            .db()
+            .cf(missing_transactions::ByBlockIdQuery)?
+            .query_prefix_range_keys(Ordering::default(), block_id)?;
+        Ok(keys.into_iter().map(|(_, transaction_id)| transaction_id).collect())
     }
 
     fn parked_blocks_count_by_proposer(

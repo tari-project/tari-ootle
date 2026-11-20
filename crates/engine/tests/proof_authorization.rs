@@ -1,11 +1,11 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use ootle_byte_type::ToByteType;
-use tari_engine::runtime::{ActionIdent, NativeAction, RuntimeError};
+use tari_engine::runtime::{ActionIdent, RuntimeError};
 use tari_engine_types::commit_result::ExecutionFailureCode;
 use tari_ootle_transaction::{Epoch, Transaction, args, args::WorkspaceOffsetId};
 use tari_template_lib::{
+    args::ComponentAction,
     invoke_args,
     models::ProofId,
     types::{
@@ -17,9 +17,8 @@ use tari_template_lib::{
         OwnerRule,
         ResourceAddress,
         VaultId,
-        access_rules::{ComponentAccessRules, ResourceAccessRules, ResourceAuthAction, UpdateRule},
+        access_rules::{ComponentAccessRules, ResourceAccessRules, ResourceAuthAction, RulesUpdater},
         constants::TARI_TOKEN,
-        crypto::RistrettoPublicKeyBytes,
         rule,
     },
 };
@@ -585,88 +584,45 @@ fn a_resource_auth_hook_is_lent_nothing() {
 }
 
 #[test]
-fn the_upgrade_rule_is_checked_in_the_instructions_scope_and_the_migration_frame_is_lent_nothing() {
+fn a_rules_updater_badge_is_satisfied_inside_an_authorize_window_only() {
     let mut test = TemplateTest::new(CRATE_PATH, [
         "tests/templates/proof_window",
-        "tests/templates/template_upgrade/v1",
-        "tests/templates/template_upgrade/v2",
+        "tests/templates/rules_updater",
     ]);
     let (lender, badge) = proof_window_component(&mut test);
-    let v1_template = test.get_template_address("TemplateV1");
-    let v2_template = test.get_template_address("TemplateV2");
-    let signer_badge = NonFungibleAddress::from_public_key(test.public_key().to_byte_type());
-
-    let create = |test: &mut TemplateTest, upgrade_rule: UpdateRule| {
-        test.execute_expect_success(
-            test.transaction()
-                .call_function(v1_template, "new", args![
-                    OwnerRule::OwnedBySigner,
-                    upgrade_rule,
-                    Vec::<RistrettoPublicKeyBytes>::new()
-                ])
-                .build_and_seal(test.secret_key()),
-            vec![],
-        );
-        test.return_values()[0].decoded::<ComponentAddress>().unwrap()
-    };
-
-    // A rule naming the badge is satisfied by a window the transaction opens, and by nothing less.
-    let component = create(
-        &mut test,
-        UpdateRule::AccessRule(rule!(resource(*badge.resource_address()))),
+    let template = test.get_template_address("RulesUpdaterTest");
+    test.execute_expect_success(
+        test.transaction()
+            .call_function(template, "new", args![
+                OwnerRule::None,
+                RulesUpdater::AccessRule(rule!(resource(*badge.resource_address())))
+            ])
+            .build_and_seal(test.secret_key()),
+        vec![],
     );
+    let component = test.return_values()[0].decoded::<ComponentAddress>().unwrap();
+    let open_rules = ComponentAccessRules::new().default(AccessRule::AllowAll);
+
     let reason = test.execute_expect_failure(
         test.transaction()
             .call_method(lender, "create_badge_proof", args![])
             .put_last_instruction_output_on_workspace("proof")
-            .update_component_template_address_with_migrate(component, v2_template, "migrate_v1_to_v2", args![])
+            .set_component_access_rules(component, open_rules.clone())
             .drop_all_proofs_in_workspace()
             .build_and_seal(test.secret_key()),
         vec![],
     );
-    assert_access_denied_for_action(reason, NativeAction::UpdateComponentTemplate);
+    assert_access_denied_for_action(reason, ComponentAction::SetAccessRules);
 
     test.execute_expect_success(
         test.transaction()
             .call_method(lender, "create_badge_proof", args![])
             .put_last_instruction_output_on_workspace("proof")
             .with_authorized_proof("proof", |builder| {
-                builder.update_component_template_address_with_migrate(
-                    component,
-                    v2_template,
-                    "migrate_v1_to_v2",
-                    args![],
-                )
+                builder.set_component_access_rules(component, open_rules)
             })
             .drop_all_proofs_in_workspace()
             .build_and_seal(test.secret_key()),
         vec![],
     );
-
-    // The migration frame itself is lent neither the window's proof nor the signer badge.
-    for (expected_badge, wrap_in_window) in [(badge.clone(), true), (signer_badge, false)] {
-        let component = create(&mut test, UpdateRule::Owner);
-        let reason = test.execute_expect_failure(
-            test.transaction()
-                .call_method(lender, "create_badge_proof", args![])
-                .put_last_instruction_output_on_workspace("proof")
-                .then(|builder| {
-                    if wrap_in_window {
-                        builder.authorize_proof("proof")
-                    } else {
-                        builder
-                    }
-                })
-                .update_component_template_address_with_migrate(
-                    component,
-                    v2_template,
-                    "migrate_asserting_badge",
-                    args![expected_badge.clone()],
-                )
-                .drop_all_proofs_in_workspace()
-                .build_and_seal(test.secret_key()),
-            vec![],
-        );
-        assert_reject_reason(reason, RuntimeError::BadgeNotInScope { badge: expected_badge });
-    }
 }

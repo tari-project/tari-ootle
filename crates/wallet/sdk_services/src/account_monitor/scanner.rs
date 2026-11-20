@@ -497,6 +497,44 @@ where TSpec: WalletSdkSpec
         Ok(balance)
     }
 
+    /// Associates `account_address` with every resource it holds a live stealth output of, so that the UTXO scanner
+    /// scans the account for that resource and sees later changes to the output, such as an issuer freezing it. A
+    /// resource that cannot be associated, because the wallet cannot fetch it, is logged and left for the next call.
+    pub async fn associate_live_stealth_resources(
+        &self,
+        account_address: &ComponentAddress,
+    ) -> Result<(), AccountMonitorError> {
+        let associated = self
+            .wallet_sdk
+            .accounts_api()
+            .get_associated_stealth_resources(account_address)?;
+        let live = self
+            .wallet_sdk
+            .stealth_outputs_api()
+            .get_live_resources_for_account(account_address)?;
+        for resource_address in live.difference(&associated) {
+            info!(
+                target: LOG_TARGET,
+                "🏦 Account {} holds stealth outputs of {}. Scanning it for that resource.",
+                account_address,
+                resource_address
+            );
+            if let Err(err) = self
+                .associate_resource_with_account(account_address, *resource_address)
+                .await
+            {
+                warn!(
+                    target: LOG_TARGET,
+                    "⚠️ Could not associate resource {} with account {} ({}). Retrying on the next UTXO scan.",
+                    resource_address,
+                    account_address,
+                    err
+                );
+            }
+        }
+        Ok(())
+    }
+
     async fn associate_resource_with_account(
         &self,
         account_address: &ComponentAddress,

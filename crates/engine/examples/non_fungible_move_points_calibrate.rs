@@ -37,15 +37,15 @@ const R1: u64 = 5_000;
 const R2: u64 = 10_000;
 const MAX_FEE: u64 = 60_000_000;
 
-/// Ids of each shape. The strings are as long as an id may be and share all but their last few
-/// characters, so every comparison reads them nearly to the end.
-fn id_shapes() -> Vec<(&'static str, BTreeSet<NonFungibleId>)> {
+/// `count` ids of each shape. The strings are as long as an id may be and share all but their last
+/// few characters, so every comparison reads them nearly to the end.
+fn id_shapes(count: usize) -> Vec<(&'static str, BTreeSet<NonFungibleId>)> {
     let prefix = "a".repeat(56);
     vec![
-        ("u64", (0..IDS as u64).map(NonFungibleId::from_u64).collect()),
+        ("u64", (0..count as u64).map(NonFungibleId::from_u64).collect()),
         (
             "u256",
-            (0..IDS as u64)
+            (0..count as u64)
                 .map(|i| {
                     let mut id = [0u8; 32];
                     id[24..].copy_from_slice(&i.to_be_bytes());
@@ -55,7 +55,7 @@ fn id_shapes() -> Vec<(&'static str, BTreeSet<NonFungibleId>)> {
         ),
         (
             "64-char string",
-            (0..IDS)
+            (0..count)
                 .map(|i| NonFungibleId::from_string(format!("{prefix}{i:08}")))
                 .collect(),
         ),
@@ -134,7 +134,7 @@ fn main() {
         );
     };
 
-    for (shape, ids) in id_shapes() {
+    for ((shape, ids), (_, interleaved)) in id_shapes(IDS).into_iter().zip(id_shapes(2 * IDS)) {
         let mut container = ResourceContainer::non_fungible(address, ids);
         report(
             shape,
@@ -150,6 +150,19 @@ fn main() {
             best_ms(|| {
                 let locked = container.lock_all().unwrap();
                 container.unlock(black_box(locked)).unwrap();
+            }),
+        );
+
+        // Every other id stays behind, so the join checks each id it brings back against a full set
+        // and inserts it between held ids.
+        let moved = interleaved.iter().step_by(2).cloned().collect::<BTreeSet<_>>();
+        let mut container = ResourceContainer::non_fungible(address, interleaved);
+        report(
+            shape,
+            "take by id, join held",
+            best_ms(|| {
+                let taken = container.withdraw_by_ids(&moved).unwrap();
+                container.deposit(black_box(taken)).unwrap();
             }),
         );
     }

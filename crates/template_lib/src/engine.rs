@@ -27,7 +27,7 @@ use tari_template_lib_types::{
     ComponentAddress,
     LogLevel,
     OwnerRule,
-    access_rules::{ComponentAccessRules, UpdateRule},
+    access_rules::{ComponentAccessRules, RulesUpdater, UpdateRule},
 };
 
 use crate::{
@@ -57,6 +57,7 @@ impl TariEngine {
         access_rules: ComponentAccessRules,
         address_allocation: Option<ComponentAddressAllocation>,
         upgrade_rule: UpdateRule,
+        rules_updater: RulesUpdater,
     ) -> ComponentAddress {
         let encoded_state = to_value(&initial_state).expect("failed to encode component state");
 
@@ -68,7 +69,8 @@ impl TariEngine {
                 owner_rule,
                 access_rules,
                 address_allocation,
-                upgrade_rule
+                upgrade_rule,
+                rules_updater: Some(rules_updater),
             }],
         });
 

@@ -4,7 +4,7 @@
 //! Sign → seal → BOR-encode an [`UnsignedTransaction`] into submit-ready bytes + transaction id.
 //!
 //! Signing always uses a fresh random nonce (`TRANSACTION_SIGNING_CONTEXT.sign` inside
-//! `TransactionSignature::sign_v1` / `TransactionSealSignature::sign_v1`),
+//! `TransactionSignature::sign` / `TransactionSealSignature::sign`),
 //! so the sealed bytes and id are unique per call — the safe default for real submission. Nothing here
 //! pins a signature nonce from a seed.
 //!
@@ -18,13 +18,14 @@
 //! [`MainSigner::None`] without one. The co-signers must have signed over the same value.
 
 use tari_ootle_transaction::{
+    AuthorizationContext,
+    AuthorizerSet,
     MainSigner,
     Transaction,
     TransactionEnvelope,
     TransactionId,
     TransactionMessage,
     TransactionSignature,
-    UnsealedTransactionV1,
     UnsignedTransaction,
 };
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
@@ -46,7 +47,7 @@ pub fn seal_public_transfer(
     let seal_signer_pk = public_key_bytes_from_secret(&account_secret);
 
     // Authorization signature (stock random nonce), then seal (stock random nonce).
-    let unsealed = unsigned.add_signer(&seal_signer_pk, &account_secret);
+    let unsealed = unsigned.authorize(&seal_signer_pk, [&account_secret]);
     let transaction = unsealed.seal(&account_secret);
     let id = transaction.calculate_id();
     Ok((transaction, id))
@@ -54,8 +55,9 @@ pub fn seal_public_transfer(
 
 /// Seals an [`UnsignedTransaction`] with **externally-supplied authorization signatures** (the co-sign
 /// path), using the stock random-nonce seal. The seal signer is derived from `keys.account_secret`;
-/// the supplied `auth_signatures` are attached verbatim as the authorization signatures (they were
-/// produced by other parties over the auth message committing to this seal signer).
+/// the supplied `auth_signatures` are attached as the authorization signatures in canonical order
+/// (they were produced by other parties over the auth message committing to this seal signer and to
+/// the set of their keys).
 ///
 /// `main_signer` names the authorizer the transaction acts as (`OwnerRule::OwnedBySigner`,
 /// `CallerContext::transaction_signer_public_key`); it must be one of the `auth_signatures` keys, else
@@ -70,12 +72,11 @@ pub fn seal_public_transfer_with_auth(
     main_signer: Option<RistrettoPublicKeyBytes>,
 ) -> Result<(Transaction, TransactionId), OotleSdkError> {
     let seal_secret = parse_secret_key(&keys.account_secret)?;
-    let UnsignedTransaction::V1(mut unsigned_v1) = unsigned;
-    unsigned_v1.main_signer = main_signer_with_auth(main_signer, &auth_signatures)?;
+    let mut unsigned = unsigned;
+    unsigned.set_main_signer(main_signer_with_auth(main_signer, &auth_signatures)?);
 
-    let unsealed = UnsealedTransactionV1::new(unsigned_v1, auth_signatures);
     // Stock random-nonce seal — the bytes/id are intentionally non-reproducible.
-    let transaction = unsealed.seal(&seal_secret);
+    let transaction = unsigned.with_signatures(auth_signatures).seal(&seal_secret);
     if !transaction.verify_all_signatures() {
         return Err(OotleSdkError::Validation(
             "the authorizations do not verify against the sealed transaction: each co-signer must sign the record \
@@ -106,14 +107,15 @@ fn main_signer_with_auth(
 }
 
 /// Re-derives the authorization signing message a co-signer must sign: the digest committing to the
-/// seal signer's public key and the unsigned transaction (`TransactionSignature::create_message_v1`).
-/// A and B both compute this from the identical unsigned record, so they agree on the message.
+/// unsigned transaction, the authorizer set and the seal signer's public key
+/// (`TransactionSignature::create_message`). A and B both compute this from the identical unsigned
+/// record, so they agree on the message.
 pub fn cosign_auth_message(
     seal_signer_pk: &RistrettoPublicKeyBytes,
+    authorizers: &AuthorizerSet,
     unsigned: &UnsignedTransaction,
 ) -> TransactionMessage {
-    let UnsignedTransaction::V1(v1) = unsigned;
-    TransactionSignature::create_message_v1(seal_signer_pk, v1)
+    TransactionSignature::create_message(AuthorizationContext::new(seal_signer_pk, authorizers), unsigned.body())
 }
 
 /// BOR-encodes a sealed [`Transaction`] into the raw `TransactionEnvelope` wire bytes.
@@ -126,6 +128,7 @@ pub fn bor_encode(transaction: Transaction) -> Result<Vec<u8>, OotleSdkError> {
 /// Verifies every signature on a sealed transaction (the seal signature and all authorization
 /// signatures). A thin wrapper so tests need not reach into the internal type.
 #[cfg(test)]
+#[must_use]
 pub(crate) fn verify_all_signatures(transaction: &Transaction) -> bool {
     transaction.verify_all_signatures()
 }

@@ -192,15 +192,22 @@ impl CallScope {
         Ok(())
     }
 
-    /// Records that an orphan of this frame is now reachable from a component's state, so it stays with the
-    /// component when the frame is popped. An address that is already owned — a root id such as a component or
-    /// resource the frame created — keeps its place in `owned` and still crosses to the caller; those are gated by
-    /// access rules rather than by scope.
+    /// Records that an orphan of this frame is now reachable from a component's state. Vaults and other non-root
+    /// substates stay with the component when the frame is popped, while resources and already-owned root substates
+    /// keep or take their place in `owned` and cross to the caller, as they are gated by access rules rather than by
+    /// scope.
     pub fn attach_node_to_component(&mut self, address: &SubstateId) -> Result<(), RuntimeError> {
-        if self.orphans.swap_remove(address) && !self.component_owned.insert(address.clone()) {
-            return Err(RuntimeError::DuplicateSubstate {
-                address: address.clone(),
-            });
+        if self.orphans.swap_remove(address) {
+            let target = if address.is_resource() {
+                &mut self.owned
+            } else {
+                &mut self.component_owned
+            };
+            if !target.insert(address.clone()) {
+                return Err(RuntimeError::DuplicateSubstate {
+                    address: address.clone(),
+                });
+            }
         }
         Ok(())
     }
@@ -214,7 +221,7 @@ impl CallScope {
     }
 
     pub fn add_substate_to_scope(&mut self, address: SubstateId) -> Result<(), RuntimeError> {
-        if self.is_substate_in_scope(&address) {
+        if self.owned.contains(&address) || self.orphans.contains(&address) {
             return Err(RuntimeError::DuplicateSubstate { address });
         }
 
@@ -223,6 +230,8 @@ impl CallScope {
     }
 
     fn add_substate_to_scope_unchecked(&mut self, address: SubstateId) {
+        self.referenced.swap_remove(&address);
+        self.component_owned.swap_remove(&address);
         if address.is_root() {
             self.owned.insert(address);
         } else {
@@ -664,5 +673,94 @@ impl PushCallFrame {
             Self::MigrationContext { entity_id, .. } => Some(*entity_id),
             Self::Static { .. } => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_template_lib::types::{ComponentAddress, ObjectKey, ResourceAddress, VaultId};
+
+    use super::*;
+
+    #[test]
+    fn unminted_resource_attached_to_component_moves_to_owned_and_crosses_frame() {
+        let resource_id = SubstateId::Resource(ResourceAddress::new(ObjectKey::from_array([1u8; ObjectKey::LENGTH])));
+        let vault_id = SubstateId::Vault(VaultId::new(ObjectKey::from_array([2u8; ObjectKey::LENGTH])));
+
+        let mut child_scope = CallScope::new();
+        child_scope.add_substate_to_scope(resource_id.clone()).unwrap();
+        child_scope.add_substate_to_scope(vault_id.clone()).unwrap();
+        assert!(child_scope.orphans().contains(&resource_id));
+        assert!(child_scope.orphans().contains(&vault_id));
+
+        // Attaching both to a component keeps the vault component-private while promoting the resource to `owned`.
+        child_scope.attach_node_to_component(&resource_id).unwrap();
+        child_scope.attach_node_to_component(&vault_id).unwrap();
+        assert!(child_scope.orphans().is_empty());
+        assert!(child_scope.owned_nodes().contains(&resource_id));
+        assert!(!child_scope.owned_nodes().contains(&vault_id));
+
+        let mut parent_scope = CallScope::new();
+        parent_scope.update_from_child_scope(child_scope, &IndexedWellKnownTypes::new());
+        assert!(parent_scope.is_substate_in_scope(&resource_id));
+        assert!(!parent_scope.is_substate_in_scope(&vault_id));
+    }
+
+    #[test]
+    fn move_node_to_owned_does_not_promote_resource_from_component_owned() {
+        let resource_addr = ResourceAddress::new(ObjectKey::from_array([3u8; ObjectKey::LENGTH]));
+        let resource_id = SubstateId::Resource(resource_addr);
+        let state_types = IndexedWellKnownTypes::from_value(&tari_bor::to_value(&resource_addr).unwrap()).unwrap();
+
+        let mut child_scope = CallScope::new();
+        child_scope.include_owned_in_scope(&state_types);
+        assert!(!child_scope.owned_nodes().contains(&resource_id));
+
+        child_scope.move_node_to_owned(&resource_id).unwrap();
+        assert!(!child_scope.owned_nodes().contains(&resource_id));
+
+        let mut parent_scope = CallScope::new();
+        parent_scope.update_from_child_scope(child_scope, &IndexedWellKnownTypes::new());
+        assert!(!parent_scope.is_substate_in_scope(&resource_id));
+    }
+
+    #[test]
+    fn materializing_allocated_address_already_in_referenced_or_component_owned_succeeds() {
+        let comp_addr = ComponentAddress::new(ObjectKey::from_array([4u8; ObjectKey::LENGTH]));
+        let res_addr = ResourceAddress::new(ObjectKey::from_array([5u8; ObjectKey::LENGTH]));
+        let comp_id = SubstateId::Component(comp_addr);
+        let res_id = SubstateId::Resource(res_addr);
+
+        let arg_types =
+            IndexedWellKnownTypes::from_value(&tari_bor::to_value(&(comp_addr, res_addr)).unwrap()).unwrap();
+
+        // Pre-referenced via call arguments:
+        let mut scope = CallScope::new();
+        scope.include_refs_in_scope(&arg_types);
+        assert!(scope.is_substate_in_scope(&comp_id));
+        assert!(scope.is_substate_in_scope(&res_id));
+
+        scope.add_substate_to_scope(comp_id.clone()).unwrap();
+        scope.add_substate_to_scope(res_id.clone()).unwrap();
+        assert!(scope.owned_nodes().contains(&comp_id));
+        assert!(scope.orphans().contains(&res_id));
+
+        // Adding again while in `owned` or `orphans` still fails with `DuplicateSubstate`.
+        assert!(matches!(
+            scope.add_substate_to_scope(comp_id.clone()),
+            Err(RuntimeError::DuplicateSubstate { .. })
+        ));
+        assert!(matches!(
+            scope.add_substate_to_scope(res_id.clone()),
+            Err(RuntimeError::DuplicateSubstate { .. })
+        ));
+
+        // Pre-seeded via component state (`component_owned`):
+        let mut comp_scope = CallScope::new();
+        comp_scope.include_owned_in_scope(&arg_types);
+        comp_scope.add_substate_to_scope(comp_id.clone()).unwrap();
+        comp_scope.add_substate_to_scope(res_id.clone()).unwrap();
+        assert!(comp_scope.owned_nodes().contains(&comp_id));
+        assert!(comp_scope.orphans().contains(&res_id));
     }
 }

@@ -203,14 +203,14 @@ const PERMISSION_OPTIONS: Array<{ value: string; label: string; description: str
     description: "Submit transfers (fund, NFT, stealth, confidential, burn-claim) from any account.",
   },
   {
-    value: "validators:read",
-    label: "validators:read",
-    description: "Read validator fee pools.",
+    value: "vn_fees:claim",
+    label: "vn_fees:claim",
+    description: "Claim validator fees for any claim key in the wallet.",
   },
   {
-    value: "validators:update",
-    label: "validators:update",
-    description: "Claim validator fees.",
+    value: "vn_fees:read",
+    label: "vn_fees:read",
+    description: "Read validator fee pools for any claim key in the wallet.",
   },
 ];
 

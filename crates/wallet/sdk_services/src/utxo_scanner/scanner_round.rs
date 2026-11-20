@@ -254,6 +254,10 @@ where TSpec: WalletSdkSpec
             .sdk
             .stealth_outputs_api()
             .count_unspent_or_locked_outputs_for_account(self.account.component_address(), self.resource_address)?;
+        // An output queued for recovery may be stored after its spend streams past, so its spend must be seen.
+        let has_queued_recoveries = self.sdk.store().with_read_tx(|tx| {
+            tx.utxo_process_queue_has_entries(self.account.component_address(), self.resource_address)
+        })?;
 
         let stream = self
             .sdk
@@ -267,7 +271,7 @@ where TSpec: WalletSdkSpec
                 // Optimisation: with no unspent or locked outputs there is no spend left for the wallet to
                 // learn of, so only unspent updates are needed. The indexer moves the cursor past the spent
                 // updates this skips, so a later pass from that cursor does not deliver them either.
-                live_output_count == 0,
+                live_output_count == 0 && !has_queued_recoveries,
             )
             .await
             .map_err(|e| StealthScannerApiError::NetworkInterfaceError(e.into()))?;
@@ -437,13 +441,18 @@ where TSpec: WalletSdkSpec
         self.stats.num_potential_recoveries += num_recovered;
         self.sdk.store().with_write_tx(|tx| {
             // Mark UTXOs as spent (if they exist)
+            let mut spends_unheld = Vec::new();
             for spent in self.utxos_to_spend.drain(..) {
-                if Self::spend(tx, self.resource_address, &spent)? {
-                    self.notify.notify(UtxoSpentEvent {
-                        account_address: *self.account.component_address(),
-                        address: UtxoAddress::new(*self.resource_address, spent.id),
-                    });
-                    num_spent += 1;
+                match Self::spend(tx, self.resource_address, &spent)? {
+                    Spend::Marked => {
+                        self.notify.notify(UtxoSpentEvent {
+                            account_address: *self.account.component_address(),
+                            address: UtxoAddress::new(*self.resource_address, spent.id),
+                        });
+                        num_spent += 1;
+                    },
+                    Spend::NotHeld => spends_unheld.push(spent.id.into_commitment_bytes()),
+                    Spend::Unchanged => {},
                 }
             }
 
@@ -463,6 +472,10 @@ where TSpec: WalletSdkSpec
                 // Queue up tag matching UTXOs for processing
                 tx.utxo_process_queue_extend(self.resource_address, self.utxos_to_recover.drain(..))?;
             }
+            // A spend of an output the wallet does not hold may be of one that recovery has looked up unspent and not
+            // stored yet. Recovery does not store an output with a spend recorded after its lookup, and looks it up
+            // again.
+            tx.utxo_unheld_spends_record(self.resource_address, &spends_unheld)?;
 
             let bound = &self.stored_cursor_bound;
             let mut cursors = Vec::new();
@@ -528,13 +541,19 @@ where TSpec: WalletSdkSpec
                     tx.stealth_outputs_get_by_commitment(self.resource_address, &burnt.id.into_commitment_bytes())
                 })
                 .optional()?;
-            let Some(held) = held.filter(|output| !output.status.is_final()) else {
-                continue;
-            };
             let reported = UtxoSpent {
                 id: burnt.id,
                 version: burnt.version,
             };
+            let Some(held) = held else {
+                // Recovery may store the output before the round commits. Recorded as a spend, the burn then takes it
+                // down, and otherwise is recorded for recovery's lookups to check (see `Self::spend`).
+                self.checked_spends.push(reported);
+                continue;
+            };
+            if held.status.is_final() {
+                continue;
+            }
             if Self::is_superseded(&held, &reported) {
                 continue;
             }
@@ -824,7 +843,7 @@ where TSpec: WalletSdkSpec
         tx: &mut <TSpec::Store as WriteableWalletStore>::WriteTransaction<'_>,
         resource_address: &ResourceAddress,
         spent: &UtxoSpent,
-    ) -> Result<bool, WalletStorageError> {
+    ) -> Result<Spend, WalletStorageError> {
         let Some(output) = tx
             .stealth_outputs_get_by_commitment(resource_address, &spent.id.into_commitment_bytes())
             .optional()?
@@ -833,19 +852,26 @@ where TSpec: WalletSdkSpec
                 target: LOG_TARGET,
                 "Spent UTXO {} not found in wallet store (likely not our output)", spent.id
             );
-            return Ok(false);
+            return Ok(Spend::NotHeld);
         };
         if output.status.is_final() {
             debug!(target: LOG_TARGET, "Stealth output {} is already {:?}", spent.id, output.status);
-            return Ok(false);
+            return Ok(Spend::Unchanged);
         }
         if Self::is_superseded(&output, spent) {
-            return Ok(false);
+            return Ok(Spend::Unchanged);
         }
         tx.stealth_outputs_mark_as_spent(resource_address, &spent.id, spent.version)?;
         info!(target: LOG_TARGET, "Marked stealth output {} as spent", spent.id);
-        Ok(true)
+        Ok(Spend::Marked)
     }
+}
+
+enum Spend {
+    Marked,
+    /// The wallet holds the output spent or burnt already, or at a later version.
+    Unchanged,
+    NotHeld,
 }
 
 /// Whether an answer to [`SubstatesApi::verify_down`] or to a proven read refuses the proof for good, so asking again

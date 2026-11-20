@@ -149,7 +149,7 @@ pub async fn run_tari_ootle_walletd(
     }
 
     let jrpc_address = config.ootle_wallet_daemon.json_rpc_address;
-    let signaling_server_address = config.ootle_wallet_daemon.signaling_server_address.unwrap();
+    let signaling_server_address = config.ootle_wallet_daemon.signaling_server_address;
 
     // webauthn
 

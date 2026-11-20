@@ -71,7 +71,8 @@ pub struct WalletDaemonConfig {
     #[serde(default = "return_default_rpc_address")]
     pub json_rpc_address: SocketAddr,
     /// The signaling server address for the webrtc
-    pub signaling_server_address: Option<SocketAddr>,
+    #[serde(default = "return_default_signaling_server_address")]
+    pub signaling_server_address: SocketAddr,
     /// Allow `webrtc.start`, which hands an app connected through the signaling
     /// server a token carrying the caller's permissions. Off unless an operator
     /// opts in, since any credential holding `webrtc` can open such a session.
@@ -307,6 +308,10 @@ fn return_default_rpc_address() -> SocketAddr {
     SocketAddr::from(([127u8, 0, 0, 1], 5100))
 }
 
+fn return_default_signaling_server_address() -> SocketAddr {
+    SocketAddr::from(([127u8, 0, 0, 1], 9100))
+}
+
 impl Default for WalletDaemonConfig {
     fn default() -> Self {
         Self {
@@ -314,7 +319,7 @@ impl Default for WalletDaemonConfig {
             network: Network::MainNet,
             authentication: WalletDaemonAuth::default(),
             json_rpc_address: return_default_rpc_address(),
-            signaling_server_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9100))),
+            signaling_server_address: return_default_signaling_server_address(),
             indexer_api_urls: vec![
                 "http://127.0.0.1:18300"
                     .parse()
@@ -593,5 +598,12 @@ mod tests {
             ..Default::default()
         };
         disabled.validate().unwrap();
+    }
+
+    #[test]
+    fn signaling_server_address_defaults_when_omitted() {
+        let config = load("[ootle_wallet_daemon]\nindexer_api_url = \"http://a.example/\"").unwrap();
+        assert_eq!(config.signaling_server_address, return_default_signaling_server_address());
+        config.validate().unwrap();
     }
 }

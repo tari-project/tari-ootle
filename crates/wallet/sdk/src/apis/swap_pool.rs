@@ -83,11 +83,12 @@ impl PoolReserves {
 }
 
 /// Calculate the input amount of a non-TARI token needed for a constant-product swap to yield at least
-/// `desired_output` of the output token. Returns `None` if the pool lacks enough output liquidity.
+/// `desired_output` of the output token. Returns `None` if `desired_output` or `reserve_in` is not positive, or if the
+/// pool lacks enough output liquidity.
 ///
 /// Includes a [`SLIPPAGE_MARGIN_PERCENT`] slippage margin and uses ceiling division to avoid integer truncation.
 pub fn calculate_swap_input(desired_output: Amount, reserve_in: Amount, reserve_out: Amount) -> Option<Amount> {
-    if reserve_out <= desired_output {
+    if !desired_output.is_positive() || !reserve_in.is_positive() || reserve_out <= desired_output {
         return None;
     }
     // ceil(desired_output * reserve_in * (100 + margin) / ((reserve_out - desired_output) * 100))
@@ -221,6 +222,9 @@ mod tests {
         // reserve_out equal to or below the desired output can never yield it
         assert!(calculate_swap_input(amt(1000), amt(1000), amt(1000)).is_none());
         assert!(calculate_swap_input(amt(1500), amt(1000), amt(1000)).is_none());
+        // zero input-side reserve or zero desired output cannot produce a valid swap input
+        assert!(calculate_swap_input(amt(100), amt(0), amt(1000)).is_none());
+        assert!(calculate_swap_input(amt(0), amt(1000), amt(1000)).is_none());
     }
 
     #[test]

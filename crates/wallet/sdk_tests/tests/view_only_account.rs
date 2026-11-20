@@ -403,3 +403,38 @@ fn view_only_account_never_becomes_the_default() {
     assert!(accounts.delete_if_unused(&spending).unwrap());
     assert!(accounts.get_default().optional().unwrap().is_none());
 }
+
+#[test]
+fn add_and_rename_account_report_typed_duplicate_errors() {
+    let test = Test::new();
+    let accounts = test.sdk().accounts_api();
+    let default_account = accounts.get_default().unwrap();
+
+    // Re-adding an existing account address with `is_default = true` returns `AccountAlreadyExists`
+    // and preserves the existing default account flag.
+    let err = accounts
+        .add_account(
+            Some("duplicate-address"),
+            default_account.component_address(),
+            default_account.view_only_key_id(),
+            default_account.owner_key_id().unwrap(),
+            Epoch::zero(),
+            false,
+            true,
+        )
+        .expect_err("duplicate account address must be rejected");
+    assert!(err.is_account_exists_error(), "{err}");
+    assert!(accounts.get_default().unwrap().account().is_default());
+
+    let second_addr = test.sdk().key_manager_api().derive_account_address(1).unwrap();
+    let second = accounts.create_account(Some("second"), false, second_addr).unwrap();
+
+    // Renaming `second` to a name already used by another account returns `AccountNameAlreadyExists`.
+    let err = accounts
+        .rename_account(second.component_address(), "test")
+        .expect_err("taken name must be rejected");
+    assert!(err.is_name_exists_error(), "{err}");
+
+    // Renaming an account to its own current name is a no-op and succeeds.
+    accounts.rename_account(second.component_address(), "second").unwrap();
+}

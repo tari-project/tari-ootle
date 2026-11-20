@@ -184,7 +184,7 @@ impl CallScope {
         self.acting_component.as_ref()
     }
 
-    pub fn set_acting_component(&mut self, acting_component: Option<ComponentAddress>) {
+    fn set_acting_component(&mut self, acting_component: Option<ComponentAddress>) {
         self.acting_component = acting_component;
     }
 

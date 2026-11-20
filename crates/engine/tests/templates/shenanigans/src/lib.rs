@@ -121,9 +121,7 @@ mod template {
         /// Mints a single token on a fresh non-fungible resource and keeps it in a vault, so that the token is not
         /// left dangling and the run reaches finalize.
         fn mint_nft_and_keep(mint: impl FnOnce(ResourceManager, NonFungibleId) -> Bucket) -> Component<Self> {
-            let resource_address = ResourceBuilder::non_fungible()
-                .mintable(rule!(allow_all), OWNER)
-                .build();
+            let resource_address = ResourceBuilder::non_fungible().mintable(rule!(allow_all), OWNER).build();
             let bucket = mint(ResourceManager::get(resource_address), NonFungibleId::from_u32(1));
             Component::new(Self {
                 vault: Some(Vault::from_bucket(bucket)),

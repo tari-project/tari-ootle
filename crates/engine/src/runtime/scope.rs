@@ -184,6 +184,10 @@ impl CallScope {
         self.acting_component.as_ref()
     }
 
+    pub fn set_acting_component(&mut self, acting_component: Option<ComponentAddress>) {
+        self.acting_component = acting_component;
+    }
+
     pub fn owned_nodes(&self) -> &IndexSet<SubstateId> {
         &self.owned
     }
@@ -660,7 +664,7 @@ impl PushCallFrame {
                 let mut frame = CallFrame::for_component(template_address, module_name, component_lock, entity_id);
                 frame.scope_mut().include_owned_in_scope(&component_scope);
                 frame.scope_mut().include_refs_in_scope(&arg_scope);
-                frame.scope_mut().acting_component = acting_component;
+                frame.scope_mut().set_acting_component(acting_component);
                 frame
             },
             Self::MigrationContext {

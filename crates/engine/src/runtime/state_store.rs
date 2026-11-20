@@ -379,12 +379,9 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
 
     /// The current value of a component this transaction has already loaded, read without taking a lock.
     pub fn get_loaded_component(&self, address: ComponentAddress) -> Result<&Component, RuntimeError> {
-        let id = SubstateId::Component(address);
         let value = self
-            .new_substates
-            .get(&id)
-            .or_else(|| self.loaded_substates.get(&id).map(|s| s.substate_value()))
-            .ok_or_else(|| RuntimeError::InvariantError {
+            .get_ref(&SubstateId::Component(address))
+            .map_err(|_| RuntimeError::InvariantError {
                 function: "get_loaded_component",
                 details: format!("Component {} has not been loaded by this transaction", address),
             })?;

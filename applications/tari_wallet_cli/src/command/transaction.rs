@@ -39,6 +39,7 @@ use tari_engine_types::{
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, InputDeclaration, SubstateAddress};
 use tari_ootle_transaction::{
+    Blob,
     Instruction,
     Transaction,
     TransactionId,
@@ -64,6 +65,7 @@ use tari_ootle_walletd_client::{
     },
 };
 use tari_template_lib::types::{
+    ComponentAddress,
     NonFungibleAddress,
     NonFungibleId,
     ResourceAddress,
@@ -71,7 +73,7 @@ use tari_template_lib::types::{
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
     crypto::RistrettoPublicKeyBytes,
 };
-use tari_transaction_manifest::{ManifestValue, parse_manifest};
+use tari_transaction_manifest::{ManifestInstructions, ManifestValue, parse_manifest};
 
 use crate::from_hex::FromHex;
 
@@ -145,11 +147,16 @@ impl CommonSubmitArgs {
     }
 }
 
+/// Submit a transaction manifest. When the manifest defines its own fee instructions, `--max-fee` is ignored and
+/// `--fee-account` only selects the seal signer.
 #[derive(Debug, Args, Clone)]
 pub struct SubmitManifestArgs {
     manifest: PathBuf,
     #[clap(long, short = 'g')]
     input_variables: Vec<String>,
+    /// Named blob files referenced by `blob!("<name>")` in the manifest (`<name>=<path>`, repeatable).
+    #[clap(long = "blob", short = 'b', value_name = "NAME=PATH")]
+    blobs: Vec<String>,
     #[clap(flatten)]
     common: CommonSubmitArgs,
 }
@@ -343,7 +350,7 @@ async fn handle_submit_manifest(
         &contents,
         parse_globals(args.input_variables)?,
         Default::default(),
-        Default::default(),
+        parse_blobs(args.blobs)?,
     )?;
     let common = args.common;
 
@@ -365,20 +372,19 @@ async fn handle_submit_manifest(
         ..
     } = client.get_settings().await?;
     let max_epoch = common.resolve_max_epoch(current_epoch, default_transaction_validity_epochs)?;
+    let dump_account = match common.dump_outputs_into.clone() {
+        Some(dump_account) => Some(client.accounts_get(dump_account).await?.account.component_address),
+        None => None,
+    };
 
-    let builder = Transaction::builder(network.byte, max_epoch)
-        .with_fee_instructions_builder(|builder| {
-            builder.with_instructions(instructions.fee_instructions).call_method(
-                fee_account.component_address,
-                "pay_fee",
-                args![common.max_fee],
-            )
-        })
-        .with_instructions(instructions.instructions)
-        .with_inputs(common.inputs)
-        .with_min_epoch(common.min_epoch.map(Epoch));
-
-    let transaction = builder.build_unsigned();
+    let transaction = build_manifest_transaction(ManifestTransactionParams {
+        network_byte: network.byte,
+        max_epoch,
+        fee_account: fee_account.component_address,
+        dump_account,
+        common: &common,
+        instructions,
+    })?;
     summarize_transaction(&transaction);
 
     if common.dry_run {
@@ -413,6 +419,53 @@ async fn handle_submit_manifest(
     }
 
     Ok(())
+}
+
+struct ManifestTransactionParams<'a> {
+    network_byte: u8,
+    max_epoch: Epoch,
+    fee_account: ComponentAddress,
+    dump_account: Option<ComponentAddress>,
+    common: &'a CommonSubmitArgs,
+    instructions: ManifestInstructions,
+}
+
+fn build_manifest_transaction(params: ManifestTransactionParams<'_>) -> Result<UnsignedTransaction, anyhow::Error> {
+    let ManifestTransactionParams {
+        network_byte,
+        max_epoch,
+        fee_account,
+        dump_account,
+        common,
+        instructions,
+    } = params;
+
+    let mut builder = Transaction::builder(network_byte, max_epoch)
+        .with_fee_instructions_builder(|builder| {
+            if instructions.fee_instructions.is_empty() {
+                builder.call_method(fee_account, "pay_fee", args![common.max_fee])
+            } else {
+                builder.with_instructions(instructions.fee_instructions)
+            }
+        })
+        .with_instructions(instructions.instructions)
+        .with_inputs(common.inputs.clone())
+        .with_min_epoch(common.min_epoch.map(Epoch));
+
+    if let Some(dump_account) = dump_account {
+        builder = builder.put_last_instruction_output_on_workspace("bucket").call_method(
+            dump_account,
+            "deposit",
+            args![Workspace("bucket")],
+        );
+    }
+
+    let mut transaction = builder.build_unsigned();
+    for blob in instructions.blobs.iter().cloned() {
+        transaction.add_blob(blob)?;
+    }
+
+    Ok(transaction)
 }
 
 pub async fn handle_send(args: SendArgs, client: &mut WalletDaemonClient) -> Result<(), anyhow::Error> {
@@ -925,7 +978,159 @@ fn parse_globals(globals: Vec<String>) -> Result<HashMap<String, ManifestValue>,
     Ok(result)
 }
 
+fn parse_blobs(blobs: Vec<String>) -> Result<HashMap<String, Blob>, anyhow::Error> {
+    let mut result = HashMap::with_capacity(blobs.len());
+    for entry in blobs {
+        let (name, path) = entry
+            .split_once('=')
+            .ok_or_else(|| anyhow!("Invalid blob '{}': expected <name>=<path>", entry))?;
+        if name.is_empty() {
+            anyhow::bail!("Invalid blob '{}': blob name cannot be empty", entry);
+        }
+        let bytes = fs::read(path).map_err(|err| anyhow!("Failed to read blob '{}' from '{}': {}", name, path, err))?;
+        if result.insert(name.to_string(), Blob::new(bytes)).is_some() {
+            anyhow::bail!("Duplicate blob name '{}'", name);
+        }
+    }
+    Ok(result)
+}
+
 fn base64_decode<T: AsRef<[u8]>>(s: T) -> Result<Vec<u8>, base64::DecodeError> {
     use base64::Engine;
     base64::prelude::BASE64_STANDARD.decode(s)
 }
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_transaction::ComponentReference;
+
+    use super::*;
+
+    fn account(byte: u8) -> ComponentAddress {
+        ComponentAddress::from_array([byte; 32])
+    }
+
+    fn common_args() -> CommonSubmitArgs {
+        CommonSubmitArgs {
+            wait_for_result_timeout_secs: None,
+            inputs: vec![],
+            detect_inputs: None,
+            version: None,
+            dump_outputs_into: None,
+            dry_run: false,
+            max_fee: 1_000,
+            fee_account: None,
+            min_epoch: None,
+            max_epoch: None,
+        }
+    }
+
+    #[test]
+    fn loads_cli_blob_files_and_attaches_to_unsigned_transaction() {
+        let blob_path = std::env::temp_dir().join(format!("tari_wallet_cli_blob_{}.wasm", std::process::id()));
+        let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d];
+        fs::write(&blob_path, &wasm_bytes).unwrap();
+
+        let arg = format!("template_wasm={}", blob_path.display());
+        let dup_err = parse_blobs(vec![arg.clone(), arg.clone()]).unwrap_err();
+        assert!(dup_err.to_string().contains("Duplicate blob name"), "{dup_err}");
+
+        let blobs = parse_blobs(vec![arg]).unwrap();
+        let _ = fs::remove_file(&blob_path);
+        let manifest = r#"
+            fn main() {
+                let wasm = blob!("template_wasm");
+                publish_template!(wasm);
+            }
+        "#;
+        let instructions = parse_manifest(manifest, HashMap::new(), HashMap::new(), blobs).unwrap();
+
+        let mut common = common_args();
+        common.min_epoch = Some(5);
+        let tx = build_manifest_transaction(ManifestTransactionParams {
+            network_byte: 0x10,
+            max_epoch: Epoch(15),
+            fee_account: account(1),
+            dump_account: None,
+            common: &common,
+            instructions,
+        })
+        .unwrap();
+
+        assert_eq!(tx.blobs().len(), 1);
+        assert_eq!(tx.blobs()[0].as_slice(), wasm_bytes.as_slice());
+        tx.validate_blob_references().unwrap();
+        assert_eq!(tx.min_epoch(), Some(Epoch(5)));
+        assert_eq!(tx.max_epoch(), Epoch(15));
+    }
+
+    #[test]
+    fn uses_manifest_fee_instructions_without_appending_duplicate_pay_fee() {
+        let custom_fee_payer = account(2);
+        let instructions = ManifestInstructions {
+            instructions: vec![Instruction::DropAllProofsInWorkspace],
+            fee_instructions: vec![Instruction::CallMethod {
+                call: ComponentReference::Address(custom_fee_payer),
+                method: "pay_fee".try_into().unwrap(),
+                args: args![500u64],
+            }],
+            blobs: Default::default(),
+        };
+
+        let common = common_args();
+        let tx = build_manifest_transaction(ManifestTransactionParams {
+            network_byte: 0x10,
+            max_epoch: Epoch(10),
+            fee_account: account(1),
+            dump_account: None,
+            common: &common,
+            instructions,
+        })
+        .unwrap();
+
+        assert_eq!(tx.fee_instructions().len(), 1);
+        assert!(matches!(
+            &tx.fee_instructions()[0],
+            Instruction::CallMethod {
+                call: ComponentReference::Address(addr),
+                ..
+            } if *addr == custom_fee_payer
+        ));
+    }
+
+    #[test]
+    fn appends_deposit_when_dump_outputs_into_is_set() {
+        let dump_target = account(9);
+        let instructions = ManifestInstructions {
+            instructions: vec![Instruction::DropAllProofsInWorkspace],
+            fee_instructions: vec![],
+            blobs: Default::default(),
+        };
+
+        let common = common_args();
+        let tx = build_manifest_transaction(ManifestTransactionParams {
+            network_byte: 0x10,
+            max_epoch: Epoch(10),
+            fee_account: account(1),
+            dump_account: Some(dump_target),
+            common: &common,
+            instructions,
+        })
+        .unwrap();
+
+        assert_eq!(tx.instructions().len(), 3);
+        assert!(matches!(
+            &tx.instructions()[1],
+            Instruction::PutLastInstructionOutputOnWorkspace { .. }
+        ));
+        assert!(matches!(
+            &tx.instructions()[2],
+            Instruction::CallMethod {
+                call: ComponentReference::Address(addr),
+                method,
+                ..
+            } if *addr == dump_target && method.as_str() == "deposit"
+        ));
+    }
+}
+

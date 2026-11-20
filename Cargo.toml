@@ -326,7 +326,8 @@ utoipa-swagger-ui = { version = "10.0.2" }
 uuid = "1.15.0"
 xxhash-rust = "0.8.15"
 
-# Optimize wasmer/cranelift even in dev/test builds (optional but highly recommended).
+# Optimize wasmer/cranelift and the curve/proof crates even in dev/test builds (optional
+# but highly recommended).
 #
 # The Cranelift JIT compiler that wasmer uses to compile WASM templates runs ~10x slower
 # when compiled without optimizations (the default for `cargo test`). Without these
@@ -334,6 +335,9 @@ xxhash-rust = "0.8.15"
 # actually testing template logic. With opt-level=2 on just these crates, the full
 # `tari_engine` test suite drops from ~150s to ~5s while keeping the rest of the build
 # in debug mode for fast compilation and good error messages.
+#
+# Range proof and signature tests likewise spend their time in unoptimized curve25519
+# arithmetic, so the crypto crates get the same treatment.
 #
 # These lines only affect local dev builds — release/CI profiles already compile
 # everything with optimizations. You can safely remove them if you prefer uniform
@@ -350,6 +354,12 @@ opt-level = 2
 opt-level = 2
 [profile.dev.package.cranelift-entity]
 opt-level = 2
+[profile.dev.package.tari_crypto]
+opt-level = 2
+[profile.dev.package.tari_bulletproofs_plus]
+opt-level = 2
+[profile.dev.package.curve25519-dalek]
+opt-level = 2
 
 [profile.release]
 # Shutdown when panicking so we can see the error, specifically for the wallet
@@ -363,6 +373,9 @@ overflow-checks = true
 [profile.ci-build]
 inherits = "release"
 opt-level = 1
+# Range proof and signature verification in tests is dominated by curve25519 arithmetic.
+[profile.ci-build.package.curve25519-dalek]
+opt-level = 3
 
 ## Make a copy of this code, uncomment and replace account and my-branch with the name of your fork and the branch you want to temporarily use
 #[patch."https://github.com/tari-project/tari.git"]

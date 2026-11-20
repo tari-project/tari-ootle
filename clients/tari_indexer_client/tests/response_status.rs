@@ -98,3 +98,69 @@ async fn a_redirection_status_does_not_open_an_event_stream() {
         "{err}"
     );
 }
+
+fn serve_response_once(response: String) -> IndexerRestApiClient {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        let Ok((mut sock, _)) = listener.accept() else {
+            return;
+        };
+        sock.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+        let read = sock.read(&mut [0u8; 8192]).unwrap();
+        assert_ne!(read, 0, "client closed the connection without sending a request");
+        sock.write_all(response.as_bytes()).unwrap();
+        sock.flush().unwrap();
+    });
+    IndexerRestApiClient::connect(format!("http://127.0.0.1:{port}")).unwrap()
+}
+
+#[tokio::test]
+async fn streaming_endpoints_preserve_server_error_details() {
+    let body = r#"{"error":"Events after id 42 have aged past this indexer's event retention window"}"#;
+    let response = format!(
+        "HTTP/1.1 410 Gone\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let client = serve_response_once(response.clone());
+    let Err(err) = client.sse_events().await else {
+        panic!("410 opened an event stream");
+    };
+    match err {
+        IndexerRestClientError::ErrorResponse { source, details } => {
+            assert_eq!(source.status().map(|s| s.as_u16()), Some(410));
+            assert_eq!(
+                details.as_deref(),
+                Some("Events after id 42 have aged past this indexer's event retention window")
+            );
+        },
+        other => panic!("expected ErrorResponse, got {other:?}"),
+    }
+
+    let client = serve_response_once(response);
+    let Err(err) = client.stream_utxo_updates_protobuf(utxo_updates_request()).await else {
+        panic!("410 opened a UTXO stream");
+    };
+    match err {
+        IndexerRestClientError::ErrorResponse { source, details } => {
+            assert_eq!(source.status().map(|s| s.as_u16()), Some(410));
+            assert_eq!(
+                details.as_deref(),
+                Some("Events after id 42 have aged past this indexer's event retention window")
+            );
+        },
+        other => panic!("expected ErrorResponse, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn sse_events_accepts_content_type_with_charset_parameter() {
+    let body = "data: hello\n\n";
+    let response = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream; charset=utf-8\r\ncontent-length: {}\r\nconnection: \
+         close\r\n\r\n{body}",
+        body.len()
+    );
+    let client = serve_response_once(response);
+    let _stream = client.sse_events().await.expect("expected SSE stream to open");
+}

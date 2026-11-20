@@ -14,7 +14,8 @@ use reqwest::{header, header::HeaderValue};
 
 use crate::{error::IndexerRestClientError, rest_api_client::require_success_status};
 
-pub static MIME_EVENT_STREAM: HeaderValue = HeaderValue::from_static("text/event-stream");
+const MIME_EVENT_STREAM_STR: &str = "text/event-stream";
+pub static MIME_EVENT_STREAM: HeaderValue = HeaderValue::from_static(MIME_EVENT_STREAM_STR);
 
 /// Longest SSE line accepted, excluding its terminator. `poll_next` produces an event after every `data:` line, so
 /// this bounds both the read buffer and the data of a single event.
@@ -32,7 +33,7 @@ impl SseEventStreamBuilder {
     pub fn into_stream(self) -> Result<SseEventStream, IndexerRestClientError> {
         let response = require_success_status(self.response)?;
         let content_type = response.headers().get(header::CONTENT_TYPE);
-        if content_type != Some(&MIME_EVENT_STREAM) {
+        if !is_event_stream_content_type(content_type) {
             return Err(IndexerRestClientError::InvalidResponse {
                 message: format!(
                     "Invalid Content-Type for SSE stream: expected '{:?}', got '{:?}'",
@@ -44,6 +45,14 @@ impl SseEventStreamBuilder {
         let stream = response.bytes_stream();
         Ok(SseEventStream::new(stream))
     }
+}
+
+fn is_event_stream_content_type(content_type: Option<&HeaderValue>) -> bool {
+    let Some(value) = content_type.and_then(|v| v.to_str().ok()) else {
+        return false;
+    };
+    let media_type = value.split(';').next().unwrap_or("").trim();
+    media_type.eq_ignore_ascii_case(MIME_EVENT_STREAM_STR)
 }
 
 impl From<reqwest::Response> for SseEventStreamBuilder {
@@ -375,5 +384,19 @@ mod tests {
         assert_eq!(data_of(&items), ["1", "2"]);
         assert_eq!(items[0].as_ref().unwrap().event_type, "a");
         assert_eq!(items[1].as_ref().unwrap().last_event_id.as_deref(), Some("7"));
+    }
+
+    #[test]
+    fn event_stream_content_type_matching_accepts_parameters_and_case() {
+        let exact = HeaderValue::from_static("text/event-stream");
+        let with_charset = HeaderValue::from_static("text/event-stream; charset=utf-8");
+        let uppercase = HeaderValue::from_static("TEXT/EVENT-STREAM; Charset=UTF-8");
+        let json = HeaderValue::from_static("application/json");
+
+        assert!(is_event_stream_content_type(Some(&exact)));
+        assert!(is_event_stream_content_type(Some(&with_charset)));
+        assert!(is_event_stream_content_type(Some(&uppercase)));
+        assert!(!is_event_stream_content_type(Some(&json)));
+        assert!(!is_event_stream_content_type(None));
     }
 }

@@ -6,9 +6,11 @@ use std::{
     task::{Context, Poll},
 };
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures::{Stream, StreamExt};
 use log::*;
+
+const DEFAULT_INITIAL_BUFFER_CAPACITY: usize = 64 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProtobufStreamError {
@@ -43,7 +45,7 @@ impl<TMsg> ProtobufStream<TMsg> {
     ) -> Self {
         Self {
             bytes_stream: Box::pin(bytes_stream.fuse()),
-            buf: BytesMut::with_capacity(max_message_size),
+            buf: BytesMut::with_capacity(max_message_size.min(DEFAULT_INITIAL_BUFFER_CAPACITY)),
             max_message_size,
             terminated: false,
             _marker: std::marker::PhantomData,
@@ -58,7 +60,8 @@ impl<TMsg: prost::Message + Default> ProtobufStream<TMsg> {
         if self.buf.len() < 10 && self.buf.iter().all(|byte| byte & 0x80 != 0) {
             return Ok(None);
         }
-        let len = prost::decode_length_delimiter(&self.buf[..])?;
+        let mut slice = &self.buf[..];
+        let len = prost::decode_length_delimiter(&mut slice)?;
         if len > self.max_message_size {
             return Err(ProtobufStreamError::MessageSizeExceeded {
                 len,
@@ -66,8 +69,9 @@ impl<TMsg: prost::Message + Default> ProtobufStream<TMsg> {
             });
         }
 
-        let frame_len = prost::length_delimiter_len(len) + len;
-        if self.buf.len() < frame_len {
+        let delimiter_len = self.buf.len() - slice.len();
+        let frame_len = delimiter_len + len;
+        if slice.len() < len {
             trace!(
                 "Buffering: have {} bytes, need {} bytes (including the length delimiter)",
                 self.buf.len(),
@@ -76,7 +80,8 @@ impl<TMsg: prost::Message + Default> ProtobufStream<TMsg> {
             return Ok(None);
         }
 
-        let msg = TMsg::decode_length_delimited(&mut self.buf)?;
+        let msg = TMsg::decode(&slice[..len])?;
+        self.buf.advance(frame_len);
         Ok(Some(msg))
     }
 }
@@ -200,5 +205,22 @@ mod tests {
         let err = stream.next().await.unwrap().unwrap_err();
         assert!(matches!(err, ProtobufStreamError::MessageSizeExceeded { .. }), "{err}");
         assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn it_decodes_frames_with_non_canonical_length_delimiters_split_across_chunks() {
+        let payload = EndOfShard { max_state_version: 42 }.encode_to_vec();
+        assert_eq!(payload.len(), 2);
+        // Encode length 2 as an overlong 2-byte varint [0x82, 0x00] instead of canonical [0x02],
+        // and split the stream right after the delimiter so the first chunk has 2 bytes (< 2 + 2 = 4).
+        let chunks = vec![vec![0x82, 0x00], payload, frame(7)];
+        let decoded = decode_chunks(chunks).await.unwrap();
+        assert_eq!(decoded, [42, 7]);
+    }
+
+    #[test]
+    fn it_caps_initial_buffer_capacity() {
+        let stream = ProtobufStream::<EndOfShard>::new(futures::stream::empty());
+        assert_eq!(stream.buf.capacity(), DEFAULT_INITIAL_BUFFER_CAPACITY);
     }
 }

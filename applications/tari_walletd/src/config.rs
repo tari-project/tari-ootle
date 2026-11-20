@@ -94,12 +94,16 @@ pub struct WalletDaemonConfig {
     /// How long a person has to approve a transaction request. The locks
     /// holding the request's inputs are extended past this, so it also decides
     /// how long those funds stay unavailable if nobody ever answers.
+    /// A human duration, the same form as `jwt_expiry` (for example `"30m"`).
+    #[serde(with = "humantime_serde")]
     #[serde(default = "return_default_transaction_request_ttl")]
     pub transaction_request_ttl: Duration,
     /// How long a person has to approve a signing request when the requester
     /// does not set its own window. Co-signers of a council transaction are
     /// often not at their wallet, so this is longer than the transaction-request
     /// window.
+    /// A human duration, the same form as `jwt_expiry` (for example `"1day"`).
+    #[serde(with = "humantime_serde")]
     #[serde(default = "return_default_signing_request_ttl")]
     pub signing_request_ttl: Duration,
     /// If true, the wallet daemon will allow CORS requests from any origin. This is useful for development and
@@ -518,6 +522,25 @@ mod tests {
             ..Default::default()
         };
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn approval_windows_load_as_human_durations_and_default_when_omitted() {
+        let configured = load(
+            "[ootle_wallet_daemon]\nindexer_api_url = \"http://a.example/\"\ntransaction_request_ttl = \
+             \"45m\"\nsigning_request_ttl = \"1day\"",
+        )
+        .unwrap();
+        assert_eq!(configured.transaction_request_ttl, Duration::from_secs(45 * 60));
+        assert_eq!(configured.signing_request_ttl, Duration::from_secs(24 * 60 * 60));
+        configured.validate().unwrap();
+
+        let defaults = load("[ootle_wallet_daemon]\nindexer_api_url = \"http://a.example/\"").unwrap();
+        assert_eq!(
+            defaults.transaction_request_ttl,
+            return_default_transaction_request_ttl()
+        );
+        assert_eq!(defaults.signing_request_ttl, return_default_signing_request_ttl());
     }
 
     #[test]

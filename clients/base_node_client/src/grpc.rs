@@ -43,6 +43,13 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::validator_node::app";
+const MAX_PREALLOCATED_UTXO_RESPONSES: usize = 1024;
+
+fn preallocated_utxo_capacity(count: u64) -> usize {
+    usize::try_from(count)
+        .unwrap_or(MAX_PREALLOCATED_UTXO_RESPONSES)
+        .min(MAX_PREALLOCATED_UTXO_RESPONSES)
+}
 
 type Client = BaseNodeGrpcClient<tonic::transport::Channel>;
 
@@ -72,7 +79,7 @@ impl GrpcBaseNodeClient {
     }
 
     pub async fn get_mempool_transaction_count(&mut self) -> Result<usize, BaseNodeClientError> {
-        let inner = self.connection().await.unwrap();
+        let inner = self.connection().await?;
         let request = grpc::GetMempoolTransactionsRequest {};
 
         let mut count = 0;
@@ -87,7 +94,7 @@ impl GrpcBaseNodeClient {
                 },
                 Err(e) => {
                     warn!(target: LOG_TARGET, "Error getting mempool transaction count: {}", e);
-                    return Err(BaseNodeClientError::ConnectionError);
+                    return Err(e.into());
                 },
             }
         }
@@ -262,7 +269,7 @@ impl BaseNodeClient for GrpcBaseNodeClient {
             count,
         };
         let mut stream = inner.get_side_chain_utxos(request).await?.into_inner();
-        let mut responses = Vec::with_capacity(count as usize);
+        let mut responses = Vec::with_capacity(preallocated_utxo_capacity(count));
         loop {
             match stream.message().await {
                 Ok(Some(resp)) => {
@@ -291,14 +298,56 @@ impl BaseNodeClient for GrpcBaseNodeClient {
                     break;
                 },
                 Err(e) => {
-                    return Err(BaseNodeClientError::InvalidPeerMessage(format!(
-                        "Error reading stream: {}",
-                        e
-                    )));
+                    return Err(e.into());
                 },
             }
         }
 
         Ok(responses)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_common_types::optional::IsNotFoundError;
+
+    use super::*;
+
+    #[test]
+    fn preallocated_utxo_capacity_is_bounded() {
+        assert_eq!(preallocated_utxo_capacity(0), 0);
+        assert_eq!(preallocated_utxo_capacity(16), 16);
+        assert_eq!(
+            preallocated_utxo_capacity(MAX_PREALLOCATED_UTXO_RESPONSES as u64),
+            MAX_PREALLOCATED_UTXO_RESPONSES
+        );
+        assert_eq!(
+            preallocated_utxo_capacity(MAX_PREALLOCATED_UTXO_RESPONSES as u64 + 1),
+            MAX_PREALLOCATED_UTXO_RESPONSES
+        );
+        assert_eq!(preallocated_utxo_capacity(u64::MAX), MAX_PREALLOCATED_UTXO_RESPONSES);
+    }
+
+    #[test]
+    fn grpc_status_conversion_preserves_code_and_not_found_classification() {
+        let not_found: BaseNodeClientError = tonic::Status::not_found("missing header").into();
+        assert!(not_found.is_not_found_error());
+        assert!(matches!(
+            not_found,
+            BaseNodeClientError::GrpcStatus {
+                code: tonic::Code::NotFound,
+                ref message
+            } if message == "missing header"
+        ));
+
+        let unavailable: BaseNodeClientError = tonic::Status::unavailable("stream broken").into();
+        assert!(!unavailable.is_not_found_error());
+        assert!(matches!(
+            unavailable,
+            BaseNodeClientError::GrpcStatus {
+                code: tonic::Code::Unavailable,
+                ref message
+            } if message == "stream broken"
+        ));
     }
 }

@@ -23,7 +23,7 @@
 mod doc_extract;
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     path::{Path, PathBuf},
 };
 
@@ -172,9 +172,22 @@ impl TemplateMetadataBuilder {
         if let Some(ref tags) = self.tags {
             metadata.tags = tags.clone();
         }
+        let mut seen = HashSet::new();
+        metadata.tags = std::mem::take(&mut metadata.tags)
+            .into_iter()
+            .map(|t| t.trim().to_lowercase())
+            .filter(|t| !t.is_empty() && seen.insert(t.clone()))
+            .collect();
+
         if let Some(ref category) = self.category {
             metadata.category = Some(category.clone());
         }
+        metadata.category = metadata
+            .category
+            .as_deref()
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(str::to_lowercase);
         if let Some(ref repository) = self.repository {
             metadata.repository =
                 Some(Url::parse(repository).map_err(|e| TemplateBuildError::InvalidUrl("repository", e))?);
@@ -570,6 +583,45 @@ overridden = "old"
             result,
             Err(TemplateBuildError::DocExtract(DocExtractError::Io { .. }))
         ));
+    }
+
+    #[test]
+    fn normalizes_tags_and_category_overrides() {
+        let dir = tempfile::tempdir().unwrap();
+        create_test_cargo_toml(dir.path());
+        let out_dir = dir.path().join("out");
+        std::fs::create_dir_all(&out_dir).unwrap();
+
+        let output = TemplateMetadataBuilder::new()
+            .tags(vec![" DeFi ", "defi", "", "  ", "NFT"])
+            .category("  Marketplace ")
+            .build_inner(dir.path().to_str().unwrap(), out_dir.to_str().unwrap())
+            .unwrap();
+
+        assert_eq!(output.metadata.tags, vec!["defi", "nft"]);
+        assert_eq!(output.metadata.category.as_deref(), Some("marketplace"));
+
+        let cargo_toml = r#"
+[package]
+name = "test-template"
+version = "1.0.0"
+
+[package.metadata.tari-template]
+tags = ["  Gaming ", "GAMING", "", "NFT "]
+category = "  Utility  "
+"#;
+        std::fs::write(dir.path().join("Cargo.toml"), cargo_toml).unwrap();
+        let from_cargo = TemplateMetadataBuilder::new()
+            .build_inner(dir.path().to_str().unwrap(), out_dir.to_str().unwrap())
+            .unwrap();
+        assert_eq!(from_cargo.metadata.tags, vec!["gaming", "nft"]);
+        assert_eq!(from_cargo.metadata.category.as_deref(), Some("utility"));
+
+        let cleared = TemplateMetadataBuilder::new()
+            .category("   ")
+            .build_inner(dir.path().to_str().unwrap(), out_dir.to_str().unwrap())
+            .unwrap();
+        assert_eq!(cleared.metadata.category, None);
     }
 
     #[test]

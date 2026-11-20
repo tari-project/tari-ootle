@@ -1927,3 +1927,44 @@ fn covenant_balance_claim_for_a_missing_input_is_rejected() {
         "names input 1, but the transfer has 1 inputs",
     );
 }
+
+#[test]
+fn duplicate_transfer_commitments_are_rejected_before_spend_scripts_run() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let script_template = test.get_template_address(SCRIPT_TEMPLATE);
+    let reject_leaf = script_condition(script_template, "always_reject", vec![]);
+    let (resx, mint) = mint_utxo(&mut test, conditions(vec![reject_leaf]));
+    let pk = test.to_public_key_bytes();
+
+    // Baseline: with unique commitments, authorization reaches the spend script and fails with its panic message.
+    submit_expect_rejected(
+        &mut test,
+        resx,
+        spend_into(&mint, key_path(pk)),
+        "spend always rejected",
+    );
+
+    // 1. Duplicate input commitment is rejected on admission, before `always_reject` executes.
+    let mut dup_inputs = spend_into(&mint, key_path(pk));
+    let first_input = dup_inputs.statement.inputs_statement.inputs[0].clone();
+    dup_inputs.statement.inputs_statement.inputs.push(first_input);
+    submit_expect_rejected(&mut test, resx, dup_inputs, "Duplicate input commitment");
+
+    // 2. Output commitment duplicating an input commitment is rejected on admission, before `always_reject` executes.
+    let mut input_output_collision = spend_into(&mint, key_path(pk));
+    input_output_collision.statement.outputs_statement.outputs[0]
+        .output
+        .commitment = input_output_collision.statement.inputs_statement.inputs[0].commitment;
+    submit_expect_rejected(
+        &mut test,
+        resx,
+        input_output_collision,
+        "duplicates an input commitment",
+    );
+
+    // 3. Duplicate output commitment is rejected on admission, before `always_reject` executes.
+    let mut dup_outputs = spend_into(&mint, key_path(pk));
+    let first_output = dup_outputs.statement.outputs_statement.outputs[0].clone();
+    dup_outputs.statement.outputs_statement.outputs.push(first_output);
+    submit_expect_rejected(&mut test, resx, dup_outputs, "Duplicate output commitment");
+}

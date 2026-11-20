@@ -9,6 +9,7 @@
 mod support;
 
 use tari_engine_types::resource::Resource;
+use tari_ootle_common_types::SubstateVersion;
 use tari_ootle_light_client::test_fixtures::ValidatorSetFixture;
 use tari_ootle_wallet_sdk::{
     IndexerTrust,
@@ -34,10 +35,25 @@ fn cached_resource_address() -> ResourceAddress {
         .unwrap()
 }
 
-fn uncached_resource_address() -> ResourceAddress {
-    "resource_c71b23ff336a5e0c05781b44dca0d0075543b564d0c254f92cb928b4ab9c9ec5"
-        .parse()
-        .unwrap()
+fn uncached_resource_addresses() -> [ResourceAddress; 2] {
+    [
+        "resource_c71b23ff336a5e0c05781b44dca0d0075543b564d0c254f92cb928b4ab9c9ec5",
+        "resource_e04ebb967a75fa6a7e37fc8e25bb93f17eebf295c0d4b6d004499b4d45cd6014",
+    ]
+    .map(|address| address.parse().unwrap())
+}
+
+fn stealth_resource() -> Resource {
+    Resource::new(
+        ResourceType::Stealth,
+        SubstateOwnerRule::None,
+        ResourceAccessRules::new(),
+        Metadata::from([("symbol", "STL".to_string())]),
+        None,
+        None,
+        6,
+        false,
+    )
 }
 
 /// A wallet that has cached [`cached_resource_address`], with a second account that no resource but TARI is
@@ -48,19 +64,7 @@ fn wallet_with_recipient() -> (ProvingNetwork, Wallet, AccountWithAddress) {
     let test = TestWithNetwork::with_network_trusting(network.clone(), IndexerTrust::Trust);
     test.sdk()
         .resources_api()
-        .upsert_resource(
-            &cached_resource_address(),
-            &Resource::new(
-                ResourceType::Stealth,
-                SubstateOwnerRule::None,
-                ResourceAccessRules::new(),
-                Metadata::from([("symbol", "STL".to_string())]),
-                None,
-                None,
-                6,
-                false,
-            ),
-        )
+        .upsert_resource(&cached_resource_address(), &stealth_resource())
         .unwrap();
     let address = test.sdk().key_manager_api().derive_account_address(1).unwrap();
     let recipient = test
@@ -158,16 +162,40 @@ async fn an_account_holding_only_spent_outputs_of_a_resource_is_not_associated_w
     assert!(!is_associated(&test, &account, &cached_resource_address()));
 }
 
+/// The first fetch fails, whichever resource it is for, so the other resource is associated only when the failure does
+/// not end the call.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_resource_the_wallet_cannot_fetch_does_not_hold_back_the_others() {
     let (network, test, recipient) = wallet_with_recipient();
     let account = *recipient.account.component_address();
-    hold(&test, &recipient, cached_resource_address(), OutputStatus::Unspent);
-    hold(&test, &recipient, uncached_resource_address(), OutputStatus::Unspent);
+    for resource_address in uncached_resource_addresses() {
+        network.serve_substate(
+            resource_address.into(),
+            SubstateVersion::ZERO,
+            stealth_resource().into(),
+            None,
+        );
+        hold(&test, &recipient, resource_address, OutputStatus::Unspent);
+    }
     network.fail_substate_queries(1);
 
     associate_live_resources(&test, &account).await;
 
-    assert!(is_associated(&test, &account, &cached_resource_address()));
-    assert!(!is_associated(&test, &account, &uncached_resource_address()));
+    let associated = uncached_resource_addresses()
+        .iter()
+        .filter(|resource_address| is_associated(&test, &account, resource_address))
+        .count();
+    assert_eq!(
+        associated, 1,
+        "only the resource whose fetch failed is left unassociated"
+    );
+
+    associate_live_resources(&test, &account).await;
+
+    for resource_address in uncached_resource_addresses() {
+        assert!(
+            is_associated(&test, &account, &resource_address),
+            "the failed resource is associated on a later call"
+        );
+    }
 }

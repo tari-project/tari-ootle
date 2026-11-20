@@ -803,8 +803,6 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(balance)
     }
 
-    /// Counts the account's outputs that are unspent or locked by a pending transaction. A spend of
-    /// any of them may still have to reach the wallet through the UTXO scanner.
     /// The resources of which `account_address` holds a stealth output unspent or locked.
     pub fn get_live_resources_for_account(
         &self,
@@ -816,6 +814,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(resources)
     }
 
+    /// Counts the account's outputs that are unspent or locked by a pending transaction. A spend of
+    /// any of them may still have to reach the wallet through the UTXO scanner.
     pub fn count_unspent_or_locked_outputs_for_account(
         &self,
         account_address: &ComponentAddress,

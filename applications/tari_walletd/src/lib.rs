@@ -169,12 +169,9 @@ pub async fn run_tari_ootle_walletd(
     let authenticator = create_authenticator(&config.ootle_wallet_daemon, wallet_store.clone())?;
     let webauthn_service = authenticator.webauthn_service().cloned();
     if config.ootle_wallet_daemon.enable_webrtc {
-        let addr_display = signaling_server_address
-            .map(|addr| addr.to_string())
-            .unwrap_or_else(|| "unconfigured".to_string());
         info!(
             target: LOG_TARGET,
-            "🔌 WebRTC is enabled: apps can connect through the signaling server at {addr_display}"
+            "🔌 WebRTC is enabled: apps can connect through the signaling server at {signaling_server_address}"
         );
     }
 

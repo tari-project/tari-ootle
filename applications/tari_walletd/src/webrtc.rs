@@ -377,7 +377,7 @@ mod tests {
         let daemon = TestDaemon::start_with_transaction_service().await;
         let (listen_addr, _server) = spawn_listener(
             "127.0.0.1:0".parse().unwrap(),
-            Some("127.0.0.1:9100".parse().unwrap()),
+            "127.0.0.1:9100".parse().unwrap(),
             daemon.context.clone(),
         )
         .await
@@ -422,7 +422,7 @@ mod tests {
         let daemon = TestDaemon::start_with_transaction_service().await;
         let (listen_addr, _server) = spawn_listener(
             "127.0.0.1:0".parse().unwrap(),
-            Some("127.0.0.1:9100".parse().unwrap()),
+            "127.0.0.1:9100".parse().unwrap(),
             daemon.context.clone(),
         )
         .await
@@ -597,7 +597,7 @@ mod tests {
         let occupied_addr = occupied.local_addr().unwrap();
         let (signaling_addr, signaling_state, _signaling_task) = spawn_mock_signaling_server().await;
 
-        let (listen_addr, _wallet_server) = spawn_listener(occupied_addr, Some(signaling_addr), daemon.context.clone())
+        let (listen_addr, _wallet_server) = spawn_listener(occupied_addr, signaling_addr, daemon.context.clone())
             .await
             .unwrap();
         assert_ne!(listen_addr, occupied_addr);

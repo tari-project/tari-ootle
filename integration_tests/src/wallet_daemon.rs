@@ -89,7 +89,7 @@ pub async fn spawn_wallet_daemon(world: &mut TariWorld, wallet_daemon_name: Stri
 
     config.common.base_path.clone_from(&base_dir);
     config.ootle_wallet_daemon.json_rpc_address = json_rpc_address;
-    config.ootle_wallet_daemon.signaling_server_address = Some(signaling_server_addr);
+    config.ootle_wallet_daemon.signaling_server_address = signaling_server_addr;
     config.ootle_wallet_daemon.indexer_api_urls = vec![indexer_url.parse().unwrap()];
     config.ootle_wallet_daemon.network = Network::LocalNet;
     config.ootle_wallet_daemon.authentication = WalletDaemonAuth::None;

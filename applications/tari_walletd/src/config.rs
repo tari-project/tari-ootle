@@ -71,7 +71,8 @@ pub struct WalletDaemonConfig {
     #[serde(default = "return_default_rpc_address")]
     pub json_rpc_address: SocketAddr,
     /// The signaling server address for the webrtc
-    pub signaling_server_address: Option<SocketAddr>,
+    #[serde(default = "return_default_signaling_server_address")]
+    pub signaling_server_address: SocketAddr,
     /// Allow `webrtc.start`, which hands an app connected through the signaling
     /// server a token carrying the caller's permissions. Off unless an operator
     /// opts in, since any credential holding `webrtc` can open such a session.
@@ -214,11 +215,6 @@ impl WalletDaemonConfig {
         if self.cookie_auth {
             self.parsed_cookie_scopes()?;
         }
-        if self.enable_webrtc && self.signaling_server_address.is_none() {
-            return Err(anyhow::anyhow!(
-                "signaling_server_address must be configured when enable_webrtc is true"
-            ));
-        }
         if self.default_transaction_validity_epochs > IMPLAUSIBLE_TRANSACTION_VALIDITY_EPOCHS {
             log::warn!(
                 target: LOG_TARGET,
@@ -312,6 +308,10 @@ fn return_default_rpc_address() -> SocketAddr {
     SocketAddr::from(([127u8, 0, 0, 1], 5100))
 }
 
+fn return_default_signaling_server_address() -> SocketAddr {
+    SocketAddr::from(([127u8, 0, 0, 1], 9100))
+}
+
 impl Default for WalletDaemonConfig {
     fn default() -> Self {
         Self {
@@ -319,7 +319,7 @@ impl Default for WalletDaemonConfig {
             network: Network::MainNet,
             authentication: WalletDaemonAuth::default(),
             json_rpc_address: return_default_rpc_address(),
-            signaling_server_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9100))),
+            signaling_server_address: return_default_signaling_server_address(),
             indexer_api_urls: vec![
                 "http://127.0.0.1:18300"
                     .parse()
@@ -601,19 +601,9 @@ mod tests {
     }
 
     #[test]
-    fn signaling_server_address_is_required_only_when_webrtc_is_enabled() {
-        let disabled = WalletDaemonConfig {
-            enable_webrtc: false,
-            signaling_server_address: None,
-            ..Default::default()
-        };
-        disabled.validate().unwrap();
-
-        let enabled_missing = WalletDaemonConfig {
-            enable_webrtc: true,
-            signaling_server_address: None,
-            ..Default::default()
-        };
-        assert!(enabled_missing.validate().is_err());
+    fn signaling_server_address_defaults_when_omitted() {
+        let config = load("[ootle_wallet_daemon]\nindexer_api_url = \"http://a.example/\"").unwrap();
+        assert_eq!(config.signaling_server_address, return_default_signaling_server_address());
+        config.validate().unwrap();
     }
 }

@@ -25,7 +25,7 @@ pub fn handle_start(
     context: Arc<HandlerContext>,
     value: JsonRpcExtractor,
     token: Option<&Bearer>,
-    addresses: (SocketAddr, Option<SocketAddr>),
+    addresses: (SocketAddr, SocketAddr),
 ) -> JrpcResult {
     let answer_id = value.get_answer_id();
     if !context.config().enable_webrtc {
@@ -59,17 +59,6 @@ pub fn handle_start(
                 ),
             )
         })?;
-    let (preferred_address, signaling_server_address) = addresses;
-    let Some(signaling_server_address) = signaling_server_address else {
-        return Err(JsonRpcResponse::error(
-            answer_id,
-            JsonRpcError::new(
-                JsonRpcErrorReason::ApplicationError(ApplicationErrorCode::InvalidRequest as i32),
-                "WebRTC signaling server address is not configured".to_string(),
-                serde_json::Value::Null,
-            ),
-        ));
-    };
     let webrtc_start_request = value.parse_params::<WebRtcStartRequest>()?;
     let requested_permissions =
         serde_json::from_value::<Permissions>(webrtc_start_request.permissions).map_err(|e| {
@@ -113,6 +102,7 @@ pub fn handle_start(
         )
     })?;
     tokio::spawn(async move {
+        let (preferred_address, signaling_server_address) = addresses;
         if let Err(err) = webrtc_start_session(
             webrtc_start_request.signaling_server_token,
             permissions_token,
@@ -146,7 +136,7 @@ mod tests {
             method: "webrtc.start".to_string(),
             id: Id::Num(1),
         };
-        let addresses = ("127.0.0.1:1".parse().unwrap(), Some("127.0.0.1:2".parse().unwrap()));
+        let addresses = ("127.0.0.1:1".parse().unwrap(), "127.0.0.1:2".parse().unwrap());
         let response = handle_start(Arc::new(daemon.context.clone()), request, Some(&api_key), addresses).unwrap_err();
 
         let body = serde_json::to_string(&response).unwrap();
@@ -177,7 +167,7 @@ mod tests {
                 method: "webrtc.start".to_string(),
                 id: Id::Num(1),
             };
-            let addresses = ("127.0.0.1:1".parse().unwrap(), Some("127.0.0.1:2".parse().unwrap()));
+            let addresses = ("127.0.0.1:1".parse().unwrap(), "127.0.0.1:2".parse().unwrap());
             let response = handle_start(context.clone(), request, Some(&delegated), addresses).unwrap_err();
             let body = serde_json::to_string(&response).unwrap();
             assert!(
@@ -185,34 +175,5 @@ mod tests {
                 "delegated token with scope '{scope}' must be rejected: {body}"
             );
         }
-    }
-
-    #[tokio::test]
-    async fn webrtc_start_errors_when_signaling_server_address_is_missing() {
-        let daemon = TestDaemon::start().await;
-        let mut config = daemon.context.config().clone();
-        config.enable_webrtc = true;
-        config.signaling_server_address = None;
-        let store = daemon.context.wallet_sdk().store().clone();
-        let context = Arc::new(HandlerContext::new(
-            daemon.context.wallet_sdk().clone(),
-            daemon.context.notifier().clone(),
-            daemon.context.transaction_service().clone(),
-            daemon.context.account_monitor().clone(),
-            config.clone(),
-            crate::handlers::auth::create_authenticator(&config, store).unwrap(),
-            "test jwt secret".parse().unwrap(),
-            daemon.context.shutdown_signal().clone(),
-        ));
-
-        let request = JsonRpcExtractor {
-            parsed: serde_json::json!({ "signaling_server_token": "token", "permissions": ["webrtc"] }),
-            method: "webrtc.start".to_string(),
-            id: Id::Num(1),
-        };
-        let addresses = ("127.0.0.1:1".parse().unwrap(), None);
-        let response = handle_start(context, request, Some(&daemon.session), addresses).unwrap_err();
-        let body = serde_json::to_string(&response).unwrap();
-        assert!(body.contains("signaling server address is not configured"), "{body}");
     }
 }

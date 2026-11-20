@@ -83,24 +83,28 @@ impl Bucket {
         self.last_refill = now;
         self.last_accessed = now;
 
-        self.tokens = (self.tokens + elapsed * refill_rate).min(capacity);
+        if refill_rate.is_finite() && refill_rate > 0.0 {
+            self.tokens = (self.tokens + elapsed * refill_rate).min(capacity);
+        }
 
         if self.tokens >= 1.0 {
             self.tokens -= 1.0;
             Ok(())
         } else {
             let tokens_needed = 1.0 - self.tokens;
-            let seconds = if refill_rate > 0.0 {
+            let seconds = if refill_rate.is_finite() && refill_rate > 0.0 {
                 (tokens_needed / refill_rate).max(1.0)
             } else {
                 60.0
             };
-            Err(Duration::from_secs_f64(seconds))
+            Err(Duration::try_from_secs_f64(seconds).unwrap_or(Duration::from_secs(60)))
         }
     }
 
     fn charge(&mut self, tokens: f64) {
-        self.tokens -= tokens;
+        if tokens.is_finite() && tokens > 0.0 {
+            self.tokens -= tokens;
+        }
     }
 }
 
@@ -135,7 +139,7 @@ pub struct RefillRate {
 
 impl RefillRate {
     pub fn new(capacity: f64, window: Duration) -> Option<Self> {
-        if window.as_secs() == 0 {
+        if window.as_secs() == 0 || !capacity.is_finite() || capacity <= 0.0 {
             None
         } else {
             Some(Self { capacity, window })
@@ -143,7 +147,12 @@ impl RefillRate {
     }
 
     pub fn calculate(&self) -> f64 {
-        self.capacity / self.window.as_secs_f64()
+        let window_secs = self.window.as_secs_f64();
+        if window_secs <= 0.0 || !self.capacity.is_finite() || self.capacity <= 0.0 {
+            0.0
+        } else {
+            self.capacity / window_secs
+        }
     }
 }
 
@@ -1236,5 +1245,29 @@ mod tests {
         assert!(RefillRate::new(10.0, Duration::ZERO).is_none());
         assert!(RefillRate::new(10.0, Duration::from_millis(500)).is_none());
         assert!(RefillRate::new(10.0, Duration::from_secs(1)).is_some());
+    }
+
+    #[test]
+    fn refill_rate_rejects_non_positive_or_non_finite_capacity() {
+        let window = Duration::from_secs(1);
+        assert!(RefillRate::new(0.0, window).is_none());
+        assert!(RefillRate::new(-1.0, window).is_none());
+        assert!(RefillRate::new(f64::NAN, window).is_none());
+        assert!(RefillRate::new(f64::INFINITY, window).is_none());
+    }
+
+    #[test]
+    fn bucket_charge_ignores_invalid_costs_and_clamps_overflowing_retry_after() {
+        let mut b = Bucket::new(2.0);
+        b.charge(-10.0);
+        b.charge(f64::NAN);
+        b.charge(f64::INFINITY);
+        assert!(b.try_consume(2.0, 1.0).is_ok());
+        assert!(b.try_consume(2.0, 1.0).is_ok());
+        assert!(b.try_consume(2.0, 1.0).is_err());
+
+        b.charge(f64::MAX);
+        let retry_after = b.try_consume(2.0, 1e-300).unwrap_err();
+        assert_eq!(retry_after, Duration::from_secs(60));
     }
 }

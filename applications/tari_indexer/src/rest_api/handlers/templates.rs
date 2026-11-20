@@ -24,7 +24,11 @@ use tari_ootle_common_types::{SubstateRequirementRef, optional::Optional};
 use tari_template_builtin::try_get_template_builtin;
 use tari_template_lib_types::TemplateAddress;
 
-use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
+use crate::rest_api::{
+    context::HandlerContext,
+    error::ErrorResponse,
+    handlers::{HandlerResult, substates::substate_lookup_error},
+};
 
 #[utoipa::path(
     get,
@@ -49,7 +53,7 @@ pub async fn get_template_definition(
                 .get_substate(SubstateRequirementRef::unversioned(&id))
                 .await
                 .optional()
-                .map_err(|err| ErrorResponse::internal_error(format!("Error fetching template: {}", err)))?
+                .map_err(substate_lookup_error)?
                 .ok_or_else(|| {
                     ErrorResponse::not_found(format!("Template with address {} not found", template_address))
                 })?;

@@ -47,6 +47,9 @@ pub async fn handle_ipc_message(services: &Services, message: IpcMessage) -> Res
                 .try_from_byte_type()
                 .map_err(|_| anyhow!("Public key is malformed"))?;
             let peer_id = public_key_to_peer_id(public_key);
+            if *networking.local_peer_id() == peer_id {
+                return Ok(());
+            }
 
             let _dial_wait = networking
                 .dial_peer(

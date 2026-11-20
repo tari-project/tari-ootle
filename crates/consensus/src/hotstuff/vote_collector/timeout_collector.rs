@@ -10,20 +10,21 @@ use tari_sidechain::SignerBitmap;
 
 use super::collector::VoteCollector;
 use crate::{
-    hotstuff::{
-        epoch_state::EpochState,
-        error::HotStuffError,
-        vote_collector::{
-            collector::{exceeds_vote_lookahead, is_before_vote_window},
-            helpers::check_eligibility,
-        },
-    },
+    hotstuff::{epoch_state::EpochState, error::HotStuffError, vote_collector::helpers::check_eligibility},
     tracing::TraceTimer,
     traits::{CertificateStore, ConsensusSpec, ValidatorSignatureVerifierService},
     validations::signed_vote::SignedTimeoutVote,
 };
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::timeout_collector";
+
+/// Maximum number of distinct timeout views buffered per committee signer at once.
+///
+/// While a committee lacks quorum, `current_height` stands still as each leader timeout advances
+/// `next_timeout_height`, so a fixed lookahead window relative to `current_height` eventually drops every
+/// peer's NEWVIEW and prevents recovery. Bounding by signer instead caps total buffered timeout votes at
+/// `committee.len() * MAX_TIMEOUT_VOTES_PER_SENDER` while allowing recovery after arbitrarily long stalls.
+pub const MAX_TIMEOUT_VOTES_PER_SENDER: usize = 128;
 
 #[derive(Clone)]
 pub struct TimeoutVoteCollector<TConsensusSpec: ConsensusSpec> {
@@ -46,7 +47,7 @@ where TConsensusSpec: ConsensusSpec
         Self {
             network,
             store,
-            vote_collector: VoteCollector::new(),
+            vote_collector: VoteCollector::with_per_sender_limit(MAX_TIMEOUT_VOTES_PER_SENDER),
             epoch_manager,
             vote_signer_service,
         }
@@ -69,12 +70,14 @@ where TConsensusSpec: ConsensusSpec
         let current_epoch = epoch_state.epoch();
         let local_committee_info = epoch_state.local_committee_info();
 
-        // Check epoch and view bounds before querying epoch_manager or verifying the signature.
+        // Check epoch and lower view bound before querying epoch_manager or verifying the signature.
+        // Upper buffering is bounded per signer by `MAX_TIMEOUT_VOTES_PER_SENDER` rather than a fixed lookahead
+        // window around `current_height`, which stands still while a committee lacks quorum.
         check_timeout_vote_epoch(current_epoch, &vote)?;
-        if is_before_vote_window(current_height, vote.height) || exceeds_vote_lookahead(current_height, vote.height) {
-            warn!(
+        if vote.height < current_height {
+            debug!(
                 target: LOG_TARGET,
-                "🗑️ Discarding {} from {}: outside collectible view window around {}/{}",
+                "🗑️ Discarding {} from {}: it is behind our current view {}/{}",
                 vote,
                 from,
                 current_epoch,

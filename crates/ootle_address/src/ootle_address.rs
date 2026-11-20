@@ -532,6 +532,26 @@ mod tests {
     }
 
     #[test]
+    fn it_decodes_the_canonical_encoding_for_every_tag_length() {
+        // The padding length depends on the payload length mod 5, so this covers every padding case.
+        let untagged = sample(3);
+        let tagged = (1..=DestinationTag::MAX_LEN).map(|len| {
+            untagged
+                .clone()
+                .with_destination_tag(DestinationTag::new_checked(vec![0xa5; len]).unwrap())
+        });
+        for addr in std::iter::once(untagged.clone()).chain(tagged) {
+            let encoded = addr.to_bech32_string();
+            assert_eq!(OotleAddress::decode_bech32(&encoded).unwrap(), addr, "{encoded}");
+            assert_eq!(
+                OotleAddress::decode_bech32(&encoded.to_uppercase()).unwrap(),
+                addr,
+                "{encoded}"
+            );
+        }
+    }
+
+    #[test]
     fn it_encodes_and_decodes_from_bytes() {
         let addr = sample(3);
         let bytes = addr.to_bytes();

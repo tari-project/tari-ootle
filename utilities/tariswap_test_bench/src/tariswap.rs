@@ -209,7 +209,7 @@ impl Runner {
                 account,
                 lp_vault,
                 SubstateVersion::ZERO,
-                tariswaps[0].lp_resource_address,
+                lp_resource,
                 ResourceType::NonFungible,
                 Some("LP".to_string()),
                 0,
@@ -292,7 +292,7 @@ impl Runner {
 
             for (j, tx_id) in tx_ids.drain(..).enumerate() {
                 self.wait_for_transaction(tx_id).await?;
-                info!("Swap {n} for {amount_a_for_b} XTR -> FAUCET", n = (i + 1) * (j + 1));
+                info!("Swap {n} for {amount_a_for_b} XTR -> FAUCET", n = i * 200 + j + 1);
             }
         }
 
@@ -341,7 +341,7 @@ impl Runner {
 
             for (j, tx_id) in tx_ids.drain(..).enumerate() {
                 self.wait_for_transaction(tx_id).await?;
-                info!("Swap {n} for {amount_b_for_a} FAUCET -> XTR", n = (i + 1) * (j + 1) * 2);
+                info!("Swap {n} for {amount_b_for_a} FAUCET -> XTR", n = i * 200 + j + 1);
             }
         }
 

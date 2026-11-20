@@ -170,7 +170,7 @@ const PERMISSION_OPTIONS: Array<{ value: string; label: string; description: str
   {
     value: "templates:create",
     label: "templates:create",
-    description: "Publish templates and sign template metadata.",
+    description: "Publish templates (also needs transfer:create on the fee account) and sign template metadata.",
   },
   {
     value: "templates:read",

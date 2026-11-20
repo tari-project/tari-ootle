@@ -1,6 +1,8 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+#[cfg(feature = "serde")]
+use std::{fmt, marker::PhantomData};
 use std::ops::Deref;
 
 use tari_engine_types::hashing::{EngineHashDomainLabel, hasher32};
@@ -127,11 +129,49 @@ pub fn hash_blob(blob: &Blob) -> Hash32 {
 pub struct Blobs(
     #[n(0)]
     #[cbor(decode_with = "decode_blobs")]
+    #[cfg_attr(feature = "serde", serde(deserialize_with = "deserialize_bounded_blobs"))]
     Vec<Blob>,
 );
 
 fn decode_blobs<'b, C>(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Vec<Blob>, minicbor::decode::Error> {
     tari_bor::adapters::bounded_vec::decode(d, ctx, Blobs::MAX_BLOBS)
+}
+
+#[cfg(feature = "serde")]
+struct BoundedBlobVecVisitor<T>(PhantomData<T>);
+
+#[cfg(feature = "serde")]
+impl<'de, T: serde::Deserialize<'de>> serde::de::Visitor<'de> for BoundedBlobVecVisitor<T> {
+    type Value = Vec<T>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "a sequence of at most {} blob entries", Blobs::MAX_BLOBS)
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where A: serde::de::SeqAccess<'de> {
+        let max = Blobs::MAX_BLOBS;
+        let mut items = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(max).min(64));
+        while let Some(item) = seq.next_element()? {
+            if items.len() == max {
+                return Err(serde::de::Error::custom(format!(
+                    "blob sequence length exceeds maximum of {}",
+                    max
+                )));
+            }
+            items.push(item);
+        }
+        Ok(items)
+    }
+}
+
+#[cfg(feature = "serde")]
+pub(crate) fn deserialize_bounded_blobs<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    deserializer.deserialize_seq(BoundedBlobVecVisitor(PhantomData))
 }
 
 impl Blobs {
@@ -210,6 +250,7 @@ impl IntoIterator for Blobs {
 pub struct BlobHashes(
     #[n(0)]
     #[cbor(decode_with = "decode_blob_hashes")]
+    #[cfg_attr(feature = "serde", serde(deserialize_with = "deserialize_bounded_blobs"))]
     Vec<Hash32>,
 );
 
@@ -343,5 +384,17 @@ mod tests {
         let json = serde_json::to_string(&blobs).unwrap();
         let decoded: Blobs = serde_json::from_str(&json).unwrap();
         assert_eq!(blobs, decoded);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_rejects_more_blobs_or_hashes_than_max_blobs() {
+        let over_blobs = Blobs::from_vec(vec![Blob::default(); Blobs::MAX_BLOBS + 1]);
+        let blobs_json = serde_json::to_string(&over_blobs).unwrap();
+        assert!(serde_json::from_str::<Blobs>(&blobs_json).is_err());
+
+        let over_hashes = over_blobs.hashes();
+        let hashes_json = serde_json::to_string(&over_hashes).unwrap();
+        assert!(serde_json::from_str::<BlobHashes>(&hashes_json).is_err());
     }
 }

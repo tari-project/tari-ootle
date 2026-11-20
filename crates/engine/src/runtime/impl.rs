@@ -178,7 +178,7 @@ use crate::{
         error::{ArgumentValidationError, LimitError},
         locking::{LockError, LockedSubstate},
         pay_fee::PayFee,
-        scope::{FrameWriteMode, PushCallFrame},
+        scope::{FrameWriteMode, HookFrame, PushCallFrame},
         tracker::{ComputeAllowance, FinalizedState, StateTracker},
     },
     state_store::StateReader,
@@ -697,7 +697,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         .into_iter()
         .collect();
 
-        if let Some(component) = auth_caller.component().copied() {
+        let acting_component = auth_caller.component().copied();
+        if let Some(component) = acting_component {
             self.invoke_modules_on_runtime_call("load_component")?;
             self.charge_component_load(component)?;
             let state = self.tracker.write_with(|state_mut| {
@@ -723,13 +724,18 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         })?;
 
         // The acting component never chose the hook code, so the hook's frame is confined to its own component
-        // state: it cannot act on any vault or resource it was handed, nor call out to a frame that could.
+        // state: it cannot act on any vault or resource it was handed, nor call out to a frame that could. It may
+        // read the vaults the acting component owns, which `check_component_scope` resolves through the acting
+        // component's loaded state.
         let ret = self.invoke_component_method(
             auth_hook.component_address,
             &auth_hook.method,
             args,
             Some(FrameWriteMode::OwnComponent),
-            Some(hook_arg_scope),
+            Some(HookFrame {
+                arg_scope: hook_arg_scope,
+                acting_component,
+            }),
         );
         if !resource_was_in_scope {
             self.tracker.write_with(|state_mut| {
@@ -826,15 +832,15 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         Runtime::new(Rc::new(self.clone()))
     }
 
-    /// Calls `method` on `component_address`. `arg_scope`, when given, is the callee frame's argument scope in
-    /// place of the one derived from `args`.
+    /// Calls `method` on `component_address`. `hook_frame`, when given, pushes the callee as a resource auth hook's
+    /// frame, with its argument scope in place of the one derived from `args`.
     fn invoke_component_method(
         &self,
         component_address: ComponentAddress,
         method: &str,
         args: Vec<Bytes>,
         restrict_frame_to: Option<FrameWriteMode>,
-        arg_scope: Option<IndexedWellKnownTypes>,
+        hook_frame: Option<HookFrame>,
     ) -> Result<IndexedValue, RuntimeError> {
         let call_runtime = self.for_nested_call();
 
@@ -845,7 +851,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             method,
             args.into_iter().map(InstructionArg::Literal).collect(),
             restrict_frame_to,
-            arg_scope,
+            hook_frame,
         )
         .map_err(|e| RuntimeError::CrossTemplateCallMethodError {
             component_address,
@@ -2776,9 +2782,7 @@ where
         trace!(target: LOG_TARGET, "Vault invoke: {} {:?}", vault_ref, action,);
 
         // Check vault ownership if referencing an ID
-        if action.requires_write_access() &&
-            let Some(vault_id) = vault_ref.vault_id()
-        {
+        if let Some(vault_id) = vault_ref.vault_id() {
             self.tracker
                 .read_with(|state| state.check_component_scope(&vault_id.into(), action))?;
         }
@@ -5560,6 +5564,7 @@ mod tests {
                     component_lock,
                     arg_scope: Box::new(arg_scope),
                     entity_id,
+                    acting_component: None,
                 },
                 None,
             )
@@ -5625,6 +5630,360 @@ mod tests {
         runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
     }
 
+    const VAULT_READ_ACTIONS: [VaultAction; 6] = [
+        VaultAction::GetBalance,
+        VaultAction::GetLockedBalance,
+        VaultAction::GetResourceAddress,
+        VaultAction::GetNonFungibleIds,
+        VaultAction::GetCommitmentCount,
+        VaultAction::GetNonFungibles,
+    ];
+
+    struct VaultScopeFixture {
+        runtime: RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        template_address: TemplateAddress,
+        resource_address: ResourceAddress,
+        vault_id: tari_template_lib::types::VaultId,
+        owner_entity: EntityId,
+        other_entity: EntityId,
+        owner_component: ComponentAddress,
+        owner_component_scope: IndexedWellKnownTypes,
+        other_component: ComponentAddress,
+    }
+
+    fn setup_vault_scope_fixture() -> VaultScopeFixture {
+        use tari_engine_types::{resource::Resource, vault::Vault};
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let template_address = TemplateAddress::from_array([12u8; 32]);
+        let resource_address = ResourceAddress::new([13u8; 32].into());
+        let vault_id = tari_template_lib::types::VaultId::new([14u8; 32].into());
+        let owner_entity = EntityId::default();
+        let other_entity = EntityId::new([3u8; EntityId::LENGTH]);
+        let other_component = create_test_component(&runtime, template_address, "Other", other_entity);
+
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address,
+                    module_name: "Owner".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id: owner_entity,
+                },
+                None,
+            )
+            .unwrap();
+        runtime.tracker.write_with(|state| {
+            let resource = Resource::new(
+                ResourceType::Fungible,
+                SubstateOwnerRule::None,
+                ResourceAccessRules::new(),
+                Metadata::new(),
+                None,
+                None,
+                6,
+                true,
+            );
+            state.new_substate(resource_address, resource).unwrap();
+            state
+                .new_substate(
+                    vault_id,
+                    Vault::new(ResourceContainer::public_fungible(resource_address, Amount::new(42))),
+                )
+                .unwrap();
+        });
+        let owner_state = tari_bor::to_value(&(vault_id, resource_address)).unwrap();
+        let owner_component_scope = IndexedWellKnownTypes::from_value(&owner_state).unwrap();
+        let owner_component = runtime
+            .tracker
+            .new_component(
+                owner_state,
+                SubstateOwnerRule::None,
+                ComponentAccessRules::new(),
+                None,
+                UpdateRule::Locked,
+                RulesUpdater::Locked,
+            )
+            .unwrap();
+        runtime
+            .pop_call_frame(&IndexedWellKnownTypes::from_value(&tari_bor::to_value(&owner_component).unwrap()).unwrap())
+            .unwrap();
+
+        VaultScopeFixture {
+            runtime,
+            template_address,
+            resource_address,
+            vault_id,
+            owner_entity,
+            other_entity,
+            owner_component,
+            owner_component_scope,
+            other_component,
+        }
+    }
+
+    #[test]
+    fn vault_read_actions_reject_out_of_scope_callers() {
+        let f = setup_vault_scope_fixture();
+
+        // 1. Static frame (including read-only context) without the vault in scope must fail with
+        //    NotInComponentContext.
+        for write_mode in [None, Some(FrameWriteMode::ReadOnly)] {
+            f.runtime
+                .push_call_frame(
+                    PushCallFrame::Static {
+                        template_address: f.template_address,
+                        module_name: "Attacker".to_string(),
+                        arg_scope: IndexedWellKnownTypes::new(),
+                        entity_id: f.other_entity,
+                    },
+                    write_mode,
+                )
+                .unwrap();
+            for action in VAULT_READ_ACTIONS {
+                let err = f
+                    .runtime
+                    .vault_invoke(VaultRef::Ref(f.vault_id), action, EngineArgs::default())
+                    .unwrap_err();
+                assert!(
+                    matches!(
+                        err,
+                        RuntimeError::NotInComponentContext {
+                            action: ActionIdent::Native(NativeAction::Vault(actual))
+                        } if std::mem::discriminant(&actual) == std::mem::discriminant(&action)
+                    ),
+                    "expected NotInComponentContext for {action:?} in mode {write_mode:?}, got {err:?}"
+                );
+            }
+            f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+        }
+
+        // 2. Non-owning component frame must fail with SubstateNotOwned.
+        let other_lock = f.runtime.lock_component(f.other_component, LockFlag::Read).unwrap();
+        f.runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address: f.template_address,
+                    module_name: "Other".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: other_lock,
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id: f.other_entity,
+                    acting_component: None,
+                },
+                None,
+            )
+            .unwrap();
+        let expected_id = SubstateId::Vault(f.vault_id);
+        let expected_owner = SubstateId::Component(f.other_component);
+        for action in VAULT_READ_ACTIONS {
+            let err = f
+                .runtime
+                .vault_invoke(VaultRef::Ref(f.vault_id), action, EngineArgs::default())
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    RuntimeError::SubstateNotOwned { ref id, ref requested_owner }
+                        if *id == expected_id && **requested_owner == expected_owner
+                ),
+                "expected SubstateNotOwned for {action:?}, got {err:?}"
+            );
+        }
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn vault_read_actions_succeed_for_owning_component() {
+        use tari_template_lib::{models::NonFungible, types::NonFungibleId};
+
+        let f = setup_vault_scope_fixture();
+        let owner_lock = f.runtime.lock_component(f.owner_component, LockFlag::Read).unwrap();
+        f.runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address: f.template_address,
+                    module_name: "Owner".to_string(),
+                    component_scope: f.owner_component_scope,
+                    component_lock: owner_lock,
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id: f.owner_entity,
+                    acting_component: None,
+                },
+                None,
+            )
+            .unwrap();
+
+        let balance: Amount = f
+            .runtime
+            .vault_invoke(
+                VaultRef::Ref(f.vault_id),
+                VaultAction::GetBalance,
+                EngineArgs::default(),
+            )
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(balance, Amount::new(42));
+        let locked_balance: Amount = f
+            .runtime
+            .vault_invoke(
+                VaultRef::Ref(f.vault_id),
+                VaultAction::GetLockedBalance,
+                EngineArgs::default(),
+            )
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(locked_balance, Amount::zero());
+        let actual_resource: ResourceAddress = f
+            .runtime
+            .vault_invoke(
+                VaultRef::Ref(f.vault_id),
+                VaultAction::GetResourceAddress,
+                EngineArgs::default(),
+            )
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(actual_resource, f.resource_address);
+        let nft_ids: std::collections::BTreeSet<NonFungibleId> = f
+            .runtime
+            .vault_invoke(
+                VaultRef::Ref(f.vault_id),
+                VaultAction::GetNonFungibleIds,
+                EngineArgs::default(),
+            )
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert!(nft_ids.is_empty());
+        let commitment_count: u64 = f
+            .runtime
+            .vault_invoke(
+                VaultRef::Ref(f.vault_id),
+                VaultAction::GetCommitmentCount,
+                EngineArgs::default(),
+            )
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(commitment_count, 0);
+        let nfts: Vec<NonFungible> = f
+            .runtime
+            .vault_invoke(
+                VaultRef::Ref(f.vault_id),
+                VaultAction::GetNonFungibles,
+                EngineArgs::default(),
+            )
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert!(nfts.is_empty());
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    /// Pushes a resource auth hook frame on `hook_component`, triggered by `acting_component`.
+    fn push_hook_frame(f: &VaultScopeFixture, hook_component: ComponentAddress, acting_component: ComponentAddress) {
+        let hook_lock = f.runtime.lock_component(hook_component, LockFlag::Read).unwrap();
+        f.runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address: f.template_address,
+                    module_name: "Hook".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: hook_lock,
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id: f.other_entity,
+                    acting_component: Some(acting_component),
+                },
+                Some(FrameWriteMode::OwnComponent),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn hook_frame_reads_vaults_of_the_acting_component() {
+        let f = setup_vault_scope_fixture();
+        push_hook_frame(&f, f.other_component, f.owner_component);
+
+        for action in VAULT_READ_ACTIONS {
+            f.runtime
+                .vault_invoke(VaultRef::Ref(f.vault_id), action, EngineArgs::default())
+                .unwrap_or_else(|err| panic!("hook read {action:?} of the acting component's vault failed: {err:?}"));
+        }
+        let balance: Amount = f
+            .runtime
+            .vault_invoke(
+                VaultRef::Ref(f.vault_id),
+                VaultAction::GetBalance,
+                EngineArgs::default(),
+            )
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(balance, Amount::new(42));
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn hook_frame_rejects_reads_of_vaults_the_acting_component_does_not_own() {
+        let f = setup_vault_scope_fixture();
+        let third_component = create_test_component(
+            &f.runtime,
+            f.template_address,
+            "Third",
+            EntityId::new([4u8; EntityId::LENGTH]),
+        );
+        push_hook_frame(&f, f.other_component, third_component);
+
+        let expected_id = SubstateId::Vault(f.vault_id);
+        let expected_owner = SubstateId::Component(f.other_component);
+        for action in VAULT_READ_ACTIONS {
+            let err = f
+                .runtime
+                .vault_invoke(VaultRef::Ref(f.vault_id), action, EngineArgs::default())
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    RuntimeError::SubstateNotOwned { ref id, ref requested_owner }
+                        if *id == expected_id && **requested_owner == expected_owner
+                ),
+                "expected SubstateNotOwned for {action:?}, got {err:?}"
+            );
+        }
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn hook_frame_rejects_writes_to_vaults_of_the_acting_component() {
+        let f = setup_vault_scope_fixture();
+        push_hook_frame(&f, f.other_component, f.owner_component);
+
+        let expected_id = SubstateId::Vault(f.vault_id);
+        let expected_owner = SubstateId::Component(f.other_component);
+        for action in [
+            VaultAction::Withdraw,
+            VaultAction::Deposit,
+            VaultAction::CreateProofByResource,
+        ] {
+            let err = f
+                .runtime
+                .vault_invoke(VaultRef::Ref(f.vault_id), action, EngineArgs::default())
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    RuntimeError::SubstateNotOwned { ref id, ref requested_owner }
+                        if *id == expected_id && **requested_owner == expected_owner
+                ),
+                "expected SubstateNotOwned for {action:?}, got {err:?}"
+            );
+        }
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
     #[test]
     fn component_get_state_enforces_call_scope_and_charges_component_load() {
         use tari_engine_types::limits::component_load_points;
@@ -5684,6 +6043,7 @@ mod tests {
                     component_lock: caller_lock,
                     arg_scope: Box::new(IndexedWellKnownTypes::new()),
                     entity_id,
+                    acting_component: None,
                 },
                 None,
             )
@@ -5716,6 +6076,7 @@ mod tests {
                     component_lock: caller_lock,
                     arg_scope: Box::new(arg_scope),
                     entity_id,
+                    acting_component: None,
                 },
                 None,
             )
@@ -5761,6 +6122,7 @@ mod tests {
                     component_lock: caller_lock,
                     arg_scope: Box::new(IndexedWellKnownTypes::new()),
                     entity_id,
+                    acting_component: None,
                 },
                 None,
             )
@@ -5832,6 +6194,7 @@ mod tests {
                     component_lock: caller_lock,
                     arg_scope: Box::new(arg_scope),
                     entity_id,
+                    acting_component: None,
                 },
                 None,
             )

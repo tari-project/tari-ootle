@@ -7,7 +7,7 @@ use indexmap::IndexSet;
 use tari_engine_types::{indexed_value::IndexedWellKnownTypes, lock::LockId, substate::SubstateId};
 use tari_template_lib::{
     models::{AddressAllocationId, BucketId, ProofId},
-    types::{EntityId, TemplateAddress, constants::TARI_TOKEN},
+    types::{ComponentAddress, EntityId, TemplateAddress, constants::TARI_TOKEN},
 };
 
 use crate::runtime::{AuthorizationScope, RuntimeError, locking::LockedSubstate};
@@ -34,6 +34,10 @@ pub struct CallScope {
     /// store or drop it.
     shown_proofs: IndexSet<ProofId>,
     component_lock: Option<LockedSubstate>,
+    /// For a resource auth hook frame, the component whose action triggered the hook. The hook may read that
+    /// component's vaults, so that it can judge the action against the acting component's holdings, but nothing
+    /// that component owns enters this frame's scope.
+    acting_component: Option<ComponentAddress>,
     lock_scope: IndexSet<LockId>,
     bucket_scope: IndexSet<BucketId>,
     address_allocation_scope: IndexSet<AddressAllocationId>,
@@ -52,6 +56,7 @@ impl CallScope {
             inherited_buckets: IndexSet::new(),
             shown_proofs: IndexSet::new(),
             component_lock: None,
+            acting_component: None,
             lock_scope: IndexSet::new(),
             bucket_scope: IndexSet::new(),
             address_allocation_scope: IndexSet::new(),
@@ -173,6 +178,14 @@ impl CallScope {
 
     pub fn take_current_component_lock(&mut self) -> Option<LockedSubstate> {
         self.component_lock.take()
+    }
+
+    pub fn acting_component(&self) -> Option<&ComponentAddress> {
+        self.acting_component.as_ref()
+    }
+
+    fn set_acting_component(&mut self, acting_component: Option<ComponentAddress>) {
+        self.acting_component = acting_component;
     }
 
     pub fn owned_nodes(&self) -> &IndexSet<SubstateId> {
@@ -583,6 +596,15 @@ impl CallFrame {
     }
 }
 
+/// How the engine pushes a resource auth hook's frame, in place of a plain method call's defaults.
+#[derive(Debug)]
+pub struct HookFrame {
+    /// The hook frame's argument scope, in place of the one derived from the call's arguments.
+    pub arg_scope: IndexedWellKnownTypes,
+    /// The component whose action triggered the hook, if a component triggered it.
+    pub acting_component: Option<ComponentAddress>,
+}
+
 #[derive(Debug)]
 pub enum PushCallFrame {
     ForComponent {
@@ -592,6 +614,8 @@ pub enum PushCallFrame {
         component_lock: LockedSubstate,
         arg_scope: Box<IndexedWellKnownTypes>,
         entity_id: EntityId,
+        /// See [`CallScope::acting_component`]. Set for resource auth hook frames only.
+        acting_component: Option<ComponentAddress>,
     },
     MigrationContext {
         template_address: TemplateAddress,
@@ -635,10 +659,12 @@ impl PushCallFrame {
                 component_lock,
                 arg_scope,
                 entity_id,
+                acting_component,
             } => {
                 let mut frame = CallFrame::for_component(template_address, module_name, component_lock, entity_id);
                 frame.scope_mut().include_owned_in_scope(&component_scope);
                 frame.scope_mut().include_refs_in_scope(&arg_scope);
+                frame.scope_mut().set_acting_component(acting_component);
                 frame
             },
             Self::MigrationContext {

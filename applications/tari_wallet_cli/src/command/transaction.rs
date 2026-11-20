@@ -64,6 +64,7 @@ use tari_ootle_walletd_client::{
     },
 };
 use tari_template_lib::types::{
+    ComponentAddress,
     NonFungibleAddress,
     NonFungibleId,
     ResourceAddress,
@@ -71,7 +72,7 @@ use tari_template_lib::types::{
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
     crypto::RistrettoPublicKeyBytes,
 };
-use tari_transaction_manifest::{ManifestValue, parse_manifest};
+use tari_transaction_manifest::{ManifestInstructions, ManifestValue, parse_manifest};
 
 use crate::from_hex::FromHex;
 
@@ -366,19 +367,21 @@ async fn handle_submit_manifest(
     } = client.get_settings().await?;
     let max_epoch = common.resolve_max_epoch(current_epoch, default_transaction_validity_epochs)?;
 
-    let builder = Transaction::builder(network.byte, max_epoch)
-        .with_fee_instructions_builder(|builder| {
-            builder.with_instructions(instructions.fee_instructions).call_method(
-                fee_account.component_address,
-                "pay_fee",
-                args![common.max_fee],
-            )
-        })
-        .with_instructions(instructions.instructions)
-        .with_inputs(common.inputs)
-        .with_min_epoch(common.min_epoch.map(Epoch));
+    let dump_account = match common.dump_outputs_into {
+        Some(dump_account) => Some(client.accounts_get(dump_account).await?.account.component_address),
+        None => None,
+    };
 
-    let transaction = builder.build_unsigned();
+    let transaction = build_manifest_transaction(
+        network.byte,
+        max_epoch,
+        common.min_epoch.map(Epoch),
+        fee_account.component_address,
+        common.max_fee,
+        common.inputs,
+        dump_account,
+        instructions,
+    )?;
     summarize_transaction(&transaction);
 
     if common.dry_run {
@@ -928,4 +931,174 @@ fn parse_globals(globals: Vec<String>) -> Result<HashMap<String, ManifestValue>,
 fn base64_decode<T: AsRef<[u8]>>(s: T) -> Result<Vec<u8>, base64::DecodeError> {
     use base64::Engine;
     base64::prelude::BASE64_STANDARD.decode(s)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_manifest_transaction(
+    network: u8,
+    max_epoch: Epoch,
+    min_epoch: Option<Epoch>,
+    fee_account: ComponentAddress,
+    max_fee: u64,
+    inputs: Vec<InputDeclaration>,
+    dump_account: Option<ComponentAddress>,
+    instructions: ManifestInstructions,
+) -> anyhow::Result<UnsignedTransaction> {
+    let mut builder = Transaction::builder(network, max_epoch)
+        .with_fee_instructions_builder(|builder| {
+            if instructions.fee_instructions.is_empty() {
+                builder.call_method(fee_account, "pay_fee", args![max_fee])
+            } else {
+                builder.with_instructions(instructions.fee_instructions)
+            }
+        })
+        .with_instructions(instructions.instructions)
+        .with_inputs(inputs)
+        .with_min_epoch(min_epoch);
+
+    if let Some(account) = dump_account {
+        builder = builder
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")]);
+    }
+
+    let mut transaction = builder.build_unsigned();
+    for blob in instructions.blobs {
+        transaction.add_blob(blob)?;
+    }
+
+    Ok(transaction)
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_transaction::{Blob, ComponentReference};
+    use tari_template_lib::types::ObjectKey;
+
+    use super::*;
+
+    fn test_component(seed: u8) -> ComponentAddress {
+        ComponentAddress::from_array([seed; ObjectKey::LENGTH])
+    }
+
+    #[test]
+    fn build_manifest_transaction_attaches_blobs_from_manifest() {
+        let src = r#"
+            fn main() {
+                Account::new(blob!(payload));
+            }
+        "#;
+        let mut blobs = HashMap::new();
+        blobs.insert("payload".to_string(), Blob::new(vec![1, 2, 3, 4]));
+        let instructions = parse_manifest(src, HashMap::new(), HashMap::new(), blobs).unwrap();
+
+        let tx = build_manifest_transaction(
+            0x10,
+            Epoch(10),
+            None,
+            test_component(1),
+            1000,
+            vec![],
+            None,
+            instructions,
+        )
+        .unwrap();
+
+        assert_eq!(tx.blobs().len(), 1);
+        assert_eq!(&**tx.blobs().iter().next().unwrap(), &[1, 2, 3, 4]);
+        tx.validate_blob_references().unwrap();
+    }
+
+    #[test]
+    fn build_manifest_transaction_adds_default_pay_fee_only_when_fee_instructions_empty() {
+        let fee_account = test_component(1);
+        let custom_fee_account = test_component(2);
+
+        let empty_fee_instructions = ManifestInstructions {
+            instructions: vec![Instruction::DropAllProofsInWorkspace],
+            fee_instructions: vec![],
+            blobs: Default::default(),
+        };
+        let tx_default = build_manifest_transaction(
+            0x10,
+            Epoch(10),
+            None,
+            fee_account,
+            500,
+            vec![],
+            None,
+            empty_fee_instructions,
+        )
+        .unwrap();
+        assert_eq!(tx_default.fee_instructions().len(), 1);
+        assert!(matches!(
+            &tx_default.fee_instructions()[0],
+            Instruction::CallMethod {
+                call: ComponentReference::Address(addr),
+                method,
+                ..
+            } if *addr == fee_account && &**method == "pay_fee"
+        ));
+
+        let custom_fee_instr = Instruction::CallMethod {
+            call: ComponentReference::Address(custom_fee_account),
+            method: "pay_fee".try_into().unwrap(),
+            args: vec![call_arg!(750u64)],
+        };
+        let non_empty_fee_instructions = ManifestInstructions {
+            instructions: vec![Instruction::DropAllProofsInWorkspace],
+            fee_instructions: vec![custom_fee_instr.clone()],
+            blobs: Default::default(),
+        };
+        let tx_custom = build_manifest_transaction(
+            0x10,
+            Epoch(10),
+            None,
+            fee_account,
+            500,
+            vec![],
+            None,
+            non_empty_fee_instructions,
+        )
+        .unwrap();
+        assert_eq!(tx_custom.fee_instructions(), &[custom_fee_instr]);
+    }
+
+    #[test]
+    fn build_manifest_transaction_appends_deposit_when_dump_account_set() {
+        let fee_account = test_component(1);
+        let dump_account = test_component(3);
+        let instructions = ManifestInstructions {
+            instructions: vec![Instruction::DropAllProofsInWorkspace],
+            fee_instructions: vec![],
+            blobs: Default::default(),
+        };
+
+        let tx = build_manifest_transaction(
+            0x10,
+            Epoch(10),
+            Some(Epoch(2)),
+            fee_account,
+            500,
+            vec![],
+            Some(dump_account),
+            instructions,
+        )
+        .unwrap();
+
+        assert_eq!(tx.min_epoch(), Some(Epoch(2)));
+        assert_eq!(tx.instructions().len(), 3);
+        assert!(matches!(
+            &tx.instructions()[1],
+            Instruction::PutLastInstructionOutputOnWorkspace { .. }
+        ));
+        assert!(matches!(
+            &tx.instructions()[2],
+            Instruction::CallMethod {
+                call: ComponentReference::Address(addr),
+                method,
+                ..
+            } if *addr == dump_account && &**method == "deposit"
+        ));
+    }
 }

@@ -21,6 +21,9 @@ name: Dependency policy
   # pending, so a required `cargo_deny` context has to report on all of them or the ones it skips
   # cannot merge. The run costs under a minute.
   pull_request:
+  # The merge queue waits for every required check on its own merge commit, so `cargo_deny` must
+  # report there too.
+  merge_group:
   # Run manually
   workflow_dispatch:
 

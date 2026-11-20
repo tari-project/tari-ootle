@@ -82,10 +82,12 @@ impl PeerStore for MemoryPeerStore {
     }
 
     async fn put_address(&self, peer_id: &PeerId, address: Multiaddr) -> Result<bool, Self::Error> {
-        match self.get(peer_id).await? {
-            Some(mut peer) => {
-                peer.addresses.push(address);
-                self.put(peer).await?;
+        let mut peers = self.peers.write().unwrap();
+        match peers.get_mut(peer_id) {
+            Some(peer) => {
+                if !peer.addresses.contains(&address) {
+                    peer.addresses.push(address);
+                }
                 Ok(true)
             },
             None => Ok(false),
@@ -107,5 +109,32 @@ impl PeerStore for MemoryPeerStore {
 
     fn stream(&self) -> Self::Stream {
         futures::stream::iter(self.peers.read().unwrap().values().cloned().map(Ok).collect::<Vec<_>>()).boxed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use libp2p::identity;
+
+    use super::*;
+    use crate::peer_record::LocalPeerRecord;
+
+    #[tokio::test]
+    async fn put_address_deduplicates_existing_addresses() {
+        let store = MemoryPeerStore::new();
+        let keypair = Arc::new(identity::Keypair::generate_ed25519());
+        let mut local = LocalPeerRecord::new(keypair);
+        let addr: Multiaddr = "/ip4/127.0.0.1/tcp/8000".parse().unwrap();
+        local.add_address(addr.clone());
+
+        let peer_id = local.to_peer_id();
+        store.put(SignedPeerRecord::from(local)).await.unwrap();
+
+        assert!(store.put_address(&peer_id, addr.clone()).await.unwrap());
+        let stored = store.get(&peer_id).await.unwrap().unwrap();
+        assert_eq!(stored.addresses, vec![addr]);
+        assert!(stored.is_valid());
     }
 }

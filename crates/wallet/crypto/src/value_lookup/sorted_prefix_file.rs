@@ -206,6 +206,16 @@ impl SortedPrefixFileLookup {
         if !(1..=8).contains(&header.value_len) {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "value_len must be in 1..=8"));
         }
+        let required_value_len = SortedLookupHeader::required_value_len(header.min, header.max);
+        if header.value_len < required_value_len {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Header value_len {} is too small for range {}..={} (requires at least {} bytes)",
+                    header.value_len, header.min, header.max, required_value_len
+                ),
+            ));
+        }
 
         let count = header
             .max
@@ -474,5 +484,25 @@ mod tests {
         write_sorted_lookup_in_memory(&mut buf, 0, 100, DEFAULT_PREFIX_LEN).unwrap();
         buf.truncate(buf.len() - 1);
         assert!(SortedPrefixFileLookup::from_buf(&buf).is_err());
+    }
+
+    #[test]
+    fn rejects_value_len_too_small_for_range() {
+        // Range 0..=256 requires at least 2 bytes per value offset.
+        let min = 0u64;
+        let max = 256u64;
+        let prefix_len = DEFAULT_PREFIX_LEN;
+        let invalid_value_len = 1u8;
+        let mut buf = Vec::new();
+        let header = SortedLookupHeader::new(min, max, prefix_len, invalid_value_len);
+        header.encode_into(&mut buf).unwrap();
+        buf.resize(
+            SortedLookupHeader::SIZE + ((max - min + 1) as usize) * header.stride(),
+            0u8,
+        );
+        let Err(err) = SortedPrefixFileLookup::from_buf(&buf) else {
+            panic!("expected header with value_len too small for range to be rejected");
+        };
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     }
 }

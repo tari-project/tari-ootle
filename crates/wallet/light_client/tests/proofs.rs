@@ -535,6 +535,34 @@ fn it_verifies_a_down_proof_with_the_committees_of_both_anchors() {
     )
     .unwrap_err();
     assert!(matches!(err, LightClientError::InvalidCommitProof(_)), "{err}");
+
+    let wrong_network_set = ValidatorSetFixture::with_signers(
+        Network::Esmeralda,
+        EPOCH.as_u64(),
+        Signers::new(0xe0, 4),
+        Signers::new(0xe1, 4),
+    );
+    let wrong_network_trust = TrustedValidatorSet::anchor_pinned(
+        Network::Esmeralda,
+        walk_shard(),
+        EPOCH,
+        &wrong_network_set.hash(),
+        &wrong_network_set.committee(low()),
+    )
+    .unwrap();
+    let wrong_network_committee = wrong_network_trust
+        .verify_committee(&wrong_network_set.committee(up_shard_group))
+        .unwrap();
+    let err = verify_down_proof(
+        &id,
+        SubstateVersion::ZERO,
+        &proof,
+        &wrong_network_committee,
+        &committee,
+        &down_commit_proof,
+    )
+    .unwrap_err();
+    assert!(matches!(err, LightClientError::WrongNetwork { .. }), "{err}");
 }
 
 #[test]

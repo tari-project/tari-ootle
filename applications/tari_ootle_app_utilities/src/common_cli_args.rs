@@ -70,12 +70,14 @@ where
     U: std::str::FromStr,
     U::Err: Error + Send + Sync + 'static,
 {
-    let mut parts = s.split('=').map(|s| s.trim());
-    let k = parts.next().ok_or("invalid override: string empty`")?;
-    let v = parts
-        .next()
+    let (k, v) = s
+        .split_once('=')
         .ok_or_else(|| format!("invalid override: expected key=value: no `=` found in `{s}`"))?;
-    Ok((k.parse()?, v.parse()?))
+    let k = k.trim();
+    if k.is_empty() {
+        return Err("invalid override: key cannot be empty".into());
+    }
+    Ok((k.parse()?, v.trim().parse()?))
 }
 
 impl CommonCliArgs {
@@ -140,5 +142,20 @@ mod defaults {
 
     pub(super) fn config() -> String {
         DEFAULT_CONFIG.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_key_val;
+
+    #[test]
+    fn parse_key_val_preserves_equals_in_value_and_rejects_empty_key() {
+        let (k, v): (String, String) = parse_key_val("wallet.auth = username_password=u:p").unwrap();
+        assert_eq!(k, "wallet.auth");
+        assert_eq!(v, "username_password=u:p");
+
+        assert!(parse_key_val::<String, String>("=value").is_err());
+        assert!(parse_key_val::<String, String>("   =value").is_err());
     }
 }

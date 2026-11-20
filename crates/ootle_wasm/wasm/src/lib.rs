@@ -45,14 +45,16 @@ pub struct StealthOutputsResult {
 }
 
 /// Decrypted contents of an inbound stealth UTXO.
-#[wasm_bindgen(getter_with_clone)]
+#[wasm_bindgen]
 pub struct DecryptedOutputResult {
     /// The 32-byte commitment mask scalar.
+    #[wasm_bindgen(getter_with_clone)]
     pub mask: Vec<u8>,
     /// The plaintext value (u64).
     pub value: u64,
     /// JSON-encoded `Memo` (variants: `U256` / `Message` / `Bytes` / `DestinationTagAndBytes`), or `null` if
     /// the payload carried no memo or `skipMemo` was set.
+    #[wasm_bindgen(getter_with_clone)]
     pub memo_json: Option<String>,
 }
 
@@ -75,15 +77,18 @@ pub struct OotlePublicKey {
 }
 
 /// Parsed components of an Ootle address.
-#[wasm_bindgen(getter_with_clone)]
+#[wasm_bindgen]
 pub struct ParsedOotleAddress {
     /// The owner (spending) public key bytes.
+    #[wasm_bindgen(getter_with_clone)]
     pub owner_key: Vec<u8>,
     /// The view-only public key bytes.
+    #[wasm_bindgen(getter_with_clone)]
     pub view_key: Vec<u8>,
     /// The network byte.
     pub network: u8,
     /// Optional destination tag bytes.
+    #[wasm_bindgen(getter_with_clone)]
     pub destination_tag: Option<Vec<u8>>,
 }
 
@@ -100,15 +105,23 @@ pub fn seal_transaction(tx_json: &str, seal_signer_secret_key: &[u8]) -> Result<
 /// Add a signer to a transaction (unsigned or unsealed JSON).
 ///
 /// Accepts either an `UnsignedTransactionV1` or `UnsealedTransactionV1` JSON string.
-/// Returns the `UnsealedTransactionV1` (with the new signature appended) as a JSON string.
+/// `authorizer_public_keys` is the 32-byte public key of every authorizer, concatenated in any order and
+/// including this signer's: every authorizer signs over the same set, so it is fixed before anyone signs.
+/// Returns the `UnsealedTransactionV1` (with the new signature added) as a JSON string.
 #[wasm_bindgen(js_name = "addTransactionSigner")]
 pub fn add_transaction_signer(
     tx_json: &str,
     signer_secret_key: &[u8],
     seal_signer_public_key: &[u8],
+    authorizer_public_keys: &[u8],
 ) -> Result<String, JsError> {
-    ootle_wasm_core::transaction::add_transaction_signer_json(tx_json, signer_secret_key, seal_signer_public_key)
-        .map_err(|e| JsError::new(&e.to_string()))
+    ootle_wasm_core::transaction::add_transaction_signer_json(
+        tx_json,
+        signer_secret_key,
+        seal_signer_public_key,
+        authorizer_public_keys,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Seal a transaction (unsigned or unsealed JSON) with a signature from an external signer (HSM, MPC).
@@ -131,21 +144,23 @@ pub fn attach_seal_signature(
 /// unsealed JSON).
 ///
 /// `signature` is the 64-byte sr25519 signature (scheme in the NPM README) over the hash from
-/// `hashUnsignedTransaction` for `seal_signer_public_key`, made by the key for
-/// `signer_public_key`. It is verified before it is appended.
-/// Returns the `UnsealedTransactionV1` (with the new signature appended) as a JSON string.
+/// `hashUnsignedTransaction` for `seal_signer_public_key` and `authorizer_public_keys`, made by the key
+/// for `signer_public_key`, which must be one of the authorizers. It is verified before it is added.
+/// Returns the `UnsealedTransactionV1` (with the new signature added) as a JSON string.
 #[wasm_bindgen(js_name = "attachTransactionSignature")]
 pub fn attach_transaction_signature(
     tx_json: &str,
     signer_public_key: &[u8],
     signature: &[u8],
     seal_signer_public_key: &[u8],
+    authorizer_public_keys: &[u8],
 ) -> Result<String, JsError> {
     ootle_wasm_core::transaction::attach_transaction_signature_json(
         tx_json,
         signer_public_key,
         signature,
         seal_signer_public_key,
+        authorizer_public_keys,
     )
     .map_err(|e| JsError::new(&e.to_string()))
 }
@@ -179,10 +194,21 @@ pub fn generate_keypair() -> KeypairResult {
 /// The message excludes attached signatures, so it is the same before and after `attachTransactionSignature`.
 ///
 /// `seal_signer_public_key` is the raw bytes of the seal signer's public key (account owner).
+/// `authorizer_public_keys` is the 32-byte public key of every authorizer, concatenated in any order.
+/// Every authorizer signs over the same set, and a transaction verifies only with an authorization from
+/// each of them attached.
 #[wasm_bindgen(js_name = "hashUnsignedTransaction")]
-pub fn hash_unsigned_transaction(unsigned_tx_json: &str, seal_signer_public_key: &[u8]) -> Result<Vec<u8>, JsError> {
-    ootle_wasm_core::hash::hash_unsigned_transaction_json(unsigned_tx_json, seal_signer_public_key)
-        .map_err(|e| JsError::new(&e.to_string()))
+pub fn hash_unsigned_transaction(
+    unsigned_tx_json: &str,
+    seal_signer_public_key: &[u8],
+    authorizer_public_keys: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    ootle_wasm_core::hash::hash_unsigned_transaction_json(
+        unsigned_tx_json,
+        seal_signer_public_key,
+        authorizer_public_keys,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Hash a transaction (unsigned or unsealed JSON) for sealing.

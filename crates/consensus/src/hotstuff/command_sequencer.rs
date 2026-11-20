@@ -100,6 +100,9 @@ pub(super) struct BlockTotals {
     pub leader_fee: u64,
     /// The exhaust burn accumulated by the chain up to and including the block.
     pub exhaust_burn: u128,
+    /// The execution points of the executions the block's commands are derived from. A command that finalizes a
+    /// transaction (AllAccept/SomeAccept) derives from none and adds nothing.
+    pub execution_points: u64,
 }
 
 impl BlockTotals {
@@ -108,6 +111,7 @@ impl BlockTotals {
         Self {
             leader_fee: 0,
             exhaust_burn,
+            execution_points: 0,
         }
     }
 
@@ -117,6 +121,11 @@ impl BlockTotals {
             .checked_add(derived.leader_fee)
             .ok_or_else(|| HotStuffError::InvariantError("Leader fee overflow when summing for block".to_string()))?;
         self.exhaust_burn += u128::from(derived.exhaust_burn);
+        if let Some(execution) = &derived.execution {
+            self.execution_points = self
+                .execution_points
+                .saturating_add(execution.result().total_execution_points());
+        }
         Ok(())
     }
 }
@@ -721,4 +730,84 @@ pub(super) fn block_state_root<TTx: StateStoreReadTransaction>(
         epoch,
     )?;
     Ok((root, diffs))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use tari_common_types::types::PrivateKey;
+    use tari_engine_types::{
+        commit_result::{ExecuteResult, FinalizeResult, TransactionResult},
+        fees::FeeReceipt,
+        substate::SubstateDiff,
+    };
+    use tari_ootle_storage::consensus_models::Evidence;
+    use tari_ootle_transaction::Transaction;
+
+    use super::*;
+
+    fn derived(
+        command: fn(TransactionPoolRecord) -> Command,
+        execution: Option<TransactionExecution>,
+    ) -> DerivedCommand {
+        let transaction = Transaction::builder_localnet(Epoch(1)).build_and_seal(&PrivateKey::from(1u64));
+        let mut pool_record = TransactionPoolRecord::new_from_transaction(&transaction, Evidence::empty());
+        pool_record.update_locked_epoch(LockedEpoch::new(Epoch(1), Default::default(), Default::default()));
+        DerivedCommand {
+            command: command(pool_record.clone()),
+            pool_record,
+            execution,
+            leader_fee: 0,
+            exhaust_burn: 0,
+        }
+    }
+
+    fn execution_with_points(wasm_execution_points: u64, native_execution_points: u64) -> TransactionExecution {
+        TransactionExecution::new(
+            ExecuteResult {
+                finalize: FinalizeResult::new(
+                    [0u8; 32].into(),
+                    vec![],
+                    vec![],
+                    TransactionResult::Accept(SubstateDiff::new()),
+                    FeeReceipt::default(),
+                ),
+                execution_time: Duration::ZERO,
+                execute_epoch: None,
+                wasm_execution_points,
+                native_execution_points,
+            },
+            vec![],
+            vec![],
+        )
+    }
+
+    fn local_accept(pool_record: TransactionPoolRecord) -> Command {
+        Command::LocalAccept(pool_record.get_current_multi_shard_atom().unwrap())
+    }
+
+    fn all_accept(pool_record: TransactionPoolRecord) -> Command {
+        Command::AllAccept(pool_record.get_current_multi_shard_atom().unwrap())
+    }
+
+    /// The block totals charge the execution a command is derived from, so the proposer and every replica sum the
+    /// same execution points whatever an earlier command in the block placed in the change set.
+    #[test]
+    fn block_totals_charge_the_execution_a_command_is_derived_from() {
+        let mut totals = BlockTotals::default();
+
+        totals
+            .add(&derived(local_accept, Some(execution_with_points(400, 100))))
+            .unwrap();
+        assert_eq!(totals.execution_points, 500);
+
+        totals.add(&derived(all_accept, None)).unwrap();
+        assert_eq!(totals.execution_points, 500);
+
+        totals
+            .add(&derived(local_accept, Some(execution_with_points(250, 0))))
+            .unwrap();
+        assert_eq!(totals.execution_points, 750);
+    }
 }

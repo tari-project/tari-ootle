@@ -63,6 +63,10 @@ impl<TMsgLogger: MessageLogger + Send> tari_consensus::traits::OutboundMessaging
 {
     type Addr = PeerAddress;
 
+    fn encoded_len(&self, message: &HotstuffMessage) -> usize {
+        prost::Message::encoded_len(&proto::consensus::HotStuffMessage::from(message))
+    }
+
     async fn send_self<T: Into<HotstuffMessage> + Send>(&mut self, message: T) -> Result<(), OutboundMessagingError> {
         let message = message.into();
         self.msg_logger.log_outbound_message(

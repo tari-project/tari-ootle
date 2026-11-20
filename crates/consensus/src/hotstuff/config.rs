@@ -8,6 +8,9 @@ use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::consensus_constants::ConsensusConstants;
 
+/// Leaves 1 MiB of the 4 MiB transport frame for the block a page always carries, and for the page's framing.
+pub const DEFAULT_CATCH_UP_PAGE_BYTES: usize = 3 * 1024 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct HotstuffConfig {
     pub network: Network,
@@ -26,4 +29,7 @@ pub struct HotstuffConfig {
     /// foreign shard group, so that only transactions whose foreign shard group fails to deliver are aborted.
     pub epoch_end_drain_period: Duration,
     pub catch_up_request_timeout: Duration,
+    /// The bytes a catch-up page is filled up to. It must leave room in the transport frame for the page's largest
+    /// block, which a page always carries even when it alone is over the budget.
+    pub catch_up_page_bytes: usize,
 }

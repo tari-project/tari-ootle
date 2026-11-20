@@ -323,7 +323,8 @@ where
     /// Like [`Self::get_substate`], but the result comes with the proof it was verified with: a live result with its
     /// value proof, and a down one with its down proof when the read names its version. A cached head is served with
     /// the proof held for it while [`Self::read_live_proof`] still serves that proof; otherwise it is fetched from the
-    /// committee again, and cached with its proof.
+    /// committee again, and cached with its proof. With proof verification off no proof is fetched or held, so a fresh
+    /// cache entry is served as it is.
     /// The cache holds no down proofs, so a read naming a version below the cached head is fetched from the committee.
     ///
     /// The proof is `None` when proof verification is off, for a nonexistent substate, for a down head read, and when
@@ -335,6 +336,9 @@ where
     ) -> Result<SubstateLookupResult, IndexerError> {
         debug!(target: LOG_TARGET, "get_substate_with_proof: {}v{}", substate_id, specific_version.display());
         if let Some(mut lookup_result) = self.read_fresh_cache_entry(substate_id, specific_version).await? {
+            if !self.verify_substate_proofs {
+                return Ok(lookup_result);
+            }
             match &lookup_result.result {
                 SubstateResult::Up { substate } => {
                     lookup_result.proof = self.read_live_proof(substate_id, substate.version()).await?;
@@ -3155,14 +3159,15 @@ mod tests {
             live: live(&ids),
             ..Default::default()
         });
+        let manager = manager.with_substate_proof_verification(true);
+        seed_cache(&manager, &ids, None);
         manager.get_substate(&ids[0], None).await.unwrap();
-        manager.get_substate(&ids[0], None).await.unwrap();
-        assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 0);
 
         let lookup = manager.get_substate_with_proof(&ids[0], None).await.unwrap();
 
         assert!(lookup.result.into_up().is_some());
-        assert_eq!(network.single_requests.load(Ordering::Relaxed), 2);
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
     }
 
     #[tokio::test]
@@ -3172,6 +3177,7 @@ mod tests {
             live: live(&ids),
             ..Default::default()
         });
+        let manager = manager.with_substate_proof_verification(true);
         let result = SubstateResult::Up {
             substate: encoded(live(&ids).remove(&ids[0]).unwrap()),
         };
@@ -3211,6 +3217,7 @@ mod tests {
             ..Default::default()
         });
         manager.committee_provider.3 = Epoch(3);
+        let manager = manager.with_substate_proof_verification(true);
         seed_cache(&manager, &ids, Some(cached_proof()));
 
         let lookup = manager.get_substate_with_proof(&ids[0], None).await.unwrap();
@@ -3218,7 +3225,6 @@ mod tests {
         assert!(lookup.result.into_up().is_some());
         assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
 
-        let manager = manager.with_substate_proof_verification(true);
         seed_cache(&manager, &ids, Some(cached_proof()));
 
         manager.fetch_and_cache_substates(&ids).await.unwrap();
@@ -4242,5 +4248,48 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn get_substate_with_proof_serves_cached_entry_when_proof_verification_is_off() {
+        let up_id = vault_id(1);
+        let down_id = vault_id(2);
+        let mut member_responses = HashMap::new();
+        member_responses.insert(("vn".to_string(), down_id.clone()), SubstateResult::Down {
+            version: SubstateVersion::new(2),
+        });
+        let (manager, network) = manager(FakeNetwork {
+            live: live(std::slice::from_ref(&up_id)),
+            member_responses,
+            ..Default::default()
+        });
+
+        let first_up = manager.get_substate_with_proof(&up_id, None).await.unwrap();
+        assert!(matches!(first_up.result, SubstateResult::Up { .. }));
+        assert!(first_up.proof.is_none());
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
+
+        let second_up = manager.get_substate_with_proof(&up_id, None).await.unwrap();
+        assert!(matches!(second_up.result, SubstateResult::Up { .. }));
+        assert!(second_up.proof.is_none());
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 1);
+
+        let first_down = manager.get_substate_with_proof(&down_id, None).await.unwrap();
+        assert!(matches!(
+            first_down.result,
+            SubstateResult::Down { version } if version == SubstateVersion::new(2)
+        ));
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 2);
+
+        let second_down = manager
+            .get_substate_with_proof(&down_id, Some(SubstateVersion::new(1)))
+            .await
+            .unwrap();
+        assert!(matches!(
+            second_down.result,
+            SubstateResult::Down { version } if version == SubstateVersion::new(1)
+        ));
+        assert!(second_down.proof.is_none());
+        assert_eq!(network.single_requests.load(Ordering::Relaxed), 2);
     }
 }

@@ -1164,6 +1164,7 @@ mod tests {
                 access_rules: ComponentAccessRules::new(),
                 entity_id: Default::default(),
                 upgrade_rule: Default::default(),
+                rules_updater: None,
             },
             body: ComponentBody::from_cbor_value(tari_bor::to_value(&vaults).unwrap()),
         }

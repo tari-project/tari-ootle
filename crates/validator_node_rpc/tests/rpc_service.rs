@@ -104,6 +104,13 @@ impl ValidatorNodeRpcService for UnservedService {
     ) -> Result<Response<proto::GetShardSnapshotResponse>, RpcStatus> {
         unserved()
     }
+
+    async fn get_epoch_oracle_config(
+        &self,
+        _: Request<proto::GetEpochOracleConfigRequest>,
+    ) -> Result<Response<proto::GetEpochOracleConfigResponse>, RpcStatus> {
+        unserved()
+    }
 }
 
 /// A client session to a served `UnservedService`. The server aborts its sessions once the notification stream
@@ -159,7 +166,7 @@ async fn a_method_past_the_table_is_not_served() {
     } = connect().await;
 
     let result = client
-        .server_streaming::<_, _, proto::SyncStateResponse>(proto::SyncStateRequest::default(), 11u32)
+        .server_streaming::<_, _, proto::SyncStateResponse>(proto::SyncStateRequest::default(), 12u32)
         .await;
     let status = match result {
         Ok(mut stream) => stream

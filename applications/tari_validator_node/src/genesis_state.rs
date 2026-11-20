@@ -122,6 +122,9 @@ fn burn_rate_governance_substate(council: &GenesisCouncil) -> (SubstateId, Subst
             access_rules: ComponentAccessRules::new(),
             entity_id: EntityId::default(),
             upgrade_rule: Default::default(),
+            // Genesis substates hash the same on every release, so the field stays absent. Absent reads as
+            // `TemplateManaged`, which `set_council` and `retire` need to replace the owner rule.
+            rules_updater: None,
         },
         body: ComponentBody::from_cbor_value(
             tari_bor::to_value(&BurnRateGovernanceState::new()).expect("BurnRateGovernanceState encode is infallible"),
@@ -145,6 +148,7 @@ fn xtr_faucet_substates(network: Network) -> Vec<(SubstateId, SubstateValue)> {
             access_rules: ComponentAccessRules::allow_all(),
             entity_id: EntityId::default(),
             upgrade_rule: Default::default(),
+            rules_updater: None,
         },
         body: ComponentBody::from_cbor_value(
             tari_bor::to_value(&XtrFaucetState {
@@ -171,6 +175,7 @@ fn nft_faucet_substates() -> Vec<(SubstateId, SubstateValue)> {
             access_rules: ComponentAccessRules::allow_all(),
             entity_id: EntityId::default(),
             upgrade_rule: Default::default(),
+            rules_updater: None,
         },
         body: ComponentBody::from_cbor_value(
             tari_bor::to_value(&NftFaucetState { serial_number: 0 }).expect("NftFaucetState encode is infallible"),

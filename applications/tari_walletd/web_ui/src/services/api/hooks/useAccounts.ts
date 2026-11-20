@@ -39,6 +39,7 @@ import {
   ResourceType,
   TARI_TOKEN,
   TransactionId,
+  UtxoAddress,
   UtxoInputSelection,
 } from "@tari-project/ootle-ts-bindings";
 import {
@@ -160,6 +161,8 @@ export interface TransferParams {
   destination_tag?: string | null;
   swap_pool_address?: string | null;
   swap_input_amount?: bigint | null;
+  /** Stealth only: the UTXOs a dry run of this transfer priced, to spend at the fee it reported. */
+  inputs?: UtxoAddress[] | null;
 }
 
 export const useAccountsTransfer = () => {
@@ -224,6 +227,7 @@ export const useAccountsTransfer = () => {
           ],
           max_fee,
           dry_run: params.dry_run,
+          inputs: params.inputs ?? null,
         };
         return accountsStealthTransfer(transferRequest);
       } else {

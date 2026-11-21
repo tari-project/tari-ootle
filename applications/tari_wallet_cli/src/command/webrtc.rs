@@ -44,32 +44,88 @@ impl WebRtcSubcommand {
         #[allow(clippy::enum_glob_use)]
         use WebRtcSubcommand::*;
         match self {
-            Start(mut args) => {
-                if let Some(url) = args.signaling_server_url {
-                    let mut parts = url.path_segments().ok_or_else(|| anyhow!("Malformed Tari URL"))?;
-                    args.signaling_server_token =
-                        Some(parts.next().ok_or_else(|| anyhow!("Malformed Tari URL"))?.to_string());
-
-                    let token = parts.next().ok_or_else(|| anyhow!("Malformed Tari URL"))?;
-                    let token = urlencoding::decode(token)?;
-                    args.webrtc_permissions_token = Some(serde_json::from_str(token.as_ref())?);
-                }
-
-                let signaling_server_token = args
-                    .signaling_server_token
-                    .ok_or_else(|| anyhow!("Missing signaling server token (pass --url or signaling_server_token)"))?;
-                let permissions = args.webrtc_permissions_token.ok_or_else(|| {
-                    anyhow!("Missing WebRTC permissions token (pass --url or webrtc_permissions_token)")
-                })?;
-
-                let _resp = client
-                    .webrtc_start(WebRtcStartRequest {
-                        signaling_server_token,
-                        permissions,
-                    })
-                    .await?;
+            Start(args) => {
+                let request = build_start_request(args)?;
+                let _resp = client.webrtc_start(request).await?;
             },
         }
         Ok(())
+    }
+}
+
+fn build_start_request(mut args: StartArgs) -> anyhow::Result<WebRtcStartRequest> {
+    if let Some(url) = args.signaling_server_url {
+        let mut parts = url.path_segments().ok_or_else(|| anyhow!("Malformed Tari URL"))?;
+        args.signaling_server_token = Some(
+            parts
+                .next()
+                .filter(|segment| !segment.is_empty())
+                .ok_or_else(|| anyhow!("Malformed Tari URL"))?
+                .to_string(),
+        );
+
+        let token = parts.next().ok_or_else(|| anyhow!("Malformed Tari URL"))?;
+        let token = urlencoding::decode(token)?;
+        args.webrtc_permissions_token = Some(serde_json::from_str(token.as_ref())?);
+    }
+
+    let signaling_server_token = args
+        .signaling_server_token
+        .ok_or_else(|| anyhow!("signaling_server_token is required when --signaling-server-url is not provided"))?;
+    let permissions = args
+        .webrtc_permissions_token
+        .ok_or_else(|| anyhow!("webrtc_permissions_token is required when --signaling-server-url is not provided"))?;
+
+    Ok(WebRtcStartRequest {
+        signaling_server_token,
+        permissions,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn build_start_request_errors_when_tokens_missing() {
+        let err = build_start_request(StartArgs {
+            signaling_server_url: None,
+            signaling_server_token: None,
+            webrtc_permissions_token: None,
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("signaling_server_token"));
+
+        let err = build_start_request(StartArgs {
+            signaling_server_url: None,
+            signaling_server_token: Some("sig-token".to_string()),
+            webrtc_permissions_token: None,
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("webrtc_permissions_token"));
+    }
+
+    #[test]
+    fn build_start_request_accepts_direct_tokens_and_url() {
+        let req = build_start_request(StartArgs {
+            signaling_server_url: None,
+            signaling_server_token: Some("sig-token".to_string()),
+            webrtc_permissions_token: Some(json!(["Admin"])),
+        })
+        .unwrap();
+        assert_eq!(req.signaling_server_token, "sig-token");
+        assert_eq!(req.permissions, json!(["Admin"]));
+
+        let url = Url::parse("https://signal.example.com/sig-123/%5B%22Admin%22%5D").unwrap();
+        let from_url = build_start_request(StartArgs {
+            signaling_server_url: Some(url),
+            signaling_server_token: None,
+            webrtc_permissions_token: None,
+        })
+        .unwrap();
+        assert_eq!(from_url.signaling_server_token, "sig-123");
+        assert_eq!(from_url.permissions, json!(["Admin"]));
     }
 }

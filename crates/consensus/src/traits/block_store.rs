@@ -211,7 +211,7 @@ mod tests {
             justify.calculate_id(),
             None,
             height,
-            Epoch::zero(),
+            parent.epoch(),
             shard_group,
             RistrettoPublicKeyBytes::default(),
             FixedHash::zero(),
@@ -283,6 +283,93 @@ mod tests {
                 assert_eq!(last_exec.height, NodeHeight(2));
                 assert_eq!(last_exec.block_id, *b2.id());
                 assert!(committed.is_empty());
+
+                Ok::<_, StorageError>(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn locking_out_of_epoch_genesis_returns_early_on_genesis_and_locks_first_non_genesis_block() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store: RocksDbStateStore<String> = RocksDbStateStore::open(tmp.path(), DatabaseOptions::default()).unwrap();
+
+        let epoch = Epoch(1);
+        let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+        let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
+        let genesis = Block::genesis(
+            Network::LocalNet,
+            ProtocolVersion::V0,
+            epoch,
+            FixedHash::zero(),
+            shard_group,
+            FixedHash::zero(),
+            None,
+            tari_engine_types::fees::ExhaustBurnRate::new(0),
+        );
+        assert!(genesis.is_genesis());
+
+        let b1 = make_block(&genesis, &genesis, NodeHeight(1));
+        let b2 = make_block(&b1, &b1, NodeHeight(2));
+        let b3 = make_block(&b2, &b2, NodeHeight(3));
+        let b4 = make_block(&b3, &b3, NodeHeight(4));
+
+        let mut locked_ids = Vec::new();
+        let mut committed_ids = Vec::new();
+        store
+            .with_write_tx(|tx| {
+                zero.justify().save(tx)?;
+                zero.insert(tx)?;
+                genesis.justify().save(tx)?;
+                genesis.insert(tx)?;
+                genesis.as_locked().set(tx)?;
+                genesis.as_last_executed().set(tx)?;
+
+                for block in [&b1, &b2] {
+                    block.justify().save(tx)?;
+                    block.insert(tx)?;
+                    block.update_nodes(
+                        tx,
+                        |_, _, locked, _| {
+                            locked_ids.push(*locked.id());
+                            Ok::<_, StorageError>(())
+                        },
+                        |_, committed| {
+                            committed_ids.push(*committed.id());
+                            Ok(())
+                        },
+                    )?;
+                }
+
+                // On b2, `new_locked` is `genesis`, which takes the `new_locked.is_genesis()` early return in
+                // `update_nodes` and leaves `LockedBlock` at `genesis`. Walking uncommitted `b2 -> b1 -> genesis`
+                // in `is_epoch_end_proposed_in_chain` also stops at `genesis.is_genesis()`.
+                assert!(!b2.is_epoch_end_proposed_in_chain(&**tx)?);
+                assert!(locked_ids.is_empty());
+                assert!(committed_ids.is_empty());
+                assert_eq!(*LockedBlock::get(&**tx, epoch)?.block_id(), *genesis.id());
+
+                // On b3, `new_locked` is `b1` (non-genesis), so `b1` is locked; on b4, `b1` is committed.
+                for block in [&b3, &b4] {
+                    block.justify().save(tx)?;
+                    block.insert(tx)?;
+                    block.update_nodes(
+                        tx,
+                        |_, _, locked, _| {
+                            locked_ids.push(*locked.id());
+                            Ok::<_, StorageError>(())
+                        },
+                        |_, committed| {
+                            committed_ids.push(*committed.id());
+                            Ok(())
+                        },
+                    )?;
+                }
+
+                assert_eq!(locked_ids, vec![*b1.id(), *b2.id()]);
+                assert_eq!(*LockedBlock::get(&**tx, epoch)?.block_id(), *b2.id());
+                assert_eq!(committed_ids, vec![*b1.id()]);
+                assert_eq!(LastExecuted::get(&**tx, epoch)?.block_id, *b1.id());
 
                 Ok::<_, StorageError>(())
             })

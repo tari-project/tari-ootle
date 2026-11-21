@@ -123,11 +123,50 @@ pub fn validate_balance_proof_signature(
         }
     }
 
-    if let Some(revealed) = outputs_statement.revealed_output &&
-        !revealed.amount.is_positive()
-    {
-        warn!(target: LOG_TARGET, "Revealed output amount must be positive");
-        return false;
+    if let Some(revealed) = outputs_statement.revealed_output {
+        if !revealed.amount.is_positive() {
+            warn!(target: LOG_TARGET, "Revealed output amount must be positive");
+            return false;
+        }
+        if RistrettoPublicKey::convert_from_byte_type(&revealed.receiver).is_err() {
+            warn!(target: LOG_TARGET, "Revealed output receiver is not a canonical public key");
+            return false;
+        }
+    }
+
+    let mut claimed_partitions = BTreeSet::new();
+    for claim in covenant_claims {
+        let index = claim.partition_input_index;
+        if index as usize >= inputs_statement.inputs.len() {
+            warn!(
+                target: LOG_TARGET,
+                "Covenant balance claim names out-of-bounds input index {index}"
+            );
+            return false;
+        }
+        if !claimed_partitions.insert(index) {
+            warn!(
+                target: LOG_TARGET,
+                "Duplicate covenant balance claim for input index {index}"
+            );
+            return false;
+        }
+    }
+
+    let mut seen_outputs = BTreeSet::new();
+    for output in &outputs_statement.outputs {
+        let commitment = *output.commitment();
+        if seen_inputs.contains(&commitment) {
+            warn!(
+                target: LOG_TARGET,
+                "Output commitment {commitment} duplicates an input commitment"
+            );
+            return false;
+        }
+        if !seen_outputs.insert(commitment) {
+            warn!(target: LOG_TARGET, "Duplicate commitment in transfer outputs");
+            return false;
+        }
     }
 
     let Ok(sig) = EngineSchnorrSignature::convert_from_byte_type(signature) else {
@@ -191,4 +230,177 @@ pub fn validate_balance_proof_signature(
         covenant_claims,
     );
     sig.verify_raw_uniform(&public_excess, &message)
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_crypto::keys::SecretKey;
+    use tari_engine_types::crypto::commit_u64_amount;
+    use tari_template_lib_types::{
+        EncryptedData,
+        crypto::{RangeProofBytes, RistrettoPublicKeyBytes, UtxoTag},
+        stealth::{RevealedOutput, SpendAuthorization, SpendWitness, StealthInput, StealthUnspentOutput, UnspentOutput},
+    };
+
+    use super::*;
+
+    fn sample_output(mask: &RistrettoSecretKey, amount: u64) -> StealthUnspentOutput {
+        let commitment = commit_u64_amount(mask, amount).to_byte_type();
+        let pk = RistrettoPublicKey::from_secret_key(mask).to_byte_type();
+        StealthUnspentOutput {
+            output: UnspentOutput {
+                commitment,
+                sender_public_nonce: pk,
+                encrypted_data: EncryptedData::try_from(vec![0u8; EncryptedData::min_size()]).unwrap(),
+                minimum_value_promise: 1,
+                viewable_balance_proof: None,
+            },
+            auth: SpendAuthorization::Key(pk),
+            tag: UtxoTag::new(0),
+        }
+    }
+
+    #[test]
+    fn validate_balance_proof_signature_rejects_commitment_collisions_invalid_receiver_and_invalid_claims() {
+        let in_mask = RistrettoSecretKey::random(&mut rand::rng());
+        let out_mask = RistrettoSecretKey::random(&mut rand::rng());
+        let in_commit = commit_u64_amount(&in_mask, 100).to_byte_type();
+        let out = sample_output(&out_mask, 100);
+
+        let inputs_stmt = StealthInputsStatement {
+            inputs: vec![StealthInput {
+                commitment: in_commit,
+                witness: SpendWitness::KeyPath,
+            }],
+            revealed_amount: Amount::zero(),
+        };
+        let outputs_stmt = StealthOutputsStatement {
+            outputs: vec![out.clone()],
+            revealed_output: None,
+            agg_range_proof: RangeProofBytes::empty(),
+        };
+        let sig = generate_stealth_balance_proof_signature(&in_mask, &out_mask, &inputs_stmt, &outputs_stmt, &[]);
+        assert!(validate_balance_proof_signature(
+            &sig,
+            &inputs_stmt,
+            &outputs_stmt,
+            &[]
+        ));
+
+        // 1. Duplicate output commitments are rejected even when masks/commitments balance.
+        let dup_in_mask = &out_mask + &out_mask;
+        let dup_inputs_stmt = StealthInputsStatement {
+            inputs: vec![StealthInput {
+                commitment: commit_u64_amount(&dup_in_mask, 200).to_byte_type(),
+                witness: SpendWitness::KeyPath,
+            }],
+            revealed_amount: Amount::zero(),
+        };
+        let dup_outputs_stmt = StealthOutputsStatement {
+            outputs: vec![out.clone(), out.clone()],
+            revealed_output: None,
+            agg_range_proof: RangeProofBytes::empty(),
+        };
+        let dup_sig = generate_stealth_balance_proof_signature(
+            &dup_in_mask,
+            &dup_in_mask,
+            &dup_inputs_stmt,
+            &dup_outputs_stmt,
+            &[],
+        );
+        assert!(!validate_balance_proof_signature(
+            &dup_sig,
+            &dup_inputs_stmt,
+            &dup_outputs_stmt,
+            &[]
+        ));
+
+        // 2. Output commitment duplicating an input commitment is rejected.
+        let extra_mask = RistrettoSecretKey::random(&mut rand::rng());
+        let colliding_in_mask = &out_mask + &extra_mask;
+        let colliding_inputs_stmt = StealthInputsStatement {
+            inputs: vec![
+                StealthInput {
+                    commitment: *out.commitment(),
+                    witness: SpendWitness::KeyPath,
+                },
+                StealthInput {
+                    commitment: commit_u64_amount(&extra_mask, 0).to_byte_type(),
+                    witness: SpendWitness::KeyPath,
+                },
+            ],
+            revealed_amount: Amount::zero(),
+        };
+        let colliding_sig = generate_stealth_balance_proof_signature(
+            &colliding_in_mask,
+            &out_mask,
+            &colliding_inputs_stmt,
+            &outputs_stmt,
+            &[],
+        );
+        assert!(!validate_balance_proof_signature(
+            &colliding_sig,
+            &colliding_inputs_stmt,
+            &outputs_stmt,
+            &[]
+        ));
+
+        // 3. Non-canonical revealed output receiver is rejected.
+        let mut bad_receiver_outputs = outputs_stmt.clone();
+        bad_receiver_outputs.revealed_output = Some(RevealedOutput::new(
+            Amount::from(50u64),
+            RistrettoPublicKeyBytes::from([0xffu8; 32]),
+        ));
+        let mut bad_receiver_inputs = inputs_stmt.clone();
+        bad_receiver_inputs.revealed_amount = Amount::from(50u64);
+        let bad_receiver_sig = generate_stealth_balance_proof_signature(
+            &in_mask,
+            &out_mask,
+            &bad_receiver_inputs,
+            &bad_receiver_outputs,
+            &[],
+        );
+        assert!(!validate_balance_proof_signature(
+            &bad_receiver_sig,
+            &bad_receiver_inputs,
+            &bad_receiver_outputs,
+            &[]
+        ));
+
+        // 4. Out-of-bounds or duplicate covenant balance claim partition indices are rejected.
+        let oob_claim = [CovenantBalanceClaim {
+            partition_input_index: 1,
+            revealed_amount: Amount::zero(),
+            signature: BalanceProofSignature::zero(),
+        }];
+        let oob_sig =
+            generate_stealth_balance_proof_signature(&in_mask, &out_mask, &inputs_stmt, &outputs_stmt, &oob_claim);
+        assert!(!validate_balance_proof_signature(
+            &oob_sig,
+            &inputs_stmt,
+            &outputs_stmt,
+            &oob_claim
+        ));
+
+        let dup_claims = [
+            CovenantBalanceClaim {
+                partition_input_index: 0,
+                revealed_amount: Amount::zero(),
+                signature: BalanceProofSignature::zero(),
+            },
+            CovenantBalanceClaim {
+                partition_input_index: 0,
+                revealed_amount: Amount::zero(),
+                signature: BalanceProofSignature::zero(),
+            },
+        ];
+        let dup_claim_sig =
+            generate_stealth_balance_proof_signature(&in_mask, &out_mask, &inputs_stmt, &outputs_stmt, &dup_claims);
+        assert!(!validate_balance_proof_signature(
+            &dup_claim_sig,
+            &inputs_stmt,
+            &outputs_stmt,
+            &dup_claims
+        ));
+    }
 }

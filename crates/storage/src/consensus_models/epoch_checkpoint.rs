@@ -356,6 +356,13 @@ pub enum EpochCheckpointValidationError {
 fn convert_sidechain_shard_group_to_shard_group(
     shard_group: tari_sidechain::ShardGroup,
 ) -> Result<ShardGroup, EpochCheckpointValidationError> {
+    if shard_group.start == 0 {
+        return Err(EpochCheckpointValidationError::InvalidEpochCheckpoint(anyhow!(
+            "Invalid shard group: start shard cannot be global shard 0 ({}-{})",
+            shard_group.start,
+            shard_group.end_inclusive
+        )));
+    }
     ShardGroup::new_checked(shard_group.start, shard_group.end_inclusive).ok_or_else(|| {
         EpochCheckpointValidationError::InvalidEpochCheckpoint(anyhow!(
             "Invalid shard group: start >= end + 1 ({}-{})",
@@ -508,5 +515,37 @@ mod tests {
             ),
             "{err}"
         );
+    }
+
+    #[test]
+    fn a_checkpoint_whose_shard_group_starts_at_global_shard_zero_is_rejected() {
+        let committed = metadata(ValidatorSetHash::from_array([9; 32]));
+        let valid = checkpoint(&committed, committed.clone());
+        let mut header = valid.header().clone();
+        header.shard_group = tari_sidechain::ShardGroup {
+            start: 0,
+            end_inclusive: 2,
+        };
+        let CommandCommitProof::V1(inner) = valid.proof();
+        let forged = EpochCheckpoint::new(
+            CommandCommitProof::new(
+                inner.command().clone(),
+                SidechainBlockCommitProof {
+                    header,
+                    proof_elements: vec![],
+                },
+                inner.inclusion_proof().clone(),
+            ),
+            IndexMap::new(),
+            valid.header_metadata().clone(),
+        );
+        assert!(matches!(
+            forged.checked_shard_group(),
+            Err(EpochCheckpointValidationError::InvalidEpochCheckpoint(_))
+        ));
+        assert!(matches!(
+            forged.validate_well_formed(),
+            Err(EpochCheckpointValidationError::InvalidEpochCheckpoint(_))
+        ));
     }
 }

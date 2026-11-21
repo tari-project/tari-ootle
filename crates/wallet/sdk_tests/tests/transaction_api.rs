@@ -628,3 +628,124 @@ async fn a_rejected_dry_run_does_not_store_the_transaction() {
     assert!(err.to_string().contains("too big"), "{err}");
     assert_not_stored(&test, transaction_id);
 }
+
+#[tokio::test]
+async fn commit_diff_preserves_downed_resource_metadata_vault_parent_and_fee_pool_token() {
+    use tari_engine_types::{
+        ValidatorFeePool,
+        resource::Resource,
+        resource_container::ResourceContainer,
+        substate::{Substate, SubstateValue},
+        vault::Vault,
+    };
+    use tari_ootle_common_types::VersionedSubstateIdRef;
+    use tari_template_lib::types::{
+        ComponentAddress,
+        Metadata,
+        ObjectKey,
+        ResourceAddress,
+        ResourceType,
+        SubstateOwnerRule,
+        TemplateAddress,
+        ValidatorFeePoolAddress,
+        VaultId,
+        access_rules::ResourceAccessRules,
+        constants::TARI_TOKEN,
+    };
+
+    let transaction = build_transaction();
+    let transaction_id = transaction.calculate_id();
+
+    let parent_component = SubstateId::Component(ComponentAddress::new(ObjectKey::from_array([0x41; 32])));
+    let child_vault_id = VaultId::new(ObjectKey::from_array([0x42; 32]));
+    let child_vault = SubstateId::Vault(child_vault_id);
+    let custom_resource_addr = ResourceAddress::new(ObjectKey::from_array([0x43; 32]));
+    let custom_resource = SubstateId::Resource(custom_resource_addr);
+    let fee_pool = SubstateId::ValidatorFeePool(ValidatorFeePoolAddress::from_array([0x44; 32]));
+    let template_addr = TemplateAddress::from_array([0x45; 32]);
+
+    let mut diff = SubstateDiff::new();
+    diff.down(custom_resource.clone(), SubstateVersion::new(0));
+    diff.down(child_vault.clone(), SubstateVersion::new(0));
+    diff.up(
+        custom_resource.clone(),
+        Substate::new(
+            1,
+            SubstateValue::Resource(Box::new(Resource::new(
+                ResourceType::Fungible,
+                SubstateOwnerRule::None,
+                ResourceAccessRules::new(),
+                Metadata::new(),
+                None,
+                None,
+                0,
+                true,
+            ))),
+        ),
+    );
+    diff.up(
+        child_vault.clone(),
+        Substate::new(
+            1,
+            Vault::new(ResourceContainer::public_fungible(custom_resource_addr, 500u64)),
+        ),
+    );
+    diff.up(
+        fee_pool.clone(),
+        Substate::new(
+            0,
+            SubstateValue::ValidatorFeePool(ValidatorFeePool::new([0x44; 32].into(), 100)),
+        ),
+    );
+
+    let mut query_result = finalized_result(transaction_id, FeeReceipt::default());
+    if let TransactionFinalizedResult::Finalized {
+        execution_result: Some(exec),
+        ..
+    } = &mut query_result.result
+    {
+        exec.finalize.result = TransactionResult::Accept(diff);
+    }
+
+    let test = TestWithNetwork::with_network(CannedTransactionResultInterface::new(query_result));
+    test.store()
+        .with_write_tx(|tx| {
+            tx.substates_upsert_root(
+                VersionedSubstateIdRef::new(&custom_resource, SubstateVersion::new(0)),
+                [parent_component.clone()].into_iter().collect(),
+                Some("custom_mod".to_string()),
+                Some(template_addr),
+            )?;
+            tx.substates_upsert_child(
+                &parent_component,
+                VersionedSubstateIdRef::new(&child_vault, SubstateVersion::new(0)),
+                [custom_resource.clone()].into_iter().collect(),
+            )?;
+            tx.transactions_insert(&transaction, None, &[Test::test_account_address()], false)
+        })
+        .unwrap();
+
+    test.sdk()
+        .transaction_api()
+        .check_and_store_finalized_transaction(transaction_id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let updated_resource = test.sdk().substate_api().get_substate(&custom_resource).unwrap();
+    assert_eq!(updated_resource.substate_id.version(), SubstateVersion::new(1));
+    assert_eq!(updated_resource.module_name.as_deref(), Some("custom_mod"));
+    assert_eq!(updated_resource.template_address, Some(template_addr));
+    assert_eq!(updated_resource.referenced_substates, vec![parent_component.clone()]);
+
+    let updated_vault = test.sdk().substate_api().get_substate(&child_vault).unwrap();
+    assert_eq!(updated_vault.substate_id.version(), SubstateVersion::new(1));
+    assert_eq!(updated_vault.parent_address, Some(parent_component));
+    assert_eq!(updated_vault.referenced_substates, vec![custom_resource]);
+
+    let stored_fee_pool = test.sdk().substate_api().get_substate(&fee_pool).unwrap();
+    assert_eq!(
+        stored_fee_pool.referenced_substates,
+        vec![SubstateId::Resource(TARI_TOKEN)]
+    );
+}

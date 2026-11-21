@@ -57,6 +57,12 @@ where TSpec: WalletSdkSpec
         amount: A,
     ) -> Result<(Vec<ConfidentialOutputModel>, Amount), ConfidentialOutputsApiError> {
         let amount = amount.into();
+        if !amount.is_positive() {
+            return Err(ConfidentialOutputsApiError::InvalidParameter {
+                param: "amount",
+                reason: "Amount to lock must be positive".to_string(),
+            });
+        }
         self.store.with_write_tx(|tx| {
             let (outputs, total_output_amount) = self.lock_outputs_internal(tx, lock_id, vault_id, amount)?;
 

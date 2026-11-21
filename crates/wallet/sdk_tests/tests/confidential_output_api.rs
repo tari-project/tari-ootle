@@ -365,3 +365,21 @@ async fn prefer_confidential_respects_locked_revealed_balance() {
         "expected InsufficientFunds, got: {err}"
     );
 }
+
+#[test]
+fn lock_outputs_by_amount_rejects_zero_amount() {
+    use tari_ootle_wallet_sdk::apis::confidential_outputs::ConfidentialOutputsApiError;
+    use tari_template_lib::types::Amount;
+
+    let test = Test::new();
+    let lock = test.new_lock();
+    let err = test
+        .sdk()
+        .confidential_outputs_api()
+        .lock_outputs_by_amount(lock.id(), &Test::test_vault_address(), Amount::zero())
+        .unwrap_err();
+    assert!(
+        matches!(err, ConfidentialOutputsApiError::InvalidParameter { param: "amount", .. }),
+        "expected InvalidParameter for zero amount, got: {err}"
+    );
+}

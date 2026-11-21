@@ -437,70 +437,103 @@ impl<'a> WriteTransaction<'a> {
         Ok(Some(transaction_id))
     }
 
-    /// Records the revealed-balance movement of a finalized spend as a `Transaction`-sourced balance change
-    /// and syncs the wallet vault to it. The vault substate in the finalized diff is the authoritative
-    /// post-transaction revealed balance: the locked amount is only the wallet's reservation, which the
-    /// transaction may not fully (or at all) withdraw from the vault. The row is keyed on the vault's
-    /// post-transaction version so that the account refresh's later record of the same transaction's
-    /// confidential effect merges onto this one row.
-    fn record_finalized_revealed_spend(
+    fn diff_vault_state(vault_address: VaultId, diff: &SubstateDiff) -> Option<(Amount, SubstateVersion)> {
+        diff.up_iter()
+            .filter(|(id, _)| *id == SubstateId::Vault(vault_address))
+            .filter_map(|(_, substate)| {
+                substate
+                    .substate_value()
+                    .vault()
+                    .map(|vault| (vault.balance(), substate.version()))
+            })
+            .max_by_key(|(_, version)| *version)
+    }
+
+    fn finalize_unlinked_revealed_spend(
         &mut self,
-        lock_id: WalletLockId,
         vault_address: VaultId,
         revealed_before: Amount,
         amount: Amount,
         diff: &SubstateDiff,
     ) -> Result<(), WalletStorageError> {
-        const OPERATION: &str = "record_finalized_revealed_spend";
-
-        let Some(transaction_id) = self.lock_transaction_id(lock_id)? else {
-            // No transaction linked to the lock — the spend cannot be attributed, so skip recording.
-            return Ok(());
-        };
-
-        let diff_vault = diff
-            .up_iter()
-            .find(|(id, _)| *id == SubstateId::Vault(vault_address))
-            .and_then(|(_, substate)| {
-                substate
-                    .substate_value()
-                    .vault()
-                    .map(|vault| (vault.balance(), substate.version()))
-            });
+        const OPERATION: &str = "finalize_unlinked_revealed_spend";
 
         let vault = self.vaults_get(&vault_address)?;
-        let (revealed_after, vault_version) = match diff_vault {
-            Some((revealed_after, version)) => (revealed_after, version),
-            None => {
-                let revealed_after =
-                    revealed_before
-                        .checked_sub(amount)
-                        .ok_or_else(|| WalletStorageError::OperationError {
-                            operation: OPERATION,
-                            details: format!("revealed balance {revealed_before} is less than spent amount {amount}"),
-                        })?;
-                (revealed_after, vault.vault_version)
-            },
-        };
-        if revealed_after == revealed_before {
+        if let Some((revealed_after, vault_version)) = Self::diff_vault_state(vault_address, diff) {
+            if vault_version >= vault.vault_version {
+                self.vaults_update(vault_address, vault_version, revealed_after, vault.confidential_balance)?;
+            }
             return Ok(());
         }
 
-        self.balance_changes_insert(
-            BalanceChangeSnapshot {
-                account_address: vault.account_address,
-                vault_address: Some(vault_address),
-                vault_version: Some(vault_version),
-                resource_address: vault.resource_address,
-                token_symbol: vault.token_symbol,
-                divisibility: vault.divisibility,
-                revealed_before,
-                revealed_after,
-                confidential_before: vault.confidential_balance,
-                confidential_after: vault.confidential_balance,
-            },
-            BalanceChangeSource::Transaction { transaction_id },
+        let new_balance = revealed_before
+            .checked_sub(amount)
+            .ok_or_else(|| WalletStorageError::OperationError {
+                operation: OPERATION,
+                details: format!(
+                    "Corrupt db: revealed balance {revealed_before} is less than locked amount {amount} for vault \
+                     {vault_address}"
+                ),
+            })?;
+        self.vaults_update(
+            vault_address,
+            vault.vault_version,
+            new_balance,
+            vault.confidential_balance,
         )?;
+        Ok(())
+    }
+
+    /// Records the revealed-balance movement of a finalized spend as a `Transaction`-sourced balance change
+    /// and syncs the wallet vault to it. The vault substate in the finalized diff is the authoritative
+    /// post-transaction revealed balance: the locked amount is only the wallet's reservation, which the
+    /// transaction may not fully (or at all) withdraw from the vault. When a vault reserved by the lock is
+    /// absent from `diff` (for example under `AcceptFeeRejectRest`, where only the fee vault committed and
+    /// the main intent rolled back), its on-chain balance and version were untouched and must not be debited.
+    fn record_finalized_revealed_spend(
+        &mut self,
+        transaction_id: TransactionId,
+        vault_address: VaultId,
+        revealed_before: Amount,
+        diff: &SubstateDiff,
+    ) -> Result<(), WalletStorageError> {
+        let Some((revealed_after, vault_version)) = Self::diff_vault_state(vault_address, diff) else {
+            return Ok(());
+        };
+
+        let vault = self.vaults_get(&vault_address)?;
+        if vault_version < vault.vault_version {
+            // A newer vault version was already scanned before this lock finalized; attribute any scan row at
+            // `vault_version` to this transaction without regressing the vault's newer balance or version.
+            self.balance_changes_attribute_transaction(&vault_address, vault_version, transaction_id)?;
+            return Ok(());
+        }
+
+        if revealed_after == revealed_before {
+            if vault_version == vault.vault_version {
+                self.balance_changes_attribute_transaction(&vault_address, vault_version, transaction_id)?;
+            }
+        } else {
+            let inserted = self.balance_changes_insert(
+                BalanceChangeSnapshot {
+                    account_address: vault.account_address,
+                    vault_address: Some(vault_address),
+                    vault_version: Some(vault_version),
+                    resource_address: vault.resource_address,
+                    token_symbol: vault.token_symbol,
+                    divisibility: vault.divisibility,
+                    revealed_before,
+                    revealed_after,
+                    confidential_before: vault.confidential_balance,
+                    confidential_after: vault.confidential_balance,
+                },
+                BalanceChangeSource::Transaction { transaction_id },
+            )?;
+            if !inserted {
+                self.balance_changes_attribute_transaction(&vault_address, vault_version, transaction_id)?;
+            }
+        }
+
         self.vaults_update(vault_address, vault_version, revealed_after, vault.confidential_balance)?;
         Ok(())
     }
@@ -612,7 +645,7 @@ impl<'a> WriteTransaction<'a> {
             // unchanged balance instead of re-recording this transaction's effect.
             if let Some(vault) = &maybe_vault {
                 let version = maybe_diff_vault
-                    .map(|(_, version)| version)
+                    .map(|(_, version)| version.max(vault.vault_version))
                     .unwrap_or(vault.vault_version);
                 self.vaults_update(vault.id, version, vault.revealed_balance, confidential_after)?;
             }
@@ -621,13 +654,14 @@ impl<'a> WriteTransaction<'a> {
     }
 
     /// Finds the account's vault for `resource_address` in the transaction diff, using the substate parent
-    /// linkage recorded by the diff commit. Returns the vault and its post-transaction version.
+    /// linkage recorded by the diff commit. Returns the vault and its highest post-transaction version.
     fn account_vault_in_diff(
         &mut self,
         account_address: &ComponentAddress,
         resource_address: &ResourceAddress,
         diff: &SubstateDiff,
     ) -> Result<Option<(VaultId, SubstateVersion)>, WalletStorageError> {
+        let mut latest: Option<(VaultId, SubstateVersion)> = None;
         for (id, substate) in diff.up_iter() {
             let Some(vault_id) = id.as_vault_id() else {
                 continue;
@@ -642,11 +676,13 @@ impl<'a> WriteTransaction<'a> {
                 .substates_get(&SubstateId::Vault(vault_id))
                 .optional()?
                 .and_then(|substate| substate.parent_address);
-            if parent.is_some_and(|parent| parent == SubstateId::Component(*account_address)) {
-                return Ok(Some((vault_id, substate.version())));
+            if parent.is_some_and(|parent| parent == SubstateId::Component(*account_address)) &&
+                latest.is_none_or(|(_, best_version)| substate.version() >= best_version)
+            {
+                latest = Some((vault_id, substate.version()));
             }
         }
-        Ok(None)
+        Ok(latest)
     }
 }
 
@@ -2632,12 +2668,19 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     fn locks_unlock_finalized(&mut self, lock_id: WalletLockId, diff: &SubstateDiff) -> Result<(), WalletStorageError> {
         let affected_stealth_balances = self.stealth_outputs_finalize_by_lock_id(lock_id, diff)?;
         self.confidential_outputs_finalize_by_lock_id(lock_id, diff)?;
-        // Capture the revealed spends before vaults_finalized_locked_revealed_funds deletes the vault locks
-        // and decrements the vaults' revealed balances, so the decreases can be recorded as balance changes.
+        let maybe_transaction_id = self.lock_transaction_id(lock_id)?;
+        // Capture the revealed reservations before releasing the vault lock rows so each vault can be synced
+        // against the finalized diff (or deducted directly when no transaction is linked to the lock).
         let revealed_spends = self.locked_revealed_spend(lock_id)?;
-        self.vaults_finalized_locked_revealed_funds(lock_id).optional()?;
-        for (vault_address, revealed_before, amount) in revealed_spends {
-            self.record_finalized_revealed_spend(lock_id, vault_address, revealed_before, amount, diff)?;
+        self.vaults_release_lock_revealed_funds(lock_id)?;
+        if let Some(transaction_id) = maybe_transaction_id {
+            for (vault_address, revealed_before, _) in revealed_spends {
+                self.record_finalized_revealed_spend(transaction_id, vault_address, revealed_before, diff)?;
+            }
+        } else {
+            for (vault_address, revealed_before, amount) in revealed_spends {
+                self.finalize_unlinked_revealed_spend(vault_address, revealed_before, amount, diff)?;
+            }
         }
         self.record_finalized_stealth_spends(lock_id, affected_stealth_balances, diff)?;
         self.locks_delete(lock_id)?;
